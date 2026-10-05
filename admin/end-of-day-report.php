@@ -1000,6 +1000,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/admin-cockpit.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-cockpit.css'); ?>">
     <link rel="stylesheet" href="css/end-of-day.css?v=<?php echo @filemtime(__DIR__ . '/css/end-of-day.css'); ?>">
 </head>
 
@@ -1007,176 +1008,421 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
-        <div class="eod-page">
-            <!-- Header: title, date, date picker and report actions in one bar -->
-            <header class="rh-page-head">
-                <div class="rh-page-head__main">
-                    <div class="rh-page-head__title">
-                        <h1>End of Day Report</h1>
-                        <span class="rh-pill <?php echo $isToday ? 'rh-pill--ok' : 'rh-pill--muted'; ?>"><?php echo $isToday ? 'Live (today)' : 'Archived day'; ?></span>
-                    </div>
-                    <p class="rh-page-head__meta">
-                        <?php echo htmlspecialchars(date('l, F j, Y', strtotime($report_date))); ?> &middot;
-                        <?php echo htmlspecialchars($site_name); ?> &middot;
-                        Generated <?php echo date('H:i'); ?>
-                    </p>
-                </div>
-                <div class="rh-page-head__actions eod-noprint">
-                    <form method="GET" class="eod-datebar" action="end-of-day-report.php">
-                        <a href="end-of-day-report.php?date=<?php echo date('Y-m-d', strtotime($report_date . ' -1 day')); ?>" class="eod-btn eod-btn--ghost" title="Previous day" aria-label="Previous day"><i class="fas fa-chevron-left"></i></a>
-                        <input type="date" name="date" aria-label="Report date" value="<?php echo htmlspecialchars($report_date); ?>" max="<?php echo date('Y-m-d'); ?>">
-                        <button type="submit" class="eod-btn eod-btn--ghost"><i class="fas fa-rotate-right"></i> Refresh</button>
-                        <a href="end-of-day-report.php?date=<?php echo date('Y-m-d'); ?>" class="eod-btn eod-btn--ghost">Today</a>
-                    </form>
-                    <span class="eod-actions__btns">
-                        <button type="button" class="eod-btn eod-btn--primary" id="eodSendEmail" data-date="<?php echo htmlspecialchars($report_date); ?>">
-                            <i class="fas fa-paper-plane"></i> Email
-                        </button>
-                        <button type="button" class="eod-btn eod-btn--whatsapp" id="eodSendWhatsApp" data-date="<?php echo htmlspecialchars($report_date); ?>">
-                            <i class="fab fa-whatsapp"></i> WhatsApp
-                        </button>
-                        <button type="button" class="eod-btn eod-btn--ghost" onclick="window.print()">
-                            <i class="fas fa-print"></i> Print
-                        </button>
-                        <a href="api/end-of-day-pdf.php?date=<?php echo htmlspecialchars($report_date); ?>&csrf=<?php echo urlencode($csrf_token); ?>" class="eod-btn eod-btn--ghost" data-no-spa="1" data-no-admin-loader="1">
-                            <i class="fas fa-file-pdf"></i> PDF
-                        </a>
-                        <a href="end-of-day-report.php?date=<?php echo htmlspecialchars($report_date); ?>&export=csv" class="eod-btn eod-btn--ghost" data-no-spa="1" data-no-admin-loader="1">
-                            <i class="fas fa-file-csv"></i> CSV
-                        </a>
-                    </span>
-                </div>
-                <div class="eod-cc-row eod-noprint">
-                    <label class="eod-cc-row__label" for="eodCcEmail"><i class="fas fa-user-plus"></i> CC email (optional)</label>
-                    <input
-                        type="email"
-                        id="eodCcEmail"
-                        class="eod-cc-row__input"
-                        placeholder="e.g. owner@example.com, gm@hotel.com"
-                        value="<?php echo htmlspecialchars(getSetting('eod_report_cc_emails') ?? ''); ?>"
-                        autocomplete="email">
-                </div>
-            </header>
+    <div class="content" data-rh-page-header-normalized="1"><?php /* the cockpit hero is this page's header */ ?>
+        <?php
+        /* =====================================================================
+         * Cockpit view-model — read-only; derived from the figures computed above.
+         * =================================================================== */
+        $curPlain = (string)$currency_symbol;
+        $plain = static function ($v) use ($curPlain): string {
+            return $curPlain . number_format((float)$v, 2);
+        };
+        $eod_billing = function_exists('rh_module_key_enabled') && rh_module_key_enabled('billing');
+        $posShort = rh_pos_short_label();
+        $posCategory = rh_pos_category_label();
 
-            <!-- Send result toast -->
-            <div id="eodResultToast" style="display:none;margin:0 0 0.9rem;padding:0.85rem 1.1rem;border-radius:6px;font-size:0.92rem;font-weight:500;line-height:1.4;border-left:4px solid currentColor;"></div>
+        $kv = static function (string $label, string $value, string $cls = ''): string {
+            return '<li><span>' . $label . '</span><strong' . ($cls !== '' ? ' class="' . $cls . '"' : '') . '>' . $value . '</strong></li>';
+        };
+        $sub = static function (string $text): string {
+            return ' <small class="eod-sub">' . $text . '</small>';
+        };
+        $pillTone = ['good' => 'green', 'bad' => 'red', 'neutral' => 'muted'];
 
-            <!-- KPI strip -->
-            <div class="rh-strip" role="group" aria-label="Day summary">
-                <div class="rh-strip__cell" data-help="Net Revenue|Gross revenue collected today minus refunds. This is the actual money earned — the figure your accounts team closes the day on.">
-                    <span class="rh-strip__label">Net revenue</span>
-                    <strong class="rh-strip__value"><?php echo $money($net_revenue); ?></strong>
-                    <span class="rh-strip__sub">Gross <?php echo $money($gross_revenue); ?> &middot; Refunds &minus;<?php echo $money($rev['refunds']); ?></span>
-                </div>
-                <?php if ($mod_bookings): ?>
-                <div class="rh-strip__cell" data-help="Occupancy Rate|Rooms sold ÷ total available rooms × 100. A room counts as occupied if a checked-in or checked-out booking spans tonight. Out-of-order rooms are excluded from the available room count.">
-                    <span class="rh-strip__label">Occupancy</span>
-                    <strong class="rh-strip__value"><?php echo number_format($occupancy_pct, 1); ?>%</strong>
-                    <span class="rh-strip__sub"><?php echo (int)$rooms_occupied; ?>/<?php echo (int)$rooms_total; ?> rooms sold<?php if ($rooms_oo > 0): ?> &middot; <?php echo (int)$rooms_oo; ?> out of order<?php endif; ?></span>
-                </div>
-                <div class="rh-strip__cell" data-help="ADR & RevPAR|Average Daily Rate = room revenue ÷ rooms sold. RevPAR = room revenue ÷ all available rooms including unsold. RevPAR penalises unsold rooms so it is a stronger measure of overall yield performance.">
-                    <span class="rh-strip__label">ADR</span>
-                    <strong class="rh-strip__value"><?php echo $money($adr); ?></strong>
-                    <span class="rh-strip__sub">RevPAR <?php echo $money($revpar); ?></span>
-                </div>
-                <?php endif; ?>
-                <div class="rh-strip__cell" data-help="VAT Collected|Total Value Added Tax charged across all completed transactions today. This amount is owed to the tax authority — it is not hotel profit. Shown here as a closeout reference.">
-                    <span class="rh-strip__label">VAT collected</span>
-                    <strong class="rh-strip__value"><?php echo $money($total_vat); ?></strong>
-                    <span class="rh-strip__sub">VAT <?php echo $vatEnabled ? 'enabled' : 'disabled'; ?> &middot; <?php echo (int)$rev['txn_count']; ?> transactions</span>
-                </div>
-                <?php if ($mod_bookings): ?>
-                <div class="rh-strip__cell" data-help="Outstanding Folio|Unpaid charges posted to in-house guest accounts. Guests can run charges to their room and settle on check-out. This balance must be collected before departure — it is live unrecovered revenue.">
-                    <span class="rh-strip__label">Outstanding folio</span>
-                    <strong class="rh-strip__value<?php echo $outstanding_folio > 0 ? ' rh-strip__value--alert' : ''; ?>"><?php echo $money($outstanding_folio); ?></strong>
-                    <span class="rh-strip__sub">In-house unpaid &middot; <a class="eod-link" href="payments.php">Collect &rarr;</a></span>
-                </div>
-                <?php endif; ?>
-                <?php if ($cn_issued_count > 0 || $cn_redeemed_today > 0): ?>
-                <div class="rh-strip__cell" data-help="Credit Notes Issued|Total value of credit notes created today. A credit note is issued instead of a cash refund — it gives the guest hotel credit to use on a future visit. Track this to monitor outstanding liability.">
-                    <span class="rh-strip__label">CN issued today</span>
-                    <strong class="rh-strip__value"><?php echo $money($cn_issued_today); ?></strong>
-                    <span class="rh-strip__sub"><?php echo (int)$cn_issued_count; ?> credit note<?php echo $cn_issued_count !== 1 ? 's' : ''; ?><?php if (function_exists('rh_module_key_enabled') && rh_module_key_enabled('advance_booking')): ?> &middot; <a class="eod-link" href="credit-notes.php">View &rarr;</a><?php endif; ?></span>
-                </div>
-                <div class="rh-strip__cell" data-help="Credit Notes Redeemed|Value of credit notes that guests used as payment today. Each redemption reduces the outstanding credit note liability balance.">
-                    <span class="rh-strip__label">CN redeemed today</span>
-                    <strong class="rh-strip__value"><?php echo $money($cn_redeemed_today); ?></strong>
-                    <span class="rh-strip__sub">Applied to bookings</span>
-                </div>
-                <?php endif; ?>
+        // Day-over-day arrow for the headline tiles
+        $netTone = $trendTone($net_change);
+        $netArrow = $net_change > 0.01 ? 'fa-arrow-trend-up' : ($net_change < -0.01 ? 'fa-arrow-trend-down' : 'fa-minus');
+        $prevHasTakings = $previous['net_revenue'] > 0.01;
+$netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format(abs($net_change_pct), 1) . '%' : 'new');
+
+        // Alerts: warn = red, watch = amber, good = clean
+        $alertHref = [
+            'fa-person-walking-luggage' => 'bookings.php?filter=checkin_today',
+            'fa-door-open'              => 'bookings.php?filter=checkout_today',
+            'fa-file-invoice-dollar'    => 'payments.php?balance=outstanding',
+            'fa-screwdriver-wrench'     => 'room-maintenance.php',
+            'fa-hourglass-half'         => 'payments.php',
+            'fa-ban'                    => 'stock-orders.php',
+            'fa-triangle-exclamation'   => 'stock-orders.php',
+            'fa-rotate-left'            => 'payments.php?refund_status=pending',
+            'fa-broom'                  => 'housekeeping.php',
+            'fa-sack-dollar'            => 'payments.php?date=' . $report_date,
+        ];
+        $alertsOpen = array_values(array_filter($closeout_alerts, static fn($a) => $a['level'] !== 'good'));
+        $alertsGood = array_values(array_filter($closeout_alerts, static fn($a) => $a['level'] === 'good'));
+        usort($alertsOpen, static fn($a, $b) => ($a['level'] === 'warn' ? 0 : 1) <=> ($b['level'] === 'warn' ? 0 : 1));
+        $alertCount = count($alertsOpen);
+
+        // Verdict sentence
+        $verdict = $daily_health_label . '. Net takings ' . $plain($net_revenue);
+        if ($previous['net_revenue'] > 0.01 || $net_revenue > 0.01) {
+            $verdict .= abs($net_change) < 0.01 ? ', level with yesterday' : ($prevHasTakings ? ', ' . ($net_change > 0 ? 'up ' : 'down ') . number_format(abs($net_change_pct), 1) . '% on yesterday' : ', with no takings yesterday to compare');
+        }
+        $verdict .= '. ' . ($alertCount ? $alertCount . ' item' . ($alertCount === 1 ? '' : 's') . ' need' . ($alertCount === 1 ? 's' : '') . ' attention before you close.' : 'Nothing needs attention.');
+
+        $scoreMeter = $daily_health_score >= 90 ? 'good' : ($daily_health_score >= 55 ? 'amber' : 'red');
+        $scoreKpi   = $daily_health_score >= 90 ? 'ck-kpi--good' : ($daily_health_score >= 55 ? 'ck-kpi--warn' : 'ck-kpi--alert');
+
+        // Trend chart scaling (net takings per day)
+        $chartMax = 1.0;
+        foreach ($trend_days as $td0) { $chartMax = max($chartMax, (float)$td0['net']); }
+        $trendNetTotal = 0.0;
+        foreach ($trend_days as $td0) { $trendNetTotal += (float)$td0['net']; }
+        $trendAvg = $trend_days ? $trendNetTotal / count($trend_days) : 0.0;
+        $lastTrend = $trend_days ? $trend_days[count($trend_days) - 1] : null;
+
+        // Share of gross for the cash-by-method meters
+        $methodBase = max(0.01, $gross_revenue);
+
+        // Detail tabs
+        $detailTabs = ['revenue' => ['Revenue', null]];
+        if ($mod_bookings) { $detailTabs['front'] = ['Front office', null]; }
+        if ($mod_pos)      { $detailTabs['pos'] = [$posShort . ' &amp; POS', (int)$pos_totals['orders']]; }
+        if ($mod_bookings) { $detailTabs['rooms'] = ['Room types', null]; }
+        $detailTabs['trend'] = ['7-day trend', null];
+        $detailTabs['insight'] = ['Yield &amp; guests', null];
+        if ($mod_bookings || $eod_billing) { $detailTabs['pricing'] = ['Pricing &amp; quotes', null]; }
+        $detailTabs['ops'] = ['Housekeeping &amp; more', null];
+        $hkOpen = (int)$housekeeping['pending'] + (int)$housekeeping['in_progress'];
+        ?>
+
+        <div class="ck eod" data-ck-root>
+
+        <!-- ============ HERO ============ -->
+        <header class="ck-hero">
+            <div class="ck-hero__intro">
+                <p class="ck-eyebrow">
+                    <i class="far fa-calendar"></i> <?php echo htmlspecialchars(date('l, j F Y', strtotime($report_date))); ?>
+                    <span class="ck-dot"></span>
+                    <span class="ck-pill <?php echo $isToday ? 'ck-pill--green' : 'ck-pill--muted'; ?>"><?php echo $isToday ? 'Live (today)' : 'Archived day'; ?></span>
+                </p>
+                <h1 class="ck-hero__title">End of Day Report</h1>
+                <p class="ck-hero__lede"><?php echo htmlspecialchars($verdict); ?></p>
             </div>
+            <nav class="ck-hero__actions eod-noprint" aria-label="Report actions">
+                <button type="button" class="ck-btn ck-btn--primary" id="eodSendEmail" data-date="<?php echo htmlspecialchars($report_date); ?>">
+                    <i class="fas fa-paper-plane"></i><span>Email</span>
+                </button>
+                <button type="button" class="ck-btn" id="eodSendWhatsApp" data-date="<?php echo htmlspecialchars($report_date); ?>">
+                    <i class="fab fa-whatsapp"></i><span>WhatsApp</span>
+                </button>
+                <button type="button" class="ck-btn" onclick="window.print()">
+                    <i class="fas fa-print"></i><span>Print</span>
+                </button>
+                <a href="api/end-of-day-pdf.php?date=<?php echo htmlspecialchars($report_date); ?>&csrf=<?php echo urlencode($csrf_token); ?>" class="ck-btn" data-no-spa="1" data-no-admin-loader="1">
+                    <i class="fas fa-file-pdf"></i><span>PDF</span>
+                </a>
+                <a href="end-of-day-report.php?date=<?php echo htmlspecialchars($report_date); ?>&export=csv" class="ck-btn" data-no-spa="1" data-no-admin-loader="1">
+                    <i class="fas fa-file-csv"></i><span>CSV</span>
+                </a>
+            </nav>
+        </header>
 
-            <!-- Closeout exceptions + cashier closeout -->
-            <div class="rh-layout eod-gap">
-                <section class="rh-panel" data-help="Closeout Exceptions|Automated checks run each time the page loads. Red (warn) = financial or operational risk requiring immediate action. Amber (watch) = advisory, action recommended before end of shift. Green (good) = clean closeout, no issues detected.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Closeout exceptions</h2>
-                    </div>
-                    <ul class="eod-alerts">
-                        <?php foreach ($closeout_alerts as $alert): ?>
-                            <li class="eod-alert eod-alert--<?php echo htmlspecialchars($alert['level']); ?>">
-                                <i class="fas <?php echo htmlspecialchars($alert['icon']); ?>"></i>
-                                <div>
-                                    <strong><?php echo htmlspecialchars($alert['title']); ?></strong>
-                                    <span><?php echo $alert['detail']; ?></span>
-                                </div>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                </section>
-
-                <aside class="rh-layout__side">
-                    <section class="rh-panel" data-help="Cashier Closeout|Cash to reconcile: physical cash collected — count the till and it must match this figure. Non-cash: card, mobile money, and transfers. Pending: invoiced amounts not yet paid. Collection rate: % of all invoiced amounts that have been settled today.">
-                        <div class="rh-panel__head">
-                            <h2 class="rh-panel__title">Cashier closeout</h2>
-                        </div>
-                        <table class="rh-kv eod-kv no-auto-pagination">
-                            <tbody>
-                                <tr><th scope="row">Cash to reconcile</th><td><?php echo $money($method_totals['cash']); ?></td></tr>
-                                <tr><th scope="row">Non-cash collected</th><td><?php echo $money($non_cash_total); ?></td></tr>
-                                <tr><th scope="row">Pending today</th><td class="<?php echo (float)$rev['pending'] > 0 ? 'eod-warn' : ''; ?>"><?php echo $money($rev['pending']); ?></td></tr>
-                                <tr><th scope="row">Collection rate</th><td><?php echo number_format($payment_capture_rate, 1); ?>%</td></tr>
-                            </tbody>
-                        </table>
-                    </section>
-                </aside>
+        <!-- Date navigation + CC for the email -->
+        <div class="eod-toolbar eod-noprint">
+            <form method="GET" class="eod-datebar" action="end-of-day-report.php">
+                <a href="end-of-day-report.php?date=<?php echo htmlspecialchars($previous_day); ?>" class="ck-icon-btn eod-nav" title="Previous day" aria-label="Previous day"><i class="fas fa-chevron-left"></i></a>
+                <input type="date" name="date" aria-label="Report date" value="<?php echo htmlspecialchars($report_date); ?>" max="<?php echo date('Y-m-d'); ?>">
+                <a href="end-of-day-report.php?date=<?php echo htmlspecialchars($tomorrow); ?>" class="ck-icon-btn eod-nav<?php echo $isToday ? ' is-disabled' : ''; ?>" title="Next day" aria-label="Next day"<?php echo $isToday ? ' aria-disabled="true" tabindex="-1"' : ''; ?>><i class="fas fa-chevron-right"></i></a>
+                <button type="submit" class="ck-btn ck-btn--sm"><i class="fas fa-rotate-right"></i><span>Refresh</span></button>
+                <a href="end-of-day-report.php?date=<?php echo date('Y-m-d'); ?>" class="ck-btn ck-btn--sm">Today</a>
+            </form>
+            <div class="eod-cc">
+                <label class="eod-cc__label" for="eodCcEmail"><i class="fas fa-user-plus"></i> CC email (optional)</label>
+                <input
+                    type="email"
+                    id="eodCcEmail"
+                    class="eod-cc__input"
+                    placeholder="e.g. owner@example.com, gm@hotel.com"
+                    value="<?php echo htmlspecialchars(getSetting('eod_report_cc_emails') ?? ''); ?>"
+                    autocomplete="email">
             </div>
+        </div>
 
-            <!-- Operations grid -->
-            <section class="eod-grid">
-                <?php if ($mod_bookings): ?>
-                <!-- Front office activity -->
-                <section class="rh-panel" data-help="Front Office Activity|Expected arrivals: confirmed bookings due to check in today. Departures: guests due to check out. Stayovers: guests in-house tonight with a future departure date. New bookings: reservations created today for any future date. Cancellations and no-shows reduce both occupancy and revenue.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Front office</h2>
-                    </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                            <tr><th scope="row">Expected arrivals</th><td><?php echo (int)$ops['expected_arrivals']; ?> <span class="eod-sub"><?php echo (int)$ops['arrivals_completed']; ?> checked in</span></td></tr>
-                            <tr><th scope="row">Expected departures</th><td><?php echo (int)$ops['expected_departures']; ?> <span class="eod-sub"><?php echo (int)$ops['departures_completed']; ?> checked out</span></td></tr>
-                            <tr><th scope="row">Stay-overs</th><td><?php echo (int)$ops['stayovers']; ?> <span class="eod-sub">In-house tonight</span></td></tr>
-                            <tr><th scope="row">New bookings</th><td><?php echo (int)$ops['new_bookings']; ?> <span class="eod-sub">Created today</span></td></tr>
-                            <tr><th scope="row">Cancellations</th><td class="<?php echo (int)$ops['cancellations'] > 0 ? 'eod-warn' : ''; ?>"><?php echo (int)$ops['cancellations']; ?></td></tr>
-                            <tr><th scope="row">No-shows</th><td class="<?php echo (int)$ops['no_shows'] > 0 ? 'eod-warn' : ''; ?>"><?php echo (int)$ops['no_shows']; ?></td></tr>
-                        </tbody>
-                    </table>
-                </section>
+        <!-- Send result toast -->
+        <div id="eodResultToast" class="eod-toast eod-noprint" role="status" aria-live="polite" hidden></div>
+
+        <!-- ============ KPI STRIP: the verdict ============ -->
+        <section class="ck-kpis" aria-label="Day summary">
+            <a class="ck-kpi ck-kpi--dark" href="payments.php?date=<?php echo htmlspecialchars($report_date); ?>">
+                <span class="ck-kpi__icon"><i class="fas fa-coins"></i></span>
+                <span class="ck-kpi__label">Net takings</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($net_revenue); ?></span>
+                <?php if ($trend_days): ?>
+                <span class="ck-spark" aria-hidden="true">
+                    <?php foreach ($trend_days as $td0): ?><span style="height:<?php echo max(6, round(max(0, (float)$td0['net']) / $chartMax * 100)); ?>%"<?php echo $td0['is_today'] ? ' class="is-today"' : ''; ?>></span><?php endforeach; ?>
+                </span>
                 <?php endif; ?>
+                <span class="ck-kpi__sub">
+                    <span class="ck-pill ck-pill--<?php echo $pillTone[$netTone]; ?> eod-pill-on-dark"><i class="fas <?php echo $netArrow; ?>"></i> <?php echo $netPctTxt; ?></span>
+                    vs yesterday &middot; gross <?php echo $money($gross_revenue); ?><?php if ((float)$rev['refunds'] > 0): ?> &middot; refunds &minus;<?php echo $money($rev['refunds']); ?><?php endif; ?>
+                </span>
+            </a>
 
-                <!-- Revenue by source -->
-                <section class="rh-panel rh-panel--flush" data-help="Revenue by Source|Rooms: accommodation payments collected today. Conferences: event and function booking payments. <?php echo htmlspecialchars(rh_pos_category_label()); ?>: <?php echo isRestaurantEnabled() ? 'restaurant charges' : 'till sales'; ?> posted through the payments system. Net = Gross minus any refunds processed today. The % Mix column shows each source's share of total gross.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Revenue by source</h2>
+            <?php if ($mod_bookings): ?>
+            <a class="ck-kpi" href="room-dashboard.php">
+                <span class="ck-kpi__icon"><i class="fas fa-bed"></i></span>
+                <span class="ck-kpi__label">Occupancy</span>
+                <span class="ck-kpi__value"><?php echo rtrim(rtrim(number_format($occupancy_pct, 1), '0'), '.'); ?><small>%</small></span>
+                <span class="ck-meter"><span style="width:<?php echo min(100, max(0, $occupancy_pct)); ?>%"></span></span>
+                <span class="ck-kpi__sub">
+                    <?php echo (int)$rooms_occupied; ?> of <?php echo (int)$rooms_total; ?> rooms sold<?php if ($rooms_oo > 0): ?> &middot; <?php echo (int)$rooms_oo; ?> out of order<?php endif; ?>
+                    <span class="ck-pill ck-pill--<?php echo $pillTone[$trendTone($occupancy_change)]; ?>"><?php echo $trendLabel($occupancy_change, false, ' pts'); ?></span>
+                </span>
+            </a>
+            <div class="ck-kpi">
+                <span class="ck-kpi__icon"><i class="fas fa-chart-line"></i></span>
+                <span class="ck-kpi__label">ADR</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($adr); ?></span>
+                <span class="ck-kpi__sub">RevPAR <strong><?php echo $money($revpar); ?></strong> &middot; room revenue <?php echo $money($rev['room_gross']); ?></span>
+            </div>
+            <?php endif; ?>
+
+            <a class="ck-kpi" href="#eodCash">
+                <span class="ck-kpi__icon"><i class="fas fa-vault"></i></span>
+                <span class="ck-kpi__label">Cash to bank</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($method_totals['cash']); ?></span>
+                <span class="ck-kpi__sub">Non-cash <?php echo $money($non_cash_total); ?> &middot; <?php echo number_format($payment_capture_rate, 0); ?>% collected</span>
+            </a>
+
+            <a class="ck-kpi<?php echo $unpaid_risk > 0.01 ? ' ck-kpi--alert' : ''; ?>" href="payments.php?balance=outstanding">
+                <span class="ck-kpi__icon"><i class="fas fa-file-invoice-dollar"></i></span>
+                <span class="ck-kpi__label">Still owed</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($unpaid_risk); ?></span>
+                <span class="ck-kpi__sub">Folio <?php echo $money($outstanding_folio); ?> &middot; pending <?php echo $money($rev['pending']); ?></span>
+            </a>
+
+            <a class="ck-kpi <?php echo $scoreKpi; ?>" href="#eodAttn">
+                <span class="ck-kpi__icon"><i class="fas fa-heart-pulse"></i></span>
+                <span class="ck-kpi__label">Close score</span>
+                <span class="ck-kpi__value"><?php echo (int)$daily_health_score; ?><small>/100</small></span>
+                <span class="ck-meter ck-meter--<?php echo $scoreMeter; ?>"><span style="width:<?php echo (int)$daily_health_score; ?>%"></span></span>
+                <span class="ck-kpi__sub"><?php echo htmlspecialchars($daily_health_label); ?></span>
+            </a>
+        </section>
+
+        <!-- ============ BENTO ============ -->
+        <div class="ck-bento">
+
+            <!-- Needs attention (driven by the closeout checks) -->
+            <section class="ck-panel ck-attn" id="eodAttn">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Needs attention <?php if ($alertCount): ?><span class="ck-badge"><?php echo (int)$alertCount; ?></span><?php endif; ?></h2>
+                        <p class="ck-panel__sub">Closeout checks, most urgent first.</p>
                     </div>
-                    <div class="rh-panel__body">
-                        <table class="eod-table no-auto-pagination">
+                </header>
+                <?php if ($alertsOpen): ?>
+                <ul class="ck-attn__list">
+                    <?php foreach ($alertsOpen as $i => $a):
+                        $tone = $a['level'] === 'warn' ? 'red' : 'amber';
+                        $href = $alertHref[$a['icon']] ?? '';
+                        $tag = $href !== '' ? 'a' : 'div';
+                    ?>
+                    <li>
+                        <<?php echo $tag; ?> class="ck-attn__item ck-attn__item--<?php echo $tone; ?><?php echo $i === 0 ? ' is-top' : ''; ?>"<?php echo $href !== '' ? ' href="' . htmlspecialchars($href) . '"' : ''; ?>>
+                            <span class="ck-attn__icon"><i class="fas <?php echo htmlspecialchars($a['icon']); ?>"></i></span>
+                            <span class="ck-attn__text">
+                                <strong><?php echo htmlspecialchars($a['title']); ?></strong>
+                                <small><?php echo $a['detail']; ?></small>
+                            </span>
+                            <?php if ($href !== ''): ?><span class="ck-attn__go"><i class="fas fa-chevron-right"></i></span><?php endif; ?>
+                        </<?php echo $tag; ?>>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+                <?php else: ?>
+                    <?php $goodMsg = $alertsGood[0] ?? ['title' => 'Clean closeout', 'detail' => 'No major exceptions flagged.']; ?>
+                    <div class="ck-empty ck-empty--good"><i class="fas fa-circle-check"></i><p><strong><?php echo htmlspecialchars($goodMsg['title']); ?>.</strong> <?php echo $goodMsg['detail']; ?></p></div>
+                <?php endif; ?>
+            </section>
+
+            <!-- Cash to bank by method -->
+            <section class="ck-panel eod-cash" id="eodCash">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Cash to bank</h2>
+                        <p class="ck-panel__sub">Count the till; it must match.</p>
+                    </div>
+                </header>
+                <div class="ck-money__headline">
+                    <span class="ck-money__label">Cash to reconcile</span>
+                    <span class="ck-money__value"><?php echo $money($method_totals['cash']); ?></span>
+                </div>
+                <?php if (empty($method_mix)): ?>
+                    <div class="ck-empty"><i class="fas fa-wallet"></i><p>No payments recorded <?php echo $isToday ? 'today' : 'on this day'; ?>.</p></div>
+                <?php else: ?>
+                <ul class="ck-levels">
+                    <?php foreach ($method_mix as $m):
+                        $mShare = min(100, max(2, ((float)$m['total'] / $methodBase) * 100));
+                        $mLabel = ucwords(str_replace('_', ' ', (string)$m['method']));
+                    ?>
+                    <li>
+                        <span class="ck-levels__name"><?php echo htmlspecialchars($mLabel); ?></span>
+                        <span class="ck-levels__qty"><strong><?php echo $money($m['total']); ?></strong> &middot; <?php echo (int)$m['cnt']; ?> txn</span>
+                        <span class="ck-meter ck-meter--gold"><span style="width:<?php echo number_format($mShare, 1, '.', ''); ?>%"></span></span>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+                <?php endif; ?>
+                <ul class="ck-kv eod-kv">
+                    <?php echo $kv('Non-cash collected', $money($non_cash_total)); ?>
+                    <?php echo $kv('Pending today', $money($rev['pending']), (float)$rev['pending'] > 0 ? 'eod-warn' : ''); ?>
+                    <?php echo $kv('Collection rate', number_format($payment_capture_rate, 1) . '%'); ?>
+                </ul>
+            </section>
+
+            <!-- Takings, 7 days -->
+            <section class="ck-panel ck-money eod-takings">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Takings, 7 days</h2>
+                        <p class="ck-panel__sub"><?php echo htmlspecialchars($plain($trendNetTotal)); ?> net &middot; avg <?php echo htmlspecialchars($plain($trendAvg)); ?>/day</p>
+                    </div>
+                </header>
+                <?php if ($trend_days): ?>
+                <div class="ck-money__headline" aria-live="polite">
+                    <span class="ck-money__label" data-ck-trend-label><?php echo htmlspecialchars($lastTrend['label']); ?></span>
+                    <span class="ck-money__value" data-ck-trend-value><?php echo htmlspecialchars($plain($lastTrend['net'])); ?></span>
+                    <span class="eod-sub" data-ck-trend-sub><?php echo $mod_pos ? htmlspecialchars($posShort . ' ' . $plain($lastTrend['pos_gross'])) . ' &middot; ' : ''; ?><?php echo (int)$lastTrend['voids']; ?> void<?php echo (int)$lastTrend['voids'] === 1 ? '' : 's'; ?></span>
+                </div>
+                <div class="ck-bars" role="list" aria-label="Net takings, last 7 days">
+                    <?php foreach ($trend_days as $td0):
+                        $isLast = $td0['is_today'];
+                        $subTxt = ($mod_pos ? $posShort . ' ' . $plain($td0['pos_gross']) . ' · ' : '') . (int)$td0['voids'] . ' void' . ((int)$td0['voids'] === 1 ? '' : 's');
+                    ?>
+                    <button type="button" role="listitem" class="ck-bars__col<?php echo $isLast ? ' is-today is-active' : ''; ?>"
+                        data-ck-trend="<?php echo htmlspecialchars($plain($td0['net'])); ?>"
+                        data-ck-trend-day="<?php echo htmlspecialchars($td0['label']); ?>"
+                        data-ck-trend-extra="<?php echo htmlspecialchars($subTxt); ?>"
+                        aria-label="<?php echo htmlspecialchars($td0['label'] . ': ' . $plain($td0['net'])); ?>">
+                        <span class="ck-bars__bar"><span style="height:<?php echo max(3, round(max(0, (float)$td0['net']) / $chartMax * 100)); ?>%"></span></span>
+                        <span class="ck-bars__day"><?php echo htmlspecialchars(substr($td0['label'], 0, 3)); ?></span>
+                    </button>
+                    <?php endforeach; ?>
+                </div>
+                <?php else: ?>
+                    <div class="ck-empty"><i class="fas fa-chart-column"></i><p>Trend data is unavailable.</p></div>
+                <?php endif; ?>
+            </section>
+
+            <!-- Versus yesterday -->
+            <section class="ck-panel eod-moved">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">What moved</h2>
+                        <p class="ck-panel__sub">Today against <?php echo htmlspecialchars(date('D j M', strtotime($previous_day))); ?>.</p>
+                    </div>
+                </header>
+                <ul class="ck-kv eod-kv">
+                    <?php
+                    $mv = static function (string $label, float $delta, string $valueHtml, string $extra = '') use ($trendTone): string {
+                        return '<li><span>' . $label . '</span><strong class="eod-trend eod-trend--' . $trendTone($delta) . '">' . $valueHtml . $extra . '</strong></li>';
+                    };
+                    echo $mv('Net revenue', $net_change, $trendLabel($net_change, true), ' <small>' . $trendLabel($net_change_pct, false, '%') . '</small>');
+                    if ($mod_bookings) { echo $mv('Rooms revenue', $room_rev_change, $trendLabel($room_rev_change, true)); }
+                    if ($mod_conference && ((float)$rev['conf_gross'] > 0 || (float)$prev_sources['conf_gross'] > 0)) { echo $mv('Conference revenue', $conf_rev_change, $trendLabel($conf_rev_change, true)); }
+                    if ($mod_pos) { echo $mv(htmlspecialchars($posShort), $fnb_rev_change, $trendLabel($fnb_rev_change, true)); }
+                    if ($mod_gym && ((float)$rev['gym_gross'] > 0 || (float)$prev_sources['gym_gross'] > 0)) { echo $mv('Gym revenue', $gym_rev_change, $trendLabel($gym_rev_change, true)); }
+                    if ($mod_events && ((float)$rev['events_gross'] > 0 || (float)$prev_sources['events_gross'] > 0)) { echo $mv('Event revenue', $events_rev_change, $trendLabel($events_rev_change, true)); }
+                    if ($mod_bookings) { echo $mv('Occupancy', $occupancy_change, $trendLabel($occupancy_change, false, ' pts')); }
+                    if ($mod_pos) {
+                        echo $mv('POS sales', $pos_change, $trendLabel($pos_change, true), ' <small>' . $trendLabel($pos_change_pct, false, '%') . '</small>');
+                        echo $mv('Average POS order', $order_value_change, $money($average_order_value));
+                    }
+                    if ($mod_bookings) {
+                        $nbDelta = (float)((int)$ops['new_bookings'] - $previous['new_bookings']);
+                        echo $mv('New bookings', $nbDelta, (int)$ops['new_bookings'] . ' <small>' . $trendLabel($nbDelta) . '</small>');
+                    }
+                    ?>
+                </ul>
+            </section>
+
+            <?php if ($mod_bookings): ?>
+            <!-- Front desk at a glance -->
+            <section class="ck-panel eod-front">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Front desk</h2>
+                        <p class="ck-panel__sub">How the day's movements closed.</p>
+                    </div>
+                    <div class="ck-panel__tools"><a class="ck-link" href="bookings.php">Bookings <i class="fas fa-arrow-right"></i></a></div>
+                </header>
+                <?php
+                $arrPct = (int)$ops['expected_arrivals'] > 0 ? min(100, round((int)$ops['arrivals_completed'] / (int)$ops['expected_arrivals'] * 100)) : 100;
+                $depPct = (int)$ops['expected_departures'] > 0 ? min(100, round((int)$ops['departures_completed'] / (int)$ops['expected_departures'] * 100)) : 100;
+                ?>
+                <ul class="ck-levels">
+                    <li>
+                        <span class="ck-levels__name">Arrivals</span>
+                        <span class="ck-levels__qty"><strong><?php echo (int)$ops['arrivals_completed']; ?></strong> of <?php echo (int)$ops['expected_arrivals']; ?> checked in</span>
+                        <span class="ck-meter ck-meter--<?php echo $arrivals_remaining > 0 ? 'amber' : 'good'; ?>"><span style="width:<?php echo $arrPct; ?>%"></span></span>
+                    </li>
+                    <li>
+                        <span class="ck-levels__name">Departures</span>
+                        <span class="ck-levels__qty"><strong><?php echo (int)$ops['departures_completed']; ?></strong> of <?php echo (int)$ops['expected_departures']; ?> checked out</span>
+                        <span class="ck-meter ck-meter--<?php echo $departures_remaining > 0 ? 'amber' : 'good'; ?>"><span style="width:<?php echo $depPct; ?>%"></span></span>
+                    </li>
+                </ul>
+                <ul class="ck-kv eod-kv">
+                    <?php
+                    echo $kv('Stay-overs', (int)$ops['stayovers'] . $sub('in-house tonight'));
+                    echo $kv('New bookings', (string)(int)$ops['new_bookings']);
+                    echo $kv('Cancellations', (string)(int)$ops['cancellations'], (int)$ops['cancellations'] > 0 ? 'eod-warn' : '');
+                    echo $kv('No-shows', (string)(int)$ops['no_shows'], (int)$ops['no_shows'] > 0 ? 'eod-warn' : '');
+                    ?>
+                </ul>
+            </section>
+            <?php endif; ?>
+
+            <?php if ($mod_bookings): ?>
+            <!-- Tomorrow -->
+            <section class="ck-panel eod-tomorrow">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Tomorrow</h2>
+                        <p class="ck-panel__sub"><?php echo htmlspecialchars(date('l, M j', strtotime($tomorrow))); ?></p>
+                    </div>
+                    <div class="ck-panel__tools"><a class="ck-link" href="bookings.php">Bookings <i class="fas fa-arrow-right"></i></a></div>
+                </header>
+                <div class="ck-stock__trio">
+                    <div class="ck-mini"><strong><?php echo (int)$tomorrow_preview['arrivals']; ?></strong><span>Arrivals</span></div>
+                    <div class="ck-mini"><strong><?php echo (int)$tomorrow_preview['departures']; ?></strong><span>Departures</span></div>
+                    <div class="ck-mini"><strong><?php echo (int)$ops['stayovers']; ?></strong><span>Stay-overs</span></div>
+                </div>
+                <ul class="ck-kv eod-kv">
+                    <?php echo $kv('Forecast revenue', $money($tomorrow_preview['rev_forecast'])); ?>
+                </ul>
+            </section>
+            <?php endif; ?>
+
+            <!-- ============ DETAIL (tabs) ============ -->
+            <section class="ck-panel ck-span-3 eod-detail" data-ck-tabs>
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">The day in detail</h2>
+                        <p class="ck-panel__sub">Every figure behind the headlines. Printing shows all sections.</p>
+                    </div>
+                    <div class="ck-tabs eod-noprint" role="tablist">
+                        <?php $firstTab = true; foreach ($detailTabs as $key => [$label, $n]): ?>
+                            <button type="button" class="ck-tab<?php echo $firstTab ? ' is-active' : ''; ?>" role="tab" aria-selected="<?php echo $firstTab ? 'true' : 'false'; ?>" data-ck-tab="<?php echo $key; ?>">
+                                <?php echo $label; ?><?php if ($n !== null): ?> <span class="ck-tab__count"><?php echo (int)$n; ?></span><?php endif; ?>
+                            </button>
+                        <?php $firstTab = false; endforeach; ?>
+                    </div>
+                </header>
+
+                <!-- Revenue -->
+                <div class="ck-pane" role="tabpanel" data-ck-pane="revenue">
+                    <h3 class="eod-pane-title">Revenue</h3>
+                    <div class="eod-table-wrap">
+                        <table class="eod-table no-auto-pagination no-card-mobile">
                             <thead>
                                 <tr>
                                     <th>Source</th>
                                     <th class="num">Gross</th>
                                     <th class="num">VAT</th>
-                                    <th class="num">% Mix</th>
+                                    <th class="num">Mix</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1184,7 +1430,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                                 $rows = [];
                                 if ($mod_bookings)   { $rows[] = ['Rooms',         (float)$rev['room_gross'], (float)$rev['room_vat']]; }
                                 if ($mod_conference) { $rows[] = ['Conferences',   (float)$rev['conf_gross'], (float)$rev['conf_vat']]; }
-                                if ($mod_pos)        { $rows[] = [htmlspecialchars(rh_pos_category_label()), (float)$rev['fnb_gross'],  (float)$rev['fnb_vat']]; }
+                                if ($mod_pos)        { $rows[] = [htmlspecialchars($posCategory), (float)$rev['fnb_gross'],  (float)$rev['fnb_vat']]; }
                                 if ($mod_gym)        { $rows[] = ['Gym',          (float)$rev['gym_gross'],  (float)$rev['gym_vat']]; }
                                 if ($mod_events)     { $rows[] = ['Events',       (float)$rev['events_gross'], (float)$rev['events_vat']]; }
                                 foreach ($rows as $r):
@@ -1194,7 +1440,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                                         <td><?php echo $r[0]; ?></td>
                                         <td class="num"><?php echo $money($r[1]); ?></td>
                                         <td class="num"><?php echo $money($r[2]); ?></td>
-                                        <td class="num"><?php echo number_format($share, 1); ?>%</td>
+                                        <td class="num eod-mixcell"><span class="ck-meter ck-meter--gold"><span style="width:<?php echo number_format(min(100, $share), 1, '.', ''); ?>%"></span></span><?php echo number_format($share, 1); ?>%</td>
                                     </tr>
                                 <?php endforeach; ?>
                                 <tr class="eod-table__total">
@@ -1220,368 +1466,156 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                             </tbody>
                         </table>
                     </div>
-                </section>
+                    <ul class="ck-kv eod-kv eod-kv--cols">
+                        <?php
+                        echo $kv('VAT collected', $money($total_vat) . $sub('VAT ' . ($vatEnabled ? 'enabled' : 'disabled')));
+                        echo $kv('Transactions', (int)$rev['txn_count'] . $sub('avg ' . $money($revenue_per_transaction)));
+                        echo $kv('Outstanding folio', $money($outstanding_folio) . ' <a class="eod-link" href="payments.php">Collect &rarr;</a>', $outstanding_folio > 0 ? 'eod-warn' : '');
+                        if ($cn_issued_count > 0 || $cn_redeemed_today > 0) {
+                            $cnLink = (function_exists('rh_module_key_enabled') && rh_module_key_enabled('advance_booking')) ? ' <a class="eod-link" href="credit-notes.php">View &rarr;</a>' : '';
+                            echo $kv('Credit notes issued', $money($cn_issued_today) . $sub((int)$cn_issued_count . ' note' . ($cn_issued_count !== 1 ? 's' : '')) . $cnLink);
+                            echo $kv('Credit notes redeemed', $money($cn_redeemed_today) . $sub('applied to bookings'));
+                        }
+                        ?>
+                    </ul>
+                </div>
 
-                <!-- Payment mix -->
-                <section class="rh-panel" data-help="Payment Method Mix|How today's revenue was collected. Cash must be physically counted and matched to the till. Non-cash (card, mobile money, bank transfer) reconciles to gateway statements. Bar length shows each method's share of total gross revenue. Number in brackets = transaction count.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Payment mix</h2>
+                <?php if ($mod_bookings): ?>
+                <!-- Front office -->
+                <div class="ck-pane" role="tabpanel" data-ck-pane="front" hidden>
+                    <h3 class="eod-pane-title">Front office</h3>
+                    <div class="eod-split">
+                        <ul class="ck-kv eod-kv">
+                            <?php
+                            echo $kv('Expected arrivals', (int)$ops['expected_arrivals'] . $sub((int)$ops['arrivals_completed'] . ' checked in'));
+                            echo $kv('Expected departures', (int)$ops['expected_departures'] . $sub((int)$ops['departures_completed'] . ' checked out'));
+                            echo $kv('Stay-overs', (int)$ops['stayovers'] . $sub('in-house tonight'));
+                            ?>
+                        </ul>
+                        <ul class="ck-kv eod-kv">
+                            <?php
+                            echo $kv('New bookings', (int)$ops['new_bookings'] . $sub('created today'));
+                            echo $kv('Cancellations', (string)(int)$ops['cancellations'], (int)$ops['cancellations'] > 0 ? 'eod-warn' : '');
+                            echo $kv('No-shows', (string)(int)$ops['no_shows'], (int)$ops['no_shows'] > 0 ? 'eod-warn' : '');
+                            ?>
+                        </ul>
                     </div>
-                    <?php if (empty($method_mix)): ?>
-                        <p class="rh-empty">No payments recorded today.</p>
-                    <?php else: ?>
-                        <div class="rh-panel__body">
-                            <ul class="eod-bars">
-                                <?php
-                                $maxMethod = max(array_map(fn($r) => (float)$r['total'], $method_mix)) ?: 1;
-                                foreach ($method_mix as $m):
-                                    $w = ((float)$m['total'] / $maxMethod) * 100;
-                                    $label = ucwords(str_replace('_', ' ', (string)$m['method']));
-                                ?>
-                                    <li>
-                                        <div class="eod-bars__row">
-                                            <span class="eod-bars__label"><?php echo htmlspecialchars($label); ?></span>
-                                            <span class="eod-bars__value"><?php echo $money($m['total']); ?> <small>(<?php echo (int)$m['cnt']; ?>)</small></span>
-                                        </div>
-                                        <div class="eod-bars__track">
-                                            <div class="eod-bars__fill" style="width:<?php echo max(2, $w); ?>%"></div>
-                                        </div>
-                                    </li>
-                                <?php endforeach; ?>
-                            </ul>
-                        </div>
-                    <?php endif; ?>
-                </section>
+                </div>
+                <?php endif; ?>
 
                 <?php if ($mod_pos): ?>
                 <!-- POS -->
-                <section class="rh-panel" data-help="<?php echo htmlspecialchars('POS / ' . rh_pos_short_label() . ' Sales'); ?>|Orders placed on the till system (walk-in, room service, takeaway, delivery). COGS is the ingredient cost from stock recipes. Margin % = (Gross − COGS) ÷ Gross × 100. Healthy margin target is ≥35%. Voids are cancelled orders — review if they exceed 5% of total orders.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">POS<?php echo isRestaurantEnabled() ? ' / F&amp;B' : ''; ?></h2>
-                    </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                            <tr><th scope="row">Orders</th><td><?php echo (int)$pos_totals['orders']; ?></td></tr>
-                            <tr><th scope="row">Gross</th><td><?php echo $money($pos_totals['gross']); ?></td></tr>
-                            <tr><th scope="row">COGS</th><td><?php echo $money($pos_totals['cogs']); ?></td></tr>
-                            <tr><th scope="row">Margin</th><td><?php echo number_format($pos_margin_pct, 1); ?>%</td></tr>
-                            <tr><th scope="row">Voids</th><td class="<?php echo (int)$pos_totals['voided_count'] > 0 ? 'eod-warn' : ''; ?>"><?php echo (int)$pos_totals['voided_count']; ?> &middot; <?php echo $money($pos_totals['voided_value']); ?></td></tr>
-                            <?php if ((int)($pos_totals['refunded_count'] ?? 0) > 0): ?><tr><th scope="row">Refunds paid out</th><td class="eod-warn"><?php echo (int)$pos_totals['refunded_count']; ?> &middot; <?php echo $money($pos_totals['refunded_value']); ?></td></tr><?php endif; ?>
-                        </tbody>
-                    </table>
-                    <?php if (!empty($pos_by_type)): ?>
-                        <div class="eod-table-wrap">
-                            <table class="eod-table no-auto-pagination">
-                                <thead>
-                                    <tr>
-                                        <th>Order type</th>
-                                        <th class="num">Orders</th>
-                                        <th class="num">Gross</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($pos_by_type as $p): $label = $order_type_labels[$p['order_type']] ?? ucfirst((string)$p['order_type']); ?>
-                                        <tr>
-                                            <td><?php echo htmlspecialchars($label); ?></td>
-                                            <td class="num"><?php echo (int)$p['cnt']; ?></td>
-                                            <td class="num"><?php echo $money($p['gross']); ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    <?php endif; ?>
-                    <?php if (!empty($void_reasons)): ?>
-                        <div class="eod-table-wrap">
-                            <table class="eod-table no-auto-pagination">
-                                <thead>
-                                    <tr>
-                                        <th>Void reason</th>
-                                        <th class="num">Count</th>
-                                        <th class="num">Value</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($void_reasons as $vr): ?>
-                                        <tr>
-                                            <td><?php echo htmlspecialchars((string)$vr['reason']); ?></td>
-                                            <td class="num"><?php echo (int)$vr['cnt']; ?></td>
-                                            <td class="num eod-warn"><?php echo $money($vr['value']); ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    <?php endif; ?>
-                </section>
-                <?php endif; ?>
-
-                <!-- Open Maintenance -->
-                <?php if ($mod_bookings && $maintenance['total_open'] > 0): ?>
-                <section class="rh-panel" data-help="Open Maintenance|Rooms maintenance tasks still open at end of shift. Urgent and high priority tasks should be resolved before tomorrow's arrivals to ensure rooms are ready.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Open maintenance</h2>
-                        <div class="rh-panel__actions"><a href="room-maintenance.php" class="rh-mini-link">View all</a></div>
-                    </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                            <?php if ($maintenance['urgent'] > 0): ?><tr><th scope="row">Urgent</th><td class="eod-warn"><?php echo $maintenance['urgent']; ?></td></tr><?php endif; ?>
-                            <?php if ($maintenance['high'] > 0): ?><tr><th scope="row">High priority</th><td class="eod-warn"><?php echo $maintenance['high']; ?></td></tr><?php endif; ?>
-                            <?php if ($maintenance['medium'] > 0): ?><tr><th scope="row">Medium</th><td><?php echo $maintenance['medium']; ?></td></tr><?php endif; ?>
-                            <tr><th scope="row">Total open tasks</th><td class="eod-warn"><?php echo $maintenance['total_open']; ?> <span class="eod-sub">Rooms need attention</span></td></tr>
-                        </tbody>
-                    </table>
-                </section>
-                <?php endif; ?>
-
-                <?php if ($mod_bookings): ?>
-                <!-- Tomorrow preview -->
-                <section class="rh-panel" data-help="Tomorrow Preview|Expected arrivals: confirmed bookings checking in tomorrow. Expected departures: guests due to check out. Revenue forecast: the sum of booking charges due from tomorrow's arrivals based on their confirmed booking values.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Tomorrow preview</h2>
-                        <span class="eod-sub"><?php echo htmlspecialchars(date('D, M j', strtotime($tomorrow))); ?></span>
-                    </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                            <tr><th scope="row">Arrivals expected</th><td><?php echo (int)$tomorrow_preview['arrivals']; ?></td></tr>
-                            <tr><th scope="row">Departures expected</th><td><?php echo (int)$tomorrow_preview['departures']; ?></td></tr>
-                            <tr><th scope="row">Forecast revenue</th><td><?php echo $money($tomorrow_preview['rev_forecast']); ?></td></tr>
-                        </tbody>
-                    </table>
-                </section>
-                <?php endif; ?>
-            </section>
-
-            <?php /* The close-out essentials stay in view above; trends, yield and the analysis
-                     panels are one click away. Printing opens this so the paper copy is complete. */ ?>
-            <details class="eod-more" id="eodMoreDetail">
-                <summary class="eod-more__summary"><i class="fas fa-chart-pie"></i> More detail <span>trends, yield, top sellers, guests, housekeeping and more</span></summary>
-                <section class="eod-grid">
-                <section class="rh-panel" data-help="Daily Closeout Health Score|A 0–100 score measuring how cleanly today is closing. Points are deducted for: unchecked arrivals/departures, pending payments, outstanding folio, POS voids above 5%, incomplete housekeeping, and out-of-order rooms. 90+ is excellent. Below 70 means action is needed before end of shift.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Daily closeout health</h2>
-                        <span class="rh-pill <?php echo $daily_health_score >= 90 ? 'rh-pill--ok' : ($daily_health_score >= 55 ? 'rh-pill--warn' : 'rh-pill--alert'); ?>"><?php echo htmlspecialchars($daily_health_label); ?></span>
-                    </div>
-                    <div class="rh-panel__body eod-score-row">
-                        <div class="eod-score" style="--score: <?php echo (int)$daily_health_score; ?>%;">
-                            <strong><?php echo (int)$daily_health_score; ?></strong>
-                            <span>/ 100</span>
-                        </div>
-                        <p class="eod-sub">Weighted from arrivals, departures, unpaid balances, POS exceptions, housekeeping, and room availability.</p>
-                    </div>
-                </section>
-
-                <section class="rh-panel" data-help="What Moved Today|Each row compares today to yesterday for the same metric. Green = improved, red = declined. Net change shows the actual currency movement; percentage shows the relative shift. Use this to spot momentum patterns at a glance.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">What moved today</h2>
-                    </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                        <tr>
-                            <th scope="row">Net revenue vs yesterday</th>
-                            <td class="eod-trend eod-trend--<?php echo $trendTone($net_change); ?>"><?php echo $trendLabel($net_change, true); ?> <small><?php echo $trendLabel($net_change_pct, false, '%'); ?></small></td>
-                        </tr>
-                        <?php if ($mod_bookings): ?>
-                        <tr>
-                            <th scope="row">Rooms revenue vs yesterday</th>
-                            <td class="eod-trend eod-trend--<?php echo $trendTone($room_rev_change); ?>"><?php echo $trendLabel($room_rev_change, true); ?></td>
-                        </tr>
-                        <?php endif; ?>
-                        <?php if ($mod_conference && ((float)$rev['conf_gross'] > 0 || (float)$prev_sources['conf_gross'] > 0)): ?>
-                        <tr>
-                            <th scope="row">Conference revenue vs yesterday</th>
-                            <td class="eod-trend eod-trend--<?php echo $trendTone($conf_rev_change); ?>"><?php echo $trendLabel($conf_rev_change, true); ?></td>
-                        </tr>
-                        <?php endif; ?>
-                        <?php if ($mod_pos): ?>
-                        <tr>
-                            <th scope="row"><?php echo htmlspecialchars(rh_pos_short_label()); ?> vs yesterday</th>
-                            <td class="eod-trend eod-trend--<?php echo $trendTone($fnb_rev_change); ?>"><?php echo $trendLabel($fnb_rev_change, true); ?></td>
-                        </tr>
-                        <?php endif; ?>
-                        <?php if ($mod_gym && ((float)$rev['gym_gross'] > 0 || (float)$prev_sources['gym_gross'] > 0)): ?>
-                        <tr>
-                            <th scope="row">Gym revenue vs yesterday</th>
-                            <td class="eod-trend eod-trend--<?php echo $trendTone($gym_rev_change); ?>"><?php echo $trendLabel($gym_rev_change, true); ?></td>
-                        </tr>
-                        <?php endif; ?>
-                        <?php if ($mod_events && ((float)$rev['events_gross'] > 0 || (float)$prev_sources['events_gross'] > 0)): ?>
-                        <tr>
-                            <th scope="row">Event revenue vs yesterday</th>
-                            <td class="eod-trend eod-trend--<?php echo $trendTone($events_rev_change); ?>"><?php echo $trendLabel($events_rev_change, true); ?></td>
-                        </tr>
-                        <?php endif; ?>
-                        <?php if ($mod_bookings): ?>
-                        <tr>
-                            <th scope="row">Occupancy movement</th>
-                            <td class="eod-trend eod-trend--<?php echo $trendTone($occupancy_change); ?>"><?php echo $trendLabel($occupancy_change, false, ' pts'); ?></td>
-                        </tr>
-                        <?php endif; ?>
-                        <?php if ($mod_pos): ?>
-                        <tr>
-                            <th scope="row">POS sales vs yesterday</th>
-                            <td class="eod-trend eod-trend--<?php echo $trendTone($pos_change); ?>"><?php echo $trendLabel($pos_change, true); ?> <small><?php echo $trendLabel($pos_change_pct, false, '%'); ?></small></td>
-                        </tr>
-                        <tr>
-                            <th scope="row">Average POS order</th>
-                            <td class="eod-trend eod-trend--<?php echo $trendTone($order_value_change); ?>"><?php echo $money($average_order_value); ?></td>
-                        </tr>
-                        <?php endif; ?>
-                        <?php if ($mod_bookings): ?>
-                        <tr>
-                            <th scope="row">New bookings today</th>
-                            <td class="eod-trend eod-trend--<?php echo $trendTone((float)((int)$ops['new_bookings'] - $previous['new_bookings'])); ?>"><?php echo (int)$ops['new_bookings']; ?> <small><?php echo $trendLabel((float)((int)$ops['new_bookings'] - $previous['new_bookings'])); ?> vs yesterday</small></td>
-                        </tr>
-                        <?php endif; ?>
-                        </tbody>
-                    </table>
-                </section>
-
-                <?php if ($mod_bookings): ?>
-                <section class="rh-panel" data-help="Yield & Opportunity|Empty-room opportunity: estimated revenue lost from unsold rooms (unsold rooms × ADR). <?php echo htmlspecialchars(rh_pos_short_label()); ?> per occupied room: <?php echo isRestaurantEnabled() ? 'food and beverage' : 'POS/till'; ?> revenue per occupied room — measures in-house guest spend. Top revenue source shows which booking type generated the most gross income today.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Yield &amp; opportunity</h2>
-                    </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                        <tr><th scope="row">Unsold rooms</th><td><?php echo (int)$rooms_unsold; ?></td></tr>
-                        <tr><th scope="row">Empty-room opportunity</th><td><?php echo $money($empty_room_opportunity); ?></td></tr>
-                        <?php if ($mod_pos): ?><tr><th scope="row"><?php echo htmlspecialchars(rh_pos_short_label()); ?> per occupied room</th><td><?php echo $money($fnb_per_occupied_room); ?></td></tr><?php endif; ?>
-                        <tr><th scope="row">Top revenue source</th><td><?php echo htmlspecialchars($top_revenue_source['label']); ?> <span class="eod-sub"><?php echo number_format($top_revenue_source_share, 1); ?>%</span></td></tr>
-                        </tbody>
-                    </table>
-                </section>
-                <?php endif; ?>
-
-                <section class="rh-panel" data-help="Best Seller & Risk Exposure|Top POS item: the single menu item generating the most revenue today. Unpaid exposure: combined total of all pending payments and outstanding folio — the maximum amount currently at risk of non-collection.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Best seller &amp; risk</h2>
-                    </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                        <tr><th scope="row">Top POS item</th><td><?php echo htmlspecialchars($top_item_name); ?> <span class="eod-sub"><?php echo $top_item_revenue > 0 ? $money($top_item_revenue) . ' revenue' : 'No paid POS item has led today yet.'; ?></span></td></tr>
-                        <tr><th scope="row">Unpaid exposure</th><td><?php echo $money($unpaid_risk); ?> <span class="eod-sub">Pending payments plus active folio balance</span></td></tr>
-                        </tbody>
-                    </table>
-                </section>
-
-                <?php if ($mod_pos): ?>
-                <!-- Top selling items -->
-                <section class="rh-panel rh-panel--flush eod-panel--wide" data-help="Top Selling Items|Best-performing individual menu items today ranked by total revenue. Qty is total units sold. Use this to guide menu decisions, manage stock for tomorrow, and identify high-margin items worth promoting.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Top selling items</h2>
-                    </div>
-                    <?php if (empty($top_items)): ?>
-                        <p class="rh-empty">No POS sales recorded today.</p>
-                    <?php else: ?>
-                        <div class="rh-panel__body">
-                            <table class="eod-table no-auto-pagination">
-                                <thead>
-                                    <tr>
-                                        <th>Item</th>
-                                        <th>Type</th>
-                                        <th class="num">Qty</th>
-                                        <th class="num">Revenue</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($top_items as $it): ?>
-                                        <tr>
-                                            <td><?php echo htmlspecialchars((string)$it['item_name']); ?></td>
-                                            <td><span class="eod-tag eod-tag--<?php echo htmlspecialchars((string)$it['menu_type']); ?>"><?php echo htmlspecialchars(ucfirst((string)$it['menu_type'])); ?></span></td>
-                                            <td class="num"><?php echo rtrim(rtrim(number_format((float)$it['qty'], 2, '.', ''), '0'), '.'); ?></td>
-                                            <td class="num"><?php echo $money($it['revenue']); ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    <?php endif; ?>
-                </section>
-                <?php endif; ?>
-
-                <?php if ($mod_bookings): ?>
-                <!-- Dynamic pricing & packages -->
-                <section class="rh-panel" data-help="Dynamic Pricing & Packages|Rate-plan bookings used a configured pricing rule (early bird, corporate, long stay, etc.). Discounts given is the total reduction from rack rate applied today. Package add-on revenue comes from extras bundled with a booking.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Dynamic pricing &amp; packages</h2>
-                    </div>
-                    <?php if ($dynamic_pricing['bookings_with_rate_plan'] === 0 && $dynamic_pricing['packages_booked'] === 0): ?>
-                        <p class="rh-empty">No rate plans or packages applied in today&rsquo;s bookings.</p>
-                    <?php else: ?>
-                        <table class="rh-kv eod-kv no-auto-pagination">
-                            <tbody>
-                            <tr>
-                                <th scope="row">Rate-plan bookings</th>
-                                <td><?php echo (int)$dynamic_pricing['bookings_with_rate_plan']; ?><?php if ($dynamic_pricing['top_rate_plan']): ?> <span class="eod-sub"><?php echo htmlspecialchars($dynamic_pricing['top_rate_plan']); ?></span><?php endif; ?></td>
-                            </tr>
-                            <tr>
-                                <th scope="row">Total discounts given</th>
-                                <td class="eod-warn"><?php echo $money($dynamic_pricing['total_discount_given']); ?> <span class="eod-sub">Rate plan savings applied</span></td>
-                            </tr>
-                            <tr>
-                                <th scope="row">Package add-on revenue</th>
-                                <td class="eod-good"><?php echo $money($dynamic_pricing['package_revenue']); ?> <span class="eod-sub"><?php echo (int)$dynamic_pricing['packages_booked']; ?> package<?php echo (int)$dynamic_pricing['packages_booked'] === 1 ? '' : 's'; ?> booked</span></td>
-                            </tr>
-                            <?php if ($dynamic_pricing['top_package']): ?>
-                                <tr>
-                                    <th scope="row">Top package today</th>
-                                    <td><?php echo htmlspecialchars($dynamic_pricing['top_package']); ?></td>
-                                </tr>
+                <div class="ck-pane" role="tabpanel" data-ck-pane="pos" hidden>
+                    <h3 class="eod-pane-title">POS<?php echo isRestaurantEnabled() ? ' / F&amp;B' : ''; ?></h3>
+                    <div class="eod-split">
+                        <ul class="ck-kv eod-kv">
+                            <?php
+                            echo $kv('Orders', (string)(int)$pos_totals['orders']);
+                            echo $kv('Gross', $money($pos_totals['gross']));
+                            echo $kv('COGS', $money($pos_totals['cogs']));
+                            echo $kv('Margin', number_format($pos_margin_pct, 1) . '%');
+                            echo $kv('Voids', (int)$pos_totals['voided_count'] . ' &middot; ' . $money($pos_totals['voided_value']), (int)$pos_totals['voided_count'] > 0 ? 'eod-warn' : '');
+                            if ((int)($pos_totals['refunded_count'] ?? 0) > 0) {
+                                echo $kv('Refunds paid out', (int)$pos_totals['refunded_count'] . ' &middot; ' . $money($pos_totals['refunded_value']), 'eod-warn');
+                            }
+                            ?>
+                        </ul>
+                        <div>
+                            <?php if (!empty($pos_by_type)): ?>
+                            <div class="eod-table-wrap">
+                                <table class="eod-table no-auto-pagination no-card-mobile">
+                                    <thead><tr><th>Order type</th><th class="num">Orders</th><th class="num">Gross</th></tr></thead>
+                                    <tbody>
+                                        <?php foreach ($pos_by_type as $p): $label = $order_type_labels[$p['order_type']] ?? ucfirst((string)$p['order_type']); ?>
+                                            <tr>
+                                                <td><?php echo htmlspecialchars($label); ?></td>
+                                                <td class="num"><?php echo (int)$p['cnt']; ?></td>
+                                                <td class="num"><?php echo $money($p['gross']); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
                             <?php endif; ?>
-                            </tbody>
-                        </table>
-                    <?php endif; ?>
-                </section>
-                <?php endif; ?>
-
-                <?php if ($mod_housekeeping): ?>
-                <!-- Housekeeping -->
-                <section class="rh-panel" data-help="Housekeeping Status|Pending: tasks assigned but not yet started. In progress: currently being worked on. Completed: fully done today. All pending and in-progress tasks should be resolved before end of shift so rooms are ready for tomorrow's arrivals.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Housekeeping</h2>
+                            <?php if (!empty($void_reasons)): ?>
+                            <div class="eod-table-wrap">
+                                <table class="eod-table no-auto-pagination no-card-mobile">
+                                    <thead><tr><th>Void reason</th><th class="num">Count</th><th class="num">Value</th></tr></thead>
+                                    <tbody>
+                                        <?php foreach ($void_reasons as $vr): ?>
+                                            <tr>
+                                                <td><?php echo htmlspecialchars((string)$vr['reason']); ?></td>
+                                                <td class="num"><?php echo (int)$vr['cnt']; ?></td>
+                                                <td class="num eod-warn"><?php echo $money($vr['value']); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <?php endif; ?>
+                        </div>
                     </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                        <tr><th scope="row">Pending</th><td class="<?php echo (int)$housekeeping['pending'] > 0 ? 'eod-warn' : ''; ?>"><?php echo (int)$housekeeping['pending']; ?></td></tr>
-                        <tr><th scope="row">In progress</th><td><?php echo (int)$housekeeping['in_progress']; ?></td></tr>
-                        <tr><th scope="row">Completed today</th><td class="eod-good"><?php echo (int)$housekeeping['completed']; ?></td></tr>
-                        </tbody>
-                    </table>
-                </section>
-                <?php endif; ?>
-
-                <!-- Guest sentiment -->
-                <section class="rh-panel" data-help="Guest Reviews|Reviews submitted today. Average rating is out of 5. Daily monitoring catches service issues before they escalate. Low scores should be reviewed with the relevant department head before the next shift.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Reviews</h2>
-                        <?php if ($reviews['count'] > 0): ?><div class="rh-panel__actions"><a href="reviews.php" class="rh-mini-link">View all</a></div><?php endif; ?>
-                    </div>
-                    <?php if ($reviews['count'] === 0): ?>
-                        <p class="rh-empty">No reviews submitted today.</p>
+                    <h4 class="eod-sub-title">Top selling items</h4>
+                    <?php if (empty($top_items)): ?>
+                        <div class="ck-empty"><i class="fas fa-receipt"></i><p>No POS sales recorded <?php echo $isToday ? 'today' : 'on this day'; ?>.</p></div>
                     <?php else: ?>
-                        <table class="rh-kv eod-kv no-auto-pagination">
+                    <div class="eod-table-wrap">
+                        <table class="eod-table no-auto-pagination no-card-mobile">
+                            <thead><tr><th>Item</th><th>Type</th><th class="num">Qty</th><th class="num">Revenue</th></tr></thead>
                             <tbody>
-                            <tr><th scope="row">Average rating</th><td><?php echo number_format($reviews['avg'], 1); ?> <span class="eod-sub">/ 5</span></td></tr>
-                            <tr><th scope="row">Reviews today</th><td><?php echo (int)$reviews['count']; ?></td></tr>
+                                <?php foreach ($top_items as $it): ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars((string)$it['item_name']); ?></td>
+                                        <td><span class="eod-tag eod-tag--<?php echo htmlspecialchars((string)$it['menu_type']); ?>"><?php echo htmlspecialchars(ucfirst((string)$it['menu_type'])); ?></span></td>
+                                        <td class="num"><?php echo rtrim(rtrim(number_format((float)$it['qty'], 2, '.', ''), '0'), '.'); ?></td>
+                                        <td class="num"><?php echo $money($it['revenue']); ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
                             </tbody>
                         </table>
-                    <?php endif; ?>
-                </section>
-
-                <!-- 7-day rolling trend -->
-                <section class="rh-panel rh-panel--flush eod-panel--wide" data-help="7-Day Revenue Trend|Net room/conference/<?php echo htmlspecialchars(rh_pos_short_label()); ?> revenue plus POS gross for each of the last 7 days. The momentum bar compares each day's combined total to the week's highest day. The gold bar is today. Voids column shows cancelled POS orders per day.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">7-day revenue trend</h2>
-                        <span class="eod-sub"><?php echo htmlspecialchars(date('M j', strtotime($trend_start))); ?> – <?php echo htmlspecialchars(date('M j', strtotime($report_date))); ?></span>
                     </div>
-                    <div class="rh-panel__body">
-                        <table class="eod-table eod-table--trend no-auto-pagination">
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
+                <?php if ($mod_bookings): ?>
+                <!-- Room types -->
+                <div class="ck-pane" role="tabpanel" data-ck-pane="rooms" hidden>
+                    <h3 class="eod-pane-title">Room type revenue</h3>
+                    <?php if (empty($room_type_perf)): ?>
+                        <div class="ck-empty"><i class="fas fa-bed"></i><p>No room payments recorded <?php echo $isToday ? 'today' : 'on this day'; ?>.</p></div>
+                    <?php else: ?>
+                    <div class="eod-table-wrap">
+                        <table class="eod-table no-auto-pagination no-card-mobile">
+                            <thead><tr><th>Room type</th><th class="num">Bookings</th><th class="num">Revenue</th><th class="num">Share</th></tr></thead>
+                            <tbody>
+                                <?php foreach ($room_type_perf as $rt):
+                                    $rt_share = $rev['room_gross'] > 0 ? min(100, ((float)$rt['revenue'] / (float)$rev['room_gross']) * 100) : 0;
+                                ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars((string)$rt['room_type']); ?></td>
+                                        <td class="num"><?php echo (int)$rt['bookings']; ?></td>
+                                        <td class="num"><?php echo $money($rt['revenue']); ?></td>
+                                        <td class="num eod-mixcell"><span class="ck-meter ck-meter--gold"><span style="width:<?php echo number_format($rt_share, 1, '.', ''); ?>%"></span></span><?php echo number_format($rt_share, 1); ?>%</td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
+                <!-- 7-day trend -->
+                <div class="ck-pane" role="tabpanel" data-ck-pane="trend" hidden>
+                    <h3 class="eod-pane-title">7-day revenue trend <span class="eod-sub"><?php echo htmlspecialchars(date('M j', strtotime($trend_start))); ?> – <?php echo htmlspecialchars(date('M j', strtotime($report_date))); ?></span></h3>
+                    <div class="eod-table-wrap">
+                        <table class="eod-table eod-table--trend no-auto-pagination no-card-mobile">
                             <thead>
                                 <tr>
                                     <th>Day</th>
-                                    <th class="num">Net Rev</th>
-                                    <?php if ($mod_pos): ?><th class="num"><?php echo htmlspecialchars(rh_pos_short_label()); ?></th><?php endif; ?>
+                                    <th class="num">Net rev</th>
+                                    <?php if ($mod_pos): ?><th class="num"><?php echo htmlspecialchars($posShort); ?></th><?php endif; ?>
                                     <th>Momentum</th>
                                     <th class="num">Voids</th>
                                 </tr>
@@ -1593,12 +1627,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                                     $is_today   = $td['is_today'];
                                 ?>
                                     <tr class="<?php echo $is_today ? 'eod-table__today' : ''; ?>">
-                                        <td><strong><?php echo htmlspecialchars($td['label']); ?></strong><?php echo $is_today ? ' <span class="eod-tag eod-tag--today">Today</span>' : ''; ?></td>
+                                        <td><strong><?php echo htmlspecialchars($td['label']); ?></strong><?php echo $is_today ? ' <span class="eod-tag eod-tag--today">Selected</span>' : ''; ?></td>
                                         <td class="num"><?php echo $money($td['net']); ?></td>
                                         <?php if ($mod_pos): ?><td class="num"><?php echo $money($td['pos_gross']); ?></td><?php endif; ?>
                                         <td>
                                             <div class="eod-trend-bar">
-                                                <div class="eod-trend-bar__fill<?php echo $is_today ? ' eod-trend-bar__fill--today' : ''; ?>" style="width:<?php echo number_format($bar_width, 1); ?>%"></div>
+                                                <div class="eod-trend-bar__fill<?php echo $is_today ? ' eod-trend-bar__fill--today' : ''; ?>" style="width:<?php echo number_format($bar_width, 1, '.', ''); ?>%"></div>
                                                 <span class="eod-trend-bar__val"><?php echo $money($combined); ?></span>
                                             </div>
                                         </td>
@@ -1608,142 +1642,181 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                             </tbody>
                         </table>
                     </div>
-                </section>
+                </div>
 
-                <?php if ($mod_bookings): ?>
-                <!-- Room type revenue -->
-                <section class="rh-panel" data-help="Room Type Revenue|Accommodation payments broken down by room category today. Bar length shows each type's share relative to the highest-earning category. Useful for pricing decisions, upsell targets, and understanding which room tiers drive revenue.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Room type revenue</h2>
-                    </div>
-                    <?php if (empty($room_type_perf)): ?>
-                        <p class="rh-empty">No room payments recorded today.</p>
-                    <?php else:
-                        $rt_max = max(array_map(fn($r) => (float)$r['revenue'], $room_type_perf)) ?: 1;
-                    ?>
-                        <div class="rh-panel__body">
-                            <ul class="eod-bars">
-                                <?php foreach ($room_type_perf as $rt):
-                                    $rt_share = $rev['room_gross'] > 0 ? min(100, ((float)$rt['revenue'] / (float)$rev['room_gross']) * 100) : 0;
-                                    $rt_w     = ((float)$rt['revenue'] / $rt_max) * 100;
+                <!-- Yield & guests -->
+                <div class="ck-pane" role="tabpanel" data-ck-pane="insight" hidden>
+                    <h3 class="eod-pane-title">Yield, guests &amp; exposure</h3>
+                    <div class="eod-split">
+                        <?php if ($mod_bookings): ?>
+                        <div>
+                            <h4 class="eod-sub-title">Yield &amp; opportunity</h4>
+                            <ul class="ck-kv eod-kv">
+                                <?php
+                                echo $kv('Unsold rooms', (string)(int)$rooms_unsold);
+                                echo $kv('Empty-room opportunity', $money($empty_room_opportunity));
+                                if ($mod_pos) { echo $kv(htmlspecialchars($posShort) . ' per occupied room', $money($fnb_per_occupied_room)); }
+                                echo $kv('Top revenue source', htmlspecialchars($top_revenue_source['label']) . $sub(number_format($top_revenue_source_share, 1) . '%'));
                                 ?>
-                                    <li>
-                                        <div class="eod-bars__row">
-                                            <span class="eod-bars__label"><?php echo htmlspecialchars((string)$rt['room_type']); ?></span>
-                                            <span class="eod-bars__value"><?php echo $money($rt['revenue']); ?> <small><?php echo (int)$rt['bookings']; ?> booking<?php echo (int)$rt['bookings'] === 1 ? '' : 's'; ?> &middot; <?php echo number_format($rt_share, 1); ?>%</small></span>
-                                        </div>
-                                        <div class="eod-bars__track">
-                                            <div class="eod-bars__fill" style="width:<?php echo max(2, $rt_w); ?>%"></div>
-                                        </div>
-                                    </li>
-                                <?php endforeach; ?>
                             </ul>
                         </div>
-                    <?php endif; ?>
-                </section>
-                <?php endif; ?>
-
-                <?php if ($mod_bookings): ?>
-                <!-- Guest intelligence -->
-                <section class="rh-panel" data-help="Guest Intelligence|New guests: arrivals today with no prior booking history in the system. Returning guests: arrivals who have booked before. Booking lead time: average days between when today's guests made their reservation and their arrival date. Short lead times may indicate last-minute demand.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Guest intelligence</h2>
+                        <div>
+                            <h4 class="eod-sub-title">Guest intelligence</h4>
+                            <?php if ($guest_intel_total === 0): ?>
+                                <div class="ck-empty"><i class="fas fa-user-group"></i><p>No arrival data to analyse.</p></div>
+                            <?php else: ?>
+                            <ul class="ck-kv eod-kv">
+                                <?php
+                                echo $kv('New guests', (string)(int)$guest_intel['new_guests']);
+                                echo $kv('Returning guests', (int)$guest_intel['returning_guests'] . $sub(number_format($returning_rate, 1) . '% repeat rate'));
+                                echo $kv('Avg booking lead time', (int)$guest_intel['avg_lead_days'] . ' day' . ($guest_intel['avg_lead_days'] === 1 ? '' : 's') . $sub(htmlspecialchars($lead_time_label)));
+                                ?>
+                            </ul>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                        <div>
+                            <h4 class="eod-sub-title">Best seller &amp; risk</h4>
+                            <ul class="ck-kv eod-kv">
+                                <?php
+                                echo $kv('Top POS item', htmlspecialchars($top_item_name) . ($top_item_revenue > 0 ? $sub($money($top_item_revenue)) : ''));
+                                echo $kv('Unpaid exposure', $money($unpaid_risk) . $sub('pending + folio'), $unpaid_risk > 0 ? 'eod-warn' : '');
+                                ?>
+                            </ul>
+                        </div>
                     </div>
-                    <?php if ($guest_intel_total === 0): ?>
-                        <p class="rh-empty">No arrival data to analyse today.</p>
-                    <?php else: ?>
-                        <table class="rh-kv eod-kv no-auto-pagination">
-                            <tbody>
-                            <tr><th scope="row">New guests</th><td><?php echo (int)$guest_intel['new_guests']; ?></td></tr>
-                            <tr><th scope="row">Returning guests</th><td><?php echo (int)$guest_intel['returning_guests']; ?> <span class="eod-sub"><?php echo number_format($returning_rate, 1); ?>% repeat rate</span></td></tr>
-                            <tr><th scope="row">Avg booking lead time</th><td><?php echo (int)$guest_intel['avg_lead_days']; ?> day<?php echo $guest_intel['avg_lead_days'] === 1 ? '' : 's'; ?> <span class="eod-sub"><?php echo htmlspecialchars($lead_time_label); ?></span></td></tr>
-                            </tbody>
-                        </table>
-                    <?php endif; ?>
-                </section>
-                <?php endif; ?>
+                </div>
 
-                <!-- Gym inquiries -->
-                <?php if ($gym_inquiries_today > 0): ?>
-                <section class="rh-panel" data-help="Gym Inquiries|New fitness centre membership inquiries received today that are awaiting response. Follow up promptly to convert leads.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Gym inquiries</h2>
-                        <div class="rh-panel__actions"><a href="gym-inquiries.php" class="rh-mini-link">View</a></div>
+                <?php if ($mod_bookings || $eod_billing): ?>
+                <!-- Pricing & quotes -->
+                <div class="ck-pane" role="tabpanel" data-ck-pane="pricing" hidden>
+                    <h3 class="eod-pane-title">Pricing, packages &amp; quotations</h3>
+                    <div class="eod-split">
+                        <?php if ($mod_bookings): ?>
+                        <div>
+                            <h4 class="eod-sub-title">Dynamic pricing &amp; packages</h4>
+                            <?php if ($dynamic_pricing['bookings_with_rate_plan'] === 0 && $dynamic_pricing['packages_booked'] === 0): ?>
+                                <div class="ck-empty"><i class="fas fa-tags"></i><p>No rate plans or packages applied in today&rsquo;s bookings.</p></div>
+                            <?php else: ?>
+                            <ul class="ck-kv eod-kv">
+                                <?php
+                                echo $kv('Rate-plan bookings', (int)$dynamic_pricing['bookings_with_rate_plan'] . ($dynamic_pricing['top_rate_plan'] ? $sub(htmlspecialchars($dynamic_pricing['top_rate_plan'])) : ''));
+                                echo $kv('Total discounts given', $money($dynamic_pricing['total_discount_given']), 'eod-warn');
+                                echo $kv('Package add-on revenue', $money($dynamic_pricing['package_revenue']) . $sub((int)$dynamic_pricing['packages_booked'] . ' package' . ((int)$dynamic_pricing['packages_booked'] === 1 ? '' : 's')), 'eod-good');
+                                if ($dynamic_pricing['top_package']) { echo $kv('Top package', htmlspecialchars($dynamic_pricing['top_package'])); }
+                                ?>
+                            </ul>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                        <?php if ($eod_billing): ?>
+                        <div>
+                            <h4 class="eod-sub-title">Quotations <a class="eod-link" href="quotations.php">View all &rarr;</a></h4>
+                            <ul class="ck-kv eod-kv">
+                                <?php
+                                echo $kv('Sent today', (string)(int)$quotation_stats['sent_today']);
+                                echo $kv('Accepted today', (string)(int)$quotation_stats['accepted_today'], 'eod-good');
+                                echo $kv('Active open quotes', (int)$quotation_stats['total_active'] . $sub($money($quotation_stats['pipeline_value']) . ' pipeline'));
+                                ?>
+                            </ul>
+                        </div>
+                        <?php endif; ?>
                     </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                        <tr><th scope="row">Pending response</th><td><?php echo $gym_inquiries_today; ?> <span class="eod-sub">New inquiry<?php echo $gym_inquiries_today === 1 ? '' : 's'; ?> today</span></td></tr>
-                        </tbody>
-                    </table>
-                </section>
+                </div>
                 <?php endif; ?>
 
-                <!-- Event bookings -->
-                <?php if ($event_bookings_today > 0): ?>
-                <section class="rh-panel" data-help="Event Bookings|New event RSVPs/bookings received today that are awaiting confirmation. Follow up promptly.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Event bookings</h2>
-                        <div class="rh-panel__actions"><a href="events-inquiries.php" class="rh-mini-link">View</a></div>
+                <!-- Housekeeping & more -->
+                <div class="ck-pane" role="tabpanel" data-ck-pane="ops" hidden>
+                    <h3 class="eod-pane-title">Housekeeping, maintenance &amp; guest feedback</h3>
+                    <div class="eod-split">
+                        <?php if ($mod_housekeeping): ?>
+                        <div>
+                            <h4 class="eod-sub-title">Housekeeping <a class="eod-link" href="housekeeping.php">Open &rarr;</a></h4>
+                            <div class="ck-stock__trio">
+                                <div class="ck-mini<?php echo (int)$housekeeping['pending'] > 0 ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$housekeeping['pending']; ?></strong><span>Pending</span></div>
+                                <div class="ck-mini"><strong><?php echo (int)$housekeeping['in_progress']; ?></strong><span>In progress</span></div>
+                                <div class="ck-mini"><strong><?php echo (int)$housekeeping['completed']; ?></strong><span>Done today</span></div>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                        <?php if ($mod_bookings): ?>
+                        <div>
+                            <h4 class="eod-sub-title">Open maintenance <a class="eod-link" href="room-maintenance.php">View all &rarr;</a></h4>
+                            <?php if ($maintenance['total_open'] > 0): ?>
+                            <ul class="ck-kv eod-kv">
+                                <?php
+                                if ($maintenance['urgent'] > 0) { echo $kv('Urgent', (string)$maintenance['urgent'], 'eod-warn'); }
+                                if ($maintenance['high'] > 0) { echo $kv('High priority', (string)$maintenance['high'], 'eod-warn'); }
+                                if ($maintenance['medium'] > 0) { echo $kv('Medium', (string)$maintenance['medium']); }
+                                echo $kv('Total open tasks', (string)$maintenance['total_open'], 'eod-warn');
+                                ?>
+                            </ul>
+                            <?php else: ?>
+                                <div class="ck-empty ck-empty--good"><i class="fas fa-circle-check"></i><p>No open maintenance tasks.</p></div>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                        <div>
+                            <h4 class="eod-sub-title">Reviews <?php if ($reviews['count'] > 0): ?><a class="eod-link" href="reviews.php">View all &rarr;</a><?php endif; ?></h4>
+                            <?php if ($reviews['count'] === 0): ?>
+                                <div class="ck-empty"><i class="fas fa-star"></i><p>No reviews submitted <?php echo $isToday ? 'today' : 'on this day'; ?>.</p></div>
+                            <?php else: ?>
+                            <ul class="ck-kv eod-kv">
+                                <?php
+                                echo $kv('Average rating', number_format($reviews['avg'], 1) . $sub('/ 5'));
+                                echo $kv('Reviews', (string)(int)$reviews['count']);
+                                ?>
+                            </ul>
+                            <?php endif; ?>
+                        </div>
+                        <?php if ($gym_inquiries_today > 0): ?>
+                        <div>
+                            <h4 class="eod-sub-title">Gym inquiries <a class="eod-link" href="gym-inquiries.php">View &rarr;</a></h4>
+                            <ul class="ck-kv eod-kv"><?php echo $kv('Pending response', $gym_inquiries_today . $sub('new inquir' . ($gym_inquiries_today === 1 ? 'y' : 'ies'))); ?></ul>
+                        </div>
+                        <?php endif; ?>
+                        <?php if ($event_bookings_today > 0): ?>
+                        <div>
+                            <h4 class="eod-sub-title">Event bookings <a class="eod-link" href="events-inquiries.php">View &rarr;</a></h4>
+                            <ul class="ck-kv eod-kv"><?php echo $kv('Pending response', $event_bookings_today . $sub('new booking' . ($event_bookings_today === 1 ? '' : 's'))); ?></ul>
+                        </div>
+                        <?php endif; ?>
                     </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                        <tr><th scope="row">Pending response</th><td><?php echo $event_bookings_today; ?> <span class="eod-sub">New booking<?php echo $event_bookings_today === 1 ? '' : 's'; ?> today</span></td></tr>
-                        </tbody>
-                    </table>
-                </section>
-                <?php endif; ?>
-
-                <!-- Quotation Pipeline (billing businesses only — matches the nav/page gate) -->
-                <?php $eod_billing = function_exists('rh_module_key_enabled') && rh_module_key_enabled('billing'); ?>
-                <?php if ($eod_billing && ($quotation_stats['sent_today'] > 0 || $quotation_stats['total_active'] > 0)): ?>
-                <section class="rh-panel" data-help="Quotation Pipeline|Quotes sent today and quotes still awaiting a decision from prospects. Pipeline value is the total of all sent quotes not yet accepted or declined. Track conversion to ensure proposals translate into confirmed revenue.">
-                    <div class="rh-panel__head">
-                        <h2 class="rh-panel__title">Quotations</h2>
-                        <div class="rh-panel__actions"><a href="quotations.php" class="rh-mini-link">View all</a></div>
-                    </div>
-                    <table class="rh-kv eod-kv no-auto-pagination">
-                        <tbody>
-                        <tr><th scope="row">Sent today</th><td><?php echo $quotation_stats['sent_today']; ?></td></tr>
-                        <tr><th scope="row">Accepted today</th><td class="eod-good"><?php echo $quotation_stats['accepted_today']; ?></td></tr>
-                        <tr><th scope="row">Active open quotes</th><td><?php echo $quotation_stats['total_active']; ?> <span class="eod-sub"><?php echo $money($quotation_stats['pipeline_value']); ?> pipeline value</span></td></tr>
-                        </tbody>
-                    </table>
-                </section>
-                <?php endif; ?>
-                </section>
-            </details>
-
-            <!-- Footer note -->
-            <footer class="eod-footer">
-                <p>Generated by <?php echo htmlspecialchars($user['full_name'] ?: 'Admin'); ?> at <?php echo date('Y-m-d H:i'); ?> &middot; All figures in <?php echo htmlspecialchars(trim($currency_symbol)); ?>.</p>
-            </footer>
+                </div>
+            </section>
         </div>
+
+        <!-- Footer note -->
+        <footer class="eod-footer">
+            <p>Generated by <?php echo htmlspecialchars($user['full_name'] ?: 'Admin'); ?> at <?php echo date('Y-m-d H:i'); ?> &middot; All figures in <?php echo htmlspecialchars(trim($currency_symbol)); ?>.</p>
+        </footer>
+
+        </div><!-- /.ck -->
     </div>
 
     <script>
         (function() {
             const csrf = window._rhCsrf || '<?php echo htmlspecialchars($csrf_token ?? ''); ?>';
 
+            // ---- Result toast (state classes, no inline styles) ----
             function showResult(title, html, isError) {
                 const toast = document.getElementById('eodResultToast');
+                const text = html.replace(/<[^>]+>/g, '');
                 if (!toast) {
-                    alert(title + '\n\n' + html.replace(/<[^>]+>/g, ''));
+                    if (window.Alert && Alert.show) { Alert.show(title + ' - ' + text, isError ? 'error' : 'success'); }
                     return;
                 }
-                toast.innerHTML = '<strong>' + title + '</strong> &mdash; ' + html.replace(/<[^>]+>/g, '');
-                if (isError) {
-                    toast.style.background = '#fff1f2';
-                    toast.style.color = '#b91c1c';
-                    toast.style.borderColor = '#ef4444';
-                } else {
-                    toast.style.background = '#f0fdf4';
-                    toast.style.color = '#166534';
-                    toast.style.borderColor = '#22c55e';
-                }
-                toast.style.display = 'block';
+                toast.textContent = '';
+                const strong = document.createElement('strong');
+                strong.textContent = title;
+                toast.appendChild(strong);
+                toast.appendChild(document.createTextNode(' — ' + text));
+                toast.classList.toggle('eod-toast--error', !!isError);
+                toast.classList.toggle('eod-toast--ok', !isError);
+                toast.hidden = false;
                 clearTimeout(toast._hideTimer);
                 toast._hideTimer = setTimeout(() => {
-                    toast.style.display = 'none';
+                    toast.hidden = true;
                 }, 8000);
                 toast.scrollIntoView({
                     behavior: 'smooth',
@@ -1757,7 +1830,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 const ccEmail = ccInput ? ccInput.value.trim() : '';
                 const originalHtml = btn.innerHTML;
                 btn.disabled = true;
-                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…';
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Sending…</span>';
 
                 fetch('api/end-of-day-send.php', {
                         method: 'POST',
@@ -1792,12 +1865,47 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             const waBtn = document.getElementById('eodSendWhatsApp');
             if (emailBtn) emailBtn.addEventListener('click', () => sendReport('email', emailBtn));
             if (waBtn) waBtn.addEventListener('click', () => sendReport('whatsapp', waBtn));
+
+            // ---- Cockpit interactions: detail tabs + takings readout ----
+            document.querySelectorAll('[data-ck-tabs]').forEach(function(panel) {
+                const tabs = panel.querySelectorAll('[data-ck-tab]');
+                tabs.forEach(function(tab) {
+                    tab.addEventListener('click', function() {
+                        tabs.forEach(function(t) {
+                            const on = t === tab;
+                            t.classList.toggle('is-active', on);
+                            t.setAttribute('aria-selected', on ? 'true' : 'false');
+                        });
+                        panel.querySelectorAll('[data-ck-pane]').forEach(function(pane) {
+                            pane.hidden = pane.dataset.ckPane !== tab.dataset.ckTab;
+                        });
+                    });
+                });
+            });
+
+            document.querySelectorAll('.ck-money').forEach(function(box) {
+                const label = box.querySelector('[data-ck-trend-label]');
+                const value = box.querySelector('[data-ck-trend-value]');
+                const extra = box.querySelector('[data-ck-trend-sub]');
+                const cols = box.querySelectorAll('[data-ck-trend]');
+                cols.forEach(function(col) {
+                    function show() {
+                        cols.forEach(function(c) {
+                            c.classList.toggle('is-active', c === col);
+                        });
+                        if (label) label.textContent = col.dataset.ckTrendDay;
+                        if (value) value.textContent = col.dataset.ckTrend;
+                        if (extra) extra.textContent = col.dataset.ckTrendExtra || '';
+                    }
+                    col.addEventListener('mouseenter', show);
+                    col.addEventListener('focus', show);
+                    col.addEventListener('click', show);
+                });
+            });
         })();
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>
-<script>window.addEventListener('beforeprint',function(){var d=document.getElementById('eodMoreDetail');if(d)d.open=true;});</script>
 </body>
 
 </html>
-

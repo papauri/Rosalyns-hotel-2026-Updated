@@ -4680,3 +4680,28 @@ details[open] .rh-help-panel__toggle::after {
 .reports-container .rh-strip {
     margin-bottom: 1rem;
 }
+
+/* ==========================================================================
+   Accounting dashboard cockpit (.ck-acct) — page-specific tweaks only.
+   Shared cockpit rules live in admin-cockpit.css.
+   ========================================================================== */
+.ck-acct .ck-tab { min-height: 40px; }
+.ck-acct .ck-kpi__value--money { font-size: clamp(20px, 1.8vw, 26px); }
+.ck-acct .ck-kpi__sub { line-height: 1.4; overflow-wrap: anywhere; }
+.ck-acct .ck-kpi__sub .ck-link { padding: 0; font-size: inherit; }
+.ck-acct .ck-levels__name i { width: 18px; color: var(--ck-gold); text-align: center; margin-right: 4px; }
+.ck-acct .ck-table td i.fas { color: var(--ck-gold); margin-right: 2px; }
+.ck-acct .ck-table .ck-table__cell-link i { margin: 0; }
+.ck-acct .ck-bars__bar { height: 120px; }
+.ck-acct .ck-bars__col { min-height: 44px; }
+.ck-acct .ck-vat > summary .vat-status-badge { margin-left: auto; margin-right: 12px; }
+.ck-acct .ck-vat .acct-panel { border: 0; box-shadow: none; background: transparent; padding: 0; margin: 0; }
+.ck-acct .ck-vat .acct-panel__sub { margin-bottom: 12px; }
+.ck-acct .ck-vat .vat-edit-actions .ck-btn { min-height: 44px; }
+@media (max-width: 680px) {
+    .ck-acct .ck-bars__bar { height: 96px; }
+    .ck-acct .ck-vat > summary .vat-status-badge { margin-left: 0; }
+}
+.ck-acct .ck-donut { width: 132px; flex: 0 0 auto; }
+.ck-acct .ck-donut__hole strong { font-size: 15px; max-width: 100%; white-space: nowrap; }
+.ck-acct .ck-table th[title] { cursor: help; }

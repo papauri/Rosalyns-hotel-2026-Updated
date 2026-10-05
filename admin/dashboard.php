@@ -77,6 +77,10 @@ $gymDash = [
     'expiring_members' => 0,
 ];
 $roomServiceQueue = [];
+$dayProgress = ['arrived' => 0, 'departed' => 0];
+$departureList = [];
+$weekAhead = [];
+$revenueTrend = [];
 $is_card_insight_ajax = isset($_GET['ajax']) && $_GET['ajax'] === 'card_insight';
 $station_union_window = null;
 $station_union_start_sql = '';
@@ -299,6 +303,75 @@ if (!$is_card_insight_ajax) {
         } catch (Throwable $e) {
             $roomServiceQueue = [];
         }
+    }
+
+    /* -----------------------------------------------------------------------
+     * Cockpit extras: day progress, departures, 7-day takings trend.
+     * Read-only and individually guarded like the blocks above.
+     * --------------------------------------------------------------------- */
+    if ($mod_bookings) {
+        try {
+            $st = $pdo->prepare("SELECT
+                    SUM(check_in_date = ? AND status = 'checked-in') AS arrived,
+                    SUM(check_out_date = ? AND status = 'checked-out') AS departed
+                FROM bookings
+                WHERE check_in_date = ? OR check_out_date = ?");
+            $st->execute([$today, $today, $today, $today]);
+            $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+            $dayProgress['arrived']  = (int)($r['arrived'] ?? 0);
+            $dayProgress['departed'] = (int)($r['departed'] ?? 0);
+
+            $st = $pdo->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.number_of_nights,
+                       b.amount_due, b.payment_status, r.name AS room_name,
+                       ir.room_number AS individual_room_number, ir.room_name AS individual_room_name
+                FROM bookings b
+                JOIN rooms r ON b.room_id = r.id
+                LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
+                WHERE b.check_out_date = ? AND b.status = 'checked-in'
+                ORDER BY b.amount_due DESC, b.guest_name ASC");
+            $st->execute([$today]);
+            $departureList = $st->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) { /* keep defaults */ }
+    }
+
+    // Next 7 days of arrivals bucketed per day (from the list already loaded)
+    for ($i = 1; $i <= 7; $i++) {
+        $weekAhead[date('Y-m-d', strtotime($today . " +{$i} day"))] = 0;
+    }
+    foreach ($upcoming_checkins as $uc) {
+        if (isset($weekAhead[$uc['check_in_date']])) {
+            $weekAhead[$uc['check_in_date']]++;
+        }
+    }
+
+    // Takings over the last 7 days — same rules as "revenue today" (ledger
+    // without restaurant rows + POS gross), so today's bar matches the KPI.
+    for ($i = 6; $i >= 0; $i--) {
+        $revenueTrend[date('Y-m-d', strtotime($today . " -{$i} day"))] = 0.0;
+    }
+    $trendStart = array_key_first($revenueTrend);
+    if ($mod_finance) {
+        try {
+            $st = $pdo->prepare("SELECT DATE(payment_date) d, COALESCE(SUM(total_amount),0) v FROM payments
+                WHERE DATE(payment_date) BETWEEN ? AND ? AND payment_status IN ('paid','completed','partial')
+                  AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund' AND booking_type <> 'restaurant'
+                GROUP BY DATE(payment_date)");
+            $st->execute([$trendStart, $today]);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                if (isset($revenueTrend[$r['d']])) { $revenueTrend[$r['d']] += (float)$r['v']; }
+            }
+        } catch (Throwable $e) { /* fine */ }
+    }
+    if ($mod_pos) {
+        try {
+            $st = $pdo->prepare("SELECT DATE(COALESCE(paid_at, created_at)) d, COALESCE(SUM(total_amount),0) v FROM stock_orders
+                WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at)) BETWEEN ? AND ?
+                GROUP BY DATE(COALESCE(paid_at, created_at))");
+            $st->execute([$trendStart, $today]);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                if (isset($revenueTrend[$r['d']])) { $revenueTrend[$r['d']] += (float)$r['v']; }
+            }
+        } catch (Throwable $e) { /* fine */ }
     }
 }
 
@@ -1718,6 +1791,7 @@ $currency_symbol = getSetting('currency_symbol');
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+    <link rel="stylesheet" href="css/admin-cockpit.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-cockpit.css'); ?>">
     <link rel="stylesheet" href="css/dashboard.css?v=<?php echo @filemtime(__DIR__ . '/css/dashboard.css'); ?>">
 </head>
 
@@ -1725,7 +1799,7 @@ $currency_symbol = getSetting('currency_symbol');
 
     <?php require_once 'includes/admin-header.php'; ?>
 
-    <div class="content">
+    <div class="content" data-rh-page-header-normalized="1"><?php /* the cockpit hero is this page's header */ ?>
         <?php if (isset($_GET['error']) && $_GET['error'] === 'access_denied'): ?>
             <div style="background:#fff3e0; border:1px solid #ffe0b2; border-radius:8px; padding:14px 20px; margin-bottom:20px; color:#e65100; display:flex; align-items:center; gap:10px; font-size:14px;">
                 <i class="fas fa-exclamation-triangle"></i> You do not have permission to access that page. Contact your administrator to request access.
@@ -1737,364 +1811,173 @@ $currency_symbol = getSetting('currency_symbol');
             </div>
         <?php endif; ?>
 
-        <h2 class="section-title">Dashboard Overview</h2>
-        <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-book-open"></i> Guides Menu</h3>
-        <div class="guide-menu-grid">
-            <a class="guide-menu-btn" href="../docs/guides/index.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i> All Guides</a>
-            <a class="guide-menu-btn" href="../docs/guides/99-admin-dashboard-full-guide.html" target="_blank" rel="noopener"><i class="fas fa-scroll"></i> Admin Bible</a>
-            <?php if ($mod_pos): ?><a class="guide-menu-btn" href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-cash-register"></i> POS Guide</a><?php endif; ?>
-            <?php if ($mod_pos && $mod_station_kds): ?><a class="guide-menu-btn" href="../docs/guides/02-kds-kitchen.html" target="_blank" rel="noopener"><i class="fas fa-utensils"></i> KDS Guide</a><?php endif; ?>
-            <?php if ($mod_pos && $mod_station_bds): ?><a class="guide-menu-btn" href="../docs/guides/03-bds-bar.html" target="_blank" rel="noopener"><i class="fas fa-cocktail"></i> BDS Guide</a><?php endif; ?>
-            <?php if ($mod_pos && $mod_station_cds): ?><a class="guide-menu-btn" href="../docs/guides/04-cds-coffee.html" target="_blank" rel="noopener"><i class="fas fa-mug-hot"></i> CDS Guide</a><?php endif; ?>
-            <?php if ($mod_pos && $mod_station_room_service): ?><a class="guide-menu-btn" href="../docs/guides/05-room-service.html" target="_blank" rel="noopener"><i class="fas fa-bell-concierge"></i> Room Service Guide</a><?php endif; ?>
-            <?php if ($mod_housekeeping): ?><a class="guide-menu-btn" href="../docs/guides/06-housekeeping.html" target="_blank" rel="noopener"><i class="fas fa-broom"></i> Housekeeping Guide</a><?php endif; ?>
-            <?php if ($mod_bookings): ?><a class="guide-menu-btn" href="../docs/guides/07-reception-bookings.html" target="_blank" rel="noopener"><i class="fas fa-calendar-check"></i> Reception Guide</a><?php endif; ?>
-            <?php if ($mod_stock): ?><a class="guide-menu-btn" href="../docs/guides/08-stock-orders.html" target="_blank" rel="noopener"><i class="fas fa-boxes"></i> Stock Guide</a><?php endif; ?>
-            <a class="guide-menu-btn" href="../docs/guides/13-finance-payments.html" target="_blank" rel="noopener"><i class="fas fa-money-bill-wave"></i> Finance Guide</a>
-            <a class="guide-menu-btn" href="../docs/guides/14-reports-eod.html" target="_blank" rel="noopener"><i class="fas fa-chart-bar"></i> Reports Guide</a>
-        </div>
+        <?php
+        /* =====================================================================
+         * Cockpit view-model — everything the page shows is decided here so the
+         * markup below stays a plain render.
+         * =================================================================== */
+        $uid = (int)$user['id'];
+        $cur = htmlspecialchars((string)$currency_symbol, ENT_QUOTES, 'UTF-8');
+        $money = static function ($v) use ($cur): string {
+            return '<span class="ck-cur">' . $cur . '</span>' . number_format((float)$v, 2);
+        };
+        $moneyShort = static function ($v) use ($cur): string {
+            $v = (float)$v;
+            if (abs($v) >= 1000000) { return $cur . number_format($v / 1000000, 1) . 'M'; }
+            if (abs($v) >= 10000)   { return $cur . number_format($v / 1000, 1) . 'k'; }
+            return $cur . number_format($v, 0);
+        };
+        $initials = static function (string $name): string {
+            $parts = preg_split('/\s+/', trim($name)) ?: [];
+            $out = '';
+            foreach (array_slice($parts, 0, 2) as $p) { $out .= mb_strtoupper(mb_substr($p, 0, 1)); }
+            return $out !== '' ? $out : '?';
+        };
+        $roomLabel = static function (array $b): string {
+            $unit = trim((string)($b['individual_room_name'] ?? '')) ?: trim((string)($b['individual_room_number'] ?? ''));
+            return $unit !== '' ? $unit : 'Unassigned';
+        };
+        $can = static function (string $page) use ($uid): bool {
+            return !function_exists('rhCanLinkTo') || rhCanLinkTo($uid, $page);
+        };
 
-        <?php if ($mod_bookings || $mod_conference || $mod_finance || $mod_pos): ?>
-        <div class="stats-grid">
-            <?php if ($mod_pos && !$mod_bookings): ?>
-            <?php /* POS-first businesses (bar, retail, supermarket, gym) — their overview
-                     is orders and takings, not check-ins. Hotels keep the booking-centric
-                     overview; their POS numbers live in Operations Pulse below. */ ?>
-            <a class="stat-card stat-info" href="pos.php" target="_blank" rel="noopener" title="Open the POS till">
-                <span class="stat-cta">Open →</span>
-                <div class="stat-icon"><i class="fas fa-receipt"></i></div>
-                <div class="stat-value"><?php echo (int)$ops['orders_today']; ?></div>
-                <div class="stat-label">Orders Today</div>
-                <div class="stat-sub">Settled through the POS till</div>
-            </a>
-            <a class="stat-card stat-good js-dashboard-insight" data-insight-card="restaurant_revenue_today" href="reports.php?type=accounting&range=today" title="Today's POS takings">
-                <span class="stat-cta">View →</span>
-                <div class="stat-icon"><i class="fas fa-cash-register"></i></div>
-                <div class="stat-value"><span class="kpi-currency"><?php echo $currency_symbol; ?></span><?php echo number_format($ops['restaurant_rev_today'], 2); ?></div>
-                <div class="stat-label"><?php echo isRestaurantEnabled() ? 'Restaurant Revenue Today' : 'POS Revenue Today'; ?></div>
-                <div class="stat-sub">Gross takings settled today</div>
-            </a>
-            <?php /* "Placed order awaiting payment" is only a real workflow where the
-                     order pipeline exists (stock module: restaurant tabs, retail/
-                     supermarket held orders). A gym snack till (pos on, stock off)
-                     settles at the point of sale, so this card is not relevant there. */ ?>
-            <?php if ($mod_stock): ?>
-            <a class="stat-card <?php echo $ops['open_tabs'] > 0 ? 'stat-warn' : ''; ?> js-dashboard-insight" data-insight-card="open_tabs" href="stock-orders.php?status=placed" title="<?php echo isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
-                <span class="stat-cta">Action →</span>
-                <div class="stat-icon"><i class="fas fa-hourglass-half"></i></div>
-                <div class="stat-value"><?php echo (int)$ops['open_tabs']; ?></div>
-                <div class="stat-label"><?php echo isRestaurantEnabled() ? 'Open Tabs' : 'Pending Orders'; ?></div>
-                <div class="stat-sub"><span class="kpi-currency"><?php echo $currency_symbol; ?></span><?php echo number_format($ops['open_tabs_value'], 2); ?> outstanding</div>
-            </a>
-            <?php endif; ?>
-            <?php endif; ?>
-            <?php if ($mod_gym && !$mod_bookings): ?>
-            <?php /* Gym-first businesses — membership register front and centre. */ ?>
-            <a class="stat-card stat-good" href="gym-members.php" title="Open the membership register">
-                <span class="stat-cta">View →</span>
-                <div class="stat-icon"><i class="fas fa-id-card"></i></div>
-                <div class="stat-value"><?php echo (int)$gymDash['active_members']; ?></div>
-                <div class="stat-label">Active Members</div>
-                <div class="stat-sub">Currently enrolled memberships</div>
-            </a>
-            <a class="stat-card <?php echo $gymDash['expiring_members'] > 0 ? 'stat-warn' : ''; ?>" href="gym-members.php?filter=expiring" title="Memberships expiring within 30 days">
-                <span class="stat-cta">Action →</span>
-                <div class="stat-icon"><i class="fas fa-hourglass-end"></i></div>
-                <div class="stat-value"><?php echo (int)$gymDash['expiring_members']; ?></div>
-                <div class="stat-label">Expiring Soon</div>
-                <div class="stat-sub">Renewals due in the next 30 days</div>
-            </a>
-            <a class="stat-card <?php echo $guestSvc['pending_gym'] > 0 ? 'stat-warn' : 'stat-info'; ?>" href="gym-inquiries.php" title="New membership inquiries awaiting reply">
-                <span class="stat-cta">Reply →</span>
-                <div class="stat-icon"><i class="fas fa-inbox"></i></div>
-                <div class="stat-value"><?php echo (int)$guestSvc['pending_gym']; ?></div>
-                <div class="stat-label">New Inquiries</div>
-                <div class="stat-sub">Prospects waiting to hear back</div>
-            </a>
-            <?php endif; ?>
-            <?php if ($mod_bookings): ?>
-            <a class="stat-card stat-info js-dashboard-insight" data-insight-card="checkins_today" href="bookings.php?filter=checkin_today" title="View today's check-ins">
-                <span class="stat-cta">View →</span>
-                <div class="stat-icon"><i class="fas fa-calendar-check"></i></div>
-                <div class="stat-value"><?php echo $today_checkins; ?></div>
-                <div class="stat-label">Today's Check-ins</div>
-                <div class="stat-sub">Confirmed + pending arrivals</div>
-            </a>
+        $hour = (int)date('G');
+        $greeting = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good evening');
+        $firstName = trim(explode(' ', trim((string)($user['full_name'] ?: $user['username'])))[0] ?? '');
 
-            <a class="stat-card stat-info js-dashboard-insight" data-insight-card="checkouts_today" href="bookings.php?filter=checkout_today" title="View today's check-outs">
-                <span class="stat-cta">View →</span>
-                <div class="stat-icon"><i class="fas fa-calendar-times"></i></div>
-                <div class="stat-value"><?php echo $today_checkouts; ?></div>
-                <div class="stat-label">Today's Check-outs</div>
-                <div class="stat-sub">Currently checked-in guests due out</div>
-            </a>
+        // Today's arrivals still to come (pending/confirmed)
+        $checkin_bookings = [];
+        if ($mod_bookings) {
+            try {
+                $st = $pdo->prepare("
+                    SELECT b.*, r.name as room_name,
+                           ir.room_number as individual_room_number, ir.room_name as individual_room_name
+                    FROM bookings b
+                    JOIN rooms r ON b.room_id = r.id
+                    LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
+                    WHERE b.check_in_date = ? AND b.status IN ('confirmed', 'pending')
+                    ORDER BY b.created_at ASC");
+                $st->execute([$today]);
+                $checkin_bookings = $st->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Throwable $e) { $checkin_bookings = []; }
+        }
 
-            <a class="stat-card <?php echo $pending_bookings > 0 ? 'stat-warn' : ''; ?> js-dashboard-insight" data-insight-card="pending_bookings" href="bookings.php?status=pending" title="Manage pending bookings">
-                <span class="stat-cta">Action →</span>
-                <div class="stat-icon"><i class="fas fa-clock"></i></div>
-                <div class="stat-value"><?php echo $pending_bookings; ?></div>
-                <div class="stat-label">Pending Bookings</div>
-                <div class="stat-sub">Awaiting confirmation</div>
-            </a>
+        $roomSummary = ($mod_bookings || $mod_housekeeping) ? getRoomDashboardSummary() : [];
+        $roomStatuses = ($mod_bookings || $mod_housekeeping) ? getRoomStatuses() : [];
+        $statusCounts = $roomSummary['status_counts'] ?? [];
+        $totalRooms = array_sum($statusCounts);
+        $occupiedRooms = (int)($statusCounts['occupied'] ?? 0);
+        $occupancy = (float)($roomSummary['occupancy_rate'] ?? 0);
+        $noShows = (int)($roomSummary['no_show_candidates'] ?? 0);
 
-            <a class="stat-card stat-good js-dashboard-insight" data-insight-card="inhouse_guests" href="bookings.php?status=checked-in" title="View in-house guests">
-                <span class="stat-cta">View →</span>
-                <div class="stat-icon"><i class="fas fa-users"></i></div>
-                <div class="stat-value"><?php echo $current_guests; ?></div>
-                <div class="stat-label">In-House Guests</div>
-                <div class="stat-sub">Currently checked in</div>
-            </a>
-            <?php endif; ?>
+        $arrivalsTotal = (int)$today_checkins + $dayProgress['arrived'];
+        $departuresTotal = (int)$today_checkouts + $dayProgress['departed'];
+        $departuresOwing = 0;
+        foreach ($departureList as $d) { if ((float)$d['amount_due'] > 0.01) { $departuresOwing++; } }
 
-            <?php if ($mod_conference): ?>
-            <a class="stat-card <?php echo $pending_conference > 0 ? 'stat-warn' : ''; ?> js-dashboard-insight" data-insight-card="pending_conference" href="conference-management.php?status=pending" title="Conference enquiries needing reply">
-                <span class="stat-cta">Action →</span>
-                <div class="stat-icon"><i class="fas fa-users-cog"></i></div>
-                <div class="stat-value"><?php echo $pending_conference; ?></div>
-                <div class="stat-label">Pending Conference Enquiries</div>
-                <div class="stat-sub">Awaiting quote / response</div>
-            </a>
+        // ---- Needs-attention queue: only what is non-zero is shown loudly ----
+        $attn = [];
+        $add = static function (array &$list, bool $on, int $count, string $label, string $icon, string $tone, string $href, ?string $insight = null, string $hint = '') {
+            if ($on) { $list[] = compact('count', 'label', 'icon', 'tone', 'href', 'insight', 'hint'); }
+        };
+        $add($attn, $mod_bookings, $noShows, 'Overdue arrivals (no-show?)', 'fa-user-clock', 'red', 'bookings.php?arrival=overdue', null, 'Arrival date passed, never checked in');
+        $add($attn, $mod_bookings, (int)$pending_bookings, 'Bookings awaiting confirmation', 'fa-hourglass-half', 'amber', 'bookings.php?status=pending', 'pending_bookings');
+        $add($attn, $mod_bookings, $departuresOwing, 'Departures with a balance', 'fa-sack-dollar', 'red', 'bookings.php?filter=checkout_today', 'checkouts_today', 'Collect before they leave');
+        $add($attn, $mod_finance, (int)$finance['refunds_pending'], 'Refunds to approve', 'fa-rotate-left', 'red', 'payments.php?refund_status=pending', 'refunds_pending');
+        $add($attn, $mod_conference, (int)$pending_conference, 'Conference enquiries to answer', 'fa-users-gear', 'amber', 'conference-management.php?status=pending', 'pending_conference');
+        $add($attn, $mod_website_cms, (int)$guestSvc['unread_contact'], 'Unread contact messages', 'fa-envelope', 'red', 'contact-inquiries.php');
+        $add($attn, $mod_website_cms, (int)$guestSvc['pending_reviews'], 'Reviews to moderate', 'fa-star', 'amber', 'reviews.php?status=pending');
+        $add($attn, $mod_website_cms && $mod_events, (int)$guestSvc['pending_events'], 'Event bookings pending', 'fa-calendar-check', 'amber', 'events-inquiries.php');
+        $add($attn, $mod_gym, (int)$guestSvc['pending_gym'], 'Gym enquiries to answer', 'fa-dumbbell', 'amber', 'gym-inquiries.php');
+        $add($attn, $mod_gym, (int)$gymDash['expiring_members'], 'Gym memberships expiring (30d)', 'fa-id-card', 'amber', 'gym-members.php?filter=expiring');
+        $add($attn, $mod_housekeeping, (int)$guestSvc['maintenance_open'], 'Rooms out of service', 'fa-screwdriver-wrench', 'red', 'room-maintenance.php');
+        $add($attn, $mod_housekeeping, (int)$guestSvc['housekeeping_due'], 'Housekeeping tasks due', 'fa-broom', 'amber', 'housekeeping.php');
+        $add($attn, $mod_pos && $mod_bookings, (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', 'stock-orders.php?type=room_service', 'room_service_pending');
+        $add($attn, $mod_pos && $mod_bookings, (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', 'stock-orders.php?type=room_service', 'room_service_reminders_due', 'Rooms with no order served today');
+        $add($attn, $mod_stock && $mod_bookings, (int)$ops['open_tabs'], isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Orders awaiting payment', 'fa-receipt', 'amber', 'stock-orders.php?status=placed', 'open_tabs');
+        $add($attn, $mod_stock, (int)$stock['expired_batches'], 'Expired stock batches', 'fa-skull-crossbones', 'red', 'stock-batches.php');
+        $add($attn, $mod_stock, (int)$stock['low_stock'], 'Items below minimum stock', 'fa-box-open', 'amber', 'stock-reorder.php');
+        $attnOpen = array_values(array_filter($attn, static fn($a) => $a['count'] > 0));
+        $attnClear = array_values(array_filter($attn, static fn($a) => $a['count'] <= 0));
+        usort($attnOpen, static fn($a, $b) => [$a['tone'] === 'red' ? 0 : 1, -$a['count']] <=> [$b['tone'] === 'red' ? 0 : 1, -$b['count']]);
+        $attnTotal = array_sum(array_column($attnOpen, 'count'));
 
-            <a class="stat-card stat-info js-dashboard-insight" data-insight-card="today_conferences" href="conference-management.php?event_date=<?php echo $today; ?>" title="Today's conference events">
-                <span class="stat-cta">View →</span>
-                <div class="stat-icon"><i class="fas fa-calendar-day"></i></div>
-                <div class="stat-value"><?php echo $today_conferences; ?></div>
-                <div class="stat-label">Today's Conference Events</div>
-                <div class="stat-sub">Confirmed + pending</div>
-            </a>
-            <?php endif; ?>
+        // ---- Hero sentence ----
+        $lede = [];
+        if ($mod_bookings) {
+            $lede[] = $arrivalsTotal . ' arrival' . ($arrivalsTotal === 1 ? '' : 's');
+            $lede[] = $departuresTotal . ' departure' . ($departuresTotal === 1 ? '' : 's');
+        } elseif ($mod_pos) {
+            $lede[] = (int)$ops['orders_today'] . ' order' . ((int)$ops['orders_today'] === 1 ? '' : 's') . ' settled';
+        } elseif ($mod_gym) {
+            $lede[] = (int)$gymDash['active_members'] . ' active members';
+        }
+        if ($mod_conference && $today_conferences > 0) { $lede[] = $today_conferences . ' event' . ($today_conferences == 1 ? '' : 's'); }
+        $ledeText = $lede ? implode(', ', $lede) . ' today' : 'Here is your day';
+        $ledeText .= count($attnOpen) ? ' — ' . count($attnOpen) . ' thing' . (count($attnOpen) === 1 ? '' : 's') . ' need' . (count($attnOpen) === 1 ? 's' : '') . ' you.' : ' — nothing needs you right now.';
 
-            <?php if ($mod_gym && $mod_bookings): ?>
-            <?php /* Booking-led presets that also run a gym (Full Hotel, Hotel + gym):
-                     the gym hero block above is booking-less only, so surface the key
-                     membership numbers here too. New inquiries already appear in the
-                     Guest Services Queue, so this stays to the two register metrics. */ ?>
-            <a class="stat-card stat-good" href="gym-members.php" title="Open the membership register">
-                <span class="stat-cta">View →</span>
-                <div class="stat-icon"><i class="fas fa-id-card"></i></div>
-                <div class="stat-value"><?php echo (int)$gymDash['active_members']; ?></div>
-                <div class="stat-label">Active Gym Members</div>
-                <div class="stat-sub">Currently enrolled memberships</div>
-            </a>
-            <a class="stat-card <?php echo $gymDash['expiring_members'] > 0 ? 'stat-warn' : ''; ?>" href="gym-members.php?filter=expiring" title="Gym memberships expiring within 30 days">
-                <span class="stat-cta">Action →</span>
-                <div class="stat-icon"><i class="fas fa-hourglass-end"></i></div>
-                <div class="stat-value"><?php echo (int)$gymDash['expiring_members']; ?></div>
-                <div class="stat-label">Gym Memberships Expiring</div>
-                <div class="stat-sub">Renewals due in the next 30 days</div>
-            </a>
-            <?php endif; ?>
+        // ---- Trend chart scaling ----
+        $trendMax = max(1.0, ...array_values($revenueTrend ?: [0]));
+        $trendTotal = array_sum($revenueTrend);
+        $weekMax = max(1, ...array_values($weekAhead ?: [0]));
+        $confByDay = [];
+        foreach ($upcoming_conferences as $c) { $confByDay[$c['event_date']] = ($confByDay[$c['event_date']] ?? 0) + 1; }
+        $hasMoney = $mod_finance || $mod_pos;
+        $roomColors = [
+            'occupied' => '#231F1C', 'available' => '#3f8f5a', 'cleaning' => '#c9a227',
+            'inspection' => '#2f6fad', 'maintenance' => '#b4632f', 'out_of_order' => '#9aa1ab',
+        ];
+        ?>
 
-            <?php if ($mod_finance && $mod_receivables): ?>
-            <a class="stat-card <?php echo $finance['outstanding'] > 0 ? 'stat-alert' : 'stat-good'; ?> js-dashboard-insight" data-insight-card="outstanding_balances" href="payments.php?balance=outstanding" title="View accounts with outstanding balances">
-                <span class="stat-cta">Collect →</span>
-                <div class="stat-icon"><i class="fas fa-money-bill-wave"></i></div>
-                <div class="stat-value">
-                    <span class="stat-money">
-                        <span class="stat-money__currency"><?php echo htmlspecialchars($currency_symbol, ENT_QUOTES, 'UTF-8'); ?></span>
-                        <span class="stat-money__amount"><?php echo number_format((float)$finance['outstanding'], 2); ?></span>
-                    </span>
-                </div>
-                <div class="stat-label">Outstanding Balances</div>
-                <div class="stat-sub"><?php echo $finance['outstanding_count']; ?> <?php echo $mod_bookings ? 'booking(s)' : 'account(s)'; ?> with amount due</div>
-            </a>
-            <?php endif; ?>
-        </div>
-        <?php endif; ?>
+        <div class="ck" data-ck-root>
 
-        <?php if ($mod_finance || ($mod_pos && $mod_bookings)): ?>
-        <!-- Money today: takings, open tabs and refunds waiting -->
-        <h3 class="section-title" style="margin-top:6px;"><i class="fas fa-coins"></i> Money Today</h3>
-        <div class="ops-grid">
-            <?php if ($mod_stock && $mod_bookings): /* POS-only presets show this in the stats row */ ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="open_tabs" href="stock-orders.php?status=placed" title="<?php echo isRestaurantEnabled() ? 'Open restaurant tabs awaiting payment' : 'Placed orders awaiting payment'; ?>">
-                <div class="ops-icon" style="background:#e67e22;"><i class="fas fa-receipt"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value"><?php echo $ops['open_tabs']; ?></div>
-                    <div class="ops-label"><?php echo isRestaurantEnabled() ? 'Open Tabs' : 'Pending Orders'; ?></div>
-                    <div class="ops-sub"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($ops['open_tabs_value'], 2); ?> outstanding</div>
-                </div>
-            </a>
-            <?php endif; // mod_stock — open tabs ?>
-
-            <?php if ($mod_pos && $mod_bookings): /* POS-only presets show this in the stats row */ ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="restaurant_revenue_today" href="reports.php?type=accounting&range=today" title="<?php echo isRestaurantEnabled() ? "Today's restaurant revenue" : "Today's POS revenue"; ?>">
-                <div class="ops-icon" style="background:#16a085;"><i class="fas fa-cash-register"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($ops['restaurant_rev_today'], 2); ?></div>
-                    <div class="ops-label"><?php echo isRestaurantEnabled() ? 'Restaurant Revenue Today' : 'POS Revenue Today'; ?></div>
-                    <div class="ops-sub"><?php echo $ops['orders_today']; ?> order(s) settled</div>
-                </div>
-            </a>
-            <?php endif; ?>
-
-            <?php if ($mod_finance): ?>
-            <a class="ops-card js-dashboard-insight" data-insight-card="total_revenue_today" href="payments.php?date=<?php echo $today; ?>" title="Payments captured today">
-                <div class="ops-icon" style="background:#2e7d32;"><i class="fas fa-credit-card"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($finance['revenue_today'], 2); ?></div>
-                    <div class="ops-label">Total Revenue Today</div>
-                    <div class="ops-sub"><?php echo $finance['payments_today']; ?> payment(s)<?php echo $mod_pos ? (isRestaurantEnabled() ? ' + restaurant' : ' + POS') : ''; ?></div>
-                </div>
-            </a>
-            <a class="ops-card js-dashboard-insight" data-insight-card="refunds_pending" href="payments.php?refund_status=pending" title="Refunds in queue">
-                <div class="ops-icon" style="background:#c62828;"><i class="fas fa-undo-alt"></i></div>
-                <div class="ops-body">
-                    <div class="ops-value"><?php echo $finance['refunds_pending']; ?></div>
-                    <div class="ops-label">Refunds Pending</div>
-                    <div class="ops-sub">Need approval / processing</div>
-                </div>
-            </a>
-            <?php endif; ?>
-        </div>
-        <?php endif; ?>
-
-        <?php if ($mod_stock || $mod_website_cms || $mod_gym || $mod_events || $mod_housekeeping || ($mod_pos && $mod_bookings)): ?>
-        <!-- Three-up widget strip: Stock Health · Guest Services · Operations & Facilities -->
-        <div class="widget-strip">
-            <?php if ($mod_stock): ?>
-            <!-- Stock Health -->
-            <div class="widget-card">
-                <h4>
-                    <span><i class="fas fa-warehouse"></i> Stock Health</span>
-                    <span class="widget-card__heading-actions">
-                        <button type="button" class="btn btn-outline dashboard-widget-insight-trigger js-dashboard-insight" data-insight-card="stock_health" title="Open stock health overview">
-                            Overview
-                        </button>
-                        <a href="stock-orders.php?view=stock">Manage stock →</a>
-                    </span>
-                </h4>
-                <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px;">
-                    <div style="text-align:center; padding:8px; background:<?php echo $stock['low_stock'] > 0 ? '#fff3e0' : '#f8f9fa'; ?>; border-radius:6px;">
-                        <div style="font-size:20px; font-weight:700; color:<?php echo $stock['low_stock'] > 0 ? '#e65100' : '#222'; ?>;"><?php echo $stock['low_stock']; ?></div>
-                        <div style="font-size:10px; color:#666;">LOW STOCK</div>
-                    </div>
-                    <div style="text-align:center; padding:8px; background:<?php echo $stock['expiring_batches'] > 0 ? '#fff8e1' : '#f8f9fa'; ?>; border-radius:6px;">
-                        <div style="font-size:20px; font-weight:700; color:<?php echo $stock['expiring_batches'] > 0 ? '#b45309' : '#222'; ?>;"><?php echo $stock['expiring_batches']; ?></div>
-                        <div style="font-size:10px; color:#666;">EXPIRING ≤7d</div>
-                    </div>
-                    <div style="text-align:center; padding:8px; background:<?php echo $stock['expired_batches'] > 0 ? '#ffebee' : '#f8f9fa'; ?>; border-radius:6px;">
-                        <div style="font-size:20px; font-weight:700; color:<?php echo $stock['expired_batches'] > 0 ? '#c62828' : '#222'; ?>;"><?php echo $stock['expired_batches']; ?></div>
-                        <div style="font-size:10px; color:#666;">EXPIRED</div>
-                    </div>
-                </div>
-                <?php if (!empty($stock['low_items'])): ?>
-                    <div style="font-size:11px; color:#666; margin-bottom:4px; font-weight:600;">Lowest items:</div>
-                    <ul class="widget-list">
-                        <?php foreach (array_slice($stock['low_items'], 0, 5) as $li): ?>
-                            <li>
-                                <span class="pri"><?php echo htmlspecialchars($li['name']); ?></span>
-                                <span class="meta"><?php echo number_format((float)$li['current_quantity'], 1); ?> / <?php echo number_format((float)$li['min_quantity'], 1); ?> <?php echo htmlspecialchars($li['unit']); ?></span>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                <?php else: ?>
-                    <p style="font-size:12px; color:#28a745; margin:8px 0 0;"><i class="fas fa-check-circle"></i> All <?php echo isRestaurantEnabled() ? 'ingredients' : 'stock items'; ?> above minimum.</p>
+        <!-- ============ HERO ============ -->
+        <header class="ck-hero">
+            <div class="ck-hero__intro">
+                <p class="ck-eyebrow"><i class="far fa-calendar"></i> <?php echo date('l, j F Y'); ?> <span class="ck-dot"></span> <span id="ckClock"><?php echo date('H:i'); ?></span></p>
+                <h1 class="ck-hero__title"><?php echo $greeting; ?><?php echo $firstName !== '' ? ', ' . htmlspecialchars($firstName) : ''; ?></h1>
+                <p class="ck-hero__lede"><?php echo htmlspecialchars($ledeText); ?></p>
+            </div>
+            <nav class="ck-hero__actions" aria-label="Quick actions">
+                <?php if ($mod_bookings && $can('create-booking.php')): ?>
+                    <a class="ck-btn ck-btn--primary" href="create-booking.php"><i class="fas fa-plus"></i><span>New booking</span></a>
                 <?php endif; ?>
-                <?php if ($stock['wastage_today'] > 0): ?>
-                    <div style="margin-top:10px; padding:6px 10px; background:#fbe9e7; border-radius:6px; font-size:11px; color:#c62828;">
-                        <i class="fas fa-trash"></i> Wastage today: <strong><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($stock['wastage_today'], 2); ?></strong>
-                    </div>
+                <?php if ($mod_bookings && $can('calendar.php')): ?>
+                    <a class="ck-btn" href="calendar.php"><i class="far fa-calendar-days"></i><span>Calendar</span></a>
                 <?php endif; ?>
-            </div>
-            <?php endif; // mod_stock ?>
+                <?php if ($mod_pos && $can('pos.php')): ?>
+                    <a class="ck-btn<?php echo $mod_bookings ? '' : ' ck-btn--primary'; ?>" href="pos.php" target="_blank" rel="noopener"><i class="fas fa-cash-register"></i><span>POS</span></a>
+                <?php endif; ?>
+                <?php if ($mod_gym && !$mod_bookings && $can('gym-checkin.php')): ?>
+                    <a class="ck-btn ck-btn--primary" href="gym-checkin.php"><i class="fas fa-id-badge"></i><span>Member check-in</span></a>
+                <?php endif; ?>
+                <?php if ($can('end-of-day-report.php')): ?>
+                    <a class="ck-btn" href="end-of-day-report.php"><i class="fas fa-file-invoice-dollar"></i><span>Day report</span></a>
+                <?php endif; ?>
+                <?php if ($mod_finance && $can('accounting-dashboard.php')): ?>
+                    <a class="ck-btn" href="accounting-dashboard.php"><i class="fas fa-scale-balanced"></i><span>Accounting</span></a>
+                <?php endif; ?>
+                <details class="ck-menu">
+                    <summary class="ck-btn ck-btn--ghost" aria-label="Guides"><i class="fas fa-book-open"></i><span>Guides</span><i class="fas fa-chevron-down ck-menu__caret"></i></summary>
+                    <div class="ck-menu__list">
+                        <a href="../docs/guides/index.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i> All guides</a>
+                        <a href="../docs/guides/99-admin-dashboard-full-guide.html" target="_blank" rel="noopener"><i class="fas fa-scroll"></i> Admin bible</a>
+                        <?php if ($mod_bookings): ?><a href="../docs/guides/07-reception-bookings.html" target="_blank" rel="noopener"><i class="fas fa-calendar-check"></i> Reception</a><?php endif; ?>
+                        <?php if ($mod_pos): ?><a href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-cash-register"></i> POS till</a><?php endif; ?>
+                        <?php if ($mod_pos && $mod_station_kds): ?><a href="../docs/guides/02-kds-kitchen.html" target="_blank" rel="noopener"><i class="fas fa-utensils"></i> Kitchen (KDS)</a><?php endif; ?>
+                        <?php if ($mod_pos && $mod_station_bds): ?><a href="../docs/guides/03-bds-bar.html" target="_blank" rel="noopener"><i class="fas fa-martini-glass"></i> Bar (BDS)</a><?php endif; ?>
+                        <?php if ($mod_pos && $mod_station_cds): ?><a href="../docs/guides/04-cds-coffee.html" target="_blank" rel="noopener"><i class="fas fa-mug-hot"></i> Coffee (CDS)</a><?php endif; ?>
+                        <?php if ($mod_pos && $mod_station_room_service): ?><a href="../docs/guides/05-room-service.html" target="_blank" rel="noopener"><i class="fas fa-bell-concierge"></i> Room service</a><?php endif; ?>
+                        <?php if ($mod_housekeeping): ?><a href="../docs/guides/06-housekeeping.html" target="_blank" rel="noopener"><i class="fas fa-broom"></i> Housekeeping</a><?php endif; ?>
+                        <?php if ($mod_stock): ?><a href="../docs/guides/08-stock-orders.html" target="_blank" rel="noopener"><i class="fas fa-boxes-stacked"></i> Stock</a><?php endif; ?>
+                        <a href="../docs/guides/13-finance-payments.html" target="_blank" rel="noopener"><i class="fas fa-money-bill-wave"></i> Finance</a>
+                        <a href="../docs/guides/14-reports-eod.html" target="_blank" rel="noopener"><i class="fas fa-chart-column"></i> Reports &amp; EOD</a>
+                    </div>
+                </details>
+            </nav>
+        </header>
 
-            <?php if ($mod_website_cms || $mod_gym || $mod_events): ?>
-            <!-- Guest Services -->
-            <div class="widget-card">
-                <h4>
-                    <span><i class="fas fa-headset"></i> <?php echo $mod_bookings ? 'Guest' : 'Customer'; ?> Services Queue</span>
-                    <span class="widget-card__heading-actions">
-                        <button type="button" class="btn btn-outline dashboard-widget-insight-trigger js-dashboard-insight" data-insight-card="guest_services_queue" title="Open guest services overview">
-                            Overview
-                        </button>
-                    </span>
-                </h4>
-                <ul class="widget-list">
-                    <?php if ($mod_website_cms): ?>
-                    <li>
-                        <span class="pri"><i class="fas fa-star" style="color:#f1c40f;"></i> Reviews awaiting moderation</span>
-                        <a href="reviews.php?status=pending" style="text-decoration:none;">
-                            <span class="pulse-pill <?php echo $guestSvc['pending_reviews'] > 0 ? 'amber' : 'green'; ?>"><?php echo $guestSvc['pending_reviews']; ?></span>
-                        </a>
-                    </li>
-                    <li>
-                        <span class="pri"><i class="fas fa-envelope" style="color:#1565c0;"></i> Unread contact inquiries</span>
-                        <a href="contact-inquiries.php" style="text-decoration:none;">
-                            <span class="pulse-pill <?php echo $guestSvc['unread_contact'] > 0 ? 'red' : 'green'; ?>"><?php echo $guestSvc['unread_contact']; ?></span>
-                        </a>
-                    </li>
-                    <?php endif; ?>
-                    <?php if ($mod_gym): ?>
-                    <li>
-                        <span class="pri"><i class="fas fa-dumbbell" style="color:#16a085;"></i> Gym inquiries pending</span>
-                        <a href="gym-inquiries.php" style="text-decoration:none;">
-                            <span class="pulse-pill <?php echo $guestSvc['pending_gym'] > 0 ? 'amber' : 'green'; ?>"><?php echo $guestSvc['pending_gym']; ?></span>
-                        </a>
-                    </li>
-                    <?php endif; ?>
-                    <?php if ($mod_website_cms && $mod_events): ?>
-                    <li>
-                        <span class="pri"><i class="fas fa-calendar-check" style="color:#5e35b1;"></i> Event bookings pending</span>
-                        <a href="events-inquiries.php" style="text-decoration:none;">
-                            <span class="pulse-pill <?php echo $guestSvc['pending_events'] > 0 ? 'amber' : 'green'; ?>"><?php echo $guestSvc['pending_events']; ?></span>
-                        </a>
-                    </li>
-                    <?php endif; ?>
-                </ul>
-            </div>
-            <?php endif; ?>
-
-            <?php if ($mod_housekeeping || ($mod_pos && $mod_bookings)): ?>
-            <!-- Operations & Facilities -->
-            <div class="widget-card">
-                <h4>
-                    <span><i class="fas fa-tools"></i> Operations & Facilities</span>
-                    <span class="widget-card__heading-actions">
-                        <button type="button" class="btn btn-outline dashboard-widget-insight-trigger js-dashboard-insight" data-insight-card="operations_facilities" title="Open operations and facilities overview">
-                            Overview
-                        </button>
-                    </span>
-                </h4>
-                <ul class="widget-list">
-                    <?php if ($mod_housekeeping): ?>
-                    <li>
-                        <span class="pri"><i class="fas fa-wrench" style="color:#fd7e14;"></i> Rooms in maintenance / OOO</span>
-                        <a href="room-maintenance.php" style="text-decoration:none;">
-                            <span class="pulse-pill <?php echo $guestSvc['maintenance_open'] > 0 ? 'red' : 'green'; ?>"><?php echo $guestSvc['maintenance_open']; ?></span>
-                        </a>
-                    </li>
-                    <li>
-                        <span class="pri"><i class="fas fa-broom" style="color:#17a2b8;"></i> Housekeeping due today</span>
-                        <a href="housekeeping.php" style="text-decoration:none;">
-                            <span class="pulse-pill <?php echo $guestSvc['housekeeping_due'] > 0 ? 'amber' : 'green'; ?>"><?php echo $guestSvc['housekeeping_due']; ?></span>
-                        </a>
-                    </li>
-                    <?php endif; ?>
-                    <?php if ($mod_pos && $mod_bookings): ?>
-                    <li>
-                        <span class="pri"><i class="fas fa-concierge-bell" style="color:#8e44ad;"></i> Room-service orders open</span>
-                        <a href="stock-orders.php?type=room_service" style="text-decoration:none;">
-                            <span class="pulse-pill <?php echo $ops['room_service_pending'] > 0 ? 'amber' : 'green'; ?>"><?php echo $ops['room_service_pending']; ?></span>
-                        </a>
-                    </li>
-                    <li>
-                        <span class="pri"><i class="fas fa-bell" style="color:#455a64;"></i> Room-service reminders due</span>
-                        <button type="button"
-                            class="pulse-pill <?php echo $roomServiceReminderDueNow ? ($ops['room_service_reminders_due'] > 0 ? 'red' : 'green') : 'amber'; ?> js-dashboard-insight"
-                            data-insight-card="room_service_reminders_due"
-                            style="border:0; cursor:pointer;">
-                            <?php echo $ops['room_service_reminders_due']; ?>
-                        </button>
-                    </li>
-                    <?php endif; ?>
-                </ul>
-            </div>
-            <?php endif; ?>
-        </div>
-        <?php endif; ?>
-
-        <?php if (hasPermission((int)$user['id'], 'system_logs')): ?>
+        <?php if (hasPermission($uid, 'system_logs')): ?>
         <!-- System health: silent while all is well; appears only when something needs the owner's attention.
              Polls admin/api/system-health.php every 5 minutes. -->
         <div class="dashboard-health-alert" id="sysHealthAlert" role="status" hidden>
@@ -2110,410 +1993,482 @@ $currency_symbol = getSetting('currency_symbol');
         </div>
         <?php endif; ?>
 
-        <?php if ($mod_pos && $mod_bookings && !empty($roomServiceQueue)): ?>
-            <!-- Room-service queue: live oldest-first list of in-flight room orders -->
-            <div class="today-checkins-section">
-                <h3>
-                    <i class="fas fa-concierge-bell"></i> Room Service Queue (<?php echo count($roomServiceQueue); ?>)
-                    <a href="stock-orders.php?type=room_service" class="btn btn-sm btn-outline" style="float:right;">All room orders →</a>
-                </h3>
-                <div class="table-container">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Order Ref</th>
-                                <th>Room</th>
-                                <th>Guest</th>
-                                <th>Items</th>
-                                <th>Total</th>
-                                <th>Age</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($roomServiceQueue as $rs):
-                                $age = (int)$rs['age_min'];
-                                $ageColor = $age >= 30 ? '#c62828' : ($age >= 15 ? '#b45309' : '#2e7d32');
-                            ?>
-                                <tr>
-                                    <td data-label="Order Ref"><strong><?php echo htmlspecialchars($rs['reference']); ?></strong></td>
-                                    <td data-label="Room"><?php echo htmlspecialchars($rs['room_number'] ?? '—'); ?></td>
-                                    <td data-label="Guest"><?php echo htmlspecialchars($rs['customer_name'] ?? '—'); ?></td>
-                                    <td data-label="Items"><?php echo (int)$rs['item_count']; ?></td>
-                                    <td data-label="Total"><?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format((float)$rs['total_amount'], 2); ?></td>
-                                    <td data-label="Age" style="color:<?php echo $ageColor; ?>; font-weight:600;"><?php echo rh_format_age($age); ?></td>
-                                    <td data-label="Status"><span class="badge badge-<?php echo htmlspecialchars($rs['status']); ?>"><?php echo ucfirst($rs['status']); ?></span></td>
-                                    <td data-label="Actions">
-                                        <a href="stock-orders.php?id=<?php echo (int)$rs['id']; ?>" class="btn btn-primary btn-sm">View</a>
-                                        <a href="pos.php?settle=<?php echo (int)$rs['id']; ?>" target="_blank" rel="noopener" class="btn btn-success btn-sm">Take Payment</a>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        <?php endif; ?>
+        <!-- ============ KPI STRIP ============ -->
+        <section class="ck-kpis" aria-label="Key figures">
+            <?php if ($mod_bookings): ?>
+                <?php if ($totalRooms > 0): ?>
+                <a class="ck-kpi ck-kpi--dark js-dashboard-insight" data-insight-card="room_status_overview" data-insight-label="Room status" href="room-dashboard.php">
+                    <span class="ck-kpi__icon"><i class="fas fa-bed"></i></span>
+                    <span class="ck-kpi__label">Occupancy</span>
+                    <span class="ck-kpi__value"><?php echo rtrim(rtrim(number_format($occupancy, 1), '0'), '.'); ?><small>%</small></span>
+                    <span class="ck-meter"><span style="width:<?php echo min(100, $occupancy); ?>%"></span></span>
+                    <span class="ck-kpi__sub"><?php echo $occupiedRooms; ?> of <?php echo $totalRooms; ?> rooms occupied</span>
+                </a>
+                <?php endif; ?>
+                <a class="ck-kpi js-dashboard-insight" data-insight-card="checkins_today" data-insight-label="Today's check-ins" href="bookings.php?filter=checkin_today">
+                    <span class="ck-kpi__icon"><i class="fas fa-plane-arrival"></i></span>
+                    <span class="ck-kpi__label">Arrivals</span>
+                    <span class="ck-kpi__value"><?php echo $dayProgress['arrived']; ?><small>/<?php echo $arrivalsTotal; ?></small></span>
+                    <span class="ck-meter ck-meter--info"><span style="width:<?php echo $arrivalsTotal ? round($dayProgress['arrived'] / $arrivalsTotal * 100) : 0; ?>%"></span></span>
+                    <span class="ck-kpi__sub"><?php echo (int)$today_checkins > 0 ? (int)$today_checkins . ' still to arrive' : ($arrivalsTotal ? 'Everyone has arrived' : 'No arrivals today'); ?></span>
+                </a>
+                <a class="ck-kpi js-dashboard-insight" data-insight-card="checkouts_today" data-insight-label="Today's check-outs" href="bookings.php?filter=checkout_today">
+                    <span class="ck-kpi__icon"><i class="fas fa-plane-departure"></i></span>
+                    <span class="ck-kpi__label">Departures</span>
+                    <span class="ck-kpi__value"><?php echo $dayProgress['departed']; ?><small>/<?php echo $departuresTotal; ?></small></span>
+                    <span class="ck-meter ck-meter--gold"><span style="width:<?php echo $departuresTotal ? round($dayProgress['departed'] / $departuresTotal * 100) : 0; ?>%"></span></span>
+                    <span class="ck-kpi__sub"><?php echo (int)$today_checkouts > 0 ? (int)$today_checkouts . ' still to check out' : ($departuresTotal ? 'All checked out' : 'No departures today'); ?></span>
+                </a>
+                <a class="ck-kpi js-dashboard-insight" data-insight-card="inhouse_guests" data-insight-label="In-house guests" href="bookings.php?status=checked-in">
+                    <span class="ck-kpi__icon"><i class="fas fa-people-roof"></i></span>
+                    <span class="ck-kpi__label">In house</span>
+                    <span class="ck-kpi__value"><?php echo (int)$current_guests; ?></span>
+                    <span class="ck-kpi__sub">Bookings checked in now</span>
+                </a>
+            <?php elseif ($mod_pos): ?>
+                <a class="ck-kpi ck-kpi--dark" href="pos.php" target="_blank" rel="noopener">
+                    <span class="ck-kpi__icon"><i class="fas fa-receipt"></i></span>
+                    <span class="ck-kpi__label">Orders today</span>
+                    <span class="ck-kpi__value"><?php echo (int)$ops['orders_today']; ?></span>
+                    <span class="ck-kpi__sub">Settled through the till</span>
+                </a>
+                <a class="ck-kpi js-dashboard-insight" data-insight-card="restaurant_revenue_today" data-insight-label="<?php echo isRestaurantEnabled() ? 'Restaurant revenue today' : 'POS revenue today'; ?>" href="reports.php?type=accounting&range=today">
+                    <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
+                    <span class="ck-kpi__label"><?php echo isRestaurantEnabled() ? 'Restaurant sales' : 'POS sales'; ?></span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($ops['restaurant_rev_today']); ?></span>
+                    <span class="ck-kpi__sub">Gross settled today</span>
+                </a>
+                <?php if ($mod_stock): ?>
+                <a class="ck-kpi<?php echo $ops['open_tabs'] > 0 ? ' ck-kpi--warn' : ''; ?> js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="<?php echo isRestaurantEnabled() ? 'Open tabs' : 'Pending orders'; ?>" href="stock-orders.php?status=placed">
+                    <span class="ck-kpi__icon"><i class="fas fa-hourglass-half"></i></span>
+                    <span class="ck-kpi__label"><?php echo isRestaurantEnabled() ? 'Open tabs' : 'Pending orders'; ?></span>
+                    <span class="ck-kpi__value"><?php echo (int)$ops['open_tabs']; ?></span>
+                    <span class="ck-kpi__sub"><?php echo $money($ops['open_tabs_value']); ?> unpaid</span>
+                </a>
+                <?php endif; ?>
+            <?php endif; ?>
+            <?php if ($mod_gym && !$mod_bookings): ?>
+                <a class="ck-kpi<?php echo $mod_pos ? '' : ' ck-kpi--dark'; ?>" href="gym-members.php">
+                    <span class="ck-kpi__icon"><i class="fas fa-id-card"></i></span>
+                    <span class="ck-kpi__label">Active members</span>
+                    <span class="ck-kpi__value"><?php echo (int)$gymDash['active_members']; ?></span>
+                    <span class="ck-kpi__sub"><?php echo (int)$gymDash['expiring_members']; ?> renewing in 30 days</span>
+                </a>
+            <?php endif; ?>
+            <?php if ($mod_gym && $mod_bookings): ?>
+                <a class="ck-kpi" href="gym-members.php">
+                    <span class="ck-kpi__icon"><i class="fas fa-dumbbell"></i></span>
+                    <span class="ck-kpi__label">Gym members</span>
+                    <span class="ck-kpi__value"><?php echo (int)$gymDash['active_members']; ?></span>
+                    <span class="ck-kpi__sub"><?php echo (int)$gymDash['expiring_members']; ?> renewing in 30 days</span>
+                </a>
+            <?php endif; ?>
+            <?php if ($mod_finance): ?>
+                <a class="ck-kpi js-dashboard-insight" data-insight-card="total_revenue_today" data-insight-label="Total revenue today" href="payments.php?date=<?php echo $today; ?>">
+                    <span class="ck-kpi__icon"><i class="fas fa-coins"></i></span>
+                    <span class="ck-kpi__label">Takings today</span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($finance['revenue_today']); ?></span>
+                    <span class="ck-spark" aria-hidden="true">
+                        <?php foreach ($revenueTrend as $d => $v): ?><span style="height:<?php echo max(6, round($v / $trendMax * 100)); ?>%"<?php echo $d === $today ? ' class="is-today"' : ''; ?>></span><?php endforeach; ?>
+                    </span>
+                    <span class="ck-kpi__sub"><?php echo (int)$finance['payments_today']; ?> payment(s)<?php echo $mod_pos ? ' + till' : ''; ?></span>
+                </a>
+                <?php if ($mod_receivables): ?>
+                <a class="ck-kpi<?php echo $finance['outstanding'] > 0.01 ? ' ck-kpi--alert' : ''; ?> js-dashboard-insight" data-insight-card="outstanding_balances" data-insight-label="Outstanding balances" href="payments.php?balance=outstanding">
+                    <span class="ck-kpi__icon"><i class="fas fa-file-invoice-dollar"></i></span>
+                    <span class="ck-kpi__label">Owed to us</span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($finance['outstanding']); ?></span>
+                    <span class="ck-kpi__sub"><?php echo (int)$finance['outstanding_count']; ?> <?php echo $mod_bookings ? 'booking(s)' : 'account(s)'; ?> with a balance</span>
+                </a>
+                <?php endif; ?>
+            <?php endif; ?>
+        </section>
 
+        <!-- ============ BENTO ============ -->
+        <div class="ck-bento">
 
-
-        <?php if ($mod_bookings || $mod_housekeeping): ?>
-        <!-- Room Status Widget -->
-        <?php
-        $roomSummary = getRoomDashboardSummary();
-        $roomStatuses = getRoomStatuses();
-        ?>
-        <div class="room-status-widget">
-            <div class="widget-header">
-                <h3><i class="fas fa-door-open"></i> Room Status Overview</h3>
-                <div class="room-status-widget__actions">
-                    <button type="button" class="btn btn-outline dashboard-widget-insight-trigger js-dashboard-insight" data-insight-card="room_status_overview" title="Open room status summary">
-                        Overview
-                    </button>
-                    <a href="room-dashboard.php" class="btn btn-sm btn-outline">View Details <i class="fas fa-arrow-right"></i></a>
-                </div>
-            </div>
-            <div class="widget-content">
-                <div class="occupancy-overview">
-                    <div class="occupancy-percentage">
-                        <span class="value"><?php echo $roomSummary['occupancy_rate'] ?? 0; ?>%</span>
-                        <span class="label">Occupancy</span>
+            <?php
+            $todayTabs = [];
+            if ($mod_bookings) {
+                $todayTabs['arrivals'] = ['Arrivals', count($checkin_bookings)];
+                $todayTabs['departures'] = ['Departures', count($departureList)];
+            }
+            if ($mod_conference) { $todayTabs['events'] = ['Events', count($today_conference_events)]; }
+            if ($mod_pos && $mod_bookings) { $todayTabs['roomservice'] = ['Room service', count($roomServiceQueue)]; }
+            ?>
+            <?php if ($todayTabs): ?>
+            <!-- Today: the front-desk worklist -->
+            <section class="ck-panel ck-span-2 ck-today" data-ck-tabs>
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Today's movements</h2>
+                        <p class="ck-panel__sub">Act straight from the list — tap a row for the full record.</p>
                     </div>
-                    <div class="occupancy-bar-mini">
-                        <?php
-                        $total = array_sum($roomSummary['status_counts'] ?? []);
-                        if ($total > 0):
-                            $colors = [
-                                'occupied' => '#dc3545',
-                                'available' => '#28a745',
-                                'cleaning' => '#ffc107',
-                                'inspection' => '#17a2b8',
-                                'maintenance' => '#fd7e14',
-                                'out_of_order' => '#6c757d'
-                            ];
-                            foreach ($roomSummary['status_counts'] ?? [] as $status => $count):
-                                $percent = ($count / $total) * 100;
-                        ?>
-                                <div class="bar-segment" style="width: <?php echo $percent; ?>%; background: <?php echo $colors[$status] ?? '#ccc'; ?>;" title="<?php echo ucfirst($status); ?>: <?php echo $count; ?>"></div>
-                        <?php
-                            endforeach;
-                        endif;
-                        ?>
+                    <div class="ck-tabs" role="tablist">
+                        <?php $firstTab = true; foreach ($todayTabs as $key => [$label, $n]): ?>
+                            <button type="button" class="ck-tab<?php echo $firstTab ? ' is-active' : ''; ?>" role="tab" aria-selected="<?php echo $firstTab ? 'true' : 'false'; ?>" data-ck-tab="<?php echo $key; ?>">
+                                <?php echo $label; ?> <span class="ck-tab__count"><?php echo (int)$n; ?></span>
+                            </button>
+                        <?php $firstTab = false; endforeach; ?>
                     </div>
+                </header>
+
+                <?php $firstPane = array_key_first($todayTabs); ?>
+                <?php if ($mod_bookings): ?>
+                <div class="ck-pane" role="tabpanel" data-ck-pane="arrivals"<?php echo $firstPane === 'arrivals' ? '' : ' hidden'; ?>>
+                    <?php if ($checkin_bookings): ?>
+                    <ul class="ck-rows">
+                        <?php foreach ($checkin_bookings as $booking):
+                            $can_checkin = ($booking['status'] === 'confirmed' && $booking['payment_status'] === 'paid');
+                            $guestJs = htmlspecialchars(addslashes($booking['guest_name']), ENT_QUOTES, 'UTF-8'); ?>
+                        <li class="ck-row" id="checkin-row-<?php echo (int)$booking['id']; ?>">
+                            <span class="ck-avatar"><?php echo htmlspecialchars($initials((string)$booking['guest_name'])); ?></span>
+                            <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
+                                <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong>
+                                <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars($booking['room_name']); ?> · <?php echo (int)$booking['number_of_nights']; ?> night<?php echo (int)$booking['number_of_nights'] === 1 ? '' : 's'; ?></span>
+                            </a>
+                            <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
+                            <span class="ck-row__meta">
+                                <span class="badge badge-<?php echo htmlspecialchars($booking['status']); ?>" id="status-<?php echo (int)$booking['id']; ?>"><?php echo ucfirst(htmlspecialchars($booking['status'])); ?></span>
+                                <?php if ((float)$booking['amount_due'] > 0.01): ?>
+                                    <small class="ck-due">Due <?php echo $money($booking['amount_due']); ?></small>
+                                <?php else: ?>
+                                    <small class="ck-paid"><i class="fas fa-check"></i> Paid</small>
+                                <?php endif; ?>
+                            </span>
+                            <span class="ck-row__act">
+                                <button type="button" id="checkin-btn-<?php echo (int)$booking['id']; ?>"
+                                    class="ck-btn ck-btn--sm <?php echo $can_checkin ? 'ck-btn--primary' : ''; ?>"
+                                    <?php echo $can_checkin ? '' : 'aria-disabled="true"'; ?>
+                                    onclick="<?php echo $can_checkin ? "processCheckIn(" . (int)$booking['id'] . ", '" . $guestJs . "')" : "Alert.show('Cannot check in: booking must be CONFIRMED and PAID.', 'error')"; ?>">
+                                    <i class="fas fa-right-to-bracket"></i> Check in
+                                </button>
+                            </span>
+                        </li>
+                        <?php endforeach; ?>
+                    </ul>
+                    <?php else: ?>
+                        <div class="ck-empty"><i class="fas fa-mug-saucer"></i><p><?php echo $dayProgress['arrived'] ? 'All ' . $dayProgress['arrived'] . ' arrivals are checked in.' : 'No arrivals scheduled for today.'; ?></p></div>
+                    <?php endif; ?>
                 </div>
-                <div class="status-cards-mini">
-                    <?php foreach ($roomStatuses as $status => $info): ?>
-                        <button type="button"
-                            class="status-mini <?php echo $status; ?> js-dashboard-insight"
-                            data-insight-card="room_status_<?php echo htmlspecialchars((string)$status, ENT_QUOTES, 'UTF-8'); ?>"
-                            title="View <?php echo htmlspecialchars((string)$info['label'], ENT_QUOTES, 'UTF-8'); ?> rooms overview">
-                            <span class="count"><?php echo $roomSummary['status_counts'][$status] ?? 0; ?></span>
-                            <span class="label"><?php echo $info['label']; ?></span>
+
+                <div class="ck-pane" role="tabpanel" data-ck-pane="departures" hidden>
+                    <?php if ($departureList): ?>
+                    <ul class="ck-rows">
+                        <?php foreach ($departureList as $d): $owes = (float)$d['amount_due'] > 0.01; ?>
+                        <li class="ck-row">
+                            <span class="ck-avatar ck-avatar--gold"><?php echo htmlspecialchars($initials((string)$d['guest_name'])); ?></span>
+                            <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
+                                <strong><?php echo htmlspecialchars($d['guest_name']); ?></strong>
+                                <span><?php echo htmlspecialchars($d['booking_reference']); ?> · <?php echo htmlspecialchars($d['room_name']); ?> · since <?php echo date('j M', strtotime($d['check_in_date'])); ?></span>
+                            </a>
+                            <span class="ck-chip"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($d)); ?></span>
+                            <span class="ck-row__meta">
+                                <?php if ($owes): ?>
+                                    <span class="ck-due ck-due--strong">Owes <?php echo $money($d['amount_due']); ?></span>
+                                <?php else: ?>
+                                    <small class="ck-paid"><i class="fas fa-check"></i> Settled</small>
+                                <?php endif; ?>
+                            </span>
+                            <span class="ck-row__act">
+                                <a class="ck-btn ck-btn--sm <?php echo $owes ? '' : 'ck-btn--primary'; ?>" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
+                                    <i class="fas <?php echo $owes ? 'fa-hand-holding-dollar' : 'fa-right-from-bracket'; ?>"></i> <?php echo $owes ? 'Settle &amp; check out' : 'Check out'; ?>
+                                </a>
+                            </span>
+                        </li>
+                        <?php endforeach; ?>
+                    </ul>
+                    <?php else: ?>
+                        <div class="ck-empty"><i class="fas fa-suitcase-rolling"></i><p><?php echo $dayProgress['departed'] ? 'All ' . $dayProgress['departed'] . ' departures are checked out.' : 'No departures due today.'; ?></p></div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
+                <?php if ($mod_conference): ?>
+                <div class="ck-pane" role="tabpanel" data-ck-pane="events"<?php echo $firstPane === 'events' ? '' : ' hidden'; ?>>
+                    <?php if ($today_conference_events): ?>
+                    <ol class="ck-timeline">
+                        <?php foreach ($today_conference_events as $conf): ?>
+                        <li class="ck-timeline__item">
+                            <span class="ck-timeline__time"><?php echo date('H:i', strtotime($conf['start_time'])); ?></span>
+                            <a class="ck-timeline__card" href="conference-management.php">
+                                <strong><?php echo htmlspecialchars($conf['company_name']); ?></strong>
+                                <span><?php echo date('H:i', strtotime($conf['start_time'])); ?>–<?php echo date('H:i', strtotime($conf['end_time'])); ?> · <?php echo htmlspecialchars($conf['room_name'] ?? 'Room TBC'); ?> · <?php echo (int)$conf['number_of_attendees']; ?> guests · <?php echo htmlspecialchars($conf['contact_person']); ?></span>
+                                <span class="badge badge-<?php echo htmlspecialchars($conf['status']); ?>"><?php echo ucfirst(htmlspecialchars($conf['status'])); ?></span>
+                            </a>
+                        </li>
+                        <?php endforeach; ?>
+                    </ol>
+                    <?php else: ?>
+                        <div class="ck-empty"><i class="fas fa-calendar-xmark"></i><p>No conference events today.</p></div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
+                <?php if ($mod_pos && $mod_bookings): ?>
+                <div class="ck-pane" role="tabpanel" data-ck-pane="roomservice" hidden>
+                    <?php if ($roomServiceQueue): ?>
+                    <ul class="ck-rows">
+                        <?php foreach ($roomServiceQueue as $rs): $age = (int)$rs['age_min']; $ageTone = $age >= 30 ? 'red' : ($age >= 15 ? 'amber' : 'green'); ?>
+                        <li class="ck-row">
+                            <span class="ck-avatar ck-avatar--soft"><i class="fas fa-bell-concierge"></i></span>
+                            <a class="ck-row__main" href="stock-orders.php?id=<?php echo (int)$rs['id']; ?>">
+                                <strong>Room <?php echo htmlspecialchars($rs['room_number'] ?? '—'); ?> · <?php echo htmlspecialchars($rs['customer_name'] ?? 'Guest'); ?></strong>
+                                <span><?php echo htmlspecialchars($rs['reference']); ?> · <?php echo (int)$rs['item_count']; ?> item(s) · <?php echo $money($rs['total_amount']); ?></span>
+                            </a>
+                            <span class="ck-pill ck-pill--<?php echo $ageTone; ?>"><i class="far fa-clock"></i> <?php echo rh_format_age($age); ?></span>
+                            <span class="ck-row__meta"><span class="badge badge-<?php echo htmlspecialchars($rs['status']); ?>"><?php echo ucfirst(htmlspecialchars($rs['status'])); ?></span></span>
+                            <span class="ck-row__act">
+                                <a href="pos.php?settle=<?php echo (int)$rs['id']; ?>" target="_blank" rel="noopener" class="ck-btn ck-btn--sm ck-btn--primary"><i class="fas fa-credit-card"></i> Take payment</a>
+                            </span>
+                        </li>
+                        <?php endforeach; ?>
+                    </ul>
+                    <?php else: ?>
+                        <div class="ck-empty"><i class="fas fa-bell-concierge"></i><p>No room-service orders in flight.</p></div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+            </section>
+            <?php endif; ?>
+
+            <!-- Needs attention -->
+            <section class="ck-panel ck-attn<?php echo $todayTabs ? ' ck-rows-2' : ''; ?>">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Needs attention <?php if ($attnTotal): ?><span class="ck-badge"><?php echo (int)$attnTotal; ?></span><?php endif; ?></h2>
+                        <p class="ck-panel__sub">Most urgent first.</p>
+                    </div>
+                    <div class="ck-panel__tools">
+                        <?php if ($mod_website_cms || $mod_gym || $mod_bookings): ?>
+                            <button type="button" class="ck-icon-btn js-dashboard-insight" data-insight-card="guest_services_queue" data-insight-label="Guest services queue" title="Guest services overview"><i class="fas fa-headset"></i></button>
+                        <?php endif; ?>
+                        <?php if ($mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance): ?>
+                            <button type="button" class="ck-icon-btn js-dashboard-insight" data-insight-card="operations_facilities" data-insight-label="Operations &amp; facilities" title="Operations overview"><i class="fas fa-screwdriver-wrench"></i></button>
+                        <?php endif; ?>
+                    </div>
+                </header>
+                <?php if ($attnOpen): ?>
+                <ul class="ck-attn__list">
+                    <?php foreach ($attnOpen as $i => $a): ?>
+                    <li>
+                        <a class="ck-attn__item ck-attn__item--<?php echo $a['tone']; ?><?php echo $i === 0 ? ' is-top' : ''; ?><?php echo $a['insight'] ? ' js-dashboard-insight' : ''; ?>"
+                           href="<?php echo htmlspecialchars($a['href']); ?>"
+                           <?php if ($a['insight']): ?>data-insight-card="<?php echo htmlspecialchars($a['insight']); ?>" data-insight-label="<?php echo htmlspecialchars($a['label']); ?>"<?php endif; ?>>
+                            <span class="ck-attn__icon"><i class="fas <?php echo $a['icon']; ?>"></i></span>
+                            <span class="ck-attn__text">
+                                <strong><?php echo htmlspecialchars($a['label']); ?></strong>
+                                <?php if ($a['hint']): ?><small><?php echo htmlspecialchars($a['hint']); ?></small><?php endif; ?>
+                            </span>
+                            <span class="ck-attn__count"><?php echo (int)$a['count']; ?></span>
+                        </a>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+                <?php else: ?>
+                    <div class="ck-empty ck-empty--good"><i class="fas fa-circle-check"></i><p><strong>All clear.</strong> Nothing is waiting on you.</p></div>
+                <?php endif; ?>
+                <?php if ($attnClear): ?>
+                <details class="ck-clear">
+                    <summary><i class="fas fa-check"></i> <?php echo count($attnClear); ?> queue<?php echo count($attnClear) === 1 ? '' : 's'; ?> clear</summary>
+                    <div class="ck-clear__chips">
+                        <?php foreach ($attnClear as $a): ?>
+                            <a href="<?php echo htmlspecialchars($a['href']); ?>" class="ck-chip ck-chip--muted"><i class="fas <?php echo $a['icon']; ?>"></i> <?php echo htmlspecialchars($a['label']); ?></a>
+                        <?php endforeach; ?>
+                    </div>
+                </details>
+                <?php endif; ?>
+            </section>
+
+            <?php if ($hasMoney): ?>
+            <!-- Money -->
+            <section class="ck-panel ck-money">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Money</h2>
+                        <p class="ck-panel__sub">Last 7 days · <?php echo $moneyShort($trendTotal); ?> taken</p>
+                    </div>
+                    <div class="ck-panel__tools">
+                        <?php if ($can('end-of-day-report.php')): ?><a class="ck-link" href="end-of-day-report.php">Day report <i class="fas fa-arrow-right"></i></a><?php endif; ?>
+                    </div>
+                </header>
+                <div class="ck-money__headline">
+                    <span class="ck-money__label" data-ck-trend-label>Today</span>
+                    <span class="ck-money__value" data-ck-trend-value><?php echo $money($revenueTrend[$today] ?? 0); ?></span>
+                </div>
+                <div class="ck-bars" role="list" aria-label="Takings for the last 7 days">
+                    <?php foreach ($revenueTrend as $d => $v): $isToday = $d === $today; ?>
+                        <button type="button" role="listitem" class="ck-bars__col<?php echo $isToday ? ' is-today is-active' : ''; ?>"
+                            data-ck-trend="<?php echo htmlspecialchars($cur . number_format($v, 2)); ?>"
+                            data-ck-trend-day="<?php echo $isToday ? 'Today' : date('l j M', strtotime($d)); ?>"
+                            aria-label="<?php echo date('l j M', strtotime($d)) . ': ' . htmlspecialchars($cur . number_format($v, 2)); ?>">
+                            <span class="ck-bars__bar"><span style="height:<?php echo max(3, round($v / $trendMax * 100)); ?>%"></span></span>
+                            <span class="ck-bars__day"><?php echo $isToday ? 'Today' : date('D', strtotime($d)); ?></span>
                         </button>
                     <?php endforeach; ?>
                 </div>
-            </div>
-        </div>
-
-        <?php endif; // mod_bookings || mod_housekeeping — room status widget ?>
-
-        <?php if ($mod_bookings): ?>
-        <!-- Today's Check-ins Management -->
-        <div class="today-checkins-section">
-            <h3>
-                <i class="fas fa-door-open"></i> Today's Check-ins (<?php echo $today_checkins; ?>)
-            </h3>
-
-            <?php
-            $today_checkin_list = $pdo->prepare("
-                SELECT b.*, r.name as room_name,
-                       ir.room_number as individual_room_number, ir.room_name as individual_room_name,
-                       b.total_amount, b.amount_paid, b.amount_due, b.payment_status
-                FROM bookings b
-                JOIN rooms r ON b.room_id = r.id
-                LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-                WHERE b.check_in_date = ?
-                AND b.status IN ('confirmed', 'pending')
-                ORDER BY b.created_at ASC
-            ");
-            $today_checkin_list->execute([$today]);
-            $checkin_bookings = $today_checkin_list->fetchAll(PDO::FETCH_ASSOC);
-            ?>
-
-            <?php if (!empty($checkin_bookings)): ?>
-                <div class="table-container">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Booking Ref</th>
-                                <th>Guest Name</th>
-                                <th>Room</th>
-                                <th>Check-out</th>
-                                <th>Status</th>
-                                <th>Payment</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($checkin_bookings as $booking): ?>
-                                <tr id="checkin-row-<?php echo $booking['id']; ?>">
-                                    <td data-label="Booking Ref"><strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong></td>
-                                    <td data-label="Guest Name"><?php echo htmlspecialchars($booking['guest_name']); ?></td>
-                                    <td data-label="Room">
-                                        <?php echo htmlspecialchars($booking['room_name']); ?>
-                                        <?php if (!empty($booking['individual_room_id'])): ?>
-                                            <br><span class="dashboard-room-chip">
-                                                <i class="fas fa-door-open"></i>
-                                                <?php echo htmlspecialchars($booking['individual_room_name'] ?: $booking['individual_room_number']); ?>
-                                            </span>
-                                            <?php if ($booking['individual_room_name'] && $booking['individual_room_number']): ?>
-                                                <br><small style="color:#888;font-size:10px;">#<?php echo htmlspecialchars($booking['individual_room_number']); ?></small>
-                                            <?php endif; ?>
-                                        <?php else: ?>
-                                            <br><small style="color:#bbb;font-style:italic;font-size:10px;">Unassigned</small>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td data-label="Check-out"><?php echo date('M d, Y', strtotime($booking['check_out_date'])); ?></td>
-                                    <td data-label="Status">
-                                        <span class="badge badge-<?php echo $booking['status']; ?>" id="status-<?php echo $booking['id']; ?>">
-                                            <?php echo ucfirst($booking['status']); ?>
-                                        </span>
-                                    </td>
-                                    <td data-label="Payment">
-                                        <span class="badge badge-<?php echo $booking['payment_status']; ?>">
-                                            <?php echo ucfirst($booking['payment_status']); ?>
-                                        </span>
-                                        <br><small style="color: #666; font-size: 11px; margin-top: 4px; display: block;">
-                                            <?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($booking['amount_paid'], 2); ?> / <?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($booking['total_amount'], 2); ?>
-                                            <?php if ($booking['amount_due'] > 0): ?>
-                                                <span style="color: #dc3545; font-weight: 600;">(Due: <?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($booking['amount_due'], 2); ?>)</span>
-                                            <?php endif; ?>
-                                        </small>
-                                    </td>
-                                    <td data-label="Actions">
-                                        <?php if ($booking['status'] !== 'checked-in'): ?>
-                                            <?php $can_checkin = ($booking['status'] === 'confirmed' && $booking['payment_status'] === 'paid'); ?>
-                                            <button onclick="<?php echo $can_checkin ? "processCheckIn({$booking['id']}, '" . htmlspecialchars(addslashes($booking['guest_name'])) . "')" : "Alert.show('Cannot check in: booking must be CONFIRMED and PAID.', 'error')"; ?>"
-                                                id="checkin-btn-<?php echo $booking['id']; ?>"
-                                                class="btn <?php echo $can_checkin ? 'btn-primary' : 'btn-light'; ?>" <?php echo $can_checkin ? '' : 'disabled'; ?>>
-                                                <i class="fas fa-check"></i> Check In
-                                            </button>
-                                        <?php else: ?>
-                                            <button onclick="cancelCheckIn(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars(addslashes($booking['guest_name'])); ?>')"
-                                                id="cancel-checkin-btn-<?php echo $booking['id']; ?>"
-                                                class="btn btn-dark">
-                                                <i class="fas fa-undo"></i> Cancel Check-in
-                                            </button>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php else: ?>
-                <div class="empty-state">
-                    <i class="fas fa-inbox"></i>
-                    <p>No check-ins scheduled for today</p>
-                </div>
-            <?php endif; ?>
-        </div>
-
-        <?php endif; // mod_bookings — today's check-ins ?>
-
-        <?php if ($mod_conference): ?>
-        <!-- Today's Conference Events -->
-        <div class="today-checkins-section">
-            <h3>
-                <i class="fas fa-calendar-check"></i> Today's Conference Events (<?php echo $today_conferences; ?>)
-            </h3>
-
-            <?php if (!empty($today_conference_events)): ?>
-                <div class="table-container">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Reference</th>
-                                <th>Company</th>
-                                <th>Contact</th>
-                                <th>Room</th>
-                                <th>Time</th>
-                                <th>Attendees</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($today_conference_events as $conf): ?>
-                                <tr>
-                                    <td data-label="Reference"><strong><?php echo htmlspecialchars($conf['inquiry_reference']); ?></strong></td>
-                                    <td data-label="Company"><?php echo htmlspecialchars($conf['company_name']); ?></td>
-                                    <td data-label="Contact"><?php echo htmlspecialchars($conf['contact_person']); ?></td>
-                                    <td data-label="Room"><?php echo htmlspecialchars($conf['room_name'] ?? 'N/A'); ?></td>
-                                    <td data-label="Time">
-                                        <?php echo date('H:i', strtotime($conf['start_time'])); ?> -
-                                        <?php echo date('H:i', strtotime($conf['end_time'])); ?>
-                                    </td>
-                                    <td data-label="Attendees"><?php echo (int) $conf['number_of_attendees']; ?></td>
-                                    <td data-label="Status">
-                                        <span class="badge badge-<?php echo $conf['status']; ?>">
-                                            <?php echo ucfirst($conf['status']); ?>
-                                        </span>
-                                    </td>
-                                    <td data-label="Actions">
-                                        <a href="conference-management.php" class="btn btn-primary btn-sm">Manage</a>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php else: ?>
-                <div class="empty-state">
-                    <i class="fas fa-calendar-times"></i>
-                    <p>No conference events scheduled for today</p>
-                </div>
-            <?php endif; ?>
-        </div>
-        <?php endif; // mod_conference — today's conference events ?>
-
-        <?php if ($mod_bookings): ?>
-        <h3 class="section-title">Upcoming Check-ins (Next 7 Days)</h3>
-        <div class="table-container">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Booking Ref</th>
-                        <th>Guest Name</th>
-                        <th>Room</th>
-                        <th>Check-in</th>
-                        <th>Nights</th>
-                        <th>Status</th>
-                        <th>Payment</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($upcoming_checkins)): ?>
-                        <tr>
-                            <td colspan="8" class="empty-state">
-                                <i class="fas fa-calendar"></i>
-                                <p>No upcoming check-ins in the next 7 days</p>
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($upcoming_checkins as $booking): ?>
-                            <tr>
-                                <td data-label="Booking Ref"><strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong></td>
-                                <td data-label="Guest Name"><?php echo htmlspecialchars($booking['guest_name']); ?></td>
-                                <td data-label="Room">
-                                    <?php echo htmlspecialchars($booking['room_name']); ?>
-                                    <?php if (!empty($booking['individual_room_id'])): ?>
-                                        <br><span class="dashboard-room-chip">
-                                            <i class="fas fa-door-open"></i>
-                                            <?php echo htmlspecialchars($booking['individual_room_name'] ?: $booking['individual_room_number']); ?>
-                                        </span>
-                                        <?php if ($booking['individual_room_name'] && $booking['individual_room_number']): ?>
-                                            <br><small style="color:#888;font-size:10px;">#<?php echo htmlspecialchars($booking['individual_room_number']); ?></small>
-                                        <?php endif; ?>
-                                    <?php else: ?>
-                                        <br><small style="color:#bbb;font-style:italic;font-size:10px;">Unassigned</small>
-                                    <?php endif; ?>
-                                </td>
-                                <td data-label="Check-in"><?php echo date('M j, Y', strtotime($booking['check_in_date'])); ?></td>
-                                <td data-label="Nights"><?php echo $booking['number_of_nights']; ?></td>
-                                <td data-label="Status">
-                                    <span class="badge badge-<?php echo $booking['status']; ?>">
-                                        <?php echo ucfirst($booking['status']); ?>
-                                    </span>
-                                </td>
-                                <td data-label="Payment">
-                                    <span class="badge badge-<?php echo $booking['payment_status']; ?>">
-                                        <?php echo ucfirst($booking['payment_status']); ?>
-                                    </span>
-                                    <br><small style="color: #666; font-size: 11px; margin-top: 4px; display: block;">
-                                        <?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($booking['amount_paid'], 2); ?> / <?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($booking['total_amount'], 2); ?>
-                                        <?php if ($booking['amount_due'] > 0): ?>
-                                            <span style="color: #dc3545; font-weight: 600;">(Due: <?php echo '<span class="kpi-currency">' . $currency_symbol . '</span>' . number_format($booking['amount_due'], 2); ?>)</span>
-                                        <?php endif; ?>
-                                    </small>
-                                </td>
-                                <td data-label="Actions">
-                                    <div class="quick-actions">
-                                        <?php if ($booking['status'] == 'pending'): ?>
-                                            <a href="booking-details.php?id=<?php echo $booking['id']; ?>&action=confirm" class="btn btn-success btn-sm">Confirm</a>
-                                        <?php elseif ($booking['status'] == 'confirmed'): ?>
-                                            <?php if ($booking['payment_status'] === 'paid'): ?>
-                                                <a href="booking-details.php?id=<?php echo $booking['id']; ?>&action=checkin" class="btn btn-primary btn-sm">Check In</a>
-                                            <?php else: ?>
-                                                <a href="booking-details.php?id=<?php echo $booking['id']; ?>" class="btn btn-primary btn-sm disabled" onclick="Alert.show('Cannot check in: booking must be PAID first.', 'error'); return false;">Check In</a>
-                                            <?php endif; ?>
-                                        <?php endif; ?>
-                                        <a href="booking-details.php?id=<?php echo $booking['id']; ?>" class="btn btn-primary btn-sm">View</a>
-                                    </div>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
+                <ul class="ck-kv">
+                    <?php if ($mod_finance && $mod_pos): ?>
+                        <li><span><i class="fas fa-bed"></i> <?php echo $mod_bookings ? 'Rooms &amp; services' : 'Invoiced sales'; ?> today</span><strong><?php echo $money(max(0, $finance['revenue_today'] - $ops['restaurant_rev_today'])); ?></strong></li>
                     <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-
-        <?php endif; // mod_bookings ?>
-
-        <?php if ($mod_conference): ?>
-        <h3 class="section-title mt-4">Upcoming Conference Events (Next 7 Days)</h3>
-        <div class="table-container">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Reference</th>
-                        <th>Company</th>
-                        <th>Contact</th>
-                        <th>Event Date</th>
-                        <th>Time</th>
-                        <th>Attendees</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($upcoming_conferences)): ?>
-                        <tr>
-                            <td colspan="8" class="empty-state">
-                                <i class="fas fa-calendar"></i>
-                                <p>No upcoming conference events in the next 7 days</p>
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($upcoming_conferences as $conf): ?>
-                            <tr>
-                                <td data-label="Reference"><strong><?php echo htmlspecialchars($conf['inquiry_reference']); ?></strong></td>
-                                <td data-label="Company"><?php echo htmlspecialchars($conf['company_name']); ?></td>
-                                <td data-label="Contact"><?php echo htmlspecialchars($conf['contact_person']); ?></td>
-                                <td data-label="Event Date"><?php echo date('M j, Y', strtotime($conf['event_date'])); ?></td>
-                                <td data-label="Time">
-                                    <?php echo date('H:i', strtotime($conf['start_time'])); ?> -
-                                    <?php echo date('H:i', strtotime($conf['end_time'])); ?>
-                                </td>
-                                <td data-label="Attendees"><?php echo (int) $conf['number_of_attendees']; ?></td>
-                                <td data-label="Status">
-                                    <span class="badge badge-<?php echo $conf['status']; ?>">
-                                        <?php echo ucfirst($conf['status']); ?>
-                                    </span>
-                                </td>
-                                <td data-label="Actions">
-                                    <a href="conference-management.php" class="btn btn-primary btn-sm">Manage</a>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
+                    <?php if ($mod_pos): ?>
+                        <li><a class="js-dashboard-insight" data-insight-card="restaurant_revenue_today" data-insight-label="Till sales today" href="reports.php?type=accounting&range=today"><span><i class="fas fa-cash-register"></i> <?php echo isRestaurantEnabled() ? 'Restaurant &amp; bar' : 'Till sales'; ?> today · <?php echo (int)$ops['orders_today']; ?> order(s)</span><strong><?php echo $money($ops['restaurant_rev_today']); ?></strong></a></li>
                     <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
+                    <?php if ($mod_stock && $mod_bookings): ?>
+                        <li><a class="js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="Open tabs" href="stock-orders.php?status=placed"><span><i class="fas fa-receipt"></i> <?php echo (int)$ops['open_tabs']; ?> open tab(s)</span><strong><?php echo $money($ops['open_tabs_value']); ?></strong></a></li>
+                    <?php endif; ?>
+                    <?php if ($mod_finance): ?>
+                        <li><a class="js-dashboard-insight" data-insight-card="refunds_pending" data-insight-label="Refunds pending" href="payments.php?refund_status=pending"><span><i class="fas fa-rotate-left"></i> Refunds pending</span><strong><?php echo (int)$finance['refunds_pending']; ?></strong></a></li>
+                    <?php endif; ?>
+                </ul>
+            </section>
+            <?php endif; ?>
 
-        <?php endif; // mod_conference ?>
+            <?php if ($totalRooms > 0): ?>
+            <!-- Rooms -->
+            <section class="ck-panel ck-rooms">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Rooms</h2>
+                        <p class="ck-panel__sub"><?php echo (int)($statusCounts['available'] ?? 0); ?> ready to sell<?php if (!empty($roomSummary['cleaning_queue'])): ?> · <?php echo (int)$roomSummary['cleaning_queue']; ?> to clean<?php endif; ?></p>
+                    </div>
+                    <div class="ck-panel__tools">
+                        <?php if ($can('room-dashboard.php')): ?><a class="ck-link" href="room-dashboard.php">Room board <i class="fas fa-arrow-right"></i></a><?php endif; ?>
+                    </div>
+                </header>
+                <?php
+                $stops = []; $acc = 0.0;
+                foreach ($roomStatuses as $status => $info) {
+                    $n = (int)($statusCounts[$status] ?? 0);
+                    if ($n <= 0) { continue; }
+                    $from = $acc; $acc += $n / $totalRooms * 100;
+                    $stops[] = ($roomColors[$status] ?? '#ccc') . ' ' . round($from, 2) . '% ' . round($acc, 2) . '%';
+                }
+                ?>
+                <div class="ck-rooms__body">
+                    <button type="button" class="ck-donut js-dashboard-insight" data-insight-card="room_status_overview" data-insight-label="Room status"
+                        style="--ck-donut: conic-gradient(<?php echo htmlspecialchars(implode(', ', $stops)); ?>);" aria-label="Room status overview">
+                        <span class="ck-donut__hole"><strong><?php echo rtrim(rtrim(number_format($occupancy, 1), '0'), '.'); ?>%</strong><small>occupied</small></span>
+                    </button>
+                    <ul class="ck-legend">
+                        <?php foreach ($roomStatuses as $status => $info): $n = (int)($statusCounts[$status] ?? 0); ?>
+                        <li>
+                            <button type="button" class="ck-legend__item js-dashboard-insight<?php echo $n ? '' : ' is-zero'; ?>"
+                                data-insight-card="room_status_<?php echo htmlspecialchars((string)$status, ENT_QUOTES, 'UTF-8'); ?>"
+                                data-insight-label="<?php echo htmlspecialchars((string)$info['label'], ENT_QUOTES, 'UTF-8'); ?> rooms">
+                                <span class="ck-legend__dot" style="background:<?php echo $roomColors[$status] ?? '#ccc'; ?>"></span>
+                                <span class="ck-legend__label"><?php echo htmlspecialchars((string)$info['label']); ?></span>
+                                <strong><?php echo $n; ?></strong>
+                            </button>
+                        </li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
+            </section>
+            <?php endif; ?>
+
+            <?php if ($mod_bookings || $mod_conference): ?>
+            <!-- Week ahead -->
+            <section class="ck-panel ck-span-2 ck-week" data-ck-week>
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Week ahead</h2>
+                        <p class="ck-panel__sub"><?php echo count($upcoming_checkins); ?> arrival(s)<?php echo $mod_conference ? ' · ' . count($upcoming_conferences) . ' event(s)' : ''; ?> in the next 7 days — tap a day to filter.</p>
+                    </div>
+                    <div class="ck-panel__tools">
+                        <button type="button" class="ck-link" data-ck-day="" hidden>Show all</button>
+                        <?php if ($mod_bookings && $can('calendar.php')): ?><a class="ck-link" href="calendar.php">Calendar <i class="fas fa-arrow-right"></i></a><?php endif; ?>
+                    </div>
+                </header>
+                <div class="ck-days">
+                    <?php foreach ($weekAhead as $d => $n): $ev = (int)($confByDay[$d] ?? 0); ?>
+                        <button type="button" class="ck-day<?php echo ($n + $ev) ? '' : ' is-empty'; ?>" data-ck-day="<?php echo $d; ?>">
+                            <span class="ck-day__name"><?php echo date('D', strtotime($d)); ?></span>
+                            <span class="ck-day__date"><?php echo date('j', strtotime($d)); ?></span>
+                            <span class="ck-day__bar"><span style="height:<?php echo round($n / $weekMax * 100); ?>%"></span></span>
+                            <span class="ck-day__count"><?php echo $n; ?><?php if ($ev): ?><i title="<?php echo $ev; ?> event(s)"> +<?php echo $ev; ?>ev</i><?php endif; ?></span>
+                        </button>
+                    <?php endforeach; ?>
+                </div>
+                <?php if ($upcoming_checkins || $upcoming_conferences): ?>
+                <ul class="ck-rows ck-rows--compact">
+                    <?php foreach ($upcoming_checkins as $booking): ?>
+                    <li class="ck-row" data-ck-day-row="<?php echo htmlspecialchars($booking['check_in_date']); ?>">
+                        <span class="ck-date"><b><?php echo date('j', strtotime($booking['check_in_date'])); ?></b><?php echo date('M', strtotime($booking['check_in_date'])); ?></span>
+                        <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
+                            <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong>
+                            <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars($booking['room_name']); ?> · <?php echo (int)$booking['number_of_nights']; ?> night(s)</span>
+                        </a>
+                        <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
+                        <span class="ck-row__meta">
+                            <span class="badge badge-<?php echo htmlspecialchars($booking['status']); ?>"><?php echo ucfirst(htmlspecialchars($booking['status'])); ?></span>
+                            <?php if ((float)$booking['amount_due'] > 0.01): ?><small class="ck-due">Due <?php echo $money($booking['amount_due']); ?></small><?php else: ?><small class="ck-paid"><i class="fas fa-check"></i> Paid</small><?php endif; ?>
+                        </span>
+                        <span class="ck-row__act">
+                            <?php if ($booking['status'] === 'pending'): ?>
+                                <a href="booking-details.php?id=<?php echo (int)$booking['id']; ?>&action=confirm" class="ck-btn ck-btn--sm ck-btn--primary">Confirm</a>
+                            <?php else: ?>
+                                <a href="booking-details.php?id=<?php echo (int)$booking['id']; ?>" class="ck-btn ck-btn--sm">View</a>
+                            <?php endif; ?>
+                        </span>
+                    </li>
+                    <?php endforeach; ?>
+                    <?php foreach ($upcoming_conferences as $conf): if ($conf['event_date'] === $today) { continue; } ?>
+                    <li class="ck-row" data-ck-day-row="<?php echo htmlspecialchars($conf['event_date']); ?>">
+                        <span class="ck-date ck-date--event"><b><?php echo date('j', strtotime($conf['event_date'])); ?></b><?php echo date('M', strtotime($conf['event_date'])); ?></span>
+                        <a class="ck-row__main" href="conference-management.php">
+                            <strong><?php echo htmlspecialchars($conf['company_name']); ?></strong>
+                            <span><?php echo htmlspecialchars($conf['inquiry_reference']); ?> · <?php echo date('H:i', strtotime($conf['start_time'])); ?>–<?php echo date('H:i', strtotime($conf['end_time'])); ?> · <?php echo (int)$conf['number_of_attendees']; ?> guests</span>
+                        </a>
+                        <span class="ck-chip ck-chip--event"><i class="fas fa-users"></i> Event</span>
+                        <span class="ck-row__meta"><span class="badge badge-<?php echo htmlspecialchars($conf['status']); ?>"><?php echo ucfirst(htmlspecialchars($conf['status'])); ?></span></span>
+                        <span class="ck-row__act"><a href="conference-management.php" class="ck-btn ck-btn--sm">Manage</a></span>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+                <div class="ck-empty" data-ck-day-empty hidden><i class="far fa-calendar"></i><p>Nothing booked for this day.</p></div>
+                <?php else: ?>
+                    <div class="ck-empty"><i class="far fa-calendar"></i><p>Nothing booked in the next 7 days.</p></div>
+                <?php endif; ?>
+            </section>
+            <?php endif; ?>
+
+            <?php if ($mod_stock): ?>
+            <!-- Stock -->
+            <section class="ck-panel ck-stock">
+                <header class="ck-panel__head">
+                    <div>
+                        <h2 class="ck-panel__title">Stock</h2>
+                        <p class="ck-panel__sub"><?php echo $stock['wastage_today'] > 0 ? 'Wastage today ' . $money($stock['wastage_today']) : 'No wastage logged today'; ?></p>
+                    </div>
+                    <div class="ck-panel__tools">
+                        <button type="button" class="ck-icon-btn js-dashboard-insight" data-insight-card="stock_health" data-insight-label="Stock health" title="Stock health overview"><i class="fas fa-chart-simple"></i></button>
+                        <a class="ck-link" href="stock-orders.php?view=stock">Manage <i class="fas fa-arrow-right"></i></a>
+                    </div>
+                </header>
+                <div class="ck-stock__trio">
+                    <a href="stock-reorder.php" class="ck-mini<?php echo $stock['low_stock'] ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$stock['low_stock']; ?></strong><span>Low</span></a>
+                    <a href="stock-batches.php" class="ck-mini<?php echo $stock['expiring_batches'] ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$stock['expiring_batches']; ?></strong><span>Expiring 7d</span></a>
+                    <a href="stock-batches.php" class="ck-mini<?php echo $stock['expired_batches'] ? ' ck-mini--red' : ''; ?>"><strong><?php echo (int)$stock['expired_batches']; ?></strong><span>Expired</span></a>
+                </div>
+                <?php if (!empty($stock['low_items'])): ?>
+                <ul class="ck-levels">
+                    <?php foreach (array_slice($stock['low_items'], 0, 5) as $li): $pct = (float)$li['min_quantity'] > 0 ? min(100, (float)$li['current_quantity'] / (float)$li['min_quantity'] * 100) : 0; ?>
+                    <li>
+                        <span class="ck-levels__name"><?php echo htmlspecialchars($li['name']); ?></span>
+                        <span class="ck-levels__qty"><?php echo number_format((float)$li['current_quantity'], 1); ?> / <?php echo number_format((float)$li['min_quantity'], 1); ?> <?php echo htmlspecialchars($li['unit']); ?></span>
+                        <span class="ck-meter ck-meter--<?php echo $pct < 34 ? 'red' : 'amber'; ?>"><span style="width:<?php echo round($pct); ?>%"></span></span>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+                <?php else: ?>
+                    <div class="ck-empty ck-empty--good"><i class="fas fa-circle-check"></i><p>All <?php echo isRestaurantEnabled() ? 'ingredients' : 'stock items'; ?> are above minimum.</p></div>
+                <?php endif; ?>
+            </section>
+            <?php endif; ?>
+
+        </div><!-- /.ck-bento -->
+        </div><!-- /.ck -->
 
     </div>
 
@@ -2710,7 +2665,7 @@ $currency_symbol = getSetting('currency_symbol');
             if (!_insightModal || !cardEl) return;
             const cardKey = String(cardEl.dataset.insightCard || '').trim();
             if (cardKey === '') return;
-            const cardLabel = cardEl.querySelector('.stat-label, .ops-label')?.textContent?.trim() || 'Loading details…';
+            const cardLabel = cardEl.dataset.insightLabel || cardEl.querySelector('.ck-kpi__label')?.textContent?.trim() || 'Loading details…';
             _insightLastTrigger = cardEl instanceof HTMLElement ? cardEl : null;
 
             dashboardInsightSetOpen(true);
@@ -2806,7 +2761,7 @@ $currency_symbol = getSetting('currency_symbol');
 
                         const button = document.getElementById(`checkin-btn-${bookingId}`);
                         if (button) {
-                            button.outerHTML = `<button onclick="cancelCheckIn(${bookingId}, '${guestName.replace(/'/g, "\\'")}')" id="cancel-checkin-btn-${bookingId}" class="btn btn-dark"><i class="fas fa-undo"></i> Cancel Check-in</button>`;
+                            button.outerHTML = `<button onclick="cancelCheckIn(${bookingId}, '${guestName.replace(/'/g, "\\'")}')" id="cancel-checkin-btn-${bookingId}" type="button" class="ck-btn ck-btn--sm"><i class="fas fa-rotate-left"></i> Undo check-in</button>`;
                         }
 
                         if (window.AdminPageLoader) AdminPageLoader.hide();
@@ -2867,7 +2822,7 @@ $currency_symbol = getSetting('currency_symbol');
 
                         const button = document.getElementById(`cancel-checkin-btn-${bookingId}`);
                         if (button) {
-                            button.outerHTML = `<span class="badge badge-confirmed">Reverted to confirmed</span>`;
+                            button.outerHTML = `<span class="ck-pill ck-pill--amber">Reverted</span>`;
                         }
 
                         if (window.AdminPageLoader) AdminPageLoader.hide();
@@ -2885,6 +2840,82 @@ $currency_symbol = getSetting('currency_symbol');
                     Alert.show('An error occurred while cancelling check-in', 'error');
                 });
         }
+        // -------------------------------------------------------------------
+        // Cockpit interactions: tabs, week-ahead day filter, takings readout, clock
+        // -------------------------------------------------------------------
+        (function () {
+            'use strict';
+            document.querySelectorAll('[data-ck-tabs]').forEach(function (panel) {
+                const tabs = panel.querySelectorAll('[data-ck-tab]');
+                tabs.forEach(function (tab) {
+                    tab.addEventListener('click', function () {
+                        tabs.forEach(function (t) {
+                            const on = t === tab;
+                            t.classList.toggle('is-active', on);
+                            t.setAttribute('aria-selected', on ? 'true' : 'false');
+                        });
+                        panel.querySelectorAll('[data-ck-pane]').forEach(function (pane) {
+                            pane.hidden = pane.dataset.ckPane !== tab.dataset.ckTab;
+                        });
+                    });
+                });
+            });
+
+            document.querySelectorAll('[data-ck-week]').forEach(function (week) {
+                const rows = week.querySelectorAll('[data-ck-day-row]');
+                const empty = week.querySelector('[data-ck-day-empty]');
+                const reset = week.querySelector('.ck-panel__tools [data-ck-day]');
+                function filter(day) {
+                    let shown = 0;
+                    rows.forEach(function (row) {
+                        const on = day === '' || row.dataset.ckDayRow === day;
+                        row.hidden = !on;
+                        if (on) shown++;
+                    });
+                    week.querySelectorAll('.ck-days [data-ck-day]').forEach(function (b) {
+                        b.classList.toggle('is-active', b.dataset.ckDay === day);
+                    });
+                    if (empty) empty.hidden = shown > 0 || rows.length === 0;
+                    if (reset) reset.hidden = day === '';
+                }
+                week.querySelectorAll('[data-ck-day]').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        filter(btn.classList.contains('is-active') ? '' : btn.dataset.ckDay);
+                    });
+                });
+            });
+
+            document.querySelectorAll('.ck-money').forEach(function (box) {
+                const label = box.querySelector('[data-ck-trend-label]');
+                const value = box.querySelector('[data-ck-trend-value]');
+                const cols = box.querySelectorAll('[data-ck-trend]');
+                cols.forEach(function (col) {
+                    function show() {
+                        cols.forEach(function (c) { c.classList.toggle('is-active', c === col); });
+                        if (label) label.textContent = col.dataset.ckTrendDay;
+                        if (value) value.textContent = col.dataset.ckTrend;
+                    }
+                    col.addEventListener('mouseenter', show);
+                    col.addEventListener('focus', show);
+                    col.addEventListener('click', show);
+                });
+            });
+
+            const clock = document.getElementById('ckClock');
+            if (clock) {
+                setInterval(function () {
+                    const d = new Date();
+                    clock.textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+                }, 30000);
+            }
+
+            document.addEventListener('click', function (e) {
+                document.querySelectorAll('.ck-menu[open]').forEach(function (m) {
+                    if (!m.contains(e.target)) m.removeAttribute('open');
+                });
+            });
+        })();
+
         // -------------------------------------------------------------------
         // System health: stays hidden unless something needs attention
         // -------------------------------------------------------------------
