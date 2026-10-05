@@ -638,8 +638,7 @@ try {
     </div>
 
     <!-- Edit Modal -->
-    <?php renderAdminModalStart('editPageModal', 'Edit Page', 'page-management-modal-content'); ?>
-    <form method="POST" id="editForm">
+    <?php renderAdminModalStart('editPageModal', 'Edit Page', 'page-management-modal-content', 'editForm'); ?>
         <input type="hidden" name="action" value="edit_page">
         <input type="hidden" name="page_id" id="edit_page_id">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
@@ -665,23 +664,20 @@ try {
             <textarea id="edit_description" name="description" rows="2"></textarea>
         </div>
 
-        <div class="modal-actions">
-            <button type="button" class="btn-cancel" onclick="closeEditModal()">Cancel</button>
-            <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Changes</button>
-        </div>
-    </form>
+    <?php renderAdminModalFooterStart(); ?>
+        <button type="button" class="btn-cancel" onclick="closeEditModal()">Cancel</button>
+        <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Changes</button>
     <?php renderAdminModalEnd(); ?>
 
     <!-- Disable Confirm Modal -->
     <?php renderAdminModalStart('confirmDisableModal', 'Disable Page'); ?>
     <p>Are you sure you want to disable <strong id="confirmDisablePageName"></strong>?</p>
     <p style="color:#888;font-size:13px;">Visitors will be redirected to the home page until it is re-enabled.</p>
-    <div class="modal-actions">
+    <?php renderAdminModalFooterStart(); ?>
         <button type="button" class="btn-cancel" onclick="closeAdminModal('confirmDisableModal')">Cancel</button>
-        <button type="button" class="btn-submit" style="background:var(--color-danger,#dc3545);" onclick="execDisableConfirm()">
+        <button type="button" class="btn-danger" onclick="execDisableConfirm()">
             <i class="fas fa-power-off"></i> Disable Page
         </button>
-    </div>
     <?php renderAdminModalEnd(); ?>
 
     <?php renderAdminModalScript(); ?>

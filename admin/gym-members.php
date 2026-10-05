@@ -894,13 +894,11 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 </div>
                 <label style="display:block;font-weight:600;margin-bottom:4px;">Notes <span style="font-weight:400;color:#9a8f82;">(optional)</span></label>
                 <textarea id="gmNotes" rows="2" style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;"></textarea>
+                <button type="button" id="gmHistoryBtn" class="mm-btn mm-btn-ghost" style="display:none;align-items:center;gap:6px;margin-top:12px;" data-id="0" onclick="gmShowHistory(this.getAttribute('data-id'))"><i class="fas fa-clock-rotate-left"></i> View change history</button>
             </div>
-            <div class="mm-modal-foot" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 18px;">
-                <button id="gmHistoryBtn" class="mm-btn mm-btn-ghost" style="display:none;align-items:center;gap:6px;" data-id="0" onclick="gmShowHistory(this.getAttribute('data-id'))"><i class="fas fa-clock-rotate-left"></i> History</button>
-                <div style="display:flex;gap:10px;margin-left:auto;">
-                    <button class="mm-btn mm-btn-ghost" onclick="gmClose('gmModal')">Cancel</button>
-                    <button class="mm-btn mm-btn-primary" onclick="gmSave()">Save Member</button>
-                </div>
+            <div class="mm-modal-foot">
+                <button type="button" class="mm-btn mm-btn-ghost" onclick="gmClose('gmModal')">Cancel</button>
+                <button type="button" class="mm-btn mm-btn-primary" onclick="gmSave()">Save Member</button>
             </div>
         </div>
     </div>
@@ -915,8 +913,8 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             <div class="mm-modal-body" id="gmHistoryBody" style="max-height:60vh;overflow-y:auto;">
                 <p style="color:#9a8f82;">Loading…</p>
             </div>
-            <div class="mm-modal-foot" style="display:flex;justify-content:flex-end;padding:14px 18px;">
-                <button class="mm-btn mm-btn-ghost" onclick="gmClose('gmHistoryModal')">Close</button>
+            <div class="mm-modal-foot">
+                <button type="button" class="mm-btn mm-btn-ghost" onclick="gmClose('gmHistoryModal')">Close</button>
             </div>
         </div>
     </div>
@@ -938,13 +936,13 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
     <div class="mm-modal" id="gmConfirmModal">
         <div class="mm-modal-card sm">
             <div class="mm-modal-head">
-                <h3><i class="fas fa-triangle-exclamation" style="color:#f59e0b;"></i> Are you sure?</h3>
+                <h3><i class="fas fa-triangle-exclamation"></i> Are you sure?</h3>
                 <button type="button" class="mm-modal-close" onclick="gmClose('gmConfirmModal')" aria-label="Close">&times;</button>
             </div>
             <div class="mm-modal-body"><p id="gmConfirmText" style="margin:0;"></p></div>
-            <div class="mm-modal-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;">
-                <button class="mm-btn mm-btn-ghost" onclick="gmClose('gmConfirmModal')">Cancel</button>
-                <button class="mm-btn mm-btn-primary" id="gmConfirmYes" style="background:#c0392b;border-color:#c0392b;">Yes, continue</button>
+            <div class="mm-modal-foot">
+                <button type="button" class="mm-btn mm-btn-ghost" onclick="gmClose('gmConfirmModal')">Cancel</button>
+                <button type="button" class="mm-btn btn-danger" id="gmConfirmYes">Yes, continue</button>
             </div>
         </div>
     </div>

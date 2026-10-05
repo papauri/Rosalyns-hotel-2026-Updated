@@ -1251,15 +1251,15 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
 
     <!-- ══ JOINED ROOM COMBINATIONS MODAL ══ -->
     <div class="modal-overlay" id="combinationsModal" style="display:none;align-items:flex-start;padding-top:40px;" onclick="if(event.target===this)closeCombinationsModal()">
-        <div class="modal-content" style="max-width:880px;width:100%;max-height:90vh;overflow-y:auto;padding:0;">
-            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px 16px;border-bottom:1px solid #e8e0d8;">
+        <div class="modal-content" style="max-width:880px;width:100%;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
                 <div>
-                    <h3 style="margin:0 0 4px;font-size:20px;font-family:'Cormorant Garamond',serif;font-weight:600;"><i class="fas fa-link" style="color:#766550;margin-right:8px;"></i> Joined Room Combinations</h3>
-                    <p style="margin:0;color:#6b625a;font-size:13px;">Pair adjoining rooms into one bookable unit. Accounting, refunds, invoices, and folios stay under one booking.</p>
+                    <h3><i class="fas fa-link"></i> Joined Room Combinations</h3>
+                    <p style="margin:4px 0 0;color:#6b625a;font-size:13px;">Pair adjoining rooms into one bookable unit. Accounting, refunds, invoices, and folios stay under one booking.</p>
                 </div>
-                <button class="modal-close" onclick="closeCombinationsModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b625a;line-height:1;">&times;</button>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeCombinationsModal()">&times;</button>
             </div>
-            <div style="padding:20px 24px;">
+            <div class="modal-body">
                 <div style="background:#f8f6f3;border:1px solid #e8e0d8;border-radius:8px;padding:18px 20px 14px;margin-bottom:24px;">
                     <h4 style="margin:0 0 16px;font-size:14px;font-weight:600;color:#2A2723;display:flex;align-items:center;gap:8px;" id="combinationFormTitle">
                         <i class="fas fa-plus-circle" style="color:#766550;"></i> Add / Edit Combination
@@ -1419,7 +1419,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                     <span id="rdStatusBadge" class="badge"></span>
                     <span id="rdPrice" class="room-detail-price"></span>
                 </div>
-                <button class="modal-close" onclick="closeRoomDetailModal()" style="position:absolute;top:14px;right:16px;">&times;</button>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeRoomDetailModal()">&times;</button>
             </div>
 
             <div class="modal-body room-detail-body" id="rdBody">
@@ -1471,7 +1471,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 </div>
             </div>
 
-            <div class="modal-footer" id="rdFooter" style="display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;border-top:1px solid #e5e7eb;">
+            <div class="modal-footer" id="rdFooter">
                 <button type="button" class="btn btn-secondary btn-sm" onclick="closeRoomDetailModal()">Close</button>
                 <button type="button" class="btn btn-success btn-sm" id="rdStatusBtn" onclick="_rdChangeStatus()">
                     <i class="fas fa-exchange-alt"></i> Change Status
@@ -1496,14 +1496,14 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
     <!-- Add/Edit Modal -->
     <div class="modal-overlay" id="roomModal">
         <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="modalTitle"><i class="fas fa-plus"></i> Add Individual Room</h3>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
-            </div>
             <form method="POST" id="roomForm">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                 <input type="hidden" name="action" id="formAction" value="add_individual_room">
                 <input type="hidden" name="id" id="roomId">
+                <div class="modal-header">
+                    <h3 id="modalTitle"><i class="fas fa-plus"></i> Add Individual Room</h3>
+                    <button type="button" class="modal-close" aria-label="Close" onclick="closeModal()">&times;</button>
+                </div>
                 <div class="modal-body">
                     <div class="form-row">
                         <div class="form-group">
@@ -1632,7 +1632,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                         </div>
                     </div>
                 </div>
-                <div class="form-actions">
+                <div class="form-actions modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Room</button>
                 </div>
@@ -1643,14 +1643,14 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
     <!-- Status Change Modal -->
     <div class="modal-overlay" id="statusModal">
         <div class="modal-content">
-            <div class="modal-header">
-                <h3><i class="fas fa-exchange-alt"></i> Change Room Status</h3>
-                <button class="modal-close" onclick="closeStatusModal()">&times;</button>
-            </div>
             <form method="POST">
                 <input type="hidden" name="action" value="update_status">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                 <input type="hidden" name="id" id="statusRoomId">
+                <div class="modal-header">
+                    <h3><i class="fas fa-exchange-alt"></i> Change Room Status</h3>
+                    <button type="button" class="modal-close" aria-label="Close" onclick="closeStatusModal()">&times;</button>
+                </div>
                 <div class="modal-body">
                     <div id="statusActiveWarning" style="display:none;margin-bottom:14px;padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-size:13px;color:#7f1d1d;">
                         <i class="fas fa-exclamation-triangle"></i>
@@ -1672,7 +1672,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                         <textarea name="reason" id="reason" rows="2" placeholder="Reason for status change..."></textarea>
                     </div>
                 </div>
-                <div class="form-actions">
+                <div class="form-actions modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeStatusModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Update Status</button>
                 </div>
@@ -1685,7 +1685,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
         <div class="modal-content" style="max-width: 800px;">
             <div class="modal-header">
                 <h3><i class="fas fa-door-open"></i> Assign Room to Booking</h3>
-                <button class="modal-close" onclick="closeAssignBookingModal()">&times;</button>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeAssignBookingModal()">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">

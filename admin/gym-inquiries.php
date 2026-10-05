@@ -610,7 +610,7 @@ try {
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Gym Inquiry Details</h3>
-                <span class="close" onclick="closeInquiryModal()">&times;</span>
+                <button type="button" class="modal-close" onclick="closeInquiryModal()" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body" id="inquiryModalBody">
                 <!-- Content will be loaded dynamically -->
@@ -622,11 +622,11 @@ try {
     <div id="emailComposerModal" class="modal">
         <div class="modal-content" style="max-width:min(96vw,42rem);width:min(96vw,42rem);">
             <div class="modal-header">
-                <h3><i class="fas fa-envelope" style="color:#7E684B;"></i> Email Member</h3>
-                <span class="close" onclick="closeEmailComposer()">&times;</span>
+                <h3><i class="fas fa-envelope"></i> Email Member</h3>
+                <button type="button" class="modal-close" onclick="closeEmailComposer()" aria-label="Close">&times;</button>
             </div>
-            <div class="modal-body">
-                <form method="POST" id="emailComposerForm">
+            <form method="POST" id="emailComposerForm">
+                <div class="modal-body">
                     <input type="hidden" name="inquiry_action" value="send_message">
                     <input type="hidden" name="inquiry_id" id="composer-inquiry-id">
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
@@ -640,12 +640,12 @@ try {
                         <textarea id="email_message" name="email_message" class="form-control" rows="7" required placeholder="Write your message to the member. Line breaks are preserved."></textarea>
                         <small class="composer-hint">Sent as a branded email from your hotel. The member's name and your signature are added automatically.</small>
                     </div>
-                    <div class="composer-actions">
-                        <button type="button" class="btn btn-secondary" onclick="closeEmailComposer()">Cancel</button>
-                        <button type="submit" class="btn btn-primary" id="composer-send-btn"><i class="fas fa-paper-plane"></i> Send Email</button>
-                    </div>
-                </form>
-            </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeEmailComposer()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="composer-send-btn"><i class="fas fa-paper-plane"></i> Send Email</button>
+                </div>
+            </form>
         </div>
     </div>
 

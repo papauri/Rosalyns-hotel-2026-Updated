@@ -321,21 +321,23 @@ $roomStatuses = getRoomStatuses();
 <!-- Fail Inspection Modal -->
 <div class="modal-overlay" id="failModal">
     <div class="modal-content">
-        <div class="modal-header">
-            <h3><i class="fas fa-times-circle" style="color: #dc3545;"></i> Fail Inspection</h3>
-            <button type="button" onclick="closeFailModal()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#6c757d; line-height:1; padding:0 4px;" aria-label="Close">&times;</button>
-        </div>
         <form method="POST">
             <input type="hidden" name="action" value="fail_inspection">
             <input type="hidden" name="room_id" id="failRoomId">
-            <p>Room: <strong id="failRoomNumber"></strong></p>
-            <div class="form-group">
-                <label>Reason for Failure *</label>
-                <textarea name="reason" rows="3" required placeholder="e.g., Bathroom not properly cleaned, stains on carpet..."></textarea>
+            <div class="modal-header">
+                <h3><i class="fas fa-times-circle"></i> Fail Inspection</h3>
+                <button type="button" class="modal-close" onclick="closeFailModal()" aria-label="Close">&times;</button>
             </div>
-            <div class="modal-actions">
+            <div class="modal-body">
+                <p>Room: <strong id="failRoomNumber"></strong></p>
+                <div class="form-group">
+                    <label for="failReason">Reason for Failure *</label>
+                    <textarea name="reason" id="failReason" rows="3" required placeholder="e.g., Bathroom not properly cleaned, stains on carpet..."></textarea>
+                </div>
+            </div>
+            <div class="modal-actions modal-footer">
                 <button type="button" class="btn-cancel" onclick="closeFailModal()">Cancel</button>
-                <button type="submit" class="btn-submit" style="background: #dc3545;">Fail & Send to Reclean</button>
+                <button type="submit" class="btn-danger">Fail &amp; Send to Reclean</button>
             </div>
         </form>
     </div>

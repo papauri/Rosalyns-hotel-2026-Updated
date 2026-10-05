@@ -833,14 +833,13 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
         <!-- Edit Room Modal -->
         <div class="modal-overlay" id="editModal">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h3 id="editModalTitle"><i class="fas fa-edit"></i> Edit Room</h3>
-                    <button class="modal-close" type="button" onclick="closeEditModal()">&times;</button>
-                </div>
                 <form method="POST" id="editForm">
                     <input type="hidden" name="action" id="editAction" value="update">
                     <input type="hidden" name="id" id="editId">
-
+                    <div class="modal-header">
+                        <h3 id="editModalTitle"><i class="fas fa-edit"></i> Edit Room</h3>
+                        <button class="modal-close" type="button" aria-label="Close" onclick="closeEditModal()">&times;</button>
+                    </div>
                     <div class="modal-body">
                         <div class="form-section">
                             <div class="form-section-title"><i class="fas fa-info-circle"></i> Room Information</div>
@@ -954,10 +953,10 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                         </div>
                     </div>
 
-                    <div class="form-actions">
+                    <div class="form-actions modal-footer">
                         <div id="editRoomFeedback" class="admin-modal-feedback" style="width:100%;margin-bottom:8px;"></div>
-                        <button type="button" onclick="closeEditModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
-                        <button type="submit" id="editRoomSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#7E684B); color:var(--deep-navy,#111111); font-weight:600; cursor:pointer;">
+                        <button type="button" onclick="closeEditModal()">Close</button>
+                        <button type="submit" id="editRoomSaveBtn">
                             <i class="fas fa-save"></i> Save Changes
                         </button>
                     </div>
@@ -968,13 +967,12 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
         <!-- Add Room Modal -->
         <div class="modal-overlay" id="addModal">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h3><i class="fas fa-plus-circle"></i> Add New Room</h3>
-                    <button class="modal-close" type="button" onclick="closeAddModal()">&times;</button>
-                </div>
                 <form method="POST" enctype="multipart/form-data" id="addForm">
                     <input type="hidden" name="action" value="add_room">
-
+                    <div class="modal-header">
+                        <h3><i class="fas fa-plus-circle"></i> Add New Room</h3>
+                        <button class="modal-close" type="button" aria-label="Close" onclick="closeAddModal()">&times;</button>
+                    </div>
                     <div class="modal-body">
                         <div class="form-section">
                             <div class="form-section-title"><i class="fas fa-info-circle"></i> Room Information</div>
@@ -1094,10 +1092,10 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                         </div>
                     </div>
 
-                    <div class="form-actions">
+                    <div class="form-actions modal-footer">
                         <div id="addRoomFeedback" class="admin-modal-feedback" style="width:100%;margin-bottom:8px;"></div>
-                        <button type="button" onclick="closeAddModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
-                        <button type="submit" id="addRoomSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#7E684B); color:var(--deep-navy,#111111); font-weight:600; cursor:pointer;">
+                        <button type="button" onclick="closeAddModal()">Close</button>
+                        <button type="submit" id="addRoomSaveBtn">
                             <i class="fas fa-plus"></i> Add Room
                         </button>
                     </div>
@@ -1110,7 +1108,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
             <div class="modal-content">
                 <div class="modal-header">
                     <h3 id="imageModalTitle"><i class="fas fa-image"></i> Room Image</h3>
-                    <button class="modal-close" type="button" onclick="closeImageModal()">&times;</button>
+                    <button class="modal-close" type="button" aria-label="Close" onclick="closeImageModal()">&times;</button>
                 </div>
                 <div class="modal-body">
                     <div id="currentImageContainer" style="display:none; margin-bottom:20px;">
@@ -1142,8 +1140,8 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                         <button type="submit" class="btn-action btn-image-source-save"><i class="fas fa-link"></i> Save URL/Path</button>
                     </form>
                 </div>
-                <div class="form-actions">
-                    <button type="button" onclick="closeImageModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
+                <div class="form-actions modal-footer">
+                    <button type="button" onclick="closeImageModal()">Close</button>
                 </div>
             </div>
         </div>
@@ -1151,13 +1149,13 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
         <!-- Video Modal -->
         <div class="modal-overlay" id="videoModal">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h3 id="videoModalTitle"><i class="fas fa-video"></i> Room Video</h3>
-                    <button class="modal-close" type="button" onclick="closeVideoModal()">&times;</button>
-                </div>
                 <form method="POST" enctype="multipart/form-data" id="videoForm">
                     <input type="hidden" name="action" value="update_video">
                     <input type="hidden" name="room_id" id="videoRoomId">
+                    <div class="modal-header">
+                        <h3 id="videoModalTitle"><i class="fas fa-video"></i> Room Video</h3>
+                        <button class="modal-close" type="button" aria-label="Close" onclick="closeVideoModal()">&times;</button>
+                    </div>
                     <div class="modal-body">
                         <div id="currentVideoInfo" style="display:none; margin-bottom:16px; background:#f0f7ff; padding:12px; border-radius:6px;">
                             <i class="fas fa-video" style="color:var(--gold);"></i> <span id="currentVideoText"></span>
@@ -1175,9 +1173,9 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                             <input type="file" name="video" accept="video/*">
                         </div>
                     </div>
-                    <div class="form-actions">
-                        <button type="button" onclick="closeVideoModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Cancel</button>
-                        <button type="submit" style="padding:10px 24px; border:none; border-radius:6px; background:#007bff; color:white; font-weight:600; cursor:pointer;">
+                    <div class="form-actions modal-footer">
+                        <button type="button" onclick="closeVideoModal()">Cancel</button>
+                        <button type="submit">
                             <i class="fas fa-save"></i> Save Video
                         </button>
                     </div>
@@ -1190,7 +1188,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
             <div class="modal-content" style="max-width:900px;">
                 <div class="modal-header">
                     <h3 id="picturesModalTitle"><i class="fas fa-images"></i> Room Pictures</h3>
-                    <button class="modal-close" type="button" onclick="closePicturesModal()">&times;</button>
+                    <button class="modal-close" type="button" aria-label="Close" onclick="closePicturesModal()">&times;</button>
                 </div>
                 <div class="modal-body">
                     <form method="POST" enctype="multipart/form-data" id="pictureUploadForm" style="margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #eee;">
@@ -2172,11 +2170,11 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
         <!-- Facebook Share Modal (with live preview) -->
         <div class="modal-overlay" id="fbShareModal" style="display:none;" onclick="if(event.target===this)closeFbShareModal()">
             <div class="modal-content" style="max-width:860px;width:96vw;">
-                <div class="modal-header" style="border-top:4px solid #1877F2;">
-                    <h3 id="fbShareTitle" style="color:#1877F2;"><i class="fab fa-facebook-f"></i> Share on Facebook</h3>
-                    <button class="modal-close" type="button" onclick="closeFbShareModal()">&times;</button>
+                <div class="modal-header">
+                    <h3 id="fbShareTitle"><i class="fab fa-facebook-f"></i> Share on Facebook</h3>
+                    <button class="modal-close" type="button" aria-label="Close" onclick="closeFbShareModal()">&times;</button>
                 </div>
-                <div class="modal-body" style="padding:20px 24px;">
+                <div class="modal-body">
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:24px;align-items:start;">
 
                         <!-- LEFT: Compose -->
@@ -2258,10 +2256,10 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                     <div id="fbShareFeedback" class="admin-modal-feedback" style="margin-top:14px;"></div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn fb-btn" id="fbShareSubmitBtn">
+                    <button type="button" class="btn btn-secondary" onclick="closeFbShareModal()">Cancel</button>
+                    <button type="button" class="btn fb-btn btn-primary" id="fbShareSubmitBtn">
                         <i class="fab fa-facebook-f"></i> Post to Facebook Page
                     </button>
-                    <button type="button" class="btn btn-secondary" onclick="closeFbShareModal()">Cancel</button>
                 </div>
             </div>
         </div>
@@ -2269,13 +2267,13 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
         <!-- Facebook Share All Rooms Modal -->
         <div class="modal-overlay" id="fbAllRoomsModal" style="display:none;" onclick="if(event.target===this)closeFbAllRoomsModal()">
             <div class="modal-content" style="max-width:920px;width:96vw;">
-                <div class="modal-header" style="border-top:4px solid #1877F2;">
-                    <h3 style="color:#1877F2;display:flex;align-items:center;gap:8px;">
+                <div class="modal-header">
+                    <h3>
                         <i class="fab fa-facebook-f"></i> Share All Rooms on Facebook
                     </h3>
-                    <button class="modal-close" type="button" onclick="closeFbAllRoomsModal()">&times;</button>
+                    <button class="modal-close" type="button" aria-label="Close" onclick="closeFbAllRoomsModal()">&times;</button>
                 </div>
-                <div class="modal-body" style="padding:20px 24px;">
+                <div class="modal-body">
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:24px;align-items:start;">
 
                         <!-- LEFT: Room picker + caption editor -->
@@ -2366,10 +2364,10 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                     <div id="fbAllFeedback" class="admin-modal-feedback" style="margin-top:14px;"></div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn fb-btn" id="fbAllSubmitBtn">
+                    <button type="button" class="btn btn-secondary" onclick="closeFbAllRoomsModal()">Cancel</button>
+                    <button type="button" class="btn fb-btn btn-primary" id="fbAllSubmitBtn">
                         <i class="fab fa-facebook-f"></i> Post to Facebook Page
                     </button>
-                    <button type="button" class="btn btn-secondary" onclick="closeFbAllRoomsModal()">Cancel</button>
                 </div>
             </div>
         </div>

@@ -2219,20 +2219,24 @@ if (!isset($folio_fnb)) {
         <div class="modal-overlay" id="vatConfirmModal-overlay" data-modal-overlay aria-hidden="true"></div>
         <div class="modal-overlay vat-confirm-modal" id="vatConfirmModal" role="dialog" aria-modal="true" aria-labelledby="vatConfirmTitle" data-modal data-close-on-escape="true" data-close-on-overlay="false">
             <div class="modal-container vat-confirm-modal__container">
-                <div class="vat-confirm-modal__icon"><i class="fas fa-shield-halved"></i></div>
-                <h3 class="vat-confirm-modal__title" id="vatConfirmTitle">Unlock VAT Settings?</h3>
-                <p class="vat-confirm-modal__body">
-                    VAT settings control how tax is calculated across all bookings, POS transactions, and invoices.
-                    Incorrect values can cause compliance issues with the MRA.
-                </p>
-                <p class="vat-confirm-modal__body">
-                    <strong>Are you sure you want to unlock and edit these settings?</strong>
-                </p>
-                <div class="vat-confirm-modal__actions">
+                <div class="modal-header">
+                    <h3 class="vat-confirm-modal__title" id="vatConfirmTitle"><i class="fas fa-shield-halved"></i> Unlock VAT Settings?</h3>
+                    <button type="button" class="modal-close" data-modal-close aria-label="Close">&times;</button>
+                </div>
+                <div class="modal-body vat-confirm-modal__content">
+                    <p class="vat-confirm-modal__body">
+                        VAT settings control how tax is calculated across all bookings, POS transactions, and invoices.
+                        Incorrect values can cause compliance issues with the MRA.
+                    </p>
+                    <p class="vat-confirm-modal__body">
+                        <strong>Are you sure you want to unlock and edit these settings?</strong>
+                    </p>
+                </div>
+                <div class="modal-footer vat-confirm-modal__actions">
                     <button type="button" class="acct-btn acct-btn--ghost" id="vatConfirmCancel">
                         <i class="fas fa-xmark"></i> No, keep locked
                     </button>
-                    <button type="button" class="acct-btn acct-btn--unlock-confirm" id="vatConfirmYes">
+                    <button type="button" class="acct-btn btn-primary" id="vatConfirmYes">
                         <i class="fas fa-lock-open"></i> Yes, unlock to edit
                     </button>
                 </div>

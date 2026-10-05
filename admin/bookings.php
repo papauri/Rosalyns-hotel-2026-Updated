@@ -5325,7 +5325,7 @@ $today_str = $today->format('Y-m-d');
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
                 <h3><i class="fas fa-envelope"></i> Resend Email</h3>
-                <button class="close-modal" onclick="closeResendEmailModal()">&times;</button>
+                <button type="button" class="close-modal" onclick="closeResendEmailModal()" aria-label="Close">&times;</button>
             </div>
             <form id="resendEmailForm" method="POST" action="">
                 <input type="hidden" name="action" value="resend_email">
@@ -5379,7 +5379,7 @@ $today_str = $today->format('Y-m-d');
         <div class="modal-content" style="max-width: 700px;">
             <div class="modal-header">
                 <h3><i class="fas fa-door-open"></i> Assign Room</h3>
-                <button class="close-modal" onclick="closeQuickRoomAssignModal()">&times;</button>
+                <button type="button" class="close-modal" onclick="closeQuickRoomAssignModal()" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
@@ -5420,7 +5420,7 @@ $today_str = $today->format('Y-m-d');
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
                 <h3><i class="fas fa-clock"></i> Make Tentative</h3>
-                <button class="close-modal" onclick="closeMakeTentativeModal()">&times;</button>
+                <button type="button" class="close-modal" onclick="closeMakeTentativeModal()" aria-label="Close">&times;</button>
             </div>
             <form id="makeTentativeForm" method="POST" action="">
                 <input type="hidden" name="action" id="make_tentative_action" value="">
@@ -5518,7 +5518,7 @@ $today_str = $today->format('Y-m-d');
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
                 <h3><i class="fas fa-times-circle"></i> Cancel Booking</h3>
-                <button class="close-modal" onclick="closeCancelBookingModal()">&times;</button>
+                <button type="button" class="close-modal" onclick="closeCancelBookingModal()" aria-label="Close">&times;</button>
             </div>
             <form id="cancelBookingForm" method="POST" action="">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
@@ -5552,7 +5552,7 @@ $today_str = $today->format('Y-m-d');
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeCancelBookingModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary"><i class="fas fa-times"></i> Cancel Booking</button>
+                    <button type="submit" class="btn btn-danger"><i class="fas fa-times"></i> Cancel Booking</button>
                 </div>
             </form>
         </div>
@@ -5724,7 +5724,7 @@ $today_str = $today->format('Y-m-d');
         <div class="modal-content" style="max-width: 680px;">
             <div class="modal-header">
                 <h3><i class="fas fa-scale-balanced"></i> Manual Payment Consolidation</h3>
-                <button class="close-modal" onclick="closeConsolidationModal()">&times;</button>
+                <button type="button" class="close-modal" onclick="closeConsolidationModal()" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body" id="con_body" style="padding:0;">
                 <div style="padding:20px; text-align:center; color:#888;"><i class="fas fa-spinner fa-spin"></i> Loading financial summary...</div>
@@ -5735,9 +5735,9 @@ $today_str = $today->format('Y-m-d');
     <!-- Extend Stay Modal -->
     <div id="extendStayModal" class="modal-overlay" aria-hidden="true">
         <div class="modal-content" style="max-width: 500px;">
-            <div class="modal-header" style="background: var(--au-success, #10b981); color: #fff;">
+            <div class="modal-header">
                 <h3><i class="fas fa-calendar-plus"></i> Extend Stay</h3>
-                <button class="close-modal" onclick="closeExtendStayModal()" style="color: #fff;">&times;</button>
+                <button type="button" class="close-modal" onclick="closeExtendStayModal()" aria-label="Close">&times;</button>
             </div>
             <form id="extendStayForm" method="POST" action="bookings.php">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
@@ -5775,9 +5775,9 @@ $today_str = $today->format('Y-m-d');
     <!-- Admin Change Checkout Date Modal -->
     <div id="adminChangeDateModal" class="modal-overlay" aria-hidden="true">
         <div class="modal-content" style="max-width: 480px;">
-            <div class="modal-header" style="background: var(--au-purple, #8b5cf6); color: #fff;">
+            <div class="modal-header">
                 <h3><i class="fas fa-calendar-pen"></i> Admin: Change Checkout Date</h3>
-                <button class="close-modal" onclick="closeAdminChangeDateModal()" style="color: #fff;">&times;</button>
+                <button type="button" class="close-modal" onclick="closeAdminChangeDateModal()" aria-label="Close">&times;</button>
             </div>
             <form id="adminChangeDateForm" method="POST" action="bookings.php">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
@@ -5812,7 +5812,7 @@ $today_str = $today->format('Y-m-d');
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeAdminChangeDateModal()">Cancel</button>
-                    <button type="submit" class="btn btn-sm" style="background: var(--au-purple, #8b5cf6); border-color: var(--au-purple, #8b5cf6); color: #fff;"><i class="fas fa-check"></i> Update Checkout Date</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Update Checkout Date</button>
                 </div>
             </form>
         </div>
@@ -5823,7 +5823,7 @@ $today_str = $today->format('Y-m-d');
         <div class="modal-content" style="max-width: 520px;">
             <div class="modal-header">
                 <h3 id="cs_title"><i class="fas fa-receipt"></i> Checkout Settlement</h3>
-                <button class="close-modal" onclick="closeCheckoutSettlementModal()">&times;</button>
+                <button type="button" class="close-modal" onclick="closeCheckoutSettlementModal()" aria-label="Close">&times;</button>
             </div>
             <form id="checkoutSettlementForm" method="POST" action="bookings.php">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
@@ -5883,7 +5883,7 @@ $today_str = $today->format('Y-m-d');
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeCheckoutSettlementModal()">Cancel</button>
-                    <button type="button" id="cs_proceed_btn" class="btn btn-primary" style="background:#dc3545;border-color:#dc3545;" onclick="const f=document.getElementById('checkoutSettlementForm'); if(f){ f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})); } return false;">Proceed & Checkout</button>
+                    <button type="button" id="cs_proceed_btn" class="btn btn-danger" onclick="const f=document.getElementById('checkoutSettlementForm'); if(f){ f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})); } return false;">Proceed & Checkout</button>
                 </div>
             </form>
         </div>
@@ -6051,7 +6051,7 @@ $today_str = $today->format('Y-m-d');
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
                 <h3><i class="fas fa-arrow-up"></i> Upgrade Room Type</h3>
-                <button class="close-modal" onclick="closeUpgradeRoomModal()">&times;</button>
+                <button type="button" class="close-modal" onclick="closeUpgradeRoomModal()" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
@@ -7372,9 +7372,9 @@ $today_str = $today->format('Y-m-d');
                     '</div>' +
                     '<div class="form-group" style="margin-bottom:10px;"><label>General notes</label><input type="text" name="notes" class="form-control" placeholder="e.g. Cash collected at front desk" maxlength="200"></div>' +
                     '<div class="form-group" style="margin-bottom:14px;"><label style="font-weight:600;"><i class="fas fa-calculator" style="color:#8F6A35;"></i> Accountant notes</label><input type="text" name="accountant_notes" class="form-control" placeholder="e.g. Reconciled against invoice RFD-20260514, balance cleared" maxlength="300" style="border-color:#8F6A35;"><small style="color:#888;display:block;margin-top:4px;">Stored as &ldquo;ACCT: &hellip;&rdquo; prefix in payment notes &mdash; visible on invoices and ledger reports.</small></div>' +
-                    '<div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid #eee;padding-top:14px;">' +
+                    '<div class="modal-actions" style="border-top:1px solid #eee;padding-top:14px;">' +
                     '<button type="button" class="btn btn-secondary" onclick="closeConsolidationModal()">Close</button>' +
-                    '<button type="submit" id="con_submit_btn" class="btn btn-primary" style="background:#8F6A35;border-color:#8F6A35;"><i class="fas fa-scale-balanced"></i> Record Payment</button>' +
+                    '<button type="submit" id="con_submit_btn" class="btn btn-primary"><i class="fas fa-scale-balanced"></i> Record Payment</button>' +
                     '</div></form>';
 
                 document.getElementById('con_body').innerHTML =
@@ -8732,7 +8732,7 @@ $today_str = $today->format('Y-m-d');
             </div>
             <div class="admin-modal__footer">
                 <button type="button" class="btn btn-secondary" onclick="closeBookingListQuoteModal()">Cancel</button>
-                <button type="button" id="bl-quotation-send-btn" class="btn" style="background:#2F4F78;color:#fff;border-color:#2F4F78;" onclick="sendBookingListQuotation()">
+                <button type="button" id="bl-quotation-send-btn" class="btn btn-primary" onclick="sendBookingListQuotation()">
                     <i class="fas fa-paper-plane"></i> Send Quotation
                 </button>
             </div>

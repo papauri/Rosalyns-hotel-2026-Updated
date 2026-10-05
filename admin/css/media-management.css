@@ -394,49 +394,7 @@
     font-size: 14px;
 }
 
-.mm-modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 20px 18px;
-    border-top: 1px solid #edf0f2;
-}
-
-.mm-modal-btn {
-    border: 1px solid transparent;
-    border-radius: 8px;
-    padding: 9px 14px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    transition: transform 0.14s ease, box-shadow 0.14s ease, background-color 0.14s ease, border-color 0.14s ease;
-}
-
-.mm-modal-btn:hover {
-    transform: translateY(-1px);
-}
-
-.mm-modal-btn--ghost {
-    background: #fff;
-    border-color: #d0d5dd;
-    color: #344054;
-}
-
-.mm-modal-btn--primary {
-    background: linear-gradient(135deg, var(--gold, #8f6a35) 0%, #9b7448 100%);
-    color: #fff;
-    box-shadow: 0 8px 18px rgba(177, 130, 71, 0.24);
-}
-
-.mm-modal-btn--danger {
-    background: #fff1f2;
-    color: #b42318;
-    border-color: #fecdca;
-}
+/* Footer and its buttons (.mm-modal-btn--ghost/primary/danger) come from the shared modal theme. */
 
 /* Link-to-source details accordion */
 .mm-link-details summary::-webkit-details-marker {
@@ -475,10 +433,6 @@
         width: 100%;
         min-width: 0;
         height: 160px;
-    }
-
-    .mm-modal-actions {
-        padding: 12px 14px 14px;
     }
 }
 

@@ -284,13 +284,13 @@ function expiry_tier(?string $expiry, ?int $days): array
 
         <div class="modal-overlay" id="stockBatchesInsightModal" style="align-items:flex-start; padding-top:60px;">
             <div class="stock-insight-modal-box">
-                <div class="stock-insight-modal-head">
-                    <h3 id="stockBatchesInsightTitle" style="margin:0;font-size:18px;">Batch Insight</h3>
-                    <button type="button" class="stock-insight-close" onclick="closeM('stockBatchesInsightModal')" aria-label="Close stock batch insight">&times;</button>
+                <div class="modal-header stock-insight-modal-head">
+                    <h3 id="stockBatchesInsightTitle">Batch Insight</h3>
+                    <button type="button" class="modal-close stock-insight-close" onclick="closeM('stockBatchesInsightModal')" aria-label="Close stock batch insight">&times;</button>
                 </div>
-                <div id="stockBatchesInsightBody"></div>
-                <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-                    <button type="button" onclick="closeM('stockBatchesInsightModal')" style="padding:9px 16px; background:#e9ecef; border:none; border-radius:6px; cursor:pointer;">Close</button>
+                <div class="modal-body" id="stockBatchesInsightBody"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" onclick="closeM('stockBatchesInsightModal')">Close</button>
                 </div>
             </div>
         </div>
@@ -465,36 +465,46 @@ function expiry_tier(?string $expiry, ?int $days): array
     </div>
 
     <div class="modal-overlay" id="wasteModal" style="align-items:flex-start; padding-top:60px;">
-        <div style="background:#fff; padding:24px; border-radius:12px; width:95%; max-width:480px;">
-            <h3 style="margin:0 0 12px;">Mark Batch as Wasted</h3>
-            <p style="color:#6c757d; font-size:13px;">Batch <strong id="wm_batch"></strong> — <span id="wm_qty"></span> will be removed from stock and logged as wastage.</p>
+        <div class="modal-content stock-batch-dialog">
+            <div class="modal-header">
+                <h3>Mark Batch as Wasted</h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeM('wasteModal')">&times;</button>
+            </div>
             <form method="POST">
-                <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
-                <input type="hidden" name="action" value="mark_wasted">
-                <input type="hidden" name="batch_id" id="wm_id">
-                <label style="font-size:12px; font-weight:600;">Reason</label>
-                <input type="text" name="reason" required style="width:100%; padding:9px 12px; border:1px solid #d6d8db; border-radius:6px; margin-bottom:14px;" placeholder="e.g. Spoiled, contamination, expired">
-                <div style="display:flex; gap:10px; justify-content:flex-end;">
-                    <button type="button" onclick="closeM('wasteModal')" style="padding:9px 16px; background:#e9ecef; border:none; border-radius:6px; cursor:pointer;">Cancel</button>
-                    <button type="submit" style="padding:9px 16px; background:#c82333; color:#fff; border:none; border-radius:6px; cursor:pointer;">Confirm Wastage</button>
+                <div class="modal-body">
+                    <p class="stock-batch-dialog__note">Batch <strong id="wm_batch"></strong> — <span id="wm_qty"></span> will be removed from stock and logged as wastage.</p>
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                    <input type="hidden" name="action" value="mark_wasted">
+                    <input type="hidden" name="batch_id" id="wm_id">
+                    <label>Reason</label>
+                    <input type="text" name="reason" required placeholder="e.g. Spoiled, contamination, expired">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" onclick="closeM('wasteModal')">Cancel</button>
+                    <button type="submit" class="btn-danger">Confirm Wastage</button>
                 </div>
             </form>
         </div>
     </div>
 
     <div class="modal-overlay" id="recallModal" style="align-items:flex-start; padding-top:60px;">
-        <div style="background:#fff; padding:24px; border-radius:12px; width:95%; max-width:480px;">
-            <h3 style="margin:0 0 12px;">Recall Batch</h3>
-            <p style="color:#6c757d; font-size:13px;">Batch <strong id="rm_batch"></strong> will be removed from active stock and logged as recalled. Use this when the supplier asks for it back or the batch is not safe to keep active.</p>
+        <div class="modal-content stock-batch-dialog">
+            <div class="modal-header">
+                <h3>Recall Batch</h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeM('recallModal')">&times;</button>
+            </div>
             <form method="POST">
-                <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
-                <input type="hidden" name="action" value="recall">
-                <input type="hidden" name="batch_id" id="rm_id">
-                <label style="font-size:12px; font-weight:600;">Recall reason</label>
-                <input type="text" name="reason" required style="width:100%; padding:9px 12px; border:1px solid #d6d8db; border-radius:6px; margin-bottom:14px;" placeholder="e.g. Supplier recall notice">
-                <div style="display:flex; gap:10px; justify-content:flex-end;">
-                    <button type="button" onclick="closeM('recallModal')" style="padding:9px 16px; background:#e9ecef; border:none; border-radius:6px; cursor:pointer;">Cancel</button>
-                    <button type="submit" style="padding:9px 16px; background:#7E684B; color:#fff; border:none; border-radius:6px; cursor:pointer;">Confirm Recall</button>
+                <div class="modal-body">
+                    <p class="stock-batch-dialog__note">Batch <strong id="rm_batch"></strong> will be removed from active stock and logged as recalled. Use this when the supplier asks for it back or the batch is not safe to keep active.</p>
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                    <input type="hidden" name="action" value="recall">
+                    <input type="hidden" name="batch_id" id="rm_id">
+                    <label>Recall reason</label>
+                    <input type="text" name="reason" required placeholder="e.g. Supplier recall notice">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" onclick="closeM('recallModal')">Cancel</button>
+                    <button type="submit" class="btn-primary">Confirm Recall</button>
                 </div>
             </form>
         </div>

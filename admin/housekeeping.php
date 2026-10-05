@@ -1495,8 +1495,7 @@ foreach ($assignments as $a) {
         </div>
     </div>
 
-    <?php renderAdminModalStart('assignmentModal', 'Add Assignment', 'housekeeping-modal-content'); ?>
-    <form method="POST" id="assignmentForm">
+    <?php renderAdminModalStart('assignmentModal', 'Add Assignment', 'housekeeping-modal-content', 'assignmentForm'); ?>
         <input type="hidden" name="action" id="formAction" value="add_assignment">
         <input type="hidden" name="id" id="assignmentId">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
@@ -1597,24 +1596,22 @@ foreach ($assignments as $a) {
             <label>Notes</label>
             <textarea name="notes" id="notes" rows="2"></textarea>
         </div>
-        <div style="display:flex; gap:10px; justify-content:flex-end;">
-            <div id="assignmentFeedback" class="admin-modal-feedback" style="flex:1;"></div>
-            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
-            <button type="submit" id="assignmentSaveBtn" class="btn btn-primary">Save</button>
-        </div>
-    </form>
+    <?php renderAdminModalFooterStart(); ?>
+        <div id="assignmentFeedback" class="admin-modal-feedback" style="flex:1;"></div>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+        <button type="submit" id="assignmentSaveBtn" class="btn btn-primary">Save</button>
     <?php renderAdminModalEnd(); ?>
 
     <!-- Confirm action modal (replaces window.confirm) -->
     <div class="modal-overlay" id="hkConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;">
-        <div class="modal-content" style="max-width:420px;border-radius:12px;padding:0;overflow:hidden;">
-            <div class="modal-header" style="padding:16px 20px;border-bottom:1px solid #e5e7eb;">
-                <h3 style="margin:0;font-size:15px;" id="hkConfirmTitle">Confirm Action</h3>
+        <div class="modal-content" style="max-width:420px;padding:0;overflow:hidden;">
+            <div class="modal-header">
+                <h3 id="hkConfirmTitle">Confirm Action</h3>
             </div>
-            <div class="modal-body" style="padding:16px 20px;">
+            <div class="modal-body">
                 <p style="margin:0;font-size:14px;color:#374151;" id="hkConfirmMessage">Are you sure?</p>
             </div>
-            <div class="modal-footer" style="padding:12px 20px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid #e5e7eb;">
+            <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="hkCloseConfirm()">Cancel</button>
                 <button type="button" class="btn btn-danger" id="hkConfirmBtn" onclick="hkDoConfirm()">Confirm</button>
             </div>
@@ -1627,17 +1624,15 @@ foreach ($assignments as $a) {
             <i class="fas fa-spinner fa-spin"></i> Loading...
         </div>
     </div>
-    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top: 16px;">
+    <?php renderAdminModalFooterStart(); ?>
         <button type="button" class="btn btn-secondary" onclick="closeAuditLogModal()">Close</button>
-    </div>
     <?php renderAdminModalEnd(); ?>
 
     <?php renderAdminModalStart('statsQuickModal', 'Housekeeping Snapshot', 'housekeeping-modal-content hk-stats-modal'); ?>
     <div id="hkStatsModalMeta" class="hk-stats-modal__meta"></div>
     <div id="hkStatsModalList" class="hk-stats-modal__list"></div>
-    <div class="hk-stats-modal__actions">
+    <?php renderAdminModalFooterStart(); ?>
         <button type="button" class="btn btn-secondary" onclick="closeStatsQuickModal()">Close</button>
-    </div>
     <?php renderAdminModalEnd(); ?>
 
     <?php renderAdminModalScript(); ?>

@@ -596,7 +596,7 @@
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 9998;
+    z-index: 10000; /* above the sidebar */
     align-items: center;
     justify-content: center;
 }
@@ -606,102 +606,16 @@
 }
 
 .modal-content {
-    background: white;
-    border-radius: 16px;
     width: 90%;
     max-width: 500px;
     max-height: 90vh;
     overflow-y: auto;
 }
 
-.modal-header {
-    padding: 20px 24px;
-    border-bottom: 1px solid #f0f0f0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.modal-header h3 {
-    margin: 0;
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 20px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.modal-close {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: none;
-    background: #f0f0f0;
-    cursor: pointer;
-    font-size: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
+/* Header, close button, footer and footer buttons come from the shared modal theme
+   (admin-components.css). */
 .modal-body {
     padding: 24px;
-}
-
-.modal-footer {
-    padding: 14px 24px;
-    border-top: 1px solid rgba(35, 31, 28, 0.1);
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    background: linear-gradient(180deg, rgba(247, 243, 238, 0.72) 0%, rgba(243, 236, 228, 0.94) 100%);
-}
-
-.modal-footer .btn-cancel,
-.modal-footer .btn-save-perms {
-    min-width: auto;
-    min-height: 40px;
-    justify-content: center;
-    padding: 0 1.25rem;
-    font-size: 13px;
-    transition: background 0.18s, border-color 0.18s, box-shadow 0.18s, transform 0.15s;
-}
-
-.modal-footer .btn-cancel {
-    background: #fff;
-    border: 1px solid rgba(35, 31, 28, 0.22);
-    color: var(--navy, #231F1C);
-}
-
-.modal-footer .btn-cancel:hover {
-    background: #F3ECE4;
-    border-color: rgba(35, 31, 28, 0.38);
-}
-
-.modal-footer .btn-save-perms:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(177, 130, 71, 0.32);
-}
-
-.user-management-container .btn-delete-confirm {
-    padding: 0 1.25rem;
-    min-height: 40px;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 13px;
-    cursor: pointer;
-    border: none;
-    background: linear-gradient(135deg, #c62828 0%, #a01e1e 100%);
-    color: white;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    transition: box-shadow 0.18s, transform 0.15s;
-}
-
-.user-management-container .btn-delete-confirm:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(198, 40, 40, 0.32);
 }
 
 .form-row {
@@ -780,8 +694,6 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: linear-gradient(180deg, #FDFAF5 0%, #F7F0E8 100%);
-    box-shadow: 0 28px 70px rgba(35, 31, 28, 0.22);
 }
 
 .permissions-modal__form {
@@ -791,25 +703,10 @@
     height: 100%;
 }
 
-#permissionsModal .modal-header {
-    padding: 22px 28px 18px;
-    background: linear-gradient(180deg, rgba(247, 243, 238, 0.92) 0%, rgba(243, 236, 228, 0.88) 100%);
-    border-bottom: 1px solid rgba(138, 119, 95, 0.16);
-}
-
-#permissionsModal .modal-header h3 {
-    color: #231F1C;
-}
-
 .permissions-modal__body {
     flex: 1;
     overflow-y: auto;
     padding: 20px 28px 24px;
-    background: linear-gradient(180deg, #F7F3EE 0%, #EFE7DC 100%);
-}
-
-#permissionsModal .modal-footer {
-    padding: 14px 28px;
 }
 
 .permissions-modal__summary {
@@ -996,15 +893,9 @@
         border-radius: 0;
     }
 
-    #permissionsModal .modal-header,
-    .permissions-modal__body,
-    #permissionsModal .modal-footer {
+    .permissions-modal__body {
         padding-left: 16px;
         padding-right: 16px;
-    }
-
-    #permissionsModal .modal-footer {
-        flex-wrap: wrap;
     }
 
     #permissionsModal .modal-footer .btn-cancel,

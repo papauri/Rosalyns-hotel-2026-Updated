@@ -500,14 +500,14 @@ $site_name = getSetting('site_name');
     <div class="modal" id="blockSingleDateModal" data-modal>
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">
+                <h3 class="modal-title">
                     <i class="fas fa-calendar-day"></i> Block Single Date
-                </h5>
-                <button type="button" class="btn-close" data-modal-close="blockSingleDateModal" aria-label="Close modal"></button>
+                </h3>
+                <button type="button" class="modal-close" data-modal-close="blockSingleDateModal" aria-label="Close">&times;</button>
             </div>
+            <form method="POST" id="blockSingleDateForm">
             <div class="modal-body">
-                <form method="POST" id="blockSingleDateForm">
-                    <input type="hidden" name="action" value="block_date">
+                                    <input type="hidden" name="action" value="block_date">
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                     <input type="hidden" name="block_scope" id="blockSingleScope" value="type">
 
@@ -565,14 +565,14 @@ $site_name = getSetting('site_name');
                     </div>
 
                     <div id="blockSingleFeedback" class="admin-modal-feedback mb-3"></div>
-                    <div class="d-flex justify-content-end gap-2">
+                    </div>
+                    <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-modal-close="blockSingleDateModal">Close</button>
                         <button type="submit" id="blockSingleSaveBtn" class="btn btn-primary">
                             <i class="fas fa-ban"></i> Block Date
                         </button>
                     </div>
                 </form>
-            </div>
         </div>
     </div>
 
@@ -581,14 +581,14 @@ $site_name = getSetting('site_name');
     <div class="modal" id="blockDateRangeModal" data-modal>
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">
+                <h3 class="modal-title">
                     <i class="fas fa-calendar-week"></i> Block Date Range
-                </h5>
-                <button type="button" class="btn-close" data-modal-close="blockDateRangeModal" aria-label="Close modal"></button>
+                </h3>
+                <button type="button" class="modal-close" data-modal-close="blockDateRangeModal" aria-label="Close">&times;</button>
             </div>
+            <form method="POST" id="blockRangeForm">
             <div class="modal-body">
-                <form method="POST" id="blockRangeForm">
-                    <input type="hidden" name="action" value="block_multiple">
+                                    <input type="hidden" name="action" value="block_multiple">
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                     <input type="hidden" name="dates" id="selectedDatesArray">
                     <input type="hidden" name="block_scope" id="blockRangeScope" value="type">
@@ -655,14 +655,14 @@ $site_name = getSetting('site_name');
                     </div>
 
                     <div id="blockRangeFeedback" class="admin-modal-feedback mb-3"></div>
-                    <div class="d-flex justify-content-end gap-2">
+                    </div>
+                    <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-modal-close="blockDateRangeModal">Close</button>
                         <button type="submit" id="blockRangeSaveBtn" class="btn btn-primary">
                             <i class="fas fa-ban"></i> Block Dates
                         </button>
                     </div>
                 </form>
-            </div>
         </div>
     </div>
 

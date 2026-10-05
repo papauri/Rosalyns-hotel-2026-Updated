@@ -220,13 +220,6 @@
     overflow-y: auto;
 }
 
-.modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 14px;
-}
-
 @media (max-width: 768px) {
     .add-page-grid {
         grid-template-columns: 1fr;

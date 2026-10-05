@@ -481,15 +481,15 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
     <!-- Add/Edit Modal -->
     <div class="modal-overlay" id="galleryModal">
         <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="modalTitle"><i class="fas fa-plus-circle"></i> Add Gallery Item</h3>
-                <button class="modal-close" type="button" onclick="closeModal()">&times;</button>
-            </div>
             <form method="POST" enctype="multipart/form-data" id="galleryForm">
                 <input type="hidden" name="action" id="formAction" value="add">
                 <input type="hidden" name="id" id="formId" value="">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-
+                <div class="modal-header">
+                    <h3 id="modalTitle"><i class="fas fa-plus-circle"></i> Add Gallery Item</h3>
+                    <button class="modal-close" type="button" aria-label="Close" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="modal-body">
                 <div class="form-group">
                     <label>Title *</label>
                     <input type="text" name="title" id="formTitle" required>
@@ -547,15 +547,13 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
                     <div style="text-align:center; color:#999; font-size:11px; margin:8px 0;">— OR upload —</div>
                     <input type="file" name="video" accept="video/*">
                 </div>
-
-                <div class="form-actions" style="flex-direction:column; align-items:stretch; gap:0;">
-                    <div id="galleryModalFeedback" class="admin-modal-feedback"></div>
-                    <div style="display:flex; justify-content:flex-end; gap:10px;">
-                        <button type="button" onclick="closeModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
-                        <button type="submit" id="galleryFormSubmitBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold, #7E684B); color:var(--deep-navy, #111111); font-weight:600; cursor:pointer;">
-                            <i class="fas fa-save"></i> Save
-                        </button>
-                    </div>
+                </div>
+                <div class="form-actions modal-footer">
+                    <div id="galleryModalFeedback" class="admin-modal-feedback" style="width:100%;"></div>
+                    <button type="button" onclick="closeModal()">Close</button>
+                    <button type="submit" id="galleryFormSubmitBtn">
+                        <i class="fas fa-save"></i> Save
+                    </button>
                 </div>
             </form>
         </div>

@@ -878,18 +878,11 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
             </div>
 
             <div id="eventModalFeedback" class="admin-modal-feedback"></div>
-            <div style="display: flex; gap: 10px; justify-content: flex-end; padding-top: 20px; border-top: 1px solid #eee; margin-top: 20px;">
-                <button type="button" class="btn-action btn-cancel" onclick="closeEventModal()">
-                    <i class="fas fa-times"></i> Close
-                </button>
-                <button type="submit" id="eventSaveBtn" class="btn-action btn-save">
-                    <i class="fas fa-save"></i> Save
-                </button>
-            </div>
         </form>
     ', [
         'size' => 'lg',
-        'show_close' => false
+        'footer' => '<button type="button" class="btn btn-secondary btn-cancel" onclick="closeEventModal()"><i class="fas fa-times"></i> Close</button>'
+            . '<button type="submit" form="eventForm" id="eventSaveBtn" class="btn btn-primary btn-save"><i class="fas fa-save"></i> Save</button>'
     ]);
 
     renderModal('eventQuoteModal', 'Send Event Quotation', '
@@ -939,18 +932,11 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                 <label for="quoteSendWhatsapp">Also send via WhatsApp (when phone is provided and WhatsApp is enabled)</label>
             </div>
 
-            <div style="display:flex; gap:10px; justify-content:flex-end; padding-top:16px; border-top:1px solid #eee; margin-top:12px;">
-                <button type="button" class="btn-action btn-cancel" onclick="closeEventQuoteModal()">
-                    <i class="fas fa-times"></i> Close
-                </button>
-                <button type="submit" class="btn-action btn-save">
-                    <i class="fas fa-paper-plane"></i> Send Quotation
-                </button>
-            </div>
         </form>
     ', [
         'size' => 'md',
-        'show_close' => false
+        'footer' => '<button type="button" class="btn btn-secondary btn-cancel" onclick="closeEventQuoteModal()"><i class="fas fa-times"></i> Close</button>'
+            . '<button type="submit" form="eventQuoteForm" class="btn btn-primary btn-save"><i class="fas fa-paper-plane"></i> Send Quotation</button>'
     ]);
     ?>
 
@@ -1421,9 +1407,9 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
     <!-- Facebook Event Share Modal -->
     <div class="modal-overlay" id="fbEventShareModal" style="display:none;" onclick="if(event.target===this)closeFbEventShareModal()">
         <div class="modal-content" style="max-width:520px;">
-            <div class="modal-header" style="border-top:4px solid #1877F2;">
-                <h3 id="fbEventShareTitle" style="color:#1877F2;"><i class="fab fa-facebook-f"></i> Post to Facebook</h3>
-                <button class="modal-close" type="button" onclick="closeFbEventShareModal()">&times;</button>
+            <div class="modal-header">
+                <h3 id="fbEventShareTitle"><i class="fab fa-facebook-f"></i> Post to Facebook</h3>
+                <button class="modal-close" type="button" aria-label="Close" onclick="closeFbEventShareModal()">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
@@ -1437,7 +1423,7 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                 <div id="fbEventShareFeedback" class="admin-modal-feedback" style="margin-top:12px;"></div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn fb-btn" id="fbEventShareSubmitBtn">
+                <button type="button" class="btn btn-primary fb-btn" id="fbEventShareSubmitBtn">
                     <i class="fab fa-facebook-f"></i> Post to Facebook Page
                 </button>
                 <button type="button" class="btn btn-secondary" onclick="closeFbEventShareModal()">Cancel</button>

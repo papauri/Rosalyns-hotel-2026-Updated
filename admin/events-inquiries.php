@@ -553,7 +553,7 @@ try {
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Event Booking Details</h3>
-                <span class="close" onclick="closeInquiryModal()">&times;</span>
+                <button type="button" class="modal-close" onclick="closeInquiryModal()" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body" id="inquiryModalBody">
                 <!-- Content will be loaded dynamically -->

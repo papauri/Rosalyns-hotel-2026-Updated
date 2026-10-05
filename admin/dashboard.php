@@ -2534,7 +2534,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <p class="dashboard-insight-modal__loading"><i class="fas fa-spinner fa-spin"></i> Loading details…</p>
             </div>
             <footer class="dashboard-insight-modal__footer modal-footer" id="dashboardInsightFooter">
-                <a id="dashboardInsightLink" class="dashboard-insight-modal__link" href="dashboard.php">Open full page</a>
+                <a id="dashboardInsightLink" class="btn btn-primary dashboard-insight-modal__link" href="dashboard.php">Open full page</a>
             </footer>
         </div>
     </div>

@@ -237,9 +237,9 @@ try {
                     <input type="checkbox" id="gcActive" checked> <span>Active — show on the public schedule</span>
                 </label>
             </div>
-            <div class="mm-modal-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;">
-                <button class="mm-btn mm-btn-ghost" onclick="gcClose('gcClassModal')">Cancel</button>
-                <button class="mm-btn mm-btn-primary" onclick="gcSaveClass()">Save Class</button>
+            <div class="mm-modal-foot">
+                <button type="button" class="mm-btn mm-btn-ghost" onclick="gcClose('gcClassModal')">Cancel</button>
+                <button type="button" class="mm-btn mm-btn-primary" onclick="gcSaveClass()">Save Class</button>
             </div>
         </div>
     </div>
@@ -260,11 +260,11 @@ try {
                 <?php endif; ?>
                 <div id="gcRosterBody"><p style="color:#9a8f82;">Loading…</p></div>
             </div>
-            <div class="mm-modal-foot" style="display:flex;justify-content:space-between;gap:10px;padding:14px 18px;align-items:center;">
+            <div class="mm-modal-foot">
                 <?php if ($gc_can_edit): ?>
-                <button class="mm-btn" style="background:#7E684B;color:#fff;" id="gcRosterRemindBtn" onclick="gcRemindFromRoster()"><i class="fas fa-bell"></i> Send reminder to all</button>
+                <button type="button" class="mm-btn mm-btn-primary" id="gcRosterRemindBtn" onclick="gcRemindFromRoster()"><i class="fas fa-bell"></i> Send reminder to all</button>
                 <?php else: ?><span></span><?php endif; ?>
-                <button class="mm-btn mm-btn-ghost" onclick="gcClose('gcRosterModal')">Close</button>
+                <button type="button" class="mm-btn mm-btn-ghost" onclick="gcClose('gcRosterModal')">Close</button>
             </div>
         </div>
     </div>
@@ -273,13 +273,13 @@ try {
     <div class="mm-modal" id="gcConfirmModal">
         <div class="mm-modal-card sm">
             <div class="mm-modal-head">
-                <h3><i class="fas fa-circle-question" style="color:#7E684B;"></i> Please confirm</h3>
+                <h3><i class="fas fa-circle-question"></i> Please confirm</h3>
                 <button type="button" class="mm-modal-close" onclick="gcClose('gcConfirmModal')" aria-label="Close">&times;</button>
             </div>
             <div class="mm-modal-body"><p id="gcConfirmText" style="margin:0;"></p></div>
-            <div class="mm-modal-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;">
-                <button class="mm-btn mm-btn-ghost" onclick="gcClose('gcConfirmModal')">Cancel</button>
-                <button class="mm-btn mm-btn-primary" id="gcConfirmYes">Yes, continue</button>
+            <div class="mm-modal-foot">
+                <button type="button" class="mm-btn mm-btn-ghost" onclick="gcClose('gcConfirmModal')">Cancel</button>
+                <button type="button" class="mm-btn mm-btn-primary" id="gcConfirmYes">Yes, continue</button>
             </div>
         </div>
     </div>

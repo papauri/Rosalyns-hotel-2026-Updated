@@ -914,10 +914,6 @@ if ($media_css_version === '' || $media_css_version === '0') {
         <?php if (hasPermission($user['id'], 'media_edit')): ?>
             <div class="modal-overlay" id="mmEditModal" aria-hidden="true">
                 <div class="modal-content mm-edit-modal" role="dialog" aria-modal="true" aria-labelledby="mmEditModalTitle">
-                    <div class="modal-header">
-                        <h3 id="mmEditModalTitle"><i class="fas fa-pen"></i> Edit Media Item</h3>
-                        <button class="modal-close" type="button" onclick="mmCloseEditModal()" aria-label="Close edit modal">&times;</button>
-                    </div>
                     <form method="POST" enctype="multipart/form-data" id="mm-edit-modal-form">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
                         <input type="hidden" name="action" value="update_item" id="mm-edit-action">
@@ -925,8 +921,12 @@ if ($media_css_version === '' || $media_css_version === '0') {
                         <input type="hidden" name="placement_key" id="mm-edit-placement-key">
                         <input type="hidden" name="entity_type" id="mm-edit-entity-type">
                         <input type="hidden" name="entity_id" id="mm-edit-entity-id">
+                        <div class="modal-header">
+                            <h3 id="mmEditModalTitle"><i class="fas fa-pen"></i> Edit Media Item</h3>
+                            <button class="modal-close" type="button" onclick="mmCloseEditModal()" aria-label="Close edit modal">&times;</button>
+                        </div>
 
-                        <div class="mm-edit-modal__body">
+                        <div class="modal-body mm-edit-modal__body">
                             <div class="mm-edit-preview" id="mm-edit-preview" hidden>
                                 <div class="mm-edit-preview__media" id="mm-edit-preview-media"></div>
                                 <div class="mm-edit-preview__details">
@@ -987,7 +987,7 @@ if ($media_css_version === '' || $media_css_version === '0') {
                             </div>
                         </div>
 
-                        <div class="mm-modal-actions">
+                        <div class="mm-modal-actions modal-footer">
                             <button type="button" class="mm-modal-btn mm-modal-btn--ghost" onclick="mmCloseEditModal()">Cancel</button>
                             <?php if (hasPermission($user['id'], 'media_delete')): ?>
                                 <button type="button" id="mm-modal-delete-btn" class="mm-modal-btn mm-modal-btn--danger">

@@ -141,52 +141,13 @@
 
 #modal-receipt-email .modal__dialog {
     position: relative;
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0,0,0,.2);
     width: min(480px, 94vw);
     overflow: hidden;
     z-index: 1;
 }
 
-#modal-receipt-email .modal__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1.1rem 1.25rem;
-    border-bottom: 1px solid var(--color-border, #e8e0d6);
-}
-
-#modal-receipt-email .modal__title {
-    margin: 0;
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: var(--color-text, #2A2723);
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-#modal-receipt-email .modal__close {
-    background: none;
-    border: none;
-    font-size: 1.4rem;
-    cursor: pointer;
-    color: var(--color-muted, #888);
-    line-height: 1;
-    padding: 0 4px;
-}
-
 #modal-receipt-email .modal__body {
     padding: 1.25rem;
-}
-
-#modal-receipt-email .modal__footer {
-    display: flex;
-    gap: 0.5rem;
-    justify-content: flex-end;
-    padding: 1rem 1.25rem;
-    border-top: 1px solid var(--color-border, #e8e0d6);
 }
 
 /* ── Autocomplete (from receipts.js) ─────────────────────────── */

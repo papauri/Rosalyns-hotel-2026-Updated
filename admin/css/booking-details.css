@@ -780,7 +780,7 @@
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
+    z-index: 10000; /* above the sidebar (z 1000-1200) */
     align-items: center;
     justify-content: center;
 }
@@ -790,10 +790,6 @@
 }
 
 .modal-content {
-    --rh-modal-shell-pad: 24px;
-    background: var(--color-white, #fff);
-    border-radius: 16px;
-    padding: 24px;
     width: 90%;
     max-width: 600px;
     max-height: 90vh;
@@ -804,33 +800,10 @@
     max-width: 800px;
 }
 
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid #f0f0f0;
-}
-
-.modal-header h3 {
-    margin: 0;
-    font-size: 18px;
-    color: var(--navy, #231F1C);
-}
-
-.modal-close {
-    background: none;
-    border: none;
-    font-size: 24px;
-    cursor: pointer;
-    color: #888;
-    padding: 0;
-    line-height: 1;
-}
-
-.modal-close:hover {
-    color: var(--navy, #231F1C);
+/* Header, close button, footer and action buttons come from the shared modal theme
+   (admin-components.css). Keep the body spacing here. */
+.modal-body .form-group:last-child {
+    margin-bottom: 0;
 }
 
 .form-group {
@@ -913,57 +886,6 @@
     font-weight: 700;
     color: var(--gold, var(--color-lux-gold, #8F6A35));
     font-size: 14px;
-}
-
-.modal-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 20px;
-    padding-top: 16px;
-    border-top: 1px solid #f0f0f0;
-}
-
-.modal-actions button {
-    flex: 1;
-    padding: 12px;
-    border-radius: 10px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-    transition: all 0.2s ease;
-}
-
-.modal-actions .btn-primary {
-    background: var(--gold, var(--color-lux-gold, #8F6A35));
-    color: white;
-}
-
-.modal-actions .btn-primary:hover {
-    background: var(--color-primary-dark, #6f5b43);
-}
-
-.modal-actions .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.modal-actions .btn-secondary {
-    background: #f0f0f0;
-    color: #333;
-}
-
-.modal-actions .btn-secondary:hover {
-    background: #e0e0e0;
-}
-
-.modal-actions .btn-danger {
-    background: #a03030;
-    color: white;
-}
-
-.modal-actions .btn-danger:hover {
-    background: #8b0000;
 }
 
 /* Timeline — explicit column placement only when the row is two-column

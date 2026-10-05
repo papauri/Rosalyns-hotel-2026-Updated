@@ -434,10 +434,6 @@
     max-width: 760px;
 }
 
-.modal-body {
-    padding: 18px;
-}
-
 .form-section {
     padding-bottom: 16px;
     margin-bottom: 16px;
@@ -467,14 +463,6 @@
 
 .checkbox-row {
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-}
-
-.form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    padding: 16px 18px 20px;
-    border-top: 1px solid var(--admin-surface-border, #e5e7eb);
 }
 
 .current-image {

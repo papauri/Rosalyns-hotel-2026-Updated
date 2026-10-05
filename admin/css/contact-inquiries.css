@@ -252,11 +252,6 @@
 .contact-reply-modal__field input,
 .contact-reply-modal__field textarea {
     width: 100%;
-    border: 1px solid var(--admin-surface-border);
-    border-radius: 0.75rem;
-    background: var(--color-white);
-    color: var(--color-text-primary);
-    font-family: 'Jost', sans-serif;
     font-size: max(16px, 1rem);
     line-height: 1.5;
     padding: 0.85rem 1rem;
@@ -267,11 +262,12 @@
     resize: vertical;
 }
 
-.contact-reply-modal__field input:focus,
-.contact-reply-modal__field textarea:focus {
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--color-primary) 18%, transparent);
-    outline: none;
+/* The renderModal() close button is an empty element whose cross is drawn by
+   css/components/modal.css, which the back office does not load. */
+.modal__close:empty::before {
+    content: '\00d7';
+    font-size: 1.4rem;
+    line-height: 1;
 }
 
 .contact-reply-modal__reference {

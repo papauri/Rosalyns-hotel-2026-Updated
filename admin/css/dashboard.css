@@ -276,10 +276,6 @@ body.dashboard-insight-open {
     max-height: min(92dvh, 58rem);
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--admin-surface-border, #eaecef);
-    border-radius: 1rem;
-    background: var(--color-white, #fff);
-    box-shadow: 0 1.1rem 2.8rem rgba(23, 27, 35, 0.24);
     overflow: hidden;
 }
 
@@ -288,9 +284,6 @@ body.dashboard-insight-open {
     justify-content: space-between;
     align-items: flex-start;
     gap: 0.9rem;
-    padding: 0.95rem 1rem 0.8rem;
-    border-bottom: 1px solid var(--admin-surface-border, #eaecef);
-    background: linear-gradient(135deg, var(--color-white, #fff), var(--color-lux-clay-50, #F3ECE4));
 }
 
 .dashboard-insight-modal__eyebrow {
@@ -303,33 +296,12 @@ body.dashboard-insight-open {
 
 .dashboard-insight-modal__header h3 {
     margin: 0.1rem 0;
-    font-size: clamp(1rem, 0.86rem + 0.5vw, 1.36rem);
-    color: var(--color-text-primary, #2A2723);
 }
 
 .dashboard-insight-modal__subtitle {
     margin: 0;
     font-size: clamp(0.78rem, 0.7rem + 0.2vw, 0.92rem);
     color: var(--color-text-secondary, #5E554D);
-}
-
-.dashboard-insight-modal__close {
-    width: 2.25rem;
-    height: 2.25rem;
-    min-width: 2.25rem;
-    border: 1px solid var(--admin-surface-border, #eaecef);
-    border-radius: 999px;
-    background: var(--color-white, #fff);
-    color: var(--color-text-secondary, #5E554D);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-}
-
-.dashboard-insight-modal__close:hover {
-    border-color: var(--color-primary, #766550);
-    color: var(--color-primary, #766550);
 }
 
 .dashboard-insight-modal__body {
@@ -469,49 +441,14 @@ body.dashboard-insight-open {
     margin: 0.46rem 0 0;
 }
 
-.dashboard-insight-modal__footer {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    padding: 0.74rem 1rem 0.9rem;
-    border-top: 1px solid var(--admin-surface-border, #eaecef);
-    background: var(--color-white, #fff);
-}
-
-.dashboard-insight-modal__link {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 2.75rem;
-    padding: 0 0.95rem;
-    border-radius: 999px;
-    border: 1px solid var(--color-primary, #766550);
-    color: var(--color-primary, #766550);
-    text-decoration: none;
-    font-weight: 600;
-    font-size: clamp(0.8rem, 0.74rem + 0.18vw, 0.92rem);
-}
-
-.dashboard-insight-modal__link:hover {
-    background: color-mix(in srgb, var(--color-primary, #766550) 10%, transparent);
-}
-
 @media (min-width: 48rem) {
     .dashboard-insight-modal {
         align-items: center;
         padding: 1rem;
     }
 
-    .dashboard-insight-modal__header {
-        padding: 1.05rem 1.2rem 0.9rem;
-    }
-
     .dashboard-insight-modal__body {
         padding: 1rem 1.2rem;
-    }
-
-    .dashboard-insight-modal__footer {
-        padding: 0.84rem 1.2rem 1rem;
     }
 }
 

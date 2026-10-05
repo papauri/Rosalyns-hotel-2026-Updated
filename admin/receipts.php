@@ -489,7 +489,7 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
             <div class="modal__dialog modal__dialog--md">
                 <div class="modal__header">
                     <h3 class="modal__title"><i class="fas fa-envelope"></i> Email Receipt</h3>
-                    <button class="modal__close" onclick="closeReceiptEmailModal()" aria-label="Close">&times;</button>
+                    <button type="button" class="modal__close" onclick="closeReceiptEmailModal()" aria-label="Close">&times;</button>
                 </div>
                 <form method="post" id="receipt-email-form">
                     <div class="modal__body">

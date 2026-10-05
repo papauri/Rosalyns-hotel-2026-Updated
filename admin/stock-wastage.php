@@ -248,13 +248,13 @@ $csrf_token = generateCsrfToken();
 
         <div class="modal-overlay" id="stockWastageInsightModal" style="align-items:flex-start; padding-top:60px;">
             <div class="stock-insight-modal-box">
-                <div class="stock-insight-modal-head">
-                    <h3 id="stockWastageInsightTitle" style="margin:0;font-size:18px;">Wastage Insight</h3>
-                    <button type="button" class="stock-insight-close" onclick="closeStockWastageInsight()" aria-label="Close wastage insight">&times;</button>
+                <div class="modal-header stock-insight-modal-head">
+                    <h3 id="stockWastageInsightTitle">Wastage Insight</h3>
+                    <button type="button" class="modal-close stock-insight-close" onclick="closeStockWastageInsight()" aria-label="Close wastage insight">&times;</button>
                 </div>
-                <div id="stockWastageInsightBody"></div>
-                <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-                    <button type="button" onclick="closeStockWastageInsight()" style="padding:9px 16px; background:#e9ecef; border:none; border-radius:6px; cursor:pointer;">Close</button>
+                <div class="modal-body" id="stockWastageInsightBody"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" onclick="closeStockWastageInsight()">Close</button>
                 </div>
             </div>
         </div>

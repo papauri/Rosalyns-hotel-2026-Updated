@@ -371,7 +371,10 @@ a{color:var(--primary);text-decoration:none}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:flex-end;justify-content:center}
 .modal-sheet{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;padding:20px 16px 32px}
 .modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px}
-.modal-title{font-size:16px;font-weight:700;margin-bottom:4px;color:var(--text)}
+.modal-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
+.modal-title{font-size:16px;font-weight:700;color:var(--text)}
+.modal-close{flex:0 0 auto;width:44px;height:44px;margin-right:-8px;border:none;background:transparent;color:var(--muted);font-size:26px;line-height:1;cursor:pointer;border-radius:10px}
+.modal-close:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
 .modal-sub{font-size:13px;color:var(--muted);margin-bottom:16px}
 .modal-field{margin-bottom:14px}
 .modal-field label{display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
@@ -482,7 +485,10 @@ a{color:var(--primary);text-decoration:none}
 <div class="modal-overlay" id="registerModal" style="display:none">
     <div class="modal-sheet">
         <div class="modal-handle"></div>
-        <div class="modal-title">Unknown Barcode</div>
+        <div class="modal-header">
+            <div class="modal-title">Unknown Barcode</div>
+            <button type="button" class="modal-close" aria-label="Close" onclick="closeRegisterModal()">&times;</button>
+        </div>
         <div class="modal-sub" id="registerModalSub" style="font-family:monospace;font-size:12px;background:var(--surface2);padding:6px 10px;border-radius:6px;color:var(--muted)"></div>
 
         <!-- Step 1: type picker -->

@@ -655,8 +655,12 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     <!-- Add/Edit Ingredient Modal -->
     <div class="modal-overlay" id="ingredientModal">
         <div class="modal-content">
-            <h3 id="ingredientModalTitle">Add <?php echo $stockNoun; ?></h3>
+            <div class="modal-header">
+                <h3 id="ingredientModalTitle">Add <?php echo $stockNoun; ?></h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('ingredientModal')">&times;</button>
+            </div>
             <form method="POST" id="ingredientForm">
+                <div class="modal-body">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" id="ing_action" value="add">
                 <input type="hidden" name="id" id="ing_id" value="">
@@ -727,7 +731,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                         <input type="number" name="lead_time_days" id="ing_lead" min="0" max="365" value="0">
                     </div>
                 </div>
-                <div class="modal-actions">
+                </div>
+                <div class="modal-footer">
                     <button type="button" class="btn-secondary" onclick="closeModal('ingredientModal')">Cancel</button>
                     <button type="submit" class="btn-primary">Save</button>
                 </div>
@@ -738,8 +743,12 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     <!-- Stock-In Modal -->
     <div class="modal-overlay" id="stockInModal">
         <div class="modal-content">
-            <h3>Stock In: <span id="si_name"></span></h3>
+            <div class="modal-header">
+                <h3>Stock In: <span id="si_name"></span></h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('stockInModal')">&times;</button>
+            </div>
             <form method="POST" id="stockInForm" onsubmit="return confirmStockIn(this);">
+                <div class="modal-body">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="stock_in">
                 <input type="hidden" name="id" id="si_id" value="">
@@ -786,7 +795,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     <input type="text" name="notes" maxlength="500">
                 </div>
                 <div id="si_warning" style="display:none; margin-top:12px;" class="stock-warn"></div>
-                <div class="modal-actions">
+                </div>
+                <div class="modal-footer">
                     <button type="button" class="btn-secondary" onclick="closeModal('stockInModal')">Cancel</button>
                     <button type="submit" class="btn-primary">Receive Stock</button>
                 </div>
@@ -797,8 +807,12 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     <!-- Adjust Modal -->
     <div class="modal-overlay" id="adjustModal">
         <div class="modal-content">
-            <h3>Manual Adjustment: <span id="adj_name"></span></h3>
+            <div class="modal-header">
+                <h3>Manual Adjustment: <span id="adj_name"></span></h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('adjustModal')">&times;</button>
+            </div>
             <form method="POST">
+                <div class="modal-body">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="adjust">
                 <input type="hidden" name="id" id="adj_id" value="">
@@ -819,7 +833,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     <label>Reason *</label>
                     <input type="text" name="reason" required maxlength="250" placeholder="e.g. Stock count correction, found extra, breakage">
                 </div>
-                <div class="modal-actions">
+                </div>
+                <div class="modal-footer">
                     <button type="button" class="btn-secondary" onclick="closeModal('adjustModal')">Cancel</button>
                     <button type="submit" class="btn-primary">Save Adjustment</button>
                 </div>
@@ -830,11 +845,15 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     <!-- Batches Modal -->
     <div class="modal-overlay" id="batchesModal">
         <div class="modal-content">
-            <h3 style="display:flex;align-items:center;gap:10px;">
-                <i class="fas fa-boxes-stacked" style="color:#7E684B;"></i>
-                Batches: <span id="bm_name"></span>
-                <span style="font-weight:400; font-size:13px; color:#6c757d;">(unit: <span id="bm_unit"></span>)</span>
-            </h3>
+            <div class="modal-header">
+                <h3>
+                    <i class="fas fa-boxes-stacked"></i>
+                    Batches: <span id="bm_name"></span>
+                    <span style="font-weight:400; font-size:13px;">(unit: <span id="bm_unit"></span>)</span>
+                </h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('batchesModal')">&times;</button>
+            </div>
+            <div class="modal-body">
             <p style="font-size:13px; color:#5b4a1f; background:#fffbf2; border-left:3px solid #f0ad4e; padding:8px 12px; border-radius:4px; margin:0 0 12px;">
                 Each batch tracks its own <strong>expiry date</strong>, <strong>supplier</strong>, and <strong>quantity remaining</strong>.
                 Edit a batch to fix a wrong expiry date or notes. Use <strong>Discard</strong> to write off expired/recalled stock — that automatically subtracts the remaining quantity from total stock.
@@ -842,7 +861,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
 
             <div id="bm_table_wrap"></div>
 
-            <div class="modal-actions">
+            </div>
+            <div class="modal-footer">
                 <button type="button" class="btn-secondary" onclick="closeModal('batchesModal')">Close</button>
             </div>
         </div>
@@ -851,8 +871,12 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     <!-- Edit Single Batch Modal -->
     <div class="modal-overlay" id="editBatchModal">
         <div class="modal-content" style="max-width:520px;">
-            <h3>Edit Batch <span id="eb_batchno" style="color:#7E684B;"></span></h3>
+            <div class="modal-header">
+                <h3>Edit Batch <span id="eb_batchno"></span></h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('editBatchModal')">&times;</button>
+            </div>
             <form method="POST">
+                <div class="modal-body">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="update_batch">
                 <input type="hidden" name="batch_id" id="eb_id">
@@ -873,7 +897,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     <label>Notes</label>
                     <input type="text" name="notes" id="eb_notes" maxlength="500">
                 </div>
-                <div class="modal-actions">
+                </div>
+                <div class="modal-footer">
                     <button type="button" class="btn-secondary" onclick="closeModal('editBatchModal')">Cancel</button>
                     <button type="submit" class="btn-primary">Save Batch</button>
                 </div>
@@ -884,8 +909,12 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     <!-- Discard Batch Modal -->
     <div class="modal-overlay" id="discardBatchModal">
         <div class="modal-content" style="max-width:480px;">
-            <h3 style="color:#c82333;"><i class="fas fa-trash-can"></i> Discard Batch <span id="db_batchno"></span></h3>
+            <div class="modal-header">
+                <h3><i class="fas fa-trash-can"></i> Discard Batch <span id="db_batchno"></span></h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('discardBatchModal')">&times;</button>
+            </div>
             <form method="POST" onsubmit="return confirm('This will subtract the remaining quantity from your total stock and close the batch. Continue?');">
+                <div class="modal-body">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="discard_batch">
                 <input type="hidden" name="batch_id" id="db_id">
@@ -904,9 +933,10 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     <label>Details</label>
                     <input type="text" name="reason" maxlength="250" placeholder="e.g. Found mouldy, dented can, supplier recall #123" required>
                 </div>
-                <div class="modal-actions">
+                </div>
+                <div class="modal-footer">
                     <button type="button" class="btn-secondary" onclick="closeModal('discardBatchModal')">Cancel</button>
-                    <button type="submit" class="btn-primary" style="background:#c82333;">Discard Batch</button>
+                    <button type="submit" class="btn-danger">Discard Batch</button>
                 </div>
             </form>
         </div>

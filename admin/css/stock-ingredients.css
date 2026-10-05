@@ -134,17 +134,11 @@
 }
 
 .modal-content {
-    --rh-modal-shell-pad: 24px;
-    background: var(--color-white, #fff);
-    border-radius: 12px;
     width: 95%;
     max-width: 560px;
-    padding: 24px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
-}
-
-.modal-content h3 {
-    margin: 0 0 18px;
+    padding: 0;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
 }
 
 .modal-content .form-row {
@@ -166,16 +160,11 @@
 .modal-content textarea {
     width: 100%;
     padding: 9px 12px;
-    border: 1px solid #d6d8db;
-    border-radius: 6px;
     font-size: 14px;
 }
 
-.modal-actions {
-    display: flex;
-    gap: 10px;
-    justify-content: flex-end;
-    margin-top: 18px;
+.modal-body > * + * {
+    margin-top: 12px;
 }
 
 .stock-ingredients-page .btn-primary {

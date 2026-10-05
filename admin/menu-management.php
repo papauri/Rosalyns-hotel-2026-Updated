@@ -1445,9 +1445,9 @@ if ($stockReady) {
         <!-- Facebook Menu Item Share Modal — two-column with live preview -->
         <div class="modal-overlay" id="fbMenuModal" style="display:none;" onclick="if(event.target===this)closeFbMenuModal()">
             <div class="modal-content" style="max-width:760px;">
-                <div class="modal-header" style="border-top:4px solid #1877F2;">
-                    <h3 id="fbMenuTitle" style="color:#1877F2;"><i class="fab fa-facebook-f"></i> Feature on Facebook</h3>
-                    <button class="modal-close" type="button" onclick="closeFbMenuModal()">&times;</button>
+                <div class="modal-header">
+                    <h3 id="fbMenuTitle"><i class="fab fa-facebook-f"></i> Feature on Facebook</h3>
+                    <button class="modal-close" type="button" aria-label="Close" onclick="closeFbMenuModal()">&times;</button>
                 </div>
                 <div class="modal-body" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
                     <!-- Left: compose -->
@@ -1481,10 +1481,10 @@ if ($stockReady) {
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" id="fbMenuSubmitBtn" class="btn" style="background:#1877F2;color:#fff;border-color:#1877F2;">
+                    <button type="button" class="btn btn-secondary" onclick="closeFbMenuModal()">Cancel</button>
+                    <button type="button" id="fbMenuSubmitBtn" class="btn btn-primary">
                         <i class="fab fa-facebook-f"></i> Post to Facebook Page
                     </button>
-                    <button type="button" class="btn btn-secondary" onclick="closeFbMenuModal()">Cancel</button>
                 </div>
             </div>
         </div>
@@ -1492,9 +1492,9 @@ if ($stockReady) {
         <!-- Share Full Menu on Facebook modal -->
         <div class="modal-overlay" id="fbMenuShareAllModal" style="display:none;" onclick="if(event.target===this)closeFbMenuShareAllModal()">
             <div class="modal-content" style="max-width:820px;">
-                <div class="modal-header" style="border-top:4px solid #1877F2;">
-                    <h3 style="color:#1877F2;"><i class="fab fa-facebook-f"></i> Share Restaurant Menu on Facebook</h3>
-                    <button class="modal-close" type="button" onclick="closeFbMenuShareAllModal()">&times;</button>
+                <div class="modal-header">
+                    <h3><i class="fab fa-facebook-f"></i> Share Restaurant Menu on Facebook</h3>
+                    <button class="modal-close" type="button" aria-label="Close" onclick="closeFbMenuShareAllModal()">&times;</button>
                 </div>
                 <div class="modal-body" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
                     <!-- Left: compose -->
@@ -1530,10 +1530,10 @@ if ($stockReady) {
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" id="fbMenuShareAllSubmitBtn" class="btn" style="background:#1877F2;color:#fff;border-color:#1877F2;">
+                    <button type="button" class="btn btn-secondary" onclick="closeFbMenuShareAllModal()">Cancel</button>
+                    <button type="button" id="fbMenuShareAllSubmitBtn" class="btn btn-primary">
                         <i class="fab fa-facebook-f"></i> Post to Facebook Page
                     </button>
-                    <button type="button" class="btn btn-secondary" onclick="closeFbMenuShareAllModal()">Cancel</button>
                 </div>
             </div>
         </div>

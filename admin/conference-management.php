@@ -983,7 +983,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         <div class="modal-content">
             <div class="modal-header">
                 <h3><i class="fas fa-plus-circle"></i> Add New Conference Room</h3>
-                <button class="modal-close" type="button" onclick="closeAddModal()">&times;</button>
+                <button class="modal-close" type="button" aria-label="Close" onclick="closeAddModal()">&times;</button>
             </div>
             <form method="POST" enctype="multipart/form-data" id="addForm">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
@@ -1044,14 +1044,14 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     </div>
                 </div>
 
-                <div class="form-actions" style="flex-direction:column; align-items:stretch; gap:0;">
+                <div class="modal-body">
                     <div id="addModalFeedback" class="admin-modal-feedback"></div>
-                    <div style="display:flex; justify-content:flex-end; gap:10px;">
-                        <button type="button" onclick="closeAddModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
-                        <button type="submit" id="addFormSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#7E684B); color:#fff; font-weight:600; cursor:pointer;">
-                            <i class="fas fa-plus"></i> Add Room
-                        </button>
-                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddModal()">Close</button>
+                    <button type="submit" id="addFormSaveBtn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Add Room
+                    </button>
                 </div>
             </form>
         </div>
@@ -1062,7 +1062,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         <div class="modal-content">
             <div class="modal-header">
                 <h3 id="editModalTitle"><i class="fas fa-edit"></i> Edit Conference Room</h3>
-                <button class="modal-close" type="button" onclick="closeEditModal()">&times;</button>
+                <button class="modal-close" type="button" aria-label="Close" onclick="closeEditModal()">&times;</button>
             </div>
             <form method="POST" enctype="multipart/form-data" id="editForm">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
@@ -1122,16 +1122,14 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                             </label>
                         </div>
                     </div>
+                    <div id="editModalFeedback" class="admin-modal-feedback"></div>
                 </div>
 
-                <div class="form-actions" style="flex-direction:column; align-items:stretch; gap:0;">
-                    <div id="editModalFeedback" class="admin-modal-feedback"></div>
-                    <div style="display:flex; justify-content:flex-end; gap:10px;">
-                        <button type="button" onclick="closeEditModal()" style="padding:10px 24px; border:1px solid #ddd; border-radius:6px; background:white; cursor:pointer;">Close</button>
-                        <button type="submit" id="editFormSaveBtn" style="padding:10px 24px; border:none; border-radius:6px; background:var(--gold,#7E684B); color:#fff; font-weight:600; cursor:pointer;">
-                            <i class="fas fa-save"></i> Save Changes
-                        </button>
-                    </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Close</button>
+                    <button type="submit" id="editFormSaveBtn" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Save Changes
+                    </button>
                 </div>
             </form>
         </div>
@@ -1142,7 +1140,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         <div class="modal-content" style="max-width: 700px;">
             <div class="modal-header">
                 <h3><i class="fas fa-calendar-alt"></i> Conference Enquiry Details</h3>
-                <button class="modal-close" type="button" onclick="closeEnquiryModal()">&times;</button>
+                <button class="modal-close" type="button" aria-label="Close" onclick="closeEnquiryModal()">&times;</button>
             </div>
             <div class="modal-body" id="enquiryModalBody">
             </div>
@@ -1871,9 +1869,9 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         <!-- Facebook Conference Share Modal (two-column with live preview) -->
         <div class="modal-overlay" id="fbConferenceModal" style="display:none;" onclick="if(event.target===this)closeFbConferenceModal()">
             <div class="modal-content" style="max-width:860px;width:96vw;">
-                <div class="modal-header" style="border-top:4px solid #1877F2;">
-                    <h3 id="fbConfTitle" style="color:#1877F2;"><i class="fab fa-facebook-f"></i> Post to Facebook</h3>
-                    <button class="modal-close" type="button" onclick="closeFbConferenceModal()">&times;</button>
+                <div class="modal-header">
+                    <h3 id="fbConfTitle"><i class="fab fa-facebook-f"></i> Post to Facebook</h3>
+                    <button class="modal-close" type="button" aria-label="Close" onclick="closeFbConferenceModal()">&times;</button>
                 </div>
                 <div class="modal-body" style="padding:20px 24px;">
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:24px;align-items:start;">
@@ -1950,7 +1948,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     <div id="fbConfFeedback" class="admin-modal-feedback" style="margin-top:14px;"></div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" id="fbConfSubmitBtn" class="btn fb-btn">
+                    <button type="button" id="fbConfSubmitBtn" class="btn btn-primary fb-btn">
                         <i class="fab fa-facebook-f"></i> Post to Facebook Page
                     </button>
                     <button type="button" class="btn btn-secondary" onclick="closeFbConferenceModal()">Cancel</button>
@@ -1961,11 +1959,11 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         <!-- Facebook Share All Conference Rooms Modal -->
         <div class="modal-overlay" id="fbAllConferenceModal" style="display:none;" onclick="if(event.target===this)closeFbAllConferenceModal()">
             <div class="modal-content" style="max-width:920px;width:96vw;">
-                <div class="modal-header" style="border-top:4px solid #1877F2;">
-                    <h3 style="color:#1877F2;display:flex;align-items:center;gap:8px;">
+                <div class="modal-header">
+                    <h3>
                         <i class="fab fa-facebook-f"></i> Share All Conference Rooms on Facebook
                     </h3>
-                    <button class="modal-close" type="button" onclick="closeFbAllConferenceModal()">&times;</button>
+                    <button class="modal-close" type="button" aria-label="Close" onclick="closeFbAllConferenceModal()">&times;</button>
                 </div>
                 <div class="modal-body" style="padding:20px 24px;">
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:24px;align-items:start;">
@@ -2054,7 +2052,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     <div id="fbAllConfFeedback" class="admin-modal-feedback" style="margin-top:14px;"></div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn fb-btn" id="fbAllConfSubmitBtn">
+                    <button type="button" class="btn btn-primary fb-btn" id="fbAllConfSubmitBtn">
                         <i class="fab fa-facebook-f"></i> Post to Facebook Page
                     </button>
                     <button type="button" class="btn btn-secondary" onclick="closeFbAllConferenceModal()">Cancel</button>

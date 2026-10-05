@@ -173,29 +173,31 @@
 }
 
 .stock-insight-modal-box {
-    background: #fff;
-    padding: 20px;
-    border-radius: 12px;
     width: 95%;
     max-width: 580px;
-    box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16);
 }
 
-.stock-insight-modal-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 10px;
+.stock-batch-dialog {
+    width: 95%;
+    max-width: 480px;
 }
 
-.stock-insight-close {
-    border: 0;
-    background: transparent;
-    font-size: 24px;
-    line-height: 1;
-    cursor: pointer;
-    color: #6c757d;
+.stock-batch-dialog__note {
+    margin: 0 0 12px;
+    color: #5f6b7a;
+    font-size: 13px;
+}
+
+.stock-batch-dialog label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.stock-batch-dialog input[type="text"] {
+    width: 100%;
+    padding: 9px 12px;
 }
 
 .stock-insight-note {

@@ -3113,35 +3113,13 @@ body {
 }
 
 .vat-confirm-modal__container {
-    background: #fff;
-    border-radius: 12px;
-    padding: 2rem 2rem 1.5rem;
     max-width: 440px;
     width: 90vw;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
-    text-align: center;
+    overflow: hidden;
 }
 
-.vat-confirm-modal__icon {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    background: #fff7ed;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 auto 1rem;
-    font-size: 1.5rem;
-    color: #d97706;
-    border: 2px solid #fde68a;
-}
-
-.vat-confirm-modal__title {
-    margin: 0 0 0.75rem;
-    font-family: 'Cormorant Garamond', Georgia, serif;
-    font-size: clamp(1.25rem, 2.5vw, 1.5rem);
-    font-weight: 600;
-    color: var(--finance-text);
+.vat-confirm-modal__content {
+    padding: 1rem 1.25rem 0.25rem;
 }
 
 .vat-confirm-modal__body {
@@ -3149,33 +3127,6 @@ body {
     color: var(--finance-muted);
     line-height: 1.6;
     margin: 0 0 0.75rem;
-}
-
-.vat-confirm-modal__actions {
-    display: flex;
-    justify-content: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-    margin-top: 1.25rem;
-}
-
-.acct-btn--unlock-confirm {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.6rem 1.3rem;
-    background: #d97706;
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.18s;
-}
-
-.acct-btn--unlock-confirm:hover {
-    background: #b45309;
 }
 
 /* ================================================================
@@ -4635,4 +4586,67 @@ details[open] .rh-help-panel__toggle::after {
 .acct-breakdown-details > .acct-panel {
     margin-left: 14px;
     margin-right: 14px;
+}
+
+/* payment-details: send-receipt modal (frame, header, footer come from the shared modal theme) */
+#pdReceiptModal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+}
+
+#pdReceiptModal .pd-receipt-dialog {
+    width: min(96vw, 500px);
+    padding: 0;
+    overflow: hidden;
+}
+
+#pdReceiptModal .pd-receipt-ref {
+    margin-top: 2px;
+    font-size: 12px;
+    color: #6b625a;
+}
+
+#pdReceiptModal .pd-receipt-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+#pdReceiptModal .pd-receipt-grid label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+}
+
+#pdReceiptModal .pd-receipt-grid input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+}
+
+#pdReceiptModal .pd-receipt-send {
+    width: 100%;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+#pdReceiptModal .pd-receipt-status {
+    min-height: 16px;
+    margin-top: 6px;
+    font-size: 12px;
+}
+
+@media (max-width: 480px) {
+    #pdReceiptModal .pd-receipt-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }

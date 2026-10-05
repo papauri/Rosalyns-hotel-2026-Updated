@@ -425,37 +425,13 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         }
 
         .rp-modal {
-            background: #fff;
-            border-radius: 10px;
             max-width: 700px;
             width: 100%;
             margin: auto;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, .25);
-        }
-
-        .rp-modal__header {
-            padding: 20px 24px 16px;
-            border-bottom: 1px solid #e9ecef;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .rp-modal__header h3 {
-            margin: 0;
-            font-size: 17px;
         }
 
         .rp-modal__body {
             padding: 20px 24px;
-        }
-
-        .rp-modal__footer {
-            padding: 16px 24px;
-            border-top: 1px solid #e9ecef;
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
         }
 
         .form-row {
@@ -682,7 +658,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
                 <div class="rp-modal__header">
                     <h3 id="modalTitle"><i class="fas fa-tags"></i> New Rate Plan</h3>
-                    <button type="button" onclick="closePlanModal()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#6c757d;">&times;</button>
+                    <button type="button" class="rp-modal__close" aria-label="Close" onclick="closePlanModal()">&times;</button>
                 </div>
 
                 <div class="rp-modal__body">
@@ -849,14 +825,13 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                         </div>
                     </div>
 
+                    <div id="planModalFeedback" class="admin-modal-feedback"></div>
+
                 </div><!-- /.rp-modal__body -->
 
-                <div class="rp-modal__footer" style="flex-direction:column; align-items:stretch; gap:0;">
-                    <div id="planModalFeedback" class="admin-modal-feedback"></div>
-                    <div style="display:flex; justify-content:flex-end; gap:10px;">
-                        <button type="button" class="btn btn-secondary" onclick="closePlanModal()">Close</button>
-                        <button type="submit" id="planSaveBtn" class="btn btn-primary"><i class="fas fa-save"></i> Save Rate Plan</button>
-                    </div>
+                <div class="rp-modal__footer">
+                    <button type="button" class="btn btn-secondary" onclick="closePlanModal()">Close</button>
+                    <button type="submit" id="planSaveBtn" class="btn btn-primary"><i class="fas fa-save"></i> Save Rate Plan</button>
                 </div>
 
             </form>

@@ -153,18 +153,15 @@ $csrf_token = generateCsrfToken();
         .pill-off { background:#f0e3e3; color:#8a3a3a; }
         .sup-modal-bg { display:none; position:fixed; inset:0; background:rgba(40,34,28,.45); z-index:1000; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto; }
         .sup-modal-bg.open { display:flex; }
-        .sup-modal { background:#FFFDF9; border-radius:3px; width:100%; max-width:560px; box-shadow:0 12px 40px rgba(40,34,28,.25); }
-        .sup-modal header { padding:18px 22px; border-bottom:1px solid #ece5da; font-family:'Cormorant Garamond',serif; font-size:1.35rem; color:#3e3930; }
+        .sup-modal { width:100%; max-width:560px; }
         .sup-modal .body { padding:22px; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
         .sup-modal .body .full { grid-column:1/3; }
         .sup-modal label { display:block; font-size:.76rem; text-transform:uppercase; letter-spacing:.04em; color:#8a8172; margin-bottom:5px; }
         .sup-modal input[type=text], .sup-modal input[type=email], .sup-modal input[type=number], .sup-modal textarea {
-            width:100%; padding:9px 11px; border:1px solid #d3cbc0; border-radius:2px; font-family:inherit; font-size:.9rem; background:#fff; }
+            width:100%; padding:9px 11px; font-family:inherit; font-size:.9rem; }
         .sup-modal textarea { min-height:64px; resize:vertical; }
-        .sup-modal footer { padding:16px 22px; border-top:1px solid #ece5da; display:flex; justify-content:flex-end; gap:10px; }
         .btn-sup { padding:9px 18px; border:none; border-radius:2px; cursor:pointer; font-family:inherit; font-size:.88rem; letter-spacing:.03em; }
         .btn-sup-primary { background:#7E684B; color:#fff; }
-        .btn-sup-ghost { background:transparent; color:#6a6255; border:1px solid #d3cbc0; }
         .sup-actions { display:flex; gap:8px; }
         .sup-link { color:#7E684B; cursor:pointer; text-decoration:none; font-size:.84rem; }
         @media (max-width:640px){ .sup-modal .body { grid-template-columns:1fr; } .sup-modal .body .full { grid-column:1; } .sup-table thead { display:none; } }
@@ -247,12 +244,15 @@ $csrf_token = generateCsrfToken();
     <!-- Add/Edit modal -->
     <div class="sup-modal-bg" id="supModal">
         <div class="sup-modal">
+            <div class="modal-header">
+                <h3 id="supModalTitle">Add Supplier</h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeSupplier()">&times;</button>
+            </div>
             <form method="POST">
-                <header id="supModalTitle">Add Supplier</header>
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="save">
                 <input type="hidden" name="id" id="sup_id" value="0">
-                <div class="body">
+                <div class="body modal-body">
                     <div class="full">
                         <label>Supplier name *</label>
                         <input type="text" name="name" id="sup_name" required maxlength="255">
@@ -295,10 +295,10 @@ $csrf_token = generateCsrfToken();
                         </label>
                     </div>
                 </div>
-                <footer>
+                <div class="modal-footer">
                     <button type="button" class="btn-sup btn-sup-ghost" onclick="closeSupplier()">Cancel</button>
                     <button type="submit" class="btn-sup btn-sup-primary">Save Supplier</button>
-                </footer>
+                </div>
             </form>
         </div>
     </div>

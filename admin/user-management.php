@@ -587,7 +587,7 @@ $nav_categories = getNavCategories();
 
                 <div class="modal-header">
                     <h3><i class="fas fa-shield-alt"></i> <span id="perm-modal-title">Edit Permissions</span></h3>
-                    <button type="button" class="modal-close" onclick="closeModal('permissionsModal')">&times;</button>
+                    <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('permissionsModal')">&times;</button>
                 </div>
 
                 <div class="modal-body permissions-modal__body">
@@ -642,7 +642,7 @@ $nav_categories = getNavCategories();
 
             <div class="modal-header">
                 <h3><i class="fas fa-user-plus"></i> Add New User</h3>
-                <button type="button" class="modal-close" onclick="closeModal('addUserModal')">&times;</button>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('addUserModal')">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="form-row">
@@ -694,7 +694,7 @@ $nav_categories = getNavCategories();
 
             <div class="modal-header">
                 <h3><i class="fas fa-user-edit"></i> Edit User</h3>
-                <button type="button" class="modal-close" onclick="closeModal('editUserModal')">&times;</button>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('editUserModal')">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="form-row">
@@ -746,9 +746,9 @@ $nav_categories = getNavCategories();
 <?php if (hasPermission($user['id'], 'user_delete')): ?>
 <div class="modal-overlay" id="deleteConfirmModal">
     <div class="modal-content" style="max-width: 420px;">
-        <div class="modal-header" style="background: linear-gradient(135deg, #fff5f5 0%, #fee2e2 100%); border-bottom: 1px solid #fecaca;">
-            <h3 style="color: #c62828;"><i class="fas fa-triangle-exclamation"></i> Delete User</h3>
-            <button type="button" class="modal-close" onclick="closeModal('deleteConfirmModal')">&times;</button>
+        <div class="modal-header">
+            <h3><i class="fas fa-triangle-exclamation"></i> Delete User</h3>
+            <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('deleteConfirmModal')">&times;</button>
         </div>
         <div class="modal-body">
             <p style="margin: 0 0 8px; color: var(--navy, #231F1C); font-size: 14px;">

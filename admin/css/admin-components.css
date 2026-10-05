@@ -2443,7 +2443,7 @@ body.modal-open {
    STANDARD MODAL TOP DESIGN (GLOBAL)
    ============================================ */
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head, .mm-modal-head, .rt-modal-head, .rp-modal__header, .sup-modal__header) {
     position: relative !important;
     display: flex !important;
     align-items: flex-start !important;
@@ -2456,7 +2456,7 @@ body.modal-open {
     color: var(--rh-modal-title-color) !important;
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head)::after {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head, .mm-modal-head, .rt-modal-head, .rp-modal__header, .sup-modal__header)::after {
     content: '';
     position: absolute;
     left: 1rem;
@@ -2467,7 +2467,7 @@ body.modal-open {
     pointer-events: none;
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header h1, .modal-header h2, .modal-header h3, .modal-head h1, .modal-head h2, .modal-head h3, .modal__title, .admin-modal__title) {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-header h1, .modal-header h2, .modal-header h3, .modal-head h1, .modal-head h2, .modal-head h3, .modal__title, .admin-modal__title, .mm-modal-head h2, .mm-modal-head h3, .rt-modal-head h3, .rp-modal__header h3, .sup-modal__header h3) {
     margin: 0 !important;
     display: inline-flex !important;
     align-items: center !important;
@@ -2481,7 +2481,7 @@ body.modal-open {
     color: var(--rh-modal-title-color) !important;
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header h1 i, .modal-header h2 i, .modal-header h3 i, .modal-head h1 i, .modal-head h2 i, .modal-head h3 i, .modal__title i, .admin-modal__title i) {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-header h1 i, .modal-header h2 i, .modal-header h3 i, .modal-head h1 i, .modal-head h2 i, .modal-head h3 i, .modal__title i, .admin-modal__title i, .mm-modal-head h3 i, .rt-modal-head h3 i) {
     width: 1.66rem;
     height: 1.66rem;
     border-radius: 999px;
@@ -2495,7 +2495,7 @@ body.modal-open {
     box-shadow: 0 2px 10px rgba(15, 23, 42, 0.12);
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) :is(.close-modal, .modal-close, .close, .modal__close) {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head, .mm-modal-head, .rt-modal-head, .rp-modal__header, .sup-modal__header) :is(.close-modal, .modal-close, .close, .modal__close, .mm-modal-close, .rt-modal-close, .admin-modal__close, .rp-modal__close, .sup-modal__close) {
     position: static !important;
     inset: auto !important;
     flex: 0 0 auto;
@@ -2517,29 +2517,29 @@ body.modal-open {
     transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.16s ease !important;
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) :is(.close-modal, .modal-close, .close, .modal__close):hover {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head, .mm-modal-head, .rt-modal-head, .rp-modal__header, .sup-modal__header) :is(.close-modal, .modal-close, .close, .modal__close, .mm-modal-close, .rt-modal-close, .admin-modal__close, .rp-modal__close, .sup-modal__close):hover {
     transform: translateY(-1px) !important;
     border-color: var(--rh-modal-close-hover-border) !important;
     background: var(--rh-modal-close-hover-bg) !important;
     color: var(--rh-modal-close-hover-color) !important;
 }
 
-:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) :is(.close-modal, .modal-close, .close, .modal__close):focus-visible {
+:is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head, .mm-modal-head, .rt-modal-head, .rp-modal__header, .sup-modal__header) :is(.close-modal, .modal-close, .close, .modal__close, .mm-modal-close, .rt-modal-close, .admin-modal__close, .rp-modal__close, .sup-modal__close):focus-visible {
     outline: 2px solid var(--color-primary, #8F6A35) !important;
     outline-offset: 1px !important;
 }
 
 @media (max-width: 48rem) {
-    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) {
+    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head, .mm-modal-head, .rt-modal-head, .rp-modal__header, .sup-modal__header) {
         gap: 0.58rem !important;
         padding: 0.84rem 0.86rem 0.8rem !important;
     }
 
-    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header h1, .modal-header h2, .modal-header h3, .modal-head h1, .modal-head h2, .modal-head h3, .modal__title, .admin-modal__title) {
+    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-header h1, .modal-header h2, .modal-header h3, .modal-head h1, .modal-head h2, .modal-head h3, .modal__title, .admin-modal__title, .mm-modal-head h2, .mm-modal-head h3, .rt-modal-head h3, .rp-modal__header h3, .sup-modal__header h3) {
         font-size: clamp(0.96rem, 0.92rem + 0.16vw, 1.08rem) !important;
     }
 
-    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head) :is(.close-modal, .modal-close, .close, .modal__close) {
+    :is(.modal-overlay, .overlay, .modal, .admin-modal, .modal-wrapper, .modal__wrapper, .modal-container, .modal__container, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-header, .modal__header, .admin-modal__header, .modal-head, .mm-modal-head, .rt-modal-head, .rp-modal__header, .sup-modal__header) :is(.close-modal, .modal-close, .close, .modal__close, .mm-modal-close, .rt-modal-close, .admin-modal__close, .rp-modal__close, .sup-modal__close) {
         width: 1.9rem !important;
         height: 1.9rem !important;
         min-width: 1.9rem !important;
@@ -2847,4 +2847,207 @@ body.modal-open {
     .admin-header .btn-logout span {
         display: none;
     }
+}
+
+/* ============================================
+   UNIFORM MODAL THEME (GLOBAL)
+   One look for every admin modal, whatever markup system it uses (.modal-overlay,
+   .modal, .mm-modal, .admin-modal-overlay, page-specific overlays): dialog box,
+   footer, buttons and form fields. Headers are themed by STANDARD MODAL TOP DESIGN.
+   !important because page stylesheets load after this file and restyle these parts.
+   ============================================ */
+:root {
+    --rh-modal-radius: 14px;
+    --rh-modal-surface: #fffdfb;
+    --rh-modal-border: #e2dbd2;
+    --rh-modal-shadow: 0 28px 64px -24px rgba(15, 23, 42, 0.42), 0 2px 8px rgba(15, 23, 42, 0.06);
+    --rh-modal-footer-bg: linear-gradient(180deg, #fbf8f4 0%, #f6f0e8 100%);
+    --rh-modal-btn-radius: 0.62rem;
+    --rh-modal-btn-height: 2.5rem;
+    --rh-modal-primary-bg: linear-gradient(135deg, #8F6A35 0%, #766550 100%);
+    --rh-modal-primary-hover: linear-gradient(135deg, #7d5c2d 0%, #655642 100%);
+    --rh-modal-secondary-border: #d3cbc1;
+    --rh-modal-text: #2A2723;
+    --rh-modal-label: #4a423a;
+    --rh-modal-field-border: #d6d0c8;
+    --rh-modal-focus: rgba(143, 106, 53, 0.18);
+}
+
+/* Dialog box */
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-content, .modal-dialog, .modal__dialog, .modal__container, .modal-container, .modal-sheet, .mm-modal-card, .rt-modal-card, .rp-modal, .sup-modal, .admin-modal, .stock-insight-modal-box, .dashboard-insight-modal__dialog) {
+    background: var(--rh-modal-surface) !important;
+    border: 1px solid var(--rh-modal-border) !important;
+    border-radius: var(--rh-modal-radius) !important;
+    box-shadow: var(--rh-modal-shadow) !important;
+    color: var(--rh-modal-text);
+}
+
+/* The header sits flush in the box: round its top corners to match */
+:is(.modal-content, .modal-dialog, .modal__dialog, .modal__container, .modal-container, .modal-sheet, .mm-modal-card, .rt-modal-card, .rp-modal, .sup-modal, .admin-modal) > :is(.modal-header, .modal__header, .admin-modal__header, .modal-head, .mm-modal-head, .rt-modal-head, .rp-modal__header, .sup-modal__header):first-child,
+:is(.modal-content, .modal-dialog, .mm-modal-card, .admin-modal) > form:first-child > :is(.modal-header, .modal-head, .mm-modal-head, .admin-modal__header):first-child {
+    border-top-left-radius: calc(var(--rh-modal-radius) - 1px);
+    border-top-right-radius: calc(var(--rh-modal-radius) - 1px);
+}
+
+/* Footer / action row */
+:is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 0.6rem !important;
+    padding: 0.85rem 1rem !important;
+    background: var(--rh-modal-footer-bg) !important;
+    border-top: 1px solid var(--rh-modal-border) !important;
+    border-bottom-left-radius: calc(var(--rh-modal-radius) - 1px);
+    border-bottom-right-radius: calc(var(--rh-modal-radius) - 1px);
+}
+
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-actions, .form-actions, .mm-modal-actions) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.6rem !important;
+}
+
+/* Footer buttons: shared shape */
+:is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot, .modal-actions, .form-actions, .mm-modal-actions) :is(button, a.btn, a[class*="btn"], input[type="submit"], input[type="button"]):not(.modal-close, .close, .close-modal, [role="switch"], [hidden]) {
+    display: inline-flex; /* not !important: JS hides footer buttons with inline display:none */
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0.45rem !important;
+    min-height: var(--rh-modal-btn-height) !important;
+    padding: 0.5rem 1.1rem !important;
+    border-radius: var(--rh-modal-btn-radius) !important;
+    font-family: inherit !important;
+    font-size: 0.9rem !important;
+    font-weight: 600 !important;
+    line-height: 1.2 !important;
+    text-decoration: none !important;
+    cursor: pointer;
+    transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease !important;
+}
+
+/* Secondary (cancel/close/back): outlined on white */
+:is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot, .modal-actions, .form-actions, .mm-modal-actions) :is(button, a.btn, a[class*="btn"], input[type="button"]):not([type="submit"], .modal-close, .close, .close-modal, [role="switch"], .btn-primary, .btn-save, .btn-submit, .btn-confirm, .btn-save-perms, .mm-btn-primary, .acct-btn--primary, .modal-btn-primary, .fm-btn--primary, .btn-add, .btn-create, .btn-success, .btn-danger, .btn-delete, .btn-delete-confirm, [class*="danger"], [class*="primary"]) {
+    background: #ffffff !important;
+    color: var(--rh-modal-text) !important;
+    border: 1px solid var(--rh-modal-secondary-border) !important;
+    box-shadow: none !important;
+}
+
+:is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot, .modal-actions, .form-actions, .mm-modal-actions) :is(button, a.btn, a[class*="btn"], input[type="button"]):not([type="submit"], .modal-close, .close, .close-modal, [role="switch"], .btn-primary, .btn-save, .btn-submit, .btn-confirm, .btn-save-perms, .mm-btn-primary, .acct-btn--primary, .modal-btn-primary, .fm-btn--primary, .btn-add, .btn-create, .btn-success, .btn-danger, .btn-delete, .btn-delete-confirm, [class*="danger"], [class*="primary"]):hover {
+    background: #f6f1ea !important;
+    border-color: #b9ad9f !important;
+}
+
+/* Primary (save/submit/create/confirm): brand brown, white text (4.9:1+) */
+:is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot, .modal-actions, .form-actions, .mm-modal-actions) :is([type="submit"], .btn-primary, .btn-save, .btn-submit, .btn-confirm, .btn-save-perms, .mm-btn-primary, .acct-btn--primary, .modal-btn-primary, .fm-btn--primary, .btn-add, .btn-create):not(.btn-danger, .btn-delete, .btn-delete-confirm, [class*="danger"], .btn-success, .modal-close, .close, .btn-cancel, .btn-secondary) {
+    background: var(--rh-modal-primary-bg) !important;
+    color: #ffffff !important;
+    border: 1px solid #766550 !important;
+    box-shadow: 0 8px 18px -10px rgba(118, 101, 80, 0.75) !important;
+}
+
+:is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot, .modal-actions, .form-actions, .mm-modal-actions) :is([type="submit"], .btn-primary, .btn-save, .btn-submit, .btn-confirm, .btn-save-perms, .mm-btn-primary, .acct-btn--primary, .modal-btn-primary, .fm-btn--primary, .btn-add, .btn-create):not(.btn-danger, .btn-delete, .btn-delete-confirm, [class*="danger"], .btn-success, .modal-close, .close, .btn-cancel, .btn-secondary):hover {
+    background: var(--rh-modal-primary-hover) !important;
+    transform: translateY(-1px);
+}
+
+/* Destructive: red, white text */
+:is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot, .modal-actions, .form-actions, .mm-modal-actions) :is(.btn-danger, .btn-delete, .btn-delete-confirm, [class*="btn-danger"], [class*="--danger"]) {
+    background: #b4232f !important;
+    color: #ffffff !important;
+    border: 1px solid #9b1c27 !important;
+    box-shadow: none !important;
+}
+
+/* Success buttons keep green, darkened for contrast */
+:is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot, .modal-actions, .form-actions, .mm-modal-actions) .btn-success {
+    background: #15803d !important;
+    color: #ffffff !important;
+    border: 1px solid #166534 !important;
+}
+
+:is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot, .modal-actions, .form-actions, .mm-modal-actions) :is(button, input):disabled {
+    opacity: 0.55 !important;
+    cursor: not-allowed !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+/* Form fields */
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"], [type="color"], [type="range"], [type="submit"], [type="button"], [type="reset"]), select, textarea):not(:is([class*="input-group"], [class*="addon"], [class*="prefix"]) *) {
+    border: 1px solid var(--rh-modal-field-border) !important;
+    border-radius: 0.55rem !important;
+    background-color: #ffffff;
+    color: var(--rh-modal-text);
+    font-family: inherit;
+    font-size: 0.92rem;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"], [type="color"], [type="range"], [type="submit"], [type="button"], [type="reset"]), select, textarea):focus {
+    outline: none !important;
+    border-color: #8F6A35 !important;
+    box-shadow: 0 0 0 3px var(--rh-modal-focus) !important;
+}
+
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-body, .mm-modal-body, .admin-modal__body, .modal__body, .rt-modal-body, .rp-modal__body) label:not(:has(input[type="checkbox"], input[type="radio"])) {
+    color: var(--rh-modal-label);
+    font-weight: 600;
+}
+
+/* Backdrops of every modal system sit above the sidebar (z 1000-1200) and header */
+:is(.mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg, .dashboard-insight-modal) {
+    z-index: 10000 !important;
+}
+
+/* Dialogs with a standard header and a .modal-body: no outer padding, so the header and footer
+   run edge to edge (the body keeps its own padding). The header may be a direct child or sit
+   inside a wrapping <form>; the body may be anywhere below. */
+.modal-content:has(> .modal-header):has(.modal-body),
+.modal-content:has(> form > .modal-header):has(.modal-body) {
+    --rh-modal-shell-pad: 0px;
+    padding: 0 !important;
+    overflow: hidden auto;
+}
+
+/* renderModal() close buttons are empty; the public modal.css that draws the cross is not loaded in admin */
+.modal__close:empty::before {
+    content: "\00d7";
+    font-size: 1.4rem;
+    line-height: 1;
+}
+
+/* Field layout inside modal bodies: label above a full-width control. Covers the
+   Bootstrap-style classes some modals use (Bootstrap is not loaded in admin) and plain
+   .form-group blocks. */
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-body, .mm-modal-body, .admin-modal__body, .modal__body) .form-label {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-size: 0.85rem;
+}
+
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-body, .mm-modal-body, .admin-modal__body, .modal__body) :is(.form-control, .form-select, .form-group > input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"], [type="color"], [type="range"]), .form-group > select, .form-group > textarea) {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.55rem 0.75rem;
+}
+
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-body, .mm-modal-body, .admin-modal__body, .modal__body) :is(input.form-control, select.form-select, select.form-control, .form-group > input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"], [type="color"], [type="range"]), .form-group > select) {
+    min-height: 2.6rem;
+}
+
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-body, .mm-modal-body, .admin-modal__body, .modal__body) .mb-3 {
+    margin-bottom: 0.9rem;
+}
+
+:is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-body, .mm-modal-body, .admin-modal__body, .modal__body) small.text-muted {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.8rem;
+    color: #6b6258;
 }

@@ -171,7 +171,7 @@
         function closeMobileNav() {
             if (window.innerWidth > 768) return;
             nav.classList.remove('nav-open');
-            if (icon) icon.className = 'fas fa-bars';
+            if (icon) icon.setAttribute('class', 'fas fa-bars'); // setAttribute: works on SVG icons too
             if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
         }
 
@@ -183,7 +183,7 @@
             button.setAttribute('aria-label', (isFavorite ? 'Remove ' : 'Add ') + label + (isFavorite ? ' from favorites' : ' to favorites'));
             button.title = isFavorite ? 'Remove from favorites' : 'Add to favorites';
             const star = button.querySelector('i');
-            if (star) star.className = isFavorite ? 'fas fa-star' : 'far fa-star';
+            if (star) star.setAttribute('class', isFavorite ? 'fas fa-star' : 'far fa-star');
         }
 
         function syncFavoriteButtons() {

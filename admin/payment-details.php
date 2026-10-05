@@ -794,39 +794,36 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
     </div>
 
     <!-- Send Receipt Modal -->
-    <div class="modal-overlay" id="pdReceiptModal" aria-hidden="true" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;">
-        <div style="background:#fff;border-radius:14px;width:min(96vw,500px);overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);">
-            <div style="background:linear-gradient(135deg,#1d6a3e,#22c55e);color:#fff;padding:18px 22px;display:flex;align-items:center;justify-content:space-between;">
-                <div style="display:flex;align-items:center;gap:12px;">
-                    <div style="width:36px;height:36px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;"><i class="fas fa-paper-plane"></i></div>
-                    <div>
-                        <div style="font-weight:700;font-size:15px;">Send Receipt</div>
-                        <div style="font-size:12px;opacity:.85;" id="pdReceiptRef"><?php echo htmlspecialchars($payment['payment_reference'] ?? ''); ?></div>
-                    </div>
+    <div class="modal-overlay" id="pdReceiptModal" aria-hidden="true" style="display:none;">
+        <div class="modal-content pd-receipt-dialog" role="dialog" aria-modal="true" aria-labelledby="pdReceiptTitle">
+            <div class="modal-header">
+                <div>
+                    <h3 id="pdReceiptTitle"><i class="fas fa-paper-plane"></i> Send Receipt</h3>
+                    <div class="pd-receipt-ref" id="pdReceiptRef"><?php echo htmlspecialchars($payment['payment_reference'] ?? ''); ?></div>
                 </div>
-                <button type="button" onclick="pdCloseReceiptModal()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;opacity:.8;">&times;</button>
+                <button type="button" class="modal-close" aria-label="Close" onclick="pdCloseReceiptModal()">&times;</button>
             </div>
-            <div style="padding:20px;">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="modal-body">
+                <div class="pd-receipt-grid">
                     <div>
-                        <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">Email</label>
-                        <input type="email" id="pdReceiptEmail" placeholder="guest@example.com" value="<?php echo htmlspecialchars((string)($payment['customer_email'] ?? '')); ?>" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:7px;padding:8px 10px;font-size:13px;margin-bottom:6px;">
-                        <button type="button" id="pdReceiptEmailBtn" onclick="pdSendReceipt('email')" style="width:100%;padding:9px;background:#3b82f6;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-envelope"></i> Send email</button>
-                        <div id="pdReceiptEmailStatus" style="font-size:11px;margin-top:5px;min-height:14px;"></div>
+                        <label for="pdReceiptEmail">Email</label>
+                        <input type="email" id="pdReceiptEmail" placeholder="guest@example.com" value="<?php echo htmlspecialchars((string)($payment['customer_email'] ?? '')); ?>">
+                        <button type="button" id="pdReceiptEmailBtn" class="btn btn-primary pd-receipt-send" onclick="pdSendReceipt('email')"><i class="fas fa-envelope"></i> Send email</button>
+                        <div id="pdReceiptEmailStatus" class="pd-receipt-status"></div>
                     </div>
                     <div>
-                        <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">WhatsApp</label>
-                        <input type="tel" id="pdReceiptPhone" placeholder="+265 999 123 456" value="<?php echo htmlspecialchars(preg_replace('/[^0-9+]/', '', (string)($payment['customer_phone'] ?? ''))); ?>" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:7px;padding:8px 10px;font-size:13px;margin-bottom:6px;">
-                        <button type="button" id="pdReceiptWhatsAppBtn" onclick="pdSendReceipt('whatsapp')" style="width:100%;padding:9px;background:#1d6a3e;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fab fa-whatsapp"></i> Send WhatsApp</button>
-                        <div id="pdReceiptWhatsAppStatus" style="font-size:11px;margin-top:5px;min-height:14px;"></div>
+                        <label for="pdReceiptPhone">WhatsApp</label>
+                        <input type="tel" id="pdReceiptPhone" placeholder="+265 999 123 456" value="<?php echo htmlspecialchars(preg_replace('/[^0-9+]/', '', (string)($payment['customer_phone'] ?? ''))); ?>">
+                        <button type="button" id="pdReceiptWhatsAppBtn" class="btn btn-success pd-receipt-send" onclick="pdSendReceipt('whatsapp')"><i class="fab fa-whatsapp"></i> Send WhatsApp</button>
+                        <div id="pdReceiptWhatsAppStatus" class="pd-receipt-status"></div>
                     </div>
                 </div>
             </div>
-            <div style="padding:12px 20px 18px;display:flex;gap:8px;justify-content:flex-end;">
+            <div class="modal-footer">
                 <?php if (($payment['booking_type'] ?? '') === 'restaurant' && !empty($payment['booking_id'])): ?>
-                    <a href="stock-receipt.php?id=<?php echo (int)$payment['booking_id']; ?>&print=1" target="_blank" rel="noopener" style="padding:8px 14px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:7px;font-size:13px;font-weight:600;color:#374151;text-decoration:none;display:flex;align-items:center;gap:5px;"><i class="fas fa-print"></i> Print</a>
+                    <a href="stock-receipt.php?id=<?php echo (int)$payment['booking_id']; ?>&amp;print=1" target="_blank" rel="noopener" class="btn btn-secondary"><i class="fas fa-print"></i> Print</a>
                 <?php endif; ?>
-                <button type="button" onclick="pdCloseReceiptModal()" style="padding:8px 18px;background:#374151;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;">Done</button>
+                <button type="button" class="btn-primary" onclick="pdCloseReceiptModal()">Done</button>
             </div>
         </div>
     </div>

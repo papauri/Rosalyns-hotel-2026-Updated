@@ -98,11 +98,6 @@
     width: min(720px, 94vw);
 }
 
-.housekeeping-modal-content h3 {
-    margin: 0 0 14px;
-    color: var(--navy, #1f2d3d);
-}
-
 .housekeeping-modal-content .form-group {
     margin-bottom: 12px;
 }
@@ -110,16 +105,12 @@
 .housekeeping-modal-content .form-group label {
     display: block;
     margin-bottom: 6px;
-    font-weight: 600;
-    color: #394656;
 }
 
 .housekeeping-modal-content input,
 .housekeeping-modal-content select,
 .housekeeping-modal-content textarea {
     width: 100%;
-    border: 1px solid #dbe2ea;
-    border-radius: 8px;
     padding: 9px 10px;
 }
 

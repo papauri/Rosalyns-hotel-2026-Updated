@@ -344,7 +344,6 @@ $active_tab = $_GET['tab'] ?? 'links';
         .form-group textarea { resize:vertical; min-height:120px; }
         .form-group .help-text { font-size:11px; color:var(--text-secondary,#6b7280); margin-top:4px; }
         .modal-body .form-group { margin-bottom:14px; }
-        .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:18px; padding-top:14px; border-top:1px solid var(--border-color,#e5e7eb); }
         .tab-panel { display:none; }
         .tab-panel--active { display:block; }
         .settings-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
@@ -698,8 +697,7 @@ $active_tab = $_GET['tab'] ?? 'links';
 </div>
 
 <!-- ═══ Edit Link Modal ═══════════════════════════════════════════════════ -->
-<?php renderAdminModalStart('editLinkModal', 'Edit Footer Link'); ?>
-<form method="POST" action="footer-management.php?tab=links">
+<?php renderAdminModalStart('editLinkModal', 'Edit Footer Link', '', 'editLinkForm', 'footer-management.php?tab=links'); ?>
     <input type="hidden" name="action" value="edit_link">
     <input type="hidden" name="link_id" id="el_id">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
@@ -734,30 +732,24 @@ $active_tab = $_GET['tab'] ?? 'links';
             <label for="el_active" style="margin:0; cursor:pointer;">Visible in footer</label>
         </div>
     </div>
-    <div class="modal-actions">
-        <button type="button" class="fm-btn" onclick="closeAdminModal('editLinkModal')">Cancel</button>
-        <button type="submit" class="fm-btn fm-btn--primary"><i class="fas fa-save"></i> Save</button>
-    </div>
-</form>
+<?php renderAdminModalFooterStart(); ?>
+    <button type="button" class="fm-btn" onclick="closeAdminModal('editLinkModal')">Cancel</button>
+    <button type="submit" class="fm-btn fm-btn--primary"><i class="fas fa-save"></i> Save</button>
 <?php renderAdminModalEnd(); ?>
 
 <!-- ═══ Delete Link Modal ════════════════════════════════════════════════ -->
-<?php renderAdminModalStart('deleteLinkModal', 'Delete Footer Link'); ?>
+<?php renderAdminModalStart('deleteLinkModal', 'Delete Footer Link', '', 'deleteLinkForm', 'footer-management.php?tab=links'); ?>
 <p>Are you sure you want to delete the link <strong id="dl_name"></strong>? This cannot be undone.</p>
-<form method="POST" action="footer-management.php?tab=links" id="deleteLinkForm">
     <input type="hidden" name="action" value="delete_link">
     <input type="hidden" name="link_id" id="dl_id">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-    <div class="modal-actions">
-        <button type="button" class="fm-btn" onclick="closeAdminModal('deleteLinkModal')">Cancel</button>
-        <button type="submit" class="fm-btn fm-btn--danger"><i class="fas fa-trash"></i> Delete</button>
-    </div>
-</form>
+<?php renderAdminModalFooterStart(); ?>
+    <button type="button" class="fm-btn" onclick="closeAdminModal('deleteLinkModal')">Cancel</button>
+    <button type="submit" class="fm-btn fm-btn--danger"><i class="fas fa-trash"></i> Delete</button>
 <?php renderAdminModalEnd(); ?>
 
 <!-- ═══ Add Link (with pre-filled column) Modal ══════════════════════════ -->
-<?php renderAdminModalStart('addLinkModal', 'Add Footer Link'); ?>
-<form method="POST" action="footer-management.php?tab=links">
+<?php renderAdminModalStart('addLinkModal', 'Add Footer Link', '', 'addLinkForm', 'footer-management.php?tab=links'); ?>
     <input type="hidden" name="action" value="add_link">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
     <div class="form-group">
@@ -780,16 +772,13 @@ $active_tab = $_GET['tab'] ?? 'links';
         <label>Display Order</label>
         <input type="number" name="display_order" value="10" min="0" max="9999">
     </div>
-    <div class="modal-actions">
-        <button type="button" class="fm-btn" onclick="closeAdminModal('addLinkModal')">Cancel</button>
-        <button type="submit" class="fm-btn fm-btn--primary"><i class="fas fa-plus"></i> Add Link</button>
-    </div>
-</form>
+<?php renderAdminModalFooterStart(); ?>
+    <button type="button" class="fm-btn" onclick="closeAdminModal('addLinkModal')">Cancel</button>
+    <button type="submit" class="fm-btn fm-btn--primary"><i class="fas fa-plus"></i> Add Link</button>
 <?php renderAdminModalEnd(); ?>
 
 <!-- ═══ Edit Policy Modal ════════════════════════════════════════════════ -->
-<?php renderAdminModalStart('editPolicyModal', 'Edit Policy'); ?>
-<form method="POST" action="footer-management.php?tab=policies">
+<?php renderAdminModalStart('editPolicyModal', 'Edit Policy', '', 'editPolicyForm', 'footer-management.php?tab=policies'); ?>
     <input type="hidden" name="action" value="edit_policy">
     <input type="hidden" name="policy_id" id="ep_id">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
@@ -820,25 +809,20 @@ $active_tab = $_GET['tab'] ?? 'links';
             <label for="ep_active" style="margin:0; cursor:pointer;">Active (visible in footer)</label>
         </div>
     </div>
-    <div class="modal-actions">
-        <button type="button" class="fm-btn" onclick="closeAdminModal('editPolicyModal')">Cancel</button>
-        <button type="submit" class="fm-btn fm-btn--primary"><i class="fas fa-save"></i> Save Policy</button>
-    </div>
-</form>
+<?php renderAdminModalFooterStart(); ?>
+    <button type="button" class="fm-btn" onclick="closeAdminModal('editPolicyModal')">Cancel</button>
+    <button type="submit" class="fm-btn fm-btn--primary"><i class="fas fa-save"></i> Save Policy</button>
 <?php renderAdminModalEnd(); ?>
 
 <!-- ═══ Delete Policy Modal ══════════════════════════════════════════════ -->
-<?php renderAdminModalStart('deletePolicyModal', 'Delete Policy'); ?>
+<?php renderAdminModalStart('deletePolicyModal', 'Delete Policy', '', 'deletePolicyForm', 'footer-management.php?tab=policies'); ?>
 <p>Are you sure you want to delete the policy <strong id="dp_name"></strong>? The footer link that points to its slug will become a dead link.</p>
-<form method="POST" action="footer-management.php?tab=policies">
     <input type="hidden" name="action" value="delete_policy">
     <input type="hidden" name="policy_id" id="dp_id">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-    <div class="modal-actions">
-        <button type="button" class="fm-btn" onclick="closeAdminModal('deletePolicyModal')">Cancel</button>
-        <button type="submit" class="fm-btn fm-btn--danger"><i class="fas fa-trash"></i> Delete</button>
-    </div>
-</form>
+<?php renderAdminModalFooterStart(); ?>
+    <button type="button" class="fm-btn" onclick="closeAdminModal('deletePolicyModal')">Cancel</button>
+    <button type="submit" class="fm-btn fm-btn--danger"><i class="fas fa-trash"></i> Delete</button>
 <?php renderAdminModalEnd(); ?>
 
 <?php renderAdminModalScript(); ?>

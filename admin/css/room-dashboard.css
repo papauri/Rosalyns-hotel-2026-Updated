@@ -482,7 +482,7 @@
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
+    z-index: 10000; /* above the sidebar */
     align-items: center;
     justify-content: center;
 }
@@ -492,26 +492,12 @@
 }
 
 .modal-content {
-    --rh-modal-shell-pad: 24px;
-    background: var(--color-white, #fff);
-    border-radius: 16px;
-    padding: 24px;
     width: 90%;
     max-width: 500px;
 }
 
-.modal-header {
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.modal-header h3 {
-    margin: 0;
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 24px;
-}
+/* Header, close button, footer and footer buttons come from the shared modal theme
+   (admin-components.css). */
 
 .form-group {
     margin-bottom: 16px;
@@ -541,28 +527,3 @@
     border-color: var(--gold, var(--color-lux-gold, #8F6A35));
 }
 
-.modal-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 20px;
-}
-
-.modal-actions button {
-    flex: 1;
-    padding: 12px;
-    border-radius: 10px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-}
-
-.btn-cancel {
-    background: #f0f0f0;
-    color: #333;
-}
-
-.btn-submit {
-    background: var(--gold, var(--color-lux-gold, #8F6A35));
-    color: white;
-}

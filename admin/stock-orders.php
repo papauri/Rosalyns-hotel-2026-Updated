@@ -2692,7 +2692,7 @@ $csrf_token = generateCsrfToken();
     <div id="soVoidModal" class="modal-overlay" data-modal role="dialog" aria-modal="true" aria-labelledby="soVoidTitle">
         <div class="modal-content" style="max-width:min(96vw,26rem); width:min(96vw,26rem);">
             <div class="modal-header">
-                <h3 class="modal-title" id="soVoidTitle" style="color:#c82333;"><i class="fas fa-ban"></i> Void Order</h3>
+                <h3 class="modal-title" id="soVoidTitle"><i class="fas fa-ban"></i> Void Order</h3>
                 <button type="button" class="modal-close" aria-label="Close modal" onclick="soCloseVoid()">&times;</button>
             </div>
             <div class="modal-body">
@@ -2711,7 +2711,7 @@ $csrf_token = generateCsrfToken();
     <div id="soSettleModal" class="modal-overlay" data-modal role="dialog" aria-modal="true" aria-labelledby="soSettleTitle">
         <div class="modal-content" style="max-width:min(96vw,30rem);width:min(96vw,30rem);">
             <div class="modal-header">
-                <h3 class="modal-title" id="soSettleTitle" style="color:#155724;"><i class="fas fa-circle-check"></i> Settle Order</h3>
+                <h3 class="modal-title" id="soSettleTitle"><i class="fas fa-circle-check"></i> Settle Order</h3>
                 <button type="button" class="modal-close" aria-label="Close" onclick="soCloseSettle()">&times;</button>
             </div>
             <div class="modal-body">

@@ -323,66 +323,14 @@ $priceTypeLabels = [
 
         /* ── Modal box ───────────────────────────────────────────────────────── */
         .pkg-modal {
-            background: #fff;
-            border-radius: 10px;
             max-width: 700px;
             width: 100%;
             margin: auto;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, .25);
-        }
-
-        .pkg-modal__header {
-            padding: 20px 24px 16px;
-            border-bottom: 1px solid #e9ecef;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: none;
-        }
-
-        .pkg-modal__header h3 {
-            margin: 0;
-            font-size: 17px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .pkg-modal__header h3 i {
-            color: #7E684B;
-        }
-
-        .pkg-modal__close {
-            background: none;
-            border: none;
-            font-size: 20px;
-            cursor: pointer;
-            color: #6c757d;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            line-height: 1;
-            padding: 0;
-        }
-
-        .pkg-modal__close:hover {
-            color: #495057;
         }
 
         .pkg-modal__body {
-            padding: 20px 24px;
             max-height: calc(100vh - 170px);
             overflow-y: auto;
-        }
-
-        .pkg-modal__footer {
-            padding: 16px 24px;
-            border-top: 1px solid #e9ecef;
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            background: #f8f9fa;
         }
 
         /* ── Package card mobile ─────────────────────────────────────────────── */
@@ -882,14 +830,12 @@ $priceTypeLabels = [
                             </div>
                         </div>
                     </div>
+                    <div id="pkgModalFeedback" class="admin-modal-feedback"></div>
                 </div>
 
-                <div class="modal-footer pkg-modal__footer" style="flex-direction:column; align-items:stretch; gap:0;">
-                    <div id="pkgModalFeedback" class="admin-modal-feedback"></div>
-                    <div style="display:flex; justify-content:flex-end; gap:10px;">
-                        <button type="button" class="btn btn-secondary" onclick="closePkgModal()">Close</button>
-                        <button type="submit" id="pkgSaveBtn" class="btn btn-primary"><i class="fas fa-save"></i> Save Package</button>
-                    </div>
+                <div class="modal-footer pkg-modal__footer">
+                    <button type="button" class="btn btn-secondary" onclick="closePkgModal()">Close</button>
+                    <button type="submit" id="pkgSaveBtn" class="btn btn-primary"><i class="fas fa-save"></i> Save Package</button>
                 </div>
 
             </form>
@@ -1077,11 +1023,16 @@ $priceTypeLabels = [
     </script>
 
     <!-- Delete Confirmation Modal -->
-    <div id="deleteConfirmModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:9000; align-items:center; justify-content:center; padding:20px;">
-        <div style="background:#fff; border-radius:10px; max-width:420px; width:100%; padding:28px; box-shadow:0 10px 40px rgba(0,0,0,.3);">
-            <h4 style="margin:0 0 12px; font-size:16px;"><i class="fas fa-exclamation-triangle" style="color:#dc3545;"></i> Confirm Delete</h4>
-            <p id="deleteConfirmMessage" style="margin:0 0 22px; font-size:14px; color:#343a40; line-height:1.5;"></p>
-            <div style="display:flex; justify-content:flex-end; gap:10px;">
+    <div id="deleteConfirmModal" class="modal-overlay" style="display:none; z-index:9000;" role="dialog" aria-modal="true" aria-labelledby="deleteConfirmTitle">
+        <div class="modal-content" style="max-width:420px; width:100%;">
+            <div class="modal-header">
+                <h3 id="deleteConfirmTitle"><i class="fas fa-exclamation-triangle"></i> Confirm Delete</h3>
+                <button type="button" class="modal-close" onclick="document.getElementById('deleteConfirmModal').style.display='none'" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="deleteConfirmMessage" style="margin:0; font-size:14px; line-height:1.5;"></p>
+            </div>
+            <div class="modal-footer">
                 <button type="button" onclick="document.getElementById('deleteConfirmModal').style.display='none'" class="btn btn-secondary">Cancel</button>
                 <button type="button" id="deleteConfirmYes" class="btn btn-danger"><i class="fas fa-trash"></i> Yes, Delete</button>
             </div>

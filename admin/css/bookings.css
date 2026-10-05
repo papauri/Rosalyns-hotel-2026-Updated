@@ -412,31 +412,11 @@ body .modal-overlay.active {
 #viewBookingModal .modal-content {
     width: min(96vw, 64rem);
     max-width: min(96vw, 64rem) !important;
-    border-radius: 1rem;
-    border: 1px solid var(--admin-surface-border, #d7dde6);
-    box-shadow: 0 24px 46px rgba(15, 23, 42, 0.22);
     overflow: hidden;
 }
 
 #viewBookingModal .modal-header {
-    position: relative;
-    display: flex;
     align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.72rem;
-    padding: 0.95rem 1rem 0.9rem;
-    border-bottom: 1px solid var(--admin-surface-border, #d7dde6);
-    background: radial-gradient(circle at 92% -12%, color-mix(in srgb, var(--color-primary, #B88E2F) 22%, transparent) 0%, transparent 60%), linear-gradient(135deg, color-mix(in srgb, var(--color-background, #F7F3EE) 80%, var(--color-white, #fff)) 0%, color-mix(in srgb, var(--color-background, #F7F3EE) 56%, var(--color-white, #fff)) 100%);
-}
-
-#viewBookingModal .modal-header::after {
-    content: "";
-    position: absolute;
-    left: 1rem;
-    right: 1rem;
-    bottom: -1px;
-    height: 1px;
-    background: color-mix(in srgb, var(--admin-surface-border, #d7dde6) 70%, transparent);
 }
 
 #viewBookingModal .bookings-view-modal__title-block {
@@ -507,35 +487,6 @@ body .modal-overlay.active {
     font-weight: 600;
 }
 
-#viewBookingModal .modal-header .close-modal {
-    position: static;
-    flex: 0 0 auto;
-    width: 2rem;
-    height: 2rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 0.62rem;
-    border: 1px solid color-mix(in srgb, var(--admin-surface-border, #d7dde6) 82%, var(--color-text-primary, #2A2723));
-    background: color-mix(in srgb, var(--color-white, #fff) 88%, var(--color-background, #F7F3EE));
-    color: var(--color-text-primary, #2A2723);
-    padding: 0;
-    line-height: 1;
-    transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.16s ease;
-}
-
-#viewBookingModal .modal-header .close-modal:hover {
-    transform: translateY(-1px);
-    border-color: color-mix(in srgb, var(--color-primary, #B88E2F) 52%, var(--color-text-primary, #2A2723));
-    background: color-mix(in srgb, var(--color-primary, #B88E2F) 12%, var(--color-white, #fff));
-    color: color-mix(in srgb, var(--color-primary, #B88E2F) 70%, var(--color-text-primary, #2A2723));
-}
-
-#viewBookingModal .modal-header .close-modal:focus-visible {
-    outline: 2px solid var(--color-primary, #B88E2F);
-    outline-offset: 1px;
-}
-
 #viewBookingModal .modal-body {
     padding: 0.92rem 1rem 0.96rem;
 }
@@ -590,9 +541,6 @@ body .modal-overlay.active {
 }
 
 #viewBookingModal .modal-footer {
-    padding: 0.76rem 1rem 0.92rem;
-    border-top: 1px solid var(--admin-surface-border, #d7dde6);
-    background: color-mix(in srgb, var(--color-background, #F7F3EE) 52%, var(--color-white, #fff));
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.54rem;
@@ -1559,7 +1507,6 @@ hr.menu-divider {
 
 .bookings-checkin-modal__dialog {
     width: min(96vw, 38rem);
-    border-radius: 1rem;
     max-height: min(92dvh, 44rem);
     overflow-x: hidden;
     overflow-y: auto;
@@ -1573,11 +1520,6 @@ hr.menu-divider {
     align-items: flex-start;
     justify-content: space-between;
     gap: 0.75rem;
-    padding: 1rem 1.15rem;
-    background: linear-gradient(135deg,
-            color-mix(in srgb, var(--color-primary, #766550) 88%, var(--color-lux-ink, #231F1C)),
-            color-mix(in srgb, var(--color-lux-gold, #8F6A35) 78%, var(--color-lux-ink, #231F1C)));
-    color: var(--color-white, #fff);
 }
 
 .bookings-checkin-modal__title-wrap h3 {
@@ -1710,8 +1652,6 @@ hr.menu-divider {
     display: flex;
     justify-content: flex-end;
     gap: 0.6rem;
-    padding: 0.9rem 1.15rem 1.1rem;
-    border-top: 1px solid var(--admin-surface-border, #d9dee7);
 }
 
 /* Missed check-ins / overdue checkouts modal refresh */
@@ -1731,10 +1671,6 @@ hr.menu-divider {
     max-height: min(92dvh, 58rem);
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--admin-surface-border, #eaecef);
-    border-radius: 1rem;
-    background: var(--color-white, #fff);
-    box-shadow: 0 1.1rem 2.8rem rgba(23, 27, 35, 0.24);
     padding: 0 !important;
     overflow: hidden;
     box-sizing: border-box;
@@ -1751,11 +1687,6 @@ hr.menu-divider {
     justify-content: space-between;
     align-items: flex-start;
     gap: 0.9rem;
-    padding: 0.95rem 1rem 0.8rem;
-    margin: 0 !important;
-    border-bottom: 1px solid var(--admin-surface-border, #eaecef);
-    background: linear-gradient(135deg, var(--color-white, #fff), var(--color-lux-clay-50, #F3ECE4));
-    color: var(--color-text-primary, #2A2723);
 }
 
 .bookings-alert-modal__title-wrap {
@@ -1791,26 +1722,6 @@ hr.menu-divider {
 
 .bookings-alert-modal__header--warning h3 i {
     color: color-mix(in srgb, var(--color-lux-gold, #8F6A35) 72%, var(--color-lux-ink, #231F1C));
-}
-
-.bookings-alert-modal__close {
-    width: 2.25rem;
-    height: 2.25rem;
-    min-width: 2.25rem;
-    border: 1px solid var(--admin-surface-border, #eaecef);
-    border-radius: 999px;
-    background: var(--color-white, #fff);
-    color: var(--color-text-secondary, #5E554D);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    line-height: 1;
-}
-
-.bookings-alert-modal__close:hover {
-    border-color: var(--color-primary, #766550);
-    color: var(--color-primary, #766550);
 }
 
 .bookings-alert-modal__body {
@@ -2044,11 +1955,6 @@ hr.menu-divider {
     white-space: normal;
 }
 
-.bookings-alert-modal .modal-footer {
-    padding: 0.8rem 1rem 0.95rem;
-    border-top: 1px solid var(--admin-surface-border, #eaecef);
-    background: color-mix(in srgb, var(--color-background, #F7F3EE) 62%, var(--color-white, #fff));
-}
 
 .bookings-stats-insight-modal__summary {
     display: flex;

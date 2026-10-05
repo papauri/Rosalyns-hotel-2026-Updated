@@ -277,24 +277,18 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         .deals-empty i { font-size:40px; margin-bottom:12px; display:block; }
 
         /* ── Modal shell ── */
-        .dm-bg  { position:fixed; inset:0; background:rgba(0,0,0,.52); z-index:1000; display:none; align-items:center; justify-content:center; padding:16px; }
-        .dm-bg.show { display:flex; }
-        .dm-box { background:#fff; border-radius:18px; width:100%; max-width:640px; max-height:94vh; overflow-y:auto; position:relative; }
-        .dm-header { padding:22px 24px 0; position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #f3f4f6; padding-bottom:14px; }
-        .dm-title  { font-size:19px; font-weight:700; color:#111827; margin:0 32px 4px 0; }
-        .dm-subtitle { font-size:12px; color:#9ca3af; }
-        .dm-close  { position:absolute; top:16px; right:18px; background:none; border:none; font-size:18px; cursor:pointer; color:#9ca3af; line-height:1; }
-        .dm-close:hover { color:#374151; }
-        .dm-body   { padding:20px 24px; }
+        .dm-bg  { z-index:10000; display:none; }
+        .dm-bg.show { display:flex; opacity:1; visibility:visible; }
+        .dm-box { width:100%; max-width:640px; max-height:94vh; overflow:hidden; display:flex; flex-direction:column; }
+        .dm-subtitle { font-size:12px; color:#6b7280; margin-top:2px; }
+        .dm-body   { padding:20px 24px; overflow-y:auto; flex:1; min-height:0; }
         /* Form primitives */
         .fm-row   { margin-bottom:16px; }
         .fm-row label,.fm-label { display:block; font-size:11px; font-weight:700; color:#374151; margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em; }
         .fm-row input[type=text],.fm-row input[type=number],.fm-row input[type=time],
         .fm-row input[type=date],.fm-row select,.fm-row textarea {
-            width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid #d1d5db;
-            border-radius:9px; font-size:14px; color:#1f2937; background:#fff; outline:none; transition:border-color .15s;
+            width:100%; box-sizing:border-box; padding:10px 12px; font-size:14px;
         }
-        .fm-row input:focus,.fm-row select:focus,.fm-row textarea:focus { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.1); }
         .fm-row textarea { resize:vertical; min-height:52px; }
         .fm-hint  { font-size:11px; color:#9ca3af; margin-top:4px; line-height:1.5; }
         .fm-2col  { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
@@ -336,12 +330,7 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         .mb-preview { background:#ede9fe; border-radius:8px; padding:9px 13px; font-size:13px; color:#4c1d95; margin-top:10px; display:none; }
         .mb-preview strong { color:#6d28d9; }
         /* Footer */
-        .dm-footer { padding:16px 24px; border-top:1px solid #f3f4f6; display:flex; gap:10px; justify-content:flex-end; position:sticky; bottom:0; background:#fff; }
-        .dm-footer .btn-cancel { padding:10px 20px; border-radius:10px; border:1px solid #d1d5db; background:#fff; font-size:14px; cursor:pointer; color:#374151; }
-        .dm-footer .btn-save   { padding:10px 24px; border-radius:10px; border:none; background:#4f46e5; color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
-        .dm-footer .btn-save:hover { background:#4338ca; }
-        .dm-footer .btn-save:disabled { opacity:.55; cursor:not-allowed; }
-        @media(max-width:560px) { .dm-type-grid,.dm-scope-opts { grid-template-columns:repeat(2,1fr); } .dm-box { border-radius:14px; } .fm-2col { grid-template-columns:1fr; } }
+        @media(max-width:560px) { .dm-type-grid,.dm-scope-opts { grid-template-columns:repeat(2,1fr); } .fm-2col { grid-template-columns:1fr; } }
 
         /* ── Item Picker ── */
         .ip-row   { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; align-items:flex-end; margin-bottom:10px; }
@@ -461,16 +450,18 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
     <?php endif; ?>
 
 <!-- Add / Edit Modal -->
-<div class="dm-bg" id="dmBg">
-<div class="dm-box">
+<div class="dm-bg modal-overlay" id="dmBg" role="dialog" aria-modal="true" aria-labelledby="dmTitle">
+<div class="dm-box modal-content">
 
-    <div class="dm-header">
-        <div class="dm-title" id="dmTitle">Add Deal</div>
-        <div class="dm-subtitle">Deals apply automatically at the POS — no staff action needed.</div>
-        <button class="dm-close" onclick="closeDealModal()"><i class="fas fa-times"></i></button>
+    <div class="dm-header modal-header">
+        <div>
+            <h3 class="dm-title" id="dmTitle">Add Deal</h3>
+            <div class="dm-subtitle">Deals apply automatically at the POS — no staff action needed.</div>
+        </div>
+        <button type="button" class="modal-close" onclick="closeDealModal()" aria-label="Close">&times;</button>
     </div>
 
-    <div class="dm-body">
+    <div class="dm-body modal-body">
 
     <!-- 1. Name & description -->
     <div class="fm-row"><label>Deal Name *</label>
@@ -705,9 +696,9 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
     </div><!-- /.dm-body -->
 
-    <div class="dm-footer">
-        <button class="btn-cancel" onclick="closeDealModal()">Cancel</button>
-        <button class="btn-save" id="dmSaveBtn" onclick="saveDeal()"><i class="fas fa-save"></i> Save Deal</button>
+    <div class="dm-footer modal-footer">
+        <button type="button" class="btn-cancel" onclick="closeDealModal()">Cancel</button>
+        <button type="button" class="btn-save" id="dmSaveBtn" onclick="saveDeal()"><i class="fas fa-save"></i> Save Deal</button>
     </div>
 </div>
 </div>
