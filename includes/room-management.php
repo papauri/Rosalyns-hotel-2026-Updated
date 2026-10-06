@@ -406,6 +406,19 @@ function completeRoomTurnover(PDO $pdo, int $roomId, ?int $performedBy): void
 }
 
 /**
+ * Close a booking's room-service orders that were charged to the folio but are
+ * still 'placed', so the room's active-order lock is released at checkout.
+ * Call inside the checkout transaction. Returns the number of orders closed.
+ */
+function closeFolioChargedRoomServiceOrders($pdo, $bookingId): int
+{
+    $stmt = $pdo->prepare("UPDATE stock_orders SET status = 'completed', updated_at = NOW()
+        WHERE booking_id = ? AND order_type = 'room_service' AND status = 'placed' AND folio_posted_at IS NOT NULL");
+    $stmt->execute([(int)$bookingId]);
+    return $stmt->rowCount();
+}
+
+/**
  * Process guest checkout with full room management
  *
  * @param int $bookingId Booking ID
@@ -531,6 +544,8 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
         } catch (Throwable $e) {
             // older schema without booking_rooms — safe to ignore
         }
+
+        closeFolioChargedRoomServiceOrders($pdo, $bookingId);
 
         // Generate final invoice
         require_once __DIR__ . '/../config/invoice.php';

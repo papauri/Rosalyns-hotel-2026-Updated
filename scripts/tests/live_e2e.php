@@ -290,6 +290,7 @@ $co = processGuestCheckout($bookingId, $adminId, ['room_status' => ROOM_STATUS_C
 check(!empty($co['success']), 'processGuestCheckout succeeded', (string)($co['message'] ?? ''));
 $bk = one($pdo, "SELECT * FROM bookings WHERE id=?", [$bookingId]);
 check($bk['status'] === 'checked-out' && !empty($bk['checkout_completed_at']), 'Booking checked-out with timestamp');
+check((int)col($pdo, "SELECT COUNT(*) FROM stock_orders WHERE booking_id=? AND order_type='room_service' AND status='placed'", [$bookingId]) === 0, 'After checkout the booking has no placed room-service orders');
 $ir = one($pdo, "SELECT status FROM individual_rooms WHERE id=?", [$irId]);
 check($ir['status'] === 'cleaning', "Room released to cleaning (got {$ir['status']})");
 check((int)$bk['final_invoice_generated'] === 1 && !empty($bk['final_invoice_number']), 'Final invoice generated', (string)($bk['final_invoice_number'] ?? ''));
