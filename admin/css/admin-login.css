@@ -478,6 +478,7 @@ body {
 
 /* Short portrait screens (small phones, browser chrome showing) */
 @media (max-height: 700px) {
+    :root { --lg-gap: 8px; --lg-field: 44px; --lg-pad: 10px; }
     .login-header p { font-size: 15px; }
     .login-hero__mark { width: 40px; height: 40px; font-size: 16px; }
     .field-error:empty { display: none; }
@@ -486,7 +487,7 @@ body {
 
 /* Very short screens of any width: drop the subtitle, tighten rhythm */
 @media (max-height: 520px) {
-    :root { --lg-pad: 8px; --lg-gap: 8px; --lg-field: 44px; }
+    :root { --lg-pad: 6px; --lg-gap: 8px; --lg-field: 44px; }
     .login-header p { display: none; }
     .login-header { margin-bottom: 10px; }
     .login-header h1 { font-size: 1.6rem; }
@@ -511,6 +512,56 @@ body {
     .form-group label { margin-bottom: 4px; }
     .form-group { margin-bottom: 8px; }
     .login-footer { margin-top: 8px; padding-top: 0; }
+}
+
+/* ── Forgot / reset password pages (share this shell) ───────── */
+.login-header p strong { color: var(--lg-ink); font-weight: 500; }
+
+.password-strength {
+    height: 4px;
+    margin-top: 10px;
+    border-radius: 2px;
+    background: #E6DCCF;
+    overflow: hidden;
+}
+
+.password-strength-bar {
+    height: 100%;
+    width: 0;
+    border-radius: 2px;
+    transition: width .3s, background .3s;
+}
+
+.password-hint {
+    margin-top: 6px;
+    font-size: 14px;
+    color: var(--lg-muted);
+}
+
+.user-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    background: rgba(177, 130, 71, .12);
+    border: 1px solid rgba(177, 130, 71, .3);
+    color: var(--lg-gold-deep);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* these pages have no field-level error line, so keep the form tight */
+@media (max-height: 700px) {
+    .password-hint { font-size: 13px; margin-top: 4px; }
+    .password-strength { margin-top: 6px; }
+    .user-badge { margin-top: 8px; padding: 4px 12px; }
+}
+
+@media (max-height: 520px) {
+    .password-hint { display: none; }
+    .user-badge { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

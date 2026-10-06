@@ -153,10 +153,24 @@ $site_name = getSetting('site_name');
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="css/admin-auth.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-auth.css'); ?>">
+    <link rel="stylesheet" href="css/admin-login.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-login.css'); ?>">
 </head>
 <body>
-    <div class="login-container">
+    <div class="login-shell">
+        <aside class="login-hero" aria-hidden="true">
+            <img class="login-hero__img" src="../images/hero/slide1.jpeg" alt="" decoding="async" fetchpriority="high">
+            <div class="login-hero__brand">
+                <span class="login-hero__mark"><i class="fas fa-hotel"></i></span>
+                <span class="login-hero__name"><?php echo htmlspecialchars($site_name); ?></span>
+            </div>
+            <div class="login-hero__copy">
+                <p class="login-hero__eyebrow">Staff Portal</p>
+                <h2 class="login-hero__title">Hospitality, <em>run with grace.</em></h2>
+                <p class="login-hero__lede">Reservations, rooms, dining and guests, all in one calm and considered place.</p>
+            </div>
+        </aside>
+
+        <main class="login-panel">
         <div class="login-card">
             <div class="login-header">
                 <div class="logo">
@@ -225,6 +239,7 @@ $site_name = getSetting('site_name');
                 </a>
             </div>
         </div>
+        </main>
     </div>
     
     <script>
