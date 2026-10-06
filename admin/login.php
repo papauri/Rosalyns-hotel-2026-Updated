@@ -337,7 +337,7 @@ $site_name = getSetting('site_name');
             </div>
 
             <?php if ($error_message): ?>
-                <div class="alert-danger">
+                <div class="alert-danger" role="alert">
                     <?php echo htmlspecialchars($error_message); ?>
                 </div>
             <?php endif; ?>
@@ -367,8 +367,9 @@ $site_name = getSetting('site_name');
                     <label for="username">Username</label>
                     <div class="input-wrapper">
                         <i class="fas fa-user"></i>
-                        <input type="text" id="username" name="username" class="form-control"
-                            placeholder="Enter your username" autofocus autocomplete="username"
+                        <input type="text" id="username" name="username" class="form-control<?php echo $error_message ? ' is-invalid' : ''; ?>"
+                            placeholder="Enter your username" autofocus autocomplete="username" maxlength="100"
+                            autocapitalize="none" spellcheck="false" aria-describedby="username-error"
                             value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>">
                     </div>
                     <span class="field-error" id="username-error" aria-live="polite"></span>
@@ -378,14 +379,16 @@ $site_name = getSetting('site_name');
                     <label for="password">Password</label>
                     <div class="input-wrapper has-toggle">
                         <i class="fas fa-lock"></i>
-                        <input type="password" id="password" name="password" class="form-control"
-                            placeholder="Enter your password" autocomplete="current-password">
+                        <input type="password" id="password" name="password" class="form-control<?php echo $error_message ? ' is-invalid' : ''; ?>"
+                            placeholder="Enter your password" autocomplete="current-password" maxlength="256"
+                            aria-describedby="password-error">
                         <button type="button" class="password-toggle" id="toggleBtn"
                             aria-label="Show password" title="Show/hide password">
                             <i class="fas fa-eye" id="toggleIcon"></i>
                         </button>
                     </div>
                     <span class="field-error" id="password-error" aria-live="polite"></span>
+                    <span class="field-hint" id="caps-hint" hidden><i class="fas fa-arrow-up"></i> Caps Lock is on</span>
                 </div>
 
                 <button type="submit" class="btn-login" id="loginBtn">
@@ -450,10 +453,6 @@ $site_name = getSetting('site_name');
                     setError(usernameEl, 'username-error', 'Username is required.');
                     return false;
                 }
-                if (val.length < 3) {
-                    setError(usernameEl, 'username-error', 'Username must be at least 3 characters.');
-                    return false;
-                }
                 if (val.length > 100) {
                     setError(usernameEl, 'username-error', 'Username is too long.');
                     return false;
@@ -467,10 +466,6 @@ $site_name = getSetting('site_name');
                 const val = passwordEl.value;
                 if (!val) {
                     setError(passwordEl, 'password-error', 'Password is required.');
-                    return false;
-                }
-                if (val.length < 6) {
-                    setError(passwordEl, 'password-error', 'Password must be at least 6 characters.');
                     return false;
                 }
                 clearError(passwordEl, 'password-error');
@@ -502,6 +497,7 @@ $site_name = getSetting('site_name');
 
             /* ── Form submit ─────────────────────────────────────────────── */
             form.addEventListener('submit', function(e) {
+                usernameEl.value = usernameEl.value.trim();
                 const validUser = validateUsername();
                 const validPass = validatePassword();
 
@@ -517,6 +513,21 @@ $site_name = getSetting('site_name');
                 loginBtn.disabled = true;
                 loginBtn.classList.add('loading');
             });
+
+            /* ── Caps Lock warning on the password field ────────────────── */
+            const capsHint = document.getElementById('caps-hint');
+            function updateCaps(e) {
+                if (e.getModifierState) capsHint.hidden = !e.getModifierState('CapsLock');
+            }
+            passwordEl.addEventListener('keydown', updateCaps);
+            passwordEl.addEventListener('keyup', updateCaps);
+            passwordEl.addEventListener('blur', function() { capsHint.hidden = true; });
+
+            /* After a failed sign-in the server re-renders the page: put the
+               cursor where the user needs to retry. */
+            <?php if ($error_message): ?>
+            passwordEl.focus();
+            <?php endif; ?>
 
             /* Re-enable button if the user navigates back (browser bfcache) */
             window.addEventListener('pageshow', function(e) {

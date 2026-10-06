@@ -323,6 +323,18 @@ body {
     color: var(--lg-danger);
 }
 
+.field-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--lg-gold-deep);
+}
+
+.field-hint[hidden] { display: none; }
+
 .password-toggle {
     position: absolute;
     right: 4px;

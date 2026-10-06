@@ -36,8 +36,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error_message = 'Your session expired. Please try again.';
     } elseif (empty($email)) {
         $error_message = 'Please enter your email address.';
+    } elseif (strlen($email) > 254) {
+        $error_message = 'That email address is too long.';
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $error_message = 'Please enter a valid email address.';
+        $error_message = 'Please enter a valid email address, like name@example.com.';
     } else {
         // Rate-limit: max 3 reset requests per IP per 15 minutes
         try {
@@ -89,11 +91,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         try {
             // Look up user by email
-            $stmt = $pdo->prepare("SELECT id, username, email, full_name FROM admin_users WHERE email = ? AND is_active = 1");
+            $stmt = $pdo->prepare("SELECT id, username, email, full_name, is_active FROM admin_users WHERE email = ?");
             $stmt->execute([$email]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if ($user) {
+            if ($user && $user['is_active']) {
                 // Generate a secure token
                 $token = bin2hex(random_bytes(32));
                 $expires = date('Y-m-d H:i:s', strtotime('+1 hour'));
@@ -161,14 +163,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 } else {
                     error_log("Password reset email failed: " . $result['message']);
-                    // Still show success to prevent email enumeration
-                    header('Location: login.php?reset=sent');
-                    exit;
+                    // The mail never left: retire the token and tell the user honestly.
+                    $pdo->prepare("UPDATE password_resets SET used_at = NOW() WHERE token = ?")->execute([hash('sha256', $token)]);
+                    $error_message = 'We could not send the reset email right now. Please try again in a few minutes or contact your administrator.';
                 }
             } else {
-                // Don't reveal if email exists - always show success
-                header('Location: login.php?reset=sent');
-                exit;
+                // Count every lookup toward the rate limit, found or not, so this
+                // form cannot be used to probe for registered addresses.
+                $detail = $user ? 'Account deactivated' : 'Unknown email';
+                $log_stmt = $pdo->prepare("INSERT INTO admin_activity_log (user_id, username, action, details, ip_address, user_agent) VALUES (?, ?, 'password_reset_request', ?, ?, ?)");
+                $log_stmt->execute([$user['id'] ?? null, $email, $detail, $ip, $ua]);
+
+                $error_message = $user
+                    ? 'This account has been deactivated. Contact your administrator.'
+                    : 'No admin account is registered with that email address. Check the spelling or contact your administrator.';
             }
         } catch (PDOException $e) {
             error_log("Password reset error: " . $e->getMessage());
@@ -219,25 +227,29 @@ $site_name = getSetting('site_name');
             </div>
 
             <?php if ($error_message): ?>
-                <div class="alert-danger">
+                <div class="alert-danger" role="alert">
                     <?php echo htmlspecialchars($error_message); ?>
                 </div>
             <?php endif; ?>
 
-            <form method="POST">
+            <form method="POST" id="forgotForm" novalidate>
                 <?php echo getCsrfField(); ?>
                 <div class="form-group">
                     <label for="email">Email Address</label>
                     <div class="input-wrapper">
                         <i class="fas fa-envelope"></i>
-                        <input type="email" id="email" name="email" class="form-control"
-                               placeholder="Enter your email" required autofocus
+                        <input type="email" id="email" name="email" class="form-control<?php echo $error_message ? ' is-invalid' : ''; ?>"
+                               placeholder="Enter your email" required autofocus maxlength="254"
+                               autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false"
+                               aria-describedby="email-error"
                                value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
                     </div>
+                    <span class="field-error" id="email-error" aria-live="polite"></span>
                 </div>
 
-                <button type="submit" class="btn-login">
-                    <i class="fas fa-paper-plane"></i> Send Reset Link
+                <button type="submit" class="btn-login" id="forgotBtn">
+                    <span class="btn-text"><i class="fas fa-paper-plane"></i> Send Reset Link</span>
+                    <span class="btn-spinner"></span>
                 </button>
             </form>
 
@@ -249,6 +261,55 @@ $site_name = getSetting('site_name');
         </div>
         </main>
     </div>
+    <script>
+        (function () {
+            'use strict';
+            var form = document.getElementById('forgotForm');
+            var emailEl = document.getElementById('email');
+            var errEl = document.getElementById('email-error');
+            var btn = document.getElementById('forgotBtn');
+            // Pragmatic check; the server re-validates with FILTER_VALIDATE_EMAIL.
+            var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+            function setError(msg) {
+                emailEl.classList.add('is-invalid');
+                emailEl.classList.remove('is-valid');
+                emailEl.setAttribute('aria-invalid', 'true');
+                errEl.textContent = msg;
+            }
+            function clearError() {
+                emailEl.classList.remove('is-invalid');
+                emailEl.removeAttribute('aria-invalid');
+                errEl.textContent = '';
+            }
+            function validate() {
+                var v = emailEl.value.trim();
+                if (!v) { setError('Email address is required.'); return false; }
+                if (v.length > 254) { setError('That email address is too long.'); return false; }
+                if (v.indexOf('@') === -1) { setError('Include an "@" in the email address.'); return false; }
+                if (!EMAIL_RE.test(v)) { setError('Enter a valid email address, like name@example.com.'); return false; }
+                clearError();
+                emailEl.classList.add('is-valid');
+                return true;
+            }
+
+            emailEl.addEventListener('blur', function () { if (emailEl.value.length) validate(); });
+            emailEl.addEventListener('input', function () {
+                emailEl.classList.remove('is-valid');
+                if (emailEl.classList.contains('is-invalid')) clearError();
+            });
+            form.addEventListener('submit', function (e) {
+                emailEl.value = emailEl.value.trim();
+                if (!validate()) { e.preventDefault(); emailEl.focus(); return; }
+                btn.disabled = true;
+                btn.classList.add('loading');
+            });
+            // Re-enable if the user comes back via the browser's back button.
+            window.addEventListener('pageshow', function (ev) {
+                if (ev.persisted) { btn.disabled = false; btn.classList.remove('loading'); }
+            });
+        })();
+    </script>
 </body>
 </html>
 
