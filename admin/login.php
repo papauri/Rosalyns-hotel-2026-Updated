@@ -308,18 +308,32 @@ $site_name = getSetting('site_name');
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link rel="manifest" href="manifest.php">
     <!-- Keep login page lean: do not load full frontend bundle to avoid duplicate imports -->
-    <link rel="stylesheet" href="css/admin-auth.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-auth.css'); ?>">
+    <link rel="stylesheet" href="css/admin-login.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-login.css'); ?>">
 </head>
 
 <body>
-    <div class="login-container">
+    <div class="login-shell">
+        <aside class="login-hero" aria-hidden="true">
+            <img class="login-hero__img" src="../images/hero/slide1.jpeg" alt="" decoding="async" fetchpriority="high">
+            <div class="login-hero__brand">
+                <span class="login-hero__mark"><i class="fas fa-hotel"></i></span>
+                <span class="login-hero__name"><?php echo htmlspecialchars($site_name); ?></span>
+            </div>
+            <div class="login-hero__copy">
+                <p class="login-hero__eyebrow">Staff Portal</p>
+                <h2 class="login-hero__title">Hospitality, <em>run with grace.</em></h2>
+                <p class="login-hero__lede">Reservations, rooms, dining and guests, all in one calm and considered place.</p>
+            </div>
+        </aside>
+
+        <main class="login-panel">
         <div class="login-card">
             <div class="login-header">
                 <div class="logo">
                     <i class="fas fa-hotel"></i>
                 </div>
-                <h1>Admin Portal</h1>
-                <p><?php echo htmlspecialchars($site_name); ?></p>
+                <h1>Welcome back</h1>
+                <p>Sign in to the <?php echo htmlspecialchars($site_name); ?> admin portal.</p>
             </div>
 
             <?php if ($error_message): ?>
@@ -389,6 +403,7 @@ $site_name = getSetting('site_name');
                 </a>
             </div>
         </div>
+        </main>
     </div>
 
     <script>
