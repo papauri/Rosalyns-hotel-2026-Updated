@@ -12,6 +12,11 @@ if (!hasPermission((int)($user['id'] ?? 0), 'receipts')) {
     exit;
 }
 
+/* Seeing receipts is not the same as rewriting the wording every guest gets.
+   Without this, the templates panel is preview-only: no fields, no Save, and
+   the save_templates action is refused server-side. */
+$canEditTemplates = hasPermission((int)($user['id'] ?? 0), 'edit_templates');
+
 receipt_ensure_schema($pdo);
 $currency_symbol = getSetting('currency_symbol', 'MWK');
 $message = '';
@@ -119,6 +124,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $message = 'Generated receipts for ' . $count . ' completed payment(s).';
             } elseif ($action === 'save_templates') {
+                if (!$canEditTemplates) {
+                    throw new RuntimeException('You do not have permission to edit receipt templates.');
+                }
                 $subject = trim((string)($_POST['receipt_email_subject'] ?? ''));
                 $html = trim((string)($_POST['receipt_email_template'] ?? ''));
                 $whatsapp = trim((string)($_POST['receipt_whatsapp_template'] ?? ''));
@@ -524,12 +532,13 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
         <!-- Templates panel -->
         <section class="rh-panel">
             <div class="rh-panel__head">
-                <h2 class="rh-panel__title">Editable receipt templates</h2>
+                <h2 class="rh-panel__title"><?php echo $canEditTemplates ? 'Editable receipt templates' : 'Receipt templates'; ?></h2>
                 <div class="rh-panel__actions">
                     <button type="button" class="btn btn--ghost btn--sm" id="receiptsPreviewToggle"><i class="fas fa-eye"></i> Preview</button>
                 </div>
             </div>
             <div class="rh-panel__body">
+            <?php if ($canEditTemplates): ?>
             <p class="rh-page-head__meta receipts-placeholders">Placeholders: {{site_name}}, {{guest_name}}, {{receipt_number}}, {{payment_reference}}, {{booking_reference}}, {{payment_date}}, {{payment_method}}, {{payment_type}}, {{total_amount}}, {{contact_email}}.</p>
             <form method="post" class="receipts-template-form" id="receiptTemplateForm" data-receipt-placeholder-tokens="<?php echo htmlspecialchars((string)json_encode($receiptPlaceholderTokens), ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
@@ -550,8 +559,24 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
                 </div>
                 <button class="btn btn--primary" type="submit"><i class="fas fa-save"></i> Save Templates</button>
             </form>
+            <?php else: ?>
+            <p class="rh-page-head__meta receipts-placeholders">
+                <i class="fas fa-lock" aria-hidden="true"></i>
+                These are the templates guests receive. Editing them needs the
+                &ldquo;Edit receipt templates&rdquo; permission &mdash; use Preview to see how they read.
+            </p>
+            <?php endif; ?>
 
-            <div class="receipts-template-preview" id="receiptsTemplatePreview" hidden data-preview-map="<?php echo htmlspecialchars((string)json_encode($templatePreviewMap), ENT_QUOTES, 'UTF-8'); ?>">
+            <?php /* The read-only view has no inputs for the preview to read, so the
+                     filled-in template is handed to the script as data instead. */ ?>
+            <div class="receipts-template-preview" id="receiptsTemplatePreview" hidden
+                 data-preview-map="<?php echo htmlspecialchars((string)json_encode($templatePreviewMap), ENT_QUOTES, 'UTF-8'); ?>"
+                 <?php if (!$canEditTemplates): ?>
+                 data-readonly="1"
+                 data-static-subject="<?php echo htmlspecialchars($templateSubject, ENT_QUOTES, 'UTF-8'); ?>"
+                 data-static-html="<?php echo htmlspecialchars($templateHtml, ENT_QUOTES, 'UTF-8'); ?>"
+                 data-static-whatsapp="<?php echo htmlspecialchars($templateWhatsapp, ENT_QUOTES, 'UTF-8'); ?>"
+                 <?php endif; ?>>
                 <div class="receipts-template-preview__section">
                     <h4 class="receipts-template-preview__title">Subject Preview</h4>
                     <p class="receipts-template-preview__subject" id="receiptPreviewSubject"></p>

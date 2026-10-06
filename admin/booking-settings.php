@@ -14,6 +14,11 @@ $user = [
 $message = '';
 $error = '';
 $template_preview = null;
+
+/* Reaching booking settings is not the same as rewriting the wording every
+   guest receives. Without this the email/PDF template editors are hidden and
+   the panel is preview-only; the save and reset actions are refused below. */
+$canEditTemplates = hasPermission((int)($user['id'] ?? 0), 'edit_templates');
 $default_site_maintenance_message = 'Our website is temporarily unavailable while we complete scheduled maintenance. Please check back shortly.';
 
 // Module flags — gate settings sections/templates by the active business
@@ -1073,6 +1078,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Failed to send test email: ' . ($result['message'] ?? 'Unknown error'));
             }
         } elseif (isset($_POST['reset_all_booking_templates_to_defaults'])) {
+            if (!$canEditTemplates) {
+                throw new Exception('You do not have permission to edit message templates.');
+            }
             if (!function_exists('resetBookingEmailTemplatesToDefaults')) {
                 throw new Exception('Booking template reset is not available');
             }
@@ -1085,6 +1093,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $updated = (int)($resetResult['updated'] ?? 0);
             $message = "All booking email and PDF templates were reset to the default design ({$updated} templates).";
         } elseif (isset($_POST['booking_email_templates'])) {
+            if (!$canEditTemplates) {
+                throw new Exception('You do not have permission to edit message templates.');
+            }
             if (!function_exists('upsertBookingEmailTemplateConfig')) {
                 throw new Exception('Booking template storage is not available');
             }
@@ -2252,9 +2263,10 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         $isShown  = ($tkey === $activeTabKey);
                     ?>
                         <div class="tpl-panel" id="panel-<?php echo $tkey; ?>" <?php echo $isShown ? '' : 'hidden'; ?> role="tabpanel">
-                            <div class="tpl-split">
+                            <div class="tpl-split<?php echo $canEditTemplates ? '' : ' tpl-split--locked'; ?>">
 
                                 <!-- ====== EDITOR ====== -->
+                                <?php if ($canEditTemplates): ?>
                                 <div class="tpl-editor">
                                     <div class="tpl-editor-header">
                                         <span class="tpl-badge <?php echo $isActive ? 'tpl-badge-active' : 'tpl-badge-inactive'; ?>">
@@ -2322,6 +2334,18 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                         </div>
                                     </details>
                                 </div><!-- /tpl-editor -->
+                                <?php else: ?>
+                                <?php /* No fields to read, so the preview endpoint falls back to the
+                                         saved template for this key — see the _ajax_preview handler. */ ?>
+                                <div class="tpl-editor tpl-editor--locked">
+                                    <p class="help-text" style="margin:0;">
+                                        <i class="fas fa-lock" aria-hidden="true"></i>
+                                        This is the template guests receive. Editing it needs the
+                                        &ldquo;Edit message templates&rdquo; permission &mdash;
+                                        use Preview to see how it reads.
+                                    </p>
+                                </div>
+                                <?php endif; ?>
 
                                 <!-- ====== PREVIEW ====== -->
                                 <div class="tpl-preview-pane" id="preview-pane-<?php echo $tkey; ?>">
@@ -2362,6 +2386,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </div><!-- /tpl-panel -->
                     <?php endforeach; ?>
 
+                    <?php if ($canEditTemplates): ?>
                     <div style="padding-top:14px;border-top:1px solid #e8e3d7;margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
                         <button type="submit" class="btn-submit">
                             <i class="fas fa-save"></i> Save All Templates
@@ -2377,6 +2402,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </button>
                         <span class="help-text" style="margin:0;color:#6b7280;">Uses the same canonical defaults that power runtime seeding and per-template Load Default.</span>
                     </div>
+                    <?php endif; ?>
                 </form>
             </div><!-- /tpl-editor-card -->
 

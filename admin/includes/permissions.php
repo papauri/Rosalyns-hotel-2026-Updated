@@ -70,6 +70,7 @@ function getAllRoles()
                 'accounting',
                 'payments',
                 'receipts',
+                'edit_templates',
                 'invoices',
                 'payment_add',
                 'refund_payment',
@@ -864,6 +865,14 @@ function getAllPermissions()
             'category' => 'Finance',
             'page' => 'payment-refund.php',
             'group' => 'payments_write'
+        ],
+        'edit_templates' => [
+            'label' => 'Edit message templates',
+            'description' => 'Change the wording guests receive: receipt email and WhatsApp templates, and the booking email and PDF templates. Without it those templates are preview-only.',
+            'icon' => 'fa-file-pen',
+            'category' => 'Settings',
+            'page' => 'receipts.php',
+            'group' => 'settings'
         ],
         'finance_settings' => [
             'label' => 'Change VAT & refund settings',

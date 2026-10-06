@@ -471,6 +471,22 @@ details.template-block[open]>summary::after {
     align-items: start;
 }
 
+/* Preview-only: with no editor to sit beside, the preview takes the full width
+   and the lock notice reads as a banner above it. */
+.tpl-split--locked {
+    grid-template-columns: 1fr;
+}
+.tpl-editor--locked {
+    padding: 12px 14px;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    border-left: 3px solid var(--gold, #8F6A35);
+    border-radius: 8px;
+    background: var(--gold-light, #F3ECE4);
+}
+.tpl-editor--locked .help-text {
+    color: #4f3f2a;
+}
+
 @media (max-width: 960px) {
     .tpl-split {
         grid-template-columns: 1fr;

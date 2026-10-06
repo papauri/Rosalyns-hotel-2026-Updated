@@ -1,7 +1,14 @@
 (function () {
     'use strict';
 
+    var _autocompleteTeardown = null;
+
     function initReceiptTemplateAutocomplete() {
+        if (_autocompleteTeardown) {
+            _autocompleteTeardown();
+            _autocompleteTeardown = null;
+        }
+
         var form = document.getElementById('receiptTemplateForm');
         if (!form) {
             return;
@@ -181,16 +188,21 @@
             document.getElementById('receiptWhatsappTemplate')
         ].filter(Boolean).forEach(bindField);
 
-        window.addEventListener('resize', function () {
+        function reposition() {
             if (state.field) {
                 positionMenu(state.field);
             }
-        });
-        window.addEventListener('scroll', function () {
-            if (state.field) {
-                positionMenu(state.field);
+        }
+        window.addEventListener('resize', reposition);
+        window.addEventListener('scroll', reposition, true);
+
+        _autocompleteTeardown = function () {
+            window.removeEventListener('resize', reposition);
+            window.removeEventListener('scroll', reposition, true);
+            if (menu.parentNode) {
+                menu.parentNode.removeChild(menu);
             }
-        }, true);
+        };
     }
 
     function setUrlPage(page) {
@@ -299,7 +311,14 @@
         var previewFrame = document.getElementById('receiptPreviewFrame');
         var previewWhatsapp = document.getElementById('receiptPreviewWhatsapp');
 
-        if (!panel || !toggle || !subjectInput || !emailInput || !whatsappInput || !previewSubject || !previewFrame || !previewWhatsapp) {
+        if (!panel || !toggle || !previewSubject || !previewFrame || !previewWhatsapp) {
+            return;
+        }
+
+        /* Without the edit permission the page renders no fields, so the saved
+           template is read from the panel's data attributes instead. */
+        var readOnly = panel.dataset.readonly === '1';
+        if (!readOnly && (!subjectInput || !emailInput || !whatsappInput)) {
             return;
         }
 
@@ -310,13 +329,26 @@
             tokenMap = {};
         }
 
+        function sourceValues() {
+            if (readOnly) {
+                return {
+                    subject: panel.dataset.staticSubject || '',
+                    email: panel.dataset.staticHtml || '',
+                    whatsapp: panel.dataset.staticWhatsapp || ''
+                };
+            }
+            return {
+                subject: subjectInput.value,
+                email: emailInput.value,
+                whatsapp: whatsappInput.value
+            };
+        }
+
         function renderPreview() {
-            var subject = replaceTokens(subjectInput.value, tokenMap);
-            var email = replaceTokens(emailInput.value, tokenMap);
-            var whatsapp = replaceTokens(whatsappInput.value, tokenMap);
-            previewSubject.textContent = subject;
-            previewWhatsapp.textContent = whatsapp;
-            previewFrame.srcdoc = email;
+            var src = sourceValues();
+            previewSubject.textContent = replaceTokens(src.subject, tokenMap);
+            previewWhatsapp.textContent = replaceTokens(src.whatsapp, tokenMap);
+            previewFrame.srcdoc = replaceTokens(src.email, tokenMap);
         }
 
         function setPanelState(isOpen) {
@@ -334,7 +366,7 @@
             setPanelState(panel.hidden);
         });
 
-        [subjectInput, emailInput, whatsappInput].forEach(function (field) {
+        [subjectInput, emailInput, whatsappInput].filter(Boolean).forEach(function (field) {
             field.addEventListener('input', function () {
                 if (!panel.hidden) {
                     renderPreview();
@@ -345,15 +377,27 @@
         setPanelState(false);
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function () {
-            initReceiptClientPagination();
-            initReceiptTemplateAutocomplete();
-            initReceiptTemplatePreview();
-        });
-    } else {
+    function initReceiptsPage() {
         initReceiptClientPagination();
         initReceiptTemplateAutocomplete();
         initReceiptTemplatePreview();
     }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initReceiptsPage);
+    } else {
+        initReceiptsPage();
+    }
+
+    /* The admin SPA replaces #rh-admin-page in place and injects a <head> script
+       only the first time it sees that src. Returning to this page therefore
+       left every control above bound to markup that had already been discarded,
+       which is why Preview stopped responding after the first visit. */
+    document.addEventListener('rh:content-updated', function () {
+        if (document.getElementById('receiptTemplateForm') ||
+            document.getElementById('receiptsTemplatePreview') ||
+            document.querySelector('[data-receipts-pagination-scope]')) {
+            initReceiptsPage();
+        }
+    });
 })();
