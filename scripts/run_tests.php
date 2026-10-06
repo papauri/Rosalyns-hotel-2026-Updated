@@ -13,6 +13,7 @@ $suites = [
     'POS/KDS smoke'         => 'scripts/smoke_test_pos_kds.php',
     'Settings pages'        => 'scripts/tests/settings_pages.php',
     'Hotel details section' => 'scripts/tests/hotel_details.php',
+    'User timezone display' => 'scripts/tests/user_timezone.php',
 ];
 $failed = 0;
 foreach ($suites as $name => $file) {

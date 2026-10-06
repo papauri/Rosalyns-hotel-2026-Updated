@@ -32,6 +32,7 @@ if ($header_logo_kicker === '') {
     $header_logo_kicker = isset($site_name) ? trim((string) $site_name) : '';
 }
 ?>
+<?php if (function_exists('rhUserTzScript')) { echo rhUserTzScript(); } ?>
 <!-- Skip to content link for accessibility -->
 <a href="#main-content" class="skip-to-content">Skip to main content</a>
 

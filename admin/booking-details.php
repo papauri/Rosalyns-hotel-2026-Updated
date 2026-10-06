@@ -1252,9 +1252,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <?php echo (int) $booking['number_of_nights']; ?> night<?php echo ((int) $booking['number_of_nights']) === 1 ? '' : 's'; ?>
                 </p>
                 <p class="rh-page-head__meta">
-                    Created <?php echo date('M j, Y \a\t g:i A', strtotime($booking['created_at'])); ?>
+                    Created <?php echo htmlspecialchars(rhToUserTime($booking['created_at'], 'M j, Y \a\t g:i A')); ?>
                     <?php if ($booking['updated_at'] && $booking['updated_at'] != $booking['created_at']): ?>
-                        &middot; Updated <?php echo date('M j, Y \a\t g:i A', strtotime($booking['updated_at'])); ?>
+                        &middot; Updated <?php echo htmlspecialchars(rhToUserTime($booking['updated_at'], 'M j, Y \a\t g:i A')); ?>
                     <?php endif; ?>
                 </p>
             </div>
@@ -1377,7 +1377,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <?php if (!empty($booking['last_quotation_sent_at'])): ?>
                     <p class="booking-actions-meta">
                         <i class="fas fa-paper-plane"></i>
-                        Quotation last sent <?php echo date('M j, Y \a\t g:i A', strtotime($booking['last_quotation_sent_at'])); ?>
+                        Quotation last sent <?php echo htmlspecialchars(rhToUserTime($booking['last_quotation_sent_at'], 'M j, Y \a\t g:i A')); ?>
                     </p>
                 <?php endif; ?>
             </div>
@@ -1786,7 +1786,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <li class="invoice-item">
                                     <div class="invoice-info">
                                         <span class="invoice-number"><i class="fas fa-file-invoice"></i> <?php echo htmlspecialchars($invoice['invoice_number']); ?></span>
-                                        <span class="invoice-date">Generated <?php echo date('M j, Y \a\t g:i A', strtotime($invoice['created_at'])); ?></span>
+                                        <span class="invoice-date">Generated <?php echo htmlspecialchars(rhToUserTime($invoice['created_at'], 'M j, Y \a\t g:i A')); ?></span>
                                     </div>
                                     <div class="invoice-actions">
                                         <?php if ($invoice['invoice_path']): ?>
@@ -1858,7 +1858,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <div class="note-item">
                                     <div class="note-header">
                                         <span class="note-author"><?php echo htmlspecialchars($note['created_by_name'] ?? 'Unknown'); ?></span>
-                                        <span class="note-time"><?php echo date('M j, H:i', strtotime($note['created_at'])); ?></span>
+                                        <span class="note-time"><?php echo htmlspecialchars(rhToUserTime($note['created_at'], 'M j, H:i')); ?></span>
                                     </div>
                                     <div class="note-text"><?php echo nl2br(htmlspecialchars($note['note_text'])); ?></div>
                                 </div>
@@ -1891,7 +1891,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                             <?php else: ?>
                                                 System
                                             <?php endif; ?>
-                                            &middot; <?php echo date('M j, H:i', strtotime($event['created_at'])); ?>
+                                            &middot; <?php echo htmlspecialchars(rhToUserTime($event['created_at'], 'M j, H:i')); ?>
                                         </div>
                                         <?php if ($event['action_type'] === 'date_adjustment' && !empty($event_metadata)): ?>
                                             <div class="timeline-adjustment-details">

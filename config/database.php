@@ -106,6 +106,7 @@ if (!defined('RH_TIMEZONE')) {
     unset($rhTz);
 }
 date_default_timezone_set(RH_TIMEZONE);
+require_once __DIR__ . '/../includes/user-timezone.php';
 
 // Create PDO connection with performance optimizations
 try {

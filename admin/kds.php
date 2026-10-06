@@ -2505,7 +2505,7 @@ $bootstrap['fingerprint'] = md5(
 
         function fmtTime(iso) {
             if (!iso) return '—';
-            const t = iso.includes('T') ? new Date(iso) : new Date(iso.replace(' ', 'T'));
+            const t = window.rhHotelDate ? window.rhHotelDate(iso) : (iso.includes('T') ? new Date(iso) : new Date(iso.replace(' ', 'T')));
             if (isNaN(t.getTime())) return '—';
             return String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') + ':' + String(t.getSeconds()).padStart(2, '0');
         }

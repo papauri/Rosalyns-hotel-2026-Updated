@@ -338,7 +338,7 @@ if (!empty($_GET['print'])) {
     if (!empty($_GET['kot'])) {
         // Kitchen Order Ticket: modernized thermal layout (80mm), no prices.
         $ticketTimeRaw = (string)($order['fired_at'] ?: ($order['kitchen_printed_at'] ?: ($order['created_at'] ?: '')));
-        $kotTime = $ticketTimeRaw !== '' ? date('Y-m-d H:i', strtotime($ticketTimeRaw)) : date('Y-m-d H:i');
+        $kotTime = $ticketTimeRaw !== '' ? rhToUserTime($ticketTimeRaw) : rhToUserTime(date('Y-m-d H:i:s'));
         $isRoomService = ($order['order_type'] ?? '') === 'room_service';
         $serviceLabel = strtoupper(str_replace('_', ' ', (string)($order['order_type'] ?? 'walk_in')));
         $roomNo = trim((string)($order['room_number'] ?? ''));
@@ -495,7 +495,7 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
                         <button type="submit" class="btn-primary" style="margin-top:10px;width:100%;"><i class="fas fa-paper-plane"></i> Send receipt</button>
                     </form>
                     <?php if ($order['receipt_sent_at']): ?>
-                        <p style="font-size:11px;color:#155724;margin-top:8px;"><i class="fas fa-check"></i> Last sent <?php echo date('Y-m-d H:i', strtotime($order['receipt_sent_at'])); ?> to <?php echo htmlspecialchars($order['receipt_sent_to']); ?> (<?php echo (int)$order['receipt_send_count']; ?>x)</p>
+                        <p style="font-size:11px;color:#155724;margin-top:8px;"><i class="fas fa-check"></i> Last sent <?php echo htmlspecialchars(rhToUserTime($order['receipt_sent_at'])); ?> to <?php echo htmlspecialchars($order['receipt_sent_to']); ?> (<?php echo (int)$order['receipt_send_count']; ?>x)</p>
                     <?php endif; ?>
                 </div>
 
@@ -553,7 +553,7 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
                             <?php foreach ($deliveries as $d): ?>
                                 <div class="row">
                                     <div><strong><?php echo strtoupper(htmlspecialchars($d['channel'])); ?></strong> · <?php echo htmlspecialchars($d['recipient']); ?> <span class="pill <?php echo htmlspecialchars($d['status']); ?>"><?php echo htmlspecialchars($d['status']); ?></span></div>
-                                    <div style="color:#6c757d;font-size:11px;"><?php echo $d['sent_at'] ? date('Y-m-d H:i', strtotime($d['sent_at'])) : '—'; ?></div>
+                                    <div style="color:#6c757d;font-size:11px;"><?php echo $d['sent_at'] ? htmlspecialchars(rhToUserTime($d['sent_at'])) : '—'; ?></div>
                                     <?php if (!empty($d['error_message'])): ?>
                                         <div style="color:#856404;font-size:11px;margin-top:2px;"><?php echo htmlspecialchars($d['error_message']); ?></div>
                                     <?php endif; ?>

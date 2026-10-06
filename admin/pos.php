@@ -2743,7 +2743,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <div class="r" style="display:flex; align-items:center; gap:8px; justify-content:space-between; cursor:default;">
                     <a href="stock-receipt.php?id=<?php echo (int)$r['id']; ?>" target="_blank" style="flex:1; text-decoration:none; color:inherit;">
                         <div class="ref"><?php echo htmlspecialchars($r['reference']); ?> · <?php echo $currency_symbol . ' ' . number_format((float)$r['total_amount'], 2); ?><?php if ($rDiscount > 0): ?> <span style="font-size:10px;color:#856404;background:#fffbeb;padding:1px 5px;border-radius:4px;">-<?php echo number_format($rDiscount,2); ?></span><?php endif; ?></div>
-                        <div style="color:#6c757d; font-size:11px;"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $r['payment_method'] ?? '—'))); ?> · <?php echo htmlspecialchars(date('H:i', strtotime($r['created_at']))); ?> · <span style="color:<?php echo $rStatusColor; ?>; font-weight:600;"><?php echo htmlspecialchars($rStatus); ?></span></div>
+                        <div style="color:#6c757d; font-size:11px;"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $r['payment_method'] ?? '—'))); ?> · <?php echo htmlspecialchars(rhToUserTime($r['created_at'], 'H:i')); ?> · <span style="color:<?php echo $rStatusColor; ?>; font-weight:600;"><?php echo htmlspecialchars($rStatus); ?></span></div>
                     </a>
                     <?php if ($posCanRefund && $rStatus === 'paid'): ?>
                         <button type="button" onclick="openRefundModal(<?php echo (int)$r['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$r['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo (float)$r['total_amount']; ?>)" style="flex-shrink:0; padding:5px 9px; background:#6f42c1; color:#fff; border:none; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap;" title="Process refund"><i class="fas fa-rotate-left"></i> Refund</button>
@@ -2956,7 +2956,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         <div class="overlay modal-overlay show" data-modal id="shiftResultOverlay">
             <div class="success-modal modal-content" style="text-align:left; width:560px;">
                 <h2 style="text-align:center; color:#1f1f24;"><i class="fas fa-cash-register"></i> Shift closed</h2>
-                <div style="text-align:center; font-size:13px; color:#6c757d; margin-bottom:18px;"><?php echo htmlspecialchars($user['full_name']); ?> · <?php echo date('Y-m-d H:i'); ?></div>
+                <div style="text-align:center; font-size:13px; color:#6c757d; margin-bottom:18px;"><?php echo htmlspecialchars($user['full_name']); ?> · <?php echo htmlspecialchars(rhToUserTime(date('Y-m-d H:i:s')) . ' ' . rhUserTzLabel()); ?></div>
                 <table style="width:100%; border-collapse:collapse; font-size:14px;">
                     <thead>
                         <tr style="background:#f7f7f7;">
@@ -3107,7 +3107,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                     <?php if (!empty($t['customer_name'])): ?><span class="tc-meta-pill"><i class="fas fa-user"></i> <?php echo htmlspecialchars($t['customer_name']); ?></span><?php endif; ?>
                                     <?php if ((int)($t['covers'] ?? 0) > 0): ?><span class="tc-meta-pill"><i class="fas fa-users"></i> <?php echo (int)$t['covers']; ?> cover<?php echo (int)$t['covers'] === 1 ? '' : 's'; ?></span><?php endif; ?>
                                     <span class="tc-meta-pill"><i class="fas fa-list"></i> <?php echo $totalItems; ?> item<?php echo $totalItems === 1 ? '' : 's'; ?></span>
-                                    <span class="tc-meta-pill"><i class="fas fa-clock"></i> Opened <?php echo htmlspecialchars(date('H:i', $created)); ?></span>
+                                    <span class="tc-meta-pill"><i class="fas fa-clock"></i> Opened <?php echo htmlspecialchars(rhToUserTime($t['created_at'], 'H:i')); ?></span>
                                     <?php if ($openedByOther): ?>
                                         <span class="tc-meta-pill"><i class="fas fa-user-tie"></i> <?php echo htmlspecialchars((string)($t['opened_by'] ?? 'staff')); ?></span>
                                     <?php else: ?>
@@ -5247,7 +5247,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         function stationNoteFmtTime(iso) {
             if (!iso) return '';
-            const ts = new Date(String(iso).replace(' ', 'T'));
+            const ts = window.rhHotelDate ? window.rhHotelDate(iso) : new Date(String(iso).replace(' ', 'T'));
             if (Number.isNaN(ts.getTime())) return '';
             return ts.toLocaleTimeString([], {
                 hour: '2-digit',
@@ -8537,7 +8537,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         function fmtTs(ts) {
             if (!ts) return '—';
-            const d = new Date(ts.replace(' ', 'T'));
+            const d = window.rhHotelDate ? window.rhHotelDate(ts) : new Date(ts.replace(' ', 'T'));
             return d.toLocaleDateString('en-GB', {
                 day: '2-digit',
                 month: 'short'
@@ -8550,7 +8550,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         function fmtTime(ts) {
             if (!ts) return '—';
-            const d = new Date(ts.replace(' ', 'T'));
+            const d = window.rhHotelDate ? window.rhHotelDate(ts) : new Date(ts.replace(' ', 'T'));
             return d.toLocaleTimeString('en-GB', {
                 hour: '2-digit',
                 minute: '2-digit',

@@ -431,6 +431,7 @@ if ($_admin_back_target !== null) {
         <div class="admin-page-loader-bar"><span></span></div>
     </div>
 </div>
+<?php echo rhUserTzScript(); ?>
 <header class="admin-header">
     <div class="admin-header-brand">
         <i class="fas fa-hotel"></i>
