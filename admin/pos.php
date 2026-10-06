@@ -1648,18 +1648,89 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'toggle_item') {
     exit;
 }
 
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'lookup_barcode') {
+    /* === Resolve a barcode the till does not know locally ===
+     * menuList is baked into the page at load, so an item registered after this
+     * till opened (Receive Stock, another till, menu management) would scan as
+     * "not registered" until someone reloaded. This is the fallback the scanner
+     * calls on a local miss. Read-only. */
+    header('Content-Type: application/json; charset=utf-8');
+    if (!validateCsrfToken((string)($_POST['csrf_token'] ?? ''))) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid token. Please reload the till.']);
+        exit;
+    }
+    $hit = rhLookupBarcode($pdo, (string)($_POST['barcode'] ?? ''), 'sale_first');
+    if ($hit === null) {
+        echo json_encode(['found' => false]);
+        exit;
+    }
+    if ($hit['kind'] === 'ingredient') {
+        // A store-room label, not something the till can sell.
+        echo json_encode([
+            'found' => true,
+            'kind'  => 'ingredient',
+            'name'  => (string)($hit['row']['name'] ?? ''),
+        ]);
+        exit;
+    }
+
+    // Re-read through the same visibility rules the catalogue uses, so the till
+    // can never sell an item the catalogue would have hidden from it.
+    $stmt = $pdo->prepare("
+        SELECT mi.id, mi.item_name AS name, mi.price,
+               COALESCE(mi.category, 'Other') AS sub_category,
+               mi.show_pos, mi.show_room_service, mi.is_available,
+               mi.barcode,
+               mc.name AS cat_name, mc.slug AS menu_type
+        FROM menu_items mi
+        JOIN menu_categories mc ON mc.id = mi.category_id
+        WHERE mi.id = ?
+          AND mc.is_active = 1
+          AND COALESCE(mc.business_context, 'food_service') = ?
+          AND (mi.show_pos = 1 OR mi.show_room_service = 1)
+        LIMIT 1
+    ");
+    $stmt->execute([(int)($hit['row']['id'] ?? 0), $posCatalogContext]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        echo json_encode(['found' => false, 'hidden' => true]);
+        exit;
+    }
+
+    echo json_encode(['found' => true, 'kind' => 'menu_item', 'item' => [
+        'id'           => (int)$row['id'],
+        'type'         => $row['menu_type'],
+        'name'         => $row['name'],
+        'price'        => (float)$row['price'],
+        'category'     => $row['cat_name'] . ' · ' . ($row['sub_category'] ?: 'Other'),
+        'show_pos'     => (int)$row['show_pos'],
+        'show_rs'      => (int)$row['show_room_service'],
+        'is_available' => (int)$row['is_available'],
+        'barcode'      => $row['barcode'] ?? null,
+    ]]);
+    exit;
+}
+
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'assign_barcode') {
     /* === Assign or clear a barcode on a menu item ===
      * Accepts POST: item_id, barcode (empty string = clear)
      * Requires pos_86 permission (manager-level). */
     header('Content-Type: application/json; charset=utf-8');
+    // This writes menu_items.barcode — the client already sends the token, it just
+    // was never checked here, unlike every other state-changing handler on the page.
+    if (!validateCsrfToken((string)($_POST['csrf_token'] ?? ''))) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid token. Please reload the till.']);
+        exit;
+    }
     if (!hasPermission($user['id'], 'pos_86')) {
         http_response_code(403);
         echo json_encode(['error' => 'Manager permission required to assign barcodes.']);
         exit;
     }
     $bcItemId = (int)($_POST['item_id'] ?? 0);
-    $bcValue  = trim((string)($_POST['barcode'] ?? ''));
+    $bcValue  = rhNormalizeBarcode((string)($_POST['barcode'] ?? ''));
     if (!$bcItemId) {
         http_response_code(400);
         echo json_encode(['error' => 'Invalid item ID.']);
@@ -1680,10 +1751,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'assign_barcode') {
             exit;
         }
         if ($bcValue !== '') {
-            // check uniqueness
-            $dupCheck = $pdo->prepare("SELECT id FROM menu_items WHERE barcode = ? AND id != ?");
-            $dupCheck->execute([$bcValue, $bcItemId]);
-            if ($dupCheck->fetch()) {
+            // Menu registry only. An ingredient mapping for the same label is the
+            // stock twin of this product by design (pm_syncProductStockLink), so
+            // it must not block the assignment. Variant-aware, so the same article
+            // cannot end up on two items under different GTIN spellings.
+            $taken = rhLookupBarcode($pdo, $bcValue, 'menu_item');
+            if ($taken !== null && (int)($taken['row']['id'] ?? 0) !== $bcItemId) {
                 http_response_code(409);
                 echo json_encode(['error' => 'That barcode is already assigned to another item.']);
                 exit;
@@ -1696,9 +1769,19 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'assign_barcode') {
         logActivity($user['id'], 'pos_barcode_assigned',
             ($bcValue !== '' ? "Assigned barcode '{$bcValue}'" : 'Cleared barcode') . ' on: ' . $bcItem['item_name']);
         echo json_encode(['ok' => true, 'item_id' => $bcItemId, 'barcode' => $bcValue !== '' ? $bcValue : null]);
-    } catch (Throwable $e) {
+    } catch (PDOException $e) {
+        if ($e->getCode() === '23000') {
+            http_response_code(409);
+            echo json_encode(['error' => 'That barcode was just assigned elsewhere.']);
+            exit;
+        }
+        error_log('[pos] assign_barcode: ' . $e->getMessage());
         http_response_code(500);
-        echo json_encode(['error' => $e->getMessage()]);
+        echo json_encode(['error' => 'Could not save that barcode. Please try again.']);
+    } catch (Throwable $e) {
+        error_log('[pos] assign_barcode: ' . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['error' => 'Could not save that barcode. Please try again.']);
     }
     exit;
 }
@@ -2312,7 +2395,10 @@ if ($posCanStations) {
     (async function () {
         if (!('BarcodeDetector' in window)) {
             try {
-                const m = await import('https://unpkg.com/@undecaf/barcode-detector-polyfill@0.9.23/dist/main.js');
+                // Same self-hosted copy the Receive Stock scanner uses, so both
+                // surfaces decode identically and the till does not depend on a
+                // third-party CDN being reachable to build the detector.
+                const m = await import('./js/barcode-detector-polyfill.js');
                 window.BarcodeDetector = m.BarcodeDetectorPolyfill;
             } catch (e) {
                 console.warn('[POS] BarcodeDetector polyfill failed to load. Native support only.');
@@ -6032,10 +6118,33 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             posToast(barcodeScannerEnabled ? 'Barcode scanner enabled' : 'Barcode scanner disabled', 'ok', 2200);
         }
 
-        function posHandleBarcodeInput(code) {
+        /* Same canonical form the server stores, so a label read as EAN-13 by one
+           scanner and UPC-A by another still matches the one registered item. */
+        function posNormalizeBarcode(raw) {
+            return String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        }
+        function posBarcodeMatches(stored, scanned) {
+            const a = posNormalizeBarcode(stored), b = posNormalizeBarcode(scanned);
+            if (!a || !b) return false;
+            if (a === b) return true;
+            if (!/^\d+$/.test(a) || !/^\d+$/.test(b)) return false;
+            return a.replace(/^0+/, '') === b.replace(/^0+/, '');
+        }
+
+        async function posHandleBarcodeInput(code) {
+            code = posNormalizeBarcode(code);
             if (!code || code.length < BC_MIN_LEN) return;
-            const match = menuList.find(m => m.barcode && m.barcode === code);
+            let match = menuList.find(m => posBarcodeMatches(m.barcode, code));
             const lastEl = document.getElementById('barcodeScanLast');
+            if (!match) {
+                // Not in the catalogue this page was built with — ask the server
+                // before telling the cashier the label is unregistered.
+                const resolved = await posResolveBarcode(code);
+                if (resolved) {
+                    menuList.push(resolved);
+                    match = resolved;
+                }
+            }
             if (match) {
                 if (!match.is_available) {
                     posToast('86\'d: ' + match.name, 'err', 2500);
@@ -6044,7 +6153,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     posToast('Not available in this mode: ' + match.name, 'err', 2500);
                     if (lastEl) lastEl.textContent = '✗ mode';
                 } else {
-                    // Stock-level check using the live snapshot
+                    // Stock gate from the recipe snapshot baked in at page load. It is
+                    // a first filter only, not an authority: the till is not reloaded
+                    // between scans, so treat it as "known-empty at open" and let the
+                    // server re-check on order placement.
                     const stockKey = match.type + ':' + match.id;
                     const inStock = Object.prototype.hasOwnProperty.call(stockSnapshot, stockKey)
                         ? stockSnapshot[stockKey] : null;
@@ -6064,6 +6176,23 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
         }
 
+        /* Server fallback for a code the baked-in catalogue does not carry. */
+        async function posResolveBarcode(code) {
+            try {
+                const fd = new FormData();
+                fd.append('csrf_token', posCsrfToken);
+                fd.append('barcode', code);
+                const res = await fetch('pos.php?ajax=lookup_barcode', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data && data.found && data.kind === 'menu_item') return data.item;
+                if (data && data.found && data.kind === 'ingredient') {
+                    posToast('Stock ingredient, not a till item: ' + data.name, 'err', 3000);
+                    return null;
+                }
+            } catch (e) { /* offline or server error — fall through to "not registered" */ }
+            return null;
+        }
+
         /* HID/USB barcode scanner listener — active whenever scanner mode is on OR the
            camera overlay is open. External wedge scanners emit keystrokes very fast
            (< 50 ms between chars) then send Enter; human typing is much slower. */
@@ -6074,20 +6203,31 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             // Ignore if focus is inside a text input (unless it's the barcode assign input)
             const ae = document.activeElement || {};
             if (['INPUT','TEXTAREA','SELECT'].includes(ae.tagName || '') && ae.id !== 'bcAssignInput') return;
+            // Ctrl/Alt/Cmd combos are shortcuts, not scanner output — without this
+            // a Ctrl+C put a stray "c" in the buffer and corrupted the next scan.
+            if (e.ctrlKey || e.altKey || e.metaKey) return;
             const now = Date.now();
             if (e.key === 'Enter') {
                 if (_bcBuffer.length >= BC_MIN_LEN && (now - _bcLastChar) < BC_SPEED_MS * 5) {
-                    posHandleBarcodeInput(_bcBuffer);
-                    // If camera overlay is open, also trigger the camera feed card
-                    if (camOverlayOpen && typeof window._posCamOnExternalCode === 'function') {
-                        window._posCamOnExternalCode(_bcBuffer);
-                    }
+                    const scanned = _bcBuffer;
+                    _bcBuffer = '';
+                    (async function () {
+                        await posHandleBarcodeInput(scanned);
+                        // If camera overlay is open, also trigger the camera feed card
+                        if (camOverlayOpen && typeof window._posCamOnExternalCode === 'function') {
+                            window._posCamOnExternalCode(scanned);
+                        }
+                    }());
+                    return;
                 }
                 _bcBuffer = '';
                 return;
             }
             if (e.key.length === 1) {
-                if (now - _bcLastChar > 500) _bcBuffer = '';
+                // A gap longer than a wedge ever leaves between characters means a
+                // human was typing: start the buffer over rather than splicing the
+                // tail of their keystrokes onto the next scan.
+                if (now - _bcLastChar > BC_SPEED_MS * 5) _bcBuffer = '';
                 _bcBuffer += e.key;
                 _bcLastChar = now;
             }
@@ -10498,11 +10638,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (!video || video.readyState < 2 || video.paused) return;
             try {
                 var barcodes = await _detector.detect(video);
-                if (barcodes.length > 0) _onCode(barcodes[0].rawValue);
+                if (barcodes.length > 0) await _onCode(barcodes[0].rawValue);
             } catch (e) { /* ignore decode errors */ }
         }
 
-        function _onCode(code) {
+        async function _onCode(code) {
             _cooldown = true;
             setTimeout(function () { _cooldown = false; }, COOLDOWN_MS);
 
@@ -10526,9 +10666,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (view) { view.classList.add('found-flash'); setTimeout(function () { view.classList.remove('found-flash'); }, 360); }
 
             _setStatus('Scanned: ' + code);
-            if (typeof posHandleBarcodeInput === 'function') posHandleBarcodeInput(code);
+            // Awaited: on a local miss this round-trips to the server, and the mini
+            // cart below would otherwise render before the item lands in it.
+            if (typeof posHandleBarcodeInput === 'function') await posHandleBarcodeInput(code);
 
-            // Show feed card + refresh mini cart immediately (addToCart is synchronous)
             _refreshCart();
             _addFeedItem(code);
 

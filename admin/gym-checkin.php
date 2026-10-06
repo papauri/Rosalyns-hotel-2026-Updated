@@ -37,6 +37,8 @@ try {
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Gym Check-In — <?php echo htmlspecialchars($siteName); ?></title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
+<link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <!-- BarcodeDetector polyfill for desktop Chrome / Firefox / Safari (self-hosted) -->
@@ -45,21 +47,22 @@ import { BarcodeDetectorPolyfill } from './js/barcode-detector-polyfill.js';
 if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPolyfill; }
 </script>
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
+*,*::before,*::after{box-sizing:border-box}
+.scan-app,.scan-app *{margin:0;padding:0}
+/* Scoped to .scan-app so they never shadow the admin theme tokens
+   (--navy/--gold) that the shared header and navbar are painted with. */
+.scan-app{
   --bg:#f4f2ef;--surface:#fffdfb;--surface2:#ede9e3;--border:#d7dde6;
   --primary:#766550;--success:#3f8f5a;--warn:#9a7c53;--danger:#956a5b;
   --text:#1f2a37;--muted:#5f6b7c;--radius:12px;
   --navy:#111827;--gold:#8F6A35;
 }
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Jost',sans-serif;font-size:15px;overscroll-behavior:none}
-a{color:var(--primary);text-decoration:none}
+.scan-app{background:var(--bg);color:var(--text);font-family:'Jost',sans-serif;font-size:15px;max-width:820px;margin:0 auto;padding-bottom:24px}
+.scan-app a{color:var(--primary);text-decoration:none}
 
-.topbar{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--navy);border-bottom:3px solid var(--gold);position:sticky;top:0;z-index:100}
-.topbar-back{width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:rgba(255,255,255,.1);color:#fff;font-size:16px;border:none;cursor:pointer}
-.topbar-back:hover{background:rgba(255,255,255,.18)}
-.topbar-title{flex:1;font-size:16px;font-weight:600;color:#fff}
-.topbar-stats{font-size:12px;color:rgba(255,255,255,.6);text-align:right;line-height:1.4}
+.scan-head{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--navy);border-bottom:3px solid var(--gold)}
+.scan-head-title{flex:1;min-width:0;font-size:16px;font-weight:600;color:#fff}
+.scan-head-stats{font-size:12px;color:rgba(255,255,255,.72);text-align:right;line-height:1.4;flex-shrink:0}
 
 .camera-zone{position:relative;background:#000;width:100%;max-height:240px;overflow:hidden;display:flex;align-items:center;justify-content:center}
 .camera-zone video{width:100%;max-height:240px;object-fit:cover;display:block}
@@ -120,11 +123,13 @@ a{color:var(--primary);text-decoration:none}
 </style>
 </head>
 <body>
+<?php require_once 'includes/admin-header.php'; ?>
 
-<div class="topbar">
-    <button class="topbar-back" onclick="location.href='gym-members.php'"><i class="fas fa-arrow-left"></i></button>
-    <div class="topbar-title"><i class="fas fa-barcode" style="color:var(--gold);margin-right:8px"></i>Gym Check-In</div>
-    <div class="topbar-stats"><span id="statInGym"><?php echo (int)$gc_snapshot['in_gym_count']; ?></span> in gym<br><span id="statVisits"><?php echo (int)$gc_snapshot['visits_today']; ?></span> visits today · <?php echo $gc_member_count; ?> active members</div>
+<div class="scan-app">
+
+<div class="scan-head">
+    <div class="scan-head-title"><i class="fas fa-barcode" style="color:var(--gold);margin-right:8px"></i>Gym Check-In</div>
+    <div class="scan-head-stats"><span id="statInGym"><?php echo (int)$gc_snapshot['in_gym_count']; ?></span> in gym<br><span id="statVisits"><?php echo (int)$gc_snapshot['visits_today']; ?></span> visits today &middot; <?php echo $gc_member_count; ?> active members</div>
 </div>
 
 <?php if ($gc_table_missing): ?>
@@ -177,6 +182,10 @@ a{color:var(--primary);text-decoration:none}
 <div class="section-head"><span><i class="fas fa-clock-rotate-left" style="margin-right:6px"></i>Today's activity</span><span id="todayCount"><?php echo (int)$gc_snapshot['visits_today']; ?></span></div>
 <div class="gc-list" id="todayList"></div>
 <div class="foot-space"></div>
+
+</div><!-- /.scan-app -->
+
+<?php require_once 'includes/admin-footer.php'; ?>
 
 <script>
 const CSRF = <?php echo json_encode($csrf_token); ?>;
@@ -427,7 +436,16 @@ function refreshSnapshot(){
 
 updateScannerUI();
 renderSnapshot(<?php echo json_encode($gc_snapshot); ?>);
-setInterval(refreshSnapshot, 60000); // keep durations fresh on a wall-mounted device
+// Keep durations fresh on a wall-mounted device. Guarded: the SPA re-runs this
+// script on every in-place navigation back to the page, and an unguarded
+// setInterval would stack a new 60-second poll each time.
+if (window._gcSnapshotTimer) clearInterval(window._gcSnapshotTimer);
+window._gcSnapshotTimer = setInterval(refreshSnapshot, 60000);
+
+// The page now lives inside the admin SPA shell, so leaving it no longer tears
+// the document down. Release the camera on navigate-away and on tab unload.
+window.addEventListener('pagehide', stopCamera);
+document.addEventListener('rh:content-updated', function(){
+    if (!document.getElementById('camVideo')) stopCamera();
+});
 </script>
-</body>
-</html>

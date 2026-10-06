@@ -32,34 +32,22 @@ if (isset($_GET['ajax'])) {
 
     // lookup_barcode — find ingredient OR menu item mapped to a barcode
     if ($_GET['ajax'] === 'lookup_barcode') {
-        $barcode = trim($_POST['barcode'] ?? '');
+        if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+            http_response_code(403); echo json_encode(['error' => 'Invalid token.']); exit;
+        }
+        $barcode = rhNormalizeBarcode((string)($_POST['barcode'] ?? ''));
         if ($barcode === '') { echo json_encode(['found' => false]); exit; }
-        // 1. Check stock ingredient barcodes
-        $stmt = $pdo->prepare("
-            SELECT sib.id AS mapping_id, sib.barcode, sib.pack_size, sib.pack_label,
-                   si.id AS ingredient_id, si.name, si.unit, si.current_quantity, si.cost_per_unit
-            FROM stock_ingredient_barcodes sib
-            JOIN stock_ingredients si ON si.id = sib.ingredient_id
-            WHERE sib.barcode = ?
-        ");
-        $stmt->execute([$barcode]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row) {
-            echo json_encode(['found' => true, 'type' => 'ingredient', 'ingredient' => $row]);
+
+        // Shared resolver, stock-first: this is the store room, so an ingredient
+        // mapping wins. A retail product carries the same label in both registries
+        // on purpose, and the till resolves the same scan sale-first.
+        $hit = rhLookupBarcode($pdo, $barcode, 'stock_first');
+        if ($hit && $hit['kind'] === 'ingredient') {
+            echo json_encode(['found' => true, 'type' => 'ingredient', 'ingredient' => $hit['row']]);
             exit;
         }
-        // 2. Check POS menu items
-        $stmt2 = $pdo->prepare("
-            SELECT mi.id, mi.item_name AS name, mi.price, mi.barcode,
-                   mc.name AS category_name, mc.slug AS menu_type
-            FROM menu_items mi
-            JOIN menu_categories mc ON mc.id = mi.category_id
-            WHERE mi.barcode = ?
-        ");
-        $stmt2->execute([$barcode]);
-        $menuItem = $stmt2->fetch(PDO::FETCH_ASSOC);
-        if ($menuItem) {
-            echo json_encode(['found' => true, 'type' => 'pos_item', 'item' => $menuItem]);
+        if ($hit && $hit['kind'] === 'menu_item') {
+            echo json_encode(['found' => true, 'type' => 'pos_item', 'item' => $hit['row']]);
             exit;
         }
         echo json_encode(['found' => false, 'barcode' => $barcode]);
@@ -71,7 +59,7 @@ if (isset($_GET['ajax'])) {
         if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
             http_response_code(403); echo json_encode(['error' => 'Invalid token.']); exit;
         }
-        $barcode      = trim($_POST['barcode'] ?? '');
+        $barcode      = rhNormalizeBarcode((string)($_POST['barcode'] ?? ''));
         $ingredientId = (int)($_POST['ingredient_id'] ?? 0);
         $packSize     = max(0.0001, (float)($_POST['pack_size'] ?? 1));
         $packLabel    = mb_substr(trim($_POST['pack_label'] ?? ''), 0, 50) ?: null;
@@ -85,11 +73,15 @@ if (isset($_GET['ajax'])) {
             $ingredient = $ing->fetch(PDO::FETCH_ASSOC);
             if (!$ingredient) { http_response_code(404); echo json_encode(['error' => 'Ingredient not found.']); exit; }
 
-            // Check barcode not already taken
-            $dup = $pdo->prepare("SELECT ingredient_id FROM stock_ingredient_barcodes WHERE barcode = ?");
-            $dup->execute([$barcode]);
-            if ($dup->fetch()) {
-                http_response_code(409); echo json_encode(['error' => 'This barcode is already registered to another ingredient.']); exit;
+            // Ingredient registry only. A menu item holding the same label is the
+            // retail twin of this stock line by design (pm_syncProductStockLink),
+            // not a clash. Variant-aware so an EAN-13 reading of a UPC-A label
+            // cannot slip past as a second mapping for the same article.
+            $taken = rhLookupBarcode($pdo, $barcode, 'ingredient');
+            if ($taken !== null) {
+                http_response_code(409);
+                echo json_encode(['error' => 'This barcode is already registered to another ingredient.']);
+                exit;
             }
 
             $pdo->prepare("INSERT INTO stock_ingredient_barcodes (barcode, ingredient_id, pack_size, pack_label, created_by) VALUES (?, ?, ?, ?, ?)")
@@ -102,8 +94,19 @@ if (isset($_GET['ajax'])) {
                 'pack_label'    => $packLabel,
                 'barcode'       => $barcode,
             ])]);
+        } catch (PDOException $e) {
+            // Two tills registering the same label at once: the UNIQUE index is the
+            // real arbiter, so report the race as the conflict it is, not a 500.
+            if ($e->getCode() === '23000') {
+                http_response_code(409);
+                echo json_encode(['error' => 'This barcode was just registered by someone else.']);
+                exit;
+            }
+            error_log('[barcode-receive] register_barcode: ' . $e->getMessage());
+            http_response_code(500); echo json_encode(['error' => 'Could not register that barcode. Please try again.']);
         } catch (Throwable $e) {
-            http_response_code(500); echo json_encode(['error' => $e->getMessage()]);
+            error_log('[barcode-receive] register_barcode: ' . $e->getMessage());
+            http_response_code(500); echo json_encode(['error' => 'Could not register that barcode. Please try again.']);
         }
         exit;
     }
@@ -122,17 +125,30 @@ if (isset($_GET['ajax'])) {
         try {
             $pdo->beginTransaction();
             $created = 0;
+            $skipped = [];
+            // Line labels come back from the client, and end up in the activity log.
+            $label = static function ($item, int $id): string {
+                $raw = is_array($item) ? trim((string)($item['name'] ?? '')) : '';
+                return $raw !== '' ? mb_substr(strip_tags($raw), 0, 80) : ('#' . $id);
+            };
             foreach ($items as $item) {
+                if (!is_array($item)) { $skipped[] = '#?'; continue; }
                 $ingId   = (int)($item['ingredient_id'] ?? 0);
                 $qty     = (float)($item['quantity'] ?? 0);
                 $cost    = max(0.0, (float)($item['cost_per_unit'] ?? 0));
-                if (!$ingId || $qty <= 0) continue;
+                if (!$ingId || $qty <= 0) {
+                    $skipped[] = $label($item, $ingId);
+                    continue;
+                }
 
                 // Lock + get current ingredient
                 $sel = $pdo->prepare("SELECT current_quantity, cost_per_unit FROM stock_ingredients WHERE id = ? FOR UPDATE");
                 $sel->execute([$ingId]);
                 $ing = $sel->fetch(PDO::FETCH_ASSOC);
-                if (!$ing) continue;
+                if (!$ing) {
+                    $skipped[] = $label($item, $ingId);
+                    continue;
+                }
 
                 $oldQty = (float)$ing['current_quantity'];
                 $oldAvg = (float)$ing['cost_per_unit'];
@@ -173,18 +189,23 @@ if (isset($_GET['ajax'])) {
                 $created++;
             }
             $pdo->commit();
-            logActivity($user['id'], 'barcode_receive_batch', "Received {$created} line(s) via barcode scanner" . ($supplier ? " from {$supplier}" : ''));
-            echo json_encode(['ok' => true, 'batches_created' => $created]);
+            logActivity($user['id'], 'barcode_receive_batch', "Received {$created} line(s) via barcode scanner"
+                . ($supplier ? " from {$supplier}" : '')
+                . ($skipped ? ' — skipped: ' . implode(', ', $skipped) : ''));
+            // Lines that fail validation are dropped rather than aborting the whole
+            // delivery, so the till has to be told which ones never landed.
+            echo json_encode(['ok' => true, 'batches_created' => $created, 'skipped' => $skipped]);
         } catch (Throwable $e) {
-            $pdo->rollBack();
-            http_response_code(500); echo json_encode(['error' => $e->getMessage()]);
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('[barcode-receive] receive_batch: ' . $e->getMessage());
+            http_response_code(500); echo json_encode(['error' => 'Could not save this delivery. Nothing was received — please try again.']);
         }
         exit;
     }
 
     // search_ingredients — autocomplete for the register modal
     if ($_GET['ajax'] === 'search_ingredients') {
-        $q = '%' . trim($_GET['q'] ?? '') . '%';
+        $q = '%' . rhEscapeLike(mb_substr(trim((string)($_GET['q'] ?? '')), 0, 60)) . '%';
         $rows = $pdo->prepare("SELECT id, name, unit, category FROM stock_ingredients WHERE is_archived = 0 AND name LIKE ? ORDER BY name LIMIT 30");
         $rows->execute([$q]);
         echo json_encode($rows->fetchAll(PDO::FETCH_ASSOC));
@@ -193,7 +214,7 @@ if (isset($_GET['ajax'])) {
 
     // search_categories — menu categories for item registration
     if ($_GET['ajax'] === 'search_categories') {
-        $q = '%' . trim($_GET['q'] ?? '') . '%';
+        $q = '%' . rhEscapeLike(mb_substr(trim((string)($_GET['q'] ?? '')), 0, 60)) . '%';
         $rows = $pdo->prepare("SELECT id, name, slug FROM menu_categories WHERE is_active = 1 AND name LIKE ? ORDER BY sort_order, name LIMIT 20");
         $rows->execute([$q]);
         echo json_encode($rows->fetchAll(PDO::FETCH_ASSOC));
@@ -205,7 +226,7 @@ if (isset($_GET['ajax'])) {
         if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
             http_response_code(403); echo json_encode(['error' => 'Invalid token.']); exit;
         }
-        $barcode    = trim($_POST['barcode'] ?? '');
+        $barcode    = rhNormalizeBarcode((string)($_POST['barcode'] ?? ''));
         $name       = mb_substr(trim($_POST['name'] ?? ''), 0, 200);
         $price      = round(max(0, (float)($_POST['price'] ?? 0)), 2);
         $categoryId = (int)($_POST['category_id'] ?? 0);
@@ -221,17 +242,16 @@ if (isset($_GET['ajax'])) {
             if (!$categoryId) {
                 http_response_code(400); echo json_encode(['error' => 'Please select a category.']); exit;
             }
-            // Check barcode not already on a menu item
-            $dup = $pdo->prepare("SELECT id FROM menu_items WHERE barcode = ?");
-            $dup->execute([$barcode]);
-            if ($dup->fetch()) {
-                http_response_code(409); echo json_encode(['error' => 'This barcode is already registered to a POS item.']); exit;
-            }
-            // Also check ingredient barcodes
-            $dup2 = $pdo->prepare("SELECT id FROM stock_ingredient_barcodes WHERE barcode = ?");
-            $dup2->execute([$barcode]);
-            if ($dup2->fetch()) {
-                http_response_code(409); echo json_encode(['error' => 'This barcode is already registered as a stock ingredient.']); exit;
+            // Creating a brand-new sellable item: both registries are checked, as
+            // before, because an unknown barcode is the only way into this flow —
+            // if either side already knows it, the scan should not have landed here.
+            $taken = rhLookupBarcode($pdo, $barcode, 'stock_first');
+            if ($taken !== null) {
+                http_response_code(409);
+                echo json_encode(['error' => $taken['kind'] === 'menu_item'
+                    ? 'This barcode is already registered to a POS item.'
+                    : 'This barcode is already registered as a stock ingredient.']);
+                exit;
             }
             $maxOrderStmt = $pdo->prepare("SELECT COALESCE(MAX(display_order),0) FROM menu_items WHERE category_id = ?");
             $maxOrderStmt->execute([$categoryId]);
@@ -254,8 +274,17 @@ if (isset($_GET['ajax'])) {
                 'category_name' => $catRow['name'] ?? '',
                 'menu_type'     => $catRow['slug'] ?? '',
             ]]);
+        } catch (PDOException $e) {
+            if ($e->getCode() === '23000') {
+                http_response_code(409);
+                echo json_encode(['error' => 'This barcode was just registered by someone else.']);
+                exit;
+            }
+            error_log('[barcode-receive] register_item: ' . $e->getMessage());
+            http_response_code(500); echo json_encode(['error' => 'Could not create that item. Please try again.']);
         } catch (Throwable $e) {
-            http_response_code(500); echo json_encode(['error' => $e->getMessage()]);
+            error_log('[barcode-receive] register_item: ' . $e->getMessage());
+            http_response_code(500); echo json_encode(['error' => 'Could not create that item. Please try again.']);
         }
         exit;
     }
@@ -274,6 +303,8 @@ $barcodeCount    = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredient_barco
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Receive Stock — <?php echo htmlspecialchars($siteName); ?></title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
+<link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <!-- BarcodeDetector polyfill for desktop Chrome / Firefox / Safari (self-hosted) -->
@@ -282,22 +313,23 @@ import { BarcodeDetectorPolyfill } from './js/barcode-detector-polyfill.js';
 if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPolyfill; }
 </script>
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
+*,*::before,*::after{box-sizing:border-box}
+.scan-app,.scan-app *{margin:0;padding:0}
+/* Scoped to .scan-app so they never shadow the admin theme tokens
+   (--navy/--gold) that the shared header and navbar are painted with. */
+.scan-app{
   --bg:#f4f2ef;--surface:#fffdfb;--surface2:#ede9e3;--border:#d7dde6;
   --primary:#766550;--success:#3f8f5a;--warn:#9a7c53;--danger:#956a5b;
   --text:#1f2a37;--muted:#5f6b7c;--radius:12px;
   --navy:#111827;--gold:#8F6A35;
 }
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Jost',sans-serif;font-size:15px;overscroll-behavior:none}
-a{color:var(--primary);text-decoration:none}
+.scan-app{background:var(--bg);color:var(--text);font-family:'Jost',sans-serif;font-size:15px;max-width:820px;margin:0 auto;padding-bottom:88px}
+.scan-app a{color:var(--primary);text-decoration:none}
 
-/* ── Top bar ── */
-.topbar{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--navy);border-bottom:3px solid var(--gold);position:sticky;top:0;z-index:100}
-.topbar-back{width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:rgba(255,255,255,.1);color:#fff;font-size:16px;border:none;cursor:pointer}
-.topbar-back:hover{background:rgba(255,255,255,.18)}
-.topbar-title{flex:1;font-size:16px;font-weight:600;color:#fff}
-.topbar-stats{font-size:12px;color:rgba(255,255,255,.6);text-align:right;line-height:1.4}
+/* ── Page header (sits under the shared admin navbar) ── */
+.scan-head{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--navy);border-bottom:3px solid var(--gold)}
+.scan-head-title{flex:1;min-width:0;font-size:16px;font-weight:600;color:#fff}
+.scan-head-stats{font-size:12px;color:rgba(255,255,255,.72);text-align:right;line-height:1.4;flex-shrink:0}
 
 /* ── Camera zone ── */
 .camera-zone{position:relative;background:#000;width:100%;max-height:240px;overflow:hidden;display:flex;align-items:center;justify-content:center}
@@ -368,30 +400,30 @@ a{color:var(--primary);text-decoration:none}
 .scan-flash.error{background:var(--danger)}
 
 /* ── Modal overlay ── */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:flex-end;justify-content:center}
-.modal-sheet{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;padding:20px 16px 32px}
-.modal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px}
-.modal-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
-.modal-title{font-size:16px;font-weight:700;color:var(--text)}
-.modal-close{flex:0 0 auto;width:44px;height:44px;margin-right:-8px;border:none;background:transparent;color:var(--muted);font-size:26px;line-height:1;cursor:pointer;border-radius:10px}
-.modal-close:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
-.modal-sub{font-size:13px;color:var(--muted);margin-bottom:16px}
-.modal-field{margin-bottom:14px}
-.modal-field label{display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
-.modal-field input,.modal-field select{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:11px 14px;color:var(--text);font-size:15px;font-family:inherit;outline:none}
-.modal-field input:focus,.modal-field select:focus{border-color:var(--primary)}
+.scanmodal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:flex-end;justify-content:center}
+.scanmodal-sheet{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;padding:20px 16px 32px}
+.scanmodal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px}
+.scanmodal-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
+.scanmodal-title{font-size:16px;font-weight:700;color:var(--text)}
+.scanmodal-close{flex:0 0 auto;width:44px;height:44px;margin-right:-8px;border:none;background:transparent;color:var(--muted);font-size:26px;line-height:1;cursor:pointer;border-radius:10px}
+.scanmodal-close:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.scanmodal-sub{font-size:13px;color:var(--muted);margin-bottom:16px}
+.scanmodal-field{margin-bottom:14px}
+.scanmodal-field label{display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
+.scanmodal-field input,.scanmodal-field select{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:11px 14px;color:var(--text);font-size:15px;font-family:inherit;outline:none}
+.scanmodal-field input:focus,.scanmodal-field select:focus{border-color:var(--primary)}
 .ing-results{background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:180px;overflow-y:auto;display:none;box-shadow:0 4px 12px rgba(0,0,0,.08)}
 .ing-result-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .ing-result-item:last-child{border-bottom:none}
 .ing-result-item:hover{background:var(--surface2)}
 .ing-result-item .ing-name{font-weight:600;font-size:14px}
 .ing-result-item .ing-meta{font-size:12px;color:var(--muted)}
-.modal-actions{display:flex;gap:10px;margin-top:20px}
-.modal-btn{flex:1;padding:13px;border-radius:10px;border:none;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
-.modal-btn-primary{background:var(--primary);color:#fff}
-.modal-btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
-.modal-btn:disabled{opacity:.4;cursor:not-allowed}
-.modal-err{color:var(--danger);font-size:13px;margin-top:8px;display:none}
+.scanmodal-actions{display:flex;gap:10px;margin-top:20px}
+.scanmodal-btn{flex:1;padding:13px;border-radius:10px;border:none;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.scanmodal-btn-primary{background:var(--primary);color:#fff}
+.scanmodal-btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.scanmodal-btn:disabled{opacity:.4;cursor:not-allowed}
+.scanmodal-err{color:var(--danger);font-size:13px;margin-top:8px;display:none}
 
 /* ── Type picker cards ── */
 .reg-type-card{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:18px 12px;background:var(--surface2);border:2px solid var(--border);border-radius:12px;cursor:pointer;text-align:center;font-family:inherit;transition:border-color .15s,background .15s}
@@ -414,13 +446,16 @@ a{color:var(--primary);text-decoration:none}
 </style>
 </head>
 <body>
+<?php require_once 'includes/admin-header.php'; ?>
 
-<!-- Top bar -->
-<div class="topbar">
-    <button class="topbar-back" onclick="history.back()"><i class="fas fa-arrow-left"></i></button>
-    <div class="topbar-title"><i class="fas fa-barcode" style="color:var(--primary);margin-right:8px"></i>Receive Stock</div>
-    <div class="topbar-stats"><?php echo $barcodeCount; ?> barcodes<br><?php echo $ingredientCount; ?> ingredients</div>
+<div class="scan-app">
+
+<!-- Page header -->
+<div class="scan-head">
+    <div class="scan-head-title"><i class="fas fa-barcode" style="color:var(--gold);margin-right:8px"></i>Receive Stock</div>
+    <div class="scan-head-stats"><?php echo $barcodeCount; ?> barcodes<br><?php echo $ingredientCount; ?> ingredients</div>
 </div>
+
 
 <!-- Camera zone -->
 <div class="camera-zone" id="cameraZone" style="display:none">
@@ -482,14 +517,14 @@ a{color:var(--primary);text-decoration:none}
 <div class="scan-flash" id="scanFlash"></div>
 
 <!-- Register barcode modal -->
-<div class="modal-overlay" id="registerModal" style="display:none">
-    <div class="modal-sheet">
-        <div class="modal-handle"></div>
-        <div class="modal-header">
-            <div class="modal-title">Unknown Barcode</div>
-            <button type="button" class="modal-close" aria-label="Close" onclick="closeRegisterModal()">&times;</button>
+<div class="scanmodal-overlay" id="registerModal" style="display:none">
+    <div class="scanmodal-sheet">
+        <div class="scanmodal-handle"></div>
+        <div class="scanmodal-header">
+            <div class="scanmodal-title">Unknown Barcode</div>
+            <button type="button" class="scanmodal-close" aria-label="Close" onclick="closeRegisterModal()">&times;</button>
         </div>
-        <div class="modal-sub" id="registerModalSub" style="font-family:monospace;font-size:12px;background:var(--surface2);padding:6px 10px;border-radius:6px;color:var(--muted)"></div>
+        <div class="scanmodal-sub" id="registerModalSub" style="font-family:monospace;font-size:12px;background:var(--surface2);padding:6px 10px;border-radius:6px;color:var(--muted)"></div>
 
         <!-- Step 1: type picker -->
         <div id="regTypePicker" style="margin-top:16px">
@@ -514,13 +549,13 @@ a{color:var(--primary);text-decoration:none}
                 <button onclick="selectRegType(null)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0"><i class="fas fa-arrow-left"></i> Back</button>
                 <span style="font-size:13px;font-weight:600;color:var(--text)">Link to Ingredient</span>
             </div>
-            <div class="modal-field">
+            <div class="scanmodal-field">
                 <label>Ingredient</label>
                 <input type="text" id="regIngSearch" placeholder="Search ingredients…" autocomplete="off" oninput="searchIngredients(this.value)">
                 <div class="ing-results" id="ingResults"></div>
                 <input type="hidden" id="regIngId">
             </div>
-            <div class="modal-field" style="display:flex;gap:10px">
+            <div class="scanmodal-field" style="display:flex;gap:10px">
                 <div style="flex:1">
                     <label>Pack Size</label>
                     <input type="number" id="regPackSize" value="1" min="0.001" step="any" placeholder="e.g. 24">
@@ -530,10 +565,10 @@ a{color:var(--primary);text-decoration:none}
                     <input type="text" id="regPackLabel" placeholder="e.g. can, bottle, case">
                 </div>
             </div>
-            <div class="modal-err" id="registerIngErr"></div>
-            <div class="modal-actions">
-                <button class="modal-btn modal-btn-secondary" onclick="closeRegisterModal()">Cancel</button>
-                <button class="modal-btn modal-btn-primary" id="registerIngSaveBtn" onclick="saveBarcode()">Save &amp; Add to Batch</button>
+            <div class="scanmodal-err" id="registerIngErr"></div>
+            <div class="scanmodal-actions">
+                <button class="scanmodal-btn scanmodal-btn-secondary" onclick="closeRegisterModal()">Cancel</button>
+                <button class="scanmodal-btn scanmodal-btn-primary" id="registerIngSaveBtn" onclick="saveBarcode()">Save &amp; Add to Batch</button>
             </div>
         </div>
 
@@ -543,11 +578,11 @@ a{color:var(--primary);text-decoration:none}
                 <button onclick="selectRegType(null)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0"><i class="fas fa-arrow-left"></i> Back</button>
                 <span style="font-size:13px;font-weight:600;color:var(--text)">Register POS Item</span>
             </div>
-            <div class="modal-field">
+            <div class="scanmodal-field">
                 <label>Item Name</label>
                 <input type="text" id="regItemName" placeholder="e.g. Coca-Cola 330ml" autocomplete="off">
             </div>
-            <div class="modal-field" style="display:flex;gap:10px">
+            <div class="scanmodal-field" style="display:flex;gap:10px">
                 <div style="flex:1">
                     <label>Sale Price (<?php echo htmlspecialchars($currency); ?>)</label>
                     <input type="number" id="regItemPrice" min="0" step="0.01" placeholder="0.00">
@@ -560,14 +595,18 @@ a{color:var(--primary);text-decoration:none}
                 </div>
             </div>
             <p style="font-size:11px;color:var(--muted);margin-top:-6px">Leave category blank to use "Retail Items" automatically.</p>
-            <div class="modal-err" id="registerItemErr"></div>
-            <div class="modal-actions">
-                <button class="modal-btn modal-btn-secondary" onclick="closeRegisterModal()">Cancel</button>
-                <button class="modal-btn modal-btn-primary" id="registerItemSaveBtn" onclick="saveItem()">Register on POS</button>
+            <div class="scanmodal-err" id="registerItemErr"></div>
+            <div class="scanmodal-actions">
+                <button class="scanmodal-btn scanmodal-btn-secondary" onclick="closeRegisterModal()">Cancel</button>
+                <button class="scanmodal-btn scanmodal-btn-primary" id="registerItemSaveBtn" onclick="saveItem()">Register on POS</button>
             </div>
         </div>
     </div>
 </div>
+
+</div><!-- /.scan-app -->
+
+<?php require_once 'includes/admin-footer.php'; ?>
 
 <script>
 const CSRF = <?php echo json_encode($csrf_token); ?>;
@@ -900,7 +939,9 @@ function processBarcode(barcode) {
 
 async function _fetchLookup(barcode) {
     try {
-        const fd = new FormData(); fd.append('barcode', barcode);
+        const fd = new FormData();
+        fd.append('barcode', barcode);
+        fd.append('csrf_token', CSRF);
         const res = await fetch(PAGE + '?ajax=lookup_barcode', { method: 'POST', body: fd });
         return await res.json();
     } catch(e) { flashMsg('Network error looking up barcode', true); return null; }
@@ -1026,6 +1067,7 @@ async function submitBatch() {
         ingredient_id: batch[id].ingredient_id,
         quantity: batch[id].quantity,
         cost_per_unit: batch[id].cost_per_unit,
+        name: batch[id].name,
     }));
 
     const fd = new FormData();
@@ -1041,7 +1083,13 @@ async function submitBatch() {
             stopCamera();
             batch = {};
             renderBatch();
-            flashMsg('✓ ' + data.batches_created + ' batch' + (data.batches_created !== 1 ? 'es' : '') + ' received into stock!');
+            const skipped = Array.isArray(data.skipped) ? data.skipped : [];
+            if (skipped.length) {
+                // Never report a clean success when lines were dropped server-side.
+                flashMsg('⚠ ' + data.batches_created + ' received — not saved: ' + skipped.join(', '), true);
+            } else {
+                flashMsg('✓ ' + data.batches_created + ' batch' + (data.batches_created !== 1 ? 'es' : '') + ' received into stock!');
+            }
             btn.innerHTML = '<i class="fas fa-check"></i> Receive into Stock';
         } else {
             flashMsg(data.error || 'Submit failed', true);
@@ -1254,6 +1302,12 @@ function esc(str) {
 document.getElementById('registerModal').addEventListener('click', function(e) {
     if (e.target === this) closeRegisterModal();
 });
+
+// The page now lives inside the admin SPA shell, so leaving it no longer tears
+// the document down. Release the camera on navigate-away and on tab unload,
+// otherwise the capture light stays on after the scanner markup is swapped out.
+window.addEventListener('pagehide', stopCamera);
+document.addEventListener('rh:content-updated', function() {
+    if (!document.getElementById('camVideo')) stopCamera();
+});
 </script>
-</body>
-</html>

@@ -259,9 +259,16 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+<?php if (!$embed): ?>
+    <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
+    <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
+<?php endif; ?>
     <link rel="stylesheet" href="css/order-lifecycle.css?v=<?php echo @filemtime(__DIR__ . '/css/order-lifecycle.css'); ?>">
 </head>
 <body class="<?php echo $embed ? 'is-embed' : ''; ?>">
+<?php /* Opened standalone this is an ordinary admin page and needs the navbar;
+         inside the lifecycle modal the host already supplies the chrome. */ ?>
+<?php if (!$embed) { require_once 'includes/admin-header.php'; } ?>
 <div class="wrap">
     <div class="head">
         <div>
@@ -483,10 +490,16 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
         }
     }
     checkForChanges();
-    setInterval(checkForChanges, 1500);
+    // Guarded: standalone this page runs inside the admin SPA, which re-runs page
+    // scripts on every in-place navigation back to it.
+    if (window._olPollTimer) clearInterval(window._olPollTimer);
+    window._olPollTimer = setInterval(checkForChanges, 1500);
     document.addEventListener('visibilitychange', checkForChanges);
 })();
 </script>
+<?php if (!$embed) { require_once 'includes/admin-footer.php'; /* closes body + html */ } ?>
+<?php if ($embed): ?>
 </body>
 </html>
+<?php endif; ?>
 

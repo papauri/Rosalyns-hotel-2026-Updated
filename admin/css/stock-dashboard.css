@@ -44,18 +44,20 @@
 /* KPI row */
 .sdash-kpi-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 14px;
     margin-bottom: 20px;
 }
 .sdash-kpi-card {
+    position: relative;
     background: var(--color-white, #fff);
     border-radius: 12px;
-    padding: 18px 20px;
+    /* Right padding leaves room for the absolutely-placed chevron. */
+    padding: 16px 34px 16px 18px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 14px;
     text-decoration: none;
     color: inherit;
     transition: transform 0.16s, box-shadow 0.16s;
@@ -68,8 +70,8 @@
     color: inherit;
 }
 .sdash-kpi-card__icon {
-    width: 48px;
-    height: 48px;
+    width: 42px;
+    height: 42px;
     border-radius: 12px;
     display: flex;
     align-items: center;
@@ -91,10 +93,14 @@
     margin-bottom: 3px;
 }
 .sdash-kpi-card__value {
-    font-size: 26px;
+    /* Shrinks instead of spilling past the card: MWK figures run to eight or
+       nine digits, which a fixed 26px will not fit beside icon and chevron. */
+    font-size: clamp(18px, 1.05rem + 0.45vw, 26px);
     font-weight: 700;
-    line-height: 1.1;
+    line-height: 1.15;
     color: #1d2430;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 .sdash-kpi-card__sub {
     font-size: 12px;
@@ -102,9 +108,14 @@
     margin-top: 3px;
 }
 .sdash-kpi-card__arrow {
+    /* Out of flow so a long amount gets the full width of the card body. */
+    position: absolute;
+    top: 50%;
+    right: 14px;
+    transform: translateY(-50%);
     color: #c0c8d5;
     font-size: 13px;
-    flex-shrink: 0;
+    pointer-events: none;
 }
 
 /* Section wrapper */

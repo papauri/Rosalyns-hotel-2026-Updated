@@ -145,8 +145,12 @@ body {
 .summary-value {
     color: var(--finance-text);
     font-weight: 700;
-    font-size: 24px;
+    /* Money figures here run to eight or nine digits; let them scale down
+       inside a narrow card rather than spill past its edge. */
+    font-size: clamp(18px, 1rem + 0.4vw, 24px);
     margin-top: 8px;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .stat-sub {
@@ -663,9 +667,11 @@ body {
 }
 
 .revenue-card-value {
-    font-size: 22px;
+    font-size: clamp(17px, 0.95rem + 0.35vw, 22px);
     font-weight: 700;
     color: var(--finance-text);
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 /* ============================================

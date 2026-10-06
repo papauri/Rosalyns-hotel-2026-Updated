@@ -685,7 +685,7 @@ footer {
 }
 
 .stat-card .stat-value {
-    font-size: 28px;
+    font-size: clamp(20px, 1.2rem + 0.5vw, 28px);
     font-weight: 600;
     color: var(--admin-text);
     margin-bottom: 4px;

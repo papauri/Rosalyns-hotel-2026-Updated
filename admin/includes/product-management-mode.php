@@ -95,6 +95,8 @@ if (!function_exists('pm_syncProductStockLink')) {
             if ($barcode !== '') {
                 $bcChk = $pdo->prepare("SELECT ingredient_id FROM stock_ingredient_barcodes WHERE barcode = ?");
                 $bcChk->execute([$barcode]);
+                // Best-effort twin: a pre-existing mapping (same label, another
+                // ingredient) is left alone rather than duplicated.
                 if ($bcChk->fetchColumn() === false) {
                     $pdo->prepare("INSERT INTO stock_ingredient_barcodes (barcode, ingredient_id, pack_size, pack_label, created_by) VALUES (?, ?, 1, 'Unit', ?)")->execute([$barcode, $ingId, $userId ?: null]);
                 }
@@ -162,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pm_action'])) {
             $catId = (int)($_POST['category_id'] ?? 0);
             $name = trim((string)($_POST['item_name'] ?? ''));
             $price = (float)($_POST['price'] ?? 0);
-            $barcode = trim((string)($_POST['barcode'] ?? ''));
+            $barcode = rhNormalizeBarcode((string)($_POST['barcode'] ?? ''));
             $desc = trim((string)($_POST['description'] ?? ''));
             $order = (int)($_POST['display_order'] ?? 0);
 
@@ -183,10 +185,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pm_action'])) {
                     $pm_json(false, 'Barcode is too long (max 100 characters).');
                 }
                 // Mirror pos.php's duplicate guard — one barcode maps to one product.
-                $dup = $pdo->prepare("SELECT id, item_name FROM menu_items WHERE barcode = ? AND id != ?");
-                $dup->execute([$barcode, $itemId]);
-                if ($dupRow = $dup->fetch(PDO::FETCH_ASSOC)) {
-                    $pm_json(false, 'Barcode already assigned to "' . htmlspecialchars($dupRow['item_name']) . '".');
+                // Variant-aware, so the same article read as UPC-A on one scanner and
+                // EAN-13 on another cannot end up on two separate products.
+                $dupRow = rhLookupBarcode($pdo, $barcode, 'menu_item');
+                if ($dupRow !== null && (int)($dupRow['row']['id'] ?? 0) !== $itemId) {
+                    $pm_json(false, 'Barcode already assigned to "' . htmlspecialchars((string)$dupRow['row']['name']) . '".');
                 }
             }
 

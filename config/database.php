@@ -9804,6 +9804,133 @@ function calculateWeightedAvgCost(float $currentQty, float $oldAvg, float $incom
 }
 
 /**
+ * Escape the LIKE metacharacters in a user-typed search term.
+ *
+ * A prepared statement stops injection but not wildcards: typing "%" into an
+ * autocomplete box otherwise matches every row in the table.
+ */
+function rhEscapeLike(string $term): string
+{
+    return addcslashes($term, '\%_');
+}
+
+/**
+ * Canonical form of a scanned barcode.
+ *
+ * Wedge scanners and camera decoders do not agree on what they hand us for the
+ * same physical label: a USB scanner may append CR/LF or a tab, some prefix a
+ * configured character, and a decoder reading a UPC-A label often reports the
+ * 13-digit EAN form (same digits, one leading zero). Storing and matching the
+ * raw string therefore makes the same product scan as "not registered"
+ * depending on which device read it.
+ *
+ * Normalising: strip whitespace and control characters, upper-case, and drop
+ * anything that is not alphanumeric. Digit-length differences are handled by
+ * rhBarcodeVariants(), not here, so the stored value stays recognisable.
+ */
+function rhNormalizeBarcode(string $raw): string
+{
+    $clean = preg_replace('/[^A-Za-z0-9]/', '', $raw);
+    return strtoupper((string)$clean);
+}
+
+/**
+ * Every GTIN spelling that refers to the same article, longest first.
+ *
+ * UPC-E is deliberately NOT expanded here — that needs the zero-suppression
+ * rules and a check-digit recompute, which belongs in its own helper if the
+ * hotel ever stocks UPC-E labelled goods.
+ *
+ * @return string[] Unique candidates, always including the normalised input.
+ */
+function rhBarcodeVariants(string $raw): array
+{
+    $code = rhNormalizeBarcode($raw);
+    if ($code === '') return [];
+
+    $out = [$code];
+    if (ctype_digit($code)) {
+        // GTIN-14 / EAN-13 / UPC-A are the same number zero-padded to width.
+        $trimmed = ltrim($code, '0');
+        if ($trimmed === '') $trimmed = '0';
+        foreach ([12, 13, 14] as $width) {
+            if (strlen($trimmed) <= $width) {
+                $out[] = str_pad($trimmed, $width, '0', STR_PAD_LEFT);
+            }
+        }
+        $out[] = $trimmed;
+    }
+
+    return array_values(array_unique($out));
+}
+
+/**
+ * Resolve a scanned barcode to whatever it is registered against.
+ *
+ * Checked in one place so the Receive Stock page, the POS till and any future
+ * scanner surface all answer the same question the same way, and so every one
+ * of them matches the same set of GTIN spellings.
+ *
+ * $scope decides which registries are consulted, and in what order. A retail
+ * product deliberately holds the SAME barcode in both — menu_items so the till
+ * can sell it, stock_ingredient_barcodes so Receive Stock can book the same
+ * unit in (see pm_syncProductStockLink). So "registered in the other table" is
+ * not a conflict, and which table wins depends on who is asking:
+ *   'stock_first' — the store room: an ingredient mapping is the answer.
+ *   'sale_first'  — the till: the sellable item is the answer.
+ *   'ingredient' / 'menu_item' — one registry only, for uniqueness checks.
+ *
+ * @param string $scope One of stock_first, sale_first, ingredient, menu_item.
+ * @return array{kind:string,barcode:string,row:array}|null
+ *         kind is 'ingredient' or 'menu_item'; null when unregistered.
+ */
+function rhLookupBarcode(PDO $pdo, string $raw, string $scope = 'stock_first'): ?array
+{
+    $variants = rhBarcodeVariants($raw);
+    if (!$variants) return null;
+
+    $place = implode(',', array_fill(0, count($variants), '?'));
+    $args  = array_merge($variants, $variants);
+
+    $findIngredient = static function () use ($pdo, $place, $args): ?array {
+        $stmt = $pdo->prepare("
+            SELECT sib.id AS mapping_id, sib.barcode, sib.pack_size, sib.pack_label,
+                   si.id AS ingredient_id, si.name, si.unit, si.current_quantity, si.cost_per_unit
+            FROM stock_ingredient_barcodes sib
+            JOIN stock_ingredients si ON si.id = sib.ingredient_id
+            WHERE sib.barcode IN ($place)
+            ORDER BY FIELD(sib.barcode, $place)
+            LIMIT 1
+        ");
+        $stmt->execute($args);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? ['kind' => 'ingredient', 'barcode' => (string)$row['barcode'], 'row' => $row] : null;
+    };
+
+    $findMenuItem = static function () use ($pdo, $place, $args): ?array {
+        $stmt = $pdo->prepare("
+            SELECT mi.id, mi.item_name AS name, mi.price, mi.barcode, mi.is_available,
+                   mc.name AS category_name, mc.slug AS menu_type
+            FROM menu_items mi
+            JOIN menu_categories mc ON mc.id = mi.category_id
+            WHERE mi.barcode IN ($place)
+            ORDER BY FIELD(mi.barcode, $place)
+            LIMIT 1
+        ");
+        $stmt->execute($args);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? ['kind' => 'menu_item', 'barcode' => (string)$row['barcode'], 'row' => $row] : null;
+    };
+
+    switch ($scope) {
+        case 'ingredient': return $findIngredient();
+        case 'menu_item':  return $findMenuItem();
+        case 'sale_first': return $findMenuItem() ?? $findIngredient();
+        default:           return $findIngredient() ?? $findMenuItem();
+    }
+}
+
+/**
  * Generate the next POS order reference: ORD-YYYYMMDD-NNN
  */
 function generateStockOrderReference(): string
