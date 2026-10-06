@@ -147,8 +147,14 @@ function updateRoomStatus(int $roomId, string $newStatus, string $reason = '', ?
 {
     global $pdo;
 
+    // Join the caller's transaction when there is one (markRoomClean() and processGuestCheckout()
+    // both call this inside their own); a second beginTransaction() threw "already an active
+    // transaction" and its catch rolled the caller's whole transaction back.
+    $ownTx = !$pdo->inTransaction();
     try {
-        $pdo->beginTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
 
         // Get current room status.
         //
@@ -172,7 +178,9 @@ function updateRoomStatus(int $roomId, string $newStatus, string $reason = '', ?
         $room = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$room) {
-            $pdo->rollBack();
+            if ($ownTx) {
+                $pdo->rollBack();
+            }
             return ['success' => false, 'message' => 'Room not found'];
         }
 
@@ -182,7 +190,9 @@ function updateRoomStatus(int $roomId, string $newStatus, string $reason = '', ?
         if (empty($options['force'])) {
             $validation = validateRoomStatusTransition($currentStatus, $newStatus);
             if (!$validation['valid']) {
-                $pdo->rollBack();
+                if ($ownTx) {
+                    $pdo->rollBack();
+                }
                 return ['success' => false, 'message' => $validation['reason']];
             }
         }
@@ -201,7 +211,9 @@ function updateRoomStatus(int $roomId, string $newStatus, string $reason = '', ?
         // Handle status-specific workflows
         $workflowResult = handleStatusWorkflow($pdo, $roomId, $currentStatus, $newStatus, $performedBy, $options);
 
-        $pdo->commit();
+        if ($ownTx) {
+            $pdo->commit();
+        }
 
         return [
             'success' => true,
@@ -214,8 +226,13 @@ function updateRoomStatus(int $roomId, string $newStatus, string $reason = '', ?
             ]
         ];
     } catch (PDOException $e) {
-        $pdo->rollBack();
         error_log("Room status update error: " . $e->getMessage());
+        if (!$ownTx) {
+            throw $e; // let the owning transaction roll back as a whole
+        }
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         return ['success' => false, 'message' => 'Database error: ' . $e->getMessage()];
     }
 }
@@ -522,6 +539,10 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
 
         $pdo->commit();
 
+        // Timeline entry (the booking-details.php checkout logs its own; this is the dashboard / process-checkin.php path).
+        require_once __DIR__ . '/booking-timeline.php';
+        logBookingCheckOut($bookingId, (string)$booking['booking_reference'], 'admin', $performedBy, null);
+
         return [
             'success' => true,
             'message' => $outstandingBalance > 0.01
@@ -646,7 +667,9 @@ function markRoomClean(int $roomId, ?int $performedBy = null, array $options = [
             ]
         ];
     } catch (PDOException $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         error_log("Mark room clean error: " . $e->getMessage());
         return ['success' => false, 'message' => 'Database error: ' . $e->getMessage()];
     }

@@ -1052,7 +1052,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
                 ]);
                 $new_payment_id = (int)$pdo->lastInsertId();
 
-                logBookingPayment($booking_id, $booking['booking_reference'], $paymentTotalWithVat, 'full_payment', 'cash', 'completed', $user['id'], $payment_reference);
+                logBookingPayment($booking_id, $booking['booking_reference'], $paymentTotalWithVat, 'full', 'cash', 'completed', $user['id'], $payment_reference);
                 // Status, amount_paid and amount_due are re-derived from the ledger;
                 // total_with_vat (the bill) is never written from here.
                 if (!recalculateBookingFinancials($booking_id)) {

@@ -67,3 +67,7 @@ package-lock.json
 
 # Test harness session files
 scripts/tests/sessions/
+
+# Generated invoice/receipt PDFs (output, not source)
+invoices/INV-*.pdf
+receipts/*.pdf

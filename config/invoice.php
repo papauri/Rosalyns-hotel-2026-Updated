@@ -1615,210 +1615,6 @@ function sendEmailWithAttachmentAndCC(string $to, ?string $toName, string $subje
         } elseif ($smtpSecureNormalized === '' && (int)$smtp_port === 465) {
             $smtpSecureNormalized = 'ssl';
         }
-
-        /**
-         * Generate and send final invoice at checkout
-         * Includes idempotency safeguards to avoid duplicate invoice generation
-         *
-         * @param int $booking_id Booking ID
-         * @param int|null $processed_by Admin user ID processing the checkout
-         * @return array Result with success status, invoice details, and any warnings
-         */
-        function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null): array
-        {
-            global $pdo;
-
-            try {
-                // Check if booking exists
-                $stmt = $pdo->prepare("SELECT id, booking_reference, guest_name, guest_email, status, final_invoice_generated FROM bookings WHERE id = ?");
-                $stmt->execute([$booking_id]);
-                $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if (!$booking) {
-                    return ['success' => false, 'message' => 'Booking not found'];
-                }
-
-                // Check if final invoice already generated (idempotency)
-                if ($booking['final_invoice_generated']) {
-                    // Return existing invoice details
-                    $existingStmt = $pdo->prepare("SELECT final_invoice_path, final_invoice_number, final_invoice_sent_at FROM bookings WHERE id = ?");
-                    $existingStmt->execute([$booking_id]);
-                    $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
-
-                    return [
-                        'success' => true,
-                        'message' => 'Final invoice already generated',
-                        'invoice_path' => $existing['final_invoice_path'],
-                        'invoice_number' => $existing['final_invoice_number'],
-                        'sent_at' => $existing['final_invoice_sent_at'],
-                        'idempotent' => true
-                    ];
-                }
-
-                // Recalculate folio before generating invoice
-                recalculateBookingFinancials($booking_id);
-
-                // Generate final invoice
-                $invoice_result = generateInvoicePDF($booking_id);
-                if (!$invoice_result) {
-                    return ['success' => false, 'message' => 'Failed to generate final invoice'];
-                }
-
-                $invoice_file = $invoice_result['filepath'];
-                $invoice_number = $invoice_result['invoice_number'];
-                $invoice_path = $invoice_result['relative_path'];
-
-                // Update booking with final invoice details
-                $updateStmt = $pdo->prepare("
-                    UPDATE bookings
-                    SET final_invoice_generated = 1,
-                        final_invoice_path = ?,
-                        final_invoice_number = ?,
-                        final_invoice_sent_at = NULL,
-                        checkout_processed_by = ?,
-                        updated_at = NOW()
-                    WHERE id = ?
-                ");
-                $updateStmt->execute([$invoice_path, $invoice_number, $processed_by, $booking_id]);
-
-                // Send final invoice email
-                $email_sent = false;
-                $email_error = null;
-
-                try {
-                    // Get invoice recipients
-                    $invoice_recipients = getEmailSetting('invoice_recipients', '');
-                    $smtp_username = getEmailSetting('smtp_username', '');
-
-                    // Parse recipients
-                    $cc_recipients = array_filter(array_map('trim', explode(',', $invoice_recipients)));
-
-                    // Always add SMTP username to CC
-                    if (!empty($smtp_username) && !in_array($smtp_username, $cc_recipients)) {
-                        $cc_recipients[] = $smtp_username;
-                    }
-
-                    // Send email
-                    $email_result = sendFinalInvoiceEmail($booking, $invoice_file, $cc_recipients);
-                    $email_sent = $email_result['success'];
-
-                    if ($email_sent) {
-                        // Update sent timestamp
-                        $pdo->prepare("UPDATE bookings SET final_invoice_sent_at = NOW() WHERE id = ?")
-                            ->execute([$booking_id]);
-                    } else {
-                        $email_error = $email_result['message'];
-                    }
-                } catch (Exception $e) {
-                    $email_error = $e->getMessage();
-                    error_log("Final invoice email error: " . $email_error);
-                }
-
-                return [
-                    'success' => true,
-                    'message' => 'Final invoice generated' . ($email_sent ? ' and sent' : ' (email failed)'),
-                    'invoice_file' => $invoice_file,
-                    'invoice_number' => $invoice_number,
-                    'invoice_path' => $invoice_path,
-                    'email_sent' => $email_sent,
-                    'email_error' => $email_error,
-                    'idempotent' => false
-                ];
-            } catch (Exception $e) {
-                error_log("Generate and send final invoice error: " . $e->getMessage());
-                return ['success' => false, 'message' => $e->getMessage()];
-            }
-        }
-
-        /**
-         * Send final invoice email at checkout
-         *
-         * @param array $booking Booking details
-         * @param string $invoice_file Path to invoice file
-         * @param array $cc_recipients CC recipients
-         * @return array Result with success status
-         */
-        function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_recipients = [])
-        {
-            global $pdo, $email_from_name, $email_from_email, $email_site_name, $email_site_url;
-
-            try {
-                // Get room details
-                $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
-                $stmt->execute([$booking['room_id']]);
-                $room = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                $currency_symbol = getSetting('currency_symbol');
-
-                // Build email content
-                $htmlBody = '
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                    <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                        <h1 style="color: #8B7355; margin: 0; font-size: 32px;">✓ CHECKOUT COMPLETE</h1>
-                        <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Thank you for your stay!</p>
-                    </div>
-
-                    <div style="background: #f8f9fa; padding: 30px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 10px 10px;">
-                        <p>Dear ' . htmlspecialchars($booking['guest_name']) . ',</p>
-
-                        <p>We hope you enjoyed your stay at <strong>' . htmlspecialchars($email_site_name) . '</strong>. Your checkout has been completed and your final invoice is ready.</p>
-
-                        <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #8B7355;">
-                            <h3 style="color: #1A1A1A; margin-top: 0;">Final Invoice Details</h3>
-
-                            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
-                                <span style="font-weight: bold; color: #333;">Booking Reference:</span>
-                                <span style="color: #666;">' . htmlspecialchars($booking['booking_reference']) . '</span>
-                            </div>
-
-                            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
-                                <span style="font-weight: bold; color: #333;">Room:</span>
-                                <span style="color: #666;">' . htmlspecialchars($room['name']) . '</span>
-                            </div>
-
-                            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
-                                <span style="font-weight: bold; color: #333;">Check-out Date:</span>
-                                <span style="color: #666;">' . date('F j, Y') . '</span>
-                            </div>
-                        </div>
-
-                        <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
-                            <h3 style="color: #155724; margin-top: 0;">✅ Final Invoice Attached</h3>
-                            <p style="color: #155724; margin: 0;">Please find your final invoice attached to this email. It includes all room charges, extras, and payments made during your stay.</p>
-                        </div>
-
-                        <div style="background: #e7f3ff; padding: 15px; border-left: 4px solid #0d6efd; border-radius: 5px;">
-                            <h3 style="color: #0d6efd; margin-top: 0;">We Hope to See You Again!</h3>
-                            <p style="color: #0d6efd; margin: 0;">Thank you for choosing ' . htmlspecialchars($email_site_name) . '. We look forward to welcoming you back soon.</p>
-                        </div>
-
-                        <p style="margin-top: 30px;">If you have any questions about your invoice or your stay, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
-
-                        <p style="margin-top: 20px;">Safe travels!</p>
-
-                        <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 2px solid #1A1A1A;">
-                            <p style="color: #666; font-size: 14px; margin: 5px 0;"><strong>The ' . htmlspecialchars($email_site_name) . ' Team</strong></p>
-                            <p style="color: #666; font-size: 14px; margin: 5px 0;"><a href="' . htmlspecialchars($email_site_url) . '">' . htmlspecialchars($email_site_url) . '</a></p>
-                        </div>
-                    </div>
-                </div>';
-
-                $subject = 'Final Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
-
-                // Send email with attachment
-                return sendEmailWithAttachmentAndCC(
-                    $booking['guest_email'],
-                    $booking['guest_name'],
-                    $subject,
-                    $htmlBody,
-                    $invoice_file,
-                    $cc_recipients
-                );
-            } catch (Exception $e) {
-                error_log("Send final invoice email error: " . $e->getMessage());
-                return ['success' => false, 'message' => $e->getMessage()];
-            }
-        }
         // Many SMTP relays require From to match authenticated mailbox.
         $fromAddress = $smtp_username;
 
@@ -1900,6 +1696,210 @@ function sendEmailWithAttachmentAndCC(string $to, ?string $toName, string $subje
             'success' => false,
             'message' => 'Failed to send email: ' . $e->getMessage()
         ];
+    }
+}
+
+/**
+ * Generate and send final invoice at checkout
+ * Includes idempotency safeguards to avoid duplicate invoice generation
+ *
+ * @param int $booking_id Booking ID
+ * @param int|null $processed_by Admin user ID processing the checkout
+ * @return array Result with success status, invoice details, and any warnings
+ */
+function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null): array
+{
+    global $pdo;
+
+    try {
+        // Check if booking exists
+        $stmt = $pdo->prepare("SELECT id, room_id, booking_reference, guest_name, guest_email, status, final_invoice_generated FROM bookings WHERE id = ?");
+        $stmt->execute([$booking_id]);
+        $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$booking) {
+            return ['success' => false, 'message' => 'Booking not found'];
+        }
+
+        // Check if final invoice already generated (idempotency)
+        if ($booking['final_invoice_generated']) {
+            // Return existing invoice details
+            $existingStmt = $pdo->prepare("SELECT final_invoice_path, final_invoice_number, final_invoice_sent_at FROM bookings WHERE id = ?");
+            $existingStmt->execute([$booking_id]);
+            $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
+
+            return [
+                'success' => true,
+                'message' => 'Final invoice already generated',
+                'invoice_path' => $existing['final_invoice_path'],
+                'invoice_number' => $existing['final_invoice_number'],
+                'sent_at' => $existing['final_invoice_sent_at'],
+                'idempotent' => true
+            ];
+        }
+
+        // Recalculate folio before generating invoice
+        recalculateBookingFinancials($booking_id);
+
+        // Generate final invoice
+        $invoice_result = generateInvoicePDF($booking_id);
+        if (!$invoice_result) {
+            return ['success' => false, 'message' => 'Failed to generate final invoice'];
+        }
+
+        $invoice_file = $invoice_result['filepath'];
+        $invoice_number = $invoice_result['invoice_number'];
+        $invoice_path = $invoice_result['relative_path'];
+
+        // Update booking with final invoice details
+        $updateStmt = $pdo->prepare("
+            UPDATE bookings
+            SET final_invoice_generated = 1,
+                final_invoice_path = ?,
+                final_invoice_number = ?,
+                final_invoice_sent_at = NULL,
+                checkout_processed_by = ?,
+                updated_at = NOW()
+            WHERE id = ?
+        ");
+        $updateStmt->execute([$invoice_path, $invoice_number, $processed_by, $booking_id]);
+
+        // Send final invoice email
+        $email_sent = false;
+        $email_error = null;
+
+        try {
+            // Get invoice recipients
+            $invoice_recipients = getEmailSetting('invoice_recipients', '');
+            $smtp_username = getEmailSetting('smtp_username', '');
+
+            // Parse recipients
+            $cc_recipients = array_filter(array_map('trim', explode(',', $invoice_recipients)));
+
+            // Always add SMTP username to CC
+            if (!empty($smtp_username) && !in_array($smtp_username, $cc_recipients)) {
+                $cc_recipients[] = $smtp_username;
+            }
+
+            // Send email
+            $email_result = sendFinalInvoiceEmail($booking, $invoice_file, $cc_recipients);
+            $email_sent = $email_result['success'];
+
+            if ($email_sent) {
+                // Update sent timestamp
+                $pdo->prepare("UPDATE bookings SET final_invoice_sent_at = NOW() WHERE id = ?")
+                    ->execute([$booking_id]);
+            } else {
+                $email_error = $email_result['message'];
+            }
+        } catch (Exception $e) {
+            $email_error = $e->getMessage();
+            error_log("Final invoice email error: " . $email_error);
+        }
+
+        return [
+            'success' => true,
+            'message' => 'Final invoice generated' . ($email_sent ? ' and sent' : ' (email failed)'),
+            'invoice_file' => $invoice_file,
+            'invoice_number' => $invoice_number,
+            'invoice_path' => $invoice_path,
+            'email_sent' => $email_sent,
+            'email_error' => $email_error,
+            'idempotent' => false
+        ];
+    } catch (Exception $e) {
+        error_log("Generate and send final invoice error: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+/**
+ * Send final invoice email at checkout
+ *
+ * @param array $booking Booking details
+ * @param string $invoice_file Path to invoice file
+ * @param array $cc_recipients CC recipients
+ * @return array Result with success status
+ */
+function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_recipients = [])
+{
+    global $pdo, $email_from_name, $email_from_email, $email_site_name, $email_site_url;
+
+    try {
+        // Get room details
+        $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
+        $stmt->execute([$booking['room_id']]);
+        $room = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $currency_symbol = getSetting('currency_symbol');
+
+        // Build email content
+        $htmlBody = '
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                <h1 style="color: #8B7355; margin: 0; font-size: 32px;">✓ CHECKOUT COMPLETE</h1>
+                <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Thank you for your stay!</p>
+            </div>
+
+            <div style="background: #f8f9fa; padding: 30px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 10px 10px;">
+                <p>Dear ' . htmlspecialchars($booking['guest_name']) . ',</p>
+
+                <p>We hope you enjoyed your stay at <strong>' . htmlspecialchars($email_site_name) . '</strong>. Your checkout has been completed and your final invoice is ready.</p>
+
+                <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #8B7355;">
+                    <h3 style="color: #1A1A1A; margin-top: 0;">Final Invoice Details</h3>
+
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
+                        <span style="font-weight: bold; color: #333;">Booking Reference:</span>
+                        <span style="color: #666;">' . htmlspecialchars($booking['booking_reference']) . '</span>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
+                        <span style="font-weight: bold; color: #333;">Room:</span>
+                        <span style="color: #666;">' . htmlspecialchars($room['name']) . '</span>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
+                        <span style="font-weight: bold; color: #333;">Check-out Date:</span>
+                        <span style="color: #666;">' . date('F j, Y') . '</span>
+                    </div>
+                </div>
+
+                <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
+                    <h3 style="color: #155724; margin-top: 0;">✅ Final Invoice Attached</h3>
+                    <p style="color: #155724; margin: 0;">Please find your final invoice attached to this email. It includes all room charges, extras, and payments made during your stay.</p>
+                </div>
+
+                <div style="background: #e7f3ff; padding: 15px; border-left: 4px solid #0d6efd; border-radius: 5px;">
+                    <h3 style="color: #0d6efd; margin-top: 0;">We Hope to See You Again!</h3>
+                    <p style="color: #0d6efd; margin: 0;">Thank you for choosing ' . htmlspecialchars($email_site_name) . '. We look forward to welcoming you back soon.</p>
+                </div>
+
+                <p style="margin-top: 30px;">If you have any questions about your invoice or your stay, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
+
+                <p style="margin-top: 20px;">Safe travels!</p>
+
+                <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 2px solid #1A1A1A;">
+                    <p style="color: #666; font-size: 14px; margin: 5px 0;"><strong>The ' . htmlspecialchars($email_site_name) . ' Team</strong></p>
+                    <p style="color: #666; font-size: 14px; margin: 5px 0;"><a href="' . htmlspecialchars($email_site_url) . '">' . htmlspecialchars($email_site_url) . '</a></p>
+                </div>
+            </div>
+        </div>';
+
+        $subject = 'Final Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
+
+        // Send email with attachment
+        return sendEmailWithAttachmentAndCC(
+            $booking['guest_email'],
+            $booking['guest_name'],
+            $subject,
+            $htmlBody,
+            $invoice_file,
+            $cc_recipients
+        );
+    } catch (Exception $e) {
+        error_log("Send final invoice email error: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
     }
 }
 
