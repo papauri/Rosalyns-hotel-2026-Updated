@@ -78,6 +78,7 @@ $gymDash = [
 ];
 $roomServiceQueue = [];
 $dayProgress = ['arrived' => 0, 'departed' => 0];
+$overdueDepartures = 0; // checked in past their checkout date
 $departureList = [];
 $weekAhead = [];
 $revenueTrend = [];
@@ -321,16 +322,24 @@ if (!$is_card_insight_ajax) {
             $dayProgress['arrived']  = (int)($r['arrived'] ?? 0);
             $dayProgress['departed'] = (int)($r['departed'] ?? 0);
 
-            $st = $pdo->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.number_of_nights,
-                       b.amount_due, b.payment_status, r.name AS room_name,
-                       ir.room_number AS individual_room_number, ir.room_name AS individual_room_name
+            // Everyone due out today (already departed ones included, so the list always matches
+            // the Departures card) plus guests still checked in after their checkout date (overdue).
+            $st = $pdo->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.check_out_date, b.number_of_nights,
+                       b.amount_due, b.payment_status, b.status, r.name AS room_name,
+                       ir.room_number AS individual_room_number, ir.room_name AS individual_room_name,
+                       CASE WHEN b.status = 'checked-out' THEN 'departed'
+                            WHEN b.check_out_date < ? THEN 'overdue' ELSE 'due' END AS departure_state
                 FROM bookings b
                 JOIN rooms r ON b.room_id = r.id
                 LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-                WHERE b.check_out_date = ? AND b.status = 'checked-in'
-                ORDER BY b.amount_due DESC, b.guest_name ASC");
-            $st->execute([$today]);
+                WHERE (b.check_out_date = ? AND b.status IN ('checked-in', 'checked-out'))
+                   OR (b.check_out_date < ? AND b.status = 'checked-in')
+                ORDER BY FIELD(departure_state, 'overdue', 'due', 'departed'), b.check_out_date ASC, b.amount_due DESC, b.guest_name ASC");
+            $st->execute([$today, $today, $today]);
             $departureList = $st->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($departureList as $d) {
+                if ($d['departure_state'] === 'overdue') { $overdueDepartures++; }
+            }
         } catch (Throwable $e) { /* keep defaults */ }
     }
 
@@ -550,7 +559,7 @@ if ($is_card_insight_ajax) {
         switch ($card) {
             case 'checkins_today':
                 $payload['title'] = "Today's Check-ins";
-                $payload['subtitle'] = 'Confirmed + pending arrivals due today';
+                $payload['subtitle'] = 'Everyone due in today, with their status';
                 $payload['columns'] = [
                     ['key' => 'reference', 'label' => 'Booking'],
                     ['key' => 'guest', 'label' => 'Guest'],
@@ -565,8 +574,8 @@ if ($is_card_insight_ajax) {
                                        FROM bookings b
                                        JOIN rooms r ON r.id = b.room_id
                                        LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                                       WHERE b.check_in_date = ? AND b.status IN ('confirmed','pending')
-                                       ORDER BY b.created_at ASC
+                                       WHERE b.check_in_date = ? AND b.status IN ('confirmed','pending','checked-in','checked-out')
+                                       ORDER BY FIELD(b.status, 'pending', 'confirmed', 'checked-in', 'checked-out'), b.created_at ASC
                                        LIMIT 30");
                 $stmt->execute([$today]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -595,24 +604,26 @@ if ($is_card_insight_ajax) {
 
             case 'checkouts_today':
                 $payload['title'] = "Today's Check-outs";
-                $payload['subtitle'] = 'In-house guests due out today';
+                $payload['subtitle'] = 'Everyone due out today, plus guests still in after their checkout date';
                 $payload['columns'] = [
                     ['key' => 'reference', 'label' => 'Booking'],
                     ['key' => 'guest', 'label' => 'Guest'],
                     ['key' => 'room', 'label' => 'Room'],
                     ['key' => 'checkout', 'label' => 'Check-out'],
+                    ['key' => 'state', 'label' => 'Status'],
                     ['key' => 'amount_due', 'label' => 'Outstanding'],
                 ];
                 $payload['link'] = ['href' => 'bookings.php?filter=checkout_today&flash=results', 'label' => 'Open check-outs list'];
-                $stmt = $pdo->prepare("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.check_out_date, b.amount_due,
+                $stmt = $pdo->prepare("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.check_out_date, b.amount_due, b.status,
                                               r.name AS room_name, ir.room_number, ir.room_name AS individual_room_name
                                        FROM bookings b
                                        JOIN rooms r ON r.id = b.room_id
                                        LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                                       WHERE b.check_out_date = ? AND b.status = 'checked-in'
-                                       ORDER BY b.check_out_date ASC, b.created_at ASC
+                                       WHERE (b.check_out_date = ? AND b.status IN ('checked-in', 'checked-out'))
+                                          OR (b.check_out_date < ? AND b.status = 'checked-in')
+                                       ORDER BY (b.status = 'checked-out'), b.check_out_date ASC, b.created_at ASC
                                        LIMIT 30");
-                $stmt->execute([$today]);
+                $stmt->execute([$today, $today]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as $row) {
                     $room = trim((string)($row['individual_room_name'] ?? ''));
@@ -630,10 +641,11 @@ if ($is_card_insight_ajax) {
                         'guest' => (string)$row['guest_name'],
                         'room' => $room,
                         'checkout' => date('M j, Y', strtotime((string)$row['check_out_date'])),
+                        'state' => $row['status'] === 'checked-out' ? 'Checked out' : ((string)$row['check_out_date'] < $today ? 'Overdue' : 'Due today'),
                         'amount_due' => $formatMoney((float)($row['amount_due'] ?? 0)),
                     ];
                 }
-                $payload['empty'] = 'No check-outs are due today.';
+                $payload['empty'] = 'No check-outs are due today, and nobody is overdue.';
                 break;
 
             case 'pending_bookings':
@@ -1855,8 +1867,8 @@ $currency_symbol = getSetting('currency_symbol');
                     FROM bookings b
                     JOIN rooms r ON b.room_id = r.id
                     LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-                    WHERE b.check_in_date = ? AND b.status IN ('confirmed', 'pending')
-                    ORDER BY b.created_at ASC");
+                    WHERE b.check_in_date = ? AND b.status IN ('confirmed', 'pending', 'checked-in', 'checked-out')
+                    ORDER BY FIELD(b.status, 'pending', 'confirmed', 'checked-in', 'checked-out'), b.created_at ASC");
                 $st->execute([$today]);
                 $checkin_bookings = $st->fetchAll(PDO::FETCH_ASSOC);
             } catch (Throwable $e) { $checkin_bookings = []; }
@@ -1871,9 +1883,11 @@ $currency_symbol = getSetting('currency_symbol');
         $noShows = (int)($roomSummary['no_show_candidates'] ?? 0);
 
         $arrivalsTotal = (int)$today_checkins + $dayProgress['arrived'];
-        $departuresTotal = (int)$today_checkouts + $dayProgress['departed'];
+        // Overdue guests (still in after their checkout date) count as departures still to do.
+        $departuresTotal = (int)$today_checkouts + $dayProgress['departed'] + $overdueDepartures;
+        $departuresStillToGo = (int)$today_checkouts + $overdueDepartures;
         $departuresOwing = 0;
-        foreach ($departureList as $d) { if ((float)$d['amount_due'] > 0.01) { $departuresOwing++; } }
+        foreach ($departureList as $d) { if ($d['departure_state'] !== 'departed' && (float)$d['amount_due'] > 0.01) { $departuresOwing++; } }
 
         // ---- Needs-attention queue: only what is non-zero is shown loudly ----
         $attn = [];
@@ -1881,6 +1895,7 @@ $currency_symbol = getSetting('currency_symbol');
             if ($on) { $list[] = compact('count', 'label', 'icon', 'tone', 'href', 'insight', 'hint'); }
         };
         $add($attn, $mod_bookings, $noShows, 'Overdue arrivals (no-show?)', 'fa-user-clock', 'red', 'bookings.php?arrival=overdue', null, 'Arrival date passed, never checked in');
+        $add($attn, $mod_bookings, $overdueDepartures, 'Overdue departures', 'fa-person-walking-luggage', 'red', 'bookings.php?filter=checked_in', null, 'Checkout date passed, still checked in');
         $add($attn, $mod_bookings, (int)$pending_bookings, 'Bookings awaiting confirmation', 'fa-hourglass-half', 'amber', 'bookings.php?status=pending', 'pending_bookings');
         $add($attn, $mod_bookings, $departuresOwing, 'Departures with a balance', 'fa-sack-dollar', 'red', 'bookings.php?filter=checkout_today', 'checkouts_today', 'Collect before they leave');
         $add($attn, $mod_finance, (int)$finance['refunds_pending'], 'Refunds to approve', 'fa-rotate-left', 'red', 'payments.php?refund_status=pending', 'refunds_pending');
@@ -2017,7 +2032,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <span class="ck-kpi__label">Departures</span>
                     <span class="ck-kpi__value"><?php echo $dayProgress['departed']; ?><small>/<?php echo $departuresTotal; ?></small></span>
                     <span class="ck-meter ck-meter--gold"><span style="width:<?php echo $departuresTotal ? round($dayProgress['departed'] / $departuresTotal * 100) : 0; ?>%"></span></span>
-                    <span class="ck-kpi__sub"><?php echo (int)$today_checkouts > 0 ? (int)$today_checkouts . ' still to check out' : ($departuresTotal ? 'All checked out' : 'No departures today'); ?></span>
+                    <span class="ck-kpi__sub"><?php echo $departuresStillToGo > 0 ? $departuresStillToGo . ' still to check out' . ($overdueDepartures ? ' (' . $overdueDepartures . ' overdue)' : '') : ($departuresTotal ? 'All checked out' : 'No departures today'); ?></span>
                 </a>
                 <a class="ck-kpi js-dashboard-insight" data-insight-card="inhouse_guests" data-insight-label="In-house guests" href="bookings.php?status=checked-in">
                     <span class="ck-kpi__icon"><i class="fas fa-people-roof"></i></span>
@@ -2137,12 +2152,16 @@ $currency_symbol = getSetting('currency_symbol');
                                 <?php endif; ?>
                             </span>
                             <span class="ck-row__act">
+                                <?php if (in_array($booking['status'], ['checked-in', 'checked-out'], true)): ?>
+                                <a class="ck-btn ck-btn--sm" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>"><i class="fas fa-eye"></i> View</a>
+                                <?php else: ?>
                                 <button type="button" id="checkin-btn-<?php echo (int)$booking['id']; ?>"
                                     class="ck-btn ck-btn--sm <?php echo $can_checkin ? 'ck-btn--primary' : ''; ?>"
                                     <?php echo $can_checkin ? '' : 'aria-disabled="true"'; ?>
                                     onclick="<?php echo $can_checkin ? "processCheckIn(" . (int)$booking['id'] . ", '" . $guestJs . "')" : "Alert.show('Cannot check in: booking must be CONFIRMED and PAID.', 'error')"; ?>">
                                     <i class="fas fa-right-to-bracket"></i> Check in
                                 </button>
+                                <?php endif; ?>
                             </span>
                         </li>
                         <?php endforeach; ?>
@@ -2155,7 +2174,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <div class="ck-pane" role="tabpanel" data-ck-pane="departures" hidden>
                     <?php if ($departureList): ?>
                     <ul class="ck-rows">
-                        <?php foreach ($departureList as $d): $owes = (float)$d['amount_due'] > 0.01; ?>
+                        <?php foreach ($departureList as $d): $dState = $d['departure_state']; $owes = $dState !== 'departed' && (float)$d['amount_due'] > 0.01; ?>
                         <li class="ck-row">
                             <span class="ck-avatar ck-avatar--gold"><?php echo htmlspecialchars($initials((string)$d['guest_name'])); ?></span>
                             <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
@@ -2164,16 +2183,25 @@ $currency_symbol = getSetting('currency_symbol');
                             </a>
                             <span class="ck-chip"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($d)); ?></span>
                             <span class="ck-row__meta">
+                                <?php if ($dState === 'departed'): ?>
+                                    <span class="badge badge-checked-out">Checked out</span>
+                                <?php elseif ($dState === 'overdue'): ?>
+                                    <span class="ck-due ck-due--strong">Overdue · was due <?php echo date('j M', strtotime($d['check_out_date'])); ?></span>
+                                <?php endif; ?>
                                 <?php if ($owes): ?>
                                     <span class="ck-due ck-due--strong">Owes <?php echo $money($d['amount_due']); ?></span>
-                                <?php else: ?>
+                                <?php elseif ($dState !== 'departed'): ?>
                                     <small class="ck-paid"><i class="fas fa-check"></i> Settled</small>
                                 <?php endif; ?>
                             </span>
                             <span class="ck-row__act">
+                                <?php if ($dState === 'departed'): ?>
+                                <a class="ck-btn ck-btn--sm" href="booking-details.php?id=<?php echo (int)$d['id']; ?>"><i class="fas fa-eye"></i> View</a>
+                                <?php else: ?>
                                 <a class="ck-btn ck-btn--sm <?php echo $owes ? '' : 'ck-btn--primary'; ?>" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
                                     <i class="fas <?php echo $owes ? 'fa-hand-holding-dollar' : 'fa-right-from-bracket'; ?>"></i> <?php echo $owes ? 'Settle &amp; check out' : 'Check out'; ?>
                                 </a>
+                                <?php endif; ?>
                             </span>
                         </li>
                         <?php endforeach; ?>
