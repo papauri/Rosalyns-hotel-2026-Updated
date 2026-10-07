@@ -6,6 +6,7 @@
  */
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
+require_once 'includes/procurement-schema.php'; // rh_supplier_id_by_name()
 
 /** @var PDO $pdo */
 $user = [
@@ -122,6 +123,27 @@ if (isset($_GET['ajax'])) {
         if (!$items || !is_array($items) || count($items) === 0) {
             http_response_code(400); echo json_encode(['error' => 'No items to receive.']); exit;
         }
+        // Link the delivery to the supplier master when the typed name matches one,
+        // so it counts towards that supplier's "Total purchased" and history (and
+        // the stored name uses the master's spelling). Unknown names stay free text.
+        $supplierId = null;
+        $hasBatchSupplierCol = false;
+        $hasLogSupplierCol = false;
+        try {
+            ensureProcurementSchema($pdo);
+            $supplierId = rh_supplier_id_by_name($pdo, $supplier);
+            if ($supplierId !== null) {
+                $canon = $pdo->prepare("SELECT name FROM stock_suppliers WHERE id = ?");
+                $canon->execute([$supplierId]);
+                $supplier = (string)($canon->fetchColumn() ?: $supplier);
+            }
+            $hasBatchSupplierCol = rh_column_exists($pdo, 'stock_batches', 'supplier_id');
+            $hasLogSupplierCol = rh_column_exists($pdo, 'stock_in_log', 'supplier_id');
+        } catch (Throwable $e) {
+            error_log('[barcode-receive] supplier lookup: ' . $e->getMessage());
+            $supplierId = null;
+        }
+
         try {
             $pdo->beginTransaction();
             $created = 0;
@@ -166,6 +188,9 @@ if (isset($_GET['ajax'])) {
                 $batchId = (int)$pdo->lastInsertId();
                 $pdo->prepare("UPDATE stock_batches SET batch_number = ? WHERE id = ?")
                     ->execute(['B' . str_pad((string)$batchId, 6, '0', STR_PAD_LEFT), $batchId]);
+                if ($supplierId !== null && $hasBatchSupplierCol) {
+                    $pdo->prepare("UPDATE stock_batches SET supplier_id = ? WHERE id = ?")->execute([$supplierId, $batchId]);
+                }
 
                 // Stock-in log
                 $pdo->prepare("
@@ -175,6 +200,9 @@ if (isset($_GET['ajax'])) {
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ")->execute([$ingId, $batchId, $qty, $cost ?: $oldAvg, $qty * ($cost ?: $oldAvg),
                     $supplier, $oldAvg, $newAvg, $note, $user['id']]);
+                if ($supplierId !== null && $hasLogSupplierCol) {
+                    $pdo->prepare("UPDATE stock_in_log SET supplier_id = ? WHERE id = ?")->execute([$supplierId, (int)$pdo->lastInsertId()]);
+                }
 
                 // Update ingredient qty + avg cost
                 $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity + ?, cost_per_unit = ?, updated_at = NOW() WHERE id = ?")
@@ -489,7 +517,16 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 
 <!-- Delivery meta -->
 <div class="meta-strip">
-    <input type="text" id="supplierInput" placeholder="Supplier name (optional)">
+    <input type="text" id="supplierInput" placeholder="Supplier name (optional)" list="supplierOptions" autocomplete="off">
+    <datalist id="supplierOptions">
+        <?php
+        try {
+            foreach ($pdo->query("SELECT name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_COLUMN) as $supOpt) {
+                echo '<option value="' . htmlspecialchars((string)$supOpt) . '"></option>';
+            }
+        } catch (Throwable $e) { /* supplier master not set up yet */ }
+        ?>
+    </datalist>
     <input type="date" id="receivedDate" value="<?php echo date('Y-m-d'); ?>">
 </div>
 

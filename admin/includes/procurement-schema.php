@@ -305,6 +305,11 @@ if (!function_exists('rh_backfill_suppliers_from_batches')) {
      * supplier_name values already present on batches / stock_in_log, then
      * link those rows back by supplier_id. Idempotent — only fills gaps.
      *
+     * Only rows NOT yet linked (supplier_id IS NULL) are considered. Previously
+     * every historical name was re-checked on each page load, so renaming a
+     * supplier re-created its old name as a ghost duplicate (the old text still
+     * sits on its batches), and a deleted supplier would have come back.
+     *
      * @return int Number of supplier rows created.
      */
     function rh_backfill_suppliers_from_batches(PDO $pdo): int
@@ -314,15 +319,18 @@ if (!function_exists('rh_backfill_suppliers_from_batches')) {
         }
         $created = 0;
 
-        // Distinct non-empty supplier names across both receiving tables.
+        $batchUnlinked = rh_column_exists($pdo, 'stock_batches', 'supplier_id') ? ' AND supplier_id IS NULL' : '';
+        $logUnlinked   = rh_column_exists($pdo, 'stock_in_log', 'supplier_id') ? ' AND supplier_id IS NULL' : '';
+
+        // Distinct non-empty supplier names on not-yet-linked receiving rows.
         $names = $pdo->query("
-            SELECT DISTINCT TRIM(supplier_name) AS nm, MAX(supplier_contact) AS ct
+            SELECT TRIM(supplier_name) AS nm, MAX(supplier_contact) AS ct
             FROM (
                 SELECT supplier_name, supplier_contact FROM stock_batches
-                WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) <> ''
+                WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) <> ''{$batchUnlinked}
                 UNION ALL
                 SELECT supplier_name, supplier_contact FROM stock_in_log
-                WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) <> ''
+                WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) <> ''{$logUnlinked}
             ) t
             GROUP BY TRIM(supplier_name)
         ")->fetchAll(PDO::FETCH_ASSOC);
@@ -354,5 +362,57 @@ if (!function_exists('rh_backfill_suppliers_from_batches')) {
         }
 
         return $created;
+    }
+}
+
+if (!function_exists('rh_supplier_usage')) {
+    /**
+     * How much stock/purchasing history references a supplier. Anything in
+     * deliveries or purchase_orders means the supplier must be kept (deactivate,
+     * don't delete); preferred_items are just defaults and can be unassigned.
+     *
+     * @return array{deliveries:int,purchase_orders:int,preferred_items:int}
+     */
+    function rh_supplier_usage(PDO $pdo, int $supplierId): array
+    {
+        $count = static function (string $sql) use ($pdo, $supplierId): int {
+            $st = $pdo->prepare($sql);
+            $st->execute([$supplierId]);
+            return (int)$st->fetchColumn();
+        };
+
+        $batches = rh_column_exists($pdo, 'stock_batches', 'supplier_id')
+            ? $count("SELECT COUNT(*) FROM stock_batches WHERE supplier_id = ?") : 0;
+        $logs = rh_column_exists($pdo, 'stock_in_log', 'supplier_id')
+            ? $count("SELECT COUNT(*) FROM stock_in_log WHERE supplier_id = ?") : 0;
+        $pos = rh_table_exists($pdo, 'stock_purchase_orders')
+            ? $count("SELECT COUNT(*) FROM stock_purchase_orders WHERE supplier_id = ?") : 0;
+        $preferred = rh_column_exists($pdo, 'stock_ingredients', 'preferred_supplier_id')
+            ? $count("SELECT COUNT(*) FROM stock_ingredients WHERE preferred_supplier_id = ?") : 0;
+
+        return [
+            'deliveries'      => max($batches, $logs),
+            'purchase_orders' => $pos,
+            'preferred_items' => $preferred,
+        ];
+    }
+}
+
+if (!function_exists('rh_supplier_id_by_name')) {
+    /**
+     * Resolve a typed supplier name to its master record (the name column's
+     * collation makes this case-insensitive). Returns null when there's no
+     * match, so the delivery stays a free-text one-off.
+     */
+    function rh_supplier_id_by_name(PDO $pdo, ?string $name): ?int
+    {
+        $name = trim((string)$name);
+        if ($name === '' || !rh_table_exists($pdo, 'stock_suppliers')) {
+            return null;
+        }
+        $st = $pdo->prepare("SELECT id FROM stock_suppliers WHERE name = ? LIMIT 1");
+        $st->execute([$name]);
+        $id = (int)($st->fetchColumn() ?: 0);
+        return $id > 0 ? $id : null;
     }
 }

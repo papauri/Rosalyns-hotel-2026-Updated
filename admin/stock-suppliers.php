@@ -26,8 +26,16 @@ if (!ensureStockTablesExist()) {
     $error = 'Stock tables not yet created.';
 } else {
     ensureProcurementSchema($pdo);
-    // Backfill once — cheap no-op after the first run.
-    try { rh_backfill_suppliers_from_batches($pdo); } catch (Throwable $e) { /* non-fatal */ }
+    // One-time migration of historical free-text supplier names into the master.
+    // It used to run on every page load, which re-created deleted or renamed
+    // suppliers from the names still printed on old deliveries. Now it runs once;
+    // later one-off ("Other") names stay free text unless added here deliberately.
+    if ((string)getSetting('stock_supplier_backfill_done', '') !== '1') {
+        try {
+            rh_backfill_suppliers_from_batches($pdo);
+            updateSetting('stock_supplier_backfill_done', '1');
+        } catch (Throwable $e) { /* non-fatal; retried next load */ }
+    }
 }
 
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -91,8 +99,54 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id = (int)($_POST['id'] ?? 0);
                 $pdo->prepare("UPDATE stock_suppliers SET is_active = 1 - is_active WHERE id = ?")->execute([$id]);
                 $message = 'Supplier status updated.';
+            } elseif ($action === 'delete') {
+                $id = (int)($_POST['id'] ?? 0);
+                $sup = $pdo->prepare("SELECT id, name FROM stock_suppliers WHERE id = ?");
+                $sup->execute([$id]);
+                $supRow = $sup->fetch(PDO::FETCH_ASSOC);
+                if (!$supRow) {
+                    throw new RuntimeException('Supplier not found — it may already have been deleted.');
+                }
+
+                // Purchase orders only reference the supplier by id (no name copy), so
+                // deleting a supplier on a PO would turn those orders into "Unassigned".
+                // Those suppliers must be deactivated instead.
+                $usage = rh_supplier_usage($pdo, $id);
+                if ($usage['purchase_orders'] > 0) {
+                    throw new RuntimeException('"' . $supRow['name'] . '" can\'t be deleted because it is on ' . $usage['purchase_orders']
+                        . ' purchase order' . ($usage['purchase_orders'] === 1 ? '' : 's')
+                        . '. Deactivate it instead — it disappears from supplier lists but the orders keep their supplier.');
+                }
+
+                // Deliveries keep the supplier's name as text on each batch / stock-in
+                // row, so stock history stays readable; they are just unlinked from the
+                // master record. Preferred-supplier defaults become unassigned.
+                $pdo->beginTransaction();
+                $pdo->prepare("UPDATE stock_ingredients SET preferred_supplier_id = NULL WHERE preferred_supplier_id = ?")->execute([$id]);
+                if (rh_column_exists($pdo, 'stock_batches', 'supplier_id')) {
+                    $pdo->prepare("UPDATE stock_batches SET supplier_name = COALESCE(NULLIF(TRIM(supplier_name), ''), ?), supplier_id = NULL WHERE supplier_id = ?")
+                        ->execute([$supRow['name'], $id]);
+                }
+                if (rh_column_exists($pdo, 'stock_in_log', 'supplier_id')) {
+                    $pdo->prepare("UPDATE stock_in_log SET supplier_name = COALESCE(NULLIF(TRIM(supplier_name), ''), ?), supplier_id = NULL WHERE supplier_id = ?")
+                        ->execute([$supRow['name'], $id]);
+                }
+                $pdo->prepare("DELETE FROM stock_suppliers WHERE id = ?")->execute([$id]);
+                $pdo->commit();
+
+                if (function_exists('logActivity')) {
+                    logActivity((int)$user['id'], 'supplier_deleted', 'Deleted supplier "' . $supRow['name'] . '" (#' . $id . ')'
+                        . ($usage['deliveries'] > 0 ? '; ' . $usage['deliveries'] . ' past deliveries kept with the name as text' : '')
+                        . ($usage['preferred_items'] > 0 ? '; unassigned from ' . $usage['preferred_items'] . ' item(s)' : ''));
+                }
+                $message = 'Supplier "' . $supRow['name'] . '" deleted.'
+                    . ($usage['deliveries'] > 0 ? ' Its ' . $usage['deliveries'] . ' past deliveries stay in stock history under its name.' : '')
+                    . ($usage['preferred_items'] > 0 ? ' ' . $usage['preferred_items'] . ' item(s) that used it as preferred supplier are now unassigned.' : '');
             }
         } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             $error = $e->getMessage();
         }
     }
@@ -113,7 +167,10 @@ if (!$error || strpos($error, 'not yet') === false) {
             SELECT s.*,
                    (SELECT COUNT(*) FROM stock_ingredients i WHERE i.preferred_supplier_id = s.id AND i.is_archived = 0) AS preferred_count,
                    (SELECT COALESCE(SUM(sil.cost_total), 0) FROM stock_in_log sil WHERE sil.supplier_id = s.id) AS total_purchased,
-                   (SELECT MAX(sil.created_at) FROM stock_in_log sil WHERE sil.supplier_id = s.id) AS last_received
+                   (SELECT MAX(sil.created_at) FROM stock_in_log sil WHERE sil.supplier_id = s.id) AS last_received,
+                   (SELECT COUNT(*) FROM stock_batches b WHERE b.supplier_id = s.id) AS batch_count,
+                   (SELECT COUNT(*) FROM stock_in_log sil WHERE sil.supplier_id = s.id) AS delivery_count,
+                   (SELECT COUNT(*) FROM stock_purchase_orders po WHERE po.supplier_id = s.id) AS po_count
             FROM stock_suppliers s
             ORDER BY s.is_active DESC, s.name ASC
         ")->fetchAll(PDO::FETCH_ASSOC);
@@ -164,7 +221,12 @@ $csrf_token = generateCsrfToken();
         .btn-sup-primary { background:#7E684B; color:#fff; }
         .sup-actions { display:flex; gap:8px; }
         .sup-link { color:#7E684B; cursor:pointer; text-decoration:none; font-size:.84rem; }
-        @media (max-width:640px){ .sup-modal .body { grid-template-columns:1fr; } .sup-modal .body .full { grid-column:1; } .sup-table thead { display:none; } }
+        .sup-icon-btn { background:none; border:none; padding:6px 7px; border-radius:4px; line-height:1; font-family:inherit; }
+        .sup-icon-btn:hover, .sup-icon-btn:focus-visible { background:#f3ece4; }
+        .sup-icon-btn--danger:hover, .sup-icon-btn--danger:focus-visible { color:#b4232f; background:#fbeae8; }
+        .sup-icon-btn--locked { color:#b9ae9f; cursor:help; }
+        .sup-help { font-size:.82rem; color:#8a8172; margin:-8px 0 16px; }
+        @media (max-width:640px){ .sup-modal .body { grid-template-columns:1fr; } .sup-modal .body .full { grid-column:1; } }
     </style>
 </head>
 
@@ -185,6 +247,9 @@ $csrf_token = generateCsrfToken();
             <div class="sup-stat"><div class="num"><?php echo (int)$stats['active']; ?></div><div class="lbl">Active</div></div>
         </div>
 
+        <p class="sup-help"><i class="fas fa-circle-info"></i> <strong>Deactivate</strong> (<i class="fas fa-power-off"></i>) hides a supplier from pickers but keeps it on record — usually the right choice. <strong>Delete</strong> (<i class="fas fa-trash"></i>) removes it for good; past deliveries keep its name as text. Suppliers on purchase orders can only be deactivated (<i class="fas fa-lock"></i>).</p>
+
+        <div style="overflow-x:auto;">
         <table class="sup-table">
             <thead>
                 <tr>
@@ -194,13 +259,14 @@ $csrf_token = generateCsrfToken();
                     <th>Terms</th>
                     <th class="num">Items</th>
                     <th class="num">Total purchased</th>
+                    <th>Last delivery</th>
                     <th>Status</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
                 <?php if (empty($suppliers)): ?>
-                    <tr><td colspan="8" style="text-align:center;padding:30px;color:#8a8172;">No suppliers yet. Add your first supplier to enable purchase orders.</td></tr>
+                    <tr><td colspan="9" style="text-align:center;padding:30px;color:#8a8172;">No suppliers yet. Add your first supplier to enable purchase orders.</td></tr>
                 <?php else: foreach ($suppliers as $s): ?>
                     <tr class="<?php echo (int)$s['is_active'] ? '' : 'sup-inactive'; ?>">
                         <td>
@@ -215,6 +281,7 @@ $csrf_token = generateCsrfToken();
                         <td><?php echo htmlspecialchars($s['payment_terms'] ?? '—'); ?></td>
                         <td class="num"><?php echo (int)$s['preferred_count']; ?></td>
                         <td class="num"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$s['total_purchased'], 2); ?></td>
+                        <td><?php echo !empty($s['last_received']) ? date('M j, Y', strtotime((string)$s['last_received'])) : '<span style="color:#8a8172;">Never</span>'; ?></td>
                         <td>
                             <?php if ((int)$s['is_active']): ?>
                                 <span class="pill pill-on">Active</span>
@@ -223,22 +290,57 @@ $csrf_token = generateCsrfToken();
                             <?php endif; ?>
                         </td>
                         <td>
+                            <?php
+                            $usedDeliveries = max((int)$s['batch_count'], (int)$s['delivery_count']);
+                            $usedPos = (int)$s['po_count'];
+                            $deletable = $usedPos === 0;
+                            $deleteMsg = 'Delete "' . $s['name'] . '" permanently? This cannot be undone.'
+                                . ($usedDeliveries > 0 ? ' Its ' . $usedDeliveries . ' past deliver' . ($usedDeliveries === 1 ? 'y stays' : 'ies stay') . ' in stock history under its name, but it will no longer show a purchase total. To keep it on record, deactivate it instead.' : '')
+                                . ((int)$s['preferred_count'] > 0 ? ' ' . (int)$s['preferred_count'] . ' item(s) using it as preferred supplier will become unassigned.' : '');
+                            $isOn = (int)$s['is_active'] === 1;
+                            ?>
                             <div class="sup-actions">
-                                <a class="sup-link" onclick='openSupplier(<?php echo json_encode($s, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>)'><i class="fas fa-pen"></i></a>
-                                <form method="POST" style="display:inline" onsubmit="return confirm('Toggle this supplier\'s status?');">
+                                <button type="button" class="sup-link sup-icon-btn" title="Edit supplier" aria-label="Edit <?php echo htmlspecialchars($s['name']); ?>"
+                                        onclick='openSupplier(<?php echo json_encode($s, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>)'><i class="fas fa-pen"></i></button>
+                                <form method="POST" style="display:inline"
+                                      data-admin-confirm="<?php echo $isOn ? 'Deactivate this supplier? It will be hidden from purchase orders and stock-in pickers. Its history stays.' : 'Reactivate this supplier so it can be picked again?'; ?>"
+                                      data-admin-confirm-title="<?php echo $isOn ? 'Deactivate supplier' : 'Activate supplier'; ?>"
+                                      data-admin-confirm-ok="<?php echo $isOn ? 'Deactivate' : 'Activate'; ?>"
+                                      data-admin-confirm-icon="fa-power-off">
                                     <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                                     <input type="hidden" name="action" value="toggle">
                                     <input type="hidden" name="id" value="<?php echo (int)$s['id']; ?>">
-                                    <button type="submit" class="sup-link" style="background:none;border:none;padding:0;">
+                                    <button type="submit" class="sup-link sup-icon-btn" title="<?php echo $isOn ? 'Deactivate' : 'Activate'; ?>" aria-label="<?php echo ($isOn ? 'Deactivate ' : 'Activate ') . htmlspecialchars($s['name']); ?>">
                                         <i class="fas fa-power-off"></i>
                                     </button>
                                 </form>
+                                <?php if ($deletable): ?>
+                                    <form method="POST" style="display:inline"
+                                          data-admin-confirm="<?php echo htmlspecialchars($deleteMsg); ?>"
+                                          data-admin-confirm-title="Delete supplier"
+                                          data-admin-confirm-ok="Delete"
+                                          data-admin-confirm-tone="danger"
+                                          data-admin-confirm-icon="fa-trash">
+                                        <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="id" value="<?php echo (int)$s['id']; ?>">
+                                        <button type="submit" class="sup-link sup-icon-btn sup-icon-btn--danger" title="Delete supplier" aria-label="Delete <?php echo htmlspecialchars($s['name']); ?>">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                <?php else: ?>
+                                    <span class="sup-link sup-icon-btn sup-icon-btn--locked" tabindex="0"
+                                          title="Can't delete: on <?php echo $usedPos; ?> purchase order<?php echo $usedPos === 1 ? '' : 's'; ?>. Deactivate it instead so those orders keep their supplier.">
+                                        <i class="fas fa-lock"></i>
+                                    </span>
+                                <?php endif; ?>
                             </div>
                         </td>
                     </tr>
                 <?php endforeach; endif; ?>
             </tbody>
         </table>
+        </div>
     </div>
 
     <!-- Add/Edit modal -->

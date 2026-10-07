@@ -72,6 +72,23 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $expected   = trim($_POST['expected_date'] ?? '');
                 $notes      = trim($_POST['notes'] ?? '');
 
+                // The supplier must exist and be active: a stale form or the Reorder
+                // page could otherwise raise a PO against a deactivated supplier.
+                if ($supplierId > 0) {
+                    $supChk = $pdo->prepare("SELECT name, is_active FROM stock_suppliers WHERE id = ?");
+                    $supChk->execute([$supplierId]);
+                    $supRow = $supChk->fetch(PDO::FETCH_ASSOC);
+                    if (!$supRow) {
+                        throw new RuntimeException('That supplier no longer exists. Pick another supplier.');
+                    }
+                    if ((int)$supRow['is_active'] !== 1) {
+                        throw new RuntimeException('"' . $supRow['name'] . '" is deactivated. Reactivate it on the Suppliers page before ordering from it.');
+                    }
+                }
+                if ($expected !== '' && $expected < $orderDate) {
+                    throw new RuntimeException('Expected delivery date cannot be before the order date.');
+                }
+
                 $pdo->beginTransaction();
                 $ref = rh_next_po_reference($pdo);
                 $pdo->prepare("

@@ -52,7 +52,8 @@ if (!$error) {
         $ingredients = $pdo->query("
             SELECT i.id, i.name, i.unit, i.category, i.current_quantity, i.min_quantity,
                    i.reorder_point, i.par_level, i.lead_time_days, i.cost_per_unit,
-                   i.preferred_supplier_id, s.name AS supplier_name, s.lead_time_days AS supplier_lead
+                   i.preferred_supplier_id, s.id AS supplier_exists, s.name AS supplier_name,
+                   s.lead_time_days AS supplier_lead, s.is_active AS supplier_active
             FROM stock_ingredients i
             LEFT JOIN stock_suppliers s ON s.id = i.preferred_supplier_id
             WHERE i.is_archived = 0
@@ -72,13 +73,15 @@ if (!$error) {
             if ($suggest <= 0.0001) continue;                 // incoming PO already covers it
 
             $lineCost = round($suggest * (float)$i['cost_per_unit'], 2);
-            $sid = (int)$i['preferred_supplier_id'];
+            // A preferred supplier that no longer exists counts as unassigned.
+            $sid = !empty($i['supplier_exists']) ? (int)$i['preferred_supplier_id'] : 0;
             $key = $sid > 0 ? $sid : 0;
             if (!isset($groups[$key])) {
                 $groups[$key] = [
                     'supplier_id' => $sid,
                     'supplier'    => $sid > 0 ? (string)$i['supplier_name'] : 'Unassigned',
                     'lead'        => $sid > 0 ? (int)$i['supplier_lead'] : null,
+                    'inactive'    => $sid > 0 && (int)$i['supplier_active'] !== 1,
                     'items'       => [],
                     'total'       => 0.0,
                 ];
@@ -165,7 +168,7 @@ $csrf_token = generateCsrfToken();
             <div class="ro-group">
                 <header>
                     <div>
-                        <h3><?php echo htmlspecialchars($g['supplier']); ?></h3>
+                        <h3><?php echo htmlspecialchars($g['supplier']); ?><?php if (!empty($g['inactive'])): ?> <span style="font-size:.72rem;font-weight:500;color:#8a3a3a;background:#f0e3e3;padding:2px 8px;border-radius:20px;vertical-align:middle;">Inactive</span><?php endif; ?></h3>
                         <span class="sub">
                             <?php echo count($g['items']); ?> item<?php echo count($g['items']) === 1 ? '' : 's'; ?>
                             · Est. <?php echo htmlspecialchars($currency_symbol) . number_format($g['total'], 2); ?>
@@ -181,7 +184,7 @@ $csrf_token = generateCsrfToken();
                             <input type="hidden" name="order_qty[]" value="<?php echo htmlspecialchars((string)$it['suggest']); ?>">
                             <input type="hidden" name="unit_cost[]" value="<?php echo htmlspecialchars((string)$it['cost']); ?>">
                         <?php endforeach; ?>
-                        <button type="submit" class="btn-ro" <?php echo $g['supplier_id'] === 0 ? 'disabled title="Assign a preferred supplier to these items first"' : ''; ?>>
+                        <button type="submit" class="btn-ro" <?php echo $g['supplier_id'] === 0 ? 'disabled title="Assign a preferred supplier to these items first"' : (!empty($g['inactive']) ? 'disabled title="This supplier is deactivated. Reactivate it on the Suppliers page or pick another preferred supplier for these items."' : ''); ?>>
                             <i class="fas fa-file-invoice"></i> Create draft PO
                         </button>
                     </form>
