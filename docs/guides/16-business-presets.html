@@ -173,17 +173,17 @@
   <table>
     <thead><tr><th>Switch</th><th>Menu items that need it</th></tr></thead>
     <tbody>
-      <tr><td><strong>Bookings &amp; Reservations</strong></td><td>Front Desk: Bookings, Calendar, Room Maintenance. Settings: Rooms, Rate Plans. Advanced: Individual Rooms, Blocked Dates, Packages. Also the booking pages themselves (create, edit, details, check-in, tentative bookings, room dashboard) and the guest booking pages.</td></tr>
+      <tr><td><strong>Bookings &amp; Reservations</strong></td><td>Front Desk: Bookings, Calendar, Individual Rooms, Blocked Dates, Room Maintenance. Settings: Rooms, Rate Plans, Room Packages. Also the booking pages themselves (create, edit, details, check-in, tentative bookings, room dashboard) and the guest booking pages.</td></tr>
       <tr><td><strong>Housekeeping</strong></td><td>Front Desk: Housekeeping.</td></tr>
-      <tr><td><strong>POS &amp; Stations</strong></td><td>Restaurant &amp; Bar: POS Till, Kitchen (KDS), Bar Display (BDS), Coffee Bar (CDS), Room Service, Menu (called Products when the restaurant page is off). Advanced: Deals &amp; Promos, Offline Log. Also needed for Station Reports, Station Hours and POS Accounting.</td></tr>
-      <tr><td><strong>Stock Management</strong></td><td>Restaurant &amp; Bar: Orders &amp; Tabs (called Orders when the restaurant page is off), Tables. The whole <strong>Stock</strong> group (Stock Overview, Ingredients, Recipes, Receive Stock, Buying, Stock Count, Wastage). Advanced: Batch Tracker, Suppliers, Purchase Orders, Stock Reports.</td></tr>
-      <tr><td><strong>Conference Rooms</strong></td><td>Front Desk: Conference.</td></tr>
-      <tr><td><strong>Gym &amp; Fitness</strong></td><td>The whole <strong>Gym</strong> group (Members, Check-In, Inquiries, Schedule). Advanced: Gym Packages, Gym Classes, Gym Reports.</td></tr>
-      <tr><td><strong>Finance &amp; Accounting</strong></td><td>Always on. Money group: Accounting, Payments, Invoices, End of Day, Reports. Advanced: Receipts, Credit Notes, Quotations, Add Payment, POS Accounting.</td></tr>
-      <tr><td><strong>Website &amp; CMS</strong></td><td>The whole <strong>Website</strong> group (Reviews, Contact Inquiries, Gallery, Pages). Front Desk: Event Bookings. Advanced: Events, Media Portal, Footer, Section Headers.</td></tr>
+      <tr><td><strong>POS &amp; Stations</strong></td><td>Restaurant &amp; Bar: POS Till, Kitchen (KDS), Bar Display (BDS), Coffee Bar (CDS), Room Service, Menu (called Products when the restaurant page is off). Deals &amp; Promos, Offline Log. Also needed for Station Reports, Station Hours and Money: POS Accounting.</td></tr>
+      <tr><td><strong>Stock Management</strong></td><td>Restaurant &amp; Bar: Orders &amp; Tabs (called Orders when the restaurant page is off), Tables. The whole <strong>Stock</strong> group (Stock Overview, Ingredients, Recipes, Receive Stock, Buying, Purchase Orders, Suppliers, Stock Count, Wastage, Batch Tracker, Stock Reports).</td></tr>
+      <tr><td><strong>Conference Rooms</strong></td><td>Conference &amp; Events: Conference.</td></tr>
+      <tr><td><strong>Gym &amp; Fitness</strong></td><td>The whole <strong>Gym</strong> group (Members, Check-In, Inquiries, Schedule, Classes, Packages, Gym Reports).</td></tr>
+      <tr><td><strong>Finance &amp; Accounting</strong></td><td>Always on. The whole <strong>Money</strong> group: Accounting, Payments, Add Payment, Receipts, Invoices, Quotations, Credit Notes, POS Accounting, End of Day, Reports.</td></tr>
+      <tr><td><strong>Website &amp; CMS</strong></td><td>Website: Reviews, Contact Inquiries, Gallery, Media Portal, Pages, Section Headers, Footer. Conference &amp; Events: Event Bookings, Events.</td></tr>
       <tr><td><strong>Kitchen / Bar / Coffee / Room Service station switches</strong></td><td>Only the matching screen: Kitchen (KDS), Bar Display (BDS), Coffee Bar (CDS), Room Service. The POS switch must also be on.</td></tr>
-      <tr><td><strong>Restaurant Page</strong></td><td>Restaurant &amp; Bar: Tables. Stock: Recipes. Advanced: Station Reports, Station Hours. Menu and Orders change their names (Menu &harr; Products, Orders &amp; Tabs &harr; Orders) and the guest restaurant page is hidden.</td></tr>
-      <tr><td><strong>Events Page</strong></td><td>Front Desk: Event Bookings. Advanced: Events. The guest events page is hidden. (Both also need Website &amp; CMS to be on.)</td></tr>
+      <tr><td><strong>Restaurant Page</strong></td><td>Restaurant &amp; Bar: Tables, Station Reports, Station Hours. Stock: Recipes. Menu and Orders change their names (Menu &harr; Products, Orders &amp; Tabs &harr; Orders) and the guest restaurant page is hidden.</td></tr>
+      <tr><td><strong>Events Page</strong></td><td>Conference &amp; Events: Event Bookings, Events. The guest events page is hidden. (Both also need Website &amp; CMS to be on.)</td></tr>
     </tbody>
   </table>
   <p>Three menu items depend on a combination, not a single switch:</p>
@@ -192,7 +192,7 @@
     <li><strong>Credit Notes</strong> needs Finance plus either Bookings or Conference.</li>
     <li><strong>POS Accounting</strong> needs both Finance and POS.</li>
   </ul>
-  <p>These pages are never switched off by a module: the Dashboard, Hotel Settings, Email Templates, Staff &amp; Access, Backups, Modules, Visitor Analytics, Automated Emails, WhatsApp Settings, Facebook Settings, API Keys, System Logs, Cache and the Staff Guides links. Hotel Settings is deliberately kept available, because it is the only place email sending is set up.</p>
+  <p>These pages are never switched off by a module: the Dashboard, Hotel Settings, Email Templates, Staff &amp; Access, Backups, Modules, Visitor Analytics, Automated Emails, WhatsApp Settings, Facebook Settings, API Keys, System Logs, Cache and the Help links (Staff Guides, Admin Reference, Email Template Tags). Hotel Settings is deliberately kept available, because it is the only place email sending is set up.</p>
   <p>The Hotel Settings page also adapts: with <strong>Bookings &amp; Reservations</strong> off, the page is called <strong>Business Settings</strong> and the booking-only cards are hidden (see <a href="19-hotel-settings.html">Hotel Settings</a>).</p>
 
   <h2 id="rules">Rules the system enforces</h2>

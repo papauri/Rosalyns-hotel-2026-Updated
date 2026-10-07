@@ -22,7 +22,7 @@
   <div class="facts">
     <dl>
       <dt>Who uses it</dt><dd>An administrator sets it up. Staff with access to rooms, events, conference, gym or menu then post.</dd>
-      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Facebook Settings</strong> (<code>/admin/facebook-settings.php</code>) and <strong>WhatsApp Settings</strong> (<code>/admin/whatsapp-settings.php</code>)</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Facebook Settings</strong> (<code>/admin/facebook-settings.php</code>) and <strong>WhatsApp Settings</strong> (<code>/admin/whatsapp-settings.php</code>)</dd>
       <dt>Permission needed</dt><dd><strong>Facebook Settings</strong> and <strong>WhatsApp Settings</strong>. To post: the permission for the page you post from (Rooms, Events, Conference, Gym or Menu).</dd>
       <dt>Only shown when</dt><dd>The pages that carry the share buttons follow their own modules: Rooms and Conference Rooms need Bookings and Conference switched on; Events needs the Events page; Gym needs Gym. The two settings pages need <strong>Website &amp; CMS</strong> switched on in Settings &rarr; Modules.</dd>
     </dl>
@@ -53,7 +53,7 @@
 
   <h2 id="connect">How to connect the Facebook Page</h2>
   <ol class="steps">
-    <li>Open <strong>Advanced</strong> &rarr; <strong>Facebook Settings</strong>.</li>
+    <li>Open <strong>Website</strong> &rarr; <strong>Facebook Settings</strong>.</li>
     <li>Paste the <strong>Page Access Token</strong>. Follow the on-screen <strong>Token Setup Guide</strong> (Graph API Explorer, permissions pages_manage_posts, pages_read_engagement and pages_show_list). A saved token is never shown again; to keep it, leave the box blank.</li>
     <li>Click <strong>Save Facebook Settings</strong> once so the token is stored.</li>
     <li>Click <strong>Fetch from Token</strong>. If your token covers several Pages, pick the right one. The Page ID and name fill in.</li>
@@ -77,9 +77,9 @@
   <p>The button appears on these pages when posting is enabled, a token is saved, and the matching share tick is on:</p>
   <ul>
     <li>Rooms: <strong>Settings</strong> &rarr; <strong>Rooms</strong>, the Facebook button on each room card (tooltip <em>Preview &amp; post this room to your Facebook Page</em>).</li>
-    <li>Events: <strong>Advanced</strong> &rarr; <strong>Events</strong>, the Facebook button on each event.</li>
-    <li>Conference: <strong>Front Desk</strong> &rarr; <strong>Conference</strong>, the Facebook button on each room card.</li>
-    <li>Gym packages: <strong>Advanced</strong> &rarr; <strong>Gym Packages</strong> (<strong>Share on Facebook</strong>).</li>
+    <li>Events: <strong>Conference &amp; Events</strong> &rarr; <strong>Events</strong>, the Facebook button on each event.</li>
+    <li>Conference: <strong>Conference &amp; Events</strong> &rarr; <strong>Conference</strong>, the Facebook button on each room card.</li>
+    <li>Gym packages: <strong>Gym</strong> &rarr; <strong>Packages</strong> (<strong>Share on Facebook</strong>).</li>
     <li>Menu items: the <strong>Feature</strong> button on each item in the menu page.</li>
   </ul>
   <ol class="steps">
@@ -100,7 +100,7 @@
   <h2 id="whatsapp">How to set up WhatsApp</h2>
   <p>The WhatsApp Settings page sends booking messages through Meta's WhatsApp Business service. The same hotel number is used for the End of Day WhatsApp summary.</p>
   <ol class="steps">
-    <li>Open <strong>Advanced</strong> &rarr; <strong>WhatsApp Settings</strong>.</li>
+    <li>Open <strong>Settings</strong> &rarr; <strong>WhatsApp Settings</strong>.</li>
     <li>In <strong>API Configuration</strong> fill in <strong>Hotel WhatsApp Number</strong> (with country code, like +265888123456), <strong>WhatsApp Phone Number ID</strong>, <strong>WhatsApp Business Account ID</strong> (both numbers from Meta) and <strong>Permanent Access Token</strong>. The token is saved encrypted and is never shown again: the box is empty after saving and its hint reads <em>"Saved &mdash; leave blank to keep the current token"</em>. Leave it blank to keep the saved token; type a new one only to replace it.</li>
     <li>Under <strong>Notification Triggers</strong> tick the events to message about: <strong>New Booking Created</strong>, <strong>Booking Confirmed</strong>, <strong>Booking Cancelled</strong>, <strong>Guest Check-in</strong>, <strong>Guest Check-out</strong>.</li>
     <li>Under <strong>Notification Recipients</strong> choose <strong>Send to Guest</strong> (uses the phone number on the booking) and <strong>Send to Hotel/Admin</strong>. Enter the staff numbers in <strong>Admin WhatsApp Numbers</strong>, separated by commas.</li>

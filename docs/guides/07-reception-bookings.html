@@ -22,7 +22,7 @@
   <div class="facts">
     <dl>
       <dt>Who uses it</dt><dd>Receptionist, Manager, Administrator</dd>
-      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Front Desk</strong> &rarr; <strong>Bookings</strong> (<code>/admin/bookings.php</code>) and <strong>Calendar</strong> (<code>/admin/calendar.php</code>). Blocked Dates and Individual Rooms are under <strong>Advanced</strong>.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Front Desk</strong> &rarr; <strong>Bookings</strong> (<code>/admin/bookings.php</code>) and <strong>Calendar</strong> (<code>/admin/calendar.php</code>). <strong>Individual Rooms</strong> (<code>/admin/individual-rooms.php</code>) and <strong>Blocked Dates</strong> (<code>/admin/blocked-dates.php</code>) are in the same group.</dd>
       <dt>Permission needed</dt><dd><strong>View Bookings</strong> to open the list and a booking. Each action needs its own permission, shown in the table below.</dd>
       <dt>Only shown when</dt><dd>The Bookings module is switched on in Settings &rarr; Modules.</dd>
     </dl>
@@ -168,7 +168,7 @@
   <ul>
     <li><strong>At booking time:</strong> use <strong>Payment Received Now</strong> and <strong>Amount Collected</strong> on the Payment step.</li>
     <li><strong>Pay everything in one click (cash):</strong> on the booking page click <strong>Mark as Paid</strong> in the <strong>Payment breakdown</strong> box. You are asked <em>"Mark this booking payment as paid and send the payment invoice email?"</em> It records the outstanding balance as a completed cash payment. The button is not shown once the booking is Paid.</li>
-    <li><strong>Part payments or other methods:</strong> use <strong>Money</strong> &rarr; <strong>Payments</strong> &rarr; <strong>Record Payment</strong> (or <strong>Advanced</strong> &rarr; <strong>Add Payment</strong>), or <strong>More</strong> &rarr; <strong>Consolidation</strong> on the list (needs Add Payments). The one-click <strong>Record payment as paid</strong> button on the list is hidden once any payment exists, so use these for a booking that already has a deposit.</li>
+    <li><strong>Part payments or other methods:</strong> use <strong>Money</strong> &rarr; <strong>Payments</strong> &rarr; <strong>Record Payment</strong> (or <strong>Money</strong> &rarr; <strong>Add Payment</strong>), or <strong>More</strong> &rarr; <strong>Consolidation</strong> on the list (needs Add Payments). The one-click <strong>Record payment as paid</strong> button on the list is hidden once any payment exists, so use these for a booking that already has a deposit.</li>
     <li>If the guest pays more than the bill, the extra is recorded as an automatic refund line (&quot;Overpayment&quot;) and the booking shows Paid with zero balance. The Payment breakdown also shows <em>"Guest has overpaid by ..."</em> with an <strong>Issue a credit note</strong> link when applicable.</li>
   </ul>
   <p>The <strong>Payment breakdown</strong> shows Room base, any rate plan discount, packages, Extras, Subtotal, Tourism Levy, VAT, Total, Paid and Balance. When the guest has paid too much the last line reads <strong>Credit owed to guest</strong>.</p>
@@ -220,7 +220,7 @@
     <li>For a quotation click <strong>Send Quotation</strong> at the top of the page. Choose <strong>Quotation valid for</strong> (1, 2, 3, 5, 7, 14, 21 or 30 days), add an optional <strong>Note to guest</strong> and send. The page then shows <em>Quotation last sent</em> with the date.</li>
   </ol>
   <p>From the list use <strong>More</strong> &rarr; <strong>Send invoice</strong>, <strong>Send quotation</strong> or <strong>Resend email</strong>. In the Resend email window choose the <strong>Email Type</strong> (Booking Received, Booking Confirmed, Tentative Booking Confirmed, Tentative Converted to Confirmed, Booking Cancelled, Invoice, and a late Check-in Reminder when it applies) and optional <strong>CC Emails</strong>.</p>
-  <p>All quotations are listed under <strong>Advanced</strong> &rarr; <strong>Quotations</strong> (<code>/admin/quotations.php</code>, permission <strong>Create Bookings</strong>). Filter by type (Room, Conference, Event, Gym) and status (Sent, Accepted, Expired, Declined). A row can be re-sent, marked accepted or marked declined. An accepted room quotation confirms the booking: <em>"Quotation marked as accepted and booking confirmed."</em> An expired quotation cannot be accepted.</p>
+  <p>All quotations are listed under <strong>Money</strong> &rarr; <strong>Quotations</strong> (<code>/admin/quotations.php</code>, permission <strong>Create Bookings</strong>). Filter by type (Room, Conference, Event, Gym) and status (Sent, Accepted, Expired, Declined). A row can be re-sent, marked accepted or marked declined. An accepted room quotation confirms the booking: <em>"Quotation marked as accepted and booking confirmed."</em> An expired quotation cannot be accepted.</p>
   <div class="note"><p>Invoices and quotations cannot be sent for a tentative booking: <em>"Invoices cannot be generated or sent for tentative (unconfirmed) bookings. Convert the booking to confirmed first."</em> Quotations are the tool for tentative holds.</p></div>
 
   <h2 id="notes">How to add a note and read the timeline</h2>
@@ -273,7 +273,7 @@
   <div class="note"><p>On this page only users with the Administrator or Manager role can confirm or cancel a hold. Others see <em>"Your role does not have permission to manage tentative bookings."</em></p></div>
 
   <h2 id="blocked">How to block dates</h2>
-  <p>Block dates when a room type or one physical room must not be sold, for example for repairs or an event. Go to <strong>Advanced</strong> &rarr; <strong>Blocked Dates</strong> (<code>/admin/blocked-dates.php</code>, needs <strong>Blocked Dates</strong>).</p>
+  <p>Block dates when a room type or one physical room must not be sold, for example for repairs or an event. Go to <strong>Front Desk</strong> &rarr; <strong>Blocked Dates</strong> (<code>/admin/blocked-dates.php</code>, needs <strong>Blocked Dates</strong>).</p>
   <ol class="steps">
     <li>Click <strong>Block Single Date</strong> or <strong>Block Date Range</strong>.</li>
     <li>Choose the <strong>Block Level</strong>: <strong>Room Type Level (All rooms of type)</strong> or <strong>Individual Room Level (Specific room)</strong>, then pick the <strong>Room Type</strong> or <strong>Individual Room</strong>.</li>
@@ -285,7 +285,7 @@
   <div class="warn"><p>A block does not cancel or move existing bookings. If bookings already sleep on the blocked nights you will see <em>"Note: N existing booking(s) already sleep on these nights (...). Blocks do not cancel or move bookings; reassign or contact those guests."</em> Only today or later dates can be blocked.</p></div>
 
   <h2 id="rooms">Individual rooms</h2>
-  <p>Room types (for example "Executive") are what guests book. Individual rooms are the physical rooms with numbers. Go to <strong>Advanced</strong> &rarr; <strong>Individual Rooms</strong> (<code>/admin/individual-rooms.php</code>, needs <strong>Individual Rooms</strong>).</p>
+  <p>Room types (for example "Executive") are what guests book. Individual rooms are the physical rooms with numbers. Go to <strong>Front Desk</strong> &rarr; <strong>Individual Rooms</strong> (<code>/admin/individual-rooms.php</code>, needs <strong>Individual Rooms</strong>).</p>
   <ul>
     <li>Filter by room type, status (Available, Occupied, Cleaning, Maintenance, Out of Order) and floor.</li>
     <li>Each row has <strong>Details</strong>, <strong>Edit</strong>, <strong>Assign</strong> and <strong>Status</strong>. Tick several rooms and use <strong>Change status to...</strong> to change them together.</li>

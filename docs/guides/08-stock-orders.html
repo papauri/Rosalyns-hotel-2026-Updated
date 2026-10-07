@@ -22,7 +22,7 @@
   <div class="facts">
     <dl>
       <dt>Who uses it</dt><dd>Store keepers, chefs, managers, accountants.</dd>
-      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Stock</strong>: <strong>Stock Overview</strong>, <strong>Ingredients</strong>, <strong>Recipes</strong>, <strong>Receive Stock</strong>, <strong>Buying</strong>, <strong>Stock Count</strong>, <strong>Wastage</strong>. Admin menu &rarr; <strong>Advanced</strong>: <strong>Batch Tracker</strong>, <strong>Suppliers</strong>, <strong>Purchase Orders</strong>, <strong>Stock Reports</strong>. Admin menu &rarr; <strong>Restaurant &amp; Bar</strong>: <strong>Orders &amp; Tabs</strong>.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Stock</strong>: <strong>Stock Overview</strong>, <strong>Ingredients</strong>, <strong>Recipes</strong>, <strong>Receive Stock</strong>, <strong>Buying</strong>, <strong>Purchase Orders</strong>, <strong>Suppliers</strong>, <strong>Stock Count</strong>, <strong>Wastage</strong>, <strong>Batch Tracker</strong>, <strong>Stock Reports</strong>. Admin menu &rarr; <strong>Restaurant &amp; Bar</strong>: <strong>Orders &amp; Tabs</strong>.</dd>
       <dt>Permission needed</dt><dd>See the table "Who can do what".</dd>
       <dt>Only shown when</dt><dd>The <strong>Stock &amp; Inventory</strong> module is switched on in Settings &rarr; Modules. Recipes and Tables also need the <strong>Restaurant Page</strong> module.</dd>
     </dl>
@@ -150,7 +150,7 @@
 
   <h2 id="suppliers">How to add a supplier</h2>
   <ol class="steps">
-    <li>Open Admin menu &rarr; Advanced &rarr; <strong>Suppliers</strong> and click <strong>Add Supplier</strong>.</li>
+    <li>Open Admin menu &rarr; Stock &rarr; <strong>Suppliers</strong> and click <strong>Add Supplier</strong>.</li>
     <li>Fill in <strong>Supplier name</strong> (required, must be unique), <strong>Contact person</strong>, <strong>Phone</strong>, <strong>Email</strong>, <strong>Lead time (days)</strong>, <strong>Payment terms</strong>, <strong>Account ref</strong>, <strong>Address</strong>, <strong>Notes</strong>, and tick <strong>Active</strong>.</li>
     <li>Click <strong>Save Supplier</strong>. You will see <em>"Supplier added."</em> or <em>"Supplier updated."</em></li>
   </ol>
@@ -166,7 +166,7 @@
   <p>If nothing is low the page says <em>"Nothing to reorder &mdash; every tracked item is above its reorder point."</em></p>
 
   <h2 id="po">How to raise and receive a purchase order</h2>
-  <p>Open Admin menu &rarr; Advanced &rarr; <strong>Purchase Orders</strong>. Orders move from draft to sent, then partly or fully received, then closed (or cancelled).</p>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Purchase Orders</strong>. Orders move from draft to sent, then partly or fully received, then closed (or cancelled).</p>
   <ol class="steps">
     <li>Click <strong>New PO</strong> (or use <strong>Create draft PO</strong> from Buying). Choose the <strong>Supplier</strong>, <strong>Order date</strong>, <strong>Expected date</strong> and <strong>Notes</strong>, then <strong>Create draft</strong>. <em>"Draft purchase order PO-... created."</em></li>
     <li>While it is a draft, use <strong>Add line</strong>: choose an <strong>Ingredient</strong> (or <strong>&mdash; Custom / non-stock &mdash;</strong>), a <strong>Description</strong>, <strong>Unit</strong>, <strong>Qty</strong> and <strong>Unit cost</strong>, then <strong>Add</strong>. <em>"Line added."</em> The bin icon removes a line.</li>
@@ -199,7 +199,7 @@
   <p>The stock comes off at once at the real cost of the batches used. <strong>Recent entries</strong> lists date, ingredient, quantity, cost, reason and who recorded it. The cards at the top (<strong>This month wastage</strong>, <strong>Last month</strong>, <strong>Days since last entry</strong>) open a detail window. A banner reminds you if no wastage has been logged for some days.</p>
 
   <h2 id="batches">How to deal with expiring and recalled batches</h2>
-  <p>Open Admin menu &rarr; Advanced &rarr; <strong>Batch Tracker</strong>. Each time the page opens, active batches past their expiry date are removed from stock automatically: <em>"3 batch(es) automatically marked as expired."</em></p>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Batch Tracker</strong>. Each time the page opens, active batches past their expiry date are removed from stock automatically: <em>"3 batch(es) automatically marked as expired."</em></p>
   <ol class="steps">
     <li>Use the cards <strong>Expiring &le; 3 days</strong> (with <strong>Value at risk</strong>), <strong>Expiring 4&ndash;7 days</strong>, <strong>Expiring 8&ndash;30 days</strong> and <strong>Total active batches</strong>, or the filters (ingredient, status <strong>Active</strong>, <strong>Depleted</strong>, <strong>Expired</strong>, <strong>Wasted</strong>, <strong>Recalled</strong>, <strong>All</strong>, and expiry range).</li>
     <li>For spoiled or damaged stock click <strong>Mark Wasted</strong>, give a <strong>Reason</strong>, and click <strong>Confirm Wastage</strong>. <em>"Batch marked as wasted."</em> It is logged as wastage.</li>
@@ -208,7 +208,7 @@
   </ol>
 
   <h2 id="reports">How to read Stock Reports</h2>
-  <p>Open Admin menu &rarr; Advanced &rarr; <strong>Stock Reports</strong>. Tabs: <strong>Inventory</strong>, <strong>Stock-In</strong>, <strong>Usage</strong>, <strong>Wastage</strong>, <strong>Yield</strong>, <strong>Adjustments</strong>, <strong>Expiry</strong>.</p>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Reports</strong>. Tabs: <strong>Inventory</strong>, <strong>Stock-In</strong>, <strong>Usage</strong>, <strong>Wastage</strong>, <strong>Yield</strong>, <strong>Adjustments</strong>, <strong>Expiry</strong>.</p>
   <ul>
     <li>Inventory and Expiry are a snapshot of now. The other tabs cover a date range (the last 30 days to start with): set <strong>From</strong> and <strong>To</strong> and click <strong>Apply</strong>.</li>
     <li>Every tab has a <strong>CSV</strong> download and a "how to read this report" hint with an example.</li>

@@ -311,7 +311,7 @@ $totalShown = 0;
   </ol>
   <p><strong>Load Default</strong> puts the built-in wording for that one tab into the boxes (you are asked to confirm). Nothing changes until you click Save All Templates. <strong>Reset All to Defaults</strong> overwrites every template with the built-in wording after you confirm, and shows <em>"All booking email and PDF templates were reset to the default design (N templates)."</em></p>
   <div class="warn"><p>Preview fills in every tag with sample details, but a real message fills in only the tags listed for that template below. A tag that is not on the list for that template stays on the email as plain <code>{{text}}</code>. Always check the list before you use a tag.</p></div>
-  <div class="note"><p>The receipt WhatsApp message is edited on <strong>Advanced</strong> &rarr; <strong>Receipts</strong>, not here.</p></div>
+  <div class="note"><p>The receipt WhatsApp message is edited on <strong>Money</strong> &rarr; <strong>Receipts</strong>, not here.</p></div>
 
   <h2 id="tags">Tag reference</h2>
   <form method="get" action="">

@@ -22,11 +22,11 @@
   <div class="facts">
     <dl>
       <dt>Who uses it</dt><dd>Gym front-desk staff, managers</dd>
-      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Gym</strong> &rarr; <strong>Members</strong>, <strong>Check-In</strong>, <strong>Inquiries</strong>, <strong>Schedule</strong>. Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Gym Packages</strong>, <strong>Gym Classes</strong>, <strong>Gym Reports</strong>. (The <strong>Advanced</strong> group starts folded &mdash; click its name to open it.)</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Gym</strong> &rarr; <strong>Members</strong>, <strong>Check-In</strong>, <strong>Inquiries</strong>, <strong>Schedule</strong>, <strong>Classes</strong>, <strong>Packages</strong>, <strong>Gym Reports</strong>.</dd>
       <dt>Permission needed</dt><dd>
-        <strong>Gym Inquiries</strong> &mdash; Members, Inquiries, Schedule and Gym Classes pages.<br>
+        <strong>Gym Inquiries</strong> &mdash; Members, Inquiries, Schedule and Classes pages.<br>
         <strong>Gym Check-In Scanner</strong> &mdash; Check-In page.<br>
-        <strong>Manage Gym Packages</strong> &mdash; Gym Packages page, and the edit controls on Schedule and Gym Classes.<br>
+        <strong>Manage Gym Packages</strong> &mdash; Packages page, and the edit controls on Schedule and Classes.<br>
         <strong>Gym Reports</strong> &mdash; Gym Reports page.<br>
         <strong>Gym Invoicing &amp; Pricing</strong> &mdash; money and manager actions (see the rules below).<br>
         <strong>Gym Member History</strong> &mdash; the change history of a member.
@@ -68,9 +68,9 @@
       <tr><td><strong>Gym &rarr; Check-In</strong> (<code>/admin/gym-checkin.php</code>)</td><td>Scan or type a member number to check them in, and again to check them out.</td></tr>
       <tr><td><strong>Gym &rarr; Inquiries</strong> (<code>/admin/gym-inquiries.php</code>)</td><td>Booking requests sent from the public gym page. Follow up, quote, invoice, confirm, cancel.</td></tr>
       <tr><td><strong>Gym &rarr; Schedule</strong> (<code>/admin/gym-schedule.php</code>)</td><td>Day view of hourly slots and who has reserved them. Also opening hours and slot settings.</td></tr>
-      <tr><td><strong>Advanced &rarr; Gym Packages</strong> (<code>/admin/gym-management.php</code>)</td><td>The membership packages guests and staff choose from. The older address <code>/admin/gym-packages.php</code> sends you to this same page.</td></tr>
-      <tr><td><strong>Advanced &rarr; Gym Classes</strong> (<code>/admin/gym-classes.php</code>)</td><td>Classes shown on the public gym page, with a roster for each.</td></tr>
-      <tr><td><strong>Advanced &rarr; Gym Reports</strong> (<code>/admin/gym-reports.php</code>)</td><td>Member numbers, attendance, revenue and unpaid balances.</td></tr>
+      <tr><td><strong>Gym &rarr; Packages</strong> (<code>/admin/gym-management.php</code>)</td><td>The membership packages guests and staff choose from. The older address <code>/admin/gym-packages.php</code> sends you to this same page.</td></tr>
+      <tr><td><strong>Gym &rarr; Classes</strong> (<code>/admin/gym-classes.php</code>)</td><td>Classes shown on the public gym page, with a roster for each.</td></tr>
+      <tr><td><strong>Gym &rarr; Gym Reports</strong> (<code>/admin/gym-reports.php</code>)</td><td>Member numbers, attendance, revenue and unpaid balances.</td></tr>
     </tbody>
   </table>
   <div class="note"><p>Each member has a number like <strong>GM-A1B2C3</strong>. The member's barcode on the emailed membership card is this number. An inquiry (a request) is not a member until you enrol it.</p></div>
@@ -220,7 +220,7 @@
   <div class="warn"><p>Closing time must be after opening time, otherwise you get <em>"Closing time must be after opening time for Tuesday."</em> and nothing is saved.</p></div>
 
   <h2 id="classes">How to manage gym classes</h2>
-  <p>Open <strong>Advanced &rarr; Gym Classes</strong>. Each class appears on its own card (hidden classes are shown faded with a <strong>Hidden</strong> badge). The same classes show on the public gym page.</p>
+  <p>Open <strong>Gym &rarr; Classes</strong>. Each class appears on its own card (hidden classes are shown faded with a <strong>Hidden</strong> badge). The same classes show on the public gym page.</p>
   <ol class="steps">
     <li>Click <strong>Add Class</strong> (needs <strong>Manage Gym Packages</strong>).</li>
     <li>Fill in <strong>Class title</strong> (required, up to 150 characters), <strong>Description</strong> (optional, up to 500), <strong>Days</strong> (required, for example <em>Tuesday &amp; Thursday</em>) and <strong>Time</strong> (required, for example <em>7:00 AM</em>).</li>
@@ -241,7 +241,7 @@
   <p>Enrolling, removing, editing, deleting and reminding need <strong>Manage Gym Packages</strong>. Otherwise you get <em>"You do not have permission to manage classes."</em> Only members with an active, unexpired membership can be enrolled.</p>
 
   <h2 id="packages">How to manage gym packages</h2>
-  <p>Open <strong>Advanced &rarr; Gym Packages</strong> (needs <strong>Manage Gym Packages</strong>). Packages appear as cards with price, length, what is included and an <strong>Active</strong> or <strong>Inactive</strong> label. The page has <strong>View Inquiries</strong> and <strong>Add Package</strong> buttons.</p>
+  <p>Open <strong>Gym &rarr; Packages</strong> (needs <strong>Manage Gym Packages</strong>). Packages appear as cards with price, length, what is included and an <strong>Active</strong> or <strong>Inactive</strong> label. The page has <strong>View Inquiries</strong> and <strong>Add Package</strong> buttons.</p>
   <ol class="steps">
     <li>Click <strong>Add Package</strong>. The window is titled <strong>Add Gym Package</strong>.</li>
     <li>Fill in <strong>Package Name</strong> (required, up to 150 characters, must be unique) and <strong>Price</strong> (required, 0 or more). <strong>Currency Code</strong> is <strong>MWK</strong> by default.</li>
@@ -258,7 +258,7 @@
 
   <h2 id="reports">How to read Gym Reports</h2>
   <ol class="steps">
-    <li>Open <strong>Advanced &rarr; Gym Reports</strong> (needs <strong>Gym Reports</strong>).</li>
+    <li>Open <strong>Gym &rarr; Gym Reports</strong> (needs <strong>Gym Reports</strong>).</li>
     <li>Choose the period at the top right: <strong>Today</strong>, <strong>7 days</strong>, <strong>30 days</strong> or <strong>90 days</strong>. The dates are printed under the title.</li>
     <li>Read the first row of boxes: <strong>Members</strong> (total, with active, suspended and expired), <strong>New Members</strong> (joined in the period), <strong>Expiring &le;30 Days</strong> (link <strong>Renewal follow-ups</strong> opens the Members page filtered to those) and <strong>Outstanding</strong> (money owed, number of unpaid accounts, and members lost in the period).</li>
     <li>Read the second row: <strong>Check-Ins</strong> and unique members, <strong>Avg Visit</strong> and busiest day, <strong>In Gym Now</strong> (link to the scanner), and <strong>Gym Revenue</strong> (payments in the period, link <strong>ledger</strong> to Payments).</li>

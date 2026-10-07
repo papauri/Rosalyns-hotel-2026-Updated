@@ -366,7 +366,7 @@
             scheduleSidebarStateSave({ collapsed_groups: Array.from(collapsedGroups) });
         }
 
-        // Groups marked data-nav-default-collapsed (e.g. Advanced) start folded;
+        // Groups marked data-nav-default-collapsed (e.g. Help) start folded;
         // for those the stored set records '<key>-open' once the user opens them.
         function isGroupCollapsed(group) {
             const key = group.dataset.navGroup || '';

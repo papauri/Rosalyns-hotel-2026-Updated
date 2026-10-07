@@ -287,7 +287,7 @@
   <h2 id="zreport">How to read the shift close report</h2>
   <p>Management can open the full printable report. You need the <strong>POS Accounting</strong> permission.</p>
   <ol class="steps">
-    <li>Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>POS Accounting</strong>.</li>
+    <li>Admin menu &rarr; <strong>Money</strong> &rarr; <strong>POS Accounting</strong>.</li>
     <li>Pick the <strong>Business date</strong>, click <strong>Apply</strong>, then click <strong>Z-report</strong>. This opens <code>shift-close-report.php</code> for that date.</li>
     <li>The day view is titled <strong>Shift Closes</strong> with the date. It shows <strong>Total Revenue</strong>, <strong>All Orders</strong>, <strong>Total Voids</strong> and <strong>Net Variance</strong>, and a table with <strong>Cashier</strong>, <strong>Closed</strong>, <strong>Revenue</strong>, <strong>Orders</strong>, <strong>Voids</strong>, <strong>Cash Var</strong>, <strong>Mobile Var</strong>, <strong>Card Var</strong>, <strong>Variance</strong>, <strong>Override</strong> and <strong>Report</strong>. If any cashier is short a banner reads <em>"TOTAL SHORTFALL ACROSS ALL CASHIERS ... investigate before EOD sign-off."</em> A <strong>Shift Close History</strong> table lists earlier closes.</li>
     <li>Click <strong>Report</strong> on a row for one cashier's report. It shows <strong>Total Revenue</strong>, <strong>Paid Orders</strong>, <strong>Voids</strong>, <strong>Settled Tabs</strong>, then <strong>Tender Reconciliation</strong> with a <strong>Cash:</strong> line (<em>Float + Cash sales &minus; Cash refunds = Expected cash</em>; it says so if no float was recorded, and labels closes made before the float was included as not counting it) (<strong>Tender</strong>, <strong>System (Expected)</strong>, <strong>Counted (Declared)</strong>, <strong>Variance</strong>, <strong>Status</strong>, where Status is <strong>BALANCED</strong>, <strong>SHORTFALL</strong> or <strong>OVERAGE</strong>), <strong>Shift Notes</strong>, <strong>Top Items</strong>, <strong>Paid Orders</strong>, <strong>Refund / Void Payouts</strong> and <strong>Voided Orders</strong>.</li>
@@ -303,7 +303,7 @@
     <li>Each saved order carries a unique number, so if it is sent twice the till answers <em>"Order ... was already recorded &mdash; duplicate submission ignored, nothing charged twice."</em></li>
     <li>Everything else (<strong>Fire</strong>, adding to a tab, settling a tab, refunds, close shift, notes) needs the connection. The till says <em>"Network error &mdash; could not reach the server. Please retry."</em> Do not assume it went through; check <strong>Tabs</strong> once you are back online.</li>
   </ul>
-  <p>Managers can see what was queued and when it synced: Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Offline Log</strong> (page title <strong>Offline Activity Log</strong>), which needs the <strong>Offline Activity Log</strong> permission.</p>
+  <p>Managers can see what was queued and when it synced: Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Offline Log</strong> (page title <strong>Offline Activity Log</strong>), which needs the <strong>Offline Activity Log</strong> permission.</p>
 
   <h2 id="menu">How to add or change a menu item</h2>
   <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong> (<code>/admin/menu-management.php</code>). Permission: <strong>Menu</strong>. Only shown when the <strong>POS &amp; Stations</strong> module is on.</p>
