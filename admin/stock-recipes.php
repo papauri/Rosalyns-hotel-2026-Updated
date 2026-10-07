@@ -302,7 +302,7 @@ $csrf_token = generateCsrfToken();
                         style="width:70px; padding:6px; border:1px solid #d6d8db; border-radius:6px; margin:0 4px;">
                     portion(s)
                 </label>
-                <small style="color:#6c757d;">Quantities below are <em>per portion sold</em>. Stock auto-deducts on POS or room-service charge.</small>
+                <small style="color:#6c757d;">Quantities below are <em>per portion sold</em>. Stock auto-deducts when the kitchen marks the dish Ready or Served on the KDS (or it is bumped), when drinks are handed over at payment, and immediately when an item is charged to a room.</small>
             </div>
 
             <div class="ing-header">

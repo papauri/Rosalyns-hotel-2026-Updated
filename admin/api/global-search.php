@@ -129,7 +129,7 @@ if ($can('conference-management.php')) {
         $items[] = [
             'title' => $r['inquiry_reference'] . ' · ' . ($r['company_name'] ?: $r['contact_person']),
             'sub' => trim($fmtDate($r['event_date']) . ' · ' . ucfirst((string)$r['status']), ' ·'),
-            'url' => $hl('conference-management.php', (string)$r['inquiry_reference']),
+            'url' => 'conference-management.php#enquiry-' . (int)$r['id'],
         ];
     }
     $add('conference', 'Conference enquiries', 'fa-briefcase', $items);

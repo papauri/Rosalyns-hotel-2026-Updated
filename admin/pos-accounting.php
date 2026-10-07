@@ -263,7 +263,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $noteInput = trim((string)($_POST['notes'][$targetUserId] ?? ''));
                 $bulkNote = trim((string)($_POST['bulk_note'] ?? ''));
                 $note = trim('Accountant manual close by ' . ($user['username'] ?? 'admin') . ($bulkNote !== '' ? ' | ' . $bulkNote : '') . ($noteInput !== '' ? ' | ' . $noteInput : ''));
-                $varianceCash = round($declaredCash - $totals['cash'], 2);
+                // Expected cash = opening float + cash sales - cash refunds (float 0 if none recorded).
+                $varianceCash = round($declaredCash - $totals['drawer_cash'], 2);
                 $varianceMobile = round($declaredMobile - $totals['mobile'], 2);
                 $varianceCard = round($declaredCard - $totals['card'], 2);
                 $totalRevenue = $totals['cash'] + $totals['mobile'] + $totals['card'];
@@ -274,7 +275,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'user_id' => $targetUserId,
                         'user_name' => $targetName,
                         'shift_date' => $businessDate,
-                        'expected_cash' => $totals['cash'],
+                        'expected_cash' => $totals['drawer_cash'],
                         'declared_cash' => $declaredCash,
                         'variance_cash' => $varianceCash,
                         'expected_mobile' => $totals['mobile'],
@@ -390,7 +391,9 @@ try {
                 'username' => $userNames[$puid]['username'],
                 'order_count' => $pt['orders_count'],
                 'paid_total' => $pt['sales_total'],
-                'expected_cash' => $pt['cash'],
+                'expected_cash' => $pt['drawer_cash'],
+                'opening_float' => $pt['float'],
+                'float_recorded' => $pt['float_recorded'],
                 'expected_mobile' => $pt['mobile'],
                 'expected_card' => $pt['card'],
                 'voided_total' => $pt['voids_amount'],
@@ -653,7 +656,7 @@ try {
                                                 </div>
                                                 <div class="pos-acct-detail-cell">
                                                     <label class="pos-acct-detail-label">Sales taken</label>
-                                                    <div class="pos-acct-detail-value"><?php echo rh_pos_accounting_money((float)$posUser['paid_total'], $currency_symbol); ?><div class="stat-sub">Expected drawer figures are hidden until you count</div>
+                                                    <div class="pos-acct-detail-value"><?php echo rh_pos_accounting_money((float)$posUser['paid_total'], $currency_symbol); ?><div class="stat-sub">Opening float: <?php echo !empty($posUser['float_recorded']) ? rh_pos_accounting_money((float)$posUser['opening_float'], $currency_symbol) : rh_pos_accounting_money(0, $currency_symbol) . ' (none recorded, counted as 0)'; ?> &middot; count the float in the drawer cash. Expected totals are hidden until you count</div>
                                                     </div>
                                                 </div>
                                                 <div class="pos-acct-detail-cell">

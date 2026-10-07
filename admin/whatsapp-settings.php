@@ -11,7 +11,8 @@ $csrf_token = $csrf_token ?? generateCsrfToken();
 
 // Get current settings
 $whatsapp_enabled = getSetting('whatsapp_enabled', getSetting('whatsapp_notifications_enabled', '0'));
-$whatsapp_api_token = getSetting('whatsapp_api_token', getSetting('whatsapp_meta_access_token', ''));
+// The access token is stored encrypted and never sent back to the browser; only whether one is saved.
+$whatsapp_has_token = (string)getSetting('whatsapp_api_token', getSetting('whatsapp_meta_access_token', '')) !== '';
 $whatsapp_phone_id = getSetting('whatsapp_phone_id', getSetting('whatsapp_meta_phone_number_id', ''));
 $whatsapp_business_id = getSetting('whatsapp_business_id', getSetting('whatsapp_meta_business_account_id', ''));
 $whatsapp_number = getSetting('whatsapp_number', getSetting('whatsapp_hotel_number', ''));
@@ -48,8 +49,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
         $settings = [
             'whatsapp_enabled' => isset($_POST['whatsapp_enabled']) ? '1' : '0',
             'whatsapp_notifications_enabled' => isset($_POST['whatsapp_enabled']) ? '1' : '0',
-            'whatsapp_api_token' => trim($_POST['whatsapp_api_token'] ?? ''),
-            'whatsapp_meta_access_token' => trim($_POST['whatsapp_api_token'] ?? ''),
             'whatsapp_phone_id' => trim($_POST['whatsapp_phone_id'] ?? ''),
             'whatsapp_meta_phone_number_id' => trim($_POST['whatsapp_phone_id'] ?? ''),
             'whatsapp_business_id' => trim($_POST['whatsapp_business_id'] ?? ''),
@@ -94,7 +93,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
                 throw new RuntimeException($idLabel . ' must be numeric (copy it from Meta WhatsApp Manager).');
             }
         }
-        if (mb_strlen($settings['whatsapp_api_token']) > 1000 || preg_match('/\s/', $settings['whatsapp_api_token'])) {
+        // Only replace the token when a new one is typed; blank keeps the saved one.
+        $newToken = trim((string)($_POST['whatsapp_api_token'] ?? ''));
+        if ($newToken !== '' && (mb_strlen($newToken) > 1000 || preg_match('/\s/', $newToken))) {
             throw new RuntimeException('The access token looks invalid (no spaces, 1000 characters maximum).');
         }
         foreach (['whatsapp_confirmed_template' => 'Confirmed template', 'whatsapp_cancelled_template' => 'Cancelled template'] as $tplKey => $tplLabel) {
@@ -105,7 +106,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
                 throw new RuntimeException($tplLabel . ' name may only contain letters, digits and underscores.');
             }
         }
-        if ($settings['whatsapp_enabled'] === '1' && getSetting('whatsapp_provider', 'meta') === 'meta' && ($settings['whatsapp_api_token'] === '' || $settings['whatsapp_phone_id'] === '')) {
+        if ($newToken !== '') {
+            require_once __DIR__ . '/../includes/whatsapp-functions.php';
+            $enc = encryptWhatsAppToken($newToken);
+            $settings['whatsapp_api_token'] = $enc;
+            $settings['whatsapp_meta_access_token'] = $enc;
+        }
+        $hasTokenAfterSave = $newToken !== '' || $whatsapp_has_token;
+        if ($settings['whatsapp_enabled'] === '1' && getSetting('whatsapp_provider', 'meta') === 'meta' && (!$hasTokenAfterSave || $settings['whatsapp_phone_id'] === '')) {
             throw new RuntimeException('Add the access token and phone number ID before enabling WhatsApp.');
         }
 
@@ -124,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
         
         // Refresh settings
         $whatsapp_enabled = $settings['whatsapp_enabled'];
-        $whatsapp_api_token = $settings['whatsapp_api_token'];
+        $whatsapp_has_token = $hasTokenAfterSave;
         $whatsapp_phone_id = $settings['whatsapp_phone_id'];
         $whatsapp_business_id = $settings['whatsapp_business_id'];
         $whatsapp_number = $settings['whatsapp_number'];
@@ -148,7 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
             'has_number' => $whatsapp_number !== '',
             'has_phone_id' => $whatsapp_phone_id !== '',
             'has_business_id' => $whatsapp_business_id !== '',
-            'has_token' => $whatsapp_api_token !== '',
+            'has_token' => $whatsapp_has_token,
         ]);
         
     } catch (Exception $e) {
@@ -310,8 +318,8 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
                            id="whatsapp_api_token" 
                            name="whatsapp_api_token" 
                            class="form-control" 
-                           value="<?php echo htmlspecialchars($whatsapp_api_token); ?>" 
-                           placeholder="EAAxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+                           value="" autocomplete="new-password"
+                           placeholder="<?php echo $whatsapp_has_token ? 'Saved — leave blank to keep the current token' : 'EAAxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; ?>">
                     <p class="help-text">
                         <i class="fas fa-info-circle"></i>
                         From Meta Business Suite > System Users. Create a System User with WhatsApp permissions.

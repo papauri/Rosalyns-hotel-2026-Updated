@@ -779,11 +779,11 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                             <!-- Link to underlying booking -->
                                             <?php if (!empty($invoice['booking_id'])): ?>
                                                 <?php if ($invoice['booking_type'] === 'room'): ?>
-                                                    <a class="btn-action" href="booking-detail.php?id=<?php echo (int)$invoice['booking_id']; ?>" title="View booking">
+                                                    <a class="btn-action" href="booking-details.php?id=<?php echo (int)$invoice['booking_id']; ?>" title="View booking">
                                                         <i class="fas fa-door-open"></i> Booking
                                                     </a>
                                                 <?php elseif ($invoice['booking_type'] === 'conference'): ?>
-                                                    <a class="btn-action" href="conference-detail.php?id=<?php echo (int)$invoice['booking_id']; ?>" title="View conference inquiry">
+                                                    <a class="btn-action" href="conference-management.php#enquiry-<?php echo (int)$invoice['booking_id']; ?>" title="View conference inquiry">
                                                         <i class="fas fa-chalkboard"></i> Booking
                                                     </a>
                                                 <?php endif; ?>

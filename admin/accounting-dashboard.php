@@ -887,7 +887,7 @@ if (!isset($folio_fnb)) {
                 </tbody>
             </table>
             <div class="acct-insight-actions">
-                <a href="payments.php?date=<?php echo urlencode($today); ?>" class="acct-btn acct-btn--primary">Open today's payments</a>
+                <a href="payments.php?start_date=<?php echo urlencode($today); ?>&end_date=<?php echo urlencode($today); ?>" class="acct-btn acct-btn--primary">Open today's payments</a>
                 <?php if ($mod_pos): ?><a href="pos-accounting.php" class="acct-btn acct-btn--ghost">Open POS accounting</a><?php endif; ?>
             </div>
         </template>
@@ -1382,7 +1382,7 @@ if (!isset($folio_fnb)) {
                 'label' => 'Completed sales',
                 'count' => (int)($complianceSummary['completed_sales'] ?? 0),
                 'warn' => false,
-                'action_link' => $periodPaymentsLink . '&payment_status=completed',
+                'action_link' => $periodPaymentsLink . '&status=completed',
                 'action_label' => 'Open payments ledger',
             ],
             [
@@ -1461,7 +1461,7 @@ if (!isset($folio_fnb)) {
                 'tone' => 'amber', 'icon' => 'fa-hourglass-half', 'value' => $ckShort($cat_pending), 'money' => true,
                 'label' => 'Payments still pending', 'hint' => 'Recorded but not yet cleared',
                 'key' => 'receivables', 'title' => 'Receivables Follow-up',
-                'href' => $periodPaymentsLink . '&payment_status=pending', 'link' => 'Review payments',
+                'href' => $periodPaymentsLink . '&status=pending', 'link' => 'Review payments',
             ];
         }
         if ($cat_pending_refunds > 0.01) {
@@ -1670,7 +1670,7 @@ if (!isset($folio_fnb)) {
                 <span class="ck-kpi__icon"><i class="fas fa-money-bill-wave"></i></span>
                 <span class="ck-kpi__label">Cash today</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_cash_today); ?></span>
-                <span class="ck-kpi__sub">Cash + mobile money &middot; <a class="ck-link" href="payments.php?date=<?php echo $ckH($today); ?>">Today's payments <i class="fas fa-arrow-right"></i></a></span>
+                <span class="ck-kpi__sub">Cash + mobile money &middot; <a class="ck-link" href="payments.php?start_date=<?php echo $ckH($today); ?>&amp;end_date=<?php echo $ckH($today); ?>">Today's payments <i class="fas fa-arrow-right"></i></a></span>
             </div>
             <div class="ck-kpi js-acct-insight-trigger" title="VAT Collected - tax held on behalf of MRA. It is not the business's income." <?php echo $ckTrig('vat-collected', 'VAT Compliance Snapshot'); ?> aria-label="Open VAT compliance snapshot">
                 <span class="ck-kpi__icon"><i class="fas fa-percent"></i></span>

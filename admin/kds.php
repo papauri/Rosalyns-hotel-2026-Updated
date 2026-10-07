@@ -403,7 +403,7 @@ $bootstrap['fingerprint'] = md5(
             </div>
         </section>
         <section class="station-panel" aria-labelledby="stationControlTitle">
-            <div class="station-panel__head" id="stationControlTitle"><span><i class="fas fa-gauge-high"></i> Online Flow</span><button type="button" class="station-panel__sound-test" onclick="RHSounds.play('normal')" title="Test notification sound"><i class="fas fa-volume-high"></i><span>Test</span></button></div>
+            <div class="station-panel__head" id="stationControlTitle"><span><i class="fas fa-gauge-high"></i> Online Flow <small style="opacity:.6;font-weight:400;">(saved note)</small></span><button type="button" class="station-panel__sound-test" onclick="RHSounds.play('normal')" title="Test notification sound"><i class="fas fa-volume-high"></i><span>Test</span></button></div>
             <div class="station-control">
                 <div class="station-control__status" id="stationControlStatus">Loading station flow...</div>
                 <div class="station-control__actions">
@@ -1352,11 +1352,11 @@ $bootstrap['fingerprint'] = md5(
             const paused = !!control.paused;
             status.classList.toggle('paused', paused);
             status.innerHTML = paused ?
-                `<strong>Online paused</strong><br>${escHtml(control.reason || 'Chef pause is active.')} · ${parseInt(control.wait_minutes || 20, 10)} min wait saved` :
-                `<strong>Online live</strong><br>Estimated wait ${parseInt(control.wait_minutes || 20, 10)} min`;
+                `<strong>Marked paused</strong><br>${escHtml(control.reason || 'Chef pause saved.')} · ${parseInt(control.wait_minutes || 20, 10)} min wait saved<br><small>Saved note only. It does not stop orders and is not shown at the till.</small>` :
+                `<strong>Marked live</strong><br>Wait time saved: ${parseInt(control.wait_minutes || 20, 10)} min<br><small>Saved note only. It is not shown at the till.</small>`;
             btn.classList.toggle('live', !paused);
             btn.innerHTML = paused ? '<i class="fas fa-play"></i><span>Go Live</span>' : '<i class="fas fa-pause"></i><span>Pause</span>';
-            btn.title = paused ? 'Resume online orders' : 'Pause online orders';
+            btn.title = paused ? 'Mark live again (saved note only, orders are not affected)' : 'Mark paused (saved note only, does not stop orders)';
             if (document.activeElement !== wait) wait.value = parseInt(control.wait_minutes || 20, 10);
         }
 
@@ -2425,7 +2425,7 @@ $bootstrap['fingerprint'] = md5(
                 }
                 state.station_control = j.control || state.station_control;
                 renderStationControl();
-                toast(paused ? 'Online orders paused. FOH sees the wait time.' : 'Station is live. FOH can send tickets.');
+                toast(paused ? 'Pause saved. This is a note on this screen only; it does not stop orders.' : 'Marked live and wait time saved (note only; orders are not affected).');
             } catch (e) {
                 showStationIssue('Network error while updating online flow. Please try again.', {
                     modal: false

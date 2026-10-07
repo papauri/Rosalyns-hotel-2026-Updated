@@ -220,29 +220,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $phone = preg_replace('/[^0-9+]/', '', $_POST['recipient'] ?? '');
                 if ($phone === '') throw new RuntimeException('Phone number required.');
 
-                $whatsappMissing = [];
-                if (!$whatsappEnabled) $whatsappMissing[] = 'restaurant_whatsapp_enabled=0';
-                if ($whatsappNumber === '') $whatsappMissing[] = 'whatsapp_number missing';
-                if ($whatsappApiToken === '') $whatsappMissing[] = 'whatsapp_api_token missing';
-                $whatsappNotReadyMessage = empty($whatsappMissing)
-                    ? null
-                    : 'WhatsApp not ready (' . implode(', ', $whatsappMissing) . '). Logged for future dispatch.';
+                // Receipt text (plain WhatsApp message).
+                $waRef = (string)($orderRow['invoice_number'] ?: $orderRow['reference']);
+                $waName = trim((string)($orderRow['customer_name'] ?? ''));
+                $waBody = 'Hello' . ($waName !== '' ? ' ' . $waName : '') . ', thank you for visiting ' . $siteName . '. '
+                    . 'Your receipt ' . $waRef . ': total ' . $currency . ' ' . number_format((float)($orderRow['total_amount'] ?? 0), 2) . '.';
+                $waFooter = trim((string)getSetting('restaurant_receipt_footer', ''));
+                if ($waFooter !== '') $waBody .= ' ' . $waFooter;
 
-                // Provision-only: log the intent, mark as queued. A future worker will pick it up.
-                $pdo->prepare("INSERT INTO stock_order_deliveries (order_id, channel, recipient, status, sent_by, error_message) VALUES (?, 'whatsapp', ?, ?, ?, ?)")
-                    ->execute([
-                        $orderId,
-                        $phone,
-                        $whatsappReady ? 'queued' : 'preview',
-                        $user['id'],
-                        $whatsappNotReadyMessage,
-                    ]);
+                require_once __DIR__ . '/../includes/whatsapp-functions.php';
+                $waUrl = '';
+                if (function_exists('isWhatsAppEnabled') && isWhatsAppEnabled()) {
+                    // A WhatsApp provider is configured (Settings -> WhatsApp): send it from the hotel's account.
+                    $waResult = sendWhatsAppMessage($phone, $waBody);
+                    $waOk = !empty($waResult['success']);
+                    $waStatus = $waOk ? 'sent' : 'failed';
+                    $waError = $waOk ? null : (string)($waResult['message'] ?? 'WhatsApp send failed');
+                } else {
+                    // No provider: open WhatsApp on this device with the receipt typed in (click-to-chat),
+                    // the same way hotel payment receipts work. Staff press Send in WhatsApp.
+                    $waDigits = ltrim(preg_replace('/[^0-9]/', '', $phone), '0');
+                    $waUrl = 'https://wa.me/' . $waDigits . '?text=' . rawurlencode($waBody);
+                    $waOk = true;
+                    $waStatus = 'preview';
+                    $waError = 'Opened in WhatsApp on the staff device (click-to-chat); sent by staff from WhatsApp.';
+                }
+
+                $pdo->prepare("INSERT INTO stock_order_deliveries (order_id, channel, recipient, status, sent_by, error_message, sent_at) VALUES (?, 'whatsapp', ?, ?, ?, ?, NOW())")
+                    ->execute([$orderId, $phone, $waStatus, $user['id'], $waError]);
                 $pdo->prepare("UPDATE stock_orders SET customer_phone = COALESCE(customer_phone, ?), whatsapp_sent_to = ? WHERE id = ?")
                     ->execute([$phone, $phone, $orderId]);
 
-                $message = $whatsappReady
-                    ? 'Receipt queued for WhatsApp delivery to ' . htmlspecialchars($phone) . '.'
-                    : 'WhatsApp delivery is provisioned but not fully configured yet. The intent has been logged — no billable send was triggered.';
+                if (!$waOk) {
+                    throw new RuntimeException('WhatsApp receipt could not be sent: ' . $waError);
+                }
+                $message = $waUrl !== ''
+                    ? 'Opening WhatsApp with the receipt for ' . htmlspecialchars($phone) . ' — press Send in WhatsApp.'
+                    : 'Receipt sent by WhatsApp to ' . htmlspecialchars($phone) . '.';
+                $waOpenUrl = $waUrl;
             }
         } catch (PDOException $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
@@ -261,7 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
     if (!empty($error)) {
         echo json_encode(['ok' => false, 'error' => $error]);
     } else {
-        echo json_encode(['ok' => true, 'message' => $message ?? 'Done']);
+        echo json_encode(['ok' => true, 'message' => $message ?? 'Done', 'url' => $waOpenUrl ?? '']);
     }
     exit;
 }
@@ -499,25 +514,26 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
                     <?php endif; ?>
                 </div>
 
-                <!-- WhatsApp (provision) -->
+                <!-- WhatsApp -->
                 <div class="panel">
                     <h3><i class="fab fa-whatsapp" style="color:#25D366;"></i> WhatsApp receipt</h3>
-                    <?php if (!$whatsappReady): ?>
-                        <span class="badge-future"><i class="fas fa-info-circle"></i> Provision-only — no live WhatsApp messages will be sent or charged until setup is complete.</span>
-                        <div style="margin-top:8px;font-size:11px;color:#6b7280;line-height:1.5;">
-                            <div><strong>Readiness:</strong> <?php echo $whatsappEnabled ? 'Enabled' : 'Disabled'; ?></div>
-                            <div><i class="fas <?php echo $whatsappNumber !== '' ? 'fa-check-circle' : 'fa-times-circle'; ?>"></i> Number: <?php echo $whatsappNumber !== '' ? 'Configured' : 'Missing'; ?></div>
-                            <div><i class="fas <?php echo $whatsappApiToken !== '' ? 'fa-check-circle' : 'fa-times-circle'; ?>"></i> API token: <?php echo $whatsappApiToken !== '' ? 'Configured' : 'Missing'; ?></div>
-                            <a href="whatsapp-settings.php" style="display:inline-block;margin-top:6px;color:#7E684B;text-decoration:none;"><i class="fas fa-sliders"></i> Open WhatsApp settings</a>
-                        </div>
+                    <?php if (!empty($waOpenUrl)): ?>
+                        <a href="<?php echo htmlspecialchars($waOpenUrl, ENT_QUOTES); ?>" target="_blank" rel="noopener" class="btn-whatsapp" style="display:block;text-align:center;margin-bottom:10px;"><i class="fab fa-whatsapp"></i> Open WhatsApp to send</a>
                     <?php endif; ?>
+                    <p style="font-size:11px;color:#6b7280;line-height:1.5;margin:0 0 8px;">
+                        <?php if (function_exists('isWhatsAppEnabled') && isWhatsAppEnabled()): ?>
+                            Sent automatically from the hotel's WhatsApp account.
+                        <?php else: ?>
+                            Opens WhatsApp on this device with the receipt typed in — press Send in WhatsApp. To send automatically instead, set up a provider in <a href="whatsapp-settings.php" style="color:#7E684B;">WhatsApp settings</a>.
+                        <?php endif; ?>
+                    </p>
                     <form method="POST">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                         <input type="hidden" name="action" value="whatsapp_receipt">
                         <input type="hidden" name="order_id" value="<?php echo (int)$orderId; ?>">
                         <label>Phone number (with country code)</label>
                         <input type="text" name="recipient" required value="<?php echo htmlspecialchars($order['customer_phone'] ?? ''); ?>" placeholder="+265 999 123 456">
-                        <button type="submit" class="btn-whatsapp" style="margin-top:10px;width:100%;"><i class="fab fa-whatsapp"></i> <?php echo $whatsappReady ? 'Send via WhatsApp' : 'Queue for WhatsApp'; ?></button>
+                        <button type="submit" class="btn-whatsapp" style="margin-top:10px;width:100%;"><i class="fab fa-whatsapp"></i> Send via WhatsApp</button>
                     </form>
                 </div>
 

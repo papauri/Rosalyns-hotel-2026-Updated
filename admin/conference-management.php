@@ -243,7 +243,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = 'Conference room deleted successfully!';
             if ($is_ajax) {
                 header('Content-Type: application/json');
-                echo json_encode(['success' => true]);
+                echo json_encode(['success' => true, 'message' => $message]);
                 exit;
             }
         }
@@ -1230,7 +1230,20 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     if (!r.ok) {
                         throw new Error('Request failed');
                     }
-                    window.location.reload();
+                    return r.json();
+                })
+                .then(function(res) {
+                    setConferenceLoader(false, 'Loading...');
+                    if (res && res.success === false) {
+                        showConferenceMessage(true, res.message || 'This action was refused.');
+                        return;
+                    }
+                    if (action === 'delete') {
+                        showConferenceMessage(false, (res && res.message) || 'Conference room deleted successfully!');
+                        refreshConferenceGrid();
+                    } else {
+                        window.location.reload();
+                    }
                 })
                 .catch(function() {
                     setConferenceLoader(false, 'Loading...');

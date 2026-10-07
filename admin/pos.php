@@ -1009,7 +1009,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $windowEnd = $restaurantWindow['end_sql'];
                 $shiftFrom = rh_pos_shift_window_start($pdo, (int)$user['id'], $windowStart, $windowEnd);
                 $E = rh_pos_shift_totals($pdo, (int)$user['id'], $shiftFrom, $windowEnd, $windowStart);
-                $vCash   = round($declCash   - (float)$E['cash'], 2);
+                // Expected cash in the drawer = opening float + cash sales - cash refunds/voids paid out.
+                $expCashDrawer = (float)$E['drawer_cash'];
+                $vCash   = round($declCash   - $expCashDrawer, 2);
                 $vMobile = round($declMobile - (float)$E['mobile'], 2);
                 $vCard   = round($declCard   - (float)$E['card'], 2);
                 // Balance enforcement: cashier must balance to within MWK 1.00 unless someone with
@@ -1033,12 +1035,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $pdo->prepare("INSERT INTO stock_shift_closes (user_id, user_name, shift_date, closed_at, expected_cash, declared_cash, variance_cash, expected_mobile, declared_mobile, variance_mobile, expected_card, declared_card, variance_card, orders_count, voids_count, voids_amount, notes, ip_address) VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                    ->execute([$user['id'], $user['full_name'], $restaurantWindow['business_date'], (float)$E['cash'], $declCash, $vCash, (float)$E['mobile'], $declMobile, $vMobile, (float)$E['card'], $declCard, $vCard, (int)$E['orders_count'], (int)$E['voids_count'], (float)$E['voids_amount'], $shiftNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null]);
+                    ->execute([$user['id'], $user['full_name'], $restaurantWindow['business_date'], $expCashDrawer, $declCash, $vCash, (float)$E['mobile'], $declMobile, $vMobile, (float)$E['card'], $declCard, $vCard, (int)$E['orders_count'], (int)$E['voids_count'], (float)$E['voids_amount'], $shiftNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null]);
                 $closeId = (int)$pdo->lastInsertId();
-                pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'shift_closed', json_encode(['close_id' => $closeId, 'window_start' => $shiftFrom, 'window_end' => $windowEnd, 'refund_cash' => $E['refund_cash'], 'refund_mobile' => $E['refund_mobile'], 'refund_card' => $E['refund_card'], 'expected_cash' => $E['cash'], 'declared_cash' => $declCash, 'variance_cash' => $vCash, 'expected_mobile' => $E['mobile'], 'declared_mobile' => $declMobile, 'variance_mobile' => $vMobile, 'expected_card' => $E['card'], 'declared_card' => $declCard, 'variance_card' => $vCard, 'tips_total' => $E['tips_total'] ?? 0, 'orders' => $E['orders_count'], 'voids' => $E['voids_count'], 'settled_from_tabs_count' => $E['settled_from_tabs_count'], 'settled_from_tabs_amount' => $E['settled_from_tabs_amount'], 'override' => $overrideRequested && $maxVar > $threshold, 'override_reason' => $overrideRequested ? $overrideReason : null]));
+                pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'shift_closed', json_encode(['close_id' => $closeId, 'window_start' => $shiftFrom, 'window_end' => $windowEnd, 'refund_cash' => $E['refund_cash'], 'refund_mobile' => $E['refund_mobile'], 'refund_card' => $E['refund_card'], 'opening_float' => $E['float'], 'float_recorded' => $E['float_recorded'], 'cash_sales' => $E['gross_cash'], 'expected_cash' => $expCashDrawer, 'declared_cash' => $declCash, 'variance_cash' => $vCash, 'expected_mobile' => $E['mobile'], 'declared_mobile' => $declMobile, 'variance_mobile' => $vMobile, 'expected_card' => $E['card'], 'declared_card' => $declCard, 'variance_card' => $vCard, 'tips_total' => $E['tips_total'] ?? 0, 'orders' => $E['orders_count'], 'voids' => $E['voids_count'], 'settled_from_tabs_count' => $E['settled_from_tabs_count'], 'settled_from_tabs_amount' => $E['settled_from_tabs_amount'], 'override' => $overrideRequested && $maxVar > $threshold, 'override_reason' => $overrideRequested ? $overrideReason : null]));
 
                 $justClosedShift = [
-                    'expected_cash' => (float)$E['cash'],
+                    'expected_cash' => $expCashDrawer,
+                    'opening_float' => (float)$E['float'],
+                    'float_recorded' => (bool)$E['float_recorded'],
+                    'cash_sales' => (float)$E['gross_cash'],
+                    'cash_refunds' => (float)$E['refund_cash'],
                     'declared_cash' => $declCash,
                     'variance_cash' => $vCash,
                     'expected_mobile' => (float)$E['mobile'],
@@ -1588,6 +1594,9 @@ function pos_fetch_shift_summary(PDO $pdo, array $restaurantWindow, int $userId)
         'card_today' => (float)$t['gross_card'],
         'settled_from_tabs_count' => (int)$t['settled_from_tabs_count'],
         'settled_from_tabs_amount' => (float)$t['settled_from_tabs_amount'],
+        // The opening float is not a secret (the cashier typed it); only the expected total stays hidden.
+        'float_amount' => (float)$t['float'],
+        'float_recorded' => (bool)$t['float_recorded'],
     ];
 }
 
@@ -2697,7 +2706,7 @@ if ($posCanStations) {
                     <div id="cart-deal-lines"></div>
                     <div class="total-row"><span>Total</span><span id="total"><?php echo $currency_symbol; ?> 0.00</span></div>
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-                        <button class="park-btn" id="parkBtn" onclick="parkOrder()" disabled data-help="Fire order|Sends the order to the relevant station (Kitchen, Bar, or both) and opens it as a TAB (no payment yet). Stock is deducted immediately. Pay later from the Tabs button.
+                        <button class="park-btn" id="parkBtn" onclick="parkOrder()" disabled data-help="Fire order|Sends the order to the relevant station (Kitchen, Bar, or both) and opens it as a TAB (no payment yet). Stock is not deducted yet: food comes off stock when the kitchen marks it Ready/Served (or it is bumped), and drinks when they are handed over at payment. Pay later from the Tabs button.
 Use for dine-in: staff can prepare while the customer is still seated."><span id="parkBtnLabel"><i class="fas fa-fire"></i> Fire Order</span></button>
                         <button class="pay-btn" id="payBtn" onclick="openPayModal()" disabled data-help="Pay now|Take payment AND place the order in one step. Use for walk-in / takeaway / quick-service. The kitchen still receives the ticket automatically."><i class="fas fa-credit-card ico"></i> Pay</button>
                     </div>
@@ -2978,6 +2987,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+                <p style="font-size:13px; color:#495057; margin:12px 0 0;">
+                    Cash: Float <strong><?php echo number_format((float)($justClosedShift['opening_float'] ?? 0), 2); ?></strong>
+                    + Cash sales <strong><?php echo number_format((float)($justClosedShift['cash_sales'] ?? 0), 2); ?></strong>
+                    &minus; Cash refunds <strong><?php echo number_format((float)($justClosedShift['cash_refunds'] ?? 0), 2); ?></strong>
+                    = Expected cash <strong><?php echo number_format((float)$justClosedShift['expected_cash'], 2); ?></strong>
+                    <?php if (empty($justClosedShift['float_recorded'])): ?><br><em style="color:#856404;">No opening float was recorded for this shift, so it was counted as 0.</em><?php endif; ?>
+                </p>
                 <p style="font-size:12px; color:#6c757d; margin-top:14px;">Orders: <?php echo $justClosedShift['orders_count']; ?> · Voids: <?php echo $justClosedShift['voids_count']; ?><?php if (($justClosedShift['tips_total'] ?? 0) > 0): ?> · Tips collected: <strong><?php echo $currency_symbol . ' ' . number_format((float)$justClosedShift['tips_total'], 2); ?></strong><?php endif; ?> · Settled earlier tabs: <?php echo (int)($justClosedShift['settled_from_tabs_count'] ?? 0); ?> (<?php echo $currency_symbol . ' ' . number_format((float)($justClosedShift['settled_from_tabs_amount'] ?? 0), 2); ?>). Recorded in <code>stock_shift_closes</code> for management review.</p>
                 <div class="actions">
                     <button class="a-print" type="button" onclick="window.print()"><i class="fas fa-print"></i> Print Z-report</button>
@@ -3243,6 +3259,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <div style="background:#f7f7f7; border-radius:8px; padding:12px; font-size:13px; margin-bottom:14px;">
                         <div>Paid orders this shift: <strong id="closeShiftOrdersCount"><?php echo (int)($shift['orders_today'] ?? 0); ?></strong></div>
                         <div>Settled earlier tabs: <strong id="closeShiftSettledCount"><?php echo (int)($shift['settled_from_tabs_count'] ?? 0); ?></strong> · <span id="closeShiftSettledAmount"><?php echo $currency_symbol . ' ' . number_format((float)($shift['settled_from_tabs_amount'] ?? 0), 2); ?></span></div>
+                        <div>Opening float: <strong id="closeShiftFloat"><?php echo !empty($shift['float_recorded']) ? $currency_symbol . ' ' . number_format((float)($shift['float_amount'] ?? 0), 2) : $currency_symbol . ' 0.00 (no opening float recorded for this shift, counted as 0)'; ?></strong></div>
+                        <div style="margin-top:4px; color:#6c757d;">Cash to count in the drawer = opening float + cash sales &minus; cash refunds. Include the float in your count.</div>
                     </div>
                     <label>Cash counted (<?php echo $currency_symbol; ?>)</label>
                     <input type="number" step="0.01" min="0" name="declared_cash" id="declCash" placeholder="0.00" required oninput="updShiftVariance()">
@@ -5540,6 +5558,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             setText('closeShiftOrdersCount', String(orders));
             setText('closeShiftSettledCount', String(settledCount));
             setText('closeShiftSettledAmount', currencySymbol + ' ' + fmtMoney(settledAmount));
+            setText('closeShiftFloat', shift.float_recorded
+                ? currencySymbol + ' ' + fmtMoney(Number(shift.float_amount || 0))
+                : currencySymbol + ' 0.00 (no opening float recorded for this shift, counted as 0)');
         }
 
         let _shiftStatsPollInFlight = false;
@@ -9605,7 +9626,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 });
                 const j = await r.json();
                 if (j.ok) {
-                    statusEl.innerHTML = '<i class="fas fa-check-circle" style="color:#16a34a;"></i> ' + escHtml(j.message || 'Sent');
+                    statusEl.innerHTML = '<i class="fas fa-check-circle" style="color:#16a34a;"></i> ' + escHtml(j.message || 'Sent'); if (!isEmail && j.url) { window.open(j.url, '_blank', 'noopener'); statusEl.innerHTML += ' <a href="' + escHtml(j.url) + '" target="_blank" rel="noopener">Open WhatsApp</a>'; }
                     statusEl.style.color = '#16a34a';
                 } else {
                     statusEl.innerHTML = '<i class="fas fa-times-circle" style="color:#dc2626;"></i> ' + escHtml(j.error || 'Failed');

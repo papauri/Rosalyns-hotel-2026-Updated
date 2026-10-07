@@ -365,6 +365,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare("DELETE FROM events WHERE id = ?");
             $stmt->execute([$_POST['id']]);
             $message = 'Event deleted successfully!';
+            if ($is_ajax) {
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['success' => true, 'message' => $message]);
+                exit;
+            }
         } elseif ($action === 'toggle_active') {
             $stmt = $pdo->prepare("UPDATE events SET is_active = NOT is_active WHERE id = ?");
             $stmt->execute([$_POST['id']]);
@@ -465,6 +470,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (PDOException $e) {
         $error = 'Error: ' . $e->getMessage();
+        if ($is_ajax) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['success' => false, 'message' => $error]);
+            exit;
+        }
     } catch (Exception $e) {
         // Validation / quotation failures used to escape as an uncaught exception (blank 500 page).
         $error = $e->getMessage();
@@ -1152,28 +1162,39 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
             formData.append('action', 'delete');
             formData.append('id', id);
 
+            function notify(isError, msg) {
+                if (window.Modal && typeof window.Modal.showMessage === 'function') {
+                    var p = document.createElement('p');
+                    p.textContent = msg;
+                    window.Modal.showMessage({
+                        title: isError ? 'Action Failed' : 'Success',
+                        message: p.outerHTML,
+                        size: 'sm'
+                    });
+                } else {
+                    alert(msg);
+                }
+            }
+
             fetch(window.location.href, {
                     method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
                     body: formData
                 })
-                .then(response => {
-                    if (response.ok) {
-                        window.location.reload();
-                    } else {
-                        if (typeof Alert !== 'undefined') {
-                            Alert.show('Error deleting event', 'error');
-                        } else {
-                            alert('Error deleting event');
-                        }
-                    }
+                .then(function(response) {
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    return response.json();
                 })
-                .catch(error => {
+                .then(function(res) {
+                    notify(!res.success, res.message || (res.success ? 'Event deleted successfully!' : 'Error deleting event'));
+                    if (res.success) refreshEventsGrid();
+                })
+                .catch(function(error) {
                     console.error('Error:', error);
-                    if (typeof Alert !== 'undefined') {
-                        Alert.show('Error deleting event', 'error');
-                    } else {
-                        alert('Error deleting event');
-                    }
+                    notify(true, 'Error deleting event. Please try again.');
                 });
         }
 

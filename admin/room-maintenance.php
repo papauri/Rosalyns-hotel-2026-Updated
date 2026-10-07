@@ -191,10 +191,8 @@ function getMaintenanceNeededRooms(PDO $pdo): array
         LEFT JOIN bookings b ON b.individual_room_id = ir.id
             AND b.status = 'checked-in'
         WHERE ir.is_active = 1
-          AND (
-              ir.status IN ('out_of_order', 'maintenance')
-              OR b.status = 'checked-in'
-          )
+          AND ir.status IN ('out_of_order', 'maintenance')
+          AND b.id IS NULL -- never raise a task for a room with a guest checked in
           AND NOT EXISTS (
               SELECT 1 FROM room_maintenance_schedules rms
               WHERE {$notExistsClause}
@@ -349,6 +347,13 @@ function reconcileMaintenanceRoomStatus(PDO $pdo, int $roomId, ?int $performedBy
     $hasPriority = maintenanceColumnExists($pdo, 'priority');
     $hasDueDate = maintenanceColumnExists($pdo, 'due_date');
 
+    // Verified is stored as status 'completed' + verified_at (see rh_maint_status_to_db). A
+    // Completed task holds the room in Maintenance until it is Verified (the inspection gate),
+    // so a verified row must no longer count as open or the room could never be released.
+    $verifiedExclusion = maintenanceColumnExists($pdo, 'verified_at')
+        ? " AND NOT (status = 'completed' AND verified_at IS NOT NULL)"
+        : '';
+
     // Build SELECT columns based on available columns
     $selectColumns = ['status', 'title'];
     if ($hasPriority) {
@@ -375,7 +380,7 @@ function reconcileMaintenanceRoomStatus(PDO $pdo, int $roomId, ?int $performedBy
         SELECT " . implode(', ', $selectColumns) . "
         FROM room_maintenance_schedules
         WHERE individual_room_id = ?
-                    AND status IN ('pending','in_progress','completed','planned')
+                    AND status IN ('pending','in_progress','completed','planned')" . $verifiedExclusion . "
         ORDER BY " . implode(', ', $orderByClauses) . "
         LIMIT 1
     ";
@@ -1233,12 +1238,8 @@ $roomsNeedingMaintenance = getRoomsNeedingMaintenance($pdo);
 // Get staff workload
 $staffWorkload = getMaintenanceStaffWorkload($pdo);
 
-// Auto-trigger on every page load: create scheduled maintenance tasks silently
-try {
-    autoCreateMaintenanceTasks($pdo, (int)($user['id'] ?? 0));
-} catch (Throwable $autoErr) {
-    // Non-fatal — silently skip if tables/columns not ready
-}
+// Maintenance tasks are never created as a side effect of loading this page.
+// Task creation only happens through the explicit "Auto-Create Tasks" button (POST + CSRF).
 
 // Get all schedules with enhanced sorting
 // Backward compatible: works with or without migration 005 columns
@@ -1372,7 +1373,7 @@ try {
                 <form method="POST" style="display:inline;">
                     <input type="hidden" name="action" value="auto_create_tasks">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                    <button class="btn btn-warning" type="button" onclick="rmConfirm(this.closest('form'), 'Auto-create maintenance tasks for all rooms that need them?', 'Auto-Create', 'btn-warning')">
+                    <button class="btn btn-warning" type="button" onclick="rmConfirm(this.closest('form'), 'Create a maintenance task for every room currently in Maintenance / Out of order that has no open task? Rooms with a guest checked in are skipped.', 'Auto-Create', 'btn-warning')">
                         <i class="fas fa-magic"></i> Auto-Create Tasks
                     </button>
                 </form>
@@ -1549,7 +1550,7 @@ try {
             <div class="rm-table-toolbar">
                 <h3 class="rm-table-toolbar__title"><i class="fas fa-list-check"></i> All Maintenance Tasks (<?php echo count($schedules); ?>)</h3>
                 <div class="rm-table-toolbar__filters">
-                    <input type="text" id="tableSearch" class="rm-inline-control rm-inline-control--search" placeholder="Search room, title, staff..." oninput="filterTable()">
+                    <input type="text" id="tableSearch" class="rm-inline-control rm-inline-control--search" placeholder="Search room, title, staff..." oninput="filterTable()" aria-describedby="rmStatusHelp">
                     <select id="tableStatusFilter" class="rm-inline-control" onchange="filterTable()">
                         <option value="">All Statuses</option>
                         <option value="pending">Pending</option>
@@ -1560,6 +1561,9 @@ try {
                     </select>
                 </div>
             </div>
+            <p id="rmStatusHelp" style="margin:0 0 12px; padding:10px 14px; font-size:13px; color:#6b7280; background:#f8f9fa; border-left:3px solid #d4a843; border-radius:4px;">
+                <strong>Completed does not release the room.</strong> The room stays in Maintenance until the task is <strong>Verified</strong> (the inspection check, use the double-tick button) or Cancelled/deleted. Only then does the room go back to Available.
+            </p>
             <table>
                 <thead>
                     <tr>
@@ -1623,7 +1627,7 @@ try {
                                                 <input type="hidden" name="action" value="mark_complete">
                                                 <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                                <button class="btn btn-success btn-sm" type="button" title="Mark done" onclick="rmConfirm(this.closest('form'), 'Mark this maintenance as completed?', 'Mark Done', 'btn-success')"><i class="fas fa-check"></i></button>
+                                                <button class="btn btn-success btn-sm" type="button" title="Mark done (room stays in Maintenance until verified)" onclick="rmConfirm(this.closest('form'), 'Mark this maintenance as completed? The room stays in Maintenance until the task is verified.', 'Mark Done', 'btn-success')"><i class="fas fa-check"></i></button>
                                             </form>
                                         <?php endif; ?>
                                         <?php if ($row['status'] !== 'verified'): ?>
@@ -1635,7 +1639,7 @@ try {
                                                 <input type="hidden" name="action" value="verify_schedule">
                                                 <input type="hidden" name="id" value="<?php echo $row['id']; ?>">
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                                <button class="btn btn-success btn-sm" type="button" title="Verify" onclick="rmConfirm(this.closest('form'), 'Mark this maintenance as verified? This cannot be undone.', 'Verify', 'btn-success')"><i class="fas fa-check-double"></i></button>
+                                                <button class="btn btn-success btn-sm" type="button" title="Verify (inspect the room, then release it from Maintenance)" onclick="rmConfirm(this.closest('form'), 'Mark this maintenance as verified? The room will be released from Maintenance and this cannot be undone.', 'Verify', 'btn-success')"><i class="fas fa-check-double"></i></button>
                                             </form>
                                         <?php endif; ?>
                                         <form method="POST" style="display:inline;">
@@ -1757,10 +1761,11 @@ try {
                 <select name="status" id="status">
                     <option value="pending">Pending</option>
                     <option value="in_progress">In Progress</option>
-                    <option value="completed">Completed</option>
-                    <option value="verified">Verified</option>
-                    <option value="cancelled">Cancelled</option>
+                    <option value="completed">Completed (room stays in Maintenance)</option>
+                    <option value="verified">Verified (releases the room)</option>
+                    <option value="cancelled">Cancelled (releases the room)</option>
                 </select>
+                <small style="color: #6b7280; font-size: 12px;">The room stays in Maintenance until the task is Verified or Cancelled.</small>
             </div>
         </div>
         <div class="form-row">

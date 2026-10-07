@@ -80,7 +80,7 @@
     <li>For <strong>Dine-in</strong> a <strong>Select table...</strong> list appears. For <strong>Room</strong> a <strong>Select checked-in room...</strong> list appears.</li>
     <li><strong>Guest name</strong> (optional) and <strong>Covers</strong> (optional, how many guests are on the tab, 0 to 99).</li>
     <li>The item lines. Click an item name to add a note to that line. The minus button becomes a bin when the quantity is 1. <strong>Clear</strong> empties the order.</li>
-    <li><strong>Total</strong>, then two buttons: the Fire button and <strong>Pay</strong>. The Fire button changes its name to match the order: <strong>Fire to Stations</strong> (food and drink), <strong>Send to Bar</strong>, <strong>Send to Kitchen</strong>, <strong>Fire Order</strong> (empty order), or <strong>Add to</strong> followed by the tab reference when you are adding to a tab. If a station is closed its button shows a closed badge.</li>
+    <li><strong>Total</strong>, then two buttons: the Fire button and <strong>Pay</strong>. The Fire button changes its name to match the order: <strong>Fire to Stations</strong> (food and drink), <strong>Send to Bar</strong>, <strong>Send to Kitchen</strong>, <strong>Fire Order</strong> (empty order), or <strong>Add to</strong> followed by the tab reference when you are adding to a tab. If a station is closed its button shows a closed badge. Its tooltip says stock is not deducted when you fire: food comes off stock when the kitchen marks it Ready/Served (or it is bumped), and drinks when they are handed over at payment.</li>
     <li><strong>Repeat last round</strong> appears after you fire an order (or add a round to a tab) and the cart is empty. It reloads the same items so you can review and send them again.</li>
   </ul>
 
@@ -113,7 +113,7 @@
     <li>Optionally fill in <strong>Note</strong>, for example "Float handed over by manager".</li>
     <li>Click <strong>Record float</strong>. You will see <em>"Float set: MWK 5,000.00"</em> (the amount is shown with your currency symbol).</li>
   </ol>
-  <div class="warn"><p>The float is recorded for the audit trail only. The system does <strong>not</strong> add it to the expected cash when you close your shift. When you close, count only the cash taken from sales (see <a href="#close">How to close your shift</a>).</p></div>
+  <div class="note"><p>The float is added to the expected cash when you close your shift. When you close, count the whole drawer, float included (see <a href="#close">How to close your shift</a>). If you record the float again before closing, the latest amount replaces the earlier one. If no float was recorded, it counts as 0.</p></div>
 
   <h2 id="pay-now">How to take an order and pay straight away</h2>
   <p>Use this for walk-in and takeaway sales where the guest pays at once.</p>
@@ -202,10 +202,10 @@
     <li>In the <strong>Cancel order</strong> window type a reason of at least 8 characters. The window counts <em>"0 / 8 characters minimum"</em> as you type.</li>
     <li>Click <strong>Cancel order</strong>. You will see <em>"Order cancelled."</em> or a message from the system. If the order was a room-service order, its folio charges are voided too.</li>
   </ol>
-  <p>You can cancel your own tabs. Managers and admins can cancel any tab. Many tabs at once: tick them in the Tabs tray (<strong>Bulk tools</strong> &rarr; <strong>Select all</strong>, <strong>Select stale</strong> or tick each card) and click <strong>Bulk cancel</strong>. You see <em>"3 tabs cancelled."</em>, or <em>"2 cancelled, 1 failed."</em></p>
+  <p>Cancelling an order before the kitchen starts it does not need the <strong>POS Void Tabs</strong> permission. You can cancel your own tabs. Managers and admins can cancel any tab. Many tabs at once: tick them in the Tabs tray (<strong>Bulk tools</strong> &rarr; <strong>Select all</strong>, <strong>Select stale</strong> or tick each card) and click <strong>Bulk cancel</strong>. You see <em>"3 tabs cancelled."</em>, or <em>"2 cancelled, 1 failed."</em></p>
   <h3>Void a tab</h3>
   <ol class="steps">
-    <li>You need <strong>POS Void Tabs</strong> and <strong>Restaurant Orders (POS)</strong>. Without <strong>POS Void Tabs</strong> the button is not shown.</li>
+    <li>You need <strong>POS Void Tabs</strong> (&ldquo;Void open tabs from the till, one at a time or in bulk&rdquo;) and <strong>Restaurant Orders (POS)</strong>. Without <strong>POS Void Tabs</strong> the button is not shown.</li>
     <li>Click <strong>Tabs</strong>, <strong>More</strong> on the tab card, then <strong>Void</strong>.</li>
     <li>Type a reason of at least 8 characters (an optional follow-up note is also offered) and click <strong>Void order</strong>.</li>
     <li>You will see <em>"Order voided."</em> Stock is restored, the order is removed from the station screens, any payment is reversed with a matching refund line, and any room-service charge is taken off the folio.</li>
@@ -257,7 +257,7 @@
     <li><strong>Receipt after payment:</strong> the <strong>Payment received</strong> or <strong>Tab settled</strong> window offers <strong>Email</strong> (type the address and click <strong>Send email</strong>), <strong>WhatsApp</strong>, and <strong>Print receipt</strong>. Click <strong>Done</strong> when finished.</li>
     <li><strong>Receipt later:</strong> click <strong>Recent</strong> and click the order to open its receipt page (<code>stock-receipt.php</code>). There you can email it (<em>"Receipt emailed to name@example.com."</em>), print it, or download a PDF.</li>
   </ul>
-  <div class="warn"><p>The WhatsApp button does not send a WhatsApp message. The system only records that you asked, and says <em>"WhatsApp delivery is provisioned but not fully configured yet. The intent has been logged &mdash; no billable send was triggered."</em> Use email or print instead.</p></div>
+  <div class="note"><p>WhatsApp receipts work in one of two ways. If a WhatsApp provider is switched on in WhatsApp Settings, the receipt is sent automatically from the hotel's account and you see <em>"Receipt sent by WhatsApp to ..."</em>. If not, you see <em>"Opening WhatsApp with the receipt for ... &mdash; press Send in WhatsApp."</em>: WhatsApp opens on your device with the receipt already typed in, and you must press Send in WhatsApp. If it does not open, click the <strong>Open WhatsApp</strong> link next to the message. If an automatic send fails you see <em>"WhatsApp receipt could not be sent: ..."</em>.</p></div>
   <p>On the receipt page, a manager or admin can apply a discount or service charge before an order is paid (<strong>Manual consolidation</strong>). After payment the totals can no longer be changed: <em>"This order has been paid - its totals can no longer be changed. Use the refund flow and take a new sale instead."</em></p>
 
   <h2 id="close">How to close your shift (Z-report)</h2>
@@ -267,14 +267,14 @@
     <li>Click <strong>More</strong> &rarr; <strong>Close shift (Z-report)</strong>.</li>
     <li>Count what you took, then enter all three amounts. Enter 0 if there is none:
       <ul>
-        <li><strong>Cash counted</strong> &mdash; the cash from sales, including tips, after refunds. Do <em>not</em> include the opening float: subtract it from what is in the drawer.</li>
+        <li><strong>Cash counted</strong> &mdash; all the cash in the drawer, including the opening float. The close window shows <strong>Opening float</strong> and the line <em>"Cash to count in the drawer = opening float + cash sales &minus; cash refunds. Include the float in your count."</em> If no float was recorded it shows <em>"(no opening float recorded for this shift, counted as 0)"</em>.</li>
         <li><strong>Mobile money totals</strong> &mdash; the total of mobile money payments you took.</li>
         <li><strong>Card totals</strong> &mdash; the total of card payments you took.</li>
       </ul>
     </li>
     <li>Optionally type a <strong>Note</strong>, for example "Drawer started with X".</li>
     <li>Click <strong>Close shift</strong>.</li>
-    <li>If each amount is within 1.00 of what the system expects, the shift closes and a <strong>Shift closed</strong> window shows a table with <strong>Tender</strong>, <strong>Expected</strong>, <strong>Declared</strong> and <strong>Variance</strong> for Cash, Mobile and Card, plus orders, voids, tips collected and tabs settled from earlier. You will see <em>"Shift closed. Paid orders: 24 (settled earlier tabs: 2). Variance &mdash; cash: 0.00, mobile: 0.00, card: 0.00."</em></li>
+    <li>If each amount is within 1.00 of what the system expects, the shift closes and a <strong>Shift closed</strong> window shows a table with <strong>Tender</strong>, <strong>Expected</strong>, <strong>Declared</strong> and <strong>Variance</strong> for Cash, Mobile and Card, plus orders, voids, tips collected and tabs settled from earlier. Under the table a line reads <em>Cash: Float ... + Cash sales ... &minus; Cash refunds ... = Expected cash ...</em>. You will see <em>"Shift closed. Paid orders: 24 (settled earlier tabs: 2). Variance &mdash; cash: 0.00, mobile: 0.00, card: 0.00."</em></li>
     <li>Click <strong>Print Z-report</strong> to print that window, or <strong>Continue</strong>.</li>
   </ol>
   <h3>If your count does not balance</h3>
@@ -290,7 +290,7 @@
     <li>Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>POS Accounting</strong>.</li>
     <li>Pick the <strong>Business date</strong>, click <strong>Apply</strong>, then click <strong>Z-report</strong>. This opens <code>shift-close-report.php</code> for that date.</li>
     <li>The day view is titled <strong>Shift Closes</strong> with the date. It shows <strong>Total Revenue</strong>, <strong>All Orders</strong>, <strong>Total Voids</strong> and <strong>Net Variance</strong>, and a table with <strong>Cashier</strong>, <strong>Closed</strong>, <strong>Revenue</strong>, <strong>Orders</strong>, <strong>Voids</strong>, <strong>Cash Var</strong>, <strong>Mobile Var</strong>, <strong>Card Var</strong>, <strong>Variance</strong>, <strong>Override</strong> and <strong>Report</strong>. If any cashier is short a banner reads <em>"TOTAL SHORTFALL ACROSS ALL CASHIERS ... investigate before EOD sign-off."</em> A <strong>Shift Close History</strong> table lists earlier closes.</li>
-    <li>Click <strong>Report</strong> on a row for one cashier's report. It shows <strong>Total Revenue</strong>, <strong>Paid Orders</strong>, <strong>Voids</strong>, <strong>Settled Tabs</strong>, then <strong>Tender Reconciliation</strong> (<strong>Tender</strong>, <strong>System (Expected)</strong>, <strong>Counted (Declared)</strong>, <strong>Variance</strong>, <strong>Status</strong>, where Status is <strong>BALANCED</strong>, <strong>SHORTFALL</strong> or <strong>OVERAGE</strong>), <strong>Shift Notes</strong>, <strong>Top Items</strong>, <strong>Paid Orders</strong>, <strong>Refund / Void Payouts</strong> and <strong>Voided Orders</strong>.</li>
+    <li>Click <strong>Report</strong> on a row for one cashier's report. It shows <strong>Total Revenue</strong>, <strong>Paid Orders</strong>, <strong>Voids</strong>, <strong>Settled Tabs</strong>, then <strong>Tender Reconciliation</strong> with a <strong>Cash:</strong> line (<em>Float + Cash sales &minus; Cash refunds = Expected cash</em>; it says so if no float was recorded, and labels closes made before the float was included as not counting it) (<strong>Tender</strong>, <strong>System (Expected)</strong>, <strong>Counted (Declared)</strong>, <strong>Variance</strong>, <strong>Status</strong>, where Status is <strong>BALANCED</strong>, <strong>SHORTFALL</strong> or <strong>OVERAGE</strong>), <strong>Shift Notes</strong>, <strong>Top Items</strong>, <strong>Paid Orders</strong>, <strong>Refund / Void Payouts</strong> and <strong>Voided Orders</strong>.</li>
     <li>Use <strong>Print / Save PDF</strong> to print. A short cashier shows <em>"SHORTFALL DETECTED &mdash; cumulative variance ... Management review required."</em> An override close shows <em>"Override applied."</em> with the reason.</li>
   </ol>
   <p>For day-end money checks across the whole hotel see <a href="14-reports-eod.html">Reports and end of day</a>.</p>
@@ -385,7 +385,7 @@
       <tr><td><em>"Could not post the room-service charge to the guest folio ... the order was not placed."</em></td><td>The charge failed, so the order was stopped.</td><td>Check the booking is checked in and try again.</td></tr>
       <tr><td><em>"Cannot close shift: 2 open tab(s) from this shift still need to be settled or cancelled &mdash; ORD-..."</em></td><td>You still have open tabs.</td><td>Open <strong>Tabs</strong> and settle or cancel them.</td></tr>
       <tr><td><em>"Enter the counted cash amount (0 if none) before closing the shift."</em></td><td>A close amount is empty.</td><td>Fill in cash, mobile and card; use 0 if none.</td></tr>
-      <tr><td><em>"Shift does not balance (variance ...)."</em></td><td>Your count differs from the system by more than 1.00.</td><td>Recount (remember to leave out the float) or ask for an override.</td></tr>
+      <tr><td><em>"Shift does not balance (variance ...)."</em></td><td>Your count differs from the system by more than 1.00.</td><td>Recount (remember to count the float too) or ask for an override.</td></tr>
       <tr><td><em>"Variance of ... exceeds tolerance. Tick the override box to record this close with a reason."</em> / <em>"Override reason is required (minimum 5 characters) and will be saved for audit."</em></td><td>A supervisor closed without the box or reason.</td><td>Tick <strong>Admin override</strong> and add a reason.</td></tr>
       <tr><td><em>"Refund reason required (minimum 5 characters)."</em> / <em>"Only paid orders can be refunded. Current status: ..."</em> / <em>"Nothing left to refund on ... - it has already been refunded in full."</em></td><td>Refund rules.</td><td>Add a reason, or check the order status in <strong>Recent</strong>.</td></tr>
       <tr><td><em>"Cancel reason is required (at least 8 characters)"</em> / <em>"Void reason is required (at least 8 characters)"</em></td><td>Reason too short.</td><td>Write a fuller reason.</td></tr>

@@ -151,6 +151,24 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
         unset($pr);
     }
 
+    // Cash breakdown for the screen: Float + Cash sales - Cash refunds = Expected cash.
+    // Computed from existing rows at display time (nothing stored is restated). Closes recorded
+    // before the float was counted stored expected_cash WITHOUT it; flag those so the line adds up.
+    $cashCalc = rh_pos_shift_totals($pdo, (int)$close['user_id'], $windowStart, $windowEnd, $bizWindow['start_sql']);
+    $cashBreakdown = [
+        'float'        => (float)$cashCalc['float'],
+        'recorded'     => (bool)$cashCalc['float_recorded'],
+        'sales'        => (float)$cashCalc['gross_cash'],
+        'refunds'      => (float)$cashCalc['refund_cash'],
+        'expected'     => (float)$cashCalc['drawer_cash'],
+        'stored'       => (float)$close['expected_cash'],
+    ];
+    // Stored figure matches net takings only (no float) while a float existed = legacy close.
+    $cashBreakdown['legacy_no_float'] = $cashBreakdown['recorded']
+        && $cashBreakdown['float'] > BALANCE_TOLERANCE
+        && abs($cashBreakdown['stored'] - $cashBreakdown['expected']) > BALANCE_TOLERANCE
+        && abs($cashBreakdown['stored'] - ($cashBreakdown['expected'] - $cashBreakdown['float'])) <= BALANCE_TOLERANCE;
+
     // Top-selling items: sold lines only (voided / 86d lines are excluded).
     $topItemsSql = "
         SELECT
@@ -959,6 +977,17 @@ $printTitle = match ($mode) {
                             </tr>
                         </tfoot>
                     </table>
+                    <?php if (!empty($cashBreakdown)): ?>
+                        <p class="cash-breakdown" style="margin:10px 0 0; font-size:13px;">
+                            <strong>Cash:</strong>
+                            Float <?php echo $fmt($cashBreakdown['legacy_no_float'] ? 0.0 : $cashBreakdown['float']); ?>
+                            + Cash sales <?php echo $fmt($cashBreakdown['sales']); ?>
+                            &minus; Cash refunds <?php echo $fmt($cashBreakdown['refunds']); ?>
+                            = Expected cash <strong><?php echo $fmt($cashBreakdown['legacy_no_float'] ? $cashBreakdown['stored'] : $cashBreakdown['expected']); ?></strong>
+                            <?php if (!$cashBreakdown['recorded']): ?><br><em>No opening float was recorded for this shift, so it is counted as 0.</em><?php endif; ?>
+                            <?php if ($cashBreakdown['legacy_no_float']): ?><br><em>This close was recorded before the opening float was included, so the float above was not part of its expected cash.</em><?php endif; ?>
+                        </p>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Shift note -->

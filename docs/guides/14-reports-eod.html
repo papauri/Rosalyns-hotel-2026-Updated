@@ -65,9 +65,9 @@
   <ol class="steps">
     <li>Set <strong>Start Date</strong> and <strong>End Date</strong> and click <strong>Apply</strong>. If the dates are the wrong way round, they are swapped for you.</li>
     <li>Or click a quick button: <strong>Today</strong>, <strong>This Week</strong> (from Sunday), <strong>This Month</strong>, <strong>This Quarter</strong>, <strong>This Year</strong>, <strong>All Time</strong> (the last five years).</li>
-    <li>Click <strong>Export CSV</strong> to download the tab you are on for those dates. The file is named like <code>hotel-report-revenue-2026-10-07.csv</code>.</li>
+    <li>Click <strong>Export CSV</strong> to download the data of the tab you are on for those dates. The file is named like <code>hotel-report-revenue-2026-10-07.csv</code>.</li>
   </ol>
-  <p>Export covers these tabs: P&amp;L Overview, Revenue, VAT Register (the <strong>Export for Filing</strong> button), Bookings, Occupancy, Guests and Conference. On the Aging &amp; AR, till, Stock, Staff and Voids tabs the button downloads the overview export instead.</p>
+  <p>Each tab's <strong>Export CSV</strong> exports that tab's own data, including P&amp;L Overview, Revenue, VAT Register (the <strong>Export for Filing</strong> button), Bookings, Occupancy, Guests, Conference, the till (F&amp;B), Stock, Staff and Voids tabs. On the Aging &amp; AR tab the file holds the age buckets (<em>Age (days)</em>, <em>Count</em>, <em>Amount</em>, with a Total) followed by the detail rows (<em>Reference</em>, <em>Client</em>, <em>Type</em>, <em>Method</em>, <em>Status</em>, <em>Date</em>, <em>Days outstanding</em>, <em>Amount</em>).</p>
   <p>You need <strong>Reports</strong> or <strong>Accounting</strong> permission to export.</p>
 
   <h2 id="deferred">The deferred revenue notice</h2>
@@ -106,21 +106,21 @@
   <p>The top shows <strong>Paid POS sales</strong>, <strong>Cash collected</strong>, <strong>Mobile / card</strong> and <strong>Voids</strong> for the day. Below that, <strong>Cashier close matching</strong> lists every cashier who took sales that day.</p>
   <ol class="steps">
     <li>Tick the cashier (or use the select-all box). Cashiers already closed show <strong>Closed</strong> and cannot be ticked. A cashier with unfinished orders shows how many are <strong>open</strong>.</li>
-    <li>Expand the row. Count the drawer and enter <strong>Declared cash</strong>, <strong>Declared mobile</strong> and <strong>Declared card</strong>. Enter 0 if there is none. The expected amounts are hidden until you close, so the count is blind.</li>
+    <li>Expand the row. Count the drawer and enter <strong>Declared cash</strong>, <strong>Declared mobile</strong> and <strong>Declared card</strong>. Enter 0 if there is none. Declared cash is the whole drawer, including the opening float. Each cashier row shows <em>Opening float: ...</em> (or <em>none recorded, counted as 0</em>). The expected amounts are hidden until you close, so the count is blind.</li>
     <li>Optional: open the list of sales to review them. Tick each as checked, or click <strong>Tick all</strong>. This does not close anything. Add an <strong>Accountant note</strong> to any sale, and a count note for the cashier.</li>
     <li>Optional: type a <strong>Bulk note for selected closes</strong>.</li>
     <li>Click <strong>Close selected</strong>.</li>
     <li>You will see <em>"N POS shift(s) closed. Variance (counted - expected) - name: cash 0.00, mobile 0.00, card 0.00."</em> A negative number means less was counted than expected.</li>
   </ol>
-  <p>Example: the system expects MWK 250,000 cash and you count MWK 248,000. The variance is -2,000.00. Write the reason in the note.</p>
+  <p>Expected cash is the opening float plus cash sales minus cash refunds. Example: float MWK 20,000 plus net cash sales MWK 230,000 means the system expects MWK 250,000 cash and you count MWK 248,000. The variance is -2,000.00. Write the reason in the note.</p>
   <p>Further down are the <strong>POS sales log</strong> and the <strong>POS audit logs</strong> for the day.</p>
 
   <h2 id="z">Z-report (shift close report)</h2>
   <p>Click <strong>Z-report</strong> on POS Accounting to see all the shift closes for the chosen date. Managers and admins only; anyone else gets <em>"Access denied."</em> It shows total revenue, orders, voids and net variance. A red banner warns of a <em>total shortfall across all cashiers</em> to investigate before sign-off. The table lists each cashier with their cash, mobile and card variance, an <strong>OVERRIDE</strong> tag where the close was approved despite a difference, and a <strong>View</strong> link.</p>
-  <p>The single report for one close shows the cashier, date and time, record number, then <strong>Tender Reconciliation</strong> (System (Expected), Counted (Declared), Variance, and BALANCED, SHORTFALL or OVERAGE for each of cash, mobile and card), notes, top items, the paid orders, refund and void payouts, and voided orders. Click <strong>Print / Save PDF</strong> to keep a copy. A cashier who is not a manager can open only their own closes. With no date given, the page shows the last 30 closes.</p>
+  <p>The single report for one close shows the cashier, date and time, record number, then <strong>Tender Reconciliation</strong> with a <strong>Cash:</strong> line showing <em>Float + Cash sales &minus; Cash refunds = Expected cash</em> (closes made before the float was included say the float was not part of their expected cash) (System (Expected), Counted (Declared), Variance, and BALANCED, SHORTFALL or OVERAGE for each of cash, mobile and card), notes, top items, the paid orders, refund and void payouts, and voided orders. Click <strong>Print / Save PDF</strong> to keep a copy. A cashier who is not a manager can open only their own closes. With no date given, the page shows the last 30 closes.</p>
 
   <h2 id="drift">Drift report</h2>
-  <p>Click <strong>Drift report</strong> on POS Accounting. It is read-only and changes nothing. It measures how far older till figures were out because of two faults that have since been fixed: tips counted inside revenue and VAT, and split payments. It looks at the last 90 days; change <strong>Start</strong> and <strong>End</strong> and click <strong>Apply</strong>, or click <strong>All time</strong>.</p>
+  <p>Click <strong>Drift report</strong> on POS Accounting. It is read-only and changes nothing. It measures how far older till figures were out because of two faults that have since been fixed: tips counted inside revenue and VAT, and split payments. It looks at the last 90 days; change <strong>Start</strong> and <strong>End</strong> and click <strong>Apply</strong>, or click <strong>All time</strong>. A cash difference that is only the opening float is not shown as drift.</p>
   <ul>
     <li><strong>Tip/VAT overstatement register</strong>: each affected sale with the recorded total, the correct total, and how much revenue and VAT were overstated. Refunded sales are marked.</li>
     <li><strong>Historical shift-close accuracy</strong>: closed shifts whose expected figures would be different today, and whether a manager override was used at the time.</li>
@@ -146,7 +146,7 @@
       <tr><td><em>Skipped - already closed: N, no paid orders: N.</em></td><td>Those cashiers were closed already or had no sales.</td><td>None needed.</td></tr>
       <tr><td><em>Security token invalid. Please refresh and try again.</em></td><td>Page open too long.</td><td>Reload and repeat.</td></tr>
       <tr><td><em>Access denied.</em> or <em>Record not found or access denied.</em></td><td>Z-report is for managers and admins, or you opened someone else's close.</td><td>Ask a manager.</td></tr>
-      <tr><td>Export CSV gives a different report than the tab</td><td>That tab has no export of its own.</td><td>See the list of exportable tabs above.</td></tr>
+      
       <tr><td><em>Could Not Send</em></td><td>No recipient or WhatsApp number is set, or sending failed.</td><td>Read the reason shown. Set the number in WhatsApp Settings, or the email in Hotel Settings, and try again.</td></tr>
     </tbody>
   </table>

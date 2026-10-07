@@ -674,7 +674,7 @@ function getAllPermissions()
         ],
         'pos_void' => [
             'label' => 'POS Void Tabs',
-            'description' => 'Void open tabs from the till, one at a time or in bulk, and cancel orders before the kitchen starts them (audit-logged)',
+            'description' => 'Void open tabs from the till, one at a time or in bulk (audit-logged). Cancelling an order before the kitchen starts it does not need this permission.',
             'icon' => 'fa-ban',
             'category' => 'Stations',
             'page' => 'pos.php',

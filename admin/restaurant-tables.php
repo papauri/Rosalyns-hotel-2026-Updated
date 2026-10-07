@@ -1597,7 +1597,7 @@ foreach ($tables as $table) {
                 });
                 const j = await r.json();
                 if (j.ok) {
-                    statusEl.innerHTML = '<i class="fas fa-check-circle" style="color:#16a34a;"></i> ' + rtEscapeHtml(j.message || 'Sent');
+                    statusEl.innerHTML = '<i class="fas fa-check-circle" style="color:#16a34a;"></i> ' + rtEscapeHtml(j.message || 'Sent'); if (!isEmail && j.url) { window.open(j.url, '_blank', 'noopener'); statusEl.innerHTML += ' <a href="' + rtEscapeHtml(j.url) + '" target="_blank" rel="noopener">Open WhatsApp</a>'; }
                     statusEl.style.color = '#16a34a';
                 } else {
                     statusEl.innerHTML = '<i class="fas fa-times-circle" style="color:#dc2626;"></i> ' + rtEscapeHtml(j.error || 'Failed');

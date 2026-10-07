@@ -185,9 +185,57 @@ function sendWhatsAppViaTwilio(string $to, string $body): array
 // PROVIDER: META CLOUD API
 // ============================================================
 
+/**
+ * WhatsApp access-token encryption. Keyed only on APP_ENCRYPTION_SALT (not the web host name,
+ * unlike encryptApiKey) so scheduled CLI jobs can decrypt what the admin page saved.
+ * Stored as "wa1:" + base64(iv . ciphertext).
+ */
+function whatsAppTokenKey(): string
+{
+    $salt = $_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: 'DEFAULT_SALT_CHANGE_IN_ENV';
+    return hash('sha256', 'whatsapp-token|' . $salt, true);
+}
+
+function encryptWhatsAppToken(string $plain): string
+{
+    $iv = random_bytes(16);
+    $cipher = openssl_encrypt($plain, 'AES-256-CBC', whatsAppTokenKey(), OPENSSL_RAW_DATA, $iv);
+    return 'wa1:' . base64_encode($iv . $cipher);
+}
+
+/**
+ * The Meta access token in plain form. Handles the current "wa1:" format, the older
+ * encryptApiKey format, and tokens saved before encryption (plain text, used as-is).
+ */
+function getWhatsAppAccessToken(): string
+{
+    $stored = (string)getSetting('whatsapp_meta_access_token', getSetting('whatsapp_api_token', ''));
+    if ($stored === '') {
+        return '';
+    }
+    if (strpos($stored, 'wa1:') === 0) {
+        $raw = base64_decode(substr($stored, 4), true);
+        $plain = ($raw !== false && strlen($raw) > 16)
+            ? openssl_decrypt(substr($raw, 16), 'AES-256-CBC', whatsAppTokenKey(), OPENSSL_RAW_DATA, substr($raw, 0, 16))
+            : false;
+        if (!is_string($plain) || $plain === '') {
+            error_log('[whatsapp] saved access token cannot be decrypted (APP_ENCRYPTION_SALT changed?) - re-enter it in WhatsApp settings');
+            return '';
+        }
+        return $plain;
+    }
+    if (function_exists('decryptApiKey')) {
+        $plain = decryptApiKey($stored);
+        if (is_string($plain) && $plain !== '' && !preg_match('/\s/', $plain)) {
+            return $plain;
+        }
+    }
+    return $stored;
+}
+
 function sendWhatsAppViaMeta(string $to, string $body): array
 {
-    $accessToken = getSetting('whatsapp_meta_access_token', getSetting('whatsapp_api_token', ''));
+    $accessToken = getWhatsAppAccessToken();
     $phoneNumberId = getSetting('whatsapp_meta_phone_number_id', getSetting('whatsapp_phone_id', ''));
 
     if (empty($accessToken) || empty($phoneNumberId)) {

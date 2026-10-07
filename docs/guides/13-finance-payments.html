@@ -73,7 +73,7 @@
   </ol>
   <p><strong>Quick Search</strong> matches payment reference, receipt number, invoice number, booking reference, transaction reference, method, status, the booking number, the amount, and the guest or company name, email, phone and reference. Results show 50 to a page.</p>
   <div class="note"><p>The list normally shows only the kinds of payment your hotel has switched on. If older records are hidden you will see <em>"Showing records for your active modules only"</em> with a link <strong>Show all history</strong>. Click it to see everything.</p></div>
-  <div class="note"><p>Pending refunds show up when you set <strong>Status</strong> to <strong>Pending</strong>, because a pending refund has the status Pending. They are marked as refunds in the <strong>Type</strong> and <strong>Reference</strong> columns.</p></div>
+  <div class="note"><p>Pending refunds show up when you set <strong>Status</strong> to <strong>Pending</strong>, because a pending refund has the status Pending. They are marked as refunds in the <strong>Type</strong> and <strong>Reference</strong> columns. To list refunds by their refund stage, add <code>refund_status=pending</code> to the Payments page address (also <code>processing</code>, <code>completed</code>, <code>failed</code> or <code>rejected</code>). Only refund lines are then shown, and the page counts it as an active filter.</p></div>
   <p>Each row has these buttons: the eye (<strong>View Details</strong>), the invoice button (only when invoicing is on), the undo arrow (<strong>Process Refund</strong>, only for Paid or Completed payments that are not refunds), the pencil (<strong>Edit</strong>, only for payments that are not yet Paid or Completed), and a WhatsApp button when the guest has a phone number. The <strong>Receipt / Txn</strong> column shows the receipt number, or <em>Missing</em> if a Paid or Completed payment has none.</p>
   <p>Click <strong>Export CSV</strong> to download the filtered list as a spreadsheet.</p>
 
@@ -177,6 +177,7 @@
       <tr><td><strong>WhatsApp</strong></td><td>Opens WhatsApp with a reminder message.</td></tr>
       <tr><td><strong>Regenerate</strong></td><td>Rebuilds the PDF. You are asked to confirm.</td></tr>
       <tr><td><strong>Credit Note</strong></td><td>Only on refund lines that have no document yet.</td></tr>
+      <tr><td>Booking (<em>View booking</em> / <em>View conference inquiry</em>)</td><td>For a room payment, opens the booking details page. For a conference payment, opens Conference Management at that enquiry's row.</td></tr>
     </tbody>
   </table>
   <p>Invoice emails are supported for Room, Conference, Gym and Event payments only.</p>
@@ -234,7 +235,7 @@
       <tr><td>Refunds</td><td>Refunds issued in the period.</td></tr>
     </tbody>
   </table>
-  <p><strong>Needs attention</strong> lists things to chase: balances owed, pending payments, refunds waiting to be settled, quotations awaiting a reply, voided till orders, stock lost. The tabs below show <strong>Recent payments</strong>, <strong>Receivables</strong>, <strong>Daily detail</strong>, <strong>Refunds</strong>, <strong>POS by type</strong> and <strong>Compliance</strong>.</p>
+  <p><strong>Needs attention</strong> lists things to chase: balances owed, pending payments, refunds waiting to be settled, quotations awaiting a reply, voided till orders, stock lost. The links on this page open the Payments list already filtered: <strong>Open today's payments</strong> and <strong>Today's payments</strong> show today's date range, and the completed and pending links show that status for the chosen period. The tabs below show <strong>Recent payments</strong>, <strong>Receivables</strong>, <strong>Daily detail</strong>, <strong>Refunds</strong>, <strong>POS by type</strong> and <strong>Compliance</strong>.</p>
   <h3>VAT settings</h3>
   <ol class="steps">
     <li>On the Accounting page open <strong>VAT settings</strong> (or click <strong>VAT</strong> at the top).</li>

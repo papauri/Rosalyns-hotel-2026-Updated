@@ -46,7 +46,7 @@
     <thead><tr><th>Facebook Settings part</th><th>What it holds</th></tr></thead>
     <tbody>
       <tr><td><strong>Page Credentials</strong></td><td><strong>Enable Facebook Page Posting</strong>, <strong>Facebook Page ID</strong> with a <strong>Fetch from Token</strong> button, <strong>Page Display Name</strong> (a label for staff only), <strong>Page Access Token</strong>, and a short <strong>Token Setup Guide</strong>.</td></tr>
-      <tr><td><strong>Posting Options</strong></td><td><strong>Default Hashtags</strong>, and ticks: <strong>Show share button on Rooms</strong>, <strong>Show share button on Events</strong>, <strong>Show share button on Conference rooms</strong>, <strong>Show share button on Menu items</strong>, <strong>Log all post attempts to system log</strong>.</td></tr>
+      <tr><td><strong>Posting Options</strong></td><td><strong>Default Hashtags</strong>, and ticks: <strong>Show share button on Rooms</strong>, <strong>Show share button on Events</strong>, <strong>Show share button on Conference rooms</strong>, <strong>Show share button on Gym packages</strong>, <strong>Show share button on Menu items</strong>, <strong>Log all post attempts to system log</strong>.</td></tr>
       <tr><td><strong>Test Post</strong></td><td>A message box and the button <strong>Send Test Post to Facebook Page</strong>.</td></tr>
     </tbody>
   </table>
@@ -101,7 +101,7 @@
   <p>The WhatsApp Settings page sends booking messages through Meta's WhatsApp Business service. The same hotel number is used for the End of Day WhatsApp summary.</p>
   <ol class="steps">
     <li>Open <strong>Advanced</strong> &rarr; <strong>WhatsApp Settings</strong>.</li>
-    <li>In <strong>API Configuration</strong> fill in <strong>Hotel WhatsApp Number</strong> (with country code, like +265888123456), <strong>WhatsApp Phone Number ID</strong>, <strong>WhatsApp Business Account ID</strong> (both numbers from Meta) and <strong>Permanent Access Token</strong>.</li>
+    <li>In <strong>API Configuration</strong> fill in <strong>Hotel WhatsApp Number</strong> (with country code, like +265888123456), <strong>WhatsApp Phone Number ID</strong>, <strong>WhatsApp Business Account ID</strong> (both numbers from Meta) and <strong>Permanent Access Token</strong>. The token is saved encrypted and is never shown again: the box is empty after saving and its hint reads <em>"Saved &mdash; leave blank to keep the current token"</em>. Leave it blank to keep the saved token; type a new one only to replace it.</li>
     <li>Under <strong>Notification Triggers</strong> tick the events to message about: <strong>New Booking Created</strong>, <strong>Booking Confirmed</strong>, <strong>Booking Cancelled</strong>, <strong>Guest Check-in</strong>, <strong>Guest Check-out</strong>.</li>
     <li>Under <strong>Notification Recipients</strong> choose <strong>Send to Guest</strong> (uses the phone number on the booking) and <strong>Send to Hotel/Admin</strong>. Enter the staff numbers in <strong>Admin WhatsApp Numbers</strong>, separated by commas.</li>
     <li>Under <strong>Message Template Names</strong> type the names of your approved Meta templates for <strong>Booking Confirmed Template</strong> and <strong>Booking Cancelled Template</strong>. They must match Meta exactly. Letters, digits and underscores only. Blank gives <code>booking_confirmed</code> and <code>booking_cancelled</code>.</li>
@@ -114,8 +114,9 @@
   <ul>
     <li>Posting needs the right permission for the thing you post: Rooms, Events, Conference, Gym or Menu.</li>
     <li>You can post only active rooms and events.</li>
-    <li>Each area can be turned off with its share tick on Facebook Settings. A gym toggle does not exist on that page; gym sharing follows the main switch.</li>
+    <li>Each area can be turned off with its share tick on Facebook Settings. The gym packages tick is <strong>Show share button on Gym packages</strong>.</li>
     <li>WhatsApp cannot be enabled without the access token and phone number ID.</li>
+    <li>Restaurant receipts (till, table settle and receipt page): when WhatsApp is enabled here they are sent automatically. When it is not, WhatsApp opens on the staff device with the receipt typed in (an <strong>Open WhatsApp</strong> link) and staff press Send.</li>
   </ul>
 
   <h2 id="problems">Problems and fixes</h2>

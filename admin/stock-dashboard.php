@@ -315,7 +315,7 @@ $csrf_token = generateCsrfToken();
                             <span class="sdash-alert-item__detail"><?php echo htmlspecialchars((string)$i['current_quantity']); ?> <?php echo htmlspecialchars($i['unit']); ?> available</span>
                         </div>
                         <div class="sdash-alert-item__actions">
-                            <a href="stock-orders.php" class="sdash-btn sdash-btn--sm sdash-btn--primary">
+                            <a href="purchase-orders.php" class="sdash-btn sdash-btn--sm sdash-btn--primary" title="Create a purchase order to restock">
                                 <i class="fas fa-cart-plus"></i> Order
                             </a>
                             <a href="stock-ingredients.php" class="sdash-btn sdash-btn--sm sdash-btn--ghost">View</a>
@@ -413,7 +413,7 @@ $csrf_token = generateCsrfToken();
                             </div>
                         </div>
                         <div class="sdash-alert-item__actions">
-                            <a href="stock-orders.php" class="sdash-btn sdash-btn--sm sdash-btn--ghost">
+                            <a href="purchase-orders.php" class="sdash-btn sdash-btn--sm sdash-btn--ghost" title="Create a purchase order to restock">
                                 <i class="fas fa-cart-plus"></i> Order
                             </a>
                         </div>

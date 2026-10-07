@@ -21,6 +21,7 @@ $fb_hashtags      = getSetting('facebook_default_hashtags', '#hotel #accommodati
 $fb_rooms_enabled      = getSetting('facebook_rooms_enabled', '1');
 $fb_events_enabled     = getSetting('facebook_events_enabled', '1');
 $fb_conference_enabled = getSetting('facebook_conference_enabled', '1');
+$fb_gym_enabled        = getSetting('facebook_gym_enabled', '1');
 $fb_menu_enabled       = getSetting('facebook_menu_enabled', '1');
 $fb_log_enabled        = getSetting('facebook_post_log_enabled', '1');
 // Token: never pre-fill plaintext in the form — show masked indicator only
@@ -46,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'facebook_rooms_enabled'      => isset($_POST['facebook_rooms_enabled']) ? '1' : '0',
             'facebook_events_enabled'     => isset($_POST['facebook_events_enabled']) ? '1' : '0',
             'facebook_conference_enabled' => isset($_POST['facebook_conference_enabled']) ? '1' : '0',
+            'facebook_gym_enabled'        => isset($_POST['facebook_gym_enabled']) ? '1' : '0',
             'facebook_menu_enabled'       => isset($_POST['facebook_menu_enabled']) ? '1' : '0',
             'facebook_post_log_enabled'   => isset($_POST['facebook_post_log_enabled']) ? '1' : '0',
         ];
@@ -96,6 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fb_rooms_enabled      = $settings['facebook_rooms_enabled'];
         $fb_events_enabled     = $settings['facebook_events_enabled'];
         $fb_conference_enabled = $settings['facebook_conference_enabled'];
+        $fb_gym_enabled        = $settings['facebook_gym_enabled'];
         $fb_menu_enabled       = $settings['facebook_menu_enabled'];
         $fb_log_enabled        = $settings['facebook_post_log_enabled'];
         if ($newToken !== '') {
@@ -283,6 +286,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <input type="checkbox" name="facebook_conference_enabled" value="1"
                                 <?php echo $fb_conference_enabled === '1' ? 'checked' : ''; ?>>
                             <span>Show share button on Conference rooms</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                            <input type="checkbox" name="facebook_gym_enabled" value="1"
+                                <?php echo $fb_gym_enabled === '1' ? 'checked' : ''; ?>>
+                            <span>Show share button on Gym packages</span>
                         </label>
                     </div>
                     <div class="form-group">

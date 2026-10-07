@@ -175,6 +175,33 @@ if (!function_exists('rh_pos_shift_reversals')) {
     }
 }
 
+if (!function_exists('rh_pos_shift_float')) {
+    /**
+     * Opening cash float declared in [start,end) (stock_shift_opens.opened_at). Each user's
+     * LATEST declaration in the window counts (re-declaring corrects the float, it does not
+     * add to it); $userId null = sum of every user's latest. Because a till close's window
+     * starts at the previous close, a float already consumed by an earlier close is not
+     * counted again. Returns ['amount' => float, 'recorded' => bool]; none recorded = 0.
+     */
+    function rh_pos_shift_float(PDO $pdo, ?int $userId, string $start, string $end): array
+    {
+        try {
+            $st = $pdo->prepare("SELECT o.user_id, o.float_amount FROM stock_shift_opens o
+                WHERE o.opened_at >= ? AND o.opened_at < ?" . ($userId !== null ? " AND o.user_id = ?" : '') . "
+                ORDER BY o.opened_at ASC, o.id ASC");
+            $st->execute($userId !== null ? [$start, $end, $userId] : [$start, $end]);
+            $latest = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $latest[(int)$r['user_id']] = (float)$r['float_amount'];
+            }
+            return ['amount' => round(array_sum($latest), 2), 'recorded' => !empty($latest)];
+        } catch (Throwable $e) {
+            error_log('rh_pos_shift_float: ' . $e->getMessage());
+            return ['amount' => 0.0, 'recorded' => false];
+        }
+    }
+}
+
 if (!function_exists('rh_pos_shift_totals')) {
     /**
      * Expected till figures for [start,end). $userId null = whole business day (all users).
@@ -265,7 +292,13 @@ if (!function_exists('rh_pos_shift_totals')) {
             $net[$k] = round($gross[$k] - $refund[$k], 2);
         }
 
+        // Opening float is cash that sits in the drawer but is not a sale: it only affects the
+        // expected DRAWER cash ('drawer_cash'). 'cash' stays net takings so revenue views are unchanged.
+        $fl = rh_pos_shift_float($pdo, $userId, $start, $end);
+
         return [
+            'float' => $fl['amount'], 'float_recorded' => $fl['recorded'],
+            'drawer_cash' => round($fl['amount'] + $net['cash'], 2),
             'cash' => $net['cash'], 'mobile' => $net['mobile'], 'card' => $net['card'],
             'gross_cash' => round($gross['cash'], 2), 'gross_mobile' => round($gross['mobile'], 2), 'gross_card' => round($gross['card'], 2),
             'refund_cash' => round($refund['cash'], 2), 'refund_mobile' => round($refund['mobile'], 2), 'refund_card' => round($refund['card'], 2),

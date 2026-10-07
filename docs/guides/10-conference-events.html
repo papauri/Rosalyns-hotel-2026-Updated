@@ -180,7 +180,7 @@
     <li>Click the bin button on the card. A window asks <em>"Delete conference room?"</em> and <em>"This permanently removes the room from conference management."</em></li>
     <li>Click <strong>Delete room</strong> (or <strong>Cancel</strong> to keep it).</li>
   </ol>
-  <div class="warn"><p>A room that still has <strong>Pending</strong> or <strong>Confirmed</strong> enquiries cannot be deleted. The page reloads and the room is still there. Cancel or complete those enquiries first, or switch the room off instead of deleting it.</p></div>
+  <div class="warn"><p>A room that still has <strong>Pending</strong> or <strong>Confirmed</strong> enquiries cannot be deleted. A message window shows the reason and the room stays on the page. After a successful delete you see <em>"Conference room deleted successfully!"</em>. Cancel or complete those enquiries first, or switch the room off instead of deleting it.</p></div>
 
   <h2 id="conf-confirm">How to confirm a conference enquiry</h2>
   <ol class="steps">
@@ -264,7 +264,7 @@
     <li><strong>Delete</strong> asks <em>"Delete this event?"</em>. Click OK to delete.</li>
   </ul>
   <p>Each of these reloads the page.</p>
-  <div class="warn"><p>An event that still has <strong>Pending</strong>, <strong>Confirmed</strong> or <strong>Waitlisted</strong> bookings cannot be deleted. The page reloads and the event is still there. Cancel those bookings first on the Event Bookings page, or use <strong>Toggle</strong> to switch the event off instead.</p></div>
+  <div class="warn"><p>An event that still has <strong>Pending</strong>, <strong>Confirmed</strong> or <strong>Waitlisted</strong> bookings cannot be deleted. A window titled <strong>Action Failed</strong> shows the reason and the event stays on the page. After a successful delete a window titled <strong>Success</strong> shows <em>"Event deleted successfully!"</em>. Cancel those bookings first on the Event Bookings page, or use <strong>Toggle</strong> to switch the event off instead.</p></div>
 
   <h2 id="upcoming">How to set up the Upcoming Events section</h2>
   <p>This is a block of event cards that can appear on other website pages.</p>
@@ -355,7 +355,7 @@
       <tr><td><em>Capacity must be a whole number of at least 1.</em></td><td>Capacity is empty, zero, negative or has decimals.</td><td>Enter a whole number such as 40.</td></tr>
       <tr><td><em>Full day rate must be a number (0 or more).</em></td><td>Rate is empty or not a number.</td><td>Enter a number such as 350000.</td></tr>
       <tr><td><em>Size must be a positive number.</em></td><td>Size (sqm) is not a number or is negative.</td><td>Enter a positive number or leave it empty.</td></tr>
-      <tr><td>The page reloads and the conference room is still listed. No message is shown, although the system refuses with <em>"This room has pending or confirmed enquiries. Cancel or complete them first, or deactivate the room instead of deleting it."</em></td><td>Live enquiries still use the room.</td><td>Cancel or complete the enquiries, or use the power button to switch the room off.</td></tr>
+      <tr><td>The conference room is still listed and a message window says <em>"This room has pending or confirmed enquiries. Cancel or complete them first, or deactivate the room instead of deleting it."</em></td><td>Live enquiries still use the room.</td><td>Cancel or complete the enquiries, or use the power button to switch the room off.</td></tr>
       <tr><td><em>Error: Only pending enquiries can be confirmed.</em></td><td>The enquiry is no longer pending (for example a colleague confirmed it).</td><td>Refresh the page and check its status.</td></tr>
       <tr><td><em>Error: Required conference deposit has not been fully paid yet.</em></td><td>A deposit is required and not fully paid.</td><td>Record the deposit first, then confirm or complete.</td></tr>
       <tr><td><em>Error: This room is already confirmed for [date] ([start]-[end]) under [reference]. Choose a different room or time before confirming.</em></td><td>Another confirmed or completed enquiry holds the room at that time.</td><td>Talk to the guest about another room or time. Cancel the other enquiry only if it is really being dropped.</td></tr>
@@ -376,7 +376,7 @@
       <tr><td><em>Capacity must be a whole number (leave blank or 0 for unlimited).</em></td><td>Capacity has decimals or letters.</td><td>Enter a whole number or leave it blank.</td></tr>
       <tr><td><em>Invalid image type. Only JPG, PNG, and WebP files are allowed.</em></td><td>The event image is another type, or is too large.</td><td>Convert or shrink the picture and try again.</td></tr>
       <tr><td><em>File is too large. Please resize or compress the image and try again.</em></td><td>The upload went over the server's size limit.</td><td>Use a smaller picture.</td></tr>
-      <tr><td>The page reloads and the event is still listed. No message is shown, although the system refuses with <em>"This event has pending, confirmed or waitlisted bookings. Cancel them first (Event Bookings), or switch the event off instead of deleting it."</em></td><td>Guests still hold places.</td><td>Cancel the bookings or use <strong>Toggle</strong>.</td></tr>
+      <tr><td>The event is still listed and an <strong>Action Failed</strong> window says <em>"This event has pending, confirmed or waitlisted bookings. Cancel them first (Event Bookings), or switch the event off instead of deleting it."</em></td><td>Guests still hold places.</td><td>Cancel the bookings or use <strong>Toggle</strong>.</td></tr>
       <tr><td><em>Recipient name is required.</em> / <em>A valid recipient email is required.</em></td><td>The event quotation form is missing a name or the email is not valid.</td><td>Complete both fields.</td></tr>
       <tr><td><em>Only pending bookings can be confirmed.</em></td><td>The event booking is not pending.</td><td>Refresh and check the status.</td></tr>
       <tr><td><em>Use the Cancel button in the booking details to cancel (it handles any payment).</em></td><td>You tried to set an unsupported status from the dropdown.</td><td>Open <strong>View</strong> and use <strong>Cancel Booking</strong>.</td></tr>

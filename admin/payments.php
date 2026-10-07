@@ -26,6 +26,11 @@ $bookingType = isset($_GET['booking_type']) ? $_GET['booking_type'] : '';
 $bookingId = isset($_GET['booking_id']) ? (int)$_GET['booking_id'] : 0;
 $status = isset($_GET['status']) ? $_GET['status'] : '';
 $paymentMethod = isset($_GET['payment_method']) ? $_GET['payment_method'] : '';
+// Refund workflow filter (whitelisted): ?refund_status=pending lists refund rows awaiting settlement.
+$refundStatus = (string)($_GET['refund_status'] ?? '');
+if (!in_array($refundStatus, ['pending', 'processing', 'completed', 'failed', 'rejected'], true)) {
+    $refundStatus = '';
+}
 $startDate = isset($_GET['start_date']) ? $_GET['start_date'] : '';
 $endDate = isset($_GET['end_date']) ? $_GET['end_date'] : '';
 $searchText = trim((string)($_GET['search_text'] ?? ''));
@@ -34,7 +39,7 @@ $searchText = trim((string)($_GET['search_text'] ?? ''));
 // what the dashboard "Outstanding Balances" card counts; those accounts often
 // have zero payment rows yet, so they can never appear in the payments list.
 $showOutstanding = (($_GET['balance'] ?? '') === 'outstanding');
-$has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !== '' || $paymentMethod !== '' || $startDate !== '' || $endDate !== '' || $searchText !== '';
+$has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !== '' || $refundStatus !== '' || $paymentMethod !== '' || $startDate !== '' || $endDate !== '' || $searchText !== '';
 
 // Preset scoping: by default the list shows only rows whose module is enabled
 // (a gym sees gym/event/till payments, not room-booking history). Explicit
@@ -148,6 +153,11 @@ if ($searchText !== '') {
 if ($status) {
     $where_conditions[] = "p.payment_status = ?";
     $params[] = $status;
+}
+
+if ($refundStatus !== '') {
+    $where_conditions[] = "p.payment_type = 'refund' AND p.refund_status = ?";
+    $params[] = $refundStatus;
 }
 
 if ($paymentMethod) {
@@ -344,6 +354,10 @@ if ($searchText !== '') {
 if ($status) {
     $analyticsWhere[] = "payment_status = ?";
     $analyticsParams[] = $status;
+}
+if ($refundStatus !== '') {
+    $analyticsWhere[] = "payment_type = 'refund' AND refund_status = ?";
+    $analyticsParams[] = $refundStatus;
 }
 if ($paymentMethod) {
     $analyticsWhere[] = "payment_method = ?";

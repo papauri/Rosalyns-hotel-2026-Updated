@@ -104,9 +104,9 @@
     <tbody>
       <tr><td><strong>Pending</strong></td><td>Waiting for a technician.</td></tr>
       <tr><td><strong>In Progress</strong></td><td>Work has started.</td></tr>
-      <tr><td><strong>Completed</strong></td><td>Work is finished. Waiting for sign-off.</td></tr>
-      <tr><td><strong>Verified</strong></td><td>Signed off. The request is locked.</td></tr>
-      <tr><td><strong>Cancelled</strong></td><td>The request is no longer needed.</td></tr>
+      <tr><td><strong>Completed</strong></td><td>Work is finished. Waiting for sign-off. The room stays in Maintenance.</td></tr>
+      <tr><td><strong>Verified</strong></td><td>Signed off. The request is locked and the room is released from Maintenance.</td></tr>
+      <tr><td><strong>Cancelled</strong></td><td>The request is no longer needed. The room is released.</td></tr>
     </tbody>
   </table>
   <p>Priorities for cleaning tasks are <strong>High</strong>, <strong>Medium</strong> and <strong>Low</strong>. Maintenance requests also have <strong>Urgent</strong>.</p>
@@ -217,18 +217,19 @@
 
   <h3>Requests the system creates for you</h3>
   <ul>
-    <li>Every time the Room Maintenance screen opens, the system creates a task titled <em>"Auto-generated maintenance task"</em> for each room that is in Maintenance or Out of Order, or has a guest checked in, and has no open request. The type and priority depend on the room: Out of Order gets <strong>Repair</strong> and <strong>High</strong>, Maintenance gets <strong>Repair</strong> and <strong>Urgent</strong>, and a room with a guest gets <strong>Inspection</strong> and <strong>Medium</strong>.</li>
-    <li>The <strong>Auto-Create Tasks</strong> button does the same on demand. Click it, then click <strong>Auto-Create</strong> in the box <em>"Auto-create maintenance tasks for all rooms that need them?"</em>. You will see <em>"Auto-created 2 maintenance tasks."</em></li>
+    <li>Nothing is created when you open the Room Maintenance screen. Tasks are only created when you click <strong>Auto-Create Tasks</strong>.</li>
+    <li>Click <strong>Auto-Create Tasks</strong>, then click <strong>Auto-Create</strong> in the box <em>"Create a maintenance task for every room currently in Maintenance / Out of order that has no open task? Rooms with a guest checked in are skipped."</em>. You will see <em>"Auto-created 2 maintenance tasks."</em></li>
+    <li>Each task is titled <em>"Auto-generated maintenance task"</em>. Out of Order gets <strong>Repair</strong> and <strong>High</strong>; Maintenance gets <strong>Repair</strong> and <strong>Urgent</strong>. A room with a guest checked in never gets an automatic task.</li>
   </ul>
 
   <h2 id="mt-work">How to work through a maintenance request (start, finish, verify)</h2>
   <ol class="steps">
     <li>Find the request in <strong>All Maintenance Tasks</strong>.</li>
     <li>To start: click <strong>Mark as started</strong>. The box says <em>"Mark this maintenance as started?"</em>. Click <strong>Start</strong>. You will see <em>"Schedule marked as started."</em></li>
-    <li>To finish: click <strong>Mark done</strong>. The box says <em>"Mark this maintenance as completed?"</em>. Click <strong>Mark Done</strong>. You will see <em>"Schedule marked as completed."</em></li>
-    <li>To sign off (manager or supervisor): click <strong>Verify</strong> (only on Completed requests). The box says <em>"Mark this maintenance as verified? This cannot be undone."</em>. Click <strong>Verify</strong>. You will see <em>"Maintenance verified successfully."</em></li>
+    <li>To finish: click <strong>Mark done</strong>. The box says <em>"Mark this maintenance as completed? The room stays in Maintenance until the task is verified."</em>. Click <strong>Mark Done</strong>. You will see <em>"Schedule marked as completed."</em></li>
+    <li>To sign off (manager or supervisor): click <strong>Verify</strong> (only on Completed requests). The box says <em>"Mark this maintenance as verified? The room will be released from Maintenance and this cannot be undone."</em>. Click <strong>Verify</strong>. You will see <em>"Maintenance verified successfully."</em> Verifying releases the room.</li>
   </ol>
-  <p>Once a request is Completed or Verified it no longer stops the room being booked.</p>
+  <p>Once a request is Completed or Verified it no longer stops the room being booked, but the room only leaves Maintenance when the request is Verified or Cancelled. The screen shows the help text <em>"Completed does not release the room."</em> above the table. In the Edit window the status list reads <strong>Completed (room stays in Maintenance)</strong>, <strong>Verified (releases the room)</strong> and <strong>Cancelled (releases the room)</strong>.</p>
 
   <h2 id="mt-bulk">How to assign maintenance to several rooms</h2>
   <ol class="steps">
@@ -266,7 +267,7 @@
     <li>A room is never given two open checkout cleanings, and the same room is never given a second checkout cleanup by <strong>Auto-Create Checkout Cleanup</strong>.</li>
     <li>While a room has an open cleaning task, an Available room is moved to <strong>Cleaning</strong>. When the room has no open cleaning task (everything is Completed, Verified or deleted), a room in <strong>Cleaning</strong> is moved to <strong>Available</strong>. This check runs each time you open the Housekeeping screen and after every change you make on it.</li>
     <li>If a room's status is set to Maintenance or Out of Order, its Pending and In progress cleaning tasks become <strong>Blocked</strong>.</li>
-    <li>Open maintenance requests move the room to <strong>Maintenance</strong>, except Occupied and Out of Order rooms, which are left as they are. Pending, In progress and Completed requests all count as open for this. Verifying, cancelling or deleting them releases the room.</li>
+    <li>Open maintenance requests move the room to <strong>Maintenance</strong>, except Occupied and Out of Order rooms, which are left as they are. Pending, In progress and Completed requests all count as open for this, so a Completed request keeps the room in Maintenance until it is Verified. Verifying, cancelling or deleting them releases the room.</li>
     <li>A maintenance request with <strong>Block room during maintenance</strong> ticked stops bookings for the room between its Start Date and End Date until the request is Completed, Verified or Cancelled.</li>
     <li>Checking a guest in to a room that is not clean is blocked unless you have the <strong>Check-in to Room Not Clean</strong> permission and confirm.</li>
     <li>Every change to a cleaning task or maintenance request is saved in its history.</li>
