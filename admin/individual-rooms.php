@@ -5,7 +5,43 @@
  * Manage individual rooms (specific rooms like "Executive 101", "VVIP Suite")
  */
 require_once 'admin-init.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 /** @var string $csrf_token */
+
+/** Common field checks for an individual room (add + edit). Returns an error string or null. */
+function ir_validate_room_fields(PDO $pdo, int $room_type_id, string $room_number, string $room_name, string $floor, string $notes, $maxGuestsRaw, $childMultRaw, int $display_order): ?string
+{
+    if ($room_type_id <= 0 || $room_number === '') {
+        return 'Room type and room number are required.';
+    }
+    $typeCheck = $pdo->prepare('SELECT COUNT(*) FROM rooms WHERE id = ?');
+    $typeCheck->execute([$room_type_id]);
+    if ((int)$typeCheck->fetchColumn() === 0) {
+        return 'The selected room type does not exist.';
+    }
+    if (mb_strlen($room_number) > 50) {
+        return 'Room number is too long (max 50 characters).';
+    }
+    if (mb_strlen($room_name) > 100) {
+        return 'Room name is too long (max 100 characters).';
+    }
+    if (mb_strlen($floor) > 20) {
+        return 'Floor is too long (max 20 characters).';
+    }
+    if (mb_strlen($notes) > 5000) {
+        return 'Notes are too long (max 5000 characters).';
+    }
+    if ($maxGuestsRaw !== '' && $maxGuestsRaw !== null && (!is_numeric($maxGuestsRaw) || (int)$maxGuestsRaw < 1 || (int)$maxGuestsRaw > 20)) {
+        return 'Maximum guests override must be between 1 and 20.';
+    }
+    if ($childMultRaw !== '' && $childMultRaw !== null && (!is_numeric($childMultRaw) || (float)$childMultRaw < 0 || (float)$childMultRaw > 100)) {
+        return 'Child price percentage must be between 0 and 100.';
+    }
+    if ($display_order < 0 || $display_order > 100000) {
+        return 'Display order must be 0 or more.';
+    }
+    return null;
+}
 
 $message = '';
 $error = '';
@@ -61,9 +97,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'add_individual_room') {
             $room_type_id = (int)$_POST['room_type_id'];
-            $room_number = trim($_POST['room_number']);
-            $room_name = trim($_POST['room_name'] ?? '');
-            $floor = trim($_POST['floor'] ?? '');
+            $room_number = rh_clean_text($_POST['room_number'] ?? '');
+            $room_name = rh_clean_text($_POST['room_name'] ?? '');
+            $floor = rh_clean_text($_POST['floor'] ?? '');
             $status = $_POST['status'] ?? 'available';
             $max_guests_override = ($_POST['max_guests_override'] ?? '') !== '' ? max(1, (int)$_POST['max_guests_override']) : null;
             $child_price_multiplier = ($_POST['child_price_multiplier'] ?? '') !== '' ? (float)$_POST['child_price_multiplier'] : null;
@@ -81,17 +117,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Validate
             $validRoomStatuses = ['available', 'occupied', 'maintenance', 'cleaning', 'out_of_order'];
-            if (empty($room_type_id) || empty($room_number)) {
-                $error = 'Room type and room number are required.';
+            $fieldError = ir_validate_room_fields($pdo, $room_type_id, $room_number, $room_name, $floor, $notes, $_POST['max_guests_override'] ?? '', $_POST['child_price_multiplier'] ?? '', $display_order);
+            if ($fieldError !== null) {
+                $error = $fieldError;
             } elseif (!in_array($status, $validRoomStatuses, true)) {
                 $error = 'Invalid room status.';
             } else {
-                // Check if room number already exists
-                $check = $pdo->prepare("SELECT COUNT(*) FROM individual_rooms WHERE room_number = ?");
-                $check->execute([$room_number]);
-                if ($check->fetchColumn() > 0) {
-                    $error = 'Room number already exists. Please use a unique room number.';
-                } else {
+                // Check if room number already exists (case/space-insensitive, re-checked under a lock)
+                rh_with_create_lock($pdo, 'individual_room', function () use ($pdo, $user, $room_type_id, $room_number, $room_name, $floor, $status, $max_guests_override, $child_price_multiplier, $single_override, $double_override, $triple_override, $children_override, $notes, $display_order, $amenities_list, $photos_list, &$error, &$message) {
+                    $dupRoom = rh_find_duplicate($pdo, 'individual_rooms', 'room_number', $room_number);
+                    if ($dupRoom) {
+                        $error = 'Room number "' . $dupRoom['value'] . '" already exists. Please use a unique room number.';
+                        return;
+                    }
+                    {
                     // Insert new individual room
                     $stmt = $pdo->prepare("
                         INSERT INTO individual_rooms (
@@ -129,14 +168,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     saveRoomPhotos($pdo, (int)$room_id, $photos_list);
 
                     $message = 'Individual room added successfully!';
-                }
+                    }
+                });
             }
         } elseif ($action === 'update_individual_room') {
             $id = (int)$_POST['id'];
             $room_type_id = (int)$_POST['room_type_id'];
-            $room_number = trim($_POST['room_number']);
-            $room_name = trim($_POST['room_name'] ?? '');
-            $floor = trim($_POST['floor'] ?? '');
+            $room_number = rh_clean_text($_POST['room_number'] ?? '');
+            $room_name = rh_clean_text($_POST['room_name'] ?? '');
+            $floor = rh_clean_text($_POST['floor'] ?? '');
             $max_guests_override = ($_POST['max_guests_override'] ?? '') !== '' ? max(1, (int)$_POST['max_guests_override']) : null;
             $child_price_multiplier = ($_POST['child_price_multiplier'] ?? '') !== '' ? (float)$_POST['child_price_multiplier'] : null;
             if ($child_price_multiplier !== null && $child_price_multiplier < 0) {
@@ -153,14 +193,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $photos_list = trim($_POST['photos_list'] ?? '');
 
             // Validate
-            if (empty($room_type_id) || empty($room_number)) {
-                $error = 'Room type and room number are required.';
+            $fieldError = $id <= 0 ? 'Room not found.' : ir_validate_room_fields($pdo, $room_type_id, $room_number, $room_name, $floor, $notes, $_POST['max_guests_override'] ?? '', $_POST['child_price_multiplier'] ?? '', $display_order);
+            if ($fieldError !== null) {
+                $error = $fieldError;
             } else {
                 // Check if room number already exists (excluding current room)
-                $check = $pdo->prepare("SELECT COUNT(*) FROM individual_rooms WHERE room_number = ? AND id != ?");
-                $check->execute([$room_number, $id]);
-                if ($check->fetchColumn() > 0) {
-                    $error = 'Room number already exists. Please use a unique room number.';
+                $dupRoom = rh_find_duplicate($pdo, 'individual_rooms', 'room_number', $room_number, [], $id);
+                if ($dupRoom) {
+                    $error = 'Room number "' . $dupRoom['value'] . '" already exists. Please use a unique room number.';
                 } else {
                     $stmt = $pdo->prepare("
                         UPDATE individual_rooms
@@ -192,7 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'save_room_combination') {
             $id = (int)($_POST['combination_id'] ?? 0);
-            $combined_name = trim($_POST['combined_name'] ?? '');
+            $combined_name = rh_clean_text($_POST['combined_name'] ?? '');
             $combined_room_type_id = (int)($_POST['combined_room_type_id'] ?? 0);
             $room_a_id = (int)($_POST['room_a_id'] ?? 0);
             $room_b_id = (int)($_POST['room_b_id'] ?? 0);
@@ -208,8 +248,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $roomCheck = $pdo->prepare("SELECT COUNT(*) FROM individual_rooms WHERE id IN (?, ?) AND is_active = 1");
                 $roomCheck->execute([$room_a_id, $room_b_id]);
-                if ((int)$roomCheck->fetchColumn() !== 2) {
+                $comboTypeCheck = $pdo->prepare('SELECT COUNT(*) FROM rooms WHERE id = ?');
+                $comboTypeCheck->execute([$combined_room_type_id]);
+                // same pair of rooms already joined (either order)?
+                $pairSt = $pdo->prepare('SELECT id, combined_name FROM room_combinations WHERE is_active = 1 AND id <> ? AND ((room_a_id = ? AND room_b_id = ?) OR (room_a_id = ? AND room_b_id = ?)) LIMIT 1');
+                $pairSt->execute([$id, $room_a_id, $room_b_id, $room_b_id, $room_a_id]);
+                $pairDup = $pairSt->fetch(PDO::FETCH_ASSOC);
+                $comboDup = rh_find_duplicate($pdo, 'room_combinations', 'combined_name', $combined_name, [], $id > 0 ? $id : null);
+                if (mb_strlen($combined_name) > 120) {
+                    $error = 'Combination name is too long (max 120 characters).';
+                } elseif ((int)$roomCheck->fetchColumn() !== 2) {
                     $error = 'Both physical rooms must exist and be active.';
+                } elseif ((int)$comboTypeCheck->fetchColumn() === 0) {
+                    $error = 'The selected room type does not exist.';
+                } elseif ($price_override !== null && !is_finite($price_override)) {
+                    $error = 'Price override must be a valid number.';
+                } elseif ($comboDup) {
+                    $error = rh_duplicate_message('joined-room combination', (string)$comboDup['value']);
+                } elseif ($pairDup && $is_active) {
+                    $error = 'These two rooms are already joined as "' . $pairDup['combined_name'] . '".';
                 } elseif ($id > 0) {
                     $stmt = $pdo->prepare(" 
                         UPDATE room_combinations
@@ -221,13 +278,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $message = 'Joined-room combination updated successfully!';
                     $autoOpenCombinations = true;
                 } else {
-                    $stmt = $pdo->prepare(" 
-                        INSERT INTO room_combinations (combined_name, combined_room_type_id, room_a_id, room_b_id, price_override, max_guests_combined, is_active, notes, created_by)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ");
-                    $stmt->execute([$combined_name, $combined_room_type_id, $room_a_id, $room_b_id, $price_override, $max_guests_combined, $is_active, $notes, $user['id'] ?? null]);
-                    $message = 'Joined-room combination added successfully!';
-                    $autoOpenCombinations = true;
+                    rh_with_create_lock($pdo, 'room_combination', function () use ($pdo, $user, $combined_name, $combined_room_type_id, $room_a_id, $room_b_id, $price_override, $max_guests_combined, $is_active, $notes, &$error, &$message, &$autoOpenCombinations) {
+                        if (rh_find_duplicate($pdo, 'room_combinations', 'combined_name', $combined_name)) {
+                            $error = rh_duplicate_message('joined-room combination', $combined_name);
+                            return;
+                        }
+                        $stmt = $pdo->prepare("
+                            INSERT INTO room_combinations (combined_name, combined_room_type_id, room_a_id, room_b_id, price_override, max_guests_combined, is_active, notes, created_by)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ");
+                        $stmt->execute([$combined_name, $combined_room_type_id, $room_a_id, $room_b_id, $price_override, $max_guests_combined, $is_active, $notes, $user['id'] ?? null]);
+                        $message = 'Joined-room combination added successfully!';
+                        $autoOpenCombinations = true;
+                    });
                 }
             }
         } elseif ($action === 'deactivate_room_combination') {

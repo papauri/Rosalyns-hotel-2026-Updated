@@ -11,6 +11,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'includes/procurement-schema.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -56,6 +57,39 @@ function rh_po_assert_editable(PDO $pdo, int $poId): string
     return (string)$status;
 }
 
+/** Validate a posted quantity/cost: numeric, 0 or more (or > 0 when $positive), sane upper bound. */
+function rh_po_number($raw, string $label, bool $positive = false, bool $allowBlank = false): float
+{
+    $raw = str_replace(',', '', trim((string)$raw));
+    if ($raw === '') {
+        if ($allowBlank) return 0.0;
+        throw new RuntimeException($label . ' is required.');
+    }
+    if (!is_numeric($raw)) {
+        throw new RuntimeException($label . ' must be a number.');
+    }
+    $v = (float)$raw;
+    if ($v < 0 || ($positive && $v <= 0)) {
+        throw new RuntimeException($label . ($positive ? ' must be greater than zero.' : ' cannot be negative.'));
+    }
+    if ($v > 99999999) {
+        throw new RuntimeException($label . ' is too large.');
+    }
+    return $v;
+}
+
+/** Validate an optional Y-m-d date; returns '' when blank. */
+function rh_po_date($raw, string $label): string
+{
+    $raw = trim((string)$raw);
+    if ($raw === '') return '';
+    $d = DateTime::createFromFormat('Y-m-d', $raw);
+    if (!$d || $d->format('Y-m-d') !== $raw) {
+        throw new RuntimeException($label . ' is not a valid date.');
+    }
+    return $raw;
+}
+
 $redirectTo = 'purchase-orders.php';
 
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -68,9 +102,12 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($action === 'create' || $action === 'create_from_reorder') {
                 $supplierId = (int)($_POST['supplier_id'] ?? 0);
-                $orderDate  = trim($_POST['order_date'] ?? '') ?: date('Y-m-d');
-                $expected   = trim($_POST['expected_date'] ?? '');
-                $notes      = trim($_POST['notes'] ?? '');
+                $orderDate  = rh_po_date($_POST['order_date'] ?? '', 'Order date') ?: date('Y-m-d');
+                $expected   = rh_po_date($_POST['expected_date'] ?? '', 'Expected delivery date');
+                $notes      = trim((string)($_POST['notes'] ?? ''));
+                if (mb_strlen($notes) > 5000) {
+                    throw new RuntimeException('Notes are too long (5000 characters maximum).');
+                }
 
                 // The supplier must exist and be active: a stale form or the Reorder
                 // page could otherwise raise a PO against a deactivated supplier.
@@ -89,49 +126,87 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('Expected delivery date cannot be before the order date.');
                 }
 
-                $pdo->beginTransaction();
-                $ref = rh_next_po_reference($pdo);
-                $pdo->prepare("
-                    INSERT INTO stock_purchase_orders (reference, supplier_id, status, order_date, expected_date, notes, created_by)
-                    VALUES (?, ?, 'draft', ?, ?, ?, ?)
-                ")->execute([$ref, $supplierId ?: null, $orderDate, $expected ?: null, $notes ?: null, $user['id']]);
-                $poId = (int)$pdo->lastInsertId();
-
+                // Validate reorder lines up front (quantities numeric > 0, costs numeric >= 0, no ingredient twice).
+                $reorderLines = [];
                 if ($action === 'create_from_reorder') {
                     $ids   = $_POST['ingredient_id'] ?? [];
                     $qtys  = $_POST['order_qty'] ?? [];
                     $costs = $_POST['unit_cost'] ?? [];
-                    $lineIns = $pdo->prepare("
-                        INSERT INTO stock_purchase_order_items
-                            (purchase_order_id, ingredient_id, description, unit, ordered_qty, unit_cost, line_total)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ");
-                    $ingMeta = $pdo->prepare("SELECT name, unit FROM stock_ingredients WHERE id = ?");
+                    $seenIds = [];
                     $n = is_array($ids) ? count($ids) : 0;
                     for ($k = 0; $k < $n; $k++) {
                         $iid = (int)($ids[$k] ?? 0);
-                        $q   = (float)($qtys[$k] ?? 0);
-                        $c   = max(0, (float)($costs[$k] ?? 0));
-                        if ($iid <= 0 || $q <= 0) continue;
-                        $ingMeta->execute([$iid]);
-                        $m = $ingMeta->fetch(PDO::FETCH_ASSOC);
-                        if (!$m) continue;
-                        $lineIns->execute([$poId, $iid, $m['name'], $m['unit'], $q, $c, round($q * $c, 2)]);
+                        $qRaw = trim((string)($qtys[$k] ?? ''));
+                        if ($iid <= 0 || $qRaw === '' || (is_numeric($qRaw) && (float)$qRaw == 0.0)) continue;
+                        $q = rh_po_number($qRaw, 'Order quantity', true);
+                        $c = rh_po_number($costs[$k] ?? '', 'Unit cost', false, true);
+                        if (isset($seenIds[$iid])) {
+                            throw new RuntimeException('The same ingredient appears more than once in this order.');
+                        }
+                        $seenIds[$iid] = true;
+                        $reorderLines[] = [$iid, $q, $c];
                     }
-                    rh_po_recalc($pdo, $poId);
                 }
-                $pdo->commit();
-                $message = "Draft purchase order {$ref} created.";
-                $redirectTo = 'purchase-orders.php?id=' . $poId;
+
+                // Double-submit guard: the same user, supplier and dates raising an identical draft within
+                // the last 30 seconds is a double click - open the draft that already exists instead.
+                $dupPoId = 0;
+                $poLockOk = rh_with_create_lock($pdo, 'stock_po_create', function () use ($pdo, $action, $supplierId, $orderDate, $expected, $notes, $user, $reorderLines, &$message, &$redirectTo, &$dupPoId) {
+                    $recent = $pdo->prepare("
+                        SELECT id, reference FROM stock_purchase_orders
+                        WHERE status = 'draft' AND created_by <=> ? AND supplier_id <=> ? AND order_date = ?
+                          AND expected_date <=> ? AND COALESCE(notes, '') = ?
+                          AND created_at >= (NOW() - INTERVAL 30 SECOND)
+                        ORDER BY id DESC LIMIT 1
+                    ");
+                    $recent->execute([$user['id'], $supplierId ?: null, $orderDate, $expected ?: null, $notes]);
+                    if ($existing = $recent->fetch(PDO::FETCH_ASSOC)) {
+                        $dupPoId = (int)$existing['id'];
+                        $message = "Draft purchase order {$existing['reference']} was already created.";
+                        $redirectTo = 'purchase-orders.php?id=' . $dupPoId;
+                        return true;
+                    }
+
+                    $pdo->beginTransaction();
+                    $ref = rh_next_po_reference($pdo);
+                    $pdo->prepare("
+                        INSERT INTO stock_purchase_orders (reference, supplier_id, status, order_date, expected_date, notes, created_by)
+                        VALUES (?, ?, 'draft', ?, ?, ?, ?)
+                    ")->execute([$ref, $supplierId ?: null, $orderDate, $expected ?: null, $notes ?: null, $user['id']]);
+                    $poId = (int)$pdo->lastInsertId();
+
+                    if ($action === 'create_from_reorder') {
+                        $lineIns = $pdo->prepare("
+                            INSERT INTO stock_purchase_order_items
+                                (purchase_order_id, ingredient_id, description, unit, ordered_qty, unit_cost, line_total)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ");
+                        $ingMeta = $pdo->prepare("SELECT name, unit FROM stock_ingredients WHERE id = ?");
+                        foreach ($reorderLines as $rl) {
+                            [$iid, $q, $c] = $rl;
+                            $ingMeta->execute([$iid]);
+                            $m = $ingMeta->fetch(PDO::FETCH_ASSOC);
+                            if (!$m) continue;
+                            $lineIns->execute([$poId, $iid, $m['name'], $m['unit'], $q, $c, round($q * $c, 2)]);
+                        }
+                        rh_po_recalc($pdo, $poId);
+                    }
+                    $pdo->commit();
+                    $message = "Draft purchase order {$ref} created.";
+                    $redirectTo = 'purchase-orders.php?id=' . $poId;
+                    return true;
+                });
 
             } elseif ($action === 'add_line') {
                 $poId = (int)($_POST['po_id'] ?? 0);
                 $iid  = (int)($_POST['ingredient_id'] ?? 0);
-                $desc = trim($_POST['description'] ?? '');
-                $unit = trim($_POST['unit'] ?? '');
-                $q    = (float)($_POST['ordered_qty'] ?? 0);
-                $c    = max(0, (float)($_POST['unit_cost'] ?? 0));
-                if ($q <= 0) throw new RuntimeException('Quantity must be greater than zero.');
+                $desc = rh_clean_text($_POST['description'] ?? '');
+                $unit = rh_clean_text($_POST['unit'] ?? '');
+                $q    = rh_po_number($_POST['ordered_qty'] ?? '', 'Quantity', true);
+                $c    = rh_po_number($_POST['unit_cost'] ?? '', 'Unit cost', false, true);
+                if (mb_strlen($desc) > 255) throw new RuntimeException('Description is too long (255 characters maximum).');
+                if (mb_strlen($unit) > 50) throw new RuntimeException('Unit is too long (50 characters maximum).');
+                if ($poId <= 0) throw new RuntimeException('Purchase order not found.');
                 rh_po_assert_editable($pdo, $poId);
                 if ($iid > 0) {
                     $m = $pdo->prepare("SELECT name, unit, cost_per_unit FROM stock_ingredients WHERE id = ?");
@@ -169,9 +244,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($action === 'update_line') {
                 $lineId = (int)($_POST['line_id'] ?? 0);
                 $poId   = (int)($_POST['po_id'] ?? 0);
-                $q = (float)($_POST['ordered_qty'] ?? 0);
-                $c = max(0, (float)($_POST['unit_cost'] ?? 0));
-                if ($q <= 0) throw new RuntimeException('Quantity must be greater than zero.');
+                $q = rh_po_number($_POST['ordered_qty'] ?? '', 'Quantity', true);
+                $c = rh_po_number($_POST['unit_cost'] ?? '', 'Unit cost', false, true);
                 rh_po_assert_editable($pdo, $poId);
                 $recvChk = $pdo->prepare("SELECT received_qty FROM stock_purchase_order_items WHERE id = ? AND purchase_order_id = ?");
                 $recvChk->execute([$lineId, $poId]);
@@ -236,8 +310,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $n = is_array($lineIds) ? count($lineIds) : 0;
                 for ($k = 0; $k < $n; $k++) {
                     $lid = (int)($lineIds[$k] ?? 0);
-                    $rq  = (float)($recvQtys[$k] ?? 0);
-                    if ($lid <= 0 || $rq <= 0) continue;
+                    $rqRaw = trim((string)($recvQtys[$k] ?? ''));
+                    if ($lid <= 0 || $rqRaw === '') continue;
+                    $rq = rh_po_number($rqRaw, 'Receive quantity', false);
+                    if ($rq <= 0) continue;
                     $lineSel->execute([$lid, $poId]);
                     $line = $lineSel->fetch(PDO::FETCH_ASSOC);
                     if (!$line) continue;
@@ -246,8 +322,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($rq > $outstanding + 0.0001) $rq = $outstanding;   // cap over-receipt
                     if ($rq <= 0) continue;
 
-                    $cost = isset($recvCosts[$k]) && $recvCosts[$k] !== '' ? max(0, (float)$recvCosts[$k]) : (float)$line['unit_cost'];
-                    $expiry = trim($expiries[$k] ?? '');
+                    $cost = isset($recvCosts[$k]) && trim((string)$recvCosts[$k]) !== '' ? rh_po_number($recvCosts[$k], 'Unit cost') : (float)$line['unit_cost'];
+                    $expiry = rh_po_date($expiries[$k] ?? '', 'Expiry date');
 
                     if (!empty($line['ingredient_id'])) {
                         rh_receive_stock_line(

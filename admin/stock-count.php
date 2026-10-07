@@ -20,6 +20,7 @@
  */
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 $user = [
     'id'        => $_SESSION['admin_user_id'],
@@ -67,9 +68,28 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($action === 'start_count') {
                 $scope = $_POST['scope'] ?? 'spot';
                 if (!in_array($scope, ['full', 'category', 'spot'], true)) $scope = 'spot';
-                $scopeValue = trim($_POST['scope_value'] ?? '');
-                $shift = trim($_POST['shift'] ?? '');
-                $notes = trim($_POST['notes'] ?? '');
+                $scopeValue = rh_clean_text($_POST['scope_value'] ?? '');
+                $shift = rh_clean_text($_POST['shift'] ?? '');
+                $notes = trim((string)($_POST['notes'] ?? ''));
+                if (mb_strlen($scopeValue) > 255 || mb_strlen($shift) > 50 || mb_strlen($notes) > 1000) {
+                    throw new RuntimeException('Scope (255), shift (50) or notes (1000 characters) is too long.');
+                }
+                if ($scope === 'category' && $scopeValue === '') {
+                    throw new RuntimeException('Choose a category for a category count.');
+                }
+                if ($scope === 'spot' && !preg_match('/^\s*\d+(\s*,\s*\d+)*\s*$/', $scopeValue)) {
+                    throw new RuntimeException('Spot count needs ingredient IDs separated by commas.');
+                }
+
+                // Double-submit guard: the same user starting the identical draft count within 30 seconds
+                // is a double click - open the count that already exists.
+                $recentCount = $pdo->prepare("SELECT id FROM stock_counts WHERE status = 'draft' AND counted_by = ? AND scope = ? AND scope_value <=> ? AND shift <=> ? AND created_at >= (NOW() - INTERVAL 30 SECOND) ORDER BY id DESC LIMIT 1");
+                $recentCount->execute([$user['id'], $scope, $scopeValue ?: null, $shift ?: null]);
+                if ($existingCountId = (int)$recentCount->fetchColumn()) {
+                    $_SESSION['stock_msg'] = 'That count was already started - opened it.';
+                    header('Location: stock-count.php?id=' . $existingCountId);
+                    exit;
+                }
 
                 $ref = generateCountReference();
                 $ins = $pdo->prepare("INSERT INTO stock_counts (reference, count_date, shift, scope, scope_value, status, counted_by, notes) VALUES (?, CURDATE(), ?, ?, ?, 'draft', ?, ?)");
@@ -122,7 +142,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $snapSel = $pdo->prepare("SELECT system_quantity, cost_per_unit FROM stock_count_lines WHERE id = ? AND count_id = ?");
                 foreach ($lines as $lineId => $payload) {
                     $lineId = (int)$lineId;
-                    $actual = (float)($payload['actual'] ?? 0);
+                    $actualRaw = trim((string)($payload['actual'] ?? ''));
+                    if ($actualRaw !== '' && !is_numeric($actualRaw)) {
+                        throw new RuntimeException('Actual quantity must be a number.');
+                    }
+                    $actual = (float)$actualRaw;
+                    if ($actual > 99999999) {
+                        throw new RuntimeException('Actual quantity is too large.');
+                    }
                     $snapSel->execute([$lineId, $countId]);
                     $snap = $snapSel->fetch(PDO::FETCH_ASSOC);
                     if (!$snap) {
@@ -132,6 +159,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $cost   = (float)$snap['cost_per_unit'];
                     $reason = (string)($payload['reason'] ?? '');
                     $notes  = trim((string)($payload['notes'] ?? ''));
+                    if (mb_strlen($notes) > 500) {
+                        throw new RuntimeException('Line notes are too long (500 characters maximum).');
+                    }
                     if ($actual < 0) {
                         throw new RuntimeException('Actual quantity cannot be negative.');
                     }

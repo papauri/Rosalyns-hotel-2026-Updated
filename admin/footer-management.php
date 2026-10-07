@@ -9,6 +9,7 @@ require_once 'admin-init.php';
 /** @var string $csrf_token */
 require_once '../includes/alert.php';
 require_once 'includes/admin-modal.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 if (!hasPermission((int)$user['id'], 'footer_management')) {
     rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
@@ -21,8 +22,8 @@ $error   = '';
 /** Footer link target: '', '#', http(s), mailto:, tel:, or a site path - never javascript:/data:. */
 function footerCheckUrl(string $url, string $label): string
 {
-    if (mb_strlen($url) > 500) {
-        throw new Exception($label . ' is too long (500 characters maximum).');
+    if (mb_strlen($url) > 255) {
+        throw new Exception($label . ' is too long (255 characters maximum).');
     }
     if ($url === '' || $url[0] === '#' || preg_match('#^(https?://|mailto:|tel:)#i', $url)) {
         return $url;
@@ -79,47 +80,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             // ── Footer Links ────────────────────────────────────────────────
             if ($action === 'add_link') {
-                $col   = trim($_POST['column_name'] ?? '');
-                $text  = trim($_POST['link_text'] ?? '');
-                $url   = trim($_POST['link_url'] ?? '');
-                $sec   = trim($_POST['secondary_link_url'] ?? '') ?: null;
+                $col   = rh_clean_text($_POST['column_name'] ?? '');
+                $text  = rh_clean_text($_POST['link_text'] ?? '');
+                $url   = rh_clean_text($_POST['link_url'] ?? '');
+                $sec   = rh_clean_text($_POST['secondary_link_url'] ?? '') ?: null;
                 $order = max(0, (int)($_POST['display_order'] ?? 0));
 
                 if (!$col || !$text) {
                     throw new Exception('Column name and link text are required.');
                 }
-                if (mb_strlen($col) > 100 || mb_strlen($text) > 200) {
-                    throw new Exception('Column name (100) or link text (200) is too long.');
+                if (mb_strlen($col) > 100 || mb_strlen($text) > 100) {
+                    throw new Exception('Column name or link text is too long (100 characters maximum).');
                 }
                 $url = footerCheckUrl($url, 'Link URL');
                 $sec = $sec !== null ? footerCheckUrl($sec, 'Secondary link URL') : null;
 
-                $stmt = $pdo->prepare("
-                    INSERT INTO footer_links (column_name, link_text, link_url, secondary_link_url, display_order, is_active)
-                    VALUES (?, ?, ?, ?, ?, 1)
-                ");
-                $stmt->execute([$col, $text, $url, $sec, $order]);
+                // Same link = same text in the same footer column.
+                rh_with_create_lock($pdo, 'footer_link', function () use ($pdo, $col, $text, $url, $sec, $order) {
+                    $dup = rh_find_duplicate($pdo, 'footer_links', 'link_text', $text, ['column_name' => $col]);
+                    if ($dup) {
+                        throw new Exception('The "' . $col . '" column already has a link called "' . $dup['value'] . '". Edit that one instead.');
+                    }
+                    $stmt = $pdo->prepare("
+                        INSERT INTO footer_links (column_name, link_text, link_url, secondary_link_url, display_order, is_active)
+                        VALUES (?, ?, ?, ?, ?, 1)
+                    ");
+                    $stmt->execute([$col, $text, $url, $sec, $order]);
+                });
                 $message = 'Footer link added.';
                 if (function_exists('clearCache')) clearCache();
                 rh_log_event('footer_management', 'info', 'Footer link added', ['link_text' => $text, 'by' => $user['username']]);
 
             } elseif ($action === 'edit_link') {
                 $id    = (int)($_POST['link_id'] ?? 0);
-                $col   = trim($_POST['column_name'] ?? '');
-                $text  = trim($_POST['link_text'] ?? '');
-                $url   = trim($_POST['link_url'] ?? '');
-                $sec   = trim($_POST['secondary_link_url'] ?? '') ?: null;
+                $col   = rh_clean_text($_POST['column_name'] ?? '');
+                $text  = rh_clean_text($_POST['link_text'] ?? '');
+                $url   = rh_clean_text($_POST['link_url'] ?? '');
+                $sec   = rh_clean_text($_POST['secondary_link_url'] ?? '') ?: null;
                 $order = max(0, (int)($_POST['display_order'] ?? 0));
                 $active = (int)(!empty($_POST['is_active']));
 
                 if ($id <= 0 || !$col || !$text) {
                     throw new Exception('Column name and link text are required.');
                 }
-                if (mb_strlen($col) > 100 || mb_strlen($text) > 200) {
-                    throw new Exception('Column name (100) or link text (200) is too long.');
+                if (mb_strlen($col) > 100 || mb_strlen($text) > 100) {
+                    throw new Exception('Column name or link text is too long (100 characters maximum).');
                 }
                 $url = footerCheckUrl($url, 'Link URL');
                 $sec = $sec !== null ? footerCheckUrl($sec, 'Secondary link URL') : null;
+
+                $existsLink = $pdo->prepare("SELECT COUNT(*) FROM footer_links WHERE id = ?");
+                $existsLink->execute([$id]);
+                if ((int)$existsLink->fetchColumn() === 0) {
+                    throw new Exception('That footer link no longer exists.');
+                }
+                $dup = rh_find_duplicate($pdo, 'footer_links', 'link_text', $text, ['column_name' => $col], $id);
+                if ($dup) {
+                    throw new Exception('The "' . $col . '" column already has a link called "' . $dup['value'] . '".');
+                }
 
                 $stmt = $pdo->prepare("
                     UPDATE footer_links
@@ -154,7 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // ── Policies ────────────────────────────────────────────────────
             } elseif ($action === 'add_policy') {
                 $slug    = trim((string)preg_replace('/[^a-z0-9-]/', '-', strtolower($_POST['slug'] ?? '')), '-');
-                $title   = trim($_POST['title'] ?? '');
+                $title   = rh_clean_text($_POST['title'] ?? '');
                 $summary = trim($_POST['summary'] ?? '');
                 $content = trim($_POST['content'] ?? '');
                 $order   = max(0, (int)($_POST['display_order'] ?? 0));
@@ -162,28 +180,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$slug || !$title || !$content) {
                     throw new Exception('Slug, title, and content are required.');
                 }
-                if (strlen($slug) > 100 || mb_strlen($title) > 200) {
-                    throw new Exception('Slug (100) or title (200) is too long.');
+                if (strlen($slug) > 100 || mb_strlen($title) > 150) {
+                    throw new Exception('Slug (100) or title (150) is too long.');
+                }
+                if (mb_strlen($summary) > 255) {
+                    throw new Exception('Summary is too long (255 characters maximum).');
                 }
 
-                $chk = $pdo->prepare("SELECT COUNT(*) FROM policies WHERE slug = ?");
-                $chk->execute([$slug]);
-                if ($chk->fetchColumn() > 0) {
-                    throw new Exception('A policy with that slug already exists.');
-                }
-
-                $stmt = $pdo->prepare("
-                    INSERT INTO policies (slug, title, summary, content, display_order, is_active)
-                    VALUES (?, ?, ?, ?, ?, 1)
-                ");
-                $stmt->execute([$slug, $title, $summary, $content, $order]);
+                rh_with_create_lock($pdo, 'policy', function () use ($pdo, $slug, $title, $summary, $content, $order) {
+                    if ($dupSlug = rh_find_duplicate($pdo, 'policies', 'slug', $slug)) {
+                        throw new Exception('A policy with the slug "' . $dupSlug['value'] . '" already exists.');
+                    }
+                    if ($dupTitle = rh_find_duplicate($pdo, 'policies', 'title', $title)) {
+                        throw new Exception(rh_duplicate_message('policy', (string)$dupTitle['value']));
+                    }
+                    $stmt = $pdo->prepare("
+                        INSERT INTO policies (slug, title, summary, content, display_order, is_active)
+                        VALUES (?, ?, ?, ?, ?, 1)
+                    ");
+                    $stmt->execute([$slug, $title, $summary, $content, $order]);
+                });
                 $message = "Policy \"$title\" added.";
                 if (function_exists('clearCache')) clearCache();
                 rh_log_event('footer_management', 'info', 'Policy added', ['slug' => $slug, 'by' => $user['username']]);
 
             } elseif ($action === 'edit_policy') {
                 $id      = (int)($_POST['policy_id'] ?? 0);
-                $title   = trim($_POST['title'] ?? '');
+                $title   = rh_clean_text($_POST['title'] ?? '');
                 $summary = trim($_POST['summary'] ?? '');
                 $content = trim($_POST['content'] ?? '');
                 $order   = max(0, (int)($_POST['display_order'] ?? 0));
@@ -192,8 +215,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($id <= 0 || !$title || !$content) {
                     throw new Exception('Title and content are required.');
                 }
-                if (mb_strlen($title) > 200) {
-                    throw new Exception('Title is too long (200 characters maximum).');
+                if (mb_strlen($title) > 150) {
+                    throw new Exception('Title is too long (150 characters maximum).');
+                }
+                if (mb_strlen($summary) > 255) {
+                    throw new Exception('Summary is too long (255 characters maximum).');
+                }
+                $existsPol = $pdo->prepare("SELECT COUNT(*) FROM policies WHERE id = ?");
+                $existsPol->execute([$id]);
+                if ((int)$existsPol->fetchColumn() === 0) {
+                    throw new Exception('That policy no longer exists.');
+                }
+                if ($dupTitle = rh_find_duplicate($pdo, 'policies', 'title', $title, [], $id)) {
+                    throw new Exception(rh_duplicate_message('policy', (string)$dupTitle['value']));
                 }
 
                 $stmt = $pdo->prepare("
@@ -296,7 +330,7 @@ $fs = [
     'site_name'            => getSetting('site_name', ''),
     'site_tagline'         => getSetting('site_tagline', ''),
     'site_logo'            => getSetting('site_logo', ''),
-    'phone_main'          => getSetting('phone_main', ''),
+    'phone_main'           => getSetting('phone_main', ''),
     'email_main'           => getSetting('email_main', ''),
     'address_line1'        => getSetting('address_line1', ''),
     'working_hours'        => getSetting('working_hours', ''),

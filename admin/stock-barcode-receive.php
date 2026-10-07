@@ -7,6 +7,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'includes/procurement-schema.php'; // rh_supplier_id_by_name()
+require_once __DIR__ . '/../includes/form-validation.php';
 
 /** @var PDO $pdo */
 $user = [
@@ -62,8 +63,12 @@ if (isset($_GET['ajax'])) {
         }
         $barcode      = rhNormalizeBarcode((string)($_POST['barcode'] ?? ''));
         $ingredientId = (int)($_POST['ingredient_id'] ?? 0);
-        $packSize     = max(0.0001, (float)($_POST['pack_size'] ?? 1));
-        $packLabel    = mb_substr(trim($_POST['pack_label'] ?? ''), 0, 50) ?: null;
+        $packRaw      = trim((string)($_POST['pack_size'] ?? '1'));
+        if ($packRaw !== '' && (!is_numeric($packRaw) || (float)$packRaw <= 0 || (float)$packRaw > 1000000)) {
+            http_response_code(400); echo json_encode(['error' => 'Pack size must be a number greater than zero.']); exit;
+        }
+        $packSize     = max(0.0001, $packRaw === '' ? 1.0 : (float)$packRaw);
+        $packLabel    = mb_substr(rh_clean_text($_POST['pack_label'] ?? ''), 0, 50) ?: null;
         if (!$barcode || !$ingredientId) {
             http_response_code(400); echo json_encode(['error' => 'Barcode and ingredient required.']); exit;
         }
@@ -118,10 +123,37 @@ if (isset($_GET['ajax'])) {
             http_response_code(403); echo json_encode(['error' => 'Invalid token.']); exit;
         }
         $items        = json_decode($_POST['items'] ?? '[]', true);
-        $supplier     = mb_substr(trim($_POST['supplier'] ?? ''), 0, 255) ?: null;
-        $receivedDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_POST['received_date'] ?? '') ? $_POST['received_date'] : date('Y-m-d');
+        $supplier     = mb_substr(rh_clean_text($_POST['supplier'] ?? ''), 0, 255) ?: null;
+        $receivedDate = date('Y-m-d');
+        $rdRaw = trim((string)($_POST['received_date'] ?? ''));
+        if ($rdRaw !== '') {
+            $rdObj = DateTime::createFromFormat('!Y-m-d', $rdRaw);
+            if (!$rdObj || $rdObj->format('Y-m-d') !== $rdRaw || $rdRaw > date('Y-m-d')) {
+                http_response_code(400); echo json_encode(['error' => 'Received date must be a valid date, not in the future.']); exit;
+            }
+            $receivedDate = $rdRaw;
+        }
         if (!$items || !is_array($items) || count($items) === 0) {
             http_response_code(400); echo json_encode(['error' => 'No items to receive.']); exit;
+        }
+        if (count($items) > 500) {
+            http_response_code(400); echo json_encode(['error' => 'Too many lines in one delivery (500 maximum).']); exit;
+        }
+        foreach ($items as $chkItem) {
+            if (!is_array($chkItem)) continue;
+            foreach (['quantity', 'cost_per_unit'] as $numKey) {
+                if (isset($chkItem[$numKey]) && $chkItem[$numKey] !== '' && (!is_numeric($chkItem[$numKey]) || (float)$chkItem[$numKey] < 0 || (float)$chkItem[$numKey] > 99999999)) {
+                    http_response_code(400); echo json_encode(['error' => 'Quantities and costs must be numbers of 0 or more.']); exit;
+                }
+            }
+        }
+        // Double-receive guard: the identical delivery from this session within 20 seconds is a
+        // double click or a retried tap - refuse it so stock is never added twice.
+        $recvFp = md5(json_encode([$items, $supplier, $receivedDate]));
+        if (($_SESSION['barcode_recv_fp'] ?? '') === $recvFp && (time() - (int)($_SESSION['barcode_recv_at'] ?? 0)) < 20) {
+            http_response_code(409);
+            echo json_encode(['error' => 'This delivery was just received - duplicate submission ignored.']);
+            exit;
         }
         // Link the delivery to the supplier master when the typed name matches one,
         // so it counts towards that supplier's "Total purchased" and history (and
@@ -217,6 +249,10 @@ if (isset($_GET['ajax'])) {
                 $created++;
             }
             $pdo->commit();
+            if ($created > 0) {
+                $_SESSION['barcode_recv_fp'] = $recvFp;
+                $_SESSION['barcode_recv_at'] = time();
+            }
             logActivity($user['id'], 'barcode_receive_batch', "Received {$created} line(s) via barcode scanner"
                 . ($supplier ? " from {$supplier}" : '')
                 . ($skipped ? ' — skipped: ' . implode(', ', $skipped) : ''));
@@ -255,12 +291,19 @@ if (isset($_GET['ajax'])) {
             http_response_code(403); echo json_encode(['error' => 'Invalid token.']); exit;
         }
         $barcode    = rhNormalizeBarcode((string)($_POST['barcode'] ?? ''));
-        $name       = mb_substr(trim($_POST['name'] ?? ''), 0, 200);
-        $price      = round(max(0, (float)($_POST['price'] ?? 0)), 2);
+        $name       = rh_clean_text($_POST['name'] ?? '');
+        $priceRaw   = trim((string)($_POST['price'] ?? '0'));
         $categoryId = (int)($_POST['category_id'] ?? 0);
         if (!$barcode || !$name) {
             http_response_code(400); echo json_encode(['error' => 'Barcode and name required.']); exit;
         }
+        if (mb_strlen($name) > 200) {
+            http_response_code(400); echo json_encode(['error' => 'Name is too long (200 characters maximum).']); exit;
+        }
+        if ($priceRaw !== '' && (!is_numeric($priceRaw) || (float)$priceRaw < 0 || (float)$priceRaw > 99999999)) {
+            http_response_code(400); echo json_encode(['error' => 'Enter a valid price (0 or more).']); exit;
+        }
+        $price = round((float)$priceRaw, 2);
         try {
             // Default to "Retail Items" category if none chosen
             if (!$categoryId) {
@@ -281,14 +324,31 @@ if (isset($_GET['ajax'])) {
                     : 'This barcode is already registered as a stock ingredient.']);
                 exit;
             }
-            $maxOrderStmt = $pdo->prepare("SELECT COALESCE(MAX(display_order),0) FROM menu_items WHERE category_id = ?");
-            $maxOrderStmt->execute([$categoryId]);
-            $maxOrder = (int)$maxOrderStmt->fetchColumn();
-            $pdo->prepare("
-                INSERT INTO menu_items (item_name, price, category_id, barcode, show_pos, show_room_service, is_available, display_order)
-                VALUES (?, ?, ?, ?, 1, 0, 1, ?)
-            ")->execute([$name, $price, $categoryId, $barcode, $maxOrder + 10]);
-            $newId = (int)$pdo->lastInsertId();
+            $catExists = $pdo->prepare("SELECT COUNT(*) FROM menu_categories WHERE id = ?");
+            $catExists->execute([$categoryId]);
+            if ((int)$catExists->fetchColumn() === 0) {
+                http_response_code(400); echo json_encode(['error' => 'That category no longer exists.']); exit;
+            }
+            // Natural key: item name within its category. Check + insert under one lock.
+            $newId = rh_with_create_lock($pdo, 'menu_item_create', function () use ($pdo, $name, $price, $categoryId, $barcode) {
+                $dupItem = rh_find_duplicate($pdo, 'menu_items', 'item_name', $name, ['category_id' => $categoryId]);
+                if ($dupItem) {
+                    return -1;
+                }
+                $maxOrderStmt = $pdo->prepare("SELECT COALESCE(MAX(display_order),0) FROM menu_items WHERE category_id = ?");
+                $maxOrderStmt->execute([$categoryId]);
+                $maxOrder = (int)$maxOrderStmt->fetchColumn();
+                $pdo->prepare("
+                    INSERT INTO menu_items (item_name, price, category_id, barcode, show_pos, show_room_service, is_available, display_order)
+                    VALUES (?, ?, ?, ?, 1, 0, 1, ?)
+                ")->execute([$name, $price, $categoryId, $barcode, $maxOrder + 10]);
+                return (int)$pdo->lastInsertId();
+            });
+            if ($newId === -1) {
+                http_response_code(409);
+                echo json_encode(['error' => 'An item called "' . $name . '" already exists in that category.']);
+                exit;
+            }
             // Get category name for response
             $cat = $pdo->prepare("SELECT name, slug FROM menu_categories WHERE id = ?");
             $cat->execute([$categoryId]);
@@ -1098,6 +1158,7 @@ async function submitBatch() {
     const keys = Object.keys(batch);
     if (!keys.length) return;
     const btn = document.getElementById('submitBtn');
+    if (btn.disabled) return;
     btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
 
     const items = keys.map(id => ({

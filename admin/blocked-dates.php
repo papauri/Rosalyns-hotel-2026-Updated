@@ -11,6 +11,7 @@
 
 // Include admin initialization (PHP-only, no HTML output)
 require_once 'admin-init.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 /** @var string $csrf_token */
 
 require_once '../includes/modal.php';
@@ -37,6 +38,35 @@ function rh_clean_block_dates($dates): array
     }
     ksort($out);
     return array_values(array_slice($out, 0, 366));
+}
+
+/** Error text if the posted room type id (null = all rooms) does not exist, else null. */
+function rh_block_check_room_type(PDO $pdo, ?int $roomId): ?string
+{
+    if ($roomId === null) {
+        return null;
+    }
+    $st = $pdo->prepare('SELECT COUNT(*) FROM rooms WHERE id = ?');
+    $st->execute([$roomId]);
+    return (int)$st->fetchColumn() > 0 ? null : 'The selected room type does not exist.';
+}
+
+/** Error text if the individual room does not exist, else null. */
+function rh_block_check_individual_room(PDO $pdo, int $roomId): ?string
+{
+    $st = $pdo->prepare('SELECT COUNT(*) FROM individual_rooms WHERE id = ?');
+    $st->execute([$roomId]);
+    return (int)$st->fetchColumn() > 0 ? null : 'The selected room does not exist.';
+}
+
+/** Run a block write under a lock so two simultaneous saves cannot both insert the same night. */
+function rh_block_locked(PDO $pdo, callable $fn)
+{
+    try {
+        return rh_with_create_lock($pdo, 'blocked_dates', $fn);
+    } catch (RuntimeException $e) {
+        return false;
+    }
 }
 
 /** Heads-up appended to a success message when existing bookings sleep on the blocked nights. */
@@ -83,8 +113,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif (empty($clean_dates)) {
                 $message = 'Please choose a valid date that is today or later';
                 $messageType = 'error';
+            } elseif (($chkErr = rh_block_check_individual_room($pdo, (int)$individual_room_id)) !== null) {
+                $message = $chkErr;
+                $messageType = 'error';
             } else {
-                $result = blockIndividualRoomDate($individual_room_id, $clean_dates[0], $block_type, $reason, $created_by);
+                $result = rh_block_locked($pdo, function () use ($individual_room_id, $clean_dates, $block_type, $reason, $created_by) {
+                    return blockIndividualRoomDate($individual_room_id, $clean_dates[0], $block_type, $reason, $created_by);
+                });
 
                 if ($result) {
                     $message = 'Individual room date blocked successfully.' . rh_block_overlap_note(null, $individual_room_id, $clean_dates);
@@ -114,8 +149,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif (empty($clean_dates)) {
                 $message = 'Please choose a valid date that is today or later';
                 $messageType = 'error';
+            } elseif (($chkErr = rh_block_check_room_type($pdo, $room_id)) !== null) {
+                $message = $chkErr;
+                $messageType = 'error';
             } else {
-                $result = blockRoomDate($room_id, $clean_dates[0], $block_type, $reason, $created_by);
+                $result = rh_block_locked($pdo, function () use ($room_id, $clean_dates, $block_type, $reason, $created_by) {
+                    return blockRoomDate($room_id, $clean_dates[0], $block_type, $reason, $created_by);
+                });
 
                 if ($result) {
                     $message = 'Room type date blocked successfully.' . rh_block_overlap_note($room_id, null, $clean_dates);
@@ -186,8 +226,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (empty($individual_room_id) || empty($dates)) {
                 $message = 'Please select a room and at least one valid date (today or later) to block';
                 $messageType = 'error';
+            } elseif (($chkErr = rh_block_check_individual_room($pdo, (int)$individual_room_id)) !== null) {
+                $message = $chkErr;
+                $messageType = 'error';
             } else {
-                $blocked_count = blockIndividualRoomDates($individual_room_id, $dates, $block_type, $reason, $created_by);
+                $blocked_count = (int)rh_block_locked($pdo, function () use ($individual_room_id, $dates, $block_type, $reason, $created_by) {
+                    return blockIndividualRoomDates($individual_room_id, $dates, $block_type, $reason, $created_by);
+                });
 
                 if ($blocked_count > 0) {
                     $message = "Successfully blocked {$blocked_count} date(s) for individual room." . rh_block_overlap_note(null, $individual_room_id, $dates);
@@ -217,8 +262,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (empty($dates)) {
                 $message = 'Please select at least one valid date (today or later) to block';
                 $messageType = 'error';
+            } elseif (($chkErr = rh_block_check_room_type($pdo, $room_id)) !== null) {
+                $message = $chkErr;
+                $messageType = 'error';
             } else {
-                $blocked_count = blockRoomDates($room_id, $dates, $block_type, $reason, $created_by);
+                $blocked_count = (int)rh_block_locked($pdo, function () use ($room_id, $dates, $block_type, $reason, $created_by) {
+                    return blockRoomDates($room_id, $dates, $block_type, $reason, $created_by);
+                });
 
                 if ($blocked_count > 0) {
                     $message = "Successfully blocked {$blocked_count} date(s)." . rh_block_overlap_note($room_id, null, $dates);

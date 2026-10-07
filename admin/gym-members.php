@@ -16,6 +16,7 @@ require_once '../includes/alert.php';
 require_once __DIR__ . '/includes/gym-checkin-lib.php';
 require_once __DIR__ . '/includes/gym-analytics-lib.php';
 require_once __DIR__ . '/includes/gym-reminders-lib.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -31,6 +32,38 @@ $gm_json = static function (bool $ok, string $msg): void {
 
 $gm_statuses = ['active', 'expired', 'suspended', 'cancelled'];
 
+/**
+ * Is there already a member who is the same person - same email (any case) or same phone number
+ * (digits only, so "0999 123 456" == "0999123456")? Any status counts: a lapsed member is renewed
+ * by editing their record, not by enrolling them again. Returns an error message or null.
+ */
+function gm_same_person_message(PDO $pdo, string $email, string $phone, ?int $excludeId): ?string
+{
+    if ($email !== '') {
+        $dup = rh_find_duplicate($pdo, 'gym_members', 'email', $email, [], $excludeId);
+        if ($dup) {
+            $who = $pdo->prepare('SELECT member_number, full_name FROM gym_members WHERE id = ?');
+            $who->execute([(int)$dup['id']]);
+            $w = $who->fetch(PDO::FETCH_ASSOC) ?: ['member_number' => '', 'full_name' => ''];
+            return 'A member with the email ' . $email . ' already exists: ' . $w['full_name'] . ' (' . $w['member_number'] . '). Edit that member instead of enrolling again.';
+        }
+    }
+    $digits = preg_replace('/\D+/', '', $phone);
+    if ($digits !== '') {
+        // Compare the last 9 digits so "+265 999 123 456" and "0999 123 456" match.
+        $tail = substr($digits, -9);
+        $st = $pdo->prepare("SELECT id, member_number, full_name, phone FROM gym_members WHERE phone IS NOT NULL AND phone <> '' AND id <> ?");
+        $st->execute([(int)$excludeId]);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $d = preg_replace('/\D+/', '', (string)$row['phone']);
+            if ($d !== '' && substr($d, -9) === $tail && min(strlen($d), strlen($digits)) >= 7) {
+                return 'A member with the phone number ' . $phone . ' already exists: ' . $row['full_name'] . ' (' . $row['member_number'] . '). Edit that member instead of enrolling again.';
+            }
+        }
+    }
+    return null;
+}
+
 // ── POST actions ─────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -41,11 +74,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
     try {
         if ($action === 'member_save') {
             $memberId = (int)($_POST['id'] ?? 0);
-            $name = trim((string)($_POST['full_name'] ?? ''));
-            $email = trim((string)($_POST['email'] ?? ''));
-            $phone = trim((string)($_POST['phone'] ?? ''));
+            $name = rh_clean_text($_POST['full_name'] ?? '');
+            $email = strtolower(rh_clean_text($_POST['email'] ?? ''));
+            $phone = rh_clean_text($_POST['phone'] ?? '');
             $packageId = (int)($_POST['package_id'] ?? 0);
-            $type = trim((string)($_POST['membership_type'] ?? ''));
+            $type = rh_clean_text($_POST['membership_type'] ?? '');
             $start = trim((string)($_POST['start_date'] ?? ''));
             $expiry = trim((string)($_POST['expiry_date'] ?? ''));
             $fee = ($_POST['monthly_fee'] ?? '') !== '' ? (float)($_POST['monthly_fee'] ?? 0) : null;
@@ -57,8 +90,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             if ($name === '' || mb_strlen($name) > 255) {
                 $gm_json(false, 'Member name is required (max 255 characters).');
             }
-            if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            if ($email !== '' && (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 255)) {
                 $gm_json(false, 'Enter a valid email address or leave it empty.');
+            }
+            // Phone format is enforced for new members and when the number is being changed, so an
+            // older record with an unusual number can still be renewed or edited.
+            $gmStoredPhone = '';
+            if ($memberId > 0) {
+                $gmPh = $pdo->prepare('SELECT phone FROM gym_members WHERE id = ?');
+                $gmPh->execute([$memberId]);
+                $gmStoredPhone = rh_clean_text((string)$gmPh->fetchColumn());
+            }
+            if ($phone !== '' && ($memberId <= 0 || $phone !== $gmStoredPhone)) {
+                $phoneDigits = preg_replace('/\D+/', '', $phone);
+                if (mb_strlen($phone) > 50 || !preg_match('/^[0-9+()\-.\s]+$/', $phone) || strlen($phoneDigits) < 7 || strlen($phoneDigits) > 15) {
+                    $gm_json(false, 'Enter a valid phone number (7 to 15 digits) or leave it empty.');
+                }
+            }
+            if (mb_strlen($type) > 100) {
+                $gm_json(false, 'Membership type is too long (max 100 characters).');
+            }
+            if (!isset($_POST['status']) || in_array($_POST['status'], $gm_statuses, true) === false) {
+                if (isset($_POST['status']) && $_POST['status'] !== '') {
+                    $gm_json(false, 'Invalid membership status.');
+                }
             }
             $startDt = DateTime::createFromFormat('Y-m-d', $start);
             if (!$startDt) {
@@ -136,7 +191,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                     $gm_json(false, 'Member not found.');
                 }
 
-                $nameChanged = $name !== (string)$cur['full_name'];
+                $nameChanged = $name !== rh_clean_text($cur['full_name']);
+
+                // Only re-check for the same person when email or phone actually changed.
+                $contactChanged = strtolower((string)($cur['email'] ?? '')) !== $email
+                    || preg_replace('/\D+/', '', (string)($cur['phone'] ?? '')) !== preg_replace('/\D+/', '', $phone);
+                if ($contactChanged && ($sameMsg = gm_same_person_message($pdo, $email, $phone, $memberId)) !== null) {
+                    $gm_json(false, $sameMsg);
+                }
 
                 // Editing contact details must not silently re-derive (and shorten/extend) the expiry:
                 // staff without financials rights get the package expiry recomputed from the start date
@@ -208,24 +270,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 }
                 $gm_json(true, 'Member updated.');
             }
-            do {
-                $memberNumber = 'GM-' . strtoupper(substr(uniqid(), -6));
-                $chk = $pdo->prepare("SELECT COUNT(*) FROM gym_members WHERE member_number = ?");
-                $chk->execute([$memberNumber]);
-            } while ((int)$chk->fetchColumn() > 0);
             $inquiryId = (int)($_POST['gym_inquiry_id'] ?? 0);
-            if ($inquiryId > 0) {
-                // One inquiry converts to one member - a double-click / second tab must not enrol twice.
-                $dupChk = $pdo->prepare("SELECT member_number FROM gym_members WHERE gym_inquiry_id = ? LIMIT 1");
-                $dupChk->execute([$inquiryId]);
-                $dupNo = $dupChk->fetchColumn();
-                if ($dupNo) {
-                    $gm_json(false, 'This inquiry is already enrolled as member ' . $dupNo . '.');
+            // Duplicate checks and the insert run together under a lock, so a double-click or two
+            // staff enrolling the same person at once cannot create two members.
+            $createRes = rh_with_create_lock($pdo, 'gym_member', function () use ($pdo, $user, $name, $email, $phone, $type, $start, $expiry, $fee, $isComplimentary, $status, $notes, $inquiryId) {
+                $sameMsg = gm_same_person_message($pdo, $email, $phone, null);
+                if ($sameMsg !== null) {
+                    return ['error' => $sameMsg];
                 }
+                do {
+                    $memberNumber = 'GM-' . strtoupper(substr(uniqid(), -6));
+                    $chk = $pdo->prepare("SELECT COUNT(*) FROM gym_members WHERE member_number = ?");
+                    $chk->execute([$memberNumber]);
+                } while ((int)$chk->fetchColumn() > 0);
+                if ($inquiryId > 0) {
+                    // One inquiry converts to one member - a double-click / second tab must not enrol twice.
+                    $dupChk = $pdo->prepare("SELECT member_number FROM gym_members WHERE gym_inquiry_id = ? LIMIT 1");
+                    $dupChk->execute([$inquiryId]);
+                    $dupNo = $dupChk->fetchColumn();
+                    if ($dupNo) {
+                        return ['error' => 'This inquiry is already enrolled as member ' . $dupNo . '.'];
+                    }
+                }
+                $stmt = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, email, phone, membership_type, start_date, expiry_date, monthly_fee, is_complimentary, status, notes, gym_inquiry_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                $stmt->execute([$memberNumber, $name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $isComplimentary, $status, $notes ?: null, $inquiryId ?: null, (int)($user['id'] ?? 0)]);
+                return ['id' => (int)$pdo->lastInsertId(), 'number' => $memberNumber];
+            });
+            if (isset($createRes['error'])) {
+                $gm_json(false, $createRes['error']);
             }
-            $stmt = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, email, phone, membership_type, start_date, expiry_date, monthly_fee, is_complimentary, status, notes, gym_inquiry_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
-            $stmt->execute([$memberNumber, $name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $isComplimentary, $status, $notes ?: null, $inquiryId ?: null, (int)($user['id'] ?? 0)]);
-            $newMemberId = (int)$pdo->lastInsertId();
+            $newMemberId = $createRes['id'];
+            $memberNumber = $createRes['number'];
 
             if (function_exists('logGymMemberAudit')) {
                 logGymMemberAudit($newMemberId, $isComplimentary ? 'complimentary_granted' : 'enrolled', null, [
@@ -536,6 +611,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
     } catch (PDOException $e) {
         error_log('gym-members: ' . $e->getMessage());
         $gm_json(false, 'Database error — has the gym_members migration been run?');
+    } catch (RuntimeException $e) {
+        $gm_json(false, $e->getMessage());
     }
 }
 
@@ -905,7 +982,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             </div>
             <div class="mm-modal-foot">
                 <button type="button" class="mm-btn mm-btn-ghost" onclick="gmClose('gmModal')">Cancel</button>
-                <button type="button" class="mm-btn mm-btn-primary" onclick="gmSave()">Save Member</button>
+                <button type="button" class="mm-btn mm-btn-primary" id="gmSaveBtn" onclick="gmSave()">Save Member</button>
             </div>
         </div>
     </div>
@@ -1097,6 +1174,8 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             var pkgSel = document.getElementById('gmPackage');
             var pkgId = (pkgSel.value === 'custom' || pkgSel.value === '0') ? 0 : pkgSel.value;
             var compEl = document.getElementById('gmComplimentary');
+            var gmSaveBtn = document.getElementById('gmSaveBtn');
+            if (gmSaveBtn) { if (gmSaveBtn.disabled) return; gmSaveBtn.disabled = true; }
             gmPost({
                 gm_action: 'member_save',
                 id: document.getElementById('gmId').value,
@@ -1113,6 +1192,9 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 status: document.getElementById('gmStatus').value,
                 change_reason: reasonEl ? reasonEl.value.trim() : '',
                 notes: document.getElementById('gmNotes').value.trim()
+            }).then(function (d) {
+                // stay disabled while the page reloads after a successful save; re-enable on any failure
+                if (gmSaveBtn && !(d && d.success)) { gmSaveBtn.disabled = false; }
             });
         }
 

@@ -10,6 +10,7 @@ require_once 'admin-init.php';
 /** @var string $csrf_token */
 require_once '../includes/alert.php';
 require_once 'video-upload-handler.php';
+require_once '../includes/form-validation.php';
 
 function syncHotelGalleryManagedMedia(array $item): void
 {
@@ -148,13 +149,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $action = $_POST['action'] ?? '';
 
+        if (in_array($action, ['add', 'update'], true)) {
+            $_POST['title'] = rh_clean_text($_POST['title'] ?? '');
+            $_POST['category'] = rh_clean_text($_POST['category'] ?? '') ?: 'general';
+        }
+
         if ($action === 'add') {
             $imagePath = uploadGalleryImage($_FILES['image'] ?? null);
             $imageUrl = $imagePath ?: galleryCleanImageUrl($_POST['image_url_external'] ?? '');
 
-            if (trim((string)($_POST['title'] ?? '')) === '') {
+            // Only obvious duplicates: the same title in the same category.
+            $galDup = ($_POST['title'] !== '' && mb_strlen($_POST['title']) <= 255)
+                ? rh_find_duplicate($pdo, 'hotel_gallery', 'title', $_POST['title'], ['category' => $_POST['category']])
+                : null;
+
+            if ($_POST['title'] === '' || mb_strlen($_POST['title']) > 255 || mb_strlen($_POST['category']) > 100 || $galDup) {
                 $imageUrl = '';
-                $error = 'Title is required.';
+                if ($_POST['title'] === '') {
+                    $error = 'Title is required.';
+                } elseif (mb_strlen($_POST['title']) > 255) {
+                    $error = 'Title is too long (max 255 characters).';
+                } elseif (mb_strlen($_POST['category']) > 100) {
+                    $error = 'Category is too long (max 100 characters).';
+                } else {
+                    $error = 'There is already a gallery item called "' . $galDup['value'] . '" in the "' . $_POST['category'] . '" category. Edit that one or use a different title.';
+                }
                 if ($imagePath) {
                     galleryUnlinkLocal($imagePath);
                 }
@@ -188,18 +207,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     INSERT INTO hotel_gallery (title, description, image_url, video_path, video_type, category, is_active, display_order)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ");
-                $stmt->execute([
-                    trim((string)$_POST['title']),
-                    $_POST['description'] ?? '',
-                    $imageUrl,
-                    $videoPath,
-                    $videoType,
-                    $_POST['category'] ?? 'general',
-                    1,
-                    (int)($_POST['display_order'] ?? 0)
-                ]);
-
-                $newId = (int)$pdo->lastInsertId();
+                $newId = 0;
+                try {
+                    rh_with_create_lock($pdo, 'hotel_gallery', function () use ($pdo, $stmt, $imageUrl, $videoPath, $videoType, &$newId) {
+                        if ($dupNow = rh_find_duplicate($pdo, 'hotel_gallery', 'title', (string)$_POST['title'], ['category' => $_POST['category']])) {
+                            throw new RuntimeException('There is already a gallery item called "' . $dupNow['value'] . '" in the "' . $_POST['category'] . '" category.');
+                        }
+                        $stmt->execute([
+                            (string)$_POST['title'],
+                            $_POST['description'] ?? '',
+                            $imageUrl,
+                            $videoPath,
+                            $videoType,
+                            $_POST['category'] ?? 'general',
+                            1,
+                            (int)($_POST['display_order'] ?? 0)
+                        ]);
+                        $newId = (int)$pdo->lastInsertId();
+                    });
+                } catch (RuntimeException $lockEx) {
+                    // do not leave an orphaned upload behind
+                    if ($imagePath) {
+                        galleryUnlinkLocal($imagePath);
+                    }
+                    throw $lockEx;
+                }
                 if ($newId > 0) {
                     syncHotelGalleryManagedMedia([
                         'id' => $newId,
@@ -234,8 +266,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $videoType = $videoUpload['type'] ?? null;
             }
 
-            if (trim((string)($_POST['title'] ?? '')) === '' || (int)($_POST['id'] ?? 0) <= 0) {
+            if ($_POST['title'] === '' || (int)($_POST['id'] ?? 0) <= 0) {
                 throw new RuntimeException('Title and a valid item are required.');
+            }
+            if (mb_strlen($_POST['title']) > 255 || mb_strlen($_POST['category']) > 100) {
+                throw new RuntimeException('Title (max 255) or category (max 100) is too long.');
+            }
+            if ($galDup = rh_find_duplicate($pdo, 'hotel_gallery', 'title', $_POST['title'], ['category' => $_POST['category']], (int)$_POST['id'])) {
+                throw new RuntimeException('There is already a gallery item called "' . $galDup['value'] . '" in the "' . $_POST['category'] . '" category.');
             }
             if (!$imagePath && galleryFileSubmitted('image')) {
                 throw new RuntimeException('The image was rejected: use a JPG, PNG, WebP or GIF under 8 MB.');

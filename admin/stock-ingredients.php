@@ -9,6 +9,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'includes/procurement-schema.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -37,39 +38,77 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? '';
         try {
             if ($action === 'add' || $action === 'update') {
-                $name = trim($_POST['name'] ?? '');
-                $category = trim($_POST['category'] ?? 'General');
-                $unit = trim($_POST['unit'] ?? 'g');
-                $minQty = max(0, (float)($_POST['min_quantity'] ?? 0));
-                $yield = max(0.1, min(100, (float)($_POST['yield_percent'] ?? 100)));
-                $notes = trim($_POST['notes'] ?? '');
-                $reorderPoint = max(0, (float)($_POST['reorder_point'] ?? 0));
-                $parLevel     = max(0, (float)($_POST['par_level'] ?? 0));
-                $leadTime     = max(0, (int)($_POST['lead_time_days'] ?? 0));
+                $name = rh_clean_text($_POST['name'] ?? '');
+                $category = rh_clean_text($_POST['category'] ?? 'General');
+                $unit = rh_clean_text($_POST['unit'] ?? 'g');
+                $rawNums = [
+                    'min_quantity' => trim((string)($_POST['min_quantity'] ?? '0')),
+                    'reorder_point' => trim((string)($_POST['reorder_point'] ?? '0')),
+                    'par_level' => trim((string)($_POST['par_level'] ?? '0')),
+                ];
+                foreach ($rawNums as $rawNum) {
+                    if ($rawNum !== '' && (!is_numeric($rawNum) || (float)$rawNum < 0 || (float)$rawNum > 99999999)) {
+                        throw new RuntimeException('Minimum, reorder point and par level must be numbers of 0 or more.');
+                    }
+                }
+                $rawYield = trim((string)($_POST['yield_percent'] ?? '100'));
+                if ($rawYield !== '' && (!is_numeric($rawYield) || (float)$rawYield <= 0 || (float)$rawYield > 100)) {
+                    throw new RuntimeException('Yield percent must be above 0 and at most 100.');
+                }
+                $rawLead = trim((string)($_POST['lead_time_days'] ?? '0'));
+                if ($rawLead !== '' && (!ctype_digit($rawLead) || (int)$rawLead > 365)) {
+                    throw new RuntimeException('Lead time must be a whole number of days (0 to 365).');
+                }
+                $minQty = max(0, (float)$rawNums['min_quantity']);
+                $yield = $rawYield === '' ? 100.0 : max(0.1, min(100, (float)$rawYield));
+                $notes = trim((string)($_POST['notes'] ?? ''));
+                $reorderPoint = max(0, (float)$rawNums['reorder_point']);
+                $parLevel     = max(0, (float)$rawNums['par_level']);
+                $leadTime     = max(0, (int)$rawLead);
                 $prefSupplier = (int)($_POST['preferred_supplier_id'] ?? 0) ?: null;
+                $editId = (int)($_POST['id'] ?? 0);
 
                 if ($name === '' || $unit === '') {
                     throw new RuntimeException('Name and unit are required.');
                 }
-
-                if ($action === 'add') {
-                    $stmt = $pdo->prepare("
-                        INSERT INTO stock_ingredients (name, category, unit, min_quantity, yield_percent, notes, reorder_point, par_level, lead_time_days, preferred_supplier_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ");
-                    $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier]);
-                    $message = "Ingredient \"{$name}\" added.";
-                } else {
-                    $id = (int)($_POST['id'] ?? 0);
-                    $stmt = $pdo->prepare("
-                        UPDATE stock_ingredients
-                        SET name = ?, category = ?, unit = ?, min_quantity = ?, yield_percent = ?, notes = ?,
-                            reorder_point = ?, par_level = ?, lead_time_days = ?, preferred_supplier_id = ?, updated_at = NOW()
-                        WHERE id = ?
-                    ");
-                    $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $id]);
-                    $message = "Ingredient updated.";
+                if (mb_strlen($name) > 100 || mb_strlen($category) > 50 || mb_strlen($unit) > 20) {
+                    throw new RuntimeException('Name (100), category (50) or unit (20 characters) is too long.');
                 }
+                if ($action === 'update' && $editId <= 0) {
+                    throw new RuntimeException('Invalid ingredient.');
+                }
+                if ($prefSupplier !== null) {
+                    $supChk = $pdo->prepare("SELECT COUNT(*) FROM stock_suppliers WHERE id = ?");
+                    $supChk->execute([$prefSupplier]);
+                    if ((int)$supChk->fetchColumn() === 0) {
+                        throw new RuntimeException('The selected supplier no longer exists.');
+                    }
+                }
+
+                rh_with_create_lock($pdo, 'stock_ingredient', function () use ($pdo, $action, $name, $category, $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $editId, &$message) {
+                    // Archived ingredients still block the name (restoring one would clash).
+                    $dup = rh_find_duplicate($pdo, 'stock_ingredients', 'name', $name, [], $action === 'update' ? $editId : null);
+                    if ($dup) {
+                        throw new RuntimeException(rh_duplicate_message('ingredient', (string)$dup['value']));
+                    }
+                    if ($action === 'add') {
+                        $stmt = $pdo->prepare("
+                            INSERT INTO stock_ingredients (name, category, unit, min_quantity, yield_percent, notes, reorder_point, par_level, lead_time_days, preferred_supplier_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ");
+                        $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier]);
+                        $message = "Ingredient \"{$name}\" added.";
+                    } else {
+                        $stmt = $pdo->prepare("
+                            UPDATE stock_ingredients
+                            SET name = ?, category = ?, unit = ?, min_quantity = ?, yield_percent = ?, notes = ?,
+                                reorder_point = ?, par_level = ?, lead_time_days = ?, preferred_supplier_id = ?, updated_at = NOW()
+                            WHERE id = ?
+                        ");
+                        $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $editId]);
+                        $message = "Ingredient updated.";
+                    }
+                });
             } elseif ($action === 'archive') {
                 $id = (int)($_POST['id'] ?? 0);
                 $stmt = $pdo->prepare("UPDATE stock_ingredients SET is_archived = 1, updated_at = NOW() WHERE id = ?");
@@ -117,7 +156,19 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $alertDays = max(0, (int)($_POST['expiry_alert_days'] ?? 7));
                 $batchNotes = trim($_POST['notes'] ?? '');
 
-                if ($qty <= 0) throw new RuntimeException('Quantity must be greater than zero.');
+                if ($qty <= 0 || $qty > 99999999) throw new RuntimeException('Quantity must be greater than zero.');
+                if (!is_numeric(trim((string)($_POST['quantity'] ?? ''))) || (isset($_POST['cost_per_unit']) && trim((string)$_POST['cost_per_unit']) !== '' && !is_numeric(trim((string)$_POST['cost_per_unit'])))) {
+                    throw new RuntimeException('Quantity and cost must be valid numbers.');
+                }
+                if ($expiry !== '') {
+                    $expDt = DateTime::createFromFormat('Y-m-d', $expiry);
+                    if (!$expDt || $expDt->format('Y-m-d') !== $expiry) {
+                        throw new RuntimeException('Expiry date is not a valid date.');
+                    }
+                }
+                if ($alertDays > 3650) throw new RuntimeException('Expiry alert days is too large.');
+                if ($supplier !== '') { $supplier = mb_substr(rh_clean_text($supplier), 0, 255); }
+                $supplierContact = mb_substr(rh_clean_text($supplierContact), 0, 255);
 
                 $pdo->beginTransaction();
                 // Lock ingredient row
@@ -273,6 +324,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $expiry  = trim($_POST['expiry_date'] ?? '');
                 $alert   = max(0, (int)($_POST['expiry_alert_days'] ?? 7));
                 $bnotes  = trim($_POST['notes'] ?? '');
+                if ($batchId <= 0) throw new RuntimeException('Batch not found.');
+                if ($expiry !== '') {
+                    $expDt = DateTime::createFromFormat('Y-m-d', $expiry);
+                    if (!$expDt || $expDt->format('Y-m-d') !== $expiry) {
+                        throw new RuntimeException('Expiry date is not a valid date.');
+                    }
+                }
+                if ($alert > 3650) throw new RuntimeException('Expiry alert days is too large.');
                 $upd = $pdo->prepare("
                     UPDATE stock_batches
                     SET expiry_date = ?, expiry_alert_days = ?, notes = ?, updated_at = NOW()

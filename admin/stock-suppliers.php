@@ -11,6 +11,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'includes/procurement-schema.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -48,29 +49,46 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($action === 'save') {
                 $id           = (int)($_POST['id'] ?? 0);
-                $name         = trim($_POST['name'] ?? '');
-                $contactName  = trim($_POST['contact_name'] ?? '');
-                $email        = trim($_POST['email'] ?? '');
-                $phone        = trim($_POST['phone'] ?? '');
-                $address      = trim($_POST['address'] ?? '');
-                $leadTime     = max(0, (int)($_POST['lead_time_days'] ?? 0));
-                $paymentTerms = trim($_POST['payment_terms'] ?? '');
-                $accountRef   = trim($_POST['account_ref'] ?? '');
-                $notes        = trim($_POST['notes'] ?? '');
+                $name         = rh_clean_text($_POST['name'] ?? '');
+                $contactName  = rh_clean_text($_POST['contact_name'] ?? '');
+                $email        = strtolower(rh_clean_text($_POST['email'] ?? ''));
+                $phone        = rh_clean_text($_POST['phone'] ?? '');
+                $address      = rh_clean_text($_POST['address'] ?? '');
+                $leadRaw      = trim((string)($_POST['lead_time_days'] ?? '0'));
+                $paymentTerms = rh_clean_text($_POST['payment_terms'] ?? '');
+                $accountRef   = rh_clean_text($_POST['account_ref'] ?? '');
+                $notes        = trim((string)($_POST['notes'] ?? ''));
                 $isActive     = isset($_POST['is_active']) ? 1 : 0;
 
                 if ($name === '') {
                     throw new RuntimeException('Supplier name is required.');
                 }
+                if (mb_strlen($name) > 255 || mb_strlen($contactName) > 255 || mb_strlen($email) > 255) {
+                    throw new RuntimeException('Name, contact and email must be 255 characters or fewer.');
+                }
+                if (mb_strlen($phone) > 60 || mb_strlen($address) > 500 || mb_strlen($paymentTerms) > 100 || mb_strlen($accountRef) > 100) {
+                    throw new RuntimeException('One of the fields is too long (phone 60, address 500, payment terms 100, account ref 100 characters).');
+                }
                 if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     throw new RuntimeException('Enter a valid email address.');
                 }
+                if ($phone !== '' && !preg_match('/^[0-9+()\-.\s\/#*xX]{5,60}$/', $phone)) {
+                    throw new RuntimeException('Enter a valid phone number (digits, spaces, + ( ) - only).');
+                }
+                if ($leadRaw !== '' && (!ctype_digit($leadRaw) || (int)$leadRaw > 365)) {
+                    throw new RuntimeException('Lead time must be a whole number of days (0 to 365).');
+                }
+                $leadTime = (int)$leadRaw;
+                if ($id < 0) {
+                    throw new RuntimeException('Invalid supplier.');
+                }
 
-                // Enforce unique name (case-insensitive) excluding self.
-                $dup = $pdo->prepare("SELECT id FROM stock_suppliers WHERE name = ? AND id <> ? LIMIT 1");
-                $dup->execute([$name, $id]);
-                if ($dup->fetchColumn()) {
-                    throw new RuntimeException('A supplier with that name already exists.');
+                // Natural key: supplier name, ignoring case and extra spaces (excluding self).
+                // Check + write run under one lock so a double click cannot create two.
+                rh_with_create_lock($pdo, 'stock_supplier', function () use ($pdo, $id, $name, $contactName, $email, $phone, $address, $leadTime, $paymentTerms, $accountRef, $notes, $isActive, $user, &$message) {
+                $dup = rh_find_duplicate($pdo, 'stock_suppliers', 'name', $name, [], $id > 0 ? $id : null);
+                if ($dup) {
+                    throw new RuntimeException(rh_duplicate_message('supplier', (string)$dup['value']));
                 }
 
                 if ($id > 0) {
@@ -95,6 +113,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                     $message = 'Supplier added.';
                 }
+                });
             } elseif ($action === 'toggle') {
                 $id = (int)($_POST['id'] ?? 0);
                 $pdo->prepare("UPDATE stock_suppliers SET is_active = 1 - is_active WHERE id = ?")->execute([$id]);

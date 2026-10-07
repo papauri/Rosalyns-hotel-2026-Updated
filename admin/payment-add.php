@@ -191,6 +191,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Idempotency: redirect to existing payment if this client_uuid was already used.
     // Edits (?edit=N) bypass this — user is intentionally re-saving the same row.
     $__incomingClientUuid = $_POST['client_uuid'] ?? null;
+    // Serialise same-uuid submissions (double click / retried tap): the second request waits here until
+    // the first has finished, then finds the payment it recorded below. The lock frees when this request ends.
+    if (!$editId && ($__idemKey = idem_normalize_uuid($__incomingClientUuid))) {
+        if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote('rh_idem_pay_' . md5($__idemKey)) . ', 15)')->fetchColumn() !== 1) {
+            // The first click is still being saved: never risk recording the payment twice.
+            http_response_code(409);
+            echo '<!doctype html><meta charset="utf-8"><title>Still saving</title><body style="font-family:system-ui,sans-serif;max-width:560px;margin:60px auto;padding:0 16px;line-height:1.6">'
+                . '<h1 style="font-size:1.3rem">This payment is still being saved</h1>'
+                . '<p>It was submitted twice (a double click or a retry) and the first copy is still saving. To avoid recording it twice, this second copy was not saved.</p>'
+                . '<p><a href="payments.php">Open the Payments list</a> and check for it before trying again.</p></body>';
+            exit;
+        }
+    }
     if (!$editId && ($__existingPayment = idem_find_existing_payment($pdo, $__incomingClientUuid))) {
         $_SESSION['alert'] = ['type' => 'success', 'message' => 'Payment already recorded (' . htmlspecialchars((string)$__existingPayment['payment_reference']) . '). Duplicate submission ignored.'];
         header('Location: payment-details.php?id=' . (int)$__existingPayment['id']);

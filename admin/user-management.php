@@ -7,6 +7,7 @@
  */
 require_once 'admin-init.php';
 require_once __DIR__ . '/includes/staff-invite-lib.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 /** @var array $user */
 /** @var string $csrf_token */
 
@@ -73,10 +74,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!hasPermission($user['id'], 'user_create')) {
                 $error_msg = 'You do not have permission to create users.';
             } else {
-                $username = trim($_POST['username'] ?? '');
-                $email = trim($_POST['email'] ?? '');
-                $full_name = trim($_POST['full_name'] ?? '');
-                $role = $_POST['role'] ?? 'receptionist';
+                $username = rh_clean_text($_POST['username'] ?? '');
+                $email = strtolower(rh_clean_text($_POST['email'] ?? ''));
+                $full_name = rh_clean_text($_POST['full_name'] ?? '');
+                $role = (string)($_POST['role'] ?? 'receptionist');
                 $password = $_POST['password'] ?? '';
                 $send_welcome = !empty($_POST['send_welcome']);
                 // Hold the invitation until permissions are saved (admins have every permission,
@@ -94,20 +95,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error_msg = 'Please enter a valid email address.';
                 } elseif (strlen($username) > 100 || strlen($full_name) > 255) {
                     $error_msg = 'Username (max 100) or full name (max 255) is too long.';
+                } elseif (strlen($username) < 3 || preg_match('/\s/', $username)) {
+                    $error_msg = 'Username must be at least 3 characters with no spaces.';
                 } elseif (!isset($all_roles[$role])) {
                     $error_msg = 'Invalid role selected.';
                 } else {
                     // Check for duplicate username/email
-                    $check = $pdo->prepare("SELECT COUNT(*) FROM admin_users WHERE username = ? OR email = ?");
-                    $check->execute([$username, $email]);
-                    if ($check->fetchColumn() > 0) {
-                        $error_msg = 'Username or email already exists.';
+                    // (case-insensitive, under a lock so a double-click cannot create two)
+                    $dup_msg = null;
+                    $new_user_id = 0;
+                    try {
+                        rh_with_create_lock($pdo, 'admin_user', function () use ($pdo, $username, $email, $full_name, $role, $password, &$dup_msg, &$new_user_id) {
+                            $dupU = rh_find_duplicate($pdo, 'admin_users', 'username', $username);
+                            $dupE = rh_find_duplicate($pdo, 'admin_users', 'email', $email);
+                            if ($dupU) {
+                                $dup_msg = 'The username "' . $dupU['value'] . '" is already taken. Choose a different username.';
+                                return;
+                            }
+                            if ($dupE) {
+                                $dup_msg = 'The email "' . $dupE['value'] . '" already belongs to another user.';
+                                return;
+                            }
+                            // No password set = nobody can sign in until the invitation is accepted.
+                            $hash = $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : rh_staff_invite_placeholder_hash();
+                            $stmt = $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
+                            $stmt->execute([$username, $email, $hash, $full_name, $role]);
+                            $new_user_id = (int)$pdo->lastInsertId();
+                        });
+                    } catch (RuntimeException $e) {
+                        $dup_msg = $e->getMessage();
+                    }
+                    if ($dup_msg !== null) {
+                        $error_msg = $dup_msg;
                     } else {
-                        // No password set = nobody can sign in until the invitation is accepted.
-                        $hash = $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : rh_staff_invite_placeholder_hash();
-                        $stmt = $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
-                        $stmt->execute([$username, $email, $hash, $full_name, $role]);
-                        $new_user_id = $pdo->lastInsertId();
 
                         // Log the action
                         logActivity($user['id'], 'user_created', "Created user '{$username}' ({$full_name}) with role '{$role}'");
@@ -139,9 +159,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error_msg = 'You do not have permission to edit users.';
             } else {
                 $uid = (int)($_POST['user_id'] ?? 0);
-                $full_name = trim($_POST['full_name'] ?? '');
-                $email = trim($_POST['email'] ?? '');
-                $role = $_POST['role'] ?? 'receptionist';
+                $full_name = rh_clean_text($_POST['full_name'] ?? '');
+                $email = strtolower(rh_clean_text($_POST['email'] ?? ''));
+                $role = (string)($_POST['role'] ?? 'receptionist');
                 $is_active = isset($_POST['is_active']) ? 1 : 0;
                 $new_password = $_POST['new_password'] ?? '';
 
@@ -156,10 +176,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error_msg = 'Invalid role selected.';
                 } else {
                     // Check email uniqueness (excluding current user)
-                    $check = $pdo->prepare("SELECT COUNT(*) FROM admin_users WHERE email = ? AND id != ?");
-                    $check->execute([$email, $uid]);
-                    if ($check->fetchColumn() > 0) {
-                        $error_msg = 'Email already in use by another user.';
+                    $dupE = rh_find_duplicate($pdo, 'admin_users', 'email', $email, [], $uid);
+                    if ($dupE) {
+                        $error_msg = 'The email "' . $dupE['value'] . '" already belongs to another user.';
                     } else {
                         // Check if this is the last admin
                         $current_role_stmt = $pdo->prepare("SELECT role FROM admin_users WHERE id = ?");
@@ -348,8 +367,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!hasPermission($user['id'], 'user_edit')) {
                 $error_msg = 'You do not have permission to edit users.';
             } else {
-                $user_ids = $_POST['user_ids'] ?? [];
-                $new_role = $_POST['new_role'] ?? '';
+                $user_ids = is_array($_POST['user_ids'] ?? null) ? $_POST['user_ids'] : [];
+                $user_ids = array_values(array_unique(array_filter(array_map('intval', $user_ids), static fn($i) => $i > 0)));
+                $new_role = (string)($_POST['new_role'] ?? '');
 
                 if (!isset($all_roles[$new_role])) {
                     $error_msg = 'Invalid role selected.';
@@ -364,6 +384,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $check = $pdo->prepare("SELECT role FROM admin_users WHERE id = ?");
                             $check->execute([$uid]);
                             $current_role = $check->fetchColumn();
+                            if ($current_role === false || $current_role === $new_role) continue; // missing user or no change
 
                             if ($current_role === 'admin' && $new_role !== 'admin') {
                                 $admin_count = $pdo->query("SELECT COUNT(*) FROM admin_users WHERE role = 'admin' AND is_active = 1")->fetchColumn();

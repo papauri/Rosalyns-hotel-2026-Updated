@@ -245,6 +245,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
 
         // Idempotency guard
         $__incomingClientUuid = $_POST['client_uuid'] ?? null;
+        // Serialise same-uuid submissions (double click / retried tap): the second request waits here until
+        // the first has finished, then finds the booking it created below. The lock frees when this request ends.
+        if ($__idemKey = idem_normalize_uuid($__incomingClientUuid)) {
+            if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote('rh_idem_bk_' . md5($__idemKey)) . ', 15)')->fetchColumn() !== 1) {
+                // The first click is still being saved: never risk a second booking.
+                http_response_code(409);
+                echo '<!doctype html><meta charset="utf-8"><title>Still saving</title><body style="font-family:system-ui,sans-serif;max-width:560px;margin:60px auto;padding:0 16px;line-height:1.6">'
+                    . '<h1 style="font-size:1.3rem">This booking is still being saved</h1>'
+                    . '<p>It was submitted twice (a double click or a retry) and the first copy is still saving. To avoid a duplicate booking, this second copy was not saved.</p>'
+                    . '<p><a href="bookings.php">Open the Bookings list</a> and check for it before trying again.</p></body>';
+                exit;
+            }
+        }
         if ($__existingBooking = idem_find_existing_booking($pdo, $__incomingClientUuid)) {
             $message = 'Booking already created (reference ' . htmlspecialchars((string)$__existingBooking['booking_reference']) . '). Duplicate submission ignored.';
             $_SESSION['flash_message'] = ['type' => 'success', 'text' => $message];

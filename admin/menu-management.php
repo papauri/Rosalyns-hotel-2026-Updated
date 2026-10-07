@@ -3,6 +3,7 @@
 require_once 'admin-init.php';
 /** @var string $csrf_token */
 require_once '../includes/alert.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -39,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: ' . basename($_SERVER['PHP_SELF']));
         exit;
     }
+    $menuLockName = '';
     try {
         $action = $_POST['action'] ?? '';
         $menu_type = $_POST['menu_type'] ?? 'food';
@@ -70,8 +72,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } elseif ($action === 'add' || $action === 'update') {
             // Validate/normalise once so strict SQL never sees '' for a DECIMAL or an over-long value.
-            $_POST['name'] = trim((string)($_POST['name'] ?? ''));
-            $_POST['category'] = trim((string)($_POST['category'] ?? ''));
+            $_POST['name'] = rh_clean_text($_POST['name'] ?? '');
+            $_POST['category'] = rh_clean_text($_POST['category'] ?? '');
             $_POST['description'] = (string)($_POST['description'] ?? '');
             $rawPrice = str_replace(',', '', trim((string)($_POST['price'] ?? '')));
             if ($_POST['name'] === '' || mb_strlen($_POST['name']) > 200) {
@@ -93,6 +95,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['is_available'] = !empty($_POST['is_available']) ? 1 : 0;
             $_POST['display_order'] = (int)($_POST['display_order'] ?? 0);
             $menu_type = ($menu_type === 'drink') ? 'drink' : 'food';
+            if ($_POST['display_order'] < 0 || $_POST['display_order'] > 100000) {
+                throw new RuntimeException('Display order must be between 0 and 100000.');
+            }
+            // Same name within the same menu type + category is a duplicate (lock covers check + write).
+            $menuLockName = 'rh_form_menu_item_' . $menu_type . '_' . (defined('DB_NAME') ? DB_NAME : 'db');
+            $menuLockName = substr($menuLockName, 0, 64);
+            if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($menuLockName) . ', 10)')->fetchColumn() !== 1) {
+                $menuLockName = '';
+                throw new RuntimeException('Someone else is saving a menu item right now. Please try again in a moment.');
+            }
+            $dupTable = $menu_type === 'food' ? 'food_menu' : 'drink_menu';
+            // On edit, only check when the name or category actually changes, so an item that already
+            // has a twin (from before this check existed) can still be edited in place.
+            $keyChanged = true;
+            if ($action === 'update') {
+                $curStmt = $pdo->prepare("SELECT item_name, category FROM {$dupTable} WHERE id = ?");
+                $curStmt->execute([(int)$_POST['id']]);
+                $cur = $curStmt->fetch(PDO::FETCH_ASSOC);
+                if ($cur && mb_strtolower(rh_clean_text($cur['item_name'])) === mb_strtolower(rh_clean_text($_POST['name']))
+                    && (string)$cur['category'] === (string)$_POST['category']) {
+                    $keyChanged = false;
+                }
+            }
+            $dup = $keyChanged
+                ? rh_find_duplicate($pdo, $dupTable, 'item_name', $_POST['name'], ['category' => $_POST['category']],
+                    $action === 'update' ? (int)$_POST['id'] : null)
+                : null;
+            if ($dup) {
+                throw new RuntimeException('A ' . ($menu_type === 'food' ? 'food' : 'drink') . ' item called "' . htmlspecialchars($dup['value'], ENT_QUOTES, 'UTF-8') . '" already exists in the "' . htmlspecialchars($_POST['category'], ENT_QUOTES, 'UTF-8') . '" category. Use a different name or edit the existing one.');
+            }
         }
         if ($action === 'add') {
 
@@ -239,6 +271,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
+        }
+        if ($menuLockName !== '') {
+            try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($menuLockName) . ')'); } catch (Throwable $e2) {}
+            $menuLockName = '';
         }
         $error = 'Error: ' . $e->getMessage();
         if ($isAjax) {
@@ -958,18 +994,35 @@ if ($stockReady) {
             const showRs = row.querySelector('[data-field="show_room_service"]');
             if (showRs && showRs.checked) formData.append('show_room_service', '1');
 
+            if (window._saveRowBusy) return;
+            window._saveRowBusy = true;
             fetch(window.location.href, {
                     method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
                     body: formData
                 })
                 .then(response => {
-                    if (response.ok) {
-                        window.location.reload();
-                    } else {
-                        Alert.show('Error saving item', 'error');
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    return response.text();
+                })
+                .then(text => {
+                    var res = null;
+                    if (text.charAt(0) === '{') {
+                        try { res = JSON.parse(text); } catch (e) { res = null; }
                     }
+                    if (res && res.success === false) {
+                        window._saveRowBusy = false;
+                        var tmp = document.createElement('div');
+                        tmp.innerHTML = res.message || 'Error saving item';
+                        Alert.show(tmp.textContent, 'error');
+                        return;
+                    }
+                    window.location.reload();
                 })
                 .catch(error => {
+                    window._saveRowBusy = false;
                     console.error('Error:', error);
                     Alert.show('Error saving item', 'error');
                 });

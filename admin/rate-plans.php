@@ -5,6 +5,7 @@
  * Admin Panel — Revenue > Rate Plans
  */
 require_once 'admin-init.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 /** @var array $user */
 /** @var string $csrf_token */
 
@@ -27,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'save') {
             /* ── Validate & sanitise ── */
             $id         = !empty($_POST['plan_id']) ? (int)$_POST['plan_id'] : null;
-            $name       = trim($_POST['name'] ?? '');
+            $name       = rh_clean_text($_POST['name'] ?? '');
             $description = trim($_POST['description'] ?? '');
             $ruleType   = $_POST['rule_type'] ?? 'promotion';
             $validTypes = ['seasonal', 'weekend', 'los_discount', 'last_minute', 'early_bird', 'promotion'];
@@ -111,6 +112,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $validationError = 'That rate plan no longer exists.';
                 }
             }
+            if ($validationError === '' && ($dupPlan = rh_find_duplicate($pdo, 'rate_plans', 'name', $name, [], $id ?: null))) {
+                $validationError = rh_duplicate_message('rate plan', (string)$dupPlan['value']);
+            }
 
             if ($validationError !== '') {
                 $message = $validationError;
@@ -160,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                              applies_to, room_type_ids,
                              priority, is_stacking, is_active)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-                        $stmt->execute([
+                        $insertParams = [
                             $name,
                             $description ?: null,
                             $ruleType,
@@ -178,8 +182,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $priority,
                             $isStacking,
                             $isActive,
-                        ]);
-                        $savedId  = (int)$pdo->lastInsertId();
+                        ];
+                        // Re-check the name and insert together under a lock (double-click / two staff at once).
+                        rh_with_create_lock($pdo, 'rate_plan', function () use ($pdo, $stmt, $insertParams, $name, &$savedId) {
+                            $dup = rh_find_duplicate($pdo, 'rate_plans', 'name', $name);
+                            if ($dup) {
+                                throw new RuntimeException(rh_duplicate_message('rate plan', (string)$dup['value']));
+                            }
+                            $stmt->execute($insertParams);
+                            $savedId = (int)$pdo->lastInsertId();
+                        });
                         rh_log_event('rate_plans', 'info', "Rate plan created: {$name}", ['user' => $user['username']]);
                         $message = 'Rate plan created successfully.';
                     }
@@ -206,6 +218,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $message .= ' Note: it overlaps active plan(s) of the same type: ' . implode(', ', array_slice($clashes, 0, 5)) . '. Guests get the single best price if any overlapping plan is non-stacking.';
                         }
                     }
+                } catch (RuntimeException $e) {
+                    $message = $e->getMessage();
+                    $messageType = 'error';
                 } catch (PDOException $e) {
                     error_log('rate_plans save error: ' . $e->getMessage());
                     $message = 'Database error saving rate plan.';

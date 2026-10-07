@@ -48,6 +48,7 @@
       <li><a href="#footer">Footer</a></li>
       <li><a href="#rules">Rules the system enforces</a></li>
       <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#duplicates">Duplicates and required fields</a></li>
       <li><a href="#related">Related guides</a></li>
     </ol>
   </div>
@@ -480,6 +481,31 @@
     </tbody>
   </table>
 
+  <h2 id="duplicates">Duplicates and required fields</h2>
+  <p>Every add and edit form checks what you type before saving. Extra spaces are removed, and names are compared without caring about capital letters or doubled spaces, so <em>"Deluxe&nbsp;&nbsp;room"</em> counts as the same name as <em>"Deluxe Room"</em>.</p>
+  <p>If you try to add something that already exists, nothing is saved and you see a message such as <em>"A supplier called "…" already exists. Use a different name or edit the existing one."</em> Edit the existing record instead.</p>
+  <table>
+    <thead><tr><th>What you add</th><th>Counts as a duplicate when…</th></tr></thead>
+    <tbody>
+      <tr><td>Staff member</td><td>The username or the email address is already used (any capitals).</td></tr>
+      <tr><td>Room type</td><td>Same name.</td></tr>
+      <tr><td>Individual room</td><td>Same room number. Joined rooms: same name, or the same two rooms already joined.</td></tr>
+      <tr><td>Rate plan, room package, deal, conference room, gym package, supplier, stock item, API client</td><td>Same name.</td></tr>
+      <tr><td>Menu item</td><td>Same name in the same category of the same menu (food or drinks).</td></tr>
+      <tr><td>Recipe</td><td>A menu item already has a recipe, or the same ingredient is listed twice.</td></tr>
+      <tr><td>Event</td><td>Same title on the same date.</td></tr>
+      <tr><td>Gym class</td><td>Same title on the same days at the same time.</td></tr>
+      <tr><td>Gym member</td><td>The email address or phone number already belongs to a member (the message names them).</td></tr>
+      <tr><td>Housekeeping task</td><td>An open task of the same type for the same room on the same date.</td></tr>
+      <tr><td>Maintenance request</td><td>An open request with the same title for the same room.</td></tr>
+      <tr><td>Footer link, policy, page, hero, gallery item</td><td>Same link text in the same column; same policy slug; same page key, file or title; same hero slug; same title in the same gallery category.</td></tr>
+    </tbody>
+  </table>
+  <ul>
+    <li><strong>Editing</strong> a record without changing its name is always allowed, even if an identical copy existed before these checks were added.</li>
+    <li><strong>Double clicks:</strong> Save buttons lock while saving. A booking or payment submitted twice is saved once; the second click shows <em>"already created"</em> or <em>"already recorded"</em>. Deliveries, stock counts, wastage and purchase orders sent twice within a few seconds are treated as one.</li>
+    <li>Required fields, number ranges (for example prices of 0 or more, percentages 0–100) and dates are checked on the server too, so a form cannot be saved half-filled.</li>
+  </ul>
   <h2 id="related">Related guides</h2>
   <ul>
     <li><a href="index.html">All guides</a></li>

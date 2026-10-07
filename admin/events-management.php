@@ -9,6 +9,7 @@ require_once '../includes/alert.php';
 require_once '../includes/video-display.php';
 require_once 'video-upload-handler.php';
 require_once '../config/email.php';
+require_once '../includes/form-validation.php';
 
 function syncEventManagedMedia(array $eventRow): void
 {
@@ -140,8 +141,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (in_array($action, ['add', 'update'], true)) {
             // Strict SQL rejects '' for TIME / INT / DECIMAL columns: validate and normalise first.
-            if (trim((string)($_POST['title'] ?? '')) === '') {
+            $_POST['title'] = rh_clean_text($_POST['title'] ?? '');
+            $_POST['location'] = rh_clean_text($_POST['location'] ?? '');
+            if ($_POST['title'] === '') {
                 throw new Exception('Event title is required.');
+            }
+            if (mb_strlen($_POST['title']) > 200) {
+                throw new Exception('Event title is too long (max 200 characters).');
+            }
+            if (mb_strlen($_POST['location']) > 200) {
+                throw new Exception('Location is too long (max 200 characters).');
+            }
+            if ($action === 'update' && (int)($_POST['id'] ?? 0) <= 0) {
+                throw new Exception('Event not found.');
             }
             $evDate = DateTime::createFromFormat('Y-m-d', (string)($_POST['event_date'] ?? ''));
             if (!$evDate || $evDate->format('Y-m-d') !== (string)$_POST['event_date']) {
@@ -169,11 +181,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cp = trim((string)($_POST['capacity'] ?? ''));
             if ($cp === '') {
                 $_POST['capacity'] = null; // unlimited
-            } elseif (!ctype_digit($cp)) {
+            } elseif (!ctype_digit($cp) || (int)$cp > 1000000) {
                 throw new Exception('Capacity must be a whole number (leave blank or 0 for unlimited).');
+            }
+            if ((float)$_POST['ticket_price'] > 99999999.99) {
+                throw new Exception('Ticket price is too large.');
             }
             $do = trim((string)($_POST['display_order'] ?? ''));
             $_POST['display_order'] = is_numeric($do) ? (int)$do : 0;
+            // Same event = same title on the same date.
+            $evDup = rh_find_duplicate($pdo, 'events', 'title', $_POST['title'], ['event_date' => $_POST['event_date']], $action === 'update' ? (int)$_POST['id'] : null);
+            if ($evDup) {
+                throw new Exception('An event called "' . $evDup['value'] . '" already exists on ' . $_POST['event_date'] . '. Edit that one or change the title or date.');
+            }
         }
 
         if ($action === 'add') {
@@ -205,25 +225,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT INTO events (title, description, event_date, start_time, end_time, location, ticket_price, capacity, is_featured, show_in_upcoming, is_active, display_order, image_path, video_path, video_type)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
-            $stmt->execute([
-                $_POST['title'],
-                $_POST['description'],
-                $_POST['event_date'],
-                $_POST['start_time'],
-                $_POST['end_time'],
-                $_POST['location'],
-                $_POST['ticket_price'] ?? 0,
-                $_POST['capacity'],
-                isset($_POST['is_featured']) ? 1 : 0,
-                isset($_POST['show_in_upcoming']) ? 1 : 0,
-                isset($_POST['is_active']) ? 1 : 0,
-                $_POST['display_order'] ?? 0,
-                $imagePath,
-                $videoPath,
-                $videoType
-            ]);
-
-            $newEventId = (int)$pdo->lastInsertId();
+            if ($error) {
+                // A rejected image must not leave a half-saved event behind (a retry would then clash).
+                throw new Exception($error);
+            }
+            $newEventId = 0;
+            rh_with_create_lock($pdo, 'event', function () use ($pdo, $stmt, $imagePath, $videoPath, $videoType, &$newEventId) {
+                $dupNow = rh_find_duplicate($pdo, 'events', 'title', (string)$_POST['title'], ['event_date' => $_POST['event_date']]);
+                if ($dupNow) {
+                    throw new Exception('An event called "' . $dupNow['value'] . '" already exists on ' . $_POST['event_date'] . '.');
+                }
+                $stmt->execute([
+                    $_POST['title'],
+                    $_POST['description'],
+                    $_POST['event_date'],
+                    $_POST['start_time'],
+                    $_POST['end_time'],
+                    $_POST['location'],
+                    $_POST['ticket_price'] ?? 0,
+                    $_POST['capacity'],
+                    isset($_POST['is_featured']) ? 1 : 0,
+                    isset($_POST['show_in_upcoming']) ? 1 : 0,
+                    isset($_POST['is_active']) ? 1 : 0,
+                    $_POST['display_order'] ?? 0,
+                    $imagePath,
+                    $videoPath,
+                    $videoType
+                ]);
+                $newEventId = (int)$pdo->lastInsertId();
+            });
             if ($newEventId > 0) {
                 syncEventManagedMedia([
                     'id' => $newEventId,

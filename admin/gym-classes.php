@@ -239,7 +239,7 @@ try {
             </div>
             <div class="mm-modal-foot">
                 <button type="button" class="mm-btn mm-btn-ghost" onclick="gcClose('gcClassModal')">Cancel</button>
-                <button type="button" class="mm-btn mm-btn-primary" onclick="gcSaveClass()">Save Class</button>
+                <button type="button" class="mm-btn mm-btn-primary" id="gcSaveBtn" onclick="gcSaveClass()">Save Class</button>
             </div>
         </div>
     </div>
@@ -329,6 +329,9 @@ try {
             gcOpen('gcClassModal');
         }
         function gcSaveClass() {
+            var gcSaveBtn = document.getElementById('gcSaveBtn');
+            if (gcSaveBtn.disabled) return;
+            gcSaveBtn.disabled = true;
             gcPost({
                 gc_action: 'class_save',
                 id: document.getElementById('gcClassId').value,
@@ -341,7 +344,10 @@ try {
                 is_active: document.getElementById('gcActive').checked ? 1 : 0
             }).then(function (d) {
                 gcToast(d.message, d.success);
-                if (d.success) { setTimeout(function () { location.reload(); }, 650); }
+                if (d.success) { setTimeout(function () { location.reload(); }, 650); } else { gcSaveBtn.disabled = false; }
+            }).catch(function () {
+                gcSaveBtn.disabled = false;
+                gcToast('Network error — please try again.', false);
             });
         }
         function gcDeleteClass(id) {

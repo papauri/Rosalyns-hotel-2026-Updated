@@ -8,6 +8,7 @@
  */
 require_once 'admin-init.php';
 require_once 'includes/admin-modal.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 /** @var array{id: int, username: string, role: string} $user */
 /** @var string $csrf_token */
 
@@ -565,6 +566,46 @@ function createRecurringMaintenance(PDO $pdo, int $performedBy): int
     return $created;
 }
 
+/** Shared field checks for add/update; returns an error string or ''. */
+function maintenanceValidateFields(string $title, string $description, int $estimated, bool $isRecurring, ?string $recurEnd, string $dueDate): string
+{
+    if (mb_strlen($title) > 255) {
+        return 'Title is too long (255 characters maximum).';
+    }
+    if (mb_strlen($description) > 5000) {
+        return 'Description is too long (5000 characters maximum).';
+    }
+    if ($estimated < 1 || $estimated > 100000) {
+        return 'Estimated duration must be a positive number of minutes.';
+    }
+    if ($dueDate !== '') {
+        $d = DateTime::createFromFormat('Y-m-d', $dueDate);
+        if (!$d || $d->format('Y-m-d') !== $dueDate) {
+            return 'Invalid due date format.';
+        }
+    }
+    if ($isRecurring && $recurEnd !== null && $recurEnd !== '') {
+        $e = DateTime::createFromFormat('Y-m-d', $recurEnd);
+        if (!$e || $e->format('Y-m-d') !== $recurEnd) {
+            return 'Recurring end date is not a valid date.';
+        }
+        if ($dueDate !== '' && $recurEnd < $dueDate) {
+            return 'Recurring end date cannot be before the due date.';
+        }
+    }
+    return '';
+}
+
+/**
+ * An open request (planned / in progress) for the same room with the same title already exists.
+ * Returns the existing row ['id','value'] or null. $excludeId skips the row being edited.
+ */
+function maintenanceFindOpenDuplicate(PDO $pdo, int $roomId, string $title, ?int $excludeId = null): ?array
+{
+    return rh_find_duplicate($pdo, 'room_maintenance_schedules', 'title', $title,
+        ['individual_room_id' => $roomId], $excludeId, 'id', "status IN ('planned','in_progress')");
+}
+
 // Handle POST requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
@@ -576,8 +617,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'add_schedule') {
             $room_id = (int)($_POST['individual_room_id'] ?? 0);
-            $title = trim($_POST['title'] ?? '');
-            $description = trim($_POST['description'] ?? '');
+            $title = rh_clean_text($_POST['title'] ?? '');
+            $description = trim((string)($_POST['description'] ?? ''));
             $due_date = $_POST['due_date'] ?? '';
             $status = $_POST['status'] ?? 'pending';
             $assigned_to = !empty($_POST['assigned_to']) ? (int)$_POST['assigned_to'] : null;
@@ -636,7 +677,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Invalid date format.';
             } elseif (strtotime($end_date) <= strtotime($start_date)) {
                 $error = 'End date must be after start date.';
+            } elseif (($fieldErr = maintenanceValidateFields($title, $description, $estimated_duration, (bool)$is_recurring, $recurring_end_date, $hasDueDate ? (string)$due_date : '')) !== '') {
+                $error = $fieldErr;
             } else {
+                // One open request per room + title: check and insert under one lock so a double click cannot add two.
+                $mtLockName = substr('rh_form_maint_schedule_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+                if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($mtLockName) . ', 10)')->fetchColumn() !== 1) {
+                    $mtLockName = '';
+                    throw new DomainException('Someone else is saving a maintenance request right now. Please try again in a moment.');
+                }
+                if (in_array($status, ['pending', 'in_progress'], true)) {
+                    $dupMt = maintenanceFindOpenDuplicate($pdo, $room_id, $title);
+                    if ($dupMt) {
+                        throw new DomainException('This room already has an open maintenance request called "' . $dupMt['value'] . '" (request #' . $dupMt['id'] . '). Edit that one instead.');
+                    }
+                }
                 $pdo->beginTransaction();
 
                 $completedAt = in_array($status, ['completed', 'verified'], true) ? date('Y-m-d H:i:s') : null;
@@ -754,6 +809,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 logMaintenanceAction($newMaintenanceId, 'created', null, $newData, $user['id'] ?? null, $user['username'] ?? null);
 
                 $pdo->commit();
+                try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($mtLockName) . ')'); } catch (Throwable $e2) {}
+                $mtLockName = '';
                 $message = 'Maintenance schedule created successfully.';
                 if ($isAjax) {
                     header('Content-Type: application/json; charset=utf-8');
@@ -764,8 +821,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'update_schedule') {
             $id = (int)($_POST['id'] ?? 0);
             $room_id = (int)($_POST['individual_room_id'] ?? 0);
-            $title = trim($_POST['title'] ?? '');
-            $description = trim($_POST['description'] ?? '');
+            $title = rh_clean_text($_POST['title'] ?? '');
+            $description = trim((string)($_POST['description'] ?? ''));
             $due_date = $_POST['due_date'] ?? '';
             $status = $_POST['status'] ?? 'pending';
             $assigned_to = !empty($_POST['assigned_to']) ? (int)$_POST['assigned_to'] : null;
@@ -822,9 +879,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Invalid date format.';
             } elseif (strtotime($end_date) <= strtotime($start_date)) {
                 $error = 'End date must be after start date.';
+            } elseif (($fieldErr = maintenanceValidateFields($title, $description, $estimated_duration, (bool)$is_recurring, $recurring_end_date, $hasDueDate ? (string)$due_date : '')) !== '') {
+                $error = $fieldErr;
             } else {
                 $pdo->beginTransaction();
-                $existsStmt = $pdo->prepare("SELECT id, individual_room_id, status, verified_by FROM room_maintenance_schedules WHERE id = ?");
+                $existsStmt = $pdo->prepare("SELECT id, individual_room_id, title, status, verified_by FROM room_maintenance_schedules WHERE id = ?");
                 $existsStmt->execute([$id]);
                 $existing = $existsStmt->fetch(PDO::FETCH_ASSOC);
                 if (!$existing) {
@@ -833,6 +892,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $existing['status'] = rh_maint_status_from_db($existing['status'] ?? '', $existing['verified_by'] ?? null);
                 if (($existing['status'] ?? '') === 'verified') {
                     throw new DomainException('Verified maintenance schedules are locked and cannot be edited.');
+                }
+
+                // Changing room or title onto an existing open request would create a duplicate.
+                if (in_array($status, ['pending', 'in_progress'], true)
+                    && ((int)$existing['individual_room_id'] !== $room_id
+                        || mb_strtolower(rh_clean_text($existing['title'] ?? '')) !== mb_strtolower($title))) {
+                    $dupMt = maintenanceFindOpenDuplicate($pdo, $room_id, $title, $id);
+                    if ($dupMt) {
+                        throw new DomainException('This room already has an open maintenance request called "' . $dupMt['value'] . '" (request #' . $dupMt['id'] . '). Edit that one instead.');
+                    }
                 }
 
                 // Auto-set verified_by when status changes to verified
@@ -1188,6 +1257,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
+        }
+        if (!empty($mtLockName)) {
+            try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($mtLockName) . ')'); } catch (Throwable $e2) {}
+            $mtLockName = '';
         }
         $error = $e instanceof DomainException ? $e->getMessage() : ('Database error: ' . $e->getMessage());
         if ($isAjax) {

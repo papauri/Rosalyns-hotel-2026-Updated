@@ -5,6 +5,7 @@
  */
 
 require_once 'admin-init.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 $csrf_token = $csrf_token ?? generateCsrfToken();
 
@@ -97,10 +98,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         switch ($_POST['action']) {
             case 'create_key':
-                $clientName = trim((string)($_POST['client_name'] ?? ''));
-                $clientWebsite = trim((string)($_POST['client_website'] ?? ''));
-                $clientEmail = trim((string)($_POST['client_email'] ?? ''));
-                $rateLimit = max(1, (int)($_POST['rate_limit_per_hour'] ?? 100));
+                $clientName = rh_clean_text($_POST['client_name'] ?? '');
+                $clientWebsite = rh_clean_text($_POST['client_website'] ?? '');
+                $clientEmail = strtolower(rh_clean_text($_POST['client_email'] ?? ''));
+                $rateLimitRaw = trim((string)($_POST['rate_limit_per_hour'] ?? '100'));
+                if ($rateLimitRaw !== '' && !ctype_digit($rateLimitRaw)) {
+                    throw new RuntimeException('Rate limit must be a whole number of requests per hour.');
+                }
+                $rateLimit = max(1, (int)($rateLimitRaw === '' ? 100 : $rateLimitRaw));
                 $permissions = array_values(array_intersect(array_keys($availablePermissions), (array)($_POST['permissions'] ?? [])));
 
                 if ($clientName === '' || $clientEmail === '') {
@@ -110,29 +115,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     throw new RuntimeException('Enter a valid email address; name, email and website must each be under 255 characters.');
                 }
                 $rateLimit = min($rateLimit, 1000000);
-
-                if (!filter_var($clientEmail, FILTER_VALIDATE_EMAIL) || strlen($clientEmail) > 255 || strlen($clientName) > 255 || strlen($clientWebsite) > 255) {
-                    throw new RuntimeException('Enter a valid email address; name, email and website must each be under 255 characters.');
+                if ($clientWebsite !== '' && (!filter_var($clientWebsite, FILTER_VALIDATE_URL) || !preg_match('#^https?://#i', $clientWebsite))) {
+                    throw new RuntimeException('Client website must be a full web address starting with http:// or https://, or left empty.');
                 }
-                $rateLimit = min($rateLimit, 1000000);
+                $dupClient = rh_find_duplicate($pdo, 'api_keys', 'client_name', $clientName);
+                if ($dupClient) {
+                    throw new RuntimeException(rh_duplicate_message('API client', (string)$dupClient['value']) . ' Use "Regenerate" on the existing key to issue a new secret.');
+                }
 
                 $rawApiKey = bin2hex(random_bytes(32));
                 $hashedApiKey = password_hash($rawApiKey, PASSWORD_DEFAULT);
                 $encryptedApiKey = encryptApiKey($rawApiKey);
 
-                $stmt = $pdo->prepare(
-                    'INSERT INTO api_keys (api_key, api_key_plain, client_name, client_website, client_email, permissions, rate_limit_per_hour, is_active)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 1)'
-                );
-                $stmt->execute([
-                    $hashedApiKey,
-                    $encryptedApiKey,
-                    $clientName,
-                    $clientWebsite,
-                    $clientEmail,
-                    json_encode(array_values((array)$permissions)),
-                    $rateLimit,
-                ]);
+                rh_with_create_lock($pdo, 'api_key_client', function () use ($pdo, $hashedApiKey, $encryptedApiKey, $clientName, $clientWebsite, $clientEmail, $permissions, $rateLimit) {
+                    $dupNow = rh_find_duplicate($pdo, 'api_keys', 'client_name', $clientName);
+                    if ($dupNow) {
+                        throw new RuntimeException(rh_duplicate_message('API client', (string)$dupNow['value']));
+                    }
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO api_keys (api_key, api_key_plain, client_name, client_website, client_email, permissions, rate_limit_per_hour, is_active)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, 1)'
+                    );
+                    $stmt->execute([
+                        $hashedApiKey,
+                        $encryptedApiKey,
+                        $clientName,
+                        $clientWebsite,
+                        $clientEmail,
+                        json_encode(array_values((array)$permissions)),
+                        $rateLimit,
+                    ]);
+                });
 
                 $safeClientName = htmlspecialchars($clientName, ENT_QUOTES, 'UTF-8');
                 $safeRaw = htmlspecialchars($rawApiKey, ENT_QUOTES, 'UTF-8');

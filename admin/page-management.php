@@ -9,6 +9,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'includes/admin-modal.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 $user = $user ?? ['id' => 0];
 $csrf_token = $csrf_token ?? generateCsrfToken();
@@ -208,11 +209,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Add new page
                 case 'add_page':
                     $page_key     = normalizePageKey($_POST['page_key'] ?? '');
-                    $title        = trim($_POST['title'] ?? '');
+                    $title        = rh_clean_text($_POST['title'] ?? '');
                     $file_path    = normalizePageFilePath($_POST['file_path'] ?? '');
                     $icon         = normalizePageIcon($_POST['icon'] ?? 'fa-file');
-                    $desc         = trim($_POST['description'] ?? '');
-                    $page_heading = trim($_POST['page_heading'] ?? '') ?: $title;
+                    $desc         = rh_clean_text($_POST['description'] ?? '');
+                    $page_heading = rh_clean_text($_POST['page_heading'] ?? '') ?: $title;
                     $create_file  = !empty($_POST['create_file']);
 
                     if (!$page_key || !$title || !$file_path) {
@@ -225,16 +226,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         // Only allow root-level files — no subdirectory creation
                         $error = 'New pages must be root-level PHP files (e.g. spa.php). Subdirectories are not supported.';
                     } else {
-                        // Check for duplicate key
-                        $chk = $pdo->prepare("SELECT COUNT(*) FROM site_pages WHERE page_key = ?");
-                        $chk->execute([$page_key]);
-                        if ($chk->fetchColumn() > 0) {
-                            $error = 'A page with that key already exists.';
+                        // Check for duplicate key / title (case-insensitive)
+                        $keyDup = rh_find_duplicate($pdo, 'site_pages', 'page_key', $page_key);
+                        $titleDup = rh_find_duplicate($pdo, 'site_pages', 'title', $title);
+                        if ($keyDup) {
+                            $error = 'A page with the key "' . $keyDup['value'] . '" already exists.';
+                        } elseif ($titleDup) {
+                            $error = rh_duplicate_message('page', (string)$titleDup['value']);
                         } else {
-                            $pathChk = $pdo->prepare("SELECT COUNT(*) FROM site_pages WHERE file_path = ?");
-                            $pathChk->execute([$file_path]);
-                            if ($pathChk->fetchColumn() > 0) {
-                                $error = 'A page with that file path already exists.';
+                            $pathDup = rh_find_duplicate($pdo, 'site_pages', 'file_path', $file_path);
+                            if ($pathDup) {
+                                $error = 'A page with the file path "' . $pathDup['value'] . '" already exists.';
                                 break;
                             }
 
@@ -331,10 +333,10 @@ PHP;
                 // Edit page details
                 case 'edit_page':
                     $id        = (int)($_POST['page_id'] ?? 0);
-                    $title     = trim($_POST['title'] ?? '');
+                    $title     = rh_clean_text($_POST['title'] ?? '');
                     $file_path = normalizePageFilePath($_POST['file_path'] ?? '');
                     $icon      = normalizePageIcon($_POST['icon'] ?? 'fa-file');
-                    $desc      = trim($_POST['description'] ?? '');
+                    $desc      = rh_clean_text($_POST['description'] ?? '');
 
                     if ($id <= 0 || !$title || !$file_path) {
                         $error = 'Title and file path are required.';
@@ -350,10 +352,16 @@ PHP;
                             break;
                         }
 
-                        $dup = $pdo->prepare("SELECT COUNT(*) FROM site_pages WHERE file_path = ? AND id <> ?");
-                        $dup->execute([$file_path, $id]);
-                        if ($dup->fetchColumn() > 0) {
+                        if (rh_find_duplicate($pdo, 'site_pages', 'file_path', $file_path, [], $id)) {
                             $error = 'Another page already uses that file path.';
+                            break;
+                        }
+                        // Only when the title is being changed (a few legacy pages already share a title).
+                        $curTitleSt = $pdo->prepare("SELECT title FROM site_pages WHERE id = ?");
+                        $curTitleSt->execute([$id]);
+                        $titleChanged = rh_clean_text((string)$curTitleSt->fetchColumn()) !== $title;
+                        if ($titleChanged && ($titleDup = rh_find_duplicate($pdo, 'site_pages', 'title', $title, [], $id))) {
+                            $error = rh_duplicate_message('page', (string)$titleDup['value']);
                             break;
                         }
 

@@ -14,6 +14,7 @@ require_once '../config/email.php';
 require_once '../config/invoice.php';
 require_once '../includes/alert.php';
 require_once '../includes/finance-sequences.php';
+require_once '../includes/form-validation.php';
 
 finance_ensure_sequence_tables($pdo);
 
@@ -115,14 +116,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (in_array($action, ['add', 'update'], true)) {
-            if (trim((string)($_POST['name'] ?? '')) === '' || trim((string)($_POST['description'] ?? '')) === '') {
+            $_POST['name'] = rh_clean_text($_POST['name'] ?? '');
+            $_POST['description'] = trim((string)($_POST['description'] ?? ''));
+            if ($_POST['name'] === '' || $_POST['description'] === '') {
                 throw new Exception('Room name and description are required.');
             }
-            if (!isset($_POST['capacity']) || !ctype_digit(trim((string)$_POST['capacity'])) || (int)$_POST['capacity'] < 1) {
+            if (mb_strlen($_POST['name']) > 100) {
+                throw new Exception('Room name is too long (max 100 characters).');
+            }
+            if ($action === 'update' && (int)($_POST['id'] ?? 0) <= 0) {
+                throw new Exception('Conference room not found.');
+            }
+            if (!isset($_POST['capacity']) || !ctype_digit(trim((string)$_POST['capacity'])) || (int)$_POST['capacity'] < 1 || (int)$_POST['capacity'] > 100000) {
                 throw new Exception('Capacity must be a whole number of at least 1.');
             }
-            if (!isset($_POST['daily_rate']) || !is_numeric($_POST['daily_rate']) || (float)$_POST['daily_rate'] < 0) {
+            if (!isset($_POST['daily_rate']) || !is_numeric($_POST['daily_rate']) || (float)$_POST['daily_rate'] < 0 || (float)$_POST['daily_rate'] > 99999999.99) {
                 throw new Exception('Full day rate must be a number (0 or more).');
+            }
+            $cfDup = rh_find_duplicate($pdo, 'conference_rooms', 'name', $_POST['name'], [], $action === 'update' ? (int)$_POST['id'] : null);
+            if ($cfDup) {
+                throw new Exception(rh_duplicate_message('conference room', (string)$cfDup['value']));
             }
             if (($_POST['size_sqm'] ?? '') !== '' && (!is_numeric($_POST['size_sqm']) || (float)$_POST['size_sqm'] < 0)) {
                 throw new Exception('Size must be a positive number.');
@@ -141,19 +154,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     amenities, image_path, is_active, display_order
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
-            $stmt->execute([
-                $_POST['name'],
-                $_POST['description'],
-                $_POST['capacity'],
-                $_POST['size_sqm'] ?: null,
-                $_POST['daily_rate'],
-                $_POST['amenities'] ?? '',
-                $imagePath,
-                isset($_POST['is_active']) ? 1 : 0,
-                $_POST['display_order'] ?? 0
-            ]);
-
-            $newConferenceRoomId = (int)$pdo->lastInsertId();
+            $newConferenceRoomId = 0;
+            rh_with_create_lock($pdo, 'conference_room', function () use ($pdo, $stmt, $imagePath, &$newConferenceRoomId) {
+                $dupNow = rh_find_duplicate($pdo, 'conference_rooms', 'name', (string)$_POST['name']);
+                if ($dupNow) {
+                    throw new Exception(rh_duplicate_message('conference room', (string)$dupNow['value']));
+                }
+                $stmt->execute([
+                    $_POST['name'],
+                    $_POST['description'],
+                    $_POST['capacity'],
+                    $_POST['size_sqm'] ?: null,
+                    $_POST['daily_rate'],
+                    $_POST['amenities'] ?? '',
+                    $imagePath,
+                    isset($_POST['is_active']) ? 1 : 0,
+                    $_POST['display_order'] ?? 0
+                ]);
+                $newConferenceRoomId = (int)$pdo->lastInsertId();
+            });
             if ($newConferenceRoomId > 0) {
                 syncConferenceRoomManagedMedia([
                     'id' => $newConferenceRoomId,

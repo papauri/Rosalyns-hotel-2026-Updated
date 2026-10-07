@@ -4,6 +4,7 @@
  */
 require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/alert.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -25,11 +26,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
     try {
         if ($action === 'save') {
             $id   = (int)($_POST['id'] ?? 0);
-            $name = mb_substr(trim($_POST['name'] ?? ''), 0, 100);
-            $desc = mb_substr(trim($_POST['description'] ?? ''), 0, 255);
+            $name = rh_clean_text($_POST['name'] ?? '');
+            $desc = rh_clean_text($_POST['description'] ?? '');
             $type = $_POST['deal_type'] ?? '';
             if (!in_array($type, $VALID_TYPES, true)) throw new InvalidArgumentException('Invalid deal type.');
             if ($name === '') throw new InvalidArgumentException('Name is required.');
+            if (mb_strlen($name) > 100) throw new InvalidArgumentException('Deal name is too long (max 100 characters).');
+            if (mb_strlen($desc) > 255) throw new InvalidArgumentException('Description is too long (max 255 characters).');
+            if ($id > 0) {
+                $dealExists = $pdo->prepare("SELECT COUNT(*) FROM pos_deals WHERE id = ?");
+                $dealExists->execute([$id]);
+                if ((int)$dealExists->fetchColumn() === 0) throw new InvalidArgumentException('That deal no longer exists.');
+            }
+            foreach (['discount_percent' => 'Discount percentage', 'discount_fixed' => 'Fixed discount', 'spend_threshold' => 'Spend threshold'] as $numField => $numLabel) {
+                $nv = trim((string)($_POST[$numField] ?? ''));
+                if ($nv !== '' && (!is_numeric($nv) || (float)$nv < 0)) throw new InvalidArgumentException($numLabel . ' must be a number of 0 or more.');
+            }
+            if (trim((string)($_POST['discount_percent'] ?? '')) !== '' && (float)$_POST['discount_percent'] > 100) throw new InvalidArgumentException('Discount percentage cannot exceed 100.');
+            $dupDeal = rh_find_duplicate($pdo, 'pos_deals', 'name', $name, [], $id > 0 ? $id : null);
+            if ($dupDeal) throw new InvalidArgumentException(rh_duplicate_message('deal', (string)$dupDeal['value']));
 
             // Time / date
             $dow       = trim($_POST['days_of_week'] ?? '');
@@ -140,14 +155,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
                 echo json_encode(['ok' => true, 'msg' => 'Deal updated.', 'id' => $id]);
             } else {
                 $params[] = (int)$user['id'];
-                $pdo->prepare("INSERT INTO pos_deals
-                    (name, description, deal_type, days_of_week, start_time, end_time,
-                     valid_from, valid_to, applies_to, item_types, item_ids,
-                     discount_percent, discount_fixed, multi_buy_qty, multi_buy_pay,
-                     spend_threshold, combo_requires, max_uses_per_order, exclusive,
-                     is_active, sort_order, created_by)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")->execute($params);
-                echo json_encode(['ok' => true, 'msg' => 'Deal created.', 'id' => (int)$pdo->lastInsertId()]);
+                $newDealId = 0;
+                // Re-check the name and insert together under a lock (double-click / two staff at once).
+                rh_with_create_lock($pdo, 'pos_deal', function () use ($pdo, $params, $name, &$newDealId) {
+                    if ($dupNow = rh_find_duplicate($pdo, 'pos_deals', 'name', $name)) {
+                        throw new InvalidArgumentException(rh_duplicate_message('deal', (string)$dupNow['value']));
+                    }
+                    $pdo->prepare("INSERT INTO pos_deals
+                        (name, description, deal_type, days_of_week, start_time, end_time,
+                         valid_from, valid_to, applies_to, item_types, item_ids,
+                         discount_percent, discount_fixed, multi_buy_qty, multi_buy_pay,
+                         spend_threshold, combo_requires, max_uses_per_order, exclusive,
+                         is_active, sort_order, created_by)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")->execute($params);
+                    $newDealId = (int)$pdo->lastInsertId();
+                });
+                echo json_encode(['ok' => true, 'msg' => 'Deal created.', 'id' => $newDealId]);
             }
 
         } elseif ($action === 'toggle') {

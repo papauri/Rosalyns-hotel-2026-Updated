@@ -12,6 +12,7 @@ if (!$is_ajax) {
     require_once '../includes/alert.php';
 }
 require_once 'video-upload-handler.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 function syncRoomManagedMedia(array $room): void
 {
@@ -128,6 +129,58 @@ function rm_num($v, $default = 0.0)
     return max(0.0, (float)$v);
 }
 
+/**
+ * Server-side checks shared by add_room and update. Returns an error string or null.
+ * $total / $avail are the already-parsed integers.
+ */
+function rm_validate_room_input(PDO $pdo, string $name, int $total, int $avail, ?int $excludeId): ?string
+{
+    if ($name === '') {
+        return 'Room name is required.';
+    }
+    if (mb_strlen($name) > 100) {
+        return 'Room name is too long (max 100 characters).';
+    }
+    $price = $_POST['price_per_night'] ?? '';
+    $priceStr = is_string($price) ? trim(str_replace(',', '', $price)) : $price;
+    if ($priceStr !== '' && (!is_numeric($priceStr) || (float)$priceStr < 0)) {
+        return 'Price per night must be a number of 0 or more.';
+    }
+    $guests = $_POST['max_guests'] ?? '2';
+    if (!is_numeric($guests) || (int)$guests < 1 || (int)$guests > 20) {
+        return 'Maximum guests must be between 1 and 20.';
+    }
+    if (mb_strlen((string)($_POST['short_description'] ?? '')) > 255) {
+        return 'Short description is too long (max 255 characters).';
+    }
+    $bed = rh_clean_text($_POST['bed_type'] ?? '');
+    if (mb_strlen($bed) > 50) {
+        return 'Bed type is too long (max 50 characters).';
+    }
+    if ($total < 1) {
+        return 'Total rooms must be at least 1.';
+    }
+    if ($avail < 0 || $avail > $total) {
+        return 'Availability cannot exceed total rooms.';
+    }
+    foreach (['price_single_occupancy', 'price_double_occupancy', 'price_triple_occupancy', 'size_sqm'] as $f) {
+        $v = $_POST[$f] ?? '';
+        $v = is_string($v) ? trim(str_replace(',', '', $v)) : $v;
+        if ($v !== '' && $v !== null && (!is_numeric($v) || (float)$v < 0)) {
+            return 'Prices and room size must be numbers of 0 or more.';
+        }
+    }
+    $cm = $_POST['child_price_multiplier'] ?? '';
+    if ($cm !== '' && (!is_numeric($cm) || (float)$cm < 0 || (float)$cm > 100)) {
+        return 'Child price percentage must be between 0 and 100.';
+    }
+    $dup = rh_find_duplicate($pdo, 'rooms', 'name', $name, [], $excludeId);
+    if ($dup) {
+        return rh_duplicate_message('room type', (string)$dup['value']);
+    }
+    return null;
+}
+
 // Note: $user and $current_page are already set in admin-init.php
 $message = '';
 $error = '';
@@ -151,15 +204,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $total_rooms = (int)($_POST['total_rooms'] ?? 0);
             $room_image_url = normalizeRoomImagePath($_POST['image_url'] ?? '');
 
-            if (trim((string)($_POST['name'] ?? '')) === '') {
-                $error = 'Room name is required.';
-                if (is_ajax_request()) {
-                    header('Content-Type: application/json');
-                    echo json_encode(['success' => false, 'message' => $error]);
-                    exit;
-                }
-            } elseif ($rooms_available < 0 || $total_rooms < 0 || $rooms_available > $total_rooms) {
-                $error = 'Availability cannot exceed total rooms.';
+            $_POST['name'] = rh_clean_text($_POST['name'] ?? '');
+            $validationError = (int)($_POST['id'] ?? 0) <= 0
+                ? 'Room not found.'
+                : rm_validate_room_input($pdo, (string)$_POST['name'], $total_rooms, $rooms_available, (int)$_POST['id']);
+            if ($validationError !== null) {
+                $error = $validationError;
                 if (is_ajax_request()) {
                     header('Content-Type: application/json');
                     echo json_encode(['success' => false, 'message' => $error]);
@@ -396,6 +446,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
         } elseif ($action === 'add_room') {
+            $_POST['name'] = rh_clean_text($_POST['name'] ?? '');
+            $addTotal = (int)($_POST['total_rooms'] ?? 1);
+            $addAvail = (int)($_POST['rooms_available'] ?? 1);
+            $addError = rm_validate_room_input($pdo, (string)$_POST['name'], $addTotal, $addAvail, null);
+            if ($addError !== null) {
+                throw new RuntimeException($addError);
+            }
             $videoUrl = processVideoUrl($_POST['video_url'] ?? '');
             $room_image_url = normalizeRoomImagePath($_POST['image_url'] ?? '');
             if ($videoUrl) {
@@ -418,23 +475,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ");
             // slug is required (NOT NULL): derive it from the name and keep it unique.
             $slugBase = substr(trim(preg_replace('/[^a-z0-9]+/', '-', strtolower((string)($_POST['name'] ?? 'room'))), '-'), 0, 90) ?: 'room'; // slug is VARCHAR(100)
-            $newSlug = $slugBase;
-            $slugCheck = $pdo->prepare('SELECT COUNT(*) FROM rooms WHERE slug = ?');
-            for ($si = 2; $slugCheck->execute([$newSlug]) && (int)$slugCheck->fetchColumn() > 0; $si++) {
-                $newSlug = $slugBase . '-' . $si;
-            }
-            if (trim((string)($_POST['name'] ?? '')) === '') {
-                throw new RuntimeException('Room name is required.');
-            }
-            $addTotal = max(0, (int)($_POST['total_rooms'] ?? 1));
-            $addAvail = min($addTotal, max(0, (int)($_POST['rooms_available'] ?? 1)));
             $maxGuests = max(1, (int)($_POST['max_guests'] ?? 2));
             $singleEnabled = $maxGuests >= 1 ? 1 : 0;
             $doubleEnabled = $maxGuests >= 2 ? 1 : 0;
             $tripleEnabled = ($maxGuests >= 3 && isset($_POST['triple_occupancy_enabled'])) ? 1 : 0;
             $childrenAllowed = isset($_POST['children_allowed']) ? 1 : 0;
+            $newRoomId = 0;
+            rh_with_create_lock($pdo, 'room_type', function () use ($pdo, $stmt, $slugBase, &$newRoomId, $addTotal, $addAvail, $maxGuests, $singleEnabled, $doubleEnabled, $tripleEnabled, $childrenAllowed, $room_image_url, $videoPath, $videoType) {
+            // re-check the name and pick a free slug under the lock
+            $dupNow = rh_find_duplicate($pdo, 'rooms', 'name', (string)$_POST['name']);
+            if ($dupNow) {
+                throw new RuntimeException(rh_duplicate_message('room type', (string)$dupNow['value']));
+            }
+            $newSlug = $slugBase;
+            $slugCheck = $pdo->prepare('SELECT COUNT(*) FROM rooms WHERE slug = ?');
+            for ($si = 2; $slugCheck->execute([$newSlug]) && (int)$slugCheck->fetchColumn() > 0; $si++) {
+                $newSlug = $slugBase . '-' . $si;
+            }
             $stmt->execute([
-                trim((string)$_POST['name']),
+                (string)$_POST['name'],
                 $_POST['description'] ?? $_POST['short_description'] ?? '',
                 $_POST['short_description'] ?? '',
                 rm_num($_POST['price_per_night'] ?? 0),
@@ -460,8 +519,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $videoType,
                 $newSlug
             ]);
-
             $newRoomId = (int)$pdo->lastInsertId();
+            });
             if ($newRoomId > 0) {
                 $mediaSyncStmt = $pdo->prepare("SELECT id, name, description, short_description, display_order, image_url, video_path, video_type FROM rooms WHERE id = ? LIMIT 1");
                 $mediaSyncStmt->execute([$newRoomId]);

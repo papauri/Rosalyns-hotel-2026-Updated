@@ -9,6 +9,7 @@
  */
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -96,46 +97,78 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $delim    = $_POST['delete_ingredient'] ?? [];
 
                 if ($itemId <= 0) throw new RuntimeException('Menu item required.');
+                if (!is_array($ingIds) || !is_array($qtys) || !is_array($yields)) {
+                    throw new RuntimeException('Recipe lines are malformed.');
+                }
+                if ($portions > 10000) throw new RuntimeException('Portions per recipe is too large.');
+                $miChk = $pdo->prepare("SELECT COUNT(*) FROM menu_items WHERE id = ?");
+                $miChk->execute([$itemId]);
+                if ((int)$miChk->fetchColumn() === 0) throw new RuntimeException('Menu item not found.');
 
-                $pdo->beginTransaction();
-                // Find or create recipe
-                $rs = $pdo->prepare("SELECT id FROM stock_recipes WHERE menu_item_id = ? AND menu_type = ?");
-                $rs->execute([$itemId, $type]);
-                $recipeId = (int)($rs->fetchColumn() ?: 0);
-                if ($recipeId === 0) {
-                    $ins = $pdo->prepare("INSERT INTO stock_recipes (menu_item_id, menu_type, portions_per_recipe, created_by) VALUES (?, ?, ?, ?)");
-                    $ins->execute([$itemId, $type, $portions, $user['id']]);
-                    $recipeId = (int)$pdo->lastInsertId();
-                } else {
-                    $upd = $pdo->prepare("UPDATE stock_recipes SET portions_per_recipe = ?, updated_at = NOW() WHERE id = ?");
-                    $upd->execute([$portions, $recipeId]);
+                // Validate every kept line up front: ingredient exists, quantity/yield numeric and in range,
+                // and the same ingredient is not repeated.
+                $lines = [];
+                $seenIng = [];
+                $ingNameStmt = $pdo->prepare("SELECT name FROM stock_ingredients WHERE id = ?");
+                $count = count($ingIds);
+                for ($k = 0; $k < $count; $k++) {
+                    if (!empty($delim[$k])) continue;
+                    $iid = (int)($ingIds[$k] ?? 0);
+                    $qRaw = trim((string)($qtys[$k] ?? ''));
+                    if ($qRaw === '' || ($qRaw !== '' && is_numeric($qRaw) && (float)$qRaw == 0.0 && $iid <= 0)) continue; // blank line
+                    if ($iid <= 0) throw new RuntimeException('Choose an ingredient for every recipe line that has a quantity.');
+                    if (!is_numeric($qRaw) || (float)$qRaw <= 0 || (float)$qRaw > 99999999) {
+                        throw new RuntimeException('Each ingredient quantity must be a number greater than zero.');
+                    }
+                    $yRaw = trim((string)($yields[$k] ?? '100'));
+                    if ($yRaw === '') $yRaw = '100';
+                    if (!is_numeric($yRaw) || (float)$yRaw <= 0 || (float)$yRaw > 100) {
+                        throw new RuntimeException('Yield percent must be above 0 and at most 100.');
+                    }
+                    $ingNameStmt->execute([$iid]);
+                    $ingName = $ingNameStmt->fetchColumn();
+                    if ($ingName === false) throw new RuntimeException('A selected ingredient no longer exists.');
+                    if (isset($seenIng[$iid])) {
+                        throw new RuntimeException('"' . $ingName . '" appears more than once in this recipe. Combine the quantities into one line.');
+                    }
+                    $seenIng[$iid] = true;
+                    $lines[] = [$iid, (float)$qRaw, (float)$yRaw];
                 }
 
-                // Wipe all ingredients then re-insert (simple & atomic)
-                $pdo->prepare("DELETE FROM stock_recipe_ingredients WHERE recipe_id = ?")->execute([$recipeId]);
+                rh_with_create_lock($pdo, 'stock_recipe', function () use ($pdo, $itemId, $type, $portions, $lines, $user, &$message) {
+                    $pdo->beginTransaction();
+                    // Find or create recipe (one recipe per menu item + type)
+                    $rs = $pdo->prepare("SELECT id FROM stock_recipes WHERE menu_item_id = ? AND menu_type = ?");
+                    $rs->execute([$itemId, $type]);
+                    $recipeId = (int)($rs->fetchColumn() ?: 0);
+                    if ($recipeId === 0) {
+                        $ins = $pdo->prepare("INSERT INTO stock_recipes (menu_item_id, menu_type, portions_per_recipe, created_by) VALUES (?, ?, ?, ?)");
+                        $ins->execute([$itemId, $type, $portions, $user['id']]);
+                        $recipeId = (int)$pdo->lastInsertId();
+                    } else {
+                        $upd = $pdo->prepare("UPDATE stock_recipes SET portions_per_recipe = ?, updated_at = NOW() WHERE id = ?");
+                        $upd->execute([$portions, $recipeId]);
+                    }
 
-                $insIng = $pdo->prepare("INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent) VALUES (?, ?, ?, ?)");
-                $count = is_array($ingIds) ? count($ingIds) : 0;
-                $saved = 0;
-                for ($k = 0; $k < $count; $k++) {
-                    $iid = (int)($ingIds[$k] ?? 0);
-                    $q = (float)($qtys[$k] ?? 0);
-                    $y = (float)($yields[$k] ?? 100);
-                    if ($y <= 0 || $y > 100) $y = 100;
-                    if ($iid > 0 && $q > 0 && empty($delim[$k])) {
-                        $insIng->execute([$recipeId, $iid, $q, $y]);
+                    // Wipe all ingredients then re-insert (simple & atomic)
+                    $pdo->prepare("DELETE FROM stock_recipe_ingredients WHERE recipe_id = ?")->execute([$recipeId]);
+
+                    $insIng = $pdo->prepare("INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent) VALUES (?, ?, ?, ?)");
+                    $saved = 0;
+                    foreach ($lines as $ln) {
+                        $insIng->execute([$recipeId, $ln[0], $ln[1], $ln[2]]);
                         $saved++;
                     }
-                }
 
-                if ($saved === 0) {
-                    // Empty recipe → delete it altogether
-                    $pdo->prepare("DELETE FROM stock_recipes WHERE id = ?")->execute([$recipeId]);
-                    $message = 'Recipe removed (no ingredients).';
-                } else {
-                    $message = "Recipe saved with {$saved} ingredient(s).";
-                }
-                $pdo->commit();
+                    if ($saved === 0) {
+                        // Empty recipe → delete it altogether
+                        $pdo->prepare("DELETE FROM stock_recipes WHERE id = ?")->execute([$recipeId]);
+                        $message = 'Recipe removed (no ingredients).';
+                    } else {
+                        $message = "Recipe saved with {$saved} ingredient(s).";
+                    }
+                    $pdo->commit();
+                });
             } elseif ($action === 'delete_recipe') {
                 $itemId = (int)($_POST['menu_item_id'] ?? 0);
                 $typeRaw3 = trim($_POST['menu_type'] ?? '');

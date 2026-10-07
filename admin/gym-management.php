@@ -12,6 +12,7 @@ $csrf_token = $csrf_token ?? generateCsrfToken();
 $site_name  = $site_name  ?? getSetting('site_name', 'Hotel');
 
 require_once '../includes/facebook-functions.php';
+require_once '../includes/form-validation.php';
 require_once __DIR__ . '/includes/gym-analytics-lib.php'; // gymDurationLabelFromDays()
 $fb_gym_posting_on = isFacebookPostingEnabled()
     && getSetting('facebook_gym_enabled', '1') === '1';
@@ -41,18 +42,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $gm_pkg_price = $gm_pkg_comp ? 0.0 : (float)($_POST['price'] ?? 0);
 
         if (in_array($action, ['add', 'update'], true)) {
-            $gm_pkg_name = trim((string)($_POST['name'] ?? ''));
+            $gm_pkg_name = rh_clean_text($_POST['name'] ?? '');
+            $_POST['name'] = $gm_pkg_name;
+            foreach (['icon_class', 'currency_code', 'cta_text', 'cta_link', 'duration_label'] as $gm_f) {
+                if (isset($_POST[$gm_f])) {
+                    $_POST[$gm_f] = rh_clean_text($_POST[$gm_f]);
+                }
+            }
+            $gm_pkg_label = rh_clean_text($gm_pkg_label);
             if ($gm_pkg_name === '' || mb_strlen($gm_pkg_name) > 150) {
                 throw new Exception('Package name is required (max 150 characters).');
+            }
+            if ($action === 'update' && (int)($_POST['id'] ?? 0) <= 0) {
+                throw new Exception('Package not found.');
             }
             if (!$gm_pkg_comp && (!is_numeric($_POST['price'] ?? '') || (float)$_POST['price'] < 0 || (float)$_POST['price'] > 99999999)) {
                 throw new Exception('Price must be a number (0 or more).');
             }
+            if (($_POST['duration_days'] ?? '') !== '' && (!is_numeric($_POST['duration_days']) || (int)$_POST['duration_days'] < 0 || (int)$_POST['duration_days'] > 3650)) {
+                throw new Exception('Duration must be a whole number of days between 0 and 3650.');
+            }
+            if (mb_strlen($gm_pkg_label) > 50) {
+                throw new Exception('Duration label is too long (max 50 characters).');
+            }
+            if (mb_strlen((string)($_POST['icon_class'] ?? '')) > 100 || mb_strlen((string)($_POST['cta_text'] ?? '')) > 120 || mb_strlen((string)($_POST['cta_link'] ?? '')) > 255 || mb_strlen((string)($_POST['currency_code'] ?? '')) > 10) {
+                throw new Exception('Icon (max 100), button text (max 120), button link (max 255) or currency code (max 10) is too long.');
+            }
             // Enquiries and members store the package by NAME, so two packages must not share one.
-            $gm_dup = $pdo->prepare("SELECT COUNT(*) FROM gym_packages WHERE LOWER(name) = LOWER(?) AND id <> ?");
-            $gm_dup->execute([$gm_pkg_name, $action === 'update' ? (int)($_POST['id'] ?? 0) : 0]);
-            if ((int)$gm_dup->fetchColumn() > 0) {
-                throw new Exception('A package with that name already exists.');
+            $gm_dupRow = rh_find_duplicate($pdo, 'gym_packages', 'name', $gm_pkg_name, [], $action === 'update' ? (int)$_POST['id'] : null);
+            if ($gm_dupRow) {
+                throw new Exception(rh_duplicate_message('gym package', (string)$gm_dupRow['value']));
             }
         }
 
@@ -63,21 +82,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      cta_text, cta_link, is_featured, is_active, display_order)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
-            $stmt->execute([
-                trim($_POST['name']),
-                trim($_POST['icon_class'] ?? 'fas fa-leaf'),
-                trim($_POST['includes_text'] ?? ''),
-                $gm_pkg_label,
-                $gm_pkg_days,
-                $gm_pkg_price,
-                $gm_pkg_comp,
-                trim($_POST['currency_code'] ?? 'MWK'),
-                trim($_POST['cta_text'] ?? 'Book Package'),
-                trim($_POST['cta_link'] ?? '#book'),
-                isset($_POST['is_featured']) ? 1 : 0,
-                isset($_POST['is_active']) ? 1 : 0,
-                (int)($_POST['display_order'] ?? 0),
-            ]);
+            rh_with_create_lock($pdo, 'gym_package', function () use ($pdo, $stmt, $gm_pkg_label, $gm_pkg_days, $gm_pkg_price, $gm_pkg_comp) {
+                $dupNow = rh_find_duplicate($pdo, 'gym_packages', 'name', (string)$_POST['name']);
+                if ($dupNow) {
+                    throw new Exception(rh_duplicate_message('gym package', (string)$dupNow['value']));
+                }
+                $stmt->execute([
+                    trim($_POST['name']),
+                    trim($_POST['icon_class'] ?? 'fas fa-leaf'),
+                    trim($_POST['includes_text'] ?? ''),
+                    $gm_pkg_label,
+                    $gm_pkg_days,
+                    $gm_pkg_price,
+                    $gm_pkg_comp,
+                    trim($_POST['currency_code'] ?? 'MWK'),
+                    trim($_POST['cta_text'] ?? 'Book Package'),
+                    trim($_POST['cta_link'] ?? '#book'),
+                    isset($_POST['is_featured']) ? 1 : 0,
+                    isset($_POST['is_active']) ? 1 : 0,
+                    (int)($_POST['display_order'] ?? 0),
+                ]);
+            });
             $message = 'Gym package added successfully!';
             if ($is_ajax) {
                 header('Content-Type: application/json');

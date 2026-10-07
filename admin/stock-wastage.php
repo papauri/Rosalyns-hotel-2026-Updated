@@ -7,6 +7,7 @@
  */
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -38,8 +39,37 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $qtys    = $_POST['quantity'] ?? [];
             $reasons = $_POST['reason'] ?? [];
 
-            $count = is_array($ingIds) ? count($ingIds) : 0;
+            if (!is_array($ingIds) || !is_array($qtys) || !is_array($reasons)) {
+                throw new RuntimeException('Wastage rows are malformed.');
+            }
+            $count = count($ingIds);
             $saved = 0;
+
+            // Validate every filled row before anything is written.
+            for ($k = 0; $k < $count; $k++) {
+                $qRaw = trim((string)($qtys[$k] ?? ''));
+                $iidChk = (int)($ingIds[$k] ?? 0);
+                if ($qRaw === '' && $iidChk <= 0) continue;
+                if ($qRaw === '' || (is_numeric($qRaw) && (float)$qRaw == 0.0)) continue; // untouched row
+                if (!is_numeric($qRaw) || (float)$qRaw < 0) {
+                    throw new RuntimeException('Wastage quantity must be a number greater than zero (row ' . ($k + 1) . ').');
+                }
+                if ((float)$qRaw > 99999999) {
+                    throw new RuntimeException('Wastage quantity is too large (row ' . ($k + 1) . ').');
+                }
+                if ($iidChk <= 0) {
+                    throw new RuntimeException('Choose an ingredient for row ' . ($k + 1) . '.');
+                }
+                if (mb_strlen(rh_clean_text($reasons[$k] ?? '')) > 255) {
+                    throw new RuntimeException('Reason is too long (255 characters maximum, row ' . ($k + 1) . ').');
+                }
+            }
+
+            // Double-submit guard: an identical submission from this session within 15 seconds is a double click.
+            $wastageFp = md5(json_encode([$date, array_values($ingIds), array_values($qtys), array_values($reasons)]));
+            if (($_SESSION['wastage_last_fp'] ?? '') === $wastageFp && (time() - (int)($_SESSION['wastage_last_at'] ?? 0)) < 15) {
+                throw new RuntimeException('This wastage was just recorded - duplicate submission ignored.');
+            }
 
             $pdo->beginTransaction();
             $costSel = $pdo->prepare("SELECT cost_per_unit, current_quantity FROM stock_ingredients WHERE id = ? FOR UPDATE");
@@ -55,7 +85,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             for ($k = 0; $k < $count; $k++) {
                 $iid = (int)($ingIds[$k] ?? 0);
                 $q = (float)($qtys[$k] ?? 0);
-                $rs = mb_substr(trim((string)($reasons[$k] ?? '')), 0, 255);
+                $rs = mb_substr(rh_clean_text($reasons[$k] ?? ''), 0, 255);
                 if ($rs === '') $rs = 'Wastage';
                 if ($iid <= 0 || $q <= 0) continue;
 
@@ -97,9 +127,11 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $wastageActualCostUpd->execute([$actualCost, $actualCost, $wastageId]);
                 $saved++;
             }
-            $pdo->commit();
-
             if ($saved === 0) throw new RuntimeException('No valid wastage rows submitted.');
+            $pdo->commit();
+            $_SESSION['wastage_last_fp'] = $wastageFp;
+            $_SESSION['wastage_last_at'] = time();
+
             $message = "{$saved} wastage entry(ies) recorded.";
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();

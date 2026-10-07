@@ -8,6 +8,7 @@
  */
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -41,8 +42,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             if ($action === 'mark_wasted') {
                 $batchId = (int)($_POST['batch_id'] ?? 0);
-                $reason = mb_substr(trim($_POST['reason'] ?? 'Wastage'), 0, 255);
+                $reason = rh_clean_text($_POST['reason'] ?? 'Wastage');
+                if (mb_strlen($reason) > 255) throw new RuntimeException('Reason is too long (255 characters maximum).');
                 if ($reason === '') $reason = 'Wastage';
+                if ($batchId <= 0) throw new RuntimeException('Batch not found.');
 
                 $pdo->beginTransaction();
                 $sel = $pdo->prepare("SELECT b.*, i.cost_per_unit AS ing_cost FROM stock_batches b INNER JOIN stock_ingredients i ON i.id = b.ingredient_id WHERE b.id = ? FOR UPDATE");
@@ -77,14 +80,17 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = 'Batch marked as wasted.';
             } elseif ($action === 'recall') {
                 $batchId = (int)($_POST['batch_id'] ?? 0);
-                $reason = mb_substr(trim($_POST['reason'] ?? 'Supplier recall'), 0, 200);
+                $reason = rh_clean_text($_POST['reason'] ?? 'Supplier recall');
+                if (mb_strlen($reason) > 200) throw new RuntimeException('Reason is too long (200 characters maximum).');
                 if ($reason === '') $reason = 'Supplier recall';
+                if ($batchId <= 0) throw new RuntimeException('Batch not found.');
 
                 $pdo->beginTransaction();
                 $sel = $pdo->prepare("SELECT * FROM stock_batches WHERE id = ? FOR UPDATE");
                 $sel->execute([$batchId]);
                 $batch = $sel->fetch(PDO::FETCH_ASSOC);
                 if (!$batch) throw new RuntimeException('Batch not found.');
+                if (($batch['status'] ?? '') === 'recalled') throw new RuntimeException('This batch has already been recalled.');
                 $remaining = (float)$batch['quantity_remaining'];
 
                 if ($remaining > 0) {

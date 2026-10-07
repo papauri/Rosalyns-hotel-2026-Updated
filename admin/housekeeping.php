@@ -7,6 +7,7 @@
  */
 require_once 'admin-init.php';
 require_once 'includes/admin-modal.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 /** @var array{id: int, username: string, role: string} $user */
 /** @var string $csrf_token */
 
@@ -581,6 +582,57 @@ function createRecurringAssignments(PDO $pdo, int $performedBy): int
     return $created;
 }
 
+/**
+ * An "open" task (pending / in progress / blocked) already exists for the same room + assignment type + due date.
+ * Returns the existing assignment id or 0. $excludeId skips the row being edited.
+ */
+function hkFindOpenDuplicateAssignment(PDO $pdo, int $roomId, string $type, string $dueDate, ?int $excludeId = null): int
+{
+    $sql = "SELECT id FROM housekeeping_assignments
+            WHERE individual_room_id = ? AND due_date = ? AND status IN ('pending','in_progress','blocked')";
+    $params = [$roomId, $dueDate];
+    if (housekeepingColumnExists($pdo, 'assignment_type')) {
+        $sql .= " AND assignment_type = ?";
+        $params[] = $type;
+    }
+    if ($excludeId !== null && $excludeId > 0) {
+        $sql .= " AND id <> ?";
+        $params[] = $excludeId;
+    }
+    $sql .= " ORDER BY id DESC LIMIT 1";
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+    return (int)($st->fetchColumn() ?: 0);
+}
+
+/** Shared field checks for add/update; returns an error string or ''. */
+function hkValidateAssignmentFields(string $dueDate, int $estimated, ?string $scheduledTime, bool $isRecurring, ?string $recurEnd, string $notes): string
+{
+    $d = DateTime::createFromFormat('Y-m-d', $dueDate);
+    if (!$d || $d->format('Y-m-d') !== $dueDate) {
+        return 'Invalid due date format.';
+    }
+    if ($estimated < 1 || $estimated > 1440) {
+        return 'Estimated duration must be between 1 and 1440 minutes.';
+    }
+    if ($scheduledTime !== null && !preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $scheduledTime)) {
+        return 'Scheduled time must be a valid time (HH:MM).';
+    }
+    if ($isRecurring && $recurEnd !== null && $recurEnd !== '') {
+        $e = DateTime::createFromFormat('Y-m-d', $recurEnd);
+        if (!$e || $e->format('Y-m-d') !== $recurEnd) {
+            return 'Recurring end date is not a valid date.';
+        }
+        if ($recurEnd < $dueDate) {
+            return 'Recurring end date cannot be before the due date.';
+        }
+    }
+    if (mb_strlen($notes) > 2000) {
+        return 'Notes are too long (2000 characters maximum).';
+    }
+    return '';
+}
+
 // Handle POST requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
@@ -635,9 +687,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Selected room is invalid or inactive.';
             } elseif (!housekeepingUserExists($pdo, $assigned_to)) {
                 $error = 'Assigned user is invalid.';
+            } elseif (($fieldErr = hkValidateAssignmentFields((string)$due_date, $estimated_duration, $scheduled_time, (bool)$is_recurring, $recurring_end_date, $notes)) !== '') {
+                $error = $fieldErr;
             } elseif (strtotime($due_date) === false) {
                 $error = 'Invalid due date format.';
             } else {
+                // One open task per room + type + date: check and insert under one lock so a double click cannot add two.
+                $hkLockName = substr('rh_form_hk_assignment_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+                if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($hkLockName) . ', 10)')->fetchColumn() !== 1) {
+                    $hkLockName = '';
+                    throw new DomainException('Someone else is saving a housekeeping task right now. Please try again in a moment.');
+                }
+                if (in_array($status, ['pending', 'in_progress', 'blocked'], true)) {
+                    $dupHk = hkFindOpenDuplicateAssignment($pdo, $room_id, $assignment_type, $due_date);
+                    if ($dupHk > 0) {
+                        throw new DomainException('This room already has an open ' . str_replace('_', ' ', $assignment_type) . ' task for ' . $due_date . ' (task #' . $dupHk . '). Edit that one instead.');
+                    }
+                }
                 $pdo->beginTransaction();
                 $completedAt = in_array($status, ['completed', 'verified'], true) ? date('Y-m-d H:i:s') : null;
                 $verifiedAt = ($hasVerifiedAt && $status === 'verified') ? date('Y-m-d H:i:s') : null;
@@ -720,6 +786,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 logHousekeepingAction($newAssignmentId, 'created', null, $newData, $user['id'] ?? null, $user['username'] ?? null);
 
                 $pdo->commit();
+                try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($hkLockName) . ')'); } catch (Throwable $e2) {}
+                $hkLockName = '';
                 $message = 'Assignment created successfully.';
                 if ($isAjax) {
                     header('Content-Type: application/json; charset=utf-8');
@@ -761,8 +829,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Validation
             if (!$id || !$room_id || !$due_date) {
                 $error = 'Room and due date are required.';
-            } elseif (strtotime($due_date) === false) {
-                $error = 'Invalid due date format.';
+            } elseif (($fieldErr = hkValidateAssignmentFields((string)$due_date, $estimated_duration, $scheduled_time, (bool)$is_recurring, $recurring_end_date, $notes)) !== '') {
+                $error = $fieldErr;
             } elseif (!in_array($status, $validHousekeepingStatuses, true)) {
                 $error = 'Invalid housekeeping status.';
             } elseif ($hasPriority && !in_array($priority, $validPriorities, true)) {
@@ -786,6 +854,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $existingLogical = rhHkStatusFromRow($existing);
                 if ($existingLogical === 'verified') {
                     throw new DomainException('Verified assignments are locked and cannot be edited.');
+                }
+
+                // Moving a task onto a room + type + date that already has an open task would create a duplicate.
+                if (in_array($status, ['pending', 'in_progress', 'blocked'], true)) {
+                    $dupHk = hkFindOpenDuplicateAssignment($pdo, $room_id, $assignment_type, $due_date, $id);
+                    if ($dupHk > 0) {
+                        throw new DomainException('This room already has an open ' . str_replace('_', ' ', $assignment_type) . ' task for ' . $due_date . ' (task #' . $dupHk . '). Edit that one instead.');
+                    }
                 }
 
                 // Auto-set verified_by when status changes to verified
@@ -1096,6 +1172,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
+        }
+        if (!empty($hkLockName)) {
+            try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($hkLockName) . ')'); } catch (Throwable $e2) {}
+            $hkLockName = '';
         }
         $error = $e instanceof DomainException ? $e->getMessage() : ('Database error: ' . $e->getMessage());
         if ($isAjax) {

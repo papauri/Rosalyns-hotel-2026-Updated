@@ -5,6 +5,7 @@
  * Admin Panel — Revenue > Packages
  */
 require_once 'admin-init.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 /** @var array $user */
 /** @var string $csrf_token */
 
@@ -31,10 +32,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'save') {
             $id               = !empty($_POST['pkg_id']) ? (int)$_POST['pkg_id'] : null;
-            $name             = trim($_POST['name'] ?? '');
+            $name             = rh_clean_text($_POST['name'] ?? '');
             $description      = trim($_POST['description'] ?? '');
-            $shortDesc        = trim($_POST['short_description'] ?? '');
-            $icon             = trim($_POST['icon'] ?? 'fas fa-gift');
+            $shortDesc        = rh_clean_text($_POST['short_description'] ?? '');
+            $icon             = rh_clean_text($_POST['icon'] ?? 'fas fa-gift');
             $priceType        = in_array($_POST['price_type'] ?? 'per_night', ['per_night', 'per_stay', 'per_person_per_night'], true)
                 ? $_POST['price_type'] : 'per_night';
             $priceRaw         = trim((string)($_POST['price_amount'] ?? '0'));
@@ -86,6 +87,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pkgError = 'That package no longer exists.';
                 }
             }
+            if ($pkgError === '' && ($dupPkg = rh_find_duplicate($pdo, 'room_packages', 'name', $name, [], $id ?: null))) {
+                $pkgError = rh_duplicate_message('package', (string)$dupPkg['value']);
+            }
             if ($pkgError !== '') {
                 $message = $pkgError;
                 $messageType = 'error';
@@ -124,7 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                              applies_to, room_type_ids,
                              is_featured, is_active, sort_order)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
-                        $stmt->execute([
+                        $insertParams = [
                             $name,
                             $slug,
                             $description ?: null,
@@ -138,12 +142,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $isFeatured,
                             $isActive,
                             $sortOrder
-                        ]);
-                        $savedId  = (int)$pdo->lastInsertId();
+                        ];
+                        // Re-check the name and insert together under a lock (double-click / two staff at once).
+                        rh_with_create_lock($pdo, 'room_package', function () use ($pdo, $stmt, $insertParams, $name, &$savedId) {
+                            $dup = rh_find_duplicate($pdo, 'room_packages', 'name', $name);
+                            if ($dup) {
+                                throw new RuntimeException(rh_duplicate_message('package', (string)$dup['value']));
+                            }
+                            $stmt->execute($insertParams);
+                            $savedId = (int)$pdo->lastInsertId();
+                        });
                         rh_log_event('room_packages', 'info', "Package created: {$name}", ['user' => $user['username']]);
                         $message = 'Package created successfully.';
                     }
                     $messageType = 'success';
+                } catch (RuntimeException $e) {
+                    $message = $e->getMessage();
+                    $messageType = 'error';
                 } catch (PDOException $e) {
                     error_log('room_packages save error: ' . $e->getMessage());
                     $message = 'Database error saving package.';

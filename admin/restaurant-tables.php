@@ -5,6 +5,7 @@
  */
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
+require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
@@ -854,7 +855,7 @@ if (!rh_restaurant_tables_exist($pdo)) {
                     if ($capacity !== null && ($capacity < 1 || $capacity > 999)) {
                         throw new RuntimeException('Capacity must be blank or between 1 and 999.');
                     }
-                    $note = mb_substr(trim((string)($notes[$idx] ?? '')), 0, 255);
+                    $note = mb_substr(rh_clean_text($notes[$idx] ?? ''), 0, 255);
                     $active = isset($activeRows[$id]) ? 1 : 0;
 
                     if ($active === 0) {

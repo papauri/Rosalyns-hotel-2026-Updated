@@ -108,10 +108,11 @@ if (!function_exists('gymClassSave')) {
     function gymClassSave(PDO $pdo, array $data, int $classId = 0): array
     {
         gymClassesEnsureTables($pdo);
-        $title = trim((string)($data['title'] ?? ''));
-        $day   = trim((string)($data['day_label'] ?? ''));
-        $time  = trim((string)($data['time_label'] ?? ''));
-        $level = trim((string)($data['level_label'] ?? '')) ?: 'All Levels';
+        require_once __DIR__ . '/../../includes/form-validation.php';
+        $title = rh_clean_text($data['title'] ?? '');
+        $day   = rh_clean_text($data['day_label'] ?? '');
+        $time  = rh_clean_text($data['time_label'] ?? '');
+        $level = rh_clean_text($data['level_label'] ?? '') ?: 'All Levels';
         $desc  = trim((string)($data['description'] ?? ''));
         $order = (int)($data['display_order'] ?? 0);
         $active = !empty($data['is_active']) ? 1 : 0;
@@ -125,15 +126,50 @@ if (!function_exists('gymClassSave')) {
         if ($time === '' || mb_strlen($time) > 50) {
             return ['success' => false, 'message' => 'A time is required (e.g. "7:00 AM").'];
         }
+        if (mb_strlen($level) > 80) {
+            return ['success' => false, 'message' => 'Level is too long (max 80 characters).'];
+        }
+        if ($order < 0 || $order > 100000) {
+            return ['success' => false, 'message' => 'Display order must be 0 or more.'];
+        }
         try {
+            // Same class = same title on the same days at the same time.
+            $dupMsg = static function (PDO $pdo, string $title, string $day, string $time, ?int $excludeId): ?string {
+                $dup = rh_find_duplicate($pdo, 'gym_classes', 'title', $title, [], $excludeId);
+                if ($dup) {
+                    $st = $pdo->prepare("SELECT id FROM gym_classes WHERE LOWER(TRIM(title)) = LOWER(?) AND LOWER(TRIM(day_label)) = LOWER(?) AND LOWER(TRIM(time_label)) = LOWER(?) AND id <> ? LIMIT 1");
+                    $st->execute([$title, $day, $time, (int)$excludeId]);
+                    if ($st->fetchColumn()) {
+                        return 'A class called "' . $dup['value'] . '" already runs on ' . $day . ' at ' . $time . '. Edit that one or change the day/time.';
+                    }
+                }
+                return null;
+            };
             if ($classId > 0) {
+                $exists = $pdo->prepare("SELECT COUNT(*) FROM gym_classes WHERE id = ?");
+                $exists->execute([$classId]);
+                if ((int)$exists->fetchColumn() === 0) {
+                    return ['success' => false, 'message' => 'That class no longer exists.'];
+                }
+                $msg = $dupMsg($pdo, $title, $day, $time, $classId);
+                if ($msg !== null) {
+                    return ['success' => false, 'message' => $msg];
+                }
                 $stmt = $pdo->prepare("UPDATE gym_classes SET title=?, description=?, day_label=?, time_label=?, level_label=?, display_order=?, is_active=? WHERE id=?");
                 $stmt->execute([$title, $desc ?: null, $day, $time, $level, $order, $active, $classId]);
                 return ['success' => true, 'message' => 'Class updated.', 'id' => $classId];
             }
-            $stmt = $pdo->prepare("INSERT INTO gym_classes (title, description, day_label, time_label, level_label, display_order, is_active) VALUES (?,?,?,?,?,?,?)");
-            $stmt->execute([$title, $desc ?: null, $day, $time, $level, $order, $active]);
-            return ['success' => true, 'message' => 'Class created.', 'id' => (int)$pdo->lastInsertId()];
+            return rh_with_create_lock($pdo, 'gym_class', function () use ($pdo, $dupMsg, $title, $day, $time, $level, $desc, $order, $active) {
+                $msg = $dupMsg($pdo, $title, $day, $time, null);
+                if ($msg !== null) {
+                    return ['success' => false, 'message' => $msg];
+                }
+                $stmt = $pdo->prepare("INSERT INTO gym_classes (title, description, day_label, time_label, level_label, display_order, is_active) VALUES (?,?,?,?,?,?,?)");
+                $stmt->execute([$title, $desc ?: null, $day, $time, $level, $order, $active]);
+                return ['success' => true, 'message' => 'Class created.', 'id' => (int)$pdo->lastInsertId()];
+            });
+        } catch (RuntimeException $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
         } catch (Throwable $e) {
             error_log('gymClassSave: ' . $e->getMessage());
             return ['success' => false, 'message' => 'Database error while saving the class.'];
