@@ -162,6 +162,9 @@ $status_note  = [
 ];
 
 $scraper_location = trim(getSetting('address_line2', '') . ' ' . getSetting('address_country', 'Malawi'));
+// Only whether a key is saved — the keys themselves never reach the browser.
+$google_source_on = strpos((string)getSetting('reviews_google_places_key', ''), 'rk1:') === 0;
+$brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), 'rk1:') === 0;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -188,10 +191,76 @@ $scraper_location = trim(getSetting('address_line2', '') . ' ' . getSetting('add
                 <h2 class="section-title">Reviews Management</h2>
                 <p class="reviews-header__lede">Moderate guest reviews, reply publicly, and control what appears on the website. Only <strong>published</strong> reviews are shown to guests.</p>
             </div>
-            <a href="../submit-review.php" target="_blank" rel="noopener" class="btn btn-light">
-                <i class="fas fa-external-link-alt"></i> Open guest review form
-            </a>
+            <div class="reviews-header__actions">
+                <button type="button" class="btn btn-primary" id="importer-toggle" aria-expanded="false" aria-controls="scraper-panel">
+                    <i class="fas fa-globe-africa"></i> Import reviews from the web
+                </button>
+                <a href="../submit-review.php" target="_blank" rel="noopener" class="btn btn-light">
+                    <i class="fas fa-external-link-alt"></i> Guest review form
+                </a>
+            </div>
         </div>
+
+        <!-- Web review importer (opened from the header button) -->
+        <section class="scraper-panel" id="scraper-panel" aria-labelledby="scraper-title" hidden>
+            <div class="scraper-panel__top">
+                <div class="scraper-panel__header">
+                    <h3 id="scraper-title"><i class="fas fa-globe-africa"></i> Import reviews from the web</h3>
+                    <p>Find reviews and mentions of the hotel on Google, Facebook, TikTok, Instagram, X, TripAdvisor and the wider web — each with the date it was posted. Imports land as <strong>Pending</strong> and are dated by when they were posted.</p>
+                </div>
+                <button type="button" class="scraper-panel__close" id="importer-close" aria-label="Close importer"><i class="fas fa-times"></i></button>
+            </div>
+
+            <div class="scraper-form">
+                <div class="scraper-form__field">
+                    <label for="scraper-hotel-name">Hotel name</label>
+                    <input type="text" id="scraper-hotel-name" value="<?php echo htmlspecialchars($site_name); ?>" maxlength="150">
+                </div>
+                <div class="scraper-form__field">
+                    <label for="scraper-location">Location</label>
+                    <input type="text" id="scraper-location" value="<?php echo htmlspecialchars($scraper_location); ?>" maxlength="120">
+                </div>
+                <div class="scraper-form__field scraper-form__field--sm">
+                    <label for="scraper-limit">Results</label>
+                    <input type="number" id="scraper-limit" min="3" max="20" value="8">
+                </div>
+                <div class="scraper-form__field scraper-form__field--sm">
+                    <label for="scraper-sentiment">Looking for</label>
+                    <select id="scraper-sentiment">
+                        <option value="positive" selected>Praise</option>
+                        <option value="negative">Complaints</option>
+                    </select>
+                </div>
+                <button type="button" id="scraper-search-btn" class="btn btn-primary">
+                    <i class="fas fa-search"></i> Search
+                </button>
+            </div>
+
+            <div class="scraper-sources-status" id="scraper-sources-status" aria-live="polite"></div>
+            <div id="scraper-results" class="scraper-results" hidden></div>
+
+            <details class="scraper-sources" <?php echo (!$google_source_on && !$brave_source_on) ? 'open' : ''; ?>>
+                <summary><i class="fas fa-plug"></i> Sources
+                    <span class="scraper-sources__chip <?php echo $google_source_on ? 'is-on' : ''; ?>" id="src-chip-google">Google reviews: <?php echo $google_source_on ? 'connected' : 'not set up'; ?></span>
+                    <span class="scraper-sources__chip <?php echo $brave_source_on ? 'is-on' : ''; ?>" id="src-chip-brave">Brave search: <?php echo $brave_source_on ? 'connected' : 'not set up'; ?></span>
+                    <span class="scraper-sources__chip is-on">Free web search: always on</span>
+                </summary>
+                <p class="scraper-sources__intro">Search engines limit automated searches, so the free web search can come back thin. For dependable results with exact dates, connect one or both of these (keys are stored encrypted and never shown again):</p>
+                <div class="scraper-sources__grid">
+                    <label>Google Places API key <small>— real Google reviews: author, stars and post date. Create one in Google Cloud Console with “Places API (New)” enabled.</small>
+                        <input type="password" id="src-google" autocomplete="off" placeholder="<?php echo $google_source_on ? 'Saved — type to replace' : 'AIza…'; ?>">
+                    </label>
+                    <label>Brave Search API key <small>— web &amp; social mentions with page dates. Free tier at api.search.brave.com.</small>
+                        <input type="password" id="src-brave" autocomplete="off" placeholder="<?php echo $brave_source_on ? 'Saved — type to replace' : 'BSA…'; ?>">
+                    </label>
+                </div>
+                <div class="scraper-sources__actions">
+                    <button type="button" class="btn btn-primary btn-sm" id="src-save"><i class="fas fa-save"></i> Save keys</button>
+                    <?php if ($google_source_on): ?><button type="button" class="btn btn-light btn-sm" data-clear-source="google">Remove Google key</button><?php endif; ?>
+                    <?php if ($brave_source_on): ?><button type="button" class="btn btn-light btn-sm" data-clear-source="brave">Remove Brave key</button><?php endif; ?>
+                </div>
+            </details>
+        </section>
 
         <!-- Headline stats -->
         <div class="stats-grid reviews-stats">
@@ -349,8 +418,13 @@ $scraper_location = trim(getSetting('address_line2', '') . ' ' . getSetting('add
                         <?php endif; ?>
                         <?php if ($source['url'] !== ''): ?>
                             <a class="review-tag review-tag--imported" href="<?php echo htmlspecialchars($source['url']); ?>" target="_blank" rel="noopener noreferrer" title="<?php echo htmlspecialchars($source['url']); ?>">
-                                <i class="fas fa-globe-africa"></i> Imported from <?php echo htmlspecialchars($source_host !== '' ? $source_host : 'the web'); ?><?php echo $source['date'] !== '' ? ' · ' . htmlspecialchars($source['date']) : ''; ?>
+                                <i class="fas fa-globe-africa"></i> Imported from <?php echo htmlspecialchars($source_host !== '' ? $source_host : 'the web'); ?><?php echo $source['date'] !== '' ? ' · posted ' . htmlspecialchars(date('M j, Y', strtotime($source['date']))) : ''; ?>
                             </a>
+                            <?php if ($source['date'] === ''): ?>
+                                <button type="button" class="review-tag review-tag--action" data-action="fetch-date" title="Look up when this was originally posted and re-date the review">
+                                    <i class="fas fa-calendar-plus"></i> Find post date
+                                </button>
+                            <?php endif; ?>
                         <?php endif; ?>
                     </div>
 
@@ -482,38 +556,6 @@ $scraper_location = trim(getSetting('address_line2', '') . ' ' . getSetting('add
             <?php endif; ?>
         <?php endif; ?>
 
-        <!-- Web feedback importer (secondary tool — below the moderation queue) -->
-        <details class="scraper-panel" id="scraper-panel">
-            <summary class="scraper-panel__header">
-                <h3 id="scraper-title"><i class="fas fa-globe-africa"></i> Import feedback from the web</h3>
-                <p>Search public web results and social platforms (TikTok, Facebook, Instagram, X) for mentions of the hotel. Imports always land as <strong>Pending</strong> — check the text, rating and attribution before publishing.</p>
-            </summary>
-            <div class="scraper-form">
-                <div class="scraper-form__field">
-                    <label for="scraper-hotel-name">Hotel name</label>
-                    <input type="text" id="scraper-hotel-name" value="<?php echo htmlspecialchars($site_name); ?>" maxlength="150">
-                </div>
-                <div class="scraper-form__field">
-                    <label for="scraper-location">Location</label>
-                    <input type="text" id="scraper-location" value="<?php echo htmlspecialchars($scraper_location); ?>" maxlength="120">
-                </div>
-                <div class="scraper-form__field scraper-form__field--sm">
-                    <label for="scraper-limit">Results</label>
-                    <input type="number" id="scraper-limit" min="3" max="20" value="8">
-                </div>
-                <div class="scraper-form__field scraper-form__field--sm">
-                    <label for="scraper-sentiment">Feedback type</label>
-                    <select id="scraper-sentiment">
-                        <option value="positive" selected>Positive</option>
-                        <option value="negative">Negative</option>
-                    </select>
-                </div>
-                <button type="button" id="scraper-search-btn" class="btn btn-primary">
-                    <i class="fas fa-search"></i> Find web feedback
-                </button>
-            </div>
-            <div id="scraper-results" class="scraper-results" hidden></div>
-        </details>
     </div>
 
     <script>
@@ -710,6 +752,7 @@ $scraper_location = trim(getSetting('address_line2', '') . ' ' . getSetting('add
                 case 'delete':          if (card) deleteReview(card, btn); break;
                 case 'remove-response': removeResponse(btn); break;
                 case 'import':          importCandidate(Number(btn.dataset.index), btn); break;
+                case 'fetch-date':      if (card) fetchPostDate(card, btn); break;
             }
         });
 
@@ -719,9 +762,52 @@ $scraper_location = trim(getSetting('address_line2', '') . ' ' . getSetting('add
             }
         });
 
-        // ---- web feedback importer ---------------------------------------------
+        // ---- web review importer -----------------------------------------------
         let scraperCandidates = [];
         let scraperSentiment = 'positive';
+
+        const panel = document.getElementById('scraper-panel');
+        const toggleBtn = document.getElementById('importer-toggle');
+        function setImporterOpen(open) {
+            if (!panel || !toggleBtn) return;
+            panel.hidden = !open;
+            toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) {
+                const first = document.getElementById('scraper-hotel-name');
+                if (first) first.focus({ preventScroll: true });
+                const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                panel.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+            }
+        }
+        if (toggleBtn) toggleBtn.addEventListener('click', function () { setImporterOpen(panel.hidden); });
+        const closeBtn = document.getElementById('importer-close');
+        if (closeBtn) closeBtn.addEventListener('click', function () { setImporterOpen(false); toggleBtn.focus(); });
+        if (/[?&]importer=open\b/.test(window.location.search)) setImporterOpen(true);
+
+        const DATE_SOURCE_LABEL = {
+            'Google': 'from Google',
+            'source page': 'from the page itself',
+            'snippet': 'from the search result',
+            'search index': 'when a search engine indexed it — may be later than the post'
+        };
+
+        function fmtDate(iso) {
+            if (!iso) return '';
+            const d = new Date(iso + 'T12:00:00');
+            return isNaN(d) ? iso : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+
+        function renderSources(sources) {
+            const box = document.getElementById('scraper-sources-status');
+            if (!box) return;
+            box.innerHTML = (sources || []).map(function (s) {
+                const cls = s.status === 'ok' ? 'is-ok' : (s.status === 'error' ? 'is-error' : (s.status === 'off' ? 'is-off' : 'is-limited'));
+                const label = s.status === 'ok' ? (s.count + ' found') : (s.status === 'off' ? 'not set up' : (s.status === 'error' ? 'error' : '0 found'));
+                return '<span class="scraper-source ' + cls + '" title="' + escapeHtml(s.detail || '') + '">' +
+                    escapeHtml(s.name) + ': <strong>' + escapeHtml(label) + '</strong></span>' +
+                    (s.detail && s.status !== 'off' ? '<span class="scraper-source__detail">' + escapeHtml(s.detail) + '</span>' : '');
+            }).join('');
+        }
 
         const searchBtn = document.getElementById('scraper-search-btn');
         if (searchBtn) {
@@ -734,6 +820,10 @@ $scraper_location = trim(getSetting('address_line2', '') . ' ' . getSetting('add
                     notify('Enter the hotel name to search for.', 'error');
                     return;
                 }
+                const wrap = document.getElementById('scraper-results');
+                wrap.hidden = false;
+                wrap.innerHTML = '<div class="scraper-empty"><i class="fas fa-spinner fa-spin"></i> Searching Google, social media and the web and checking post dates… this usually takes 5–20 seconds.</div>';
+                document.getElementById('scraper-sources-status').innerHTML = '';
                 setBusy(searchBtn, true);
                 api('api/review-scraper.php', {
                     method: 'POST',
@@ -749,47 +839,67 @@ $scraper_location = trim(getSetting('address_line2', '') . ' ' . getSetting('add
                 })
                     .then(function (data) {
                         const d = data.data || {};
-                        renderCandidates(Array.isArray(d.candidates) ? d.candidates : [], d.sentiment === 'negative' ? 'negative' : 'positive');
+                        renderSources(d.sources || []);
+                        renderCandidates(Array.isArray(d.candidates) ? d.candidates : [], d.sentiment === 'negative' ? 'negative' : 'positive', d.dated || 0);
                     })
-                    .catch(function (err) { notify('Could not search the web: ' + err.message, 'error'); })
+                    .catch(function (err) {
+                        wrap.innerHTML = '<div class="scraper-empty">Search failed: ' + escapeHtml(err.message) + '</div>';
+                    })
                     .finally(function () { setBusy(searchBtn, false); });
             });
         }
 
-        function renderCandidates(candidates, sentiment) {
+        function renderCandidates(candidates, sentiment, dated) {
             const wrap = document.getElementById('scraper-results');
             scraperCandidates = candidates;
             scraperSentiment = sentiment;
-            const label = sentiment === 'negative' ? 'negative feedback' : 'positive feedback';
+            const label = sentiment === 'negative' ? 'complaints' : 'positive reviews or mentions';
             wrap.hidden = false;
             if (!candidates.length) {
-                wrap.innerHTML = '<div class="scraper-empty">No ' + label + ' found. Try a different location or spelling of the hotel name.</div>';
+                wrap.innerHTML = '<div class="scraper-empty">' + (sentiment === 'negative'
+                    ? 'No complaints about the hotel were found online.'
+                    : 'Nothing new found. Check the source status above — the free web search is often throttled; connecting Google reviews gives dependable results.') + '</div>';
                 return;
             }
-            const ratingOptions = sentiment === 'negative'
-                ? '<option value="1">1</option><option value="2" selected>2</option><option value="3">3</option>'
-                : '<option value="5" selected>5</option><option value="4">4</option><option value="3">3</option>';
-            let html = '<div class="scraper-results__count">Found ' + candidates.length + ' ' + label + ' candidate' + (candidates.length === 1 ? '' : 's') + '.</div>';
+            let html = '<div class="scraper-results__count">' + candidates.length + ' ' + label + ' found · ' + dated + ' with a post date · newest first.</div>';
             candidates.forEach(function (item, idx) {
-                const meta = [item.source_platform, item.source_domain, item.source_date].filter(Boolean).join(' · ');
                 const src = /^https?:\/\//i.test(String(item.source_url || '')) ? String(item.source_url) : '';
+                const already = item.already_imported;
+                const indexDateOnly = item.date_source === 'search index';
+                const goodDate = item.source_date && !indexDateOnly ? item.source_date : '';
+                const rating = parseInt(item.rating, 10) || (sentiment === 'negative' ? 2 : 5);
+                let ratingOptions = '';
+                for (let r = 5; r >= 1; r--) {
+                    ratingOptions += '<option value="' + r + '"' + (r === rating ? ' selected' : '') + '>' + r + '★</option>';
+                }
+                const platform = item.source_platform || item.source_domain || 'Web';
+                const dateLine = item.source_date
+                    ? '<span class="scraper-card__date' + (indexDateOnly ? ' is-uncertain' : '') + '"><i class="far fa-calendar"></i> ' +
+                        (indexDateOnly ? 'Seen ' : 'Posted ') + escapeHtml(fmtDate(item.source_date)) +
+                        ' <small>(' + escapeHtml(DATE_SOURCE_LABEL[item.date_source] || 'date found') + ')</small></span>'
+                    : '<span class="scraper-card__date is-missing"><i class="far fa-calendar-times"></i> Post date unknown — enter it below if you know it</span>';
                 html +=
-                    '<article class="scraper-card" data-index="' + idx + '">' +
-                        '<h4>' + escapeHtml(item.title || (sentiment === 'negative' ? 'Guest service concern' : 'Positive guest feedback')) + '</h4>' +
+                    '<article class="scraper-card' + (already ? ' scraper-card--imported' : '') + '" data-index="' + idx + '">' +
+                        '<div class="scraper-card__head">' +
+                            '<span class="scraper-card__platform">' + escapeHtml(platform) + (item.rating ? ' · ' + '★'.repeat(rating) : '') + '</span>' +
+                            dateLine +
+                        '</div>' +
+                        '<h4>' + escapeHtml(item.title || (sentiment === 'negative' ? 'Guest service concern' : 'Guest feedback')) + '</h4>' +
                         '<p class="scraper-card__snippet">' + escapeHtml(item.snippet || '') + '</p>' +
-                        (meta ? '<p class="scraper-card__meta">' + escapeHtml(meta) + '</p>' : '') +
-                        (src ? '<a class="scraper-card__source" href="' + escapeHtml(src) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(src) + '</a>' : '') +
-                        '<div class="scraper-card__inputs">' +
-                            '<label>Name shown<input type="text" class="scraper-username" value="' + escapeHtml(item.username || '') + '" placeholder="Leave blank for “Guest”" maxlength="120"></label>' +
-                            '<label>Rating<select class="scraper-rating">' + ratingOptions + '</select></label>' +
-                        '</div>' +
-                        '<div class="scraper-card__inputs">' +
-                            '<label>Email (optional)<input type="email" class="scraper-email" value="' + escapeHtml(item.email || '') + '" placeholder="user@example.com" maxlength="190"></label>' +
-                            '<label>Source date<input type="date" class="scraper-source-date" value="' + escapeHtml(item.source_date || '') + '"></label>' +
-                        '</div>' +
-                        '<div class="scraper-card__actions">' +
-                            '<button type="button" class="btn btn-primary btn-sm" data-action="import" data-index="' + idx + '"><i class="fas fa-file-import"></i> Import as pending</button>' +
-                        '</div>' +
+                        (src ? '<a class="scraper-card__source" href="' + escapeHtml(src) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(src.length > 90 ? src.slice(0, 90) + '…' : src) + '</a>' : '') +
+                        (already
+                            ? '<p class="scraper-card__already"><i class="fas fa-check-circle"></i> Already imported as review #' + already.id + ' (' + escapeHtml(already.status === 'approved' ? 'published' : already.status) + ').</p>'
+                            : '<div class="scraper-card__inputs">' +
+                                '<label>Name shown<input type="text" class="scraper-username" value="' + escapeHtml(item.username || '') + '" placeholder="Leave blank for “Guest”" maxlength="120"></label>' +
+                                '<label>Rating<select class="scraper-rating">' + ratingOptions + '</select></label>' +
+                              '</div>' +
+                              '<div class="scraper-card__inputs">' +
+                                '<label>Posted on<input type="date" class="scraper-source-date" max="' + new Date().toISOString().slice(0, 10) + '" value="' + escapeHtml(goodDate) + '"></label>' +
+                                '<label>Email (optional)<input type="email" class="scraper-email" value="' + escapeHtml(item.email || '') + '" placeholder="user@example.com" maxlength="190"></label>' +
+                              '</div>' +
+                              '<div class="scraper-card__actions">' +
+                                '<button type="button" class="btn btn-primary btn-sm" data-action="import" data-index="' + idx + '"><i class="fas fa-file-import"></i> Import as pending</button>' +
+                              '</div>') +
                     '</article>';
             });
             wrap.innerHTML = html;
@@ -807,6 +917,7 @@ $scraper_location = trim(getSetting('address_line2', '') . ' ' . getSetting('add
                 notify('That email address doesn’t look valid. Fix it or leave it blank.', 'error');
                 return;
             }
+            const postedOn = card.querySelector('.scraper-source-date').value.trim();
             setBusy(btn, true);
             api('api/review-scraper.php', {
                 method: 'POST',
@@ -816,23 +927,96 @@ $scraper_location = trim(getSetting('address_line2', '') . ' ' . getSetting('add
                     rating: parseInt(card.querySelector('.scraper-rating').value, 10) || (scraperSentiment === 'negative' ? 2 : 5),
                     username: card.querySelector('.scraper-username').value.trim(),
                     email: email,
-                    source_date: card.querySelector('.scraper-source-date').value.trim(),
+                    source_date: postedOn,
                     sentiment: scraperSentiment,
                     candidate: candidate,
                     _csrf: CSRF
                 })
             })
-                .then(function () {
+                .then(function (data) {
+                    const d = data.data || {};
                     card.classList.add('scraper-card--imported');
                     btn.innerHTML = '<i class="fas fa-check"></i> Imported — in Pending';
                     btn.disabled = true;
-                    notify('Imported as a pending review. Approve it in the Pending tab when you’ve checked it.', 'success');
+                    notify('Imported as pending review #' + (d.review_id || '') + (d.source_date ? ', dated ' + fmtDate(d.source_date) : ', dated today (no post date)') + '. Publish it from the Pending tab once checked.', 'success');
                 })
                 .catch(function (err) {
                     setBusy(btn, false);
                     notify('Import failed: ' + err.message, 'error');
                 });
         }
+
+        function fetchPostDate(card, btn) {
+            const reviewId = Number(card.dataset.reviewId);
+            setBusy(btn, true);
+            api('api/review-scraper.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'fetch_date', review_id: reviewId, _csrf: CSRF })
+            })
+                .then(function (data) {
+                    flashThenReload('Post date found: ' + fmtDate((data.data || {}).source_date) + '. The review is now dated accordingly.', 'success');
+                })
+                .catch(function (err) {
+                    setBusy(btn, false);
+                    // Couldn't read it automatically — let the admin enter it from the post.
+                    const ask = window.AdminConfirm && window.AdminConfirm.prompt
+                        ? window.AdminConfirm.prompt({ title: 'Enter the post date', message: err.message + ' Open the source link, check when it was posted, and enter that date.', inputLabel: 'Posted on (YYYY-MM-DD)', inputPlaceholder: 'e.g. 2024-08-05', confirmText: 'Save date', icon: 'fa-calendar-plus' })
+                        : Promise.resolve(window.prompt(err.message + '\nEnter the post date (YYYY-MM-DD):', ''));
+                    ask.then(function (value) {
+                        const v = String(value || '').trim();
+                        if (!v) return;
+                        if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+                            notify('Use the format YYYY-MM-DD, e.g. 2024-08-05.', 'error');
+                            return;
+                        }
+                        setBusy(btn, true);
+                        api('api/review-scraper.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'set_date', review_id: reviewId, date: v, _csrf: CSRF })
+                        })
+                            .then(function () { flashThenReload('Review dated ' + fmtDate(v) + '.', 'success'); })
+                            .catch(function (e2) { notify(e2.message, 'error'); setBusy(btn, false); });
+                    });
+                });
+        }
+
+        // ---- source API keys ---------------------------------------------------
+        function saveSources(payload, btn) {
+            setBusy(btn, true);
+            return api('api/review-scraper.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(Object.assign({ action: 'save_sources', _csrf: CSRF }, payload))
+            })
+                .then(function (data) { flashThenReload(data.message || 'Sources saved.', 'success'); })
+                .catch(function (err) { notify('Could not save: ' + err.message, 'error'); setBusy(btn, false); });
+        }
+        const srcSave = document.getElementById('src-save');
+        if (srcSave) {
+            srcSave.addEventListener('click', function () {
+                const google = document.getElementById('src-google').value.trim();
+                const brave = document.getElementById('src-brave').value.trim();
+                if (!google && !brave) {
+                    notify('Paste at least one API key first.', 'error');
+                    return;
+                }
+                saveSources({ google: google, brave: brave }, srcSave);
+            });
+        }
+        document.querySelectorAll('[data-clear-source]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                const which = b.dataset.clearSource;
+                confirmAction({ title: 'Remove this API key?', message: 'Searches will stop using this source until a new key is saved.', confirmText: 'Remove', tone: 'warning', icon: 'fa-plug' })
+                    .then(function (ok) {
+                        if (!ok) return;
+                        const payload = {};
+                        payload[which + '_clear'] = 1;
+                        saveSources(payload, b);
+                    });
+            });
+        });
     })();
     </script>
 
