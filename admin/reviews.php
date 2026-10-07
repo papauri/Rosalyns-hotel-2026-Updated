@@ -33,10 +33,17 @@ $sort_options = [
     'lowest'  => ['Lowest rated', 'r.rating ASC, r.created_at DESC'],
 ];
 
+$source_options = ['guests' => 'Left on our website', 'imported' => 'Imported from the web (all)'];
+foreach (rh_review_platforms() as $pk => $pdef) {
+    $source_options[$pk] = '— ' . $pdef[0];
+}
+$source_options['other'] = '— Other websites';
+
 $status_filter = (string)($_GET['status'] ?? 'all');
 $rating_filter = (string)($_GET['rating'] ?? '');
 $reply_filter  = (string)($_GET['reply'] ?? '');
 $type_filter   = (string)($_GET['type'] ?? '');
+$source_filter = (string)($_GET['source'] ?? '');
 $sort          = (string)($_GET['sort'] ?? 'newest');
 $search_query  = trim((string)($_GET['search'] ?? ''));
 
@@ -44,6 +51,7 @@ if (!in_array($status_filter, $valid_statuses, true)) { $status_filter = 'all'; 
 if (!in_array($rating_filter, $valid_ratings, true))  { $rating_filter = ''; }
 if (!in_array($reply_filter, $valid_replies, true))   { $reply_filter = ''; }
 if (!isset($review_types[$type_filter]))              { $type_filter = ''; }
+if ($source_filter !== '' && !isset($source_options[$source_filter])) { $source_filter = ''; }
 if (!isset($sort_options[$sort]))                     { $sort = 'newest'; }
 if (mb_strlen($search_query, 'UTF-8') > 120)          { $search_query = mb_substr($search_query, 0, 120, 'UTF-8'); }
 
@@ -69,6 +77,13 @@ if ($reply_filter === 'needs') {
 if ($type_filter !== '') {
     $where[] = "r.review_type = ?";
     $params[] = $type_filter;
+}
+if ($source_filter !== '') {
+    [$srcSql, $srcParams] = rh_review_source_filter($source_filter);
+    if ($srcSql !== '') {
+        $where[] = $srcSql;
+        array_push($params, ...$srcParams);
+    }
 }
 $base_where = $where ? ' AND ' . implode(' AND ', $where) : '';
 
@@ -137,15 +152,16 @@ $avg_rating     = ($stats['avg_rating'] ?? null) !== null ? round((float)$stats[
 $awaiting_reply = (int)($stats['awaiting_reply'] ?? 0);
 $low_rated      = (int)($stats['low_rated'] ?? 0);
 
-$filters_active = $search_query !== '' || $rating_filter !== '' || $reply_filter !== '' || $type_filter !== '' || $sort !== 'newest';
+$filters_active = $search_query !== '' || $rating_filter !== '' || $reply_filter !== '' || $type_filter !== '' || $source_filter !== '' || $sort !== 'newest';
 
 /** Build a reviews.php URL that keeps the current filters, overriding some. */
-$filter_url = static function (array $overrides = []) use ($status_filter, $rating_filter, $reply_filter, $type_filter, $sort, $search_query): string {
+$filter_url = static function (array $overrides = []) use ($status_filter, $rating_filter, $reply_filter, $type_filter, $source_filter, $sort, $search_query): string {
     $q = array_merge([
         'status' => $status_filter,
         'rating' => $rating_filter,
         'reply'  => $reply_filter,
         'type'   => $type_filter,
+        'source' => $source_filter,
         'sort'   => $sort,
         'search' => $search_query,
     ], $overrides);
@@ -225,6 +241,14 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                     <input type="number" id="scraper-limit" min="3" max="20" value="8">
                 </div>
                 <div class="scraper-form__field scraper-form__field--sm">
+                    <label for="scraper-scope">Search in</label>
+                    <select id="scraper-scope">
+                        <option value="all" selected>All sources</option>
+                        <option value="google">Google reviews only</option>
+                        <option value="web">Web &amp; social only</option>
+                    </select>
+                </div>
+                <div class="scraper-form__field scraper-form__field--sm">
                     <label for="scraper-sentiment">Looking for</label>
                     <select id="scraper-sentiment">
                         <option value="positive" selected>Praise</option>
@@ -237,34 +261,21 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
             </div>
 
             <div class="scraper-sources-status" id="scraper-sources-status" aria-live="polite"></div>
+            <div class="scraper-chips" id="scraper-chips" role="group" aria-label="Filter results by source" hidden></div>
             <div id="scraper-results" class="scraper-results" hidden></div>
 
-            <details class="scraper-sources" <?php echo (!$google_source_on && !$brave_source_on) ? 'open' : ''; ?>>
-                <summary><i class="fas fa-plug"></i> Sources
-                    <span class="scraper-sources__chip <?php echo $google_source_on ? 'is-on' : ''; ?>" id="src-chip-google">Google reviews: <?php echo $google_source_on ? 'connected' : 'not set up'; ?></span>
-                    <span class="scraper-sources__chip <?php echo $brave_source_on ? 'is-on' : ''; ?>" id="src-chip-brave">Brave search: <?php echo $brave_source_on ? 'connected' : 'not set up'; ?></span>
-                    <span class="scraper-sources__chip is-on">Free web search: always on</span>
-                </summary>
-                <p class="scraper-sources__intro">Search engines limit automated searches, so the free web search can come back thin. For dependable results with exact dates, connect one or both of these (keys are stored encrypted and never shown again):</p>
-                <div class="scraper-sources__grid">
-                    <label>Google Places API key <small>— real Google reviews: author, stars and post date. Create one in Google Cloud Console with “Places API (New)” enabled.</small>
-                        <input type="password" id="src-google" autocomplete="off" placeholder="<?php echo $google_source_on ? 'Saved — type to replace' : 'AIza…'; ?>">
-                    </label>
-                    <label>Brave Search API key <small>— web &amp; social mentions with page dates. Free tier at api.search.brave.com.</small>
-                        <input type="password" id="src-brave" autocomplete="off" placeholder="<?php echo $brave_source_on ? 'Saved — type to replace' : 'BSA…'; ?>">
-                    </label>
-                </div>
-                <div class="scraper-sources__actions">
-                    <button type="button" class="btn btn-primary btn-sm" id="src-save"><i class="fas fa-save"></i> Save keys</button>
-                    <?php if ($google_source_on): ?><button type="button" class="btn btn-light btn-sm" data-clear-source="google">Remove Google key</button><?php endif; ?>
-                    <?php if ($brave_source_on): ?><button type="button" class="btn btn-light btn-sm" data-clear-source="brave">Remove Brave key</button><?php endif; ?>
-                </div>
-            </details>
+            <p class="scraper-sources-note">
+                <i class="fas fa-plug"></i>
+                <span class="scraper-sources__chip <?php echo $google_source_on ? 'is-on' : ''; ?>">Google reviews: <?php echo $google_source_on ? 'connected' : 'not set up'; ?></span>
+                <span class="scraper-sources__chip <?php echo $brave_source_on ? 'is-on' : ''; ?>">Brave search: <?php echo $brave_source_on ? 'connected' : 'not set up'; ?></span>
+                <span class="scraper-sources__chip is-on">Free web search: always on</span>
+                <a href="booking-settings.php#review-sources">Manage API keys in Hotel Settings &rarr;</a>
+            </p>
         </section>
 
         <!-- Headline stats -->
         <div class="stats-grid reviews-stats">
-            <a class="stat-card reviews-stat-link" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'rating' => '', 'reply' => '', 'type' => '', 'search' => '', 'sort' => 'newest'])); ?>">
+            <a class="stat-card reviews-stat-link" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'rating' => '', 'reply' => '', 'type' => '', 'source' => '', 'search' => '', 'sort' => 'newest'])); ?>">
                 <div class="stat-icon"><i class="fas fa-star"></i></div>
                 <div class="stat-value"><?php echo $avg_rating !== null ? number_format($avg_rating, 1) . ' / 5' : '—'; ?></div>
                 <div class="stat-label">Average rating · <?php echo $approved_count; ?> published</div>
@@ -279,7 +290,7 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                 <div class="stat-value"><?php echo $awaiting_reply; ?></div>
                 <div class="stat-label">Published, no reply yet</div>
             </a>
-            <a class="stat-card stat-card-danger reviews-stat-link" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'rating' => 'low', 'reply' => '', 'type' => '', 'search' => '', 'sort' => 'newest'])); ?>">
+            <a class="stat-card stat-card-danger reviews-stat-link" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'rating' => 'low', 'reply' => '', 'type' => '', 'source' => '', 'search' => '', 'sort' => 'newest'])); ?>">
                 <div class="stat-icon"><i class="fas fa-exclamation-triangle"></i></div>
                 <div class="stat-value"><?php echo $low_rated; ?></div>
                 <div class="stat-label">Published 1–2★ reviews</div>
@@ -333,6 +344,15 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                     </select>
                 </div>
                 <div class="filter-group">
+                    <label for="source-filter">Source</label>
+                    <select id="source-filter" name="source" data-autosubmit>
+                        <option value="">All sources</option>
+                        <?php foreach ($source_options as $sv => $sl): ?>
+                            <option value="<?php echo htmlspecialchars($sv); ?>" <?php echo $source_filter === $sv ? 'selected' : ''; ?>><?php echo htmlspecialchars($sl); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="filter-group">
                     <label for="sort-filter">Sort</label>
                     <select id="sort-filter" name="sort" data-autosubmit>
                         <?php foreach ($sort_options as $sv => $so): ?>
@@ -343,7 +363,7 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                 <div class="filter-actions">
                     <button type="submit" class="btn btn-primary"><i class="fas fa-search"></i> Search</button>
                     <?php if ($filters_active): ?>
-                        <a href="<?php echo htmlspecialchars($filter_url(['rating' => '', 'reply' => '', 'type' => '', 'sort' => 'newest', 'search' => ''])); ?>" class="btn btn-light"><i class="fas fa-times"></i> Clear</a>
+                        <a href="<?php echo htmlspecialchars($filter_url(['rating' => '', 'reply' => '', 'type' => '', 'source' => '', 'sort' => 'newest', 'search' => ''])); ?>" class="btn btn-light"><i class="fas fa-times"></i> Clear</a>
                     <?php endif; ?>
                 </div>
             </form>
@@ -378,6 +398,7 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                 $has_email  = $guest_mail !== '' && filter_var($guest_mail, FILTER_VALIDATE_EMAIL);
                 $source     = rh_review_source_meta($review['comment'] ?? '');
                 $source_host = $source['url'] !== '' ? (string)parse_url($source['url'], PHP_URL_HOST) : '';
+                $source_key  = $source['url'] !== '' ? rh_review_platform_key($source['url']) : '';
                 $body_text  = rh_public_review_text($review['comment'] ?? '');
                 $type_key   = (string)($review['review_type'] ?? 'general');
                 $responses  = (int)$review['response_count'];
@@ -418,7 +439,7 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                         <?php endif; ?>
                         <?php if ($source['url'] !== ''): ?>
                             <a class="review-tag review-tag--imported" href="<?php echo htmlspecialchars($source['url']); ?>" target="_blank" rel="noopener noreferrer" title="<?php echo htmlspecialchars($source['url']); ?>">
-                                <i class="fas fa-globe-africa"></i> Imported from <?php echo htmlspecialchars($source_host !== '' ? $source_host : 'the web'); ?><?php echo $source['date'] !== '' ? ' · posted ' . htmlspecialchars(date('M j, Y', strtotime($source['date']))) : ''; ?>
+                                <i class="<?php echo htmlspecialchars($source_key !== '' && $source_key !== 'other' ? rh_review_platforms()[$source_key][1] : 'fas fa-globe-africa'); ?>"></i> Imported from <?php echo htmlspecialchars($source_key !== '' && $source_key !== 'other' ? rh_review_platform_label($source_key) : ($source_host !== '' ? $source_host : 'the web')); ?><?php echo $source['date'] !== '' ? ' · posted ' . htmlspecialchars(date('M j, Y', strtotime($source['date']))) : ''; ?>
                             </a>
                             <?php if ($source['date'] === ''): ?>
                                 <button type="button" class="review-tag review-tag--action" data-action="fetch-date" title="Look up when this was originally posted and re-date the review">
@@ -797,10 +818,12 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
             return isNaN(d) ? iso : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
         }
 
-        function renderSources(sources) {
+        function renderSources(sources, d) {
             const box = document.getElementById('scraper-sources-status');
             if (!box) return;
-            box.innerHTML = (sources || []).map(function (s) {
+            const usage = d && d.google_calls != null && (sources || []).some(function (s) { return s.name === 'Google reviews' && s.status === 'ok'; })
+                ? '<span class="scraper-source__detail">Google lookups this month: ' + d.google_calls + ' of about ' + d.google_free + ' free.</span>' : '';
+            box.innerHTML = usage + (sources || []).map(function (s) {
                 const cls = s.status === 'ok' ? 'is-ok' : (s.status === 'error' ? 'is-error' : (s.status === 'off' ? 'is-off' : 'is-limited'));
                 const label = s.status === 'ok' ? (s.count + ' found') : (s.status === 'off' ? 'not set up' : (s.status === 'error' ? 'error' : '0 found'));
                 return '<span class="scraper-source ' + cls + '" title="' + escapeHtml(s.detail || '') + '">' +
@@ -809,6 +832,44 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
             }).join('');
         }
 
+        // Result filter chips: All / Google / Facebook / ...
+        let activeChip = 'all';
+        function renderChips(candidates) {
+            const chips = document.getElementById('scraper-chips');
+            if (!chips) return;
+            const counts = {};
+            const labels = {};
+            candidates.forEach(function (c) {
+                const k = c.platform_key || 'other';
+                counts[k] = (counts[k] || 0) + 1;
+                labels[k] = c.platform_label || 'Other website';
+            });
+            const keys = Object.keys(counts);
+            activeChip = 'all';
+            if (keys.length < 2) { chips.hidden = true; chips.innerHTML = ''; return; }
+            chips.hidden = false;
+            chips.innerHTML = '<button type="button" class="scraper-chip is-active" data-chip="all">All <span>' + candidates.length + '</span></button>' +
+                keys.map(function (k) {
+                    return '<button type="button" class="scraper-chip" data-chip="' + escapeHtml(k) + '">' + escapeHtml(labels[k]) + ' <span>' + counts[k] + '</span></button>';
+                }).join('');
+        }
+        function applyChip(key) {
+            activeChip = key;
+            document.querySelectorAll('#scraper-chips .scraper-chip').forEach(function (b) { b.classList.toggle('is-active', b.dataset.chip === key); });
+            let shown = 0;
+            document.querySelectorAll('#scraper-results .scraper-card').forEach(function (card) {
+                const show = key === 'all' || card.dataset.platform === key;
+                card.hidden = !show;
+                if (show) shown++;
+            });
+            const count = document.getElementById('scraper-shown-count');
+            if (count) count.textContent = String(shown);
+        }
+        document.addEventListener('click', function (e) {
+            const chip = e.target.closest('.scraper-chip');
+            if (chip) applyChip(chip.dataset.chip);
+        });
+
         const searchBtn = document.getElementById('scraper-search-btn');
         if (searchBtn) {
             searchBtn.addEventListener('click', function () {
@@ -816,6 +877,7 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                 const location = document.getElementById('scraper-location').value.trim();
                 const limit = parseInt(document.getElementById('scraper-limit').value || '8', 10);
                 const sentiment = document.getElementById('scraper-sentiment').value === 'negative' ? 'negative' : 'positive';
+                const scope = (document.getElementById('scraper-scope') || {}).value || 'all';
                 if (!hotelName) {
                     notify('Enter the hotel name to search for.', 'error');
                     return;
@@ -834,12 +896,13 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                         location: location,
                         limit: Math.min(20, Math.max(3, Number.isNaN(limit) ? 8 : limit)),
                         sentiment: sentiment,
+                        sources: scope,
                         _csrf: CSRF
                     })
                 })
                     .then(function (data) {
                         const d = data.data || {};
-                        renderSources(d.sources || []);
+                        renderSources(d.sources || [], d);
                         renderCandidates(Array.isArray(d.candidates) ? d.candidates : [], d.sentiment === 'negative' ? 'negative' : 'positive', d.dated || 0);
                     })
                     .catch(function (err) {
@@ -855,13 +918,14 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
             scraperSentiment = sentiment;
             const label = sentiment === 'negative' ? 'complaints' : 'positive reviews or mentions';
             wrap.hidden = false;
+            renderChips(candidates);
             if (!candidates.length) {
                 wrap.innerHTML = '<div class="scraper-empty">' + (sentiment === 'negative'
                     ? 'No complaints about the hotel were found online.'
                     : 'Nothing new found. Check the source status above — the free web search is often throttled; connecting Google reviews gives dependable results.') + '</div>';
                 return;
             }
-            let html = '<div class="scraper-results__count">' + candidates.length + ' ' + label + ' found · ' + dated + ' with a post date · newest first.</div>';
+            let html = '<div class="scraper-results__count"><span id="scraper-shown-count">' + candidates.length + '</span> of ' + candidates.length + ' ' + label + ' shown · ' + dated + ' with a post date · newest first.</div>';
             candidates.forEach(function (item, idx) {
                 const src = /^https?:\/\//i.test(String(item.source_url || '')) ? String(item.source_url) : '';
                 const already = item.already_imported;
@@ -872,14 +936,14 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                 for (let r = 5; r >= 1; r--) {
                     ratingOptions += '<option value="' + r + '"' + (r === rating ? ' selected' : '') + '>' + r + '★</option>';
                 }
-                const platform = item.source_platform || item.source_domain || 'Web';
+                const platform = item.platform_key && item.platform_key !== 'other' ? (item.platform_label + (item.source_platform === 'Google reviews' ? ' reviews' : '')) : (item.source_platform || item.source_domain || 'Web');
                 const dateLine = item.source_date
                     ? '<span class="scraper-card__date' + (indexDateOnly ? ' is-uncertain' : '') + '"><i class="far fa-calendar"></i> ' +
                         (indexDateOnly ? 'Seen ' : 'Posted ') + escapeHtml(fmtDate(item.source_date)) +
                         ' <small>(' + escapeHtml(DATE_SOURCE_LABEL[item.date_source] || 'date found') + ')</small></span>'
                     : '<span class="scraper-card__date is-missing"><i class="far fa-calendar-times"></i> Post date unknown — enter it below if you know it</span>';
                 html +=
-                    '<article class="scraper-card' + (already ? ' scraper-card--imported' : '') + '" data-index="' + idx + '">' +
+                    '<article class="scraper-card' + (already ? ' scraper-card--imported' : '') + '" data-index="' + idx + '" data-platform="' + escapeHtml(item.platform_key || 'other') + '">' +
                         '<div class="scraper-card__head">' +
                             '<span class="scraper-card__platform">' + escapeHtml(platform) + (item.rating ? ' · ' + '★'.repeat(rating) : '') + '</span>' +
                             dateLine +
@@ -982,41 +1046,6 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                 });
         }
 
-        // ---- source API keys ---------------------------------------------------
-        function saveSources(payload, btn) {
-            setBusy(btn, true);
-            return api('api/review-scraper.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(Object.assign({ action: 'save_sources', _csrf: CSRF }, payload))
-            })
-                .then(function (data) { flashThenReload(data.message || 'Sources saved.', 'success'); })
-                .catch(function (err) { notify('Could not save: ' + err.message, 'error'); setBusy(btn, false); });
-        }
-        const srcSave = document.getElementById('src-save');
-        if (srcSave) {
-            srcSave.addEventListener('click', function () {
-                const google = document.getElementById('src-google').value.trim();
-                const brave = document.getElementById('src-brave').value.trim();
-                if (!google && !brave) {
-                    notify('Paste at least one API key first.', 'error');
-                    return;
-                }
-                saveSources({ google: google, brave: brave }, srcSave);
-            });
-        }
-        document.querySelectorAll('[data-clear-source]').forEach(function (b) {
-            b.addEventListener('click', function () {
-                const which = b.dataset.clearSource;
-                confirmAction({ title: 'Remove this API key?', message: 'Searches will stop using this source until a new key is saved.', confirmText: 'Remove', tone: 'warning', icon: 'fa-plug' })
-                    .then(function (ok) {
-                        if (!ok) return;
-                        const payload = {};
-                        payload[which + '_clear'] = 1;
-                        saveSources(payload, b);
-                    });
-            });
-        });
     })();
     </script>
 

@@ -237,6 +237,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cancellation_ref
 
 // Hotel details & policies (registry-driven; see admin/includes/hotel-details-settings.php)
 require_once __DIR__ . '/includes/hotel-details-settings.php';
+require_once __DIR__ . '/includes/review-sources-settings.php';
+$mod_website_cms = !function_exists('moduleEnabled') || moduleEnabled('website_cms');
+// Review sources (Google / Brave API keys for the Reviews web importer)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_review_sources']) && $mod_website_cms) {
+    [$rsMessage, $rsError] = rh_review_sources_save($_POST, $user);
+    if ($rsError !== '') {
+        $error = $rsError;
+    } else {
+        $message = $rsMessage; // built from escaped parts in rh_review_sources_save()
+    }
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_hotel_details'])) {
     [$hdMessage, $hdError] = rh_hotel_details_save($_POST, $user);
     if ($hdError !== '') {
@@ -1333,6 +1344,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 <a href="#tourism-levy">Tourism levy</a>
             <?php endif; ?>
             <a href="#email-config">Email</a>
+            <?php if ($mod_website_cms): ?><a href="#review-sources">Review sources</a><?php endif; ?>
             <?php if ($mod_bookings): ?>
                 <a href="#notification-email">Notifications</a>
             <?php endif; ?>
@@ -1872,6 +1884,8 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </div>
 
             <?php endif; /* $mod_bookings — Booking Status / Advance / Tentative / Tourism Levy */ ?>
+
+            <?php if ($mod_website_cms): rh_review_sources_render($user, $csrf_token); endif; ?>
 
             <div class="rh-panel settings-card" id="email-config">
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Email Configuration</h2></div>

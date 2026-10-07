@@ -23,7 +23,8 @@ require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../config/security.php';
 require_once __DIR__ . '/../../config/cache.php';
 require_once __DIR__ . '/../includes/permissions.php';
-require_once __DIR__ . '/../../includes/reviews-display.php'; // rh_review_source_meta(), rh_clear_review_caches()
+require_once __DIR__ . '/../../includes/reviews-display.php'; // rh_review_source_meta(), rh_clear_review_caches(), rh_review_platform_key()
+require_once __DIR__ . '/../../includes/review-sources.php';   // key storage, http_json(), Google place lookup
 
 function json_success(array $data = [], string $message = 'OK', int $code = 200): never
 {
@@ -1192,87 +1193,34 @@ function search_feedback(string $hotelName, string $location, int $limit, string
 // mentions with exact dates every time.
 // ───────────────────────────────────────────────────────────────────────────
 
-function review_sources_key(): string
-{
-    $salt = $_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: 'DEFAULT_SALT_CHANGE_IN_ENV';
-    return hash('sha256', 'review-sources|' . $salt, true);
-}
-
-function review_source_encrypt(string $plain): string
-{
-    $iv = random_bytes(16);
-    $cipher = openssl_encrypt($plain, 'AES-256-CBC', review_sources_key(), OPENSSL_RAW_DATA, $iv);
-    return 'rk1:' . base64_encode($iv . $cipher);
-}
-
-function review_source_secret(string $settingKey): string
-{
-    $stored = (string)getSetting($settingKey, '');
-    if (strpos($stored, 'rk1:') !== 0) {
-        return '';
-    }
-    $raw = base64_decode(substr($stored, 4), true);
-    if ($raw === false || strlen($raw) <= 16) {
-        return '';
-    }
-    $plain = openssl_decrypt(substr($raw, 16), 'AES-256-CBC', review_sources_key(), OPENSSL_RAW_DATA, substr($raw, 0, 16));
-    return is_string($plain) ? $plain : '';
-}
-
-/** One JSON request (GET, or POST when $body is given). Returns [status, decoded|null]. */
-function http_json(string $url, array $headers, ?array $body = null, int $timeout = 15): array
-{
-    $ch = curl_init($url);
-    $opts = [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT => 6,
-        CURLOPT_TIMEOUT => $timeout,
-        CURLOPT_HTTPHEADER => array_merge(['Accept: application/json'], $headers),
-        CURLOPT_ENCODING => '',
-    ];
-    if ($body !== null) {
-        $opts[CURLOPT_POST] = true;
-        $opts[CURLOPT_POSTFIELDS] = json_encode($body);
-        $opts[CURLOPT_HTTPHEADER][] = 'Content-Type: application/json';
-    }
-    curl_setopt_array($ch, $opts);
-    $raw = curl_exec($ch);
-    $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $err = curl_error($ch);
-    curl_close($ch);
-    $json = is_string($raw) ? json_decode($raw, true) : null;
-    return [$status, is_array($json) ? $json : null, $err];
-}
-
 /**
- * Google reviews for the hotel via the Places API (New): finds the place, then
- * returns its reviews (Google exposes up to 5, "most relevant") with the
- * author, star rating, text and exact publish time.
+ * Google reviews for the hotel via the Places API (New): finds the place (IDs
+ * only = free, or a saved Place ID = no request), then reads its reviews (Google
+ * exposes up to 5, "most relevant") with author, stars, text and exact post time.
+ *
+ * The one billable call (Place Details with reviews) is cached for 6 hours and
+ * tallied per month so the admin can see usage against the free allowance.
  */
-function google_places_reviews(string $apiKey, string $hotelName, string $location, string $sentiment): array
+function google_places_reviews(string $apiKey, string $hotelName, string $location, string $sentiment, string $placeIdOverride = ''): array
 {
-    $headers = ['X-Goog-Api-Key: ' . $apiKey];
-    [$st, $found, $err] = http_json(
-        'https://places.googleapis.com/v1/places:searchText',
-        array_merge($headers, ['X-Goog-FieldMask: places.id,places.displayName,places.googleMapsUri']),
-        ['textQuery' => trim($hotelName . ' ' . $location), 'languageCode' => 'en']
-    );
-    if ($st !== 200 || empty($found['places'][0]['id'])) {
-        $msg = $found['error']['message'] ?? ($err ?: ('HTTP ' . $st));
-        throw new RuntimeException($st === 200 ? 'Google could not find the hotel — check the hotel name and location.' : 'Google Places: ' . $msg);
-    }
-    $place = $found['places'][0];
+    $place = review_google_find_place($apiKey, $hotelName, $location, $placeIdOverride, false);
 
-    [$st, $details, $err] = http_json(
-        'https://places.googleapis.com/v1/places/' . rawurlencode((string)$place['id']) . '?languageCode=en',
-        array_merge($headers, ['X-Goog-FieldMask: displayName,googleMapsUri,rating,userRatingCount,reviews'])
-    );
-    if ($st !== 200 || !is_array($details)) {
-        throw new RuntimeException('Google Places: ' . ($details['error']['message'] ?? ($err ?: ('HTTP ' . $st))));
+    $cacheKey = 'google_place_details_' . md5($place['id']);
+    $details = getCache($cacheKey, null);
+    if (!is_array($details)) {
+        [$st, $details, $err] = http_json(
+            'https://places.googleapis.com/v1/places/' . rawurlencode($place['id']) . '?languageCode=en',
+            ['X-Goog-Api-Key: ' . $apiKey, 'X-Goog-FieldMask: displayName,googleMapsUri,rating,userRatingCount,reviews']
+        );
+        if ($st !== 200 || !is_array($details)) {
+            throw new RuntimeException('Google: ' . ($details['error']['message'] ?? ($err ?: ('HTTP ' . $st))));
+        }
+        review_google_count_call();
+        setCache($cacheKey, $details, 6 * 3600);
     }
 
     $placeName = (string)($details['displayName']['text'] ?? $hotelName);
-    $placeUri = (string)($details['googleMapsUri'] ?? ($place['googleMapsUri'] ?? ''));
+    $placeUri = (string)($details['googleMapsUri'] ?? '');
     $out = [];
     foreach ((array)($details['reviews'] ?? []) as $rv) {
         $rating = (int)($rv['rating'] ?? 0);
@@ -1410,24 +1358,34 @@ if ($action === 'search') {
         json_error('Hotel name is required', 400);
     }
 
+    // Which sources to use: everything, only Google reviews, or only web & social.
+    $scope = (string)($input['sources'] ?? 'all');
+    $scope = in_array($scope, ['all', 'google', 'web'], true) ? $scope : 'all';
+    $useGoogle = $scope !== 'web';
+    $useWeb = $scope !== 'google';
+
     $sources = [];
     $pool = [];
 
-    $googleKey = review_source_secret('reviews_google_places_key');
-    if ($googleKey !== '') {
+    $googleKey = $useGoogle ? review_source_secret('reviews_google_places_key') : '';
+    if (!$useGoogle) {
+        // not requested
+    } elseif ($googleKey !== '') {
         try {
-            $g = google_places_reviews($googleKey, $hotelName, $location, $sentiment);
+            $g = google_places_reviews($googleKey, $hotelName, $location, $sentiment, (string)getSetting('reviews_google_place_id', ''));
             $pool = array_merge($pool, $g);
             $sources[] = ['name' => 'Google reviews', 'status' => 'ok', 'count' => count($g)];
         } catch (Throwable $e) {
             $sources[] = ['name' => 'Google reviews', 'status' => 'error', 'count' => 0, 'detail' => $e->getMessage()];
         }
     } else {
-        $sources[] = ['name' => 'Google reviews', 'status' => 'off', 'count' => 0, 'detail' => 'Add a Google Places API key under Sources to import real Google reviews with dates.'];
+        $sources[] = ['name' => 'Google reviews', 'status' => 'off', 'count' => 0, 'detail' => 'Add a Google Places API key in Hotel Settings → Review sources to import real Google reviews with dates.'];
     }
 
-    $braveKey = review_source_secret('reviews_brave_search_key');
-    if ($braveKey !== '') {
+    $braveKey = $useWeb ? review_source_secret('reviews_brave_search_key') : '';
+    if (!$useWeb) {
+        // not requested
+    } elseif ($braveKey !== '') {
         try {
             $b = brave_search_mentions($braveKey, $hotelName, $location, $sentiment, $limit);
             $pool = array_merge($pool, $b);
@@ -1436,24 +1394,26 @@ if ($action === 'search') {
             $sources[] = ['name' => 'Brave web search', 'status' => 'error', 'count' => 0, 'detail' => $e->getMessage()];
         }
     } else {
-        $sources[] = ['name' => 'Brave web search', 'status' => 'off', 'count' => 0, 'detail' => 'Optional: a Brave Search API key gives reliable web & social results.'];
+        $sources[] = ['name' => 'Brave web search', 'status' => 'off', 'count' => 0, 'detail' => 'Optional: a Brave Search API key (Hotel Settings → Review sources) gives reliable web & social results.'];
     }
 
     // Free search-engine scraping: best effort, often throttled.
-    $web = search_feedback_with_meta($hotelName, $location, $limit, $sentiment);
-    $webCands = (array)($web['candidates'] ?? []);
-    $pool = array_merge($pool, $webCands);
-    $webMeta = (array)($web['meta'] ?? []);
-    $sources[] = [
-        'name' => 'Free web search',
-        'status' => count($webCands) > 0 ? 'ok' : 'limited',
-        'count' => count($webCands),
+    if ($useWeb) {
+        $web = search_feedback_with_meta($hotelName, $location, $limit, $sentiment);
+        $webCands = (array)($web['candidates'] ?? []);
+        $pool = array_merge($pool, $webCands);
+        $webMeta = (array)($web['meta'] ?? []);
+        $sources[] = [
+            'name' => 'Free web search',
+            'status' => count($webCands) > 0 ? 'ok' : 'limited',
+            'count' => count($webCands),
         // Engines rarely say they are throttling — they just return unrelated
         // pages — so an empty result can mean either. Say so honestly.
-        'detail' => count($webCands) > 0 ? '' : ((int)($webMeta['duckduckgo_blocked'] ?? 0) > 0
-            ? 'Search engines are blocking automated searches right now. Try again later, or connect Google reviews / Brave below for dependable results.'
-            : 'Nothing matching the hotel name came back. Search engines also limit automated searches, so try again later or connect an API source below.'),
-    ];
+            'detail' => count($webCands) > 0 ? '' : ((int)($webMeta['duckduckgo_blocked'] ?? 0) > 0
+                ? 'Search engines are blocking automated searches right now. Try again later, or connect Google reviews / Brave in Hotel Settings → Review sources for dependable results.'
+                : 'Nothing matching the hotel name came back. Search engines also limit automated searches, so try again later or connect an API source in Hotel Settings → Review sources.'),
+        ];
+    }
 
     // Merge: one entry per post, keeping any date/rating another source had.
     $byKey = [];
@@ -1477,6 +1437,8 @@ if ($action === 'search') {
     $chk = $pdo->prepare('SELECT id, status FROM reviews WHERE comment LIKE ? LIMIT 1');
     foreach ($candidates as &$c) {
         unset($c['_score']);
+        $c['platform_key'] = rh_review_platform_key((string)($c['source_url'] ?? ''));
+        $c['platform_label'] = rh_review_platform_label($c['platform_key']);
         $chk->execute(['%' . addcslashes('Source: ' . $c['source_url'], '%_\\') . '%']);
         if ($row = $chk->fetch(PDO::FETCH_ASSOC)) {
             $c['already_imported'] = ['id' => (int)$row['id'], 'status' => (string)$row['status']];
@@ -1489,38 +1451,9 @@ if ($action === 'search') {
         'sentiment' => $sentiment,
         'dated' => count(array_filter($candidates, static fn($c) => ($c['source_date'] ?? '') !== '')),
         'sources' => $sources,
+        'google_calls' => review_google_calls_this_month(),
+        'google_free' => RH_GOOGLE_FREE_LOOKUPS_PER_MONTH,
     ], 'Search completed');
-}
-
-if ($action === 'get_sources') {
-    json_success([
-        'google' => review_source_secret('reviews_google_places_key') !== '',
-        'brave' => review_source_secret('reviews_brave_search_key') !== '',
-    ]);
-}
-
-if ($action === 'save_sources') {
-    $saved = [];
-    foreach (['google' => 'reviews_google_places_key', 'brave' => 'reviews_brave_search_key'] as $field => $settingKey) {
-        if (!empty($input[$field . '_clear'])) {
-            updateSetting($settingKey, '');
-            $saved[] = $field . ' removed';
-            continue;
-        }
-        $val = trim((string)($input[$field] ?? ''));
-        if ($val === '') {
-            continue; // blank keeps the saved key
-        }
-        if (mb_strlen($val) > 300 || preg_match('/\s/', $val)) {
-            json_error('That ' . ucfirst($field) . ' key looks invalid (no spaces, 300 characters max).', 400);
-        }
-        updateSetting($settingKey, review_source_encrypt($val));
-        $saved[] = $field . ' saved';
-    }
-    json_success([
-        'google' => review_source_secret('reviews_google_places_key') !== '',
-        'brave' => review_source_secret('reviews_brave_search_key') !== '',
-    ], $saved ? ucfirst(implode(', ', $saved)) . '.' : 'Nothing changed.');
 }
 
 if ($action === 'import') {

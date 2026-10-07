@@ -63,6 +63,84 @@ function rh_review_source_meta(?string $comment): array
 }
 
 /**
+ * Where an imported review came from, by the host of its "Source:" link.
+ * key => [label, icon, host regex fragment]. Used by the admin "Source" filter
+ * and the importer's result chips; anything else is "Other websites".
+ *
+ * @return array<string,array{0:string,1:string,2:string}>
+ */
+function rh_review_platforms(): array
+{
+    return [
+        'google'      => ['Google',      'fab fa-google',      '([a-z0-9-]+\.)*(google\.[a-z.]+|g\.page|goo\.gl)'],
+        'facebook'    => ['Facebook',    'fab fa-facebook',    '([a-z0-9-]+\.)*(facebook\.com|fb\.com|fb\.watch)'],
+        'instagram'   => ['Instagram',   'fab fa-instagram',   '([a-z0-9-]+\.)*instagram\.com'],
+        'tiktok'      => ['TikTok',      'fab fa-tiktok',      '([a-z0-9-]+\.)*tiktok\.com'],
+        'x'           => ['X / Twitter', 'fab fa-x-twitter',   '([a-z0-9-]+\.)*(x\.com|twitter\.com)'],
+        'tripadvisor' => ['TripAdvisor', 'fas fa-suitcase',    '([a-z0-9-]+\.)*tripadvisor\.[a-z.]+'],
+        'booking'     => ['Booking.com', 'fas fa-bed',         '([a-z0-9-]+\.)*booking\.com'],
+    ];
+}
+
+/** Platform key for a source URL: a key of rh_review_platforms(), or 'other'. */
+function rh_review_platform_key(string $url): string
+{
+    $host = strtolower((string)parse_url($url, PHP_URL_HOST));
+    if ($host === '') {
+        return 'other';
+    }
+    foreach (rh_review_platforms() as $key => $def) {
+        if (preg_match('/^' . $def[2] . '$/i', $host)) {
+            return $key;
+        }
+    }
+    return 'other';
+}
+
+function rh_review_platform_label(string $key): string
+{
+    return rh_review_platforms()[$key][0] ?? 'Other website';
+}
+
+/**
+ * SQL for the admin "Source" filter on reviews.comment (imports keep their
+ * provenance there as a "Source: <url>" line).
+ *
+ * $source: 'guests' (left on the website form), 'imported' (any web import), a key
+ * of rh_review_platforms(), or 'other' (imported from a site not listed).
+ *
+ * @return array{0:string,1:array} [SQL condition on r.comment, bound params]; ['', []] for no filter
+ */
+function rh_review_source_filter(string $source): array
+{
+    $nl = "\n";
+    $anySource = '(^|' . $nl . ')Source: https?://';
+    $tail = '([/:?#' . $nl . ']|$)';
+    $platforms = rh_review_platforms();
+
+    if ($source === 'guests') {
+        return ['r.comment NOT REGEXP ?', [$anySource]];
+    }
+    if ($source === 'imported') {
+        return ['r.comment REGEXP ?', [$anySource]];
+    }
+    if (isset($platforms[$source])) {
+        return ['r.comment REGEXP ?', ['(^|' . $nl . ')Source: https?://' . $platforms[$source][2] . $tail]];
+    }
+    if ($source === 'other') {
+        $known = [];
+        foreach ($platforms as $def) {
+            $known[] = $def[2];
+        }
+        return [
+            '(r.comment REGEXP ? AND r.comment NOT REGEXP ?)',
+            [$anySource, '(^|' . $nl . ')Source: https?://(' . implode('|', $known) . ')' . $tail],
+        ];
+    }
+    return ['', []];
+}
+
+/**
  * Invalidate every cached copy of guest-facing review data.
  *
  * The homepage caches its review strip ('hotel_reviews_6', 30 min) including the
