@@ -70,4 +70,5 @@ scripts/tests/sessions/
 
 # Generated invoice/receipt PDFs (output, not source)
 invoices/INV-*.pdf
+invoices/receipts/*.pdf
 receipts/*.pdf
