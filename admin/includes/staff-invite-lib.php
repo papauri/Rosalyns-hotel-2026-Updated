@@ -33,9 +33,24 @@ if (!function_exists('rh_staff_invite_send')) {
         return ['token' => $token, 'expires_at' => $expires];
     }
 
+    /**
+     * Accept link on the domain the inviting admin is using, so an invite sent from a
+     * test/staging domain lands there and one sent from the live domain lands there,
+     * whatever site_url says. Invites are only sent from signed-in admin POSTs (session +
+     * CSRF), so the Host header is the admin's own browser's. The site_url setting and
+     * BASE_URL are fallbacks for non-HTTP contexts (CLI, cron).
+     */
     function rh_staff_invite_url(string $token): string
     {
-        $base = trim((string)getSetting('site_url', ''));
+        $base = '';
+        $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+        if (PHP_SAPI !== 'cli' && $host !== '' && preg_match('/^[a-z0-9.-]+(:\d{1,5})?$/i', $host)
+            && function_exists('detectBaseUrl')) {
+            $base = (string)detectBaseUrl();
+        }
+        if ($base === '') {
+            $base = trim((string)getSetting('site_url', ''));
+        }
         if ($base === '' && defined('BASE_URL')) {
             $base = (string)BASE_URL;
         }

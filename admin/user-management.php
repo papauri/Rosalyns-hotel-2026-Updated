@@ -21,6 +21,7 @@ if (!hasPermission($user['id'], 'user_management')) {
 $site_name = getSetting('site_name');
 $success_msg = '';
 $error_msg = '';
+$open_permissions_for = 0; // new user whose invitation waits for "Save & send invitation"
 
 // Get all roles for use throughout the page
 $all_roles = getAllRoles();
@@ -78,6 +79,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $role = $_POST['role'] ?? 'receptionist';
                 $password = $_POST['password'] ?? '';
                 $send_welcome = !empty($_POST['send_welcome']);
+                // Hold the invitation until permissions are saved (admins have every permission,
+                // so there is nothing to choose for them).
+                $customize_first = $send_welcome && !empty($_POST['customize_first'])
+                    && $role !== 'admin' && hasPermission($user['id'], 'user_permissions');
 
                 if (empty($username) || empty($email) || empty($full_name)) {
                     $error_msg = 'Name, username and email are required.';
@@ -110,7 +115,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $success_msg = "User '{$full_name}' created successfully.";
 
                         // Invitation: a one-time link to choose a password (no password is emailed).
-                        if ($send_welcome) {
+                        if ($customize_first) {
+                            $open_permissions_for = (int)$new_user_id;
+                            $success_msg .= ' Choose their permissions, then press "Save & send invitation".';
+                        } elseif ($send_welcome) {
                             $invite = rh_staff_invite_send($pdo, (int)$new_user_id, (string)($user['full_name'] ?? 'An administrator'));
                             if (!empty($invite['success'])) {
                                 logActivity($user['id'], 'user_invited', "Sent invitation to '{$username}' ({$email})");
@@ -231,6 +239,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         if (setUserPermissions($uid, $perms_to_set, $user['id'])) {
                             $success_msg = "Permissions updated successfully.";
+                            // "Save & send invitation": the invite goes out only once the
+                            // permissions above are stored, so the first sign-in already has them.
+                            if (!empty($_POST['send_invite_after']) && hasPermission($user['id'], 'user_edit')) {
+                                $invite = rh_staff_invite_send($pdo, $uid, (string)($user['full_name'] ?? 'An administrator'));
+                                if (!empty($invite['success'])) {
+                                    logActivity($user['id'], 'user_invited', "Sent invitation to user #{$uid} after setting permissions");
+                                    $success_msg .= ' ' . $invite['message'] . ' (link valid ' . RH_STAFF_INVITE_HOURS . ' h).';
+                                } else {
+                                    error_log('Invitation failed for user #' . $uid . ': ' . $invite['message']);
+                                    $error_msg = 'Permissions saved, but the invitation could not be sent: ' . $invite['message'] . ' Use "Resend invitation".';
+                                }
+                            }
                         } else {
                             $error_msg = "Failed to update permissions.";
                         }
@@ -372,6 +392,11 @@ $users_stmt = $pdo->query("
     ORDER BY u.role ASC, u.full_name ASC
 ");
 $all_users = $users_stmt->fetchAll(PDO::FETCH_ASSOC);
+// Rows are JSON-encoded into the page for the Edit/Permissions buttons; never ship credentials.
+foreach ($all_users as &$rh_u) {
+    unset($rh_u['password_hash'], $rh_u['password'], $rh_u['remember_token'], $rh_u['two_factor_secret']);
+}
+unset($rh_u);
 
 // Get user counts by role
 $user_counts = getUserCountByRole();
@@ -584,6 +609,7 @@ $nav_categories = getNavCategories();
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                 <input type="hidden" name="action" value="save_permissions">
                 <input type="hidden" name="user_id" id="perm-user-id">
+                <input type="hidden" name="send_invite_after" id="perm-send-invite" value="0">
 
                 <div class="modal-header">
                     <h3><i class="fas fa-shield-alt"></i> <span id="perm-modal-title">Edit Permissions</span></h3>
@@ -622,8 +648,8 @@ $nav_categories = getNavCategories();
                     <button type="button" class="btn-cancel" onclick="closeModal('permissionsModal')">
                         <i class="fas fa-times"></i> Cancel
                     </button>
-                    <button type="submit" class="btn-save-perms">
-                        <i class="fas fa-save"></i> Save Permissions
+                    <button type="submit" class="btn-save-perms" id="perm-save-btn">
+                        <i class="fas fa-save"></i> <span id="perm-save-label">Save Permissions</span>
                     </button>
                 </div>
             </form>
@@ -670,6 +696,19 @@ $nav_categories = getNavCategories();
                     <label for="add-password">Password <span style="font-weight:400;color:#888;">(optional)</span></label>
                     <input type="password" id="add-password" name="password" minlength="8" placeholder="Leave blank - they set it from the invitation">
                     <div class="hint">With "Send invitation" ticked, the person gets a one-time link (valid 72 h) to choose their own password. No password is ever emailed.</div>
+                </div>
+                <div class="form-row">
+                    <label class="edit-active-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--navy);">
+                        <input type="checkbox" name="send_welcome" id="add-send-welcome" value="1" checked style="width: auto;">
+                        Send invitation email
+                    </label>
+                    <?php if (hasPermission($user['id'], 'user_permissions')): ?>
+                    <label class="edit-active-label" id="add-customize-first-row" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--navy); margin-top: 8px;">
+                        <input type="checkbox" name="customize_first" id="add-customize-first" value="1" style="width: auto;">
+                        Set their permissions before the invitation goes out
+                    </label>
+                    <div class="hint">Ticked: you choose permissions next, and the invitation is sent when you press "Save &amp; send invitation". Unticked: it goes now with the role's default permissions.</div>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="modal-footer">
@@ -811,6 +850,36 @@ function confirmDelete(userId, userName) {
     openModal('deleteConfirmModal');
 }
 
+// "Set their permissions before the invitation goes out" only applies when inviting.
+(function () {
+    const send = document.getElementById('add-send-welcome');
+    const first = document.getElementById('add-customize-first');
+    if (!send || !first) return;
+    const sync = () => {
+        first.disabled = !send.checked;
+        if (!send.checked) first.checked = false;
+    };
+    send.addEventListener('change', sync);
+    sync();
+})();
+
+<?php
+$rh_pending_invite_user = null;
+if ($open_permissions_for > 0) {
+    foreach ($all_users as $u) {
+        if ((int)$u['id'] === $open_permissions_for) {
+            $rh_pending_invite_user = $u;
+            break;
+        }
+    }
+}
+if ($rh_pending_invite_user): ?>
+// Just created with "set permissions first": open the permissions step right away.
+document.addEventListener('DOMContentLoaded', function () {
+    openPermissionsModal(<?php echo json_encode($rh_pending_invite_user, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>, true);
+});
+<?php endif; ?>
+
 function submitResendWelcome(userId) {
     document.getElementById('resend-welcome-user-id').value = userId;
     document.getElementById('resendWelcomeForm').submit();
@@ -829,8 +898,11 @@ const permissionData = <?php echo json_encode([
 ]); ?>;
 
 // Open permissions modal
-function openPermissionsModal(userData) {
+function openPermissionsModal(userData, sendInviteAfter) {
     const container = document.getElementById('perm-categories-container');
+
+    document.getElementById('perm-send-invite').value = sendInviteAfter ? '1' : '0';
+    document.getElementById('perm-save-label').textContent = sendInviteAfter ? 'Save & send invitation' : 'Save Permissions';
 
     document.getElementById('perm-user-id').value = userData.id;
     document.getElementById('perm-user-name').textContent = userData.full_name;
