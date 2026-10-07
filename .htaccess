@@ -174,3 +174,17 @@ RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^favicon\.ico$ images/logo/logo.png [L,R=301]
 
 </IfModule>
+
+# ====================
+# SESSION COOKIE HARDENING (mod_php / LiteSpeed only; PHP-FPM reads .user.ini)
+# ====================
+<IfModule mod_php.c>
+    php_flag session.cookie_httponly on
+    php_value session.cookie_samesite Lax
+    php_flag session.use_strict_mode on
+</IfModule>
+<IfModule mod_lsapi.c>
+    php_flag session.cookie_httponly on
+    php_value session.cookie_samesite Lax
+    php_flag session.use_strict_mode on
+</IfModule>
