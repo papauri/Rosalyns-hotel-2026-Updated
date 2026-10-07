@@ -897,6 +897,18 @@ if ($action === 'import') {
         json_error('Candidate snippet and source_url are required', 400);
     }
 
+    if (!preg_match('#^https?://#i', $sourceUrl)) {
+        json_error('Candidate source_url must be an http(s) link', 400);
+    }
+
+    // Re-running a search returns the same snippets; without this check every
+    // re-import stacked another copy into the moderation queue.
+    $dupe = $pdo->prepare('SELECT id, status FROM reviews WHERE comment LIKE ? LIMIT 1');
+    $dupe->execute(['%' . addcslashes('Source: ' . $sourceUrl, '%_\\') . '%']);
+    if ($existing = $dupe->fetch(PDO::FETCH_ASSOC)) {
+        json_error('Already imported (review #' . (int)$existing['id'] . ', ' . $existing['status'] . ')', 409);
+    }
+
     $guestEmail = $emailInput !== '' ? strtolower($emailInput) : strtolower($candidateEmail);
     if ($guestEmail !== '' && !filter_var($guestEmail, FILTER_VALIDATE_EMAIL)) {
         json_error('Invalid guest email format', 400);

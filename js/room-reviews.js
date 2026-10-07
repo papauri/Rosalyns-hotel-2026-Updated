@@ -92,7 +92,13 @@
             reviewsList.innerHTML = pageReviews.map(review => `
                 <div class="editorial-testimonial-card">
                     <div class="editorial-testimonial-quote">"</div>
-                    <p class="editorial-testimonial-text">${escapeHtml(review.comment || 'A wonderful experience!')}</p>
+                    ${review.title ? `<p class="editorial-testimonial-title">${escapeHtml(review.title)}</p>` : ''}
+                    <p class="editorial-testimonial-text">${escapeHtml(review.comment || '')}</p>
+                    ${review.latest_response ? `
+                    <div class="editorial-testimonial-reply">
+                        <span class="editorial-testimonial-reply__label">Hotel reply</span>
+                        <p class="editorial-testimonial-reply__text">${escapeHtml(review.latest_response)}</p>
+                    </div>` : ''}
                     <div class="editorial-testimonial-footer">
                         <div class="editorial-testimonial-author">
                             <span class="editorial-testimonial-author-name">${escapeHtml(review.guest_name || 'Valued Guest')}</span>

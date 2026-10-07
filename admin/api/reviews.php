@@ -30,6 +30,7 @@ require_once __DIR__ . '/../includes/permissions.php';
 
 // Include cache configuration - FIXED PATH
 require_once __DIR__ . '/../../config/cache.php';
+require_once __DIR__ . '/../../includes/reviews-display.php'; // rh_clear_review_caches()
 
 // Helper function to send JSON response
 function sendResponse(mixed $data, int $statusCode = 200): never
@@ -227,7 +228,7 @@ try {
             $reviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             // Hide guest_email for non-admin requests
-            $is_admin = isset($_SESSION['admin_user']);
+            $is_admin = isset($_SESSION['admin_user_id']);
             if (!$is_admin) {
                 foreach ($reviews as &$review) {
                     unset($review['guest_email']);
@@ -369,28 +370,16 @@ try {
                 sendError('Review not found', 404);
             }
 
-            // Update status
-            $stmt = $pdo->prepare("UPDATE reviews SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-            $stmt->execute([$status, $review_id]);
+            // Update status (no-op when unchanged, so a double-click can't churn caches)
+            if ($review['status'] !== $status) {
+                $stmt = $pdo->prepare("UPDATE reviews SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+                $stmt->execute([$status, $review_id]);
 
-            // Clear review caches when status changes to approved
-            if ($status === 'approved') {
-                // Clear hotel-wide review caches
-                deleteCache('hotel_reviews_6');
-                deleteCache('hotel_reviews_10');
-
-                // Clear room-specific cache if this is a room review
-                $stmt = $pdo->prepare("SELECT room_id FROM reviews WHERE id = ?");
-                $stmt->execute([$review_id]);
-                $review_data = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if ($review_data && $review_data['room_id']) {
-                    deleteCache('room_reviews_' . $review_data['room_id']);
-                }
-
-                // Clear all review-related caches with wildcard pattern
-                deleteCache('reviews_count_*');
-                deleteCache('avg_rating_*');
+                // Any transition can change what guests see: approving publishes it,
+                // rejecting / returning to pending must pull it from the cached
+                // homepage strip immediately (previously only approvals cleared caches,
+                // so a rejected review stayed public for up to 30 minutes).
+                rh_clear_review_caches();
             }
 
             // Fetch updated review
@@ -420,9 +409,14 @@ try {
                 sendError('Review not found', 404);
             }
 
-            // Delete review (cascade will delete responses)
-            $stmt = $pdo->prepare("DELETE FROM reviews WHERE id = ?");
-            $stmt->execute([$review_id]);
+            // Delete responses explicitly (don't rely on the FK cascade being present),
+            // then the review itself, atomically.
+            $pdo->beginTransaction();
+            $pdo->prepare("DELETE FROM review_responses WHERE review_id = ?")->execute([$review_id]);
+            $pdo->prepare("DELETE FROM reviews WHERE id = ?")->execute([$review_id]);
+            $pdo->commit();
+
+            rh_clear_review_caches();
 
             sendResponse([
                 'success' => true,
@@ -436,9 +430,12 @@ try {
     }
 } catch (PDOException $e) {
     error_log("Database error in reviews.php: " . $e->getMessage());
-    sendError('Database error occurred', 500, $e->getMessage());
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    sendError('Database error occurred', 500);
 } catch (Exception $e) {
     error_log("Error in reviews.php: " . $e->getMessage());
-    sendError('An error occurred', 500, $e->getMessage());
+    sendError('An error occurred', 500);
 }
 

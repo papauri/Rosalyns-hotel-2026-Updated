@@ -5,15 +5,95 @@
  */
 
 /**
+ * Strip the scraper's provenance block from a review before showing it to guests.
+ *
+ * `admin/api/review-scraper.php` appends its metadata into the comment body itself
+ * (there is no `source` column on `reviews`, and the schema is locked), producing:
+ *
+ *     <the snippet>
+ *
+ *     Source: https://www.facebook.com/...
+ *     Source Date: ...
+ *     User Email: ...
+ *
+ * Rendered verbatim, that puts a raw URL — and potentially a guest's email address —
+ * into the public quote. Admin screens keep the full text so provenance is auditable;
+ * only the guest-facing render is trimmed.
+ *
+ * @param string|null $comment Raw stored comment.
+ * @return string Comment with any trailing metadata block removed.
+ */
+function rh_public_review_text(?string $comment): string
+{
+    $text = (string)$comment;
+    if ($text === '') {
+        return '';
+    }
+
+    // Drop from the first metadata label onwards. Anchored to line start so a
+    // guest legitimately writing "source: ..." mid-sentence is not truncated.
+    $text = preg_replace(
+        '/\R+^(?:Source|Source Date|User Email)\s*:.*\z/ims',
+        '',
+        $text
+    ) ?? $text;
+
+    return trim($text);
+}
+
+/**
+ * Pull the scraper's provenance (source URL / date) back out of a stored comment.
+ * Admin-only: lets the moderation screen show where an imported review came from
+ * and flag it as imported, without a schema column for it.
+ *
+ * @param string|null $comment Raw stored comment.
+ * @return array{url:string,date:string} Empty strings when the review was not imported.
+ */
+function rh_review_source_meta(?string $comment): array
+{
+    $text = (string)$comment;
+    $meta = ['url' => '', 'date' => ''];
+    if (preg_match('/^Source\s*:\s*(\S+)\s*$/im', $text, $m)) {
+        $meta['url'] = $m[1];
+    }
+    if (preg_match('/^Source Date\s*:\s*(.+?)\s*$/im', $text, $m)) {
+        $meta['date'] = $m[1];
+    }
+    return $meta;
+}
+
+/**
+ * Invalidate every cached copy of guest-facing review data.
+ *
+ * The homepage caches its review strip ('hotel_reviews_6', 30 min) including the
+ * latest hotel reply, so ANY moderation change — approve, reject, back to pending,
+ * delete, reply added or removed — must clear it, or a rejected/deleted review stays
+ * public until the cache expires.
+ */
+function rh_clear_review_caches(): void
+{
+    if (function_exists('clearCacheByPattern')) {
+        clearCacheByPattern('hotel_reviews_*');
+        clearCacheByPattern('room_reviews_*');
+        clearCacheByPattern('testimonials_*');
+    } elseif (function_exists('deleteCache')) {
+        deleteCache('hotel_reviews_6');
+        deleteCache('hotel_reviews_10');
+    }
+}
+
+/**
  * Display star rating (1-5 stars)
- * 
+ *
  * @param float $rating The rating value (1-5)
  * @param int $size Size of stars in pixels (default: 16)
  * @param bool $showEmpty Whether to show empty stars (default: true)
  * @return string HTML for star rating display
  */
 function displayStarRating($rating, $size = 16, $showEmpty = true) {
-    $rating = max(1, min(5, (float)$rating));
+    // Floor at 0, not 1: an unrated room (average 0) must render empty stars,
+    // not a misleading single star.
+    $rating = max(0, min(5, (float)$rating));
     $fullStars = floor($rating);
     $hasHalfStar = ($rating - $fullStars) >= 0.5;
     $emptyStars = $showEmpty ? (5 - $fullStars - ($hasHalfStar ? 1 : 0)) : 0;
@@ -141,7 +221,7 @@ function displayReviewCard($review, $showRoom = false) {
     $guestName = htmlspecialchars($guestNameRaw);
     $rating = (int)($review['rating'] ?? 5);
     $title = htmlspecialchars(trim((string)($review['title'] ?? '')));
-    $comment = nl2br(htmlspecialchars($review['comment'] ?? ''));
+    $comment = nl2br(htmlspecialchars(rh_public_review_text($review['comment'] ?? '')));
     $reviewDate = isset($review['created_at']) ? date('M j, Y', strtotime($review['created_at'])) : '';
     $adminResponse = $review['latest_response'] ?? '';
     $adminResponseDate = $review['latest_response_date'] ?? null;
@@ -390,7 +470,8 @@ function fetchReviews($roomId = null, $status = 'approved', $limit = 10, $offset
             }
         }
         
-        // Calculate average ratings
+        // Calculate average ratings — scoped to the room when one was asked for,
+        // otherwise a room page would show the hotel-wide score as its own.
         $avgSql = "
             SELECT
                 AVG(rating) as avg_rating,
@@ -402,7 +483,13 @@ function fetchReviews($roomId = null, $status = 'approved', $limit = 10, $offset
             FROM reviews
             WHERE status = 'approved'
         ";
-        $avgStmt = $pdo->query($avgSql);
+        $avgParams = [];
+        if ($roomId !== null) {
+            $avgSql .= " AND room_id = ?";
+            $avgParams[] = $roomId;
+        }
+        $avgStmt = $pdo->prepare($avgSql);
+        $avgStmt->execute($avgParams);
         $averages = $avgStmt->fetch(PDO::FETCH_ASSOC);
         
         // Format averages to 1 decimal place

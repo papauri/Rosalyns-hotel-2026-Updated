@@ -766,3 +766,12 @@
     font-weight: 700;
     letter-spacing: 0.02em;
 }
+
+/* Spam honeypot: off-screen, never visible or focusable for real guests. */
+.review-hp {
+    position: absolute;
+    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}

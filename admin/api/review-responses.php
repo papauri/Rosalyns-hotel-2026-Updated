@@ -6,7 +6,8 @@
  *
  * Endpoints:
  * - GET: Fetch responses for a specific review
- * - POST: Add a new admin response to a review
+ * - POST: Add a new admin response to a review (optionally emails the guest)
+ * - DELETE: Remove a response (?response_id=N)
  */
 
 // Start session FIRST before any includes
@@ -28,6 +29,8 @@ require_once __DIR__ . '/../includes/permissions.php';
 
 // Include email configuration (corrected relative path)
 require_once __DIR__ . '/../../config/email.php';
+require_once __DIR__ . '/../../config/cache.php';
+require_once __DIR__ . '/../../includes/reviews-display.php'; // rh_clear_review_caches()
 
 // Helper function to send JSON response
 function sendResponse(array $data, int $statusCode = 200): never
@@ -70,16 +73,9 @@ function validateResponseData(array $data): array
         }
     }
 
-    // Validate admin_id if provided
-    if (isset($data['admin_id']) && $data['admin_id'] !== null && $data['admin_id'] !== '') {
-        if (!is_numeric($data['admin_id']) || (int)$data['admin_id'] < 1) {
-            $errors['admin_id'] = 'Invalid admin ID';
-        }
-    }
-
     // Validate response length
     if (isset($data['response'])) {
-        $response_length = strlen(trim($data['response']));
+        $response_length = mb_strlen(trim((string)$data['response']), 'UTF-8');
         if ($response_length < 10) {
             $errors['response'] = 'Response must be at least 10 characters long';
         }
@@ -127,7 +123,7 @@ if ($method === 'POST') {
 // json_decode() accepts, and the browser attaches the admin's cookies.
 // Token accepted from the X-CSRF-Token header (so DELETE, which sends no body,
 // is covered too) or from `_csrf` in the payload.
-if (in_array($method, ['POST'], true)) {
+if (in_array($method, ['POST', 'DELETE'], true)) {
     $csrfToken = (string)($_SERVER['HTTP_X_CSRF_TOKEN'] ?? $input['_csrf'] ?? '');
     if (!validateCsrfToken($csrfToken)) {
         sendError('Invalid CSRF token', 403);
@@ -157,8 +153,7 @@ try {
             $sql = "
                 SELECT
                     rr.*,
-                    au.username as admin_username,
-                    au.email as admin_email
+                    au.username as admin_username
                 FROM review_responses rr
                 LEFT JOIN admin_users au ON rr.admin_id = au.id
                 WHERE rr.review_id = ?
@@ -185,62 +180,37 @@ try {
             }
 
             $review_id = (int)$input['review_id'];
-            $response_text = trim($input['response']);
+            $response_text = trim((string)$input['response']);
+            // Always attribute to the signed-in admin — the client can't choose who "said" it.
+            $admin_id = (int)$_SESSION['admin_user_id'];
+            // Emailing is opt-out: replies to imported web feedback, or public-only
+            // replies, shouldn't necessarily land in someone's inbox.
+            $notify_guest = !isset($input['notify_guest']) || !in_array(strtolower((string)$input['notify_guest']), ['0', 'false', 'no', 'off', ''], true);
 
-            // Default admin_id to logged-in admin, but allow override via input
-            $admin_id = isset($input['admin_id']) && $input['admin_id'] !== '' ? (int)$input['admin_id'] : null;
-            if ($admin_id === null && isset($_SESSION['admin_user_id'])) {
-                $admin_id = (int)$_SESSION['admin_user_id'];
-            }
-
-            // Validate review exists
-            $stmt = $pdo->prepare("SELECT id, status FROM reviews WHERE id = ?");
-            $stmt->execute([$review_id]);
-            $review = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$review) {
-                sendError('Review not found', 404);
-            }
-
-            // Validate admin_id if provided
-            if ($admin_id !== null) {
-                $stmt = $pdo->prepare("SELECT id FROM admin_users WHERE id = ?");
-                $stmt->execute([$admin_id]);
-                if (!$stmt->fetch(PDO::FETCH_ASSOC)) {
-                    sendError('Admin user not found', 404);
-                }
-            }
-
-            // Get review details for email
-            $stmt = $pdo->prepare("SELECT id, guest_name, guest_email, title, comment FROM reviews WHERE id = ?");
+            $stmt = $pdo->prepare("SELECT id, status, guest_name, guest_email, title, comment FROM reviews WHERE id = ?");
             $stmt->execute([$review_id]);
             $review_details = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // Insert response
-            $sql = "
-                INSERT INTO review_responses (review_id, admin_id, response)
-                VALUES (?, ?, ?)
-            ";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$review_id, $admin_id, $response_text]);
+            if (!$review_details) {
+                sendError('Review not found', 404);
+            }
 
+            $stmt = $pdo->prepare("INSERT INTO review_responses (review_id, admin_id, response) VALUES (?, ?, ?)");
+            $stmt->execute([$review_id, $admin_id, $response_text]);
             $response_id = $pdo->lastInsertId();
 
-            // Fetch the created response with admin details
-            $sql = "
-                SELECT
-                    rr.*,
-                    au.username as admin_username,
-                    au.email as admin_email
+            // The homepage review strip caches the latest reply alongside each review.
+            rh_clear_review_caches();
+
+            $stmt = $pdo->prepare("
+                SELECT rr.*, au.username as admin_username
                 FROM review_responses rr
                 LEFT JOIN admin_users au ON rr.admin_id = au.id
                 WHERE rr.id = ?
-            ";
-            $stmt = $pdo->prepare($sql);
+            ");
             $stmt->execute([$response_id]);
             $new_response = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // Prepare response with email status
             $response_data = [
                 'success' => true,
                 'message' => 'Response added successfully',
@@ -249,115 +219,56 @@ try {
                 'email_status' => 'not_attempted'
             ];
 
-            // Send email notification to guest
-            if (!empty($review_details['guest_email'])) {
-                $response_data['email_status'] = 'attempting';
-
-                $site_name = getSetting('site_name');
-                $site_url = getSetting('site_url', '');
-
-                $email_subject = "Response to your review at {$site_name}";
-
-                $email_body = "
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset='UTF-8'>
-                    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-                    <style>
-                        body { font-family: 'Jost', Arial, sans-serif; line-height: 1.6; color: #333; }
-                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                        .header { background: linear-gradient(135deg, #8B7355 0%, #A08B6D 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-                        .header h1 { color: #fff; margin: 0; font-size: 24px; }
-                        .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
-                        .review-box { background: #fff; padding: 20px; border-left: 4px solid #8B7355; margin: 20px 0; }
-                        .response-box { background: #fff8e1; padding: 20px; border-left: 4px solid #A08B6D; margin: 20px 0; }
-                        .footer { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 14px; }
-                        .btn { display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #8B7355 0%, #A08B6D 100%); color: #fff; text-decoration: none; border-radius: 50px; margin-top: 20px; }
-                    </style>
-                </head>
-                <body>
-                    <div class='container'>
-                        <div class='header'>
-                            <h1>{$site_name}</h1>
-                        </div>
-                        <div class='content'>
-                            <h2>Thank You for Your Feedback!</h2>
-                            <p>Dear " . htmlspecialchars($review_details['guest_name']) . ",</p>
-                            <p>Thank you for taking the time to share your experience at {$site_name}. We value your feedback and have responded to your review.</p>
-
-                            <div class='review-box'>
-                                <h3>Your Review:</h3>
-                                <p><strong>" . htmlspecialchars($review_details['title']) . "</strong></p>
-                                <p>" . htmlspecialchars(substr($review_details['comment'], 0, 200)) . (strlen($review_details['comment']) > 200 ? '...' : '') . "</p>
-                            </div>
-
-                            <div class='response-box'>
-                                <h3>Our Response:</h3>
-                                <p>" . nl2br(htmlspecialchars($response_text)) . "</p>
-                            </div>
-
-                            <p>We hope to welcome you back to {$site_name} soon!</p>
-
-                            <a href='{$site_url}' class='btn'>Visit Our Website</a>
-
-                            <div class='footer'>
-                                <p>&copy; " . date('Y') . " {$site_name}. All rights reserved.</p>
-                            </div>
-                        </div>
-                    </div>
-                </body>
-                </html>
-                ";
-
-                $text_body = "Thank you for your review at {$site_name}.\n\n";
-                $text_body .= "We have responded to your review titled: " . $review_details['title'] . "\n\n";
-                $text_body .= "Our Response:\n" . strip_tags($response_text) . "\n\n";
-                $text_body .= "Visit us at: {$site_url}\n";
-
-                // Log email attempt
-                error_log("Attempting to send review response email to: " . $review_details['guest_email']);
-
+            $guest_email = trim((string)($review_details['guest_email'] ?? ''));
+            if (!$notify_guest) {
+                $response_data['email_status'] = 'skipped';
+            } elseif ($guest_email === '' || !filter_var($guest_email, FILTER_VALIDATE_EMAIL)) {
+                $response_data['email_status'] = 'no_guest_email';
+            } else {
                 try {
-                    $result = sendEmail(
-                        $review_details['guest_email'],
-                        $review_details['guest_name'],
-                        $email_subject,
-                        $email_body,
-                        $text_body
+                    $result = sendReviewResponseEmail(
+                        (string)$review_details['guest_name'],
+                        $guest_email,
+                        (string)$review_details['title'],
+                        rh_public_review_text($review_details['comment'] ?? ''),
+                        $response_text
                     );
-
-                    if ($result['success']) {
-                        error_log("Review response email sent successfully to: " . $review_details['guest_email']);
+                    if (!empty($result['success'])) {
                         $response_data['email_sent'] = true;
                         $response_data['email_status'] = 'sent';
-                        $response_data['message'] .= ' Email notification sent to guest.';
                     } else {
-                        error_log("Review response email failed: " . $result['message']);
-                        $response_data['email_sent'] = false;
+                        error_log('Review response email failed: ' . ($result['message'] ?? 'unknown'));
                         $response_data['email_status'] = 'failed';
-                        $response_data['email_error'] = $result['message'];
-                        $response_data['message'] .= ' Note: Email could not be sent - ' . $result['message'];
-
-                        // Add preview if available
-                        if (isset($result['preview'])) {
-                            $response_data['email_preview'] = $result['preview'];
-                        }
+                        $response_data['email_error'] = (string)($result['message'] ?? 'Email could not be sent');
                     }
-                } catch (Exception $e) {
-                    error_log("Exception sending review response email: " . $e->getMessage());
-                    error_log("Email error trace: " . $e->getTraceAsString());
-                    $response_data['email_sent'] = false;
-                    $response_data['email_status'] = 'exception';
-                    $response_data['email_error'] = $e->getMessage();
-                    $response_data['message'] .= ' Note: Email error occurred - ' . $e->getMessage();
+                } catch (Throwable $e) {
+                    error_log('Exception sending review response email: ' . $e->getMessage());
+                    $response_data['email_status'] = 'failed';
+                    $response_data['email_error'] = 'Email error occurred';
                 }
-            } else {
-                $response_data['email_status'] = 'no_guest_email';
-                $response_data['message'] .= ' No guest email on file.';
             }
 
             sendResponse($response_data, 201);
+            break;
+
+        case 'DELETE':
+            $response_id = isset($_GET['response_id']) ? (int)$_GET['response_id'] : 0;
+            if ($response_id < 1) {
+                sendError('response_id parameter is required', 400);
+            }
+
+            $stmt = $pdo->prepare("DELETE FROM review_responses WHERE id = ?");
+            $stmt->execute([$response_id]);
+            if ($stmt->rowCount() === 0) {
+                sendError('Response not found', 404);
+            }
+
+            rh_clear_review_caches();
+
+            sendResponse([
+                'success' => true,
+                'message' => 'Response removed'
+            ]);
             break;
 
         default:
@@ -366,9 +277,9 @@ try {
     }
 } catch (PDOException $e) {
     error_log("Database error in review-responses.php: " . $e->getMessage());
-    sendError('Database error occurred', 500, $e->getMessage());
+    sendError('Database error occurred', 500);
 } catch (Exception $e) {
     error_log("Error in review-responses.php: " . $e->getMessage());
-    sendError('An error occurred', 500, $e->getMessage());
+    sendError('An error occurred', 500);
 }
 

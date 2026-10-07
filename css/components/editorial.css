@@ -2262,3 +2262,39 @@
         aspect-ratio: 3 / 4;
         min-height: clamp(300px, 72vw, 430px);
     }
+
+/* Room-page review title + hotel reply (rendered by js/room-reviews.js). */
+.editorial-testimonial-title {
+    font-family: var(--font-sans);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--color-text-primary);
+    margin: 0 0 0.5rem;
+}
+
+.editorial-testimonial-reply {
+    margin: 1rem 0 0;
+    padding: 0.75rem 0 0 1rem;
+    border-left: 1px solid var(--color-border-light);
+}
+
+.editorial-testimonial-reply__label {
+    display: block;
+    font-family: var(--font-sans);
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 0.66rem;
+    color: var(--color-primary);
+    margin-bottom: 0.3rem;
+}
+
+.editorial-testimonial-reply__text {
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.55;
+    color: var(--color-text-secondary);
+    margin: 0;
+    white-space: pre-line;
+}

@@ -10,6 +10,9 @@
 
 // Load section headers helper (if needed)
 require_once __DIR__ . '/section-headers.php';
+// rh_public_review_text() lives here. Required unconditionally: the fallback fetch
+// below only runs when $hotel_reviews is empty.
+require_once __DIR__ . '/reviews-display.php';
 
 // If hotel_reviews is not available, try to fetch it
 if (!isset($hotel_reviews) || empty($hotel_reviews)) {
@@ -46,18 +49,19 @@ if (!isset($hotel_reviews) || empty($hotel_reviews)) {
         <div class="editorial-reviews-grid" data-reviews-grid>
             <?php foreach ($hotel_reviews as $index => $review): ?>
             <div class="editorial-review-card scroll-reveal" data-review-card>
-                <div class="editorial-review-card__rating">
-                    <?php for ($i = 0; $i < $review['rating']; $i++): ?>
+                <?php $card_rating = max(1, min(5, (int)($review['rating'] ?? 5))); ?>
+                <div class="editorial-review-card__rating" role="img" aria-label="<?php echo $card_rating; ?> out of 5 stars">
+                    <?php for ($i = 0; $i < $card_rating; $i++): ?>
                     <i class="fas fa-star" aria-hidden="true"></i>
                     <?php endfor; ?>
                 </div>
                 
                 <blockquote class="editorial-review-card__quote">
-                    <?php echo htmlspecialchars($review['comment']); ?>
+                    <?php echo htmlspecialchars(rh_public_review_text($review['comment'] ?? '')); ?>
                 </blockquote>
                 
                 <div class="editorial-review-card__author">
-                    <span class="editorial-review-card__name"><?php echo htmlspecialchars($review['guest_name']); ?></span>
+                    <span class="editorial-review-card__name"><?php echo htmlspecialchars(trim((string)($review['guest_name'] ?? '')) ?: 'Guest'); ?></span>
                 </div>
             </div>
             <?php endforeach; ?>

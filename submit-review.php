@@ -28,6 +28,9 @@ if (function_exists('moduleEnabled') && !moduleEnabled('website_cms')) {
 
 // Include alert system
 require_once 'includes/alert.php';
+// rh_public_review_text() — strips the scraper's "Source: <url>" provenance block
+// out of the community-feedback quotes further down this page.
+require_once 'includes/reviews-display.php';
 
 // Include validation library
 require_once 'includes/validation.php';
@@ -68,30 +71,37 @@ try {
 
 // ── Reviews Overview (public, approved only) ───────────────────────────────
 $reviews_summary = [
-    'total' => 0,
     'approved' => 0,
     'responses' => 0,
     'avg_rating' => null,
+    'recommend_pct' => null,
 ];
 $latest_reviews = [];
 
 try {
-    // Total reviews (all statuses)
-    $stmt = $pdo->query("SELECT COUNT(*) AS c FROM reviews");
-    $reviews_summary['total'] = (int)($stmt->fetch(PDO::FETCH_ASSOC)['c'] ?? 0);
+    // Public figures are computed over APPROVED reviews only. The old "All Reviews"
+    // tile counted pending + rejected submissions too, and "Admin Responses" counted
+    // replies on reviews guests can't see; neither means anything to a guest.
+    $stmt = $pdo->query("
+        SELECT COUNT(*) AS c,
+               AVG(rating) AS avg_rating,
+               SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) AS positive
+        FROM reviews
+        WHERE status = 'approved'
+    ");
+    $agg = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $reviews_summary['approved'] = (int)($agg['c'] ?? 0);
+    $reviews_summary['avg_rating'] = isset($agg['avg_rating']) && $agg['avg_rating'] !== null ? round((float)$agg['avg_rating'], 1) : null;
+    $reviews_summary['recommend_pct'] = $reviews_summary['approved'] > 0
+        ? (int)round(((int)$agg['positive'] / $reviews_summary['approved']) * 100)
+        : null;
 
-    // Approved reviews count
-    $stmt = $pdo->query("SELECT COUNT(*) AS c FROM reviews WHERE status = 'approved'");
-    $reviews_summary['approved'] = (int)($stmt->fetch(PDO::FETCH_ASSOC)['c'] ?? 0);
-
-    // Responses count
-    $stmt = $pdo->query("SELECT COUNT(*) AS c FROM review_responses");
+    $stmt = $pdo->query("
+        SELECT COUNT(DISTINCT rr.review_id) AS c
+        FROM review_responses rr
+        INNER JOIN reviews r ON r.id = rr.review_id AND r.status = 'approved'
+    ");
     $reviews_summary['responses'] = (int)($stmt->fetch(PDO::FETCH_ASSOC)['c'] ?? 0);
-
-    // Average rating on approved
-    $stmt = $pdo->query("SELECT AVG(rating) AS avg_rating FROM reviews WHERE status='approved' AND rating IS NOT NULL");
-    $avg = $stmt->fetch(PDO::FETCH_ASSOC)['avg_rating'] ?? null;
-    $reviews_summary['avg_rating'] = $avg !== null ? round((float)$avg, 2) : null;
 
     // Latest approved reviews with latest response (if any)
     $sql = "
@@ -137,6 +147,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'message' => 'Too many submissions. Please wait a few minutes before trying again.'
         ];
         header('Location: ' . $_SERVER['REQUEST_URI']);
+        exit;
+    }
+
+    // Honeypot: a visually hidden "website" field real guests never fill in.
+    // Bots that do are shown the normal thank-you page and nothing is stored.
+    if (trim((string)($_POST['website'] ?? '')) !== '') {
+        header('Location: ' . BASE_URL . 'review-confirmation.php');
         exit;
     }
 
@@ -248,9 +265,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Check for validation errors
     if (!empty($validation_errors)) {
+        $field_labels = [
+            'guest_name' => 'Name',
+            'guest_email' => 'Email',
+            'overall_rating' => 'Overall rating',
+            'review_title' => 'Review title',
+            'review_comment' => 'Review',
+            'review_type' => 'Review type',
+            'room_id' => 'Room',
+            'service_rating' => 'Service rating',
+            'cleanliness_rating' => 'Cleanliness rating',
+            'location_rating' => 'Location rating',
+            'value_rating' => 'Value rating',
+        ];
         $errors = [];
         foreach ($validation_errors as $field => $message) {
-            $errors[] = ucfirst(str_replace('_', ' ', $field)) . ': ' . $message;
+            $errors[] = ($field_labels[$field] ?? ucfirst(str_replace('_', ' ', $field))) . ': ' . $message;
         }
     } else {
         $errors = [];
@@ -332,6 +362,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
     }
 }
+
+// Re-populate the form after a failed submission so the guest doesn't lose their text.
+$is_repost = $_SERVER['REQUEST_METHOD'] === 'POST';
+$old = static function (string $key) use ($is_repost): string {
+    return $is_repost ? htmlspecialchars(trim((string)($_POST[$key] ?? ''))) : '';
+};
+$old_rating = static function (string $key) use ($is_repost): int {
+    $v = $is_repost ? (int)($_POST[$key] ?? 0) : 0;
+    return ($v >= 1 && $v <= 5) ? $v : 0;
+};
+$old_type = $is_repost ? (string)($_POST['review_type'] ?? '') : ($selected_room_id > 0 ? 'room' : '');
+$old_room = $is_repost ? (int)($_POST['room_id'] ?? 0) : $selected_room_id;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -396,7 +438,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <?php endif; ?>
 
                 <form id="reviewForm" method="POST" action="submit-review.php<?php echo $selected_room_id > 0 ? '?room_id=' . $selected_room_id : ''; ?>" novalidate>
-                    <input type="hidden" name="_csrf_review" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                    <input type="hidden" name="_csrf_review" value="<?php echo htmlspecialchars(pub_csrf_generate('review')); ?>">
+                    <div class="review-hp" aria-hidden="true">
+                        <label for="review_website">Website</label>
+                        <input type="text" id="review_website" name="website" tabindex="-1" autocomplete="off">
+                    </div>
                     <!-- Personal Information -->
                     <div class="form-section-title">
                         <i class="fas fa-user"></i>
@@ -413,6 +459,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 id="guest_name"
                                 name="guest_name"
                                 placeholder="Enter your full name"
+                                value="<?php echo $old('guest_name'); ?>"
+                                maxlength="100"
+                                autocomplete="name"
                                 required
                                 aria-required="true"
                                 minlength="2">
@@ -428,6 +477,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 id="guest_email"
                                 name="guest_email"
                                 placeholder="your@email.com"
+                                value="<?php echo $old('guest_email'); ?>"
+                                maxlength="254"
+                                autocomplete="email"
                                 required
                                 aria-required="true">
                             <p class="form-hint">We'll never share your email with anyone</p>
@@ -441,25 +493,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </label>
                         <select id="review_type" name="review_type">
                             <option value="">General Hotel Experience</option>
-                            <option value="room" <?php echo $selected_room_id > 0 ? 'selected' : ''; ?>>Specific Room</option>
-                            <option value="restaurant">Restaurant & Dining</option>
-                            <option value="spa">Spa & Wellness</option>
-                            <option value="conference">Conference & Events</option>
-                            <option value="gym">Fitness Center</option>
-                            <option value="service">Staff & Service</option>
+                            <?php foreach (['room' => 'Specific Room', 'restaurant' => 'Restaurant & Dining', 'spa' => 'Spa & Wellness', 'conference' => 'Conference & Events', 'gym' => 'Fitness Center', 'service' => 'Staff & Service'] as $type_value => $type_label): ?>
+                                <option value="<?php echo $type_value; ?>" <?php echo $old_type === $type_value ? 'selected' : ''; ?>><?php echo htmlspecialchars($type_label); ?></option>
+                            <?php endforeach; ?>
                         </select>
                         <p class="form-hint">Select the specific area you're reviewing, or leave blank for a general hotel review</p>
                     </div>
 
                     <!-- Room Selection (shown only when "Specific Room" is selected) -->
-                    <div class="form-group" id="roomSelectionGroup" style="display: <?php echo $selected_room_id > 0 ? 'block' : 'none'; ?>;">
+                    <div class="form-group" id="roomSelectionGroup" style="display: <?php echo $old_type === 'room' ? 'block' : 'none'; ?>;">
                         <label for="room_id">
                             Which room did you stay in? <span class="optional">(Optional)</span>
                         </label>
                         <select id="room_id" name="room_id">
                             <option value="">Select a room type...</option>
                             <?php foreach ($rooms as $room): ?>
-                                <option value="<?php echo $room['id']; ?>" <?php echo $selected_room_id === (int)$room['id'] ? 'selected' : ''; ?>>
+                                <option value="<?php echo $room['id']; ?>" <?php echo $old_room === (int)$room['id'] ? 'selected' : ''; ?>>
                                     <?php echo htmlspecialchars($room['name']); ?>
                                 </option>
                             <?php endforeach; ?>
@@ -484,7 +533,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                             <span class="star-rating-label" id="overallRatingLabel">Select a rating</span>
                         </div>
-                        <input type="hidden" id="overall_rating" name="overall_rating" value="0" required>
+                        <input type="hidden" id="overall_rating" name="overall_rating" value="<?php echo $old_rating('overall_rating'); ?>" required>
                         <p class="form-hint">How would you rate your overall experience?</p>
                     </div>
 
@@ -503,6 +552,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             id="review_title"
                             name="review_title"
                             placeholder="Summarize your experience in a few words"
+                            value="<?php echo $old('review_title'); ?>"
+                            maxlength="200"
                             required
                             aria-required="true"
                             minlength="5">
@@ -519,7 +570,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             placeholder="Tell us about your stay, what you loved, and how we can improve..."
                             required
                             aria-required="true"
-                            minlength="20"></textarea>
+                            maxlength="2000"
+                            minlength="20"><?php echo $old('review_comment'); ?></textarea>
                         <p class="form-hint">Share your detailed experience (min. 20 characters)</p>
                     </div>
 
@@ -539,7 +591,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <span class="star" data-value="4" role="button" tabindex="0" aria-label="4 stars" aria-pressed="false"><i class="fas fa-star"></i></span>
                                 <span class="star" data-value="5" role="button" tabindex="0" aria-label="5 stars" aria-pressed="false"><i class="fas fa-star"></i></span>
                             </div>
-                            <input type="hidden" id="service_rating" name="service_rating" value="">
+                            <input type="hidden" id="service_rating" name="service_rating" value="<?php echo $old_rating('service_rating') ?: ''; ?>">
                         </div>
 
                         <div class="optional-rating-item">
@@ -551,7 +603,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <span class="star" data-value="4" role="button" tabindex="0" aria-label="4 stars" aria-pressed="false"><i class="fas fa-star"></i></span>
                                 <span class="star" data-value="5" role="button" tabindex="0" aria-label="5 stars" aria-pressed="false"><i class="fas fa-star"></i></span>
                             </div>
-                            <input type="hidden" id="cleanliness_rating" name="cleanliness_rating" value="">
+                            <input type="hidden" id="cleanliness_rating" name="cleanliness_rating" value="<?php echo $old_rating('cleanliness_rating') ?: ''; ?>">
                         </div>
 
                         <div class="optional-rating-item">
@@ -563,7 +615,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <span class="star" data-value="4" role="button" tabindex="0" aria-label="4 stars" aria-pressed="false"><i class="fas fa-star"></i></span>
                                 <span class="star" data-value="5" role="button" tabindex="0" aria-label="5 stars" aria-pressed="false"><i class="fas fa-star"></i></span>
                             </div>
-                            <input type="hidden" id="location_rating" name="location_rating" value="">
+                            <input type="hidden" id="location_rating" name="location_rating" value="<?php echo $old_rating('location_rating') ?: ''; ?>">
                         </div>
 
                         <div class="optional-rating-item">
@@ -575,7 +627,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <span class="star" data-value="4" role="button" tabindex="0" aria-label="4 stars" aria-pressed="false"><i class="fas fa-star"></i></span>
                                 <span class="star" data-value="5" role="button" tabindex="0" aria-label="5 stars" aria-pressed="false"><i class="fas fa-star"></i></span>
                             </div>
-                            <input type="hidden" id="value_rating" name="value_rating" value="">
+                            <input type="hidden" id="value_rating" name="value_rating" value="<?php echo $old_rating('value_rating') ?: ''; ?>">
                         </div>
                     </div>
 
@@ -607,20 +659,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <div class="community-feedback__stats" role="list" aria-label="Review statistics">
                     <article class="community-feedback__stat-card" role="listitem">
-                        <span class="community-feedback__stat-label">Approved Reviews</span>
+                        <span class="community-feedback__stat-label">Average Rating</span>
+                        <strong class="community-feedback__stat-value"><?php echo $reviews_summary['avg_rating'] !== null ? number_format($reviews_summary['avg_rating'], 1) . ' / 5' : '—'; ?></strong>
+                    </article>
+                    <article class="community-feedback__stat-card" role="listitem">
+                        <span class="community-feedback__stat-label">Guest Reviews</span>
                         <strong class="community-feedback__stat-value"><?php echo (int)$reviews_summary['approved']; ?></strong>
                     </article>
                     <article class="community-feedback__stat-card" role="listitem">
-                        <span class="community-feedback__stat-label">All Reviews</span>
-                        <strong class="community-feedback__stat-value"><?php echo (int)$reviews_summary['total']; ?></strong>
+                        <span class="community-feedback__stat-label">Rated 4&#9733; or Higher</span>
+                        <strong class="community-feedback__stat-value"><?php echo $reviews_summary['recommend_pct'] !== null ? (int)$reviews_summary['recommend_pct'] . '%' : '—'; ?></strong>
                     </article>
                     <article class="community-feedback__stat-card" role="listitem">
-                        <span class="community-feedback__stat-label">Admin Responses</span>
+                        <span class="community-feedback__stat-label">Reviews We've Replied To</span>
                         <strong class="community-feedback__stat-value"><?php echo (int)$reviews_summary['responses']; ?></strong>
-                    </article>
-                    <article class="community-feedback__stat-card" role="listitem">
-                        <span class="community-feedback__stat-label">Average Rating</span>
-                        <strong class="community-feedback__stat-value"><?php echo $reviews_summary['avg_rating'] !== null ? number_format($reviews_summary['avg_rating'], 2) . ' / 5' : '—'; ?></strong>
                     </article>
                 </div>
 
@@ -640,7 +692,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 </header>
 
                                 <h3 class="community-feedback__review-title"><?php echo htmlspecialchars($r['title']); ?></h3>
-                                <p class="community-feedback__review-comment"><?php echo nl2br(htmlspecialchars(mb_strimwidth($r['comment'] ?? '', 0, 320, '…'))); ?></p>
+                                <p class="community-feedback__review-comment"><?php echo nl2br(htmlspecialchars(mb_strimwidth(rh_public_review_text($r['comment'] ?? ''), 0, 320, '…'))); ?></p>
 
                                 <?php if (!empty($r['latest_response'])): ?>
                                     <div class="community-feedback__response">
@@ -681,10 +733,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             function initStarRating(containerId, inputId, isRequired = false) {
                 const container = document.getElementById(containerId);
                 const input = document.getElementById(inputId);
+                if (!container || !input) return;
                 const stars = container.querySelectorAll('.star');
                 const labelElement = document.getElementById(containerId + 'Label');
-
-                if (!container || !input) return;
 
                 // Handle star click
                 stars.forEach(star => {
@@ -757,6 +808,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             star.classList.add('empty');
                         }
                     });
+                }
+
+                // Restore a rating carried back after a failed server-side submit.
+                const initial = parseInt(input.value, 10);
+                if (initial >= 1 && initial <= 5) {
+                    container.dataset.rating = initial;
+                    highlightStars(initial);
+                    stars.forEach(star => star.setAttribute('aria-pressed', parseInt(star.dataset.value, 10) <= initial ? 'true' : 'false'));
+                    if (labelElement) labelElement.textContent = ratingLabels[initial];
                 }
             }
 
@@ -837,11 +897,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 });
             });
 
-            // Form submission
+            // Form submission: validated here, then posted natively. The server
+            // redirects to the confirmation page on success, or re-renders this page
+            // with its own validation message and the guest's input intact. (The
+            // previous fetch() version replaced every server error - rate limit,
+            // invalid email, too-short text - with a generic "An error occurred".)
             form.addEventListener('submit', function(e) {
-                e.preventDefault();
-
-                // Validate all fields
                 let isFormValid = true;
                 requiredFields.forEach(field => {
                     if (!validateField(field)) {
@@ -849,97 +910,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 });
 
-                // Validate overall rating
                 const overallRating = document.getElementById('overall_rating');
-                if (parseInt(overallRating.value) < 1) {
+                if (parseInt(overallRating.value, 10) < 1) {
                     isFormValid = false;
                     overallRating.closest('.form-group').classList.add('error');
                 }
 
                 if (!isFormValid) {
-                    // Scroll to first error
+                    e.preventDefault();
                     const firstError = form.querySelector('.form-group.error');
                     if (firstError) {
-                        firstError.scrollIntoView({
-                            behavior: 'smooth',
-                            block: 'center'
-                        });
+                        const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                        firstError.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
                     }
                     return;
                 }
 
-                // Show loading state
+                if (form.dataset.submitting === '1') {
+                    e.preventDefault();
+                    return;
+                }
+                form.dataset.submitting = '1';
                 submitBtn.classList.add('loading');
                 submitBtn.disabled = true;
-
-                // Prepare form data
-                const formData = new FormData(form);
-
-                // Submit via AJAX
-                fetch(form.action, {
-                        method: 'POST',
-                        body: formData
-                    })
-                    .then(response => {
-                        if (response.redirected) {
-                            window.location.href = response.url;
-                            return;
-                        }
-                        return response.text();
-                    })
-                    .then(html => {
-                        // Check if response contains success message
-                        if (html.includes('alert-success') || html.includes('Thank you for your review')) {
-                            // Parse the response to find redirect URL
-                            const parser = new DOMParser();
-                            const doc = parser.parseFromString(html, 'text/html');
-
-                            // Show success message
-                            const alertDiv = document.createElement('div');
-                            alertDiv.className = 'alert alert-success';
-                            alertDiv.style.cssText = 'background: #1f8f5f; color: white; padding: 16px; border-radius: 8px; margin-bottom: 20px; text-align: center;';
-                            alertDiv.innerHTML = '<i class="fas fa-check-circle"></i> Thank you for your review! Your feedback has been submitted successfully.';
-
-                            form.insertBefore(alertDiv, form.firstChild);
-
-                            // Redirect after 2 seconds
-                            setTimeout(() => {
-                                const roomId = document.getElementById('room_id').value;
-                                if (roomId) {
-                                    window.location.href = 'room.php?id=' + roomId;
-                                } else {
-                                    window.location.href = 'index.php';
-                                }
-                            }, 2000);
-                        } else {
-                            // Show error message
-                            const alertDiv = document.createElement('div');
-                            alertDiv.className = 'alert alert-error';
-                            alertDiv.style.cssText = 'background: #c0392b; color: white; padding: 16px; border-radius: 8px; margin-bottom: 20px; text-align: center;';
-                            alertDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i> An error occurred while submitting your review. Please try again.';
-
-                            form.insertBefore(alertDiv, form.firstChild);
-
-                            // Reset button
-                            submitBtn.classList.remove('loading');
-                            submitBtn.disabled = false;
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-
-                        // Show error message
-                        const alertDiv = document.createElement('div');
-                        alertDiv.className = 'alert alert-error';
-                        alertDiv.style.cssText = 'background: #c0392b; color: white; padding: 16px; border-radius: 8px; margin-bottom: 20px; text-align: center;';
-                        alertDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i> An error occurred while submitting your review. Please try again.';
-
-                        form.insertBefore(alertDiv, form.firstChild);
-
-                        // Reset button
-                        submitBtn.classList.remove('loading');
-                        submitBtn.disabled = false;
-                    });
             });
         });
     </script>

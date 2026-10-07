@@ -6907,6 +6907,68 @@ function sendReviewAcknowledgementEmail(string $guestName, string $guestEmail, s
 }
 
 /**
+ * Email a reviewer the hotel's reply to their review.
+ *
+ * Body is a fragment like every other template here — sendEmail() wraps it in the
+ * branded layout. (The old inline version in admin/api/review-responses.php built a
+ * whole <html> document, which ended up nested inside the wrapper.)
+ */
+function sendReviewResponseEmail(string $guestName, string $guestEmail, string $reviewTitle, string $reviewComment, string $responseText): array
+{
+    global $email_site_name, $email_site_url;
+
+    try {
+        if (empty($guestEmail) || !filter_var($guestEmail, FILTER_VALIDATE_EMAIL)) {
+            return ['success' => false, 'message' => 'No valid reviewer email provided'];
+        }
+
+        $siteName = htmlspecialchars((string)$email_site_name);
+        $siteUrl  = (string)($email_site_url ?? '');
+        $excerpt  = mb_strimwidth(trim($reviewComment), 0, 240, '…', 'UTF-8');
+
+        $htmlBody = '
+        <h1 style="color: #8B7355; text-align: center;">We Replied to Your Review</h1>
+        <p>Dear ' . htmlspecialchars($guestName) . ',</p>
+        <p>Thank you for taking the time to share your experience at <strong>' . $siteName . '</strong>. Our team has read your feedback and replied below.</p>
+
+        <div style="background: #FAF6F0; border-left: 4px solid #C8A45A; padding: 16px 20px; margin: 20px 0; border-radius: 6px;">
+            <p style="margin:0 0 6px;font-weight:bold;color:#1A1A1A;">Your review: ' . htmlspecialchars($reviewTitle) . '</p>
+            <p style="margin:0;color:#555;font-style:italic;">' . nl2br(htmlspecialchars($excerpt)) . '</p>
+        </div>
+
+        <div style="background: #FDF6EC; border-left: 4px solid #8B7355; padding: 16px 20px; margin: 20px 0; border-radius: 6px;">
+            <p style="margin:0 0 6px;font-weight:bold;color:#5C4A32;">Our reply</p>
+            <p style="margin:0;color:#333;">' . nl2br(htmlspecialchars($responseText)) . '</p>
+        </div>
+
+        <p>We hope to welcome you to ' . $siteName . ' again soon.</p>' .
+        ($siteUrl !== '' ? '
+        <p style="text-align:center;margin:26px 0;">
+            <a href="' . htmlspecialchars($siteUrl) . '" style="background: #8B7355; color: #ffffff; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block;">Visit Our Website</a>
+        </p>' : '') . '
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
+            Warm regards &mdash; ' . $siteName . '
+        </p>';
+
+        $textBody = 'Dear ' . $guestName . ",\n\n"
+            . 'Thank you for your review "' . $reviewTitle . '" at ' . $email_site_name . ".\n\n"
+            . "Our reply:\n" . $responseText . "\n\n"
+            . ($siteUrl !== '' ? 'Visit us: ' . $siteUrl . "\n" : '');
+
+        return sendEmail(
+            $guestEmail,
+            $guestName,
+            'We replied to your review - ' . $email_site_name,
+            $htmlBody,
+            $textBody
+        );
+    } catch (Exception $e) {
+        error_log('sendReviewResponseEmail Error: ' . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+/**
  * Email a gym member their digital membership card: a CODE 128 barcode of
  * their member number (the payload the Gym Check-In scanner reads), shown
  * inline (CID) and attached as a PNG for saving to a phone.
