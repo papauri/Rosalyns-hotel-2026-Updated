@@ -1,389 +1,230 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KDS Kitchen Guide — Rosalyn's Hotel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-    rel="stylesheet">
+  <title>Kitchen Display (KDS) — Rosalyns Beach Hotel</title>
   <link rel="stylesheet" href="assets/guide-theme.css">
   <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
   <nav class="top">
-    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-    <div class="nav-links">
-      <a href="index.html">All Guides</a>
-      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-      <a href="owner-handover.php">Owner</a>
-      <a href="01-pos-till.html">← Prev</a>
-      <a href="03-bds-bar.html">Next →</a>
-    </div>
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
   </nav>
 
-  <header class="hero">
-    <div class="deck">
-      <div class="eyebrow">Guide 02 &middot; Kitchen</div>
-      <h1>KDS — Kitchen Display</h1>
-      <p class="lead">A live ticket board for the kitchen. No printers, no paper &mdash; chefs work directly off the
-        screen.</p>
-      <div class="meta">
-        <span>URL <strong>/admin/kds.php</strong></span>
-        <span>Role <strong>chef · manager · admin</strong></span>
-        <span>Read time <strong>4 min</strong></span>
-      </div>
-    </div>
-  </header>
+  <h1>Kitchen Display (KDS)</h1>
+  <p>The Kitchen Display is the screen the kitchen uses to see food orders sent from the till, work through them, and mark them ready and served. It also covers the Station Reports page and the Station Hours page, which apply to the Kitchen, Bar and Coffee Bar screens.</p>
 
-  <main class="content">
-    <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Chefs and kitchen staff (screen). Managers (reports and hours).</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Kitchen (KDS)</strong> (<code>/admin/kds.php</code>). It opens in a new browser tab. Reports: Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Station Reports</strong> (<code>/admin/kds-report.php</code>). Hours: Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Station Hours</strong> (<code>/admin/station-settings.php</code>).</dd>
+      <dt>Permission needed</dt><dd><strong>Kitchen Display (KDS)</strong> for the screen. <strong>Station Reports (KDS/BDS/CDS)</strong> for reports. <strong>Ingredients &amp; Recipes</strong> for Station Hours.</dd>
+      <dt>Only shown when</dt><dd>The <strong>Point of Sale</strong> and <strong>Kitchen Display (KDS)</strong> modules are switched on in Settings &rarr; Modules. Station Reports and Station Hours also need the <strong>Restaurant Page</strong> module.</dd>
+    </dl>
+  </div>
 
-      <section>
-        <h2>Layout</h2>
-        <div class="diagram">┌────────────────────────────────────────────────────────────────────┐
-          │ KITCHEN   [All] [New] [Cooking] [Ready]    21:14:02  🔊  Exit      │ ← top bar
-          ├────────────────────────────────────────────────────────────────────┤
-          │                                                                    │
-          │  ┌── #001 ─ Table 4 ──┐  ┌── #002 ─ Room 12 ─┐  ┌── #003 ────────┐ │
-          │  │ 12m 04s   COOKING  │  │ 2m 11s       NEW  │  │ 45 sec    NEW  │ │
-          │  │ ─────────────────  │  │ ────────────────  │  │ ─────────────  │ │
-          │  │ 2× Steak    Ready  │  │ 1× Soup   Start   │  │ 1× Pasta Start │ │  ← tap a line
-          │  │ 1× S̶a̶l̶a̶d̶   (done)  │  │ 1× Steak  Start   │  │ 2× Wine  Start │ │    to advance it
-          │  │ ─────────────────  │  │ ────────────────  │  │ ─────────────  │ │
-          │  │ Bump  Rush  💬 👁 ☰ │  │ Start all  Bump…  │  │ Start all …    │ │  ← ticket footer
-          │  └────────────────────┘  └───────────────────┘  └────────────────┘ │
-          │                                                                    │
-          ├────────────────────────────────────────────────────────────────────┤
-          │  FOH Notes          │  All Day            │  Online Flow           │ ← station dock
-          └────────────────────────────────────────────────────────────────────┘</div>
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#flow">How a ticket moves through the kitchen</a></li>
+      <li><a href="#work">How to work a ticket</a></li>
+      <li><a href="#bump">How to bump a whole ticket</a></li>
+      <li><a href="#rush">How to mark a ticket as a rush</a></li>
+      <li><a href="#cancel">How to cancel a ticket before cooking starts</a></li>
+      <li><a href="#86">How to 86 an item on a ticket</a></li>
+      <li><a href="#chat">How to talk to the front of house</a></li>
+      <li><a href="#served">How to look at served tickets</a></li>
+      <li><a href="#pause">How to use Online Flow (pause and wait time)</a></li>
+      <li><a href="#hours">How to set the station hours</a></li>
+      <li><a href="#report">How to read and send the daily station report</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
 
-        <ul class="checklist">
-          <li>Tickets fade in when fired by the till.</li>
-          <li>The board uses the same <strong>Japandi palette as the admin dashboard</strong> &mdash; warm paper
-            background, off-white cards, muted clay and sage accents. Status is carried by a coloured edge and a small
-            label, not by flooding the whole card, so a busy pass stays readable.</li>
-          <li>Cards warm to <span class="pill amber">amber</span> after 5 min and <span class="pill red">red</span> after
-            10 min &mdash; keeps the kitchen on time.</li>
-          <li>A soft chime plays when a new ticket lands. Tap <strong>Sound</strong> to mute, or open
-            <strong>Sound Settings</strong> to choose alert tones and volume for the station screen.</li>
-          <li>Each ticket shows FOH/orderer, guest/service type, line count, item count, fired time and current status
-            so the kitchen can identify who sent it without leaving the board.</li>
-          <li>Everything scales continuously with the screen &mdash; the same board is legible on a 10&Prime; counter
-            tablet and on a <strong>70&Prime; wall display</strong>, with no setting to change. Type, cards and the dock
-            all grow together; on a large screen you simply get more columns of larger tickets.</li>
-        </ul>
-      </section>
+  <h2 id="screen">What is on the screen</h2>
+  <p><strong>Top bar</strong></p>
+  <ul>
+    <li><strong>KDS</strong> and the hotel name at the left.</li>
+    <li><strong>Open</strong> &mdash; tickets still on the board. <strong>Ready</strong> &mdash; tickets that are ready. <strong>Served shift</strong> &mdash; tickets served in this business day. <strong>Hours</strong> &mdash; the station's opening hours. An <strong>Open</strong> or <strong>Closed</strong> label shows if the station is inside its hours.</li>
+    <li>Filter buttons: <strong>All</strong>, <strong>New</strong>, <strong>Cooking</strong>, <strong>Ready</strong>.</li>
+    <li>The clock, <strong>FOH chat</strong>, <strong>Sound</strong> (mute or unmute the chime), <strong>Settings</strong> (sound settings), <strong>Served</strong>, <strong>Help</strong> (shows hints on each button), a guide link (<strong>KDS Guide</strong>), <strong>Daily Report</strong> (only with the <strong>Station Reports (KDS/BDS/CDS)</strong> permission), <strong>Dashboard</strong> (only with the Dashboard permission, so kitchen-only staff stay on this screen) and <strong>Logout</strong>.</li>
+    <li>On small screens the same controls are in a <strong>Menu</strong> panel, which also has <strong>Enter Fullscreen</strong>.</li>
+  </ul>
+  <p><strong>Board</strong> &mdash; one card per ticket. The card shows:</p>
+  <ul>
+    <li>The place: <strong>Table 5</strong>, the order type (for example <strong>WALK IN</strong>) or the room.</li>
+    <li>A timer showing how long the ticket has waited since it was sent, the order reference, and who took the order.</li>
+    <li>The order note, if there is one.</li>
+    <li>The lines: quantity, item name, any note for that line, and a small tag showing the next step. Lines that belong to another station (for example drinks on a food ticket) are shown with that station's name. Under the lines a note such as <strong>2 items at other stations</strong> tells you the other stations are still working.</li>
+    <li>Buttons along the bottom (see below).</li>
+  </ul>
+  <p><strong>Bottom panels</strong></p>
+  <ul>
+    <li><strong>FOH Notes</strong> &mdash; notes from the front of house that have not been dismissed. It says <em>"No active notes."</em> when there are none.</li>
+    <li><strong>All Day</strong> &mdash; a running total of items still waiting or being cooked across all tickets. It says <em>"No items working."</em> when empty.</li>
+    <li><strong>Online Flow</strong> &mdash; the pause and wait-time setting (see <a href="#pause">Online Flow</a>).</li>
+  </ul>
+  <p>The board updates by itself. When new tickets or notes arrive a chime plays (if <strong>Sound</strong> is on). If the station is outside its hours a banner reads <strong>KDS is currently closed</strong> with the hours.</p>
+  <p>The board only lists tickets sent during the current business day that still have at least one line for the kitchen that is not served and not cancelled. Which items come here is decided on the Menu page by the item's <strong>Station</strong> (see the <a href="01-pos-till.html">POS guide</a>).</p>
 
-      <section>
-        <h2>Step-by-step</h2>
-        <ol class="steps">
-          <li><strong>A new ticket arrives</strong> &mdash; it appears on the board and chimes.</li>
-          <li><strong>Tap the line itself</strong> when you pick the item up. There are no per-line button rows any
-            more: the whole line is the control, and each tap moves it one step forward. The label on the right of the
-            line always tells you what the <em>next</em> tap will do.</li>
-          <li>Tap again when the plate is up &mdash; that is <strong>Ready</strong>, and it is the moment the
-            <strong>ingredients come off stock</strong>.</li>
-          <li>If recipe stock is short, the board stops the action and shows a friendly stock dialog. Receive stock,
-            adjust the recipe, or 86 the item before trying again.</li>
-          <li>Tap once more for <strong>Collect</strong> when the runner takes it, and once more for
-            <strong>Serve</strong> when it reaches the guest. A finished line is <s>struck through</s> and stops
-            responding to taps.</li>
-          <li>When every line is done, tap <strong>Bump</strong> in the ticket footer. The ticket leaves the active
-            board.</li>
-        </ol>
-        <div class="callout note">
-          <strong>Stock deducts at Ready, not at fire.</strong> If an order is cancelled before you tap a line up to
-          Ready, no stock is lost. This keeps physical prep and stock usage in sync.
-        </div>
-      </section>
+  <h2 id="flow">How a ticket moves through the kitchen</h2>
+  <p>Every line goes through these steps. The tag on a line shows the step that tapping will do next.</p>
+  <table>
+    <thead><tr><th>Line is</th><th>Tag shows</th><th>Tap does</th></tr></thead>
+    <tbody>
+      <tr><td>Pending (just arrived)</td><td><strong>Start</strong></td><td>Marks it as being cooked.</td></tr>
+      <tr><td>Cooking</td><td><strong>Ready</strong></td><td>Marks it ready for pickup. The ingredients for the recipe come off stock now.</td></tr>
+      <tr><td>Ready</td><td><strong>Collect</strong></td><td>Marks that the runner is collecting it. The cashier is sent a "ready for collection" note.</td></tr>
+      <tr><td>Collecting</td><td><strong>Serve</strong></td><td>Marks it as delivered to the guest.</td></tr>
+      <tr><td>Served or cancelled</td><td>none (struck through / <strong>CANCELED</strong>)</td><td>Nothing; the line is finished.</td></tr>
+    </tbody>
+  </table>
+  <p>When every kitchen line on an order is ready, collecting or served, the cashier's till shows <em>"Kitchen: order ORD-... (Table 5) is ready for collection."</em> This is sent once per order and station.</p>
+  <p>A ticket's status on the filter buttons is: <strong>New</strong> (nothing started), <strong>Cooking</strong> (at least one line started), <strong>Ready</strong> (everything for the station is ready).</p>
 
-      <section>
-        <h2>Tapping a line: the four steps</h2>
-        <p>Every ticket line walks the same path. You never choose an action from a row of buttons &mdash; you just tap
-          the line, and the label on its right edge tells you where the next tap takes it.</p>
-        <table>
-          <thead>
-            <tr>
-              <th>Line shows</th>
-              <th>Tap it when</th>
-              <th>Stock effect</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span class="pill blue">Start</span></td>
-              <td>You physically pick the item up to cook it.</td>
-              <td>None.</td>
-            </tr>
-            <tr>
-              <td><span class="pill green">Ready</span></td>
-              <td>Plate/glass is up and ready to leave the pass.</td>
-              <td><strong>Deducts ingredients from stock.</strong></td>
-            </tr>
-            <tr>
-              <td><span class="pill amber">Collect</span></td>
-              <td>The runner has taken the item for delivery.</td>
-              <td>None (already deducted at Ready).</td>
-            </tr>
-            <tr>
-              <td><span class="pill green">Serve</span></td>
-              <td>That single line is confirmed delivered to the guest.</td>
-              <td>None.</td>
-            </tr>
-            <tr>
-              <td><s>struck through</s></td>
-              <td>Nothing &mdash; the line is finished and no longer tappable.</td>
-              <td>None.</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="callout note">Lines belonging to <strong>another station</strong> are shown for context with a
-          Kitchen / Bar / Coffee Bar badge, greyed out and not tappable. You can see what the bar is doing without being
-          able to touch their work.</div>
-      </section>
+  <h2 id="work">How to work a ticket</h2>
+  <ol class="steps">
+    <li>Watch the board for a new ticket. Its timer starts as soon as the cashier sends it.</li>
+    <li>To cook the whole ticket at once, click <strong>Start all</strong>. This appears only while the ticket still has pending lines for your station. Or tap each line to start it.</li>
+    <li>When a dish is plated, tap its line (tag <strong>Ready</strong>). If the ingredients are not in stock you see <em>"Stock check stopped this action: Chicken short by 2.500 kg. Receive stock, adjust the recipe, or 86 the item before marking it ready."</em> and the line does not move. Tell your manager to receive stock, or 86 the item.</li>
+    <li>When the runner takes it, tap the line again (tag <strong>Collect</strong>), and when it reaches the guest tap it once more (tag <strong>Serve</strong>).</li>
+    <li>You can tap lines in any order. A line can also be served directly from Pending or Cooking; the stock still comes off at that moment.</li>
+  </ol>
+  <p>The timer changes after 5 minutes (a warning) and again after 10 minutes (late). For a ticket that is already ready and waiting, the same 5 and 10 minute marks apply. A ticket that has waited more than 12 minutes without being ready is marked urgent on the board.</p>
+  <p>Small icons on each of your lines: <strong>Recipe card</strong> (shows the recipe, ingredients and portion for that line) and <strong>86 this item</strong> (see below; not shown once the line is served or cancelled). The eye icon on the ticket, <strong>View whole order</strong>, shows every line across all stations. The stream icon, <strong>Order log</strong>, shows the full history of the order.</p>
 
-      <section>
-        <h2>The ticket footer</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Control</th>
-              <th>What it does</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span class="pill blue">Start all</span></td>
-              <td>Starts every pending line at once, for when you fire the whole ticket together. Only shown while some
-                line is still pending.</td>
-            </tr>
-            <tr>
-              <td><span class="pill gold">Bump</span></td>
-              <td>Marks the ticket delivered and clears it from the board. Deducts stock for anything not already taken
-                at Ready. Recallable for 10 minutes.</td>
-            </tr>
-            <tr>
-              <td><span class="pill red">Rush</span> / Un-rush</td>
-              <td>Toggles priority. Sorts the ticket to the top and alerts every station.</td>
-            </tr>
-            <tr>
-              <td><i class="fas fa-comment-dots"></i> Notes</td>
-              <td>Opens the FOH message thread for this ticket, with a reply box. The badge counts messages; an
-                indicator marks unread ones.</td>
-            </tr>
-            <tr>
-              <td><i class="fas fa-eye"></i> Whole order</td>
-              <td>Shows every line on the order across all three stations — useful for timing your prep with the bar.
-              </td>
-            </tr>
-            <tr>
-              <td><i class="fas fa-stream"></i> Log</td>
-              <td>Opens the full order lifecycle over the board (see below).</td>
-            </tr>
-            <tr>
-              <td><i class="fas fa-xmark-circle"></i> Cancel</td>
-              <td>Only appears while <em>all</em> lines are still pending. Cancels the order outright and restores
-                stock.</td>
-            </tr>
-          </tbody>
-        </table>
-        <p>Each line also carries two small icons on its right: <i class="fas fa-book-open"></i> <strong>Recipe</strong>
-          for portion and prep guidance, and <i class="fas fa-ban"></i> <strong>86</strong> to pull the item and alert
-          FOH. These act on the single line and do not advance it.</p>
-      </section>
+  <h2 id="bump">How to bump a whole ticket</h2>
+  <ol class="steps">
+    <li>Click <strong>Bump</strong> at the bottom of the ticket. It turns into the main button once all your lines are ready.</li>
+    <li>Every remaining line for your station is marked served and the ticket clears from your board. The ingredients for any line that had not yet been deducted come off stock now.</li>
+  </ol>
+  <p>If stock is short the bump is refused with the same <em>"Stock check stopped this action ..."</em> message and nothing changes. <strong>Bump</strong> is greyed out if the ticket has no lines for your station.</p>
 
-      <section>
-        <h2>Ticket timer &amp; age colours</h2>
-        <ul class="checklist">
-          <li>Each ticket shows elapsed time since it was fired. The format is compact: <strong>just fired → 45 sec → 3m
-              12s → 12 min → 1h 04m</strong>.</li>
-          <li>The sub-label below the timer gives context: <em>On time — fired 14:32</em> · <em>Watch closely — fired
-              14:20</em> · <em>Late — fired 14:05</em> · <em>Overdue — fired 13:50 · check with FOH</em>. "Overdue"
-            means the ticket has been on the board over one hour without being bumped — verify with Front of House.</li>
-          <li>Card border colour escalates: normal → <span class="pill amber">amber at 5 min</span> → <span
-              class="pill red">red at 10 min</span> → pulsing red "urgent" glow at 12 min.</li>
-          <li>All times are shown in <strong>Malawi local time</strong> (UTC+2) — the timers are accurate to the second.
-          </li>
-        </ul>
-      </section>
+  <h2 id="rush">How to mark a ticket as a rush</h2>
+  <ol class="steps">
+    <li>Click <strong>Rush</strong> on the ticket. You see <em>"Marked as RUSH &mdash; FOH notified"</em>. The ticket is flagged as a rush and moves to the top of the board.</li>
+    <li>To clear it click <strong>Un-rush</strong>. You see <em>"Rush cleared"</em>.</li>
+  </ol>
 
-      <section>
-        <h2>RUSH priority</h2>
-        <ul class="checklist">
-          <li>A RUSH ticket has a <span class="pill red">⚡ RUSH</span> badge in the ticket header and a red left border.
-          </li>
-          <li>RUSH tickets sort to the <strong>top of the board</strong>, above all other orders.</li>
-          <li>When a ticket is marked Rush, an <span class="pill red">URGENT</span> inbox message arrives in the bottom
-            bar so every station knows immediately.</li>
-          <li>The cashier sees the <span class="pill red">RUSH</span> tag on the order in <strong>My orders</strong> on
-            the till, so both ends of the pass know which order is jumping the queue.</li>
-          <li>Rush can be set or cleared from the <strong>Rush</strong> button in the ticket footer on the station
-            screen.</li>
-          <li>When Rush is cleared, stations get a second URGENT message confirming the priority has been removed.</li>
-        </ul>
-        <div class="callout note">Any station (KDS, BDS, CDS) can toggle Rush, and the last person to tap wins.
-          Coordinate with FOH before clearing a Rush the cashier asked for.</div>
-      </section>
+  <h2 id="cancel">How to cancel a ticket before cooking starts</h2>
+  <p>The cross-in-a-circle button (<strong>Cancel before prep</strong>) only appears while no line on the order has been started at any station.</p>
+  <ol class="steps">
+    <li>Click the button. The window <strong>Cancel Order Before Prep</strong> says <em>"Choose a reason &mdash; FOH will be notified immediately."</em></li>
+    <li>Click one reason: <strong>Customer cancelled</strong>, <strong>Wrong order sent</strong>, <strong>Out of ingredient</strong>, <strong>Quality issue</strong>, <strong>Test / training order</strong> or <strong>Other</strong>. You can add extra words in the box <strong>Additional details or custom reason&hellip;</strong>.</li>
+    <li>Click <strong>Confirm Cancel</strong> (or <strong>Keep</strong> to leave the ticket alone). If the reason is shorter than 8 characters you see <em>"Choose a reason before confirming"</em>.</li>
+    <li>You see <em>"Order cancelled &mdash; FOH notified"</em>. Stock is restored and, for a room-service order, the room charge is removed.</li>
+  </ol>
+  <p>If the order has already been paid, or part of it paid, you see <em>"Order ... has payment recorded against it - it cannot be cancelled. A manager must void it (this writes the reversal)."</em> If cooking has started you see <em>"Cannot cancel: preparation has already started"</em>.</p>
 
-      <section>
-        <h2>FOH notes &amp; station messages</h2>
-        <ul class="checklist">
-          <li>The <strong>station dock</strong> along the bottom has three panels: <strong>FOH Notes</strong>,
-            <strong>All Day</strong> (running item counts) and <strong>Online Flow</strong>. The dock is a fixed band
-            that scrolls internally — it never pushes the board off-screen or slides under the taskbar, however many
-            notes arrive.</li>
-          <li><strong>FOH chat works like Messenger.</strong> A round chat button sits on the right of the board, above
-            the dock. When FOH writes, it bounces and a speech bubble pops up beside it with the message; the red
-            number shows how many messages are waiting. Tap the bubble or the button to open the chat.</li>
-          <li>The chat slides in from the right with one conversation per order: FOH's messages on the left in grey,
-            yours on the right in blue. Tap <strong>Got it</strong> or a quick reply (<em>On it</em>, <em>10 minutes</em>…),
-            or type in the box at the bottom of a conversation. You can also start a new message to the cashier about
-            any order already in the chat.</li>
-          <li>An <strong>URGENT</strong> note also takes over the middle of the board as a large red card until someone
-            taps <strong>Got it</strong> or <strong>Open chat</strong>. Unread messages re-chime every 30 seconds, urgent
-            ones every 20.</li>
-          <li><strong>FOH chat</strong> in the top bar and the FOH Notes heading in the dock open the same chat. The
-            number on them, and in the browser tab title, counts only messages still waiting for you.</li>
-          <li>You can <strong>reply</strong> to any message from the dock — your reply pops up on the cashier's till
-            as a large card and stays in their <strong>Messages</strong>.</li>
-          <li>You can also open a ticket's own thread with the <i class="fas fa-comment-dots"></i> button in its footer
-            and reply in place, which keeps the conversation attached to that order.</li>
-          <li>If a note has been dismissed or the order has moved on, a reply is <strong>refused with a clear
-              message</strong> rather than silently disappearing — so a "sent" note on the pass really did reach the
-            till.</li>
-          <li>POS receives station replies, ready alerts, and My orders status updates within about 1 second. Ready
-            alerts and notes open as a large card in the middle of the till that stays until the cashier taps
-            <strong>Got it</strong> (or a quick reply such as <em>On my way</em>), re-chiming every 20 seconds &mdash;
-            so you can expect an answer rather than hoping they saw it. Their Got it shows here as actioned.</li>
-          <li>A note from FOH stays until you answer or dismiss it. Notes your station sent, and FOH's answers to them,
-            drop off after 6 hours.</li>
-        </ul>
-      </section>
+  <h2 id="86">How to 86 an item on a ticket</h2>
+  <p>Use this when an ingredient has run out or a dish cannot be made for this order.</p>
+  <ol class="steps">
+    <li>Click <strong>86 this item</strong> (the small icon on the line). The window <strong>86 Item</strong> reads <em>"86 (item name)? This removes it from the order and sends an urgent alert to FOH."</em></li>
+    <li>Click <strong>86 this item</strong> to confirm, or <strong>Keep</strong>. You see <em>"Item 86'd &mdash; FOH notified"</em>.</li>
+  </ol>
+  <p>What the system does:</p>
+  <ul>
+    <li>The line is cancelled and the order total comes down by that line (including its share of any discount and tax).</li>
+    <li>If the line had not been started, its stock is put back. If it had been started or was ready, the loss is recorded as wastage.</li>
+    <li>If the order was already paid, a pending refund is raised for the cashier to complete.</li>
+    <li>For a room-service order the matching room charge is removed.</li>
+    <li>If every line on an unpaid tab is 86'd, the tab is cancelled.</li>
+    <li>The cashier who opened the order gets an urgent message telling them to inform the guest and offer an alternative.</li>
+  </ul>
+  <div class="warn"><p>This does not switch the dish off for future orders. Ask the till to 86 the menu item (see the <a href="01-pos-till.html#86">POS guide</a>) so it cannot be ordered again.</p></div>
 
-      <section>
-        <h2>Filters</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Filter</th>
-              <th>Shows</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span class="pill gold">All</span></td>
-              <td>Every open ticket.</td>
-            </tr>
-            <tr>
-              <td><span class="pill blue">New</span></td>
-              <td>Just arrived, not started.</td>
-            </tr>
-            <tr>
-              <td><span class="pill amber">Cooking</span></td>
-              <td>At least one item started or in collection.</td>
-            </tr>
-            <tr>
-              <td><span class="pill green">Ready</span></td>
-              <td>All items ready or awaiting collection, bump pending.</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+  <h2 id="chat">How to talk to the front of house</h2>
+  <ol class="steps">
+    <li>On a ticket click the speech-bubble icon. A number shows how many notes are on that ticket. The icon turns red when there is a note you have not opened.</li>
+    <li>To reply to a note, click one of the quick replies (<strong>On it!</strong>, <strong>5 minutes</strong>, <strong>10 minutes</strong>, <strong>Ready soon</strong>, <strong>Out of stock</strong>, <strong>Need clarification</strong>) or type your own in <strong>Custom reply&hellip;</strong> and click the send arrow. You see <em>"Reply sent to FOH"</em>.</li>
+    <li>To start a note yourself, type in <strong>Send a note to FOH about this ticket&hellip;</strong> (up to 240 characters) and press the send arrow. You see <em>"Sent to FOH"</em>.</li>
+    <li>To dismiss a note click the small cross on it.</li>
+    <li>All messages with the till for the last 6 hours are in <strong>FOH chat</strong> (top bar, or the chat bubble at the right edge of the screen).</li>
+  </ol>
+  <p>An urgent note from the till covers the middle of the board with an alert. Click <strong>Got it</strong> to dismiss it, or <strong>Open chat</strong> to read and reply. If there are several, <strong>Close all &mdash; notes stay in the chat</strong> closes them all; the notes stay in the chat.</p>
 
-      <section>
-        <h2>Order Lifecycle Log (ticket footer)</h2>
-        <p>Every KDS ticket card has a <strong>Log</strong> (<i class="fas fa-stream"></i>) button in the footer
-          alongside <em>Rush</em> and <em>Bump</em>. It opens the full audit trail
-          (<code>/admin/order-lifecycle.php</code>) <strong>in a panel over the board</strong> — the station screen stays
-          exactly where it was behind it. Close it with the ✕ or the <kbd>Esc</kbd> key and you are back on the pass.</p>
-        <p>The log shows:</p>
-        <ul class="checklist">
-          <li>The exact second the order was placed, fired, each item marked Ready, collected, and served.</li>
-          <li>Every stock deduction with ingredient name, quantity, and unit cost.</li>
-          <li>KDS events with actor name and IP (who tapped what and when).</li>
-          <li>A linked payment row if payment has been taken, and any void with reason and actor.</li>
-          <li>Cancel or Void action buttons for admin and manager roles (when applicable).</li>
-        </ul>
-        <p>Each timing row now names <strong>both ends of the interval</strong> it measures — <em>Placed → fired</em>,
-          <em>Fired → ready</em>, <em>Ready → served</em>, <em>Placed → paid</em>, <em>Total cycle</em> — so there is no
-          guessing which two stamps a duration is the gap between. If a ticket has not been fired or readied yet, the
-          log says so instead of showing an empty timing.</p>
-        <div class="callout note">The Log button is visible to all station roles but the Cancel and Void action buttons
-          inside the lifecycle page are restricted — Cancel requires admin/manager, Void requires admin only.</div>
-      </section>
+  <h2 id="served">How to look at served tickets</h2>
+  <ol class="steps">
+    <li>Click <strong>Served</strong> in the top bar. The window <strong>Served Menu</strong> opens.</li>
+    <li>Choose <strong>Current Shift</strong>, <strong>Yesterday</strong> or <strong>After Hours</strong>.</li>
+    <li>The window shows <strong>Orders served</strong>, <strong>Items served</strong>, <strong>Revenue</strong> and <strong>Avg prep</strong>, then the tickets with guests, who took the order, times, lines and the station log.</li>
+  </ol>
 
-      <section>
-        <h2>Recall a ticket (mistake)</h2>
-        <ol class="steps">
-          <li>Tap <strong>Served</strong> in the top bar (opens the Served Menu).</li>
-          <li>Find the ticket, tap <strong>Recall</strong> (available within 10 minutes of bump).</li>
-          <li>The ticket reappears on the board. Any stock that was deducted for Ready/Collected items is
-            <strong>automatically restored</strong> so you can re-prep and re-deduct correctly.
-          </li>
-        </ol>
-        <div class="callout note">Recall is only available within <strong>10 minutes</strong> of bumping the ticket.
-          After that, ask a manager to void the order from Stock Orders.</div>
-      </section>
+  <h2 id="pause">How to use Online Flow (pause and wait time)</h2>
+  <p>The <strong>Online Flow</strong> panel at the bottom of the screen shows either <strong>Online live</strong> with <em>"Estimated wait 20 min"</em>, or <strong>Online paused</strong> with the wait time saved.</p>
+  <ol class="steps">
+    <li>To pause, click <strong>Pause</strong>. You see <em>"Online orders paused. FOH sees the wait time."</em> The button changes to <strong>Go Live</strong>.</li>
+    <li>To resume, click <strong>Go Live</strong>. You see <em>"Station is live. FOH can send tickets."</em></li>
+    <li>To change the wait time, type minutes (from 5 to 180, in steps of 5) in the box and click <strong>Save</strong>.</li>
+  </ol>
+  <div class="note"><p>This setting is saved and shown on the station's own panel. Nothing else in the system reads it today: the till still lets staff send tickets while a station is paused.</p></div>
 
-      <section>
-        <h2>Mobile / tablet</h2>
-        <ul class="checklist">
-          <li>A <strong>burger menu</strong> in the top-right opens a drawer with all controls (filters, sound toggle,
-            daily report, sign-out).</li>
-          <li>Long-press any button to read its tooltip.</li>
-          <li>The board reflows to a single column at narrow widths.</li>
-          <li><strong>Fullscreen kiosk mode</strong> &mdash; a banner at the bottom of the screen says "Tap anywhere to
-            go fullscreen" on every load. Tap anywhere and the browser hides its tabs, address bar and all UI chrome. If
-            you accidentally exit fullscreen (e.g. back-swipe on Android), the banner reappears and the next tap
-            re-enters it automatically. This ensures the board uses the full screen on every device.</li>
-        </ul>
-      </section>
+  <h2 id="hours">How to set the station hours</h2>
+  <p>Station hours set the "business day" for each screen. They decide which tickets a board shows, what counts in <strong>Served shift</strong>, the windows in reports and shift closes, and the "station closed" warning at the till. Tickets are never refused when a station is closed.</p>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Station Hours</strong>. The page is titled <strong>Station Hours</strong>.</li>
+    <li>For each station (Kitchen, Bar, Coffee Bar) set <strong>Opens</strong> and <strong>Closes</strong> as times. Each card shows <strong>Open now</strong> or <strong>Closed now</strong>, the <strong>Current</strong> and <strong>Yesterday</strong> windows, and <strong>Close day: Next calendar day</strong> when a station closes after midnight.</li>
+    <li>Click <strong>Save Station Hours</strong>. You will see <em>"Station hours updated."</em></li>
+  </ol>
+  <p>If hours have never been saved the system uses these: Kitchen 06:00 to 23:00, Bar 11:00 to 03:00 (the next morning), Coffee Bar 06:00 to 22:00. A time that is not valid gives <em>"Use 24-hour HH:MM format for every station."</em></p>
 
-      <section>
-        <h2>Daily report</h2>
-        <p>Top bar → <strong>Daily Report</strong> → opens an end-of-day summary. Includes: tickets served, average prep
-          time, item counts, optional CSV export and email delivery.</p>
-      </section>
+  <h2 id="report">How to read and send the daily station report</h2>
+  <ol class="steps">
+    <li>Click <strong>Daily Report</strong> on the screen, or open Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Station Reports</strong>.</li>
+    <li>Choose the <strong>Station</strong> (<strong>All Stations</strong>, Kitchen, Bar or Coffee Bar) and the <strong>Date</strong>, then click <strong>Apply</strong>. Staff with the Chef, Bar Staff or Coffee Bar Staff role are fixed to their own station.</li>
+    <li>The report shows <strong>Items Served</strong>, <strong>Total Qty</strong>, <strong>Revenue</strong>, <strong>Avg Prep Time</strong> (with the shortest and longest), <strong>Voided / Cancelled</strong>, a <strong>By station</strong> table, <strong>Top items by revenue</strong>, and an <strong>All tickets</strong> table with Ref, Type, Table / Guest, Item, Qty, Total, Stn, Status, Fired, Started, Ready, Served and Prep.</li>
+    <li>Click <strong>CSV</strong> to download it, <strong>Print</strong> to print it, or <strong>Email</strong>.</li>
+    <li>For <strong>Email</strong> type the <strong>Recipient email</strong> in the window <strong>Email station report</strong> and click <strong>Send</strong>. You will see <em>"Report emailed to name@example.com."</em></li>
+  </ol>
+  <p>If nothing was served that day it says <em>"No tickets for the selected day &amp; station."</em></p>
 
-      <section>
-        <h2>Tips</h2>
-        <div class="callout tip">Always tap each line up to <strong>Ready</strong> as you complete it &mdash; this is
-          how stock gets deducted. <strong>Bump</strong> when everything is done and collected.</div>
-        <ul class="checklist">
-          <li>If the kitchen network drops, the board still works; orders queue locally.</li>
-          <li>Press <code>?</code> to peek at every button label.</li>
-          <li>The board <strong>polls every 2 seconds</strong> &mdash; RUSH alerts and note changes from POS arrive
-            within 2 seconds of being sent.</li>
-          <li>New tickets animate in smoothly (fade-up). If you see a flash of old cards on hard-reload, that means the
-            screen was idle overnight and the business-window filter has already cleared them &mdash; normal behaviour.
-          </li>
-          <li>Card sizes are uniform &mdash; short tickets stretch to match their neighbours in the same row so the grid
-            always looks clean and nothing feels like a squeeze.</li>
-          <li>A tapped line or button shows a spinner while the server records the change, so a double tap cannot
-            double-advance an item or bump a ticket twice.</li>
-          <li>The elapsed timers count continuously on every card. If you ever see them frozen, reload the board &mdash;
-            but this is no longer expected behaviour.</li>
-        </ul>
-      </section>
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>You only act on lines that belong to your station. A line for another station is shown for information and cannot be tapped.</li>
+    <li>Stock for a line comes off when it is marked Ready, Served or bumped, never earlier. If ingredients are short, the action is refused.</li>
+    <li>A ticket cannot be cancelled once any line has started, or once any payment has been recorded.</li>
+    <li>An order that is already refunded, voided or cancelled cannot have an item 86'd. A served line cannot be 86'd.</li>
+    <li>Cancel needs a reason of at least 8 characters.</li>
+    <li>The cashier cannot settle a tab while kitchen food is unserved, unless a manager forces it (see the <a href="01-pos-till.html">POS guide</a>). Bar and coffee drinks do not block settlement.</li>
+    <li>Notes to the front of house are limited to 240 characters on a ticket and 255 characters overall.</li>
+  </ul>
 
-    </div>
-  </main>
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>"Stock check stopped this action: ... short by ... Receive stock, adjust the recipe, or 86 the item before marking it ready."</em></td><td>Not enough of an ingredient in stock.</td><td>Ask the manager to receive stock (see the <a href="08-stock-orders.html">Stock guide</a>), fix the recipe, or 86 the item.</td></tr>
+      <tr><td><em>"Cannot mark ready from served"</em> / <em>"Already served"</em> / <em>"Cannot serve a voided item"</em></td><td>The line has already moved on or was cancelled.</td><td>Nothing to do. The board refreshes by itself.</td></tr>
+      <tr><td><em>"Can only collect from ready state (current: preparing)"</em></td><td>Collect was used before Ready.</td><td>Tap the line to mark Ready first.</td></tr>
+      <tr><td><em>"This order was voided - refresh the board."</em> (the word depends on the order's state)</td><td>The order changed (for example it was voided at the till) while your board was open.</td><td>Wait for the board to refresh.</td></tr>
+      <tr><td><em>"Item does not belong to your station"</em></td><td>You tried to change another station's line.</td><td>Leave it to that station.</td></tr>
+      <tr><td><em>"Cannot cancel: preparation has already started"</em></td><td>A line was started.</td><td>Ask a manager to void the order from the till.</td></tr>
+      <tr><td><em>"Choose a reason before confirming"</em></td><td>Cancel reason too short.</td><td>Click a reason or type more detail.</td></tr>
+      <tr><td><em>"Order ... is already refunded - it cannot be 86'd."</em> / <em>"Cannot void an already-served item"</em></td><td>The order is closed or the line is served.</td><td>Nothing to do.</td></tr>
+      <tr><td><em>"Could not restore stock for ... - nothing was changed. Please retry."</em></td><td>A stock error stopped the action.</td><td>Try again. If it repeats, tell a manager.</td></tr>
+      <tr><td><em>"Network error while updating the ticket. Please try again."</em></td><td>No connection.</td><td>Check the internet and repeat the action.</td></tr>
+      <tr><td><em>"Forbidden"</em></td><td>Your account does not have the <strong>Kitchen Display (KDS)</strong> permission.</td><td>Ask a manager to add it in Staff &amp; Access.</td></tr>
+      <tr><td><em>"Provide a valid recipient email."</em> / <em>"Email failed: ..."</em></td><td>The report email address is wrong, or the mail server refused it.</td><td>Correct the address and send again.</td></tr>
+    </tbody>
+  </table>
 
-  <footer class="guide-footer">
-    <div class="deck">
-      <div class="crest">— R H —</div>
-      <p><a href="01-pos-till.html">← POS Till</a> &middot; <a href="index.html">All guides</a> &middot; <a
-          href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot; <a href="owner-handover.php">Owner
-          handover</a> &middot; <a href="03-bds-bar.html">BDS Bar →</a></p>
-    </div>
-  </footer>
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="01-pos-till.html">POS till, menu and tables</a></li>
+    <li><a href="03-bds-bar.html">Bar display (BDS)</a></li>
+    <li><a href="04-cds-coffee.html">Coffee bar display (CDS)</a></li>
+    <li><a href="05-room-service.html">Room service</a></li>
+    <li><a href="08-stock-orders.html">Stock, recipes and orders</a></li>
+  </ul>
 
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

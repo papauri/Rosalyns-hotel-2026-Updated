@@ -1,299 +1,405 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Conference, Events &amp; Gym — Rosalyn's Hotel</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-        rel="stylesheet">
-    <link rel="stylesheet" href="assets/guide-theme.css">
-    <script src="assets/guide-init.js" defer></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conference and Events — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
-    <nav class="top">
-        <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-        <div class="nav-links">
-            <a href="index.html">All Guides</a>
-            <a href="09-packages-rates.html">← Packages</a>
-            <a href="99-admin-dashboard-full-guide.html">Admin Bible →</a>
-        </div>
-    </nav>
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
 
-    <header class="hero">
-        <div class="deck">
-            <div class="eyebrow">10 &middot; Venues &amp; Wellness</div>
-            <h1>Conference, Events &amp; Gym</h1>
-            <p class="lead">Manage your boardrooms, ballroom, public events calendar, and fitness membership pipeline —
-                all
-                from one place.</p>
-            <div class="meta">
-                <span>Audience <strong>Manager &amp; Events coordinator</strong></span>
-                <span>Read time <strong>~5 min</strong></span>
-                <span>Pages <strong>conference-management · events-management · gym-inquiries</strong></span>
-            </div>
-        </div>
-    </header>
+  <h1>Conference and Events</h1>
+  <p>This guide covers conference room enquiries, hotel events, and event bookings at <span class="g-site-name">Rosalyns Beach Hotel</span>. It explains what the guest sees on the website and what staff do in the admin area.</p>
 
-    <main class="content">
-        <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Receptionist, Conference Staff, Manager</dd>
+      <dt>Where to find it</dt><dd>
+        Conference: Admin menu &rarr; <strong>Front Desk</strong> &rarr; <strong>Conference</strong> (<code>/admin/conference-management.php</code>)<br>
+        Event bookings: Admin menu &rarr; <strong>Front Desk</strong> &rarr; <strong>Event Bookings</strong> (<code>/admin/events-inquiries.php</code>)<br>
+        Events: Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Events</strong> (<code>/admin/events-management.php</code>). The Advanced group starts folded, so click its heading to open it.
+      </dd>
+      <dt>Permission needed</dt><dd>
+        <strong>Conference Bookings</strong> to open the Conference page and handle enquiries.<br>
+        <strong>Manage Conference Rooms</strong> to add, edit, delete or switch off rooms.<br>
+        <strong>Conference Invoicing &amp; Pricing</strong> to send invoices and quotations and change amounts.<br>
+        <strong>Event Bookings</strong> to open the Event Bookings page and handle bookings.<br>
+        <strong>Event Invoicing &amp; Pricing</strong> to send invoices and quotations and change amounts on event bookings.<br>
+        <strong>Events</strong> to open the Events page.
+      </dd>
+      <dt>Only shown when</dt><dd>Conference: the <strong>Conference Rooms</strong> module is switched on in Settings &rarr; Modules. Events and Event Bookings: the <strong>Website &amp; CMS</strong> module is switched on in Settings &rarr; Modules, and the <strong>Events Page</strong> switch is on in Settings &rarr; Modules.</dd>
+    </dl>
+  </div>
 
-            <!-- CONFERENCE ROOMS -->
-            <section>
-                <h2>Conference Rooms</h2>
-                <p class="lead">Manage conference venues that guests can browse and enquire about on your public
-                    website.</p>
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#guest-conference">What the guest sees: conference enquiry</a></li>
+      <li><a href="#guest-events">What the guest sees: event booking</a></li>
+      <li><a href="#add-room">How to add a conference room</a></li>
+      <li><a href="#edit-room">How to edit, switch off or delete a conference room</a></li>
+      <li><a href="#conf-confirm">How to confirm a conference enquiry</a></li>
+      <li><a href="#conf-amount">How to set the price and send a quotation</a></li>
+      <li><a href="#conf-paid">How to record payment and send the invoice</a></li>
+      <li><a href="#conf-finish">How to complete or cancel a conference enquiry</a></li>
+      <li><a href="#add-event">How to add or edit an event</a></li>
+      <li><a href="#event-toggles">How to switch an event on or off, feature it, or delete it</a></li>
+      <li><a href="#upcoming">How to set up the Upcoming Events section</a></li>
+      <li><a href="#event-quote">How to send an event quotation</a></li>
+      <li><a href="#event-bookings">How to handle event bookings</a></li>
+      <li><a href="#waitlist">How to move a guest off the waitlist</a></li>
+      <li><a href="#event-money">How to price, invoice and cancel an event booking</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
 
-                <h3>Adding a conference room</h3>
-                <ol class="steps">
-                    <li>Go to <strong>Admin → Conference Management</strong>
-                        (<code>/admin/conference-management.php</code>).</li>
-                    <li>Click <strong>Add Conference Room</strong>.</li>
-                    <li>Fill in: room name, description, capacity (number of people), size in square metres, and daily
-                        rate.</li>
-                    <li>Add amenities one by one (projector, whiteboard, AV system, catering, etc.).</li>
-                    <li>Upload a cover photo — the system accepts JPG, PNG, and WebP only and validates the file type
-                        twice
-                        (extension + MIME check) before saving to <code>images/conference/</code>.</li>
-                    <li>The image is automatically added to the <strong>unified media library</strong> for centralised
-                        management.</li>
-                    <li><strong>Save</strong>. The room appears immediately on <code>/conference.php</code>.</li>
-                </ol>
+  <h2 id="screen">What is on the screen</h2>
 
-                <h3>Public inquiry workflow</h3>
-                <ol class="steps">
-                    <li>A guest visits <code>/conference.php</code>, browses the rooms, and submits an inquiry (company
-                        name,
-                        contact person, preferred date, duration, attendee count, special requirements).</li>
-                    <li>The system validates the form server-side (CSRF protected) and emails a confirmation to the
-                        guest.</li>
-                    <li>The manager reviews the inquiry in the admin <strong>Conference Management</strong> inbox and
-                        follows up
-                        directly.</li>
-                    <li>When the client commits, the manager <strong>Confirms</strong> the inquiry — this is the point the
-                        room is actually held.</li>
-                </ol>
+  <h3>Conference page</h3>
+  <ul>
+    <li>Heading <strong>Conference Rooms Management</strong> with an <strong>Add New Room</strong> button.</li>
+    <li>One card per room showing the picture, name, description, the rate shown as <em>MWK ... /day</em>, how many guests it holds, its size in sqm, and a badge <strong>Active</strong> or <strong>Inactive</strong>. Each card has a power button (<em>Deactivate room</em> or <em>Activate room</em>), a bin button (<em>Delete room</em>) and an <strong>Edit Room</strong> button.</li>
+    <li>If a room has a display order above 0, a small number such as <em>#2</em> shows on the card.</li>
+    <li>Below the cards, a table called <strong>Conference Enquiries</strong> with columns Reference, Company, Contact, Event Date, Time, Room, Attendees, Status, Amount, Actions. The newest event dates are at the top.</li>
+    <li>The Amount column shows the amount, or <em>Pending</em> when the amount is zero.</li>
+    <li>Buttons in the Actions column depend on the status: <strong>Confirm</strong> (pending only), <strong>Complete</strong> and <strong>Paid</strong> (confirmed only), <strong>Quote</strong> and <strong>Cancel</strong> (pending or confirmed), and <strong>Details</strong> (always).</li>
+  </ul>
 
-                <div class="callout warn">
-                    <strong>Double-booking is now blocked at confirmation.</strong> If the same conference room is already
-                    <em>confirmed</em> for that date with an overlapping time, the system refuses the confirmation and
-                    names the clashing reference. Two <em>pending</em> inquiries for the same slot can still coexist —
-                    only confirmation commits the room, so confirm the one you intend to honour.
-                </div>
+  <h3>Events page</h3>
+  <ul>
+    <li>Heading <strong>Events Management</strong>, a count such as <em>5 events total</em>, and an <strong>Add New Event</strong> button.</li>
+    <li>A box called <strong>Upcoming Events Section Settings</strong> (see <a href="#upcoming">below</a>).</li>
+    <li>One card per event, soonest date first. Badges on the card can be: <strong>Expired</strong>, <strong>Active</strong> or <strong>Inactive</strong>, <strong>Featured</strong>, <strong>Upcoming Section</strong>, <strong>Free</strong> or the ticket price, and <strong>Video</strong>. If the event has a capacity, the card shows seats taken, for example <em>12 / 40 seats</em>, and <em>&middot; 3 waitlisted</em> when guests are waiting.</li>
+    <li>Card buttons: <strong>Edit</strong>, <strong>Quote</strong>, <strong>Toggle</strong>, <strong>Featured</strong>, <strong>Upcoming</strong>, <strong>Delete</strong>.</li>
+  </ul>
 
-                <h3>Payments &amp; balances</h3>
-                <p>Record conference payments from the <strong>Add Payment</strong> screen or the inquiry itself. However
-                    you collect them, the balance is calculated the same way as rooms, gym and events: the
-                    <strong>amount due is measured against the VAT-inclusive (gross) invoice total</strong>, and the
-                    invoiced total is locked at the rate it was raised at.</p>
-                <div class="callout note">
-                    Conference room pricing is shown publicly as a daily rate. Any discounts for multi-day bookings
-                    should be negotiated manually and recorded as a custom booking charge.
-                </div>
-            </section>
+  <h3>Event Bookings page</h3>
+  <ul>
+    <li>Heading <strong>Event Bookings Management</strong>.</li>
+    <li>Filter tabs: <strong>All</strong>, <strong>Pending</strong>, <strong>Confirmed</strong>, <strong>Completed</strong>, <strong>Waitlisted</strong>, <strong>Cancelled</strong>, each with a count.</li>
+    <li>A search box (<em>Search by name, email, phone, or reference...</em>) with a <strong>Search</strong> button, and a <strong>Clear</strong> button once a search or filter is active.</li>
+    <li>A table with Reference, Name, Contact, Event, Attendees, Status, Created, Actions. The Status cell is a dropdown for open bookings. Actions are <strong>View</strong> and <strong>Delete</strong>.</li>
+  </ul>
 
-            <!-- EVENTS -->
-            <section>
-                <h2>Hotel Events</h2>
-                <p class="lead">Keep the public events page fresh — upcoming events build anticipation; past events
-                    build
-                    credibility.</p>
+  <div class="note"><p>You can also find any conference enquiry or event booking with the <strong>Search</strong> button at the top of the admin (or press Ctrl+K). Click a result to jump to that row.</p></div>
 
-                <h3>Publishing an event</h3>
-                <ol class="steps">
-                    <li>Go to <strong>Admin → Events Management</strong> (<code>/admin/events-management.php</code>).
-                    </li>
-                    <li>Click <strong>Add Event</strong>. Fill in: title, description, event date, and optionally a
-                        price or
-                        ticket link.</li>
-                    <li>Upload a cover <strong>image</strong> (JPG / PNG / WebP) — MIME-validated before storage.</li>
-                    <li>Optionally upload a <strong>video</strong> via the async video handler. The video path is stored
-                        alongside the image and both sync to the media library.</li>
-                    <li>Set <strong>Active</strong> to publish immediately, or leave inactive to schedule for later.
-                    </li>
-                    <li><strong>Save</strong>. The event appears on <code>/events.php</code>.</li>
-                </ol>
+  <h2 id="guest-conference">What the guest sees: conference enquiry</h2>
+  <p>Guests use the Conference page on the website (<code>/conference.php</code>). It lists every room that is switched on. If the Conference service is switched off, the guest sees <em>"Our corporate booking service is temporarily unavailable"</em> and is asked to contact the hotel directly.</p>
+  <ol class="steps">
+    <li>The guest clicks <strong>Send Inquiry</strong> on a room card. The window <strong>Conference Room Inquiry</strong> opens.</li>
+    <li>They fill in: <strong>Company Name *</strong>, <strong>Contact Person *</strong>, <strong>Email *</strong>, <strong>Phone *</strong>, <strong>Event Date *</strong>, <strong>Start Time *</strong>, <strong>End Time *</strong>, <strong>Number of Attendees *</strong>. Optional: <strong>Event Type</strong> (Meeting, Conference, Workshop, Seminar, Training, Other), <strong>AV Equipment Requirements</strong>, <strong>Catering Required</strong> (tick box), <strong>Special Requirements</strong>.</li>
+    <li>They tick <strong>I agree to be contacted about this enquiry request.</strong> The <strong>Submit Inquiry</strong> button stays greyed out until this is ticked.</li>
+    <li>They click <strong>Submit Inquiry</strong>. They are taken to a page headed <em>"Conference Enquiry Received"</em> showing their reference (for example <em>CONF-2026-04127</em>). It says the events team will confirm availability within 24 hours.</li>
+  </ol>
+  <p>The enquiry arrives on the Conference page as <strong>Pending</strong>. Its amount is set automatically to the room's full day rate. The guest and the hotel both get an email.</p>
 
-                <h3>How the public page works</h3>
-                <ul class="checklist">
-                    <li><strong>Upcoming</strong> — events with a future date, sorted nearest first.</li>
-                    <li><strong>Past</strong> — events with a date in the past, sorted most-recent first.</li>
-                    <li>The page updates automatically at midnight &mdash; no action needed to move events between
-                        sections.</li>
-                    <li>Both image and video display if provided. Videos play inline without leaving the page.</li>
-                </ul>
+  <h3>Messages the guest can see</h3>
+  <p>If something is wrong, the guest sees a window headed <em>"Enquiry Submission Failed"</em>. Several problems are joined together with semicolons, each starting with the field name, for example <em>"Contact person: Name contains invalid characters; Phone: Phone number is too short (minimum 8 digits)"</em>.</p>
+  <table>
+    <thead><tr><th>Message</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td><em>Company name: This field is required</em></td><td>The company name is empty.</td></tr>
+      <tr><td><em>Company name: Must be at least 2 characters</em></td><td>The company name is shorter than 2 characters (the limit is 200).</td></tr>
+      <tr><td><em>Contact person: Name is required</em> / <em>Name must be at least 2 characters</em> / <em>Name contains invalid characters</em></td><td>The name is empty, too short, or has anything other than letters, spaces, hyphens, apostrophes and full stops. Digits are not allowed.</td></tr>
+      <tr><td><em>Email: Email address is required</em> / <em>Please enter a valid email address</em></td><td>The email is empty or not a real address. It also cannot be longer than 100 characters.</td></tr>
+      <tr><td><em>Phone: Phone number is required</em> / <em>Phone number is too short (minimum 8 digits)</em> / <em>Phone number is too long (maximum 15 digits)</em></td><td>The phone number must have 8 to 15 digits.</td></tr>
+      <tr><td><em>Event date: Date cannot be in the past</em></td><td>The date is before today. The form also shows <em>"Event date cannot be in the past"</em> under the date field before the guest submits.</td></tr>
+      <tr><td><em>Event date: For today, please select a time at least 1 hour(s) from now</em></td><td>The event is today and the start time is too soon. The gap comes from the booking time buffer in Hotel Settings (60 minutes unless changed). The wording changes with the buffer.</td></tr>
+      <tr><td><em>End time: Time is required</em> / <em>Invalid time format</em></td><td>The end time is empty or not a real time.</td></tr>
+      <tr><td><em>Time range: End time must be after start time</em></td><td>The end time is the same as or earlier than the start time.</td></tr>
+      <tr><td><em>Number of attendees: Value must be at least 1</em> / <em>Value must be at most 500</em></td><td>Attendees must be between 1 and 500.</td></tr>
+      <tr><td><em>Number of attendees: This room holds up to 40 people. Please choose a larger room or reduce the number of attendees.</em></td><td>The party is bigger than the room's capacity (the real capacity of that room is shown). Staff can still override this later in the admin.</td></tr>
+      <tr><td><em>Conference room id: Conference room not found or inactive</em></td><td>The room was switched off or deleted while the guest had the page open.</td></tr>
+      <tr><td><em>Special requirements: Must be at most 1000 characters</em></td><td>The box allows up to 1000 characters. AV equipment allows up to 500.</td></tr>
+      <tr><td><em>Consent: You must accept consent to proceed.</em></td><td>The consent box was not ticked.</td></tr>
+      <tr><td><em>Too many submissions. Please wait a few minutes before trying again.</em></td><td>More than 5 enquiries from the same visitor, or more than 10 from the same internet connection, within 10 minutes.</td></tr>
+      <tr><td><em>Security token invalid. Please refresh the page and try again.</em></td><td>The page was open too long. The guest should reload and fill the form again.</td></tr>
+      <tr><td><em>We could not save your enquiry. Please try again or contact us directly.</em></td><td>A system problem. Nothing was saved.</td></tr>
+    </tbody>
+  </table>
 
-                <h3>Editing &amp; removing events</h3>
-                <ul class="checklist">
-                    <li>Click <strong>Edit</strong> on any event card to update any field.</li>
-                    <li>Toggle <strong>Active</strong> off to hide an event without deleting it.</li>
-                    <li>Delete removes the event and its media record from the library.</li>
-                </ul>
-            </section>
+  <h2 id="guest-events">What the guest sees: event booking</h2>
+  <p>Guests use the Events page on the website (<code>/events.php</code>). It lists active events. Events whose date has passed move to a <strong>Past Events</strong> section with an <em>Expired</em> ribbon, and cannot be booked. If the Events feature is off, the page sends the visitor to the home page.</p>
+  <ol class="steps">
+    <li>The guest clicks <strong>Book This Event</strong> on an upcoming event. (The <strong>Enquire</strong> button next to it opens the Contact Us page instead.) The window <strong>Book [event name]</strong> opens.</li>
+    <li>They fill in <strong>Full Name *</strong>, <strong>Email *</strong>, <strong>Phone *</strong>, <strong>Guests</strong> (optional, 1 to 20, counts as 1 if left blank) and <strong>Message / Special Requests</strong> (optional).</li>
+    <li>They tick <strong>I agree to be contacted about this booking request.</strong> The <strong>Send Booking Request</strong> button stays greyed out until this is ticked.</li>
+    <li>They click <strong>Send Booking Request</strong>. They are taken to a confirmation page with a reference such as <em>EVT-1A2B3C4D</em>.</li>
+  </ol>
+  <ul>
+    <li>If seats are available (or the event has no capacity limit), the page says <em>"Event Booking Received"</em> and the booking is <strong>Pending</strong>. The guest gets a "received" email. Nothing is confirmed until staff confirm it.</li>
+    <li>If the event is full, the page says <em>"You're on the Waitlist"</em> and the booking is <strong>Waitlisted</strong>. The guest gets a waitlist email.</li>
+  </ul>
+  <p>Problems show in a red box at the top of the form. The name, email, phone, message and consent rules are the same as the conference form above, with these differences:</p>
+  <table>
+    <thead><tr><th>Message</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td><em>Full name: Name contains invalid characters</em></td><td>The name has digits or symbols.</td></tr>
+      <tr><td><em>Guests: Value must be at most 20</em></td><td>Guests must be between 1 and 20.</td></tr>
+      <tr><td><em>Message: Must be at most 1000 characters</em></td><td>The message is too long.</td></tr>
+      <tr><td><em>This event is no longer taking bookings.</em></td><td>The event was switched off, or its date has passed.</td></tr>
+      <tr><td><em>Too many submissions. Please wait a few minutes before trying again.</em></td><td>Same limit as the conference form: 5 per visitor and 10 per internet connection in 10 minutes.</td></tr>
+    </tbody>
+  </table>
 
-            <!-- GYM -->
-            <section>
-                <h2>Gym &amp; Fitness Centre</h2>
-                <p class="lead">The gym is a full DB-driven experience — content, classes, packages, and a membership
-                    conversion pipeline.</p>
+  <h2 id="add-room">How to add a conference room</h2>
+  <ol class="steps">
+    <li>Open <strong>Front Desk</strong> &rarr; <strong>Conference</strong>.</li>
+    <li>Click <strong>Add New Room</strong>. The window <strong>Add New Conference Room</strong> opens.</li>
+    <li>Under Room Information fill in <strong>Name *</strong> and <strong>Description *</strong>. Optionally choose a <strong>Featured Image</strong> (JPG, PNG or WebP).</li>
+    <li>Under Room Details fill in <strong>Capacity *</strong> (a whole number, at least 1), <strong>Size (sqm)</strong> (optional), <strong>Full Day Rate *</strong> (0 or more, for example 350000) and <strong>Display Order</strong> (lowest shows first on the website, 0 if blank). In <strong>Amenities (comma separated)</strong> type for example <em>Projector, Whiteboard, WiFi, Catering</em>.</li>
+    <li>Leave <strong>Active</strong> ticked if the room should show on the website now.</li>
+    <li>Click <strong>Add Room</strong>. A green message <em>"Conference room added successfully!"</em> shows inside the window and the cards behind it refresh. Click <strong>Close</strong>.</li>
+  </ol>
+  <div class="note"><p>If the image is not a JPG, PNG or WebP file, or is too large, the room is still saved but without a picture. Check that the card shows the picture.</p></div>
 
-                <h3>Managing the gym page content</h3>
-                <p>All gym content is edited in the database via the admin system. Tables you control:</p>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>What</th>
-                            <th>Table</th>
-                            <th>Appears on</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Hero text &amp; tagline</td>
-                            <td><code>gym_content</code></td>
-                            <td>Top of <code>/gym.php</code></td>
-                        </tr>
-                        <tr>
-                            <td>Facility features</td>
-                            <td><code>gym_features</code></td>
-                            <td>Features grid</td>
-                        </tr>
-                        <tr>
-                            <td>Equipment &amp; zones</td>
-                            <td><code>gym_facilities</code></td>
-                            <td>Facility cards</td>
-                        </tr>
-                        <tr>
-                            <td>Group &amp; personal class schedule</td>
-                            <td><code>gym_classes</code></td>
-                            <td>Class schedule table</td>
-                        </tr>
-                        <tr>
-                            <td>Membership tiers &amp; prices</td>
-                            <td><code>gym_packages</code></td>
-                            <td>Pricing cards</td>
-                        </tr>
-                    </tbody>
-                </table>
+  <h2 id="edit-room">How to edit, switch off or delete a conference room</h2>
+  <h3>Edit</h3>
+  <ol class="steps">
+    <li>On the room's card click <strong>Edit Room</strong>. The window opens with the title <strong>Edit: [room name]</strong>.</li>
+    <li>Change the fields. The image field is called <strong>Replace Image</strong>. Leave it empty to keep the current picture.</li>
+    <li>Click <strong>Save Changes</strong>. You will see <em>"Conference room updated successfully!"</em>.</li>
+  </ol>
+  <h3>Switch a room off or on</h3>
+  <ol class="steps">
+    <li>Click the power button on the card (tooltip <em>Deactivate room</em> or <em>Activate room</em>).</li>
+    <li>The page reloads and the badge changes between <strong>Active</strong> and <strong>Inactive</strong>. An inactive room does not show on the website.</li>
+  </ol>
+  <h3>Delete</h3>
+  <ol class="steps">
+    <li>Click the bin button on the card. A window asks <em>"Delete conference room?"</em> and <em>"This permanently removes the room from conference management."</em></li>
+    <li>Click <strong>Delete room</strong> (or <strong>Cancel</strong> to keep it).</li>
+  </ol>
+  <div class="warn"><p>A room that still has <strong>Pending</strong> or <strong>Confirmed</strong> enquiries cannot be deleted. The page reloads and the room is still there. Cancel or complete those enquiries first, or switch the room off instead of deleting it.</p></div>
 
-                <h3>Managing gym inquiries</h3>
-                <p>When a visitor submits a membership inquiry on <code>/gym.php</code>, it lands in
-                    <strong>Admin → Gym Inquiries</strong> (<code>/admin/gym-inquiries.php</code>).
-                </p>
+  <h2 id="conf-confirm">How to confirm a conference enquiry</h2>
+  <ol class="steps">
+    <li>On the Conference page find the enquiry in the <strong>Conference Enquiries</strong> table. Click <strong>Details</strong> to read everything the guest entered: Reference, Company, Contact Person, Email, Phone, Event Date, Time, Conference Room, Number of Attendees, Event Type, Status, Catering Required, AV Equipment, Special Requirements, Total Amount, Notes.</li>
+    <li>Click <strong>Confirm</strong>. A window asks <em>"Confirm this conference enquiry?"</em>. Click <strong>Confirm</strong>.</li>
+    <li>You will see <em>"Conference enquiry confirmed successfully! Confirmation email sent."</em> The guest receives the confirmation email. If the email could not be sent you will see <em>"Conference enquiry confirmed successfully! (Email not sent: ...)"</em> and the enquiry is still confirmed.</li>
+  </ol>
+  <ul>
+    <li>If the number of attendees is more than the room's capacity, the message adds <em>"WARNING: 60 attendees exceed this room's capacity of 40 - confirm the layout with the client."</em> The enquiry is still confirmed. Phone the client to agree the layout.</li>
+    <li>A copy of the confirmation is also emailed to the hotel's admin address when one is set up.</li>
+  </ul>
+  <div class="note"><p>Two pending enquiries can ask for the same room at the same time. Only confirming commits the room. If another confirmed or completed enquiry already holds that room on that date with overlapping times, the system will not confirm (see the table at the end).</p></div>
 
-                <ol class="steps">
-                    <li>Open the <strong>New</strong> tab to see unactioned inquiries. Each card shows name, email,
-                        phone, and
-                        membership type.</li>
-                    <li>Click <strong>Mark Contacted</strong> — status moves to <em>Contacted</em> and the system sends
-                        a
-                        notification email to the enquirer.</li>
-                    <li>Once the member has enrolled, click <strong>Mark Converted</strong> — status moves to
-                        <em>Converted</em>
-                        and a <strong>welcome email</strong> is sent to the new member automatically.</li>
-                </ol>
+  <h2 id="conf-amount">How to set the price and send a quotation</h2>
+  <p>You need the permission <strong>Conference Invoicing &amp; Pricing</strong> for this section.</p>
+  <h3>Change the amount</h3>
+  <ol class="steps">
+    <li>Click <strong>Details</strong> on the enquiry.</li>
+    <li>In <strong>Update Total Amount:</strong> type the new amount (for example 450000).</li>
+    <li>Click <strong>Update Amount</strong>. You will see <em>"Total amount updated successfully!"</em>.</li>
+  </ol>
+  <p>The amount starts as the room's full day rate. Change it here if you agreed a different price. You cannot change the amount of a cancelled enquiry.</p>
+  <h3>Send a quotation</h3>
+  <ol class="steps">
+    <li>On a <strong>Pending</strong> or <strong>Confirmed</strong> enquiry click <strong>Quote</strong>.</li>
+    <li>A window asks <em>"Send conference quotation now? This sends email and WhatsApp (if enabled)."</em> Click <strong>Send quotation</strong>.</li>
+    <li>You will see <em>"Conference quotation sent to [guest email]."</em> The guest gets a PDF quotation valid for 7 days. If WhatsApp is switched on and the guest's phone works you will also see <em>"WhatsApp delivered."</em></li>
+  </ol>
+  <div class="note"><p>The quotation uses the amount currently on the enquiry. Set the amount first, then send the quotation.</p></div>
 
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Status</th>
-                            <th>Meaning</th>
-                            <th>Email triggered</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><span class="pill amber">new</span></td>
-                            <td>Inquiry just submitted, awaiting action</td>
-                            <td>None</td>
-                        </tr>
-                        <tr>
-                            <td><span class="pill gold">contacted</span></td>
-                            <td>Staff has reached out to the prospect</td>
-                            <td>Notification email to enquirer</td>
-                        </tr>
-                        <tr>
-                            <td><span class="pill green">converted</span></td>
-                            <td>Prospect enrolled as a member</td>
-                            <td>Member welcome email</td>
-                        </tr>
-                    </tbody>
-                </table>
+  <h2 id="conf-paid">How to record payment and send the invoice</h2>
+  <p>You need the permission <strong>Conference Invoicing &amp; Pricing</strong>. The <strong>Paid</strong> button only shows on <strong>Confirmed</strong> enquiries.</p>
+  <ol class="steps">
+    <li>Check the amount is correct (see above). It must be more than zero.</li>
+    <li>Click <strong>Paid</strong>. A window asks <em>"Generate and send invoice for this conference?"</em>. Click <strong>Send invoice</strong>.</li>
+    <li>The system records a cash payment for the amount still owed (the full amount including VAT if nothing was paid before, or only the remaining balance if part was already paid), issues a receipt, emails the receipt and invoice to the guest, and shows <em>"Payment recorded successfully! Invoice sent to [guest email]"</em>.</li>
+  </ol>
+  <ul>
+    <li>If the account is already fully paid, nothing new is recorded and you see <em>"Payment already recorded. Invoice resent to [guest email]"</em>.</li>
+    <li>The payment is always recorded as <strong>cash</strong>. For card, mobile money or part payments use the Payments screens (see the Finance guide).</li>
+  </ul>
 
-                <h3>Search &amp; filter</h3>
-                <ul class="checklist">
-                    <li>Use the tab strip to filter by status (New / Contacted / Converted / All).</li>
-                    <li>Use the search box to find by name, email, phone, or reference number.</li>
-                    <li>Delete an inquiry with the <strong>Delete</strong> button — a confirmation prompt prevents
-                        accidents.</li>
-                </ul>
+  <h2 id="conf-finish">How to complete or cancel a conference enquiry</h2>
+  <h3>Complete (after the event has taken place)</h3>
+  <ol class="steps">
+    <li>On a <strong>Confirmed</strong> enquiry click <strong>Complete</strong>.</li>
+    <li>A window asks <em>"Mark this conference as completed?"</em>. Click <strong>Complete</strong>.</li>
+    <li>You will see <em>"Conference marked as completed!"</em>.</li>
+  </ol>
+  <h3>Cancel</h3>
+  <ol class="steps">
+    <li>On a <strong>Pending</strong> or <strong>Confirmed</strong> enquiry click <strong>Cancel</strong>.</li>
+    <li>A window asks <em>"Cancel this conference enquiry?"</em>. Click <strong>Cancel enquiry</strong> (or <strong>Keep enquiry</strong> to leave it).</li>
+    <li>You will see <em>"Conference enquiry cancelled successfully! Cancellation email sent."</em> The guest is emailed, and the cancellation is logged.</li>
+  </ol>
+  <div class="warn"><p>Cancelling voids the bill (amount due becomes zero). Money the guest already paid is not lost: it stays on the account as credit owed back. You will see a line such as <em>"MWK 100,000.00 already paid stays as credit owed back - refund it from the payment Refund screen."</em> Refund it from the payment's Refund screen or issue a credit note. If your hotel's cancellation refund setting is to refund everything paid, the refund is made for you at the moment of cancelling. A cancelled enquiry cannot be re-opened.</p></div>
 
-                <div class="callout note">
-                    Never delete a converted inquiry — it is your enrolment record. Use the status tabs to archive
-                    instead.
-                </div>
-            </section>
+  <h3>Keep notes</h3>
+  <ol class="steps">
+    <li>Click <strong>Details</strong>.</li>
+    <li>Type in <strong>Update Notes:</strong> and click <strong>Update Notes</strong>. You will see <em>"Notes updated successfully!"</em>. Notes are internal; the guest never sees them.</li>
+  </ol>
 
-            <!-- QUICK REFERENCE -->
-            <section>
-                <h2>Quick reference</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Task</th>
-                            <th>Where</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Add a new conference venue</td>
-                            <td><code>/admin/conference-management.php</code> → Add Conference Room</td>
-                        </tr>
-                        <tr>
-                            <td>View conference inquiries</td>
-                            <td>Conference Management → Inquiries tab</td>
-                        </tr>
-                        <tr>
-                            <td>Publish a new event</td>
-                            <td><code>/admin/events-management.php</code> → Add Event</td>
-                        </tr>
-                        <tr>
-                            <td>Hide an event temporarily</td>
-                            <td>Edit Event → toggle <strong>Active</strong> off</td>
-                        </tr>
-                        <tr>
-                            <td>View new gym inquiries</td>
-                            <td><code>/admin/gym-inquiries.php</code> → New tab</td>
-                        </tr>
-                        <tr>
-                            <td>Mark inquiry as contacted</td>
-                            <td>Gym Inquiries → inquiry card → <strong>Mark Contacted</strong></td>
-                        </tr>
-                        <tr>
-                            <td>Enrol a new gym member</td>
-                            <td>Gym Inquiries → inquiry card → <strong>Mark Converted</strong></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
+  <h2 id="add-event">How to add or edit an event</h2>
+  <ol class="steps">
+    <li>Open <strong>Advanced</strong> &rarr; <strong>Events</strong>.</li>
+    <li>Click <strong>Add New Event</strong>. To change an existing event click <strong>Edit</strong> on its card.</li>
+    <li>Fill in: <strong>Event Title *</strong>, <strong>Description *</strong>, <strong>Event Date *</strong>, <strong>Start Time</strong>, <strong>End Time</strong>, <strong>Location</strong> (for example <em>Grand Conference Hall</em>), <strong>Ticket Price (MWK)</strong> (enter 0 for a free event), <strong>Capacity</strong> and <strong>Display Order</strong>.</li>
+    <li><strong>Capacity</strong> is the number of seats. Leave it blank or enter 0 for unlimited. When the seats are used up, new guests go on the waitlist.</li>
+    <li>Optionally add an <strong>Event Image</strong> (JPG, PNG or WebP). For <strong>Event Video (Optional)</strong>, paste a YouTube, Vimeo, Dailymotion or direct video link, or upload a video file. When editing an event that has a video, <strong>Remove Video</strong> takes it off.</li>
+    <li>Tick the boxes you want: <strong>Feature this event</strong>, <strong>Show in Upcoming Events section (homepage)</strong>, <strong>Active (visible on website)</strong>. Active is ticked by default.</li>
+    <li>Click <strong>Save</strong>. You will see <em>"Event added successfully!"</em> or <em>"Event updated successfully!"</em> inside the window, and the cards refresh. Click <strong>Close</strong>.</li>
+  </ol>
+  <div class="note"><p>After you save a new event, the window stays open and turns into an edit window for that event. Click <strong>Save</strong> again only if you make more changes. Clicking Save twice does not create two events.</p></div>
 
-        </div>
-    </main>
+  <h2 id="event-toggles">How to switch an event on or off, feature it, or delete it</h2>
+  <ul>
+    <li><strong>Toggle</strong> switches the event between <strong>Active</strong> (shows on the website) and <strong>Inactive</strong> (hidden). Use it instead of deleting when you may need the event again.</li>
+    <li><strong>Featured</strong> adds or removes the <strong>Featured</strong> badge.</li>
+    <li><strong>Upcoming</strong> adds or removes the event from the Upcoming Events section.</li>
+    <li><strong>Delete</strong> asks <em>"Delete this event?"</em>. Click OK to delete.</li>
+  </ul>
+  <p>Each of these reloads the page.</p>
+  <div class="warn"><p>An event that still has <strong>Pending</strong>, <strong>Confirmed</strong> or <strong>Waitlisted</strong> bookings cannot be deleted. The page reloads and the event is still there. Cancel those bookings first on the Event Bookings page, or use <strong>Toggle</strong> to switch the event off instead.</p></div>
 
-    <footer class="guide-footer">
-        <div class="deck">
-            <div class="crest">— R H —</div>
-            <p><a href="09-packages-rates.html">← Packages &amp; Rate Plans</a> &middot; <a href="index.html">All
-                    guides</a>
-                &middot; <a href="99-admin-dashboard-full-guide.html">Admin Bible →</a></p>
-        </div>
-    </footer>
+  <h2 id="upcoming">How to set up the Upcoming Events section</h2>
+  <p>This is a block of event cards that can appear on other website pages.</p>
+  <ol class="steps">
+    <li>On the Events page find the box <strong>Upcoming Events Section Settings</strong>.</li>
+    <li>Tick or untick <strong>Enable Upcoming Events section on public pages</strong>.</li>
+    <li>Choose <strong>Max Events to Display</strong> (1 to 8).</li>
+    <li>Under <strong>Show on Pages</strong> tick where it should appear: <strong>Homepage</strong>, <strong>Rooms Showcase</strong>, <strong>Restaurant</strong>, <strong>Conference</strong>, <strong>Gym</strong>.</li>
+    <li>Click <strong>Save Settings</strong>. You will see <em>"Upcoming events section settings saved!"</em>.</li>
+    <li>Use the <strong>Upcoming</strong> button on each event card to choose which events appear. Only active events with a future date that are marked this way are shown.</li>
+  </ol>
 
+  <h2 id="event-quote">How to send an event quotation</h2>
+  <p>This sends a quotation for an event to anyone, without needing a booking first.</p>
+  <ol class="steps">
+    <li>On the event's card click <strong>Quote</strong>. The window <strong>Send Event Quotation</strong> opens. The <strong>Event</strong> field is filled in.</li>
+    <li>Fill in <strong>Recipient Name *</strong>, <strong>Recipient Email *</strong>, optionally <strong>Recipient Phone (for WhatsApp)</strong> (for example +265...), <strong>Attendee Count *</strong> (at least 1) and <strong>Valid For (days)</strong> (1 to 30, 7 by default).</li>
+    <li>Edit <strong>Quotation Notes</strong> if you wish. It starts with a line naming the event and its date.</li>
+    <li>Leave <strong>Also send via WhatsApp (when phone is provided and WhatsApp is enabled)</strong> ticked or untick it.</li>
+    <li>Click <strong>Send Quotation</strong>. You will see <em>"Event quotation sent to [email]."</em> and, if it worked, <em>"WhatsApp delivered."</em></li>
+  </ol>
+
+  <h2 id="event-bookings">How to handle event bookings</h2>
+  <ol class="steps">
+    <li>Open <strong>Front Desk</strong> &rarr; <strong>Event Bookings</strong>. Use the filter tabs or the search box to find the booking.</li>
+    <li>Click <strong>View</strong>. The window <strong>Event Booking Details</strong> shows Reference Number, Full Name, Email, Phone, Event, Event Date, Number of Attendees, Status, Consent Given, Created At, the guest's Message, and an <strong>Accounting</strong> block with Total Amount, Amount Paid, Amount Due and Payment Status.</li>
+    <li>To confirm: click <strong>Confirm</strong> and answer OK to <em>"Confirm this event booking?"</em>. You will see <em>"Event booking confirmed successfully! Confirmation email sent."</em></li>
+    <li>After the event: click <strong>Mark Completed</strong> and answer OK to <em>"Mark this booking as completed?"</em>. You will see <em>"Event booking marked as completed!"</em></li>
+    <li>To keep a private note, type in the <em>Internal notes...</em> box and click <strong>Save Notes</strong>. You will see <em>"Notes updated successfully!"</em></li>
+  </ol>
+  <p>You can also change a booking between <strong>Pending</strong>, <strong>Confirmed</strong> and <strong>Completed</strong> with the dropdown in the Status column. It saves as soon as you pick a value and shows <em>"Event booking status updated successfully!"</em>. Cancelled and waitlisted bookings show the status as plain text, with no dropdown.</p>
+  <h3>Delete a booking</h3>
+  <p>Click <strong>Delete</strong> in the row and answer OK to <em>"Are you sure you want to delete this booking?"</em>. You will see <em>"Event booking deleted successfully!"</em>. Only use this for mistakes or test entries. If the guest changed their mind, cancel the booking instead.</p>
+
+  <h2 id="waitlist">How to move a guest off the waitlist</h2>
+  <ol class="steps">
+    <li>Seats must be free. Either another booking was cancelled, or you raised the event's <strong>Capacity</strong> on the Events page.</li>
+    <li>On the Event Bookings page click the <strong>Waitlisted</strong> tab, then <strong>View</strong> on the booking.</li>
+    <li>Click <strong>Promote from waitlist</strong>. A window asks <em>"Move this booking off the waitlist? The guest will be emailed that a place is available."</em> Click OK.</li>
+    <li>You will see <em>"Booking moved off the waitlist (now pending). The guest has been emailed."</em> The booking is now <strong>Pending</strong>. Confirm it as usual.</li>
+  </ol>
+  <div class="note"><p>When you cancel a booking and other guests are waiting, the message ends with <em>"[number] booking(s) are on the waitlist for this event - promote one from the Waitlisted tab."</em></p></div>
+
+  <h2 id="event-money">How to price, invoice and cancel an event booking</h2>
+  <p>The price, invoice and quotation controls only appear in the booking window for staff with the permission <strong>Event Invoicing &amp; Pricing</strong>. Cancel and Confirm do not need it.</p>
+  <h3>Set the amount</h3>
+  <ol class="steps">
+    <li>Click <strong>View</strong> on the booking.</li>
+    <li>In <strong>Set Total Amount:</strong> type the amount, for example 25000, and click <strong>Save Amount</strong>. You will see <em>"Total amount updated successfully!"</em>.</li>
+  </ol>
+  <p>A booking made on the website starts with no amount. Set the amount before sending an invoice.</p>
+  <h3>Send a quotation for the booking</h3>
+  <ol class="steps">
+    <li>In the booking window enter the number of days it stays valid (7 by default) in the small box and click <strong>Send Quotation</strong>.</li>
+    <li>You will see <em>"Event booking quotation sent to [email]."</em> and <em>"WhatsApp delivered."</em> when that worked.</li>
+  </ol>
+  <h3>Record payment and send the invoice</h3>
+  <ol class="steps">
+    <li>Click <strong>Record Payment &amp; Send Invoice</strong>. It is greyed out (<em>"Set a total amount first"</em>) until the amount is above zero.</li>
+    <li>The system records a cash payment for the amount still owed, issues a receipt and emails the invoice. You will see <em>"Payment recorded successfully! Invoice sent to [email]"</em>. If the booking is already fully paid you see <em>"Payment already recorded. Invoice resent to [email]"</em>.</li>
+  </ol>
+  <h3>Cancel a booking</h3>
+  <ol class="steps">
+    <li>Click <strong>Cancel Booking</strong> in the booking window. The window says <em>"Cancel this booking? The bill is voided; any payment already recorded stays as credit owed back to the guest (refund it from the Payments screen)."</em> Click OK.</li>
+    <li>You will see <em>"Event booking cancelled successfully! Cancellation email sent."</em> The guest is emailed. Any money already paid stays as credit owed back, so refund it from the payment's Refund screen or with a credit note. A cancelled booking cannot be re-opened: ask the guest to book again.</li>
+  </ol>
+
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>A conference enquiry can only be confirmed while it is <strong>Pending</strong>, completed while it is <strong>Confirmed</strong>, and cancelled once. Event bookings follow the same rules.</li>
+    <li>If a deposit is required and has not been fully paid, the booking cannot be confirmed or completed. This also applies to the status dropdown on Event Bookings.</li>
+    <li>A conference room cannot be confirmed for a date and time when another confirmed or completed enquiry already holds the same room with overlapping times. If the enquiry has no times, any confirmed booking that day blocks it.</li>
+    <li>A conference room with pending or confirmed enquiries cannot be deleted. An event with pending, confirmed or waitlisted bookings cannot be deleted.</li>
+    <li>Event seats: pending, confirmed and completed bookings use up seats, counting every guest. Waitlisted and cancelled bookings do not. A guest whose party does not fit goes on the waitlist automatically.</li>
+    <li>Past events and inactive events cannot be booked on the website.</li>
+    <li>A booking with payments recorded cannot be deleted from Event Bookings. Cancel it.</li>
+    <li>Cancelling voids the bill but never removes payments. Paid money is shown as credit owed back until it is refunded.</li>
+    <li>Prices, invoices and quotations need the Invoicing &amp; Pricing permission. Without it, the buttons are missing from the event booking window. On the Conference page the buttons are still visible, but pressing them shows <em>"Error: You do not have permission to handle conference invoicing or pricing."</em></li>
+    <li>On the Conference page, adding, editing, switching off or deleting rooms needs <strong>Manage Conference Rooms</strong>. Without it you see <em>"You do not have permission to manage conference room facilities."</em></li>
+    <li>Conference and event images must be JPG, PNG or WebP.</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>Room name and description are required.</em></td><td>Name or description left empty when saving a room.</td><td>Fill in both and save again.</td></tr>
+      <tr><td><em>Capacity must be a whole number of at least 1.</em></td><td>Capacity is empty, zero, negative or has decimals.</td><td>Enter a whole number such as 40.</td></tr>
+      <tr><td><em>Full day rate must be a number (0 or more).</em></td><td>Rate is empty or not a number.</td><td>Enter a number such as 350000.</td></tr>
+      <tr><td><em>Size must be a positive number.</em></td><td>Size (sqm) is not a number or is negative.</td><td>Enter a positive number or leave it empty.</td></tr>
+      <tr><td>The page reloads and the conference room is still listed. No message is shown, although the system refuses with <em>"This room has pending or confirmed enquiries. Cancel or complete them first, or deactivate the room instead of deleting it."</em></td><td>Live enquiries still use the room.</td><td>Cancel or complete the enquiries, or use the power button to switch the room off.</td></tr>
+      <tr><td><em>Error: Only pending enquiries can be confirmed.</em></td><td>The enquiry is no longer pending (for example a colleague confirmed it).</td><td>Refresh the page and check its status.</td></tr>
+      <tr><td><em>Error: Required conference deposit has not been fully paid yet.</em></td><td>A deposit is required and not fully paid.</td><td>Record the deposit first, then confirm or complete.</td></tr>
+      <tr><td><em>Error: This room is already confirmed for [date] ([start]-[end]) under [reference]. Choose a different room or time before confirming.</em></td><td>Another confirmed or completed enquiry holds the room at that time.</td><td>Talk to the guest about another room or time. Cancel the other enquiry only if it is really being dropped.</td></tr>
+      <tr><td><em>Error: Only confirmed enquiries can be marked completed.</em></td><td>The enquiry is pending, cancelled or already completed.</td><td>Confirm it first, or leave it as it is.</td></tr>
+      <tr><td><em>Error: This booking is already cancelled.</em></td><td>Cancel was pressed twice, or a colleague cancelled it.</td><td>Nothing to do.</td></tr>
+      <tr><td><em>Error: Payment can only be recorded for confirmed or completed bookings.</em></td><td>Conference Paid was used on an enquiry that is not confirmed or completed.</td><td>Confirm the enquiry first.</td></tr>
+      <tr><td><em>Error: Set a total amount before recording payment.</em></td><td>The amount is zero. This also shows on events.</td><td>Set the amount with <strong>Update Amount</strong> (conference) or <strong>Save Amount</strong> (events).</td></tr>
+      <tr><td><em>Error: Total amount must be a number (0 or more).</em></td><td>The amount is empty, negative or not a number. Events show the same text without "Error:".</td><td>Enter a number, for example 450000.</td></tr>
+      <tr><td><em>A cancelled booking's bill is void; its amount cannot be changed.</em> (On the Conference page it starts with <em>Error:</em>.)</td><td>You tried to change the amount of a cancelled enquiry or booking.</td><td>None needed. Create a new booking if work is needed.</td></tr>
+      <tr><td><em>Failed to send quotation: ...</em></td><td>The quotation email could not be sent.</td><td>Check the guest's email address and try again. If it keeps failing, tell your manager.</td></tr>
+      <tr><td><em>(Email not sent: ...)</em> after a Confirm or Cancel</td><td>The action worked but the guest email failed.</td><td>Contact the guest yourself.</td></tr>
+      <tr><td><em>Security token invalid — refresh the page.</em></td><td>The page was open too long or your session ended.</td><td>Reload the page and try again.</td></tr>
+      <tr><td><em>Event title is required.</em></td><td>The title is empty.</td><td>Enter a title.</td></tr>
+      <tr><td><em>A valid event date is required.</em></td><td>The date is missing or not valid.</td><td>Pick a date.</td></tr>
+      <tr><td><em>Start and end time must be valid times (HH:MM).</em></td><td>A time was typed in a format the system cannot read.</td><td>Use the time picker, for example 18:00.</td></tr>
+      <tr><td><em>End time must be after the start time.</em></td><td>End is the same as or earlier than start.</td><td>Correct the times.</td></tr>
+      <tr><td><em>Ticket price must be a number (0 or more).</em></td><td>The price is not a number or is negative.</td><td>Enter 0 for free events, or a number.</td></tr>
+      <tr><td><em>Capacity must be a whole number (leave blank or 0 for unlimited).</em></td><td>Capacity has decimals or letters.</td><td>Enter a whole number or leave it blank.</td></tr>
+      <tr><td><em>Invalid image type. Only JPG, PNG, and WebP files are allowed.</em></td><td>The event image is another type, or is too large.</td><td>Convert or shrink the picture and try again.</td></tr>
+      <tr><td><em>File is too large. Please resize or compress the image and try again.</em></td><td>The upload went over the server's size limit.</td><td>Use a smaller picture.</td></tr>
+      <tr><td>The page reloads and the event is still listed. No message is shown, although the system refuses with <em>"This event has pending, confirmed or waitlisted bookings. Cancel them first (Event Bookings), or switch the event off instead of deleting it."</em></td><td>Guests still hold places.</td><td>Cancel the bookings or use <strong>Toggle</strong>.</td></tr>
+      <tr><td><em>Recipient name is required.</em> / <em>A valid recipient email is required.</em></td><td>The event quotation form is missing a name or the email is not valid.</td><td>Complete both fields.</td></tr>
+      <tr><td><em>Only pending bookings can be confirmed.</em></td><td>The event booking is not pending.</td><td>Refresh and check the status.</td></tr>
+      <tr><td><em>Use the Cancel button in the booking details to cancel (it handles any payment).</em></td><td>You tried to set an unsupported status from the dropdown.</td><td>Open <strong>View</strong> and use <strong>Cancel Booking</strong>.</td></tr>
+      <tr><td><em>Use "Promote from waitlist" in the booking details so the seat count is checked.</em></td><td>The dropdown cannot move a waitlisted booking.</td><td>Use <strong>Promote from waitlist</strong> in <strong>View</strong>.</td></tr>
+      <tr><td><em>Cancelled bookings cannot be reopened. Ask the guest to book again.</em></td><td>A cancelled booking cannot return to an open status.</td><td>Ask the guest to make a new booking.</td></tr>
+      <tr><td><em>Not enough seats: [n] left, this booking needs [n]. Raise the event capacity or cancel another booking first.</em></td><td>The event is still full for this party.</td><td>Raise <strong>Capacity</strong> on the Events page, or cancel another booking, then promote again.</td></tr>
+      <tr><td><em>Only waitlisted bookings can be promoted.</em></td><td>The booking has already left the waitlist.</td><td>Refresh the page.</td></tr>
+      <tr><td><em>Required event deposit has not been fully paid yet.</em></td><td>A deposit is required and not fully paid.</td><td>Record the deposit, then confirm or complete.</td></tr>
+      <tr><td><em>This booking has payments recorded against it and cannot be deleted. Cancel it instead.</em></td><td>Payments exist for this booking.</td><td>Use <strong>Cancel Booking</strong>.</td></tr>
+      <tr><td><em>Payment cannot be recorded for a cancelled booking.</em> / <em>...for a waitlisted booking.</em></td><td>Payment cannot be taken on that status.</td><td>Promote a waitlisted booking first. Cancelled bookings cannot take payment.</td></tr>
+      <tr><td><em>You do not have permission to handle event invoicing or pricing.</em></td><td>Your role lacks Event Invoicing &amp; Pricing.</td><td>Ask a manager to give you the permission in Staff &amp; Access.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="13-finance-payments.html">Finance and payments</a> (payments, refunds, credit notes)</li>
+    <li><a href="11-social-facebook-sharing.html">Social media and Facebook sharing</a></li>
+    <li><a href="18-staff-access.html">Staff and access</a> (giving permissions)</li>
+    <li><a href="07-reception-bookings.html">Reception and bookings</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

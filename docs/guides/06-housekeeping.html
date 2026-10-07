@@ -1,135 +1,311 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Housekeeping Guide — Rosalyn's Hotel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-    rel="stylesheet">
+  <title>Housekeeping and Room Maintenance — Rosalyns Beach Hotel</title>
   <link rel="stylesheet" href="assets/guide-theme.css">
   <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
   <nav class="top">
-    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-    <div class="nav-links">
-      <a href="index.html">All Guides</a>
-      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-      <a href="owner-handover.php">Owner</a>
-      <a href="05-room-service.html">← Prev</a>
-      <a href="07-reception-bookings.html">Next →</a>
-    </div>
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
   </nav>
 
-  <header class="hero">
-    <div class="deck">
-      <div class="eyebrow">Guide 06 &middot; Housekeeping</div>
-      <h1>Housekeeping</h1>
-      <p class="lead">Track every individual room's Pending / In Progress / Completed / Verified / Blocked status. Every change is logged with old →
-        new state and timestamp.</p>
-      <div class="meta">
-        <span>URL <strong>/admin/housekeeping.php</strong></span>
-        <span>Role <strong>housekeeping · manager · admin</strong></span>
-        <span>Read time <strong>5 min</strong></span>
-      </div>
-    </div>
-  </header>
+  <h1>Housekeeping and Room Maintenance</h1>
+  <p>This guide covers the two screens that keep rooms ready for guests at <span class="g-site-name">Rosalyns Beach Hotel</span>. <strong>Housekeeping</strong> is for cleaning tasks, including the clean after a guest checks out. <strong>Room Maintenance</strong> is for repairs and other work that takes a room out of use.</p>
 
-  <main class="content">
-    <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Housekeeping supervisors, receptionists, managers, maintenance staff</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Front Desk</strong> &rarr; <strong>Housekeeping</strong> (<code>/admin/housekeeping.php</code>) and admin menu &rarr; <strong>Front Desk</strong> &rarr; <strong>Room Maintenance</strong> (<code>/admin/room-maintenance.php</code>)</dd>
+      <dt>Permission needed</dt><dd><strong>Housekeeping</strong> for the Housekeeping screen. <strong>Room Maintenance</strong> for the Room Maintenance screen. Each screen needs its own permission.</dd>
+      <dt>Only shown when</dt><dd>Housekeeping: the <strong>Housekeeping</strong> module is switched on in Settings &rarr; Modules. Room Maintenance: the <strong>Bookings &amp; Reservations</strong> module is switched on in Settings &rarr; Modules.</dd>
+    </dl>
+  </div>
 
-      <section>
-        <h2>Assignment statuses</h2>
-        <p>Housekeeping work is tracked as <strong>assignments</strong> against a room (not a single room-wide
-          status flag). Each assignment moves through:</p>
-        <table>
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th>Meaning</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span class="pill amber">Pending</span></td>
-              <td>Task created, not yet started.</td>
-            </tr>
-            <tr>
-              <td><span class="pill blue">In Progress</span></td>
-              <td>Housekeeper has tapped Start — currently cleaning.</td>
-            </tr>
-            <tr>
-              <td><span class="pill green">Completed</span></td>
-              <td>Housekeeper marked the task done.</td>
-            </tr>
-            <tr>
-              <td><span class="pill purple">Verified</span></td>
-              <td>Supervisor confirmed the completed task — locked, cannot be edited further.</td>
-            </tr>
-            <tr>
-              <td><span class="pill red">Blocked</span></td>
-              <td>Task cannot proceed (e.g. maintenance issue) — set via the assignment's status field.</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#statuses">Room statuses and task statuses</a></li>
+      <li><a href="#flow">What happens to a room after check-out</a></li>
+      <li><a href="#hk-work">How to work through a cleaning task (start, finish, verify)</a></li>
+      <li><a href="#hk-add">How to add a cleaning task</a></li>
+      <li><a href="#hk-auto">How to create the checkout cleanings in one click</a></li>
+      <li><a href="#hk-bulk">How to assign cleaning to occupied rooms</a></li>
+      <li><a href="#hk-edit">How to edit, correct or delete a cleaning task</a></li>
+      <li><a href="#hk-history">How to see the history of a task</a></li>
+      <li><a href="#mt-add">How to report and add a maintenance request</a></li>
+      <li><a href="#mt-work">How to work through a maintenance request (start, finish, verify)</a></li>
+      <li><a href="#mt-bulk">How to assign maintenance to several rooms</a></li>
+      <li><a href="#mt-edit">How to edit, cancel or delete a maintenance request</a></li>
+      <li><a href="#checkin">Checking a guest in to a room that is not clean</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
 
-      <section>
-        <h2>A typical morning</h2>
-        <ol class="steps">
-          <li>Sign in. The <strong>All Assignments</strong> table lists every task, filterable by status and
-            searchable by room or staff name.</li>
-          <li>On a <strong>Pending</strong> row, tap <strong>Start</strong> → status moves to <em>In Progress</em>.
-          </li>
-          <li>When done, tap <strong>Mark Done</strong> → status moves to <em>Completed</em>.</li>
-          <li>The supervisor reviews completed rows and taps <strong>Verify</strong> to mark the task
-            <em>Verified</em> — this cannot be undone.</li>
-        </ol>
-      </section>
+  <h2 id="screen">What is on the screen</h2>
 
-      <section>
-        <h2>Maintenance issues</h2>
-        <ol class="steps">
-          <li>Set a task's status to <strong>Blocked</strong> if the room can't be cleaned due to a maintenance
-            issue, and add a note explaining why.</li>
-          <li>Serious out-of-order rooms (unbookable until fixed) are handled on the separate
-            <strong>Room Maintenance</strong> page, which removes the room from bookable inventory.</li>
-        </ol>
-      </section>
+  <h3>Housekeeping screen</h3>
+  <p>The page title is <strong>Housekeeping Management</strong>. From top to bottom:</p>
+  <ul>
+    <li><strong>Auto-Create Checkout Cleanup</strong> and <strong>Add Assignment</strong> buttons at the top right.</li>
+    <li>Number cards: <strong>Today's Tasks</strong>, <strong>Pending Tasks</strong>, <strong>In Progress</strong>, <strong>Completed Today</strong>, <strong>High Priority</strong>. A <strong>Blocked</strong> card appears only when at least one task is blocked. Click a card to open a window (for example <em>"Pending Tasks - Quick Insights"</em>) listing up to 12 matching tasks with the room, who it is assigned to, the due date and the notes.</li>
+    <li><strong>Occupied Rooms</strong> list. Shown only when at least one guest is checked in. Each room card shows the room, the guest name and the check-out date. A card marked <strong>Checkout Today</strong> has a guest leaving today.</li>
+    <li><strong>Staff Workload</strong> table (columns <strong>Staff Member</strong>, <strong>Active Tasks</strong>, <strong>High Priority Pending</strong>, <strong>Completed Today</strong>). It lists only staff who have an open task or finished one today.</li>
+    <li><strong>All Assignments</strong> table with a search box (<em>"Search room, staff…"</em>) and a status filter (<strong>All Statuses</strong>, <strong>Pending</strong>, <strong>In Progress</strong>, <strong>Completed</strong>, <strong>Verified</strong>, <strong>Blocked</strong>). Columns: <strong>Room</strong>, <strong>Type</strong>, <strong>Priority</strong>, <strong>Status</strong>, <strong>Scheduled</strong>, <strong>Assigned To</strong>, <strong>Notes</strong>, <strong>Actions</strong>. The Scheduled column shows the due date, and under it the scheduled time, the time the task was started and the time it was completed when they exist. Notes are cut off after 30 characters.</li>
+  </ul>
+  <p>The buttons in the Actions column are small icons. Point at one to see its name. They are, left to right: <strong>Mark as started</strong> (only on Pending tasks), <strong>Mark done</strong> (Pending and In progress tasks), <strong>Edit</strong> (every task except Verified ones), <strong>View History</strong>, <strong>Verify</strong> (only on Completed tasks) and a red bin to delete.</p>
+  <p>Tasks are listed with Pending first, then In progress, Completed, Verified and Blocked. Inside each group, High priority comes before Medium and Low, then the earliest due date.</p>
 
-      <section>
-        <h2>Audit history</h2>
-        <ul class="checklist">
-          <li>Every status change is saved to <code>housekeeping_audit_log</code>.</li>
-          <li>Tap <strong>View History</strong> on an assignment row to see who changed it, when, and what changed.
-          </li>
-        </ul>
-      </section>
+  <h3>Room Maintenance screen</h3>
+  <p>The page title is <strong>Room Maintenance Management</strong>. It has the same layout:</p>
+  <ul>
+    <li><strong>Auto-Create Tasks</strong> and <strong>Add Maintenance</strong> buttons at the top right.</li>
+    <li>Number cards: <strong>Today's Tasks</strong>, <strong>Pending Tasks</strong>, <strong>In Progress</strong>, <strong>Completed Today</strong>, <strong>Verified Today</strong>, <strong>High/Urgent Priority</strong>, <strong>Emergency</strong>. Click a card to see up to 12 matching requests.</li>
+    <li><strong>Rooms Needing Maintenance</strong> list. Shown when a room is marked Maintenance or Out of Order, or has a guest checked in. Each card shows the room and its status.</li>
+    <li><strong>Staff Workload</strong> table (same four columns as above).</li>
+    <li><strong>All Maintenance Tasks</strong> table, 10 rows per page with page numbers underneath. It has a search box (<em>"Search room, title, staff..."</em>) and a status filter (<strong>All Statuses</strong>, <strong>Pending</strong>, <strong>In Progress</strong>, <strong>Completed</strong>, <strong>Verified</strong>, <strong>Cancelled</strong>). Columns: <strong>Room</strong>, <strong>Title</strong>, <strong>Type</strong>, <strong>Priority</strong>, <strong>Status</strong>, <strong>Scheduled</strong>, <strong>Assigned To</strong>, <strong>Actions</strong>. The action icons work exactly as on the Housekeeping screen.</li>
+    <li><strong>Maintenance Log</strong> at the bottom (shown once there is something to show). It lists the last 50 room status changes with the columns <strong>Room</strong>, <strong>From</strong>, <strong>To</strong>, <strong>Reason</strong>, <strong>By</strong>, <strong>At</strong>.</li>
+  </ul>
 
-      <section>
-        <h2>Tips</h2>
-        <div class="callout tip">If a guest reports an issue with a room, create or edit an assignment for it and
-          set the status appropriately &mdash; this keeps the room on staff's task list.</div>
-      </section>
+  <h2 id="statuses">Room statuses and task statuses</h2>
+  <h3>Room statuses</h3>
+  <table>
+    <thead><tr><th>Room status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Available</strong></td><td>The room is clean and ready for guests.</td></tr>
+      <tr><td><strong>Occupied</strong></td><td>A guest is currently checked in.</td></tr>
+      <tr><td><strong>Cleaning</strong></td><td>The room is being cleaned.</td></tr>
+      <tr><td><strong>Maintenance</strong></td><td>The room is under maintenance.</td></tr>
+      <tr><td><strong>Out of Order</strong></td><td>The room is not available for use.</td></tr>
+    </tbody>
+  </table>
+  <h3>Cleaning task statuses (Housekeeping screen)</h3>
+  <table>
+    <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Pending</strong></td><td>Waiting for someone to start it.</td></tr>
+      <tr><td><strong>In Progress</strong></td><td>Being cleaned now.</td></tr>
+      <tr><td><strong>Completed</strong></td><td>The cleaner has finished. Waiting for a supervisor to check it.</td></tr>
+      <tr><td><strong>Verified</strong></td><td>A supervisor has checked and signed off the clean. The task is locked.</td></tr>
+      <tr><td><strong>Blocked</strong></td><td>The task cannot go ahead. It is set by hand in the Edit window, or automatically if the room is changed to Maintenance or Out of Order while the task is open.</td></tr>
+    </tbody>
+  </table>
+  <h3>Maintenance request statuses (Room Maintenance screen)</h3>
+  <table>
+    <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Pending</strong></td><td>Waiting for a technician.</td></tr>
+      <tr><td><strong>In Progress</strong></td><td>Work has started.</td></tr>
+      <tr><td><strong>Completed</strong></td><td>Work is finished. Waiting for sign-off.</td></tr>
+      <tr><td><strong>Verified</strong></td><td>Signed off. The request is locked.</td></tr>
+      <tr><td><strong>Cancelled</strong></td><td>The request is no longer needed.</td></tr>
+    </tbody>
+  </table>
+  <p>Priorities for cleaning tasks are <strong>High</strong>, <strong>Medium</strong> and <strong>Low</strong>. Maintenance requests also have <strong>Urgent</strong>.</p>
 
-    </div>
-  </main>
+  <h2 id="flow">What happens to a room after check-out</h2>
+  <p>You do not have to create the clean by hand. This is the normal flow:</p>
+  <ol class="steps">
+    <li>Reception checks the guest out (see the Reception and Bookings guide). The room status changes to <strong>Cleaning</strong>.</li>
+    <li>At the same moment a cleaning task is created for the room. It is <strong>Pending</strong>, due today, with the note <em>"Room turnover cleaning"</em>.</li>
+    <li>Open <strong>Housekeeping</strong>. The task is in the <strong>All Assignments</strong> table. Assign it to a cleaner by clicking <strong>Edit</strong> and choosing a name in <strong>Assigned To</strong>.</li>
+    <li>The cleaner starts the job. Click <strong>Mark as started</strong>. The status becomes <strong>In Progress</strong>.</li>
+    <li>When the room is clean, click <strong>Mark done</strong>. The status becomes <strong>Completed</strong>. As soon as the room has no other open cleaning task, the room status changes from <strong>Cleaning</strong> to <strong>Available</strong> and the room can be sold or checked in.</li>
+    <li>A supervisor looks at the room and clicks <strong>Verify</strong>. The task becomes <strong>Verified</strong> and is locked. Verifying does not change the room status. It only records who checked the room and when.</li>
+  </ol>
+  <div class="note"><p>A room is ready for the next guest as soon as its cleaning task is <strong>Completed</strong>. You do not have to wait for <strong>Verify</strong>.</p></div>
 
-  <footer class="guide-footer">
-    <div class="deck">
-      <div class="crest">— R H —</div>
-      <p><a href="05-room-service.html">← Room Service</a> &middot; <a href="index.html">All guides</a> &middot; <a
-          href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot; <a href="owner-handover.php">Owner
-          handover</a> &middot; <a href="07-reception-bookings.html">Reception →</a></p>
-    </div>
-  </footer>
+  <h2 id="hk-work">How to work through a cleaning task (start, finish, verify)</h2>
+  <ol class="steps">
+    <li>Go to <strong>Front Desk</strong> &rarr; <strong>Housekeeping</strong>.</li>
+    <li>Find the room in <strong>All Assignments</strong>. Use the search box (room number or staff name) or the status filter if the list is long.</li>
+    <li>To start: click <strong>Mark as started</strong> (the play icon). A box asks <em>"Mark this assignment as started?"</em>. Click <strong>Start</strong>. You will see <em>"Assignment marked as started."</em> The start time is recorded.</li>
+    <li>To finish: click <strong>Mark done</strong> (the tick icon). A box asks <em>"Mark this assignment as completed?"</em>. Click <strong>Mark Done</strong>. You will see <em>"Assignment marked as completed."</em> The finish time is recorded. If the task was never started, the start time is set to the same moment.</li>
+    <li>To verify (supervisor): click <strong>Verify</strong> (the double-tick icon, shown only on Completed tasks). A box asks <em>"Mark this assignment as verified? This cannot be undone."</em>. Click <strong>Verify</strong>. You will see <em>"Assignment verified successfully."</em></li>
+  </ol>
+  <div class="warn"><p>Verified cannot be undone. A verified task cannot be edited. The only thing you can still do to it is delete it.</p></div>
+  <p>You can also skip a step by editing the task and choosing a different <strong>Status</strong> (see <a href="#hk-edit">How to edit, correct or delete a cleaning task</a>).</p>
 
+  <h2 id="hk-add">How to add a cleaning task</h2>
+  <ol class="steps">
+    <li>Click <strong>Add Assignment</strong>. A window titled <strong>Add Assignment</strong> opens.</li>
+    <li>Choose the <strong>Room</strong> (required). When you pick a room, the line under the box shows its current state, for example <em>"Room: cleaning | Housekeeping: pending"</em>.</li>
+    <li>Choose the <strong>Assignment Type</strong> (required): <strong>Regular Cleaning</strong>, <strong>Checkout Cleanup (High Priority)</strong>, <strong>Deep Clean</strong>, <strong>Maintenance</strong> or <strong>Turn Down Service</strong>.</li>
+    <li>Choose the <strong>Priority</strong> (required): <strong>Medium</strong>, <strong>High</strong> or <strong>Low</strong>.</li>
+    <li>Choose the <strong>Due Date</strong> (required). It cannot be before today. The note under the box says <em>"Due date cannot be in the past"</em>.</li>
+    <li>Optional: <strong>Scheduled Time</strong> (time of day, for example 09:00 or 14:30, in 5-minute steps). <strong>Started At</strong> (leave blank and the system stamps the time when you click Mark as started).</li>
+    <li><strong>Status</strong>: leave it on <strong>Pending</strong> for a new task. The list is <strong>Pending</strong>, <strong>In Progress</strong>, <strong>Completed</strong>, <strong>Verified</strong>, <strong>Blocked</strong>.</li>
+    <li><strong>Assigned To</strong>: choose a staff member, or leave <strong>Unassigned</strong>.</li>
+    <li><strong>Estimated Duration (minutes)</strong>: starts at 30. Minimum 5, in steps of 5. <strong>Actual Duration (minutes)</strong> is for when the job is done (it is saved when you edit a task).</li>
+    <li>Tick <strong>Recurring Task</strong> if the job repeats. Two more boxes appear. <strong>Recurring Pattern</strong>: <strong>Daily</strong>, <strong>Weekly</strong> or <strong>Monthly</strong>. <strong>Recurring End Date</strong>: leave empty for no end date.</li>
+    <li>Type any <strong>Notes</strong>.</li>
+    <li>Click <strong>Save</strong>. The button shows <em>"Saving…"</em>. The result appears at the bottom left of the window. On success you will see <em>"Assignment created successfully."</em> and the list refreshes. Click <strong>Close</strong> to shut the window.</li>
+  </ol>
+  <div class="note"><p>The <strong>Recurring Task</strong> settings are saved with the task. The screen does not create the next task for you, so add the next one yourself when you need it.</p></div>
+
+  <h2 id="hk-auto">How to create the checkout cleanings in one click</h2>
+  <p>Use this at the start of a shift if some checked-out rooms have no cleaning task yet.</p>
+  <ol class="steps">
+    <li>Click <strong>Auto-Create Checkout Cleanup</strong>.</li>
+    <li>A box asks <em>"Auto-create checkout cleanup assignments for all rooms that need it?"</em>. Click <strong>Auto-Create</strong>.</li>
+    <li>You will see <em>"Auto-created 3 checkout cleanup assignments."</em> (the number is however many were made, which can be 0).</li>
+  </ol>
+  <p>The system looks at each room whose latest booking is checked out (or still checked in past its check-out date) with a check-out date of today or earlier. If that room has never had a checkout cleanup task, it creates one: type <strong>Checkout Cleanup</strong>, priority <strong>High</strong>, due today, <strong>Unassigned</strong>, note <em>"Checkout cleanup required"</em>. A room is never given a second checkout cleanup, even if you run this again.</p>
+
+  <h2 id="hk-bulk">How to assign cleaning to occupied rooms</h2>
+  <p>Use this for a daily stay-over clean. It is in the <strong>Occupied Rooms</strong> section.</p>
+  <ol class="steps">
+    <li>Click each room card you want. A selected card shows <strong>Selected</strong>. Click again to unselect. <strong>Select All</strong> selects every card (click it again to unselect all).</li>
+    <li>Choose a staff member in the first box (or leave <strong>Unassigned</strong>).</li>
+    <li>Choose <strong>Medium Priority</strong>, <strong>High Priority</strong> or <strong>Low Priority</strong>.</li>
+    <li>Click <strong>Assign Selected (n)</strong>. The button is greyed out until you select at least one room.</li>
+    <li>You will see <em>"Bulk assigned 4 rooms for housekeeping."</em></li>
+  </ol>
+  <p>Each task is <strong>Regular Cleaning</strong>, <strong>Pending</strong> and due today. A room that already has a Pending or In progress task is skipped, so the number in the message can be lower than the number you selected.</p>
+  <p>For one room only, click <strong>Quick Assign</strong> on its card. The <strong>Assign Room</strong> window opens with that room and today's date filled in. Fill in the rest as in <a href="#hk-add">How to add a cleaning task</a> and click <strong>Save</strong>.</p>
+
+  <h2 id="hk-edit">How to edit, correct or delete a cleaning task</h2>
+  <h3>Edit</h3>
+  <ol class="steps">
+    <li>Click <strong>Edit</strong> (pencil icon) on the task. The <strong>Edit Assignment</strong> window opens with the saved details.</li>
+    <li>Change what you need. This is where you assign a cleaner, change the priority, set <strong>Status</strong> to <strong>Blocked</strong>, or fill in <strong>Actual Duration (minutes)</strong>.</li>
+    <li>Click <strong>Save</strong>. You will see <em>"Assignment updated successfully."</em></li>
+  </ol>
+  <p>If you set the <strong>Status</strong> to <strong>Completed</strong> or <strong>Verified</strong> here, the completed time is set to now. Choosing <strong>Verified</strong> records you as the person who verified it. If you move a Completed task back to <strong>Pending</strong> or <strong>In Progress</strong>, the completed time is cleared and the room goes back to Cleaning.</p>
+  <h3>Move the task to a different room</h3>
+  <p>Edit the task and change the <strong>Room</strong>. Both rooms are updated.</p>
+  <h3>Delete</h3>
+  <ol class="steps">
+    <li>Click the red bin on the task.</li>
+    <li>A box asks <em>"Delete this assignment? This cannot be undone."</em>. Click <strong>Delete</strong>.</li>
+    <li>You will see <em>"Assignment deleted successfully."</em></li>
+  </ol>
+  <p>If the deleted task was the room's only open cleaning, a room that was in <strong>Cleaning</strong> goes back to <strong>Available</strong>. Delete is the only action available on a Verified task. Deleting it is recorded in the task history.</p>
+
+  <h2 id="hk-history">How to see the history of a task</h2>
+  <ol class="steps">
+    <li>Click <strong>View History</strong> (the clock-arrow icon) on the task.</li>
+    <li>The <strong>Audit History</strong> window opens, titled with the room and the task number. It lists each change (for example <strong>Status Changed</strong>), who made it and when.</li>
+    <li>If nothing has been recorded you will see <em>"No audit history available."</em> Click <strong>Close</strong> when you are done.</li>
+  </ol>
+
+  <h2 id="mt-add">How to report and add a maintenance request</h2>
+  <ol class="steps">
+    <li>Go to <strong>Front Desk</strong> &rarr; <strong>Room Maintenance</strong> and click <strong>Add Maintenance</strong>. The <strong>Add Maintenance</strong> window opens.</li>
+    <li>Choose the <strong>Room</strong> (required). The line under the box shows the room's current status.</li>
+    <li>Type a <strong>Title</strong> (required), for example <em>Air conditioner not cooling</em>. Add a <strong>Description</strong> if you need to.</li>
+    <li>Choose the <strong>Maintenance Type</strong> (required): <strong>Repair</strong>, <strong>Replacement</strong>, <strong>Inspection</strong>, <strong>Upgrade</strong> or <strong>Emergency</strong>. Choosing <strong>Emergency</strong> sets the priority to Urgent for you.</li>
+    <li>Choose the <strong>Priority</strong> (required): <strong>Medium</strong>, <strong>High</strong>, <strong>Urgent</strong> or <strong>Low</strong>.</li>
+    <li>Choose the <strong>Due Date</strong> (required). It cannot be before today.</li>
+    <li><strong>Status</strong>: leave on <strong>Pending</strong> for a new request. The list is <strong>Pending</strong>, <strong>In Progress</strong>, <strong>Completed</strong>, <strong>Verified</strong>, <strong>Cancelled</strong>.</li>
+    <li><strong>Start Date</strong> and <strong>End Date</strong>: the window the work covers. The window opens with now and tomorrow filled in. The end must be after the start.</li>
+    <li>Optional: <strong>Started At</strong> (leave blank to stamp automatically), <strong>Assigned To</strong>, <strong>Linked Booking</strong> (pick the booking of the guest who reported it, or leave <strong>None</strong>; the list shows the 100 most recent pending, confirmed and checked-in bookings as reference - guest name (room)).</li>
+    <li><strong>Estimated Duration (minutes)</strong> starts at 60 (minimum 5). <strong>Actual Duration (minutes)</strong> is for when the work is done.</li>
+    <li><strong>Block room during maintenance</strong> is ticked by default. While it is ticked and the request is not Completed, Verified or Cancelled, the room cannot be booked for any night between the Start Date and the End Date. Untick it if guests can still use the room.</li>
+    <li>Tick <strong>Recurring Task</strong> to record a repeat pattern, then choose <strong>Daily</strong>, <strong>Weekly</strong> or <strong>Monthly</strong> and an optional <strong>Recurring End Date</strong>. The screen does not create the repeat requests for you.</li>
+    <li>Type any <strong>Notes</strong> and click <strong>Save</strong>. You will see <em>"Maintenance schedule created successfully."</em></li>
+  </ol>
+  <p>When a request is open (Pending, In progress or Completed), the room's status is set to <strong>Maintenance</strong>, unless the room is Occupied or Out of Order. The change is recorded in the <strong>Maintenance Log</strong>.</p>
+
+  <h3>Requests the system creates for you</h3>
+  <ul>
+    <li>Every time the Room Maintenance screen opens, the system creates a task titled <em>"Auto-generated maintenance task"</em> for each room that is in Maintenance or Out of Order, or has a guest checked in, and has no open request. The type and priority depend on the room: Out of Order gets <strong>Repair</strong> and <strong>High</strong>, Maintenance gets <strong>Repair</strong> and <strong>Urgent</strong>, and a room with a guest gets <strong>Inspection</strong> and <strong>Medium</strong>.</li>
+    <li>The <strong>Auto-Create Tasks</strong> button does the same on demand. Click it, then click <strong>Auto-Create</strong> in the box <em>"Auto-create maintenance tasks for all rooms that need them?"</em>. You will see <em>"Auto-created 2 maintenance tasks."</em></li>
+  </ul>
+
+  <h2 id="mt-work">How to work through a maintenance request (start, finish, verify)</h2>
+  <ol class="steps">
+    <li>Find the request in <strong>All Maintenance Tasks</strong>.</li>
+    <li>To start: click <strong>Mark as started</strong>. The box says <em>"Mark this maintenance as started?"</em>. Click <strong>Start</strong>. You will see <em>"Schedule marked as started."</em></li>
+    <li>To finish: click <strong>Mark done</strong>. The box says <em>"Mark this maintenance as completed?"</em>. Click <strong>Mark Done</strong>. You will see <em>"Schedule marked as completed."</em></li>
+    <li>To sign off (manager or supervisor): click <strong>Verify</strong> (only on Completed requests). The box says <em>"Mark this maintenance as verified? This cannot be undone."</em>. Click <strong>Verify</strong>. You will see <em>"Maintenance verified successfully."</em></li>
+  </ol>
+  <p>Once a request is Completed or Verified it no longer stops the room being booked.</p>
+
+  <h2 id="mt-bulk">How to assign maintenance to several rooms</h2>
+  <ol class="steps">
+    <li>In <strong>Rooms Needing Maintenance</strong>, click each room card you want, or click <strong>Select All</strong>.</li>
+    <li>Choose a staff member (or <strong>Unassigned</strong>), a type (<strong>Inspection</strong>, <strong>Repair</strong>, <strong>Replacement</strong>, <strong>Upgrade</strong>, <strong>Emergency</strong>) and a priority (<strong>Medium Priority</strong>, <strong>High Priority</strong>, <strong>Urgent Priority</strong>, <strong>Low Priority</strong>).</li>
+    <li>Click <strong>Assign Selected (n)</strong>. You will see <em>"Bulk assigned 3 rooms for maintenance."</em></li>
+  </ol>
+  <p>Each request is titled <em>"Bulk assigned maintenance task"</em>, due today, Pending. Rooms that already have an open request are skipped. Edit the request afterwards to give it a proper title.</p>
+
+  <h2 id="mt-edit">How to edit, cancel or delete a maintenance request</h2>
+  <ol class="steps">
+    <li>To edit: click <strong>Edit</strong>. The <strong>Edit Maintenance</strong> window opens. Change what you need and click <strong>Save</strong>. You will see <em>"Maintenance schedule updated successfully."</em></li>
+    <li>To cancel: edit the request, set <strong>Status</strong> to <strong>Cancelled</strong> and click <strong>Save</strong>. The request stays in the list for the record.</li>
+    <li>To delete: click the red bin. The box says <em>"Delete this schedule? This cannot be undone."</em>. Click <strong>Delete</strong>. You will see <em>"Maintenance schedule deleted successfully."</em></li>
+    <li>To see who changed what: click <strong>View History</strong> to open <strong>Audit History</strong>.</li>
+  </ol>
+  <div class="note"><p>On a maintenance request, <strong>Save</strong> also checks the <strong>Due Date</strong> is not in the past. If you need to edit an old request, move the due date to today first.</p></div>
+  <p>If the room has no open request left (all are Verified, Cancelled or deleted) and its status is <strong>Maintenance</strong>, the room goes back to <strong>Available</strong>.</p>
+
+  <h2 id="checkin">Checking a guest in to a room that is not clean</h2>
+  <p>Reception cannot check a guest in while the room is not ready. A room is not ready when its status is anything other than <strong>Available</strong>, or when its cleaning is <strong>Pending</strong> or <strong>In progress</strong>.</p>
+  <ul>
+    <li>Without the permission <strong>Check-in to Room Not Clean</strong> you will see <em>"Check-in blocked: Room 12 (cleaning pending) is not marked clean yet. Ask housekeeping to finish the room, or ask someone with the "Check-in to Room Not Clean" permission."</em> Ask housekeeping to click <strong>Mark done</strong> on the task, then check the guest in again.</li>
+    <li>With that permission, a box titled <strong>Room not marked clean</strong> asks you to confirm. Click <strong>Check in anyway</strong> to go ahead. The check-in is recorded in the booking timeline as <em>"Checked in to a room not marked clean"</em>, with your name.</li>
+  </ul>
+
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>You need the <strong>Housekeeping</strong> permission to open Housekeeping and the <strong>Room Maintenance</strong> permission to open Room Maintenance. Without it you are sent back to the dashboard.</li>
+    <li>Cleaning tasks can only be created for active rooms, and only assigned to active staff.</li>
+    <li>A cleaning task or maintenance request cannot be due in the past when you add it. A maintenance request also cannot be due in the past when you edit it.</li>
+    <li>A maintenance request's end date must be after its start date.</li>
+    <li>Verified tasks and requests are locked. They cannot be edited. They can only be deleted.</li>
+    <li>Verify only works on tasks that are Completed and not yet verified.</li>
+    <li>A room is never given two open checkout cleanings, and the same room is never given a second checkout cleanup by <strong>Auto-Create Checkout Cleanup</strong>.</li>
+    <li>While a room has an open cleaning task, an Available room is moved to <strong>Cleaning</strong>. When the room has no open cleaning task (everything is Completed, Verified or deleted), a room in <strong>Cleaning</strong> is moved to <strong>Available</strong>. This check runs each time you open the Housekeeping screen and after every change you make on it.</li>
+    <li>If a room's status is set to Maintenance or Out of Order, its Pending and In progress cleaning tasks become <strong>Blocked</strong>.</li>
+    <li>Open maintenance requests move the room to <strong>Maintenance</strong>, except Occupied and Out of Order rooms, which are left as they are. Pending, In progress and Completed requests all count as open for this. Verifying, cancelling or deleting them releases the room.</li>
+    <li>A maintenance request with <strong>Block room during maintenance</strong> ticked stops bookings for the room between its Start Date and End Date until the request is Completed, Verified or Cancelled.</li>
+    <li>Checking a guest in to a room that is not clean is blocked unless you have the <strong>Check-in to Room Not Clean</strong> permission and confirm.</li>
+    <li>Every change to a cleaning task or maintenance request is saved in its history.</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>"Room is required."</em></td><td>No room chosen.</td><td>Choose a room in <strong>Room</strong>.</td></tr>
+      <tr><td><em>"Due date is required."</em> / <em>"Room and due date are required."</em> / <em>"Room and title are required."</em></td><td>A required box is empty.</td><td>Fill in the room, due date and (for maintenance) the title.</td></tr>
+      <tr><td><em>"Title is required."</em></td><td>Maintenance request with no title.</td><td>Type a title.</td></tr>
+      <tr><td><em>"Due date cannot be in the past. Please select today or a future date."</em></td><td>The due date is before today.</td><td>Pick today or a later date.</td></tr>
+      <tr><td><em>"Selected room is invalid or inactive."</em></td><td>The room has been switched off or removed.</td><td>Choose another room, or ask a manager to check the room in Settings &rarr; Rooms.</td></tr>
+      <tr><td><em>"Assigned user is invalid."</em></td><td>The staff member is no longer active.</td><td>Choose another staff member or leave Unassigned.</td></tr>
+      <tr><td><em>"Invalid recurring pattern."</em></td><td>Recurring ticked without a valid pattern.</td><td>Choose Daily, Weekly or Monthly, or untick Recurring Task.</td></tr>
+      <tr><td><em>"Invalid date format."</em> / <em>"End date must be after start date."</em></td><td>The maintenance Start Date and End Date are missing, wrong or the wrong way round.</td><td>Set an End Date later than the Start Date.</td></tr>
+      <tr><td><em>"Verified assignments are locked and cannot be edited."</em></td><td>The cleaning task is already Verified.</td><td>It cannot be changed. If it was wrong, delete it and add a new task.</td></tr>
+      <tr><td><em>"Verified maintenance schedules are locked and cannot be edited."</em></td><td>The maintenance request is already Verified.</td><td>Delete it and add a new request if needed.</td></tr>
+      <tr><td><em>"Assignment not found or not in completed status."</em> / <em>"Schedule not found or not in completed status."</em></td><td>You clicked Verify on something that is not Completed, or someone already verified it.</td><td>Refresh the page and check the status.</td></tr>
+      <tr><td><em>"No rooms selected."</em></td><td>You clicked assign without choosing a room.</td><td>Click at least one room card first.</td></tr>
+      <tr><td><em>"Bulk assigned 0 rooms for housekeeping."</em> / <em>"Bulk assigned 0 rooms for maintenance."</em></td><td>Every selected room already has an open task.</td><td>Nothing to do. Edit the existing task if you need to change it.</td></tr>
+      <tr><td><em>"Auto-created 0 checkout cleanup assignments."</em></td><td>No checked-out room is missing a checkout cleanup.</td><td>Nothing to do.</td></tr>
+      <tr><td><em>"Invalid security token. Please refresh and try again."</em></td><td>The page was open too long.</td><td>Refresh the page and try again.</td></tr>
+      <tr><td><em>"Network error — please try again."</em></td><td>The connection dropped while saving in the window.</td><td>Check the connection and click Save again.</td></tr>
+      <tr><td><em>"Failed to load audit history."</em></td><td>The history could not be loaded.</td><td>Close the window and try again.</td></tr>
+      <tr><td><em>"Check-in blocked: Room ... is not marked clean yet."</em></td><td>The room is not Available, or cleaning is still Pending or In progress.</td><td>Mark the cleaning done, or use someone with the <strong>Check-in to Room Not Clean</strong> permission.</td></tr>
+      <tr><td><em>"Database error: ..."</em></td><td>The system could not save.</td><td>Try again. If it keeps happening, tell your manager and give them the full message.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="07-reception-bookings.html">Reception and Bookings</a> (check-in and check-out)</li>
+    <li><a href="18-staff-access.html">Staff Access</a> (giving the Housekeeping and Room Maintenance permissions)</li>
+    <li><a href="99-admin-dashboard-full-guide.html">Admin reference</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

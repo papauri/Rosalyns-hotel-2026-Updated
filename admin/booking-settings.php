@@ -1454,7 +1454,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     </div>
                 </div>
 
-                <div id="disabled-settings" style="display: none; margin-top: 25px;">
+                <div id="disabled-settings" style="margin-top: 25px;">
                     <h3 style="color: #7E684B; margin-bottom: 20px;"><i class="fas fa-sliders-h"></i> Disabled Mode Settings</h3>
 
                     <form method="POST" action="booking-settings.php">

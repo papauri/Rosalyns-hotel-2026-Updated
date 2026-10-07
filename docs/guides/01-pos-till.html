@@ -1,749 +1,414 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>POS Till Guide — Rosalyn's Hotel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-    rel="stylesheet">
+  <title>POS Till, Menu and Tables — Rosalyns Beach Hotel</title>
   <link rel="stylesheet" href="assets/guide-theme.css">
   <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
   <nav class="top">
-    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-    <div class="nav-links">
-      <a href="index.html">All Guides</a>
-      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-      <a href="owner-handover.php">Owner</a>
-      <a href="02-kds-kitchen.html">Next →</a>
-    </div>
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
   </nav>
 
-  <header class="hero">
-    <div class="deck">
-      <div class="eyebrow">Guide 01 &middot; Cashier</div>
-      <h1>POS Till</h1>
-      <p class="lead">Your home screen for the restaurant, bar and coffee shop. Every order starts here.</p>
-      <div class="meta">
-        <span>URL <strong>/admin/pos.php</strong></span>
-        <span>Role <strong>restaurant_staff · manager · admin</strong></span>
-        <span>Read time <strong>8 min</strong></span>
-      </div>
-    </div>
-  </header>
+  <h1>POS Till, Menu and Tables</h1>
+  <p>The POS Till is the touchscreen screen where staff take food and drink orders, send them to the Kitchen, Bar and Coffee Bar screens, take payment, charge orders to a guest's room, and close their shift. This guide also covers the Menu page (what the till sells) and the Tables page (the dine-in tables the till offers).</p>
 
-  <main class="content">
-    <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Waiters, cashiers and bar staff (till). Managers (refunds, voids, 86, shift reports). Anyone who maintains the menu or tables.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>POS Till</strong> (<code>/admin/pos.php</code>). It opens in a new browser tab. The same group also has <strong>Menu</strong> (<code>/admin/menu-management.php</code>), <strong>Orders &amp; Tabs</strong> and <strong>Tables</strong> (<code>/admin/restaurant-tables.php</code>).</dd>
+      <dt>Permission needed</dt><dd><strong>POS Till (Touch)</strong> for the till. <strong>Menu</strong> for the Menu page. <strong>Ingredients &amp; Recipes</strong> for the Tables page. Extra till powers are listed in the table "Who can do what" below.</dd>
+      <dt>Only shown when</dt><dd>The <strong>POS &amp; Stations</strong> module is switched on in Settings &rarr; Modules. The Tables page also needs the <strong>Stock Management</strong> and <strong>Restaurant Page</strong> modules.</dd>
+    </dl>
+  </div>
 
-      <section>
-        <h2>Layout (left → right)</h2>
-        <p>The till shares the <strong>Japandi palette used by the admin dashboard and the kitchen screens</strong> —
-          warm paper background, off-white panes, muted clay and sage accents, and a dark bar across the top. Staff
-          moving between the till, the KDS and the admin pages see one system rather than three.</p>
-        <table>
-          <thead>
-            <tr>
-              <th>Pane</th>
-              <th>Purpose</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>Left — Categories</strong></td>
-              <td>All menu sections (Starters, Mains, Drinks…). Tap one to filter.</td>
-            </tr>
-            <tr>
-              <td><strong>Centre — Items</strong></td>
-              <td>Tap an item to add it to the cart. Counts (e.g. <strong>23 items</strong>) are visible per category.
-              </td>
-            </tr>
-            <tr>
-              <td><strong>Right — Cart &amp; Pay</strong></td>
-              <td>Current order, quantities, totals, payment buttons, park-as-tab.</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#perms">Who can do what</a></li>
+      <li><a href="#float">How to start your shift and record the opening float</a></li>
+      <li><a href="#pay-now">How to take an order and pay straight away</a></li>
+      <li><a href="#tab">How to open a tab (send now, pay later)</a></li>
+      <li><a href="#add-round">How to add another round to a tab</a></li>
+      <li><a href="#settle">How to settle a tab (split bill, tip, discount)</a></li>
+      <li><a href="#room">How to charge an order to a guest's room</a></li>
+      <li><a href="#cancel-void">How to cancel or void an order</a></li>
+      <li><a href="#refund">How to refund a paid order</a></li>
+      <li><a href="#86">How to 86 an item (mark it unavailable)</a></li>
+      <li><a href="#force-serve">How to settle a tab whose food was never served</a></li>
+      <li><a href="#notes">How to send a note to a station and read replies</a></li>
+      <li><a href="#receipts">How to print a kitchen ticket or send a receipt</a></li>
+      <li><a href="#close">How to close your shift (Z-report)</a></li>
+      <li><a href="#zreport">How to read the shift close report</a></li>
+      <li><a href="#offline">What happens when the internet drops</a></li>
+      <li><a href="#menu">How to add or change a menu item</a></li>
+      <li><a href="#tables">How to set up the dine-in tables</a></li>
+      <li><a href="#table-pay">How to take payment for a table from the Tables page</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
 
-      <section>
-        <h2>The Till Bar</h2>
-        <p>The bar across the top carries the cashier's name, the live figures they are allowed to see, and only the
-          controls that get touched <em>during</em> service:</p>
-        <div class="diagram">┌────────────────────────────────────────────────────────────────────────┐
-          │ Point of Sale · Amina        [Recent] [Tabs 3] [Note] │ [⋯ More] [Sign out] │
-          │ Orders 24 · Revenue 412,500 · Cash 180,000 · Mobile … · Card …              │
-          └────────────────────────────────────────────────────────────────────────┘</div>
-        <ul class="checklist">
-          <li><strong>Recent</strong> — the last 10 orders you rang up.</li>
-          <li><strong>Tabs</strong> — unpaid kitchen orders, with a count badge.</li>
-          <li><strong>Note</strong> — send a quick message to Kitchen, Bar or Coffee.</li>
-          <li><strong>More</strong> (<i class="fas fa-ellipsis"></i>) — everything used once a shift or less, grouped
-            under <em>Shift</em>, <em>Kitchen</em> and <em>Settings</em>.</li>
-          <li><strong>Sign out</strong>.</li>
-        </ul>
-        <p>What moved into <strong>More</strong>: <em>Close shift (Z-report)</em>, <em>Opening float</em>,
-          <em>Stations</em>, <em>86 mode</em>, <em>All orders</em>, <em>Help mode</em>, <em>Sound settings</em>, the
-          <em>POS guide</em>, and the link back to the <em>Admin dashboard</em>.</p>
-        <div class="callout note"><strong>These controls do not move with screen size.</strong> A till is muscle memory,
-          so Recent / Tabs / Note stay in the same place on a phone, a 10&Prime; tablet and a desktop, and everything
-          else is always one tap away under More — rather than appearing and disappearing as the window changes.</div>
-        <p>If you turn on <strong>86 mode</strong> and then close the More menu, a small dot appears on the More button
-          so you cannot forget the till is still in 86 mode.</p>
-      </section>
+  <h2 id="screen">What is on the screen</h2>
+  <p><strong>Top bar</strong></p>
+  <ul>
+    <li><strong>Recent</strong> &mdash; your last 10 orders in the current business day, with the amount, payment method, time and status. Click an order to open its receipt. A <strong>Refund</strong> button shows next to paid orders if you have the <strong>POS Refunds</strong> permission.</li>
+    <li><strong>Tabs</strong> &mdash; the open (unpaid) tabs. The number on the button is how many are open.</li>
+    <li><strong>Note</strong> &mdash; send a short note to the Kitchen, Bar or Coffee Bar.</li>
+    <li><strong>My orders</strong> &mdash; every order you rang up today, with kitchen and payment status.</li>
+    <li><strong>Messages</strong> &mdash; notes from the stations and their replies to yours.</li>
+    <li><strong>More</strong> &mdash; a menu with: <strong>Close shift (Z-report)</strong>; <strong>Opening float</strong> (only if you have <strong>POS Opening Float</strong>); <strong>Stations</strong> (only with <strong>POS Station Overview</strong>); <strong>86 mode</strong> (only with <strong>POS Quick-86 Items</strong>); <strong>All orders</strong> (opens Orders &amp; Tabs, only if you can open that page); <strong>Help mode</strong>; <strong>Sound settings</strong>; <strong>POS guide</strong> (opens this guide); <strong>Admin dashboard</strong> (only if you have the Dashboard permission).</li>
+    <li><strong>Sign out</strong>.</li>
+  </ul>
+  <p><strong>Shift figures</strong> (second row): <strong>Orders</strong> is always shown. <strong>Revenue</strong>, <strong>Cash</strong>, <strong>Mobile</strong> and <strong>Card</strong> are shown only to people with the <strong>POS Accounting</strong> permission.</p>
+  <p><strong>Menu side</strong></p>
+  <ul>
+    <li>Two buttons, <strong>Restaurant</strong> and <strong>Room Service</strong>, choose which items are shown. Choosing <strong>Room Service</strong> also sets the order type to <strong>Room</strong>.</li>
+    <li>A category list (<strong>All</strong> plus one entry per menu category), a <strong>Search menu&hellip;</strong> box, and a tile for each item.</li>
+    <li>Each tile shows the price and a stock line: <strong>N avail</strong>, <strong>N left</strong> (5 or fewer), <strong>Out of stock</strong>, <strong>Untracked</strong> (the item has no recipe, so no stock is counted) or <strong>86'd</strong> (only people with the 86 permission see 86'd items).</li>
+  </ul>
+  <p><strong>Current order side</strong></p>
+  <ul>
+    <li>Order type buttons: <strong>Walk-in</strong>, <strong>Dine-in</strong>, <strong>Takeaway</strong>, <strong>Room</strong>.</li>
+    <li>For <strong>Dine-in</strong> a <strong>Select table...</strong> list appears. For <strong>Room</strong> a <strong>Select checked-in room...</strong> list appears.</li>
+    <li><strong>Guest name</strong> (optional) and <strong>Covers</strong> (optional, how many guests are on the tab, 0 to 99).</li>
+    <li>The item lines. Click an item name to add a note to that line. The minus button becomes a bin when the quantity is 1. <strong>Clear</strong> empties the order.</li>
+    <li><strong>Total</strong>, then two buttons: the Fire button and <strong>Pay</strong>. The Fire button changes its name to match the order: <strong>Fire to Stations</strong> (food and drink), <strong>Send to Bar</strong>, <strong>Send to Kitchen</strong>, <strong>Fire Order</strong> (empty order), or <strong>Add to</strong> followed by the tab reference when you are adding to a tab. If a station is closed its button shows a closed badge.</li>
+    <li><strong>Repeat last round</strong> appears after you fire an order (or add a round to a tab) and the cart is empty. It reloads the same items so you can review and send them again.</li>
+  </ul>
 
-      <section>
-        <h2>Who sees the takings</h2>
-        <p>The figures on the till bar are <strong>gated by permission</strong>, so a front-of-house cashier gets a till
-          that does its job without exposing the day's money.</p>
-        <table>
-          <thead>
-            <tr>
-              <th>Tile</th>
-              <th>Who sees it</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>Orders</strong> (today's count)</td>
-              <td>Everyone who can open the till.</td>
-            </tr>
-            <tr>
-              <td><strong>Revenue · Cash · Mobile · Card</strong></td>
-              <td>Only users with the <code>pos_accounting</code> permission — typically supervisor, manager and admin.
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p>Other till capabilities are permissioned the same way, so a role can be given exactly as much as it needs:
-          <code>pos_till</code> (use the till at all), <code>pos_float</code> (declare the opening float),
-          <code>pos_86</code> (mark items unavailable), <code>pos_discount</code>, <code>pos_refund</code> and
-          <code>pos_force_serve</code>. A control the user lacks permission for is not rendered at all, rather than shown
-          and then refused.</p>
-        <div class="callout note">Review these under <strong>Admin → Users → Permissions</strong>. A cashier who cannot
-          see Revenue can still take every kind of payment, park tabs and fire to the kitchen — the gate is on the
-          reporting figures, never on the work.</div>
-      </section>
+  <h2 id="perms">Who can do what</h2>
+  <p>Staff can only do what the permissions on their account allow. Permissions are set in Staff &amp; Access.</p>
+  <table>
+    <thead><tr><th>Task</th><th>Permission needed</th></tr></thead>
+    <tbody>
+      <tr><td>Use the till, fire orders, take payment</td><td><strong>POS Till (Touch)</strong></td></tr>
+      <tr><td>Record the opening float</td><td><strong>POS Opening Float</strong></td></tr>
+      <tr><td>Give a discount</td><td><strong>POS Discounts</strong></td></tr>
+      <tr><td>86 or re-enable a menu item from the till</td><td><strong>POS Quick-86 Items</strong></td></tr>
+      <tr><td>Refund a paid order</td><td><strong>POS Refunds</strong></td></tr>
+      <tr><td>Void a tab or order (single or bulk)</td><td><strong>POS Void Tabs</strong> and <strong>Restaurant Orders (POS)</strong></td></tr>
+      <tr><td>Settle a tab whose food was never served without asking a manager</td><td><strong>POS Force-Serve Tab</strong></td></tr>
+      <tr><td>See, add to and settle other cashiers' tabs</td><td><strong>POS All Cashiers' Tabs</strong>. Without it you only see and work on tabs you opened.</td></tr>
+      <tr><td>See the live Kitchen, Bar and Coffee boards, today's order list and order timelines from the till</td><td><strong>POS Station Overview</strong></td></tr>
+      <tr><td>Close a shift that does not balance (with a reason)</td><td><strong>POS Shift Override</strong></td></tr>
+      <tr><td>See revenue, cash, mobile and card figures on the top bar; open the shift close report</td><td><strong>POS Accounting</strong></td></tr>
+      <tr><td>Settle a dine-in table from the Tables page</td><td><strong>Settle Restaurant Tables</strong></td></tr>
+    </tbody>
+  </table>
+  <div class="note"><p>Cancelling an order before the kitchen or bar has started it needs no special permission: any signed-in till user can cancel an order they opened. Managers and admins can cancel any order.</p></div>
 
-      <section>
-        <h2>Take an order</h2>
-        <ol class="steps">
-          <li><strong>Pick the destination</strong> &mdash; choose a <strong>Table number</strong> (dine-in),
-            <strong>Room number</strong> (room charge / room service) or leave blank for <strong>takeaway</strong>.
-          </li>
-          <li><strong>Pick a category</strong> on the left.</li>
-          <li><strong>Tap items</strong> in the centre &mdash; each tap adds 1; tap <strong>+ / −</strong> in the cart
-            to adjust qty.</li>
-          <li>Review the cart total at the bottom-right.</li>
-          <li><strong>Choose action:</strong>
-            <ul>
-              <li><strong>Pay &amp; Send</strong> (walk-in/takeaway) &mdash; pay now, then fire immediately to
-                KDS/BDS/CDS.</li>
-              <li><strong>Fire to Stations</strong> (or <strong>Send to Kitchen</strong> / <strong>Send to Bar</strong>,
-                based on cart mix) &mdash; opens the order as a tab to settle later.</li>
-              <li><strong>Settle from Tabs</strong> (dine-in) or <strong>Room Folio</strong> (room service) &mdash; the
-                pay button guides you to the correct settlement path.</li>
-              <li>Open tabs can be re-opened later from
-                the Tabs panel and add more items, then settle.</li>
-            </ul>
-          </li>
-          <li><strong>Optionally split the bill or add a tip</strong> in the payment modal before choosing a method (see sections below).</li>
-          <li><strong>Choose payment method:</strong> Cash · Mobile Money · Card.
-            <ul>
-              <li>Mobile Money requires <strong>provider + transaction reference</strong>.</li>
-              <li>Card requires <strong>last 4 digits + authorisation code</strong>.</li>
-              <li>For cash, enter the <strong>tendered amount</strong> — change due is calculated automatically.</li>
-            </ul>
-          </li>
-          <li>The success overlay shows the <strong>order reference</strong>. Print or hand the receipt to the guest.
-          </li>
-        </ol>
-        <div class="callout note">
-          <strong>Menu prices already include VAT.</strong> The price you see on a button is what the customer pays — the
-          till works out the VAT portion inside that figure for the books, so the total never grows at checkout. If VAT is
-          disabled in <strong>Finance → Accounting → VAT Settings</strong>, no VAT is split out. This matches the "Prices
-          already include VAT" pricing mode described in the <a href="13-finance-payments.html#vat">Finance guide</a>.
-        </div>
-      </section>
+  <h2 id="float">How to start your shift and record the opening float</h2>
+  <ol class="steps">
+    <li>Open <strong>POS Till</strong> from the admin menu.</li>
+    <li>Click <strong>More</strong> &rarr; <strong>Opening float</strong>. This item only appears if you have the <strong>POS Opening Float</strong> permission.</li>
+    <li>In <strong>Float amount</strong> type the cash put in the drawer, for example <code>5000.00</code>, or click one of the quick buttons (2,000, 5,000, 10,000, 20,000).</li>
+    <li>Optionally fill in <strong>Note</strong>, for example "Float handed over by manager".</li>
+    <li>Click <strong>Record float</strong>. You will see <em>"Float set: MWK 5,000.00"</em> (the amount is shown with your currency symbol).</li>
+  </ol>
+  <div class="warn"><p>The float is recorded for the audit trail only. The system does <strong>not</strong> add it to the expected cash when you close your shift. When you close, count only the cash taken from sales (see <a href="#close">How to close your shift</a>).</p></div>
 
-      <section>
-        <h2>Tabs (parked orders)</h2>
-        <ul class="checklist">
-          <li>A parked tab stays open until you settle it.</li>
-          <li>The Tabs tray shows: reference, table/room, order type, item count, total, age timer (turns red after 30
-            min), fired time, served time, and current kitchen status (pending / prep / ready / collection / served
-            counts).</li>
-          <li>Tap <strong>Settle</strong> to open the payment modal — where you can optionally split the bill and add a tip before choosing a payment method.</li>
-          <li>Tap <strong>Details</strong> to open the full order detail modal. Inside you'll see:
-            <ul>
-              <li><strong>Order Lifecycle track</strong> — five milestone steps (Placed → Fired → Ready → Served → Paid)
-                with icons, timestamps, and colour-coded dots: green for completed steps, primary colour for the current
-                active step.</li>
-              <li><strong>Item Status stepper</strong> — how many items are at each kitchen stage (pending / preparing /
-                ready / collecting / served).</li>
-              <li><strong>Line items table</strong> with per-item kitchen status and timestamps.</li>
-              <li><strong>Audit &amp; event log</strong> — every action on this order in chronological order.</li>
-            </ul>
-          </li>
-          <li>For settled tabs, use <strong>Receipt</strong> to open the printable receipt page.</li>
-          <li>Admin/manager tab cards also show a <strong>Lifecycle</strong> link. It opens the full order log
-            (<code>/admin/order-lifecycle.php</code>) <strong>in a panel over the till</strong>, with Cancel and Void
-            actions — your cart, table number and open tray are all still there when you close it with ✕ or
-            <kbd>Esc</kbd>. Nothing opens in a new tab any more, which matters most on a fullscreen till tablet with no
-            browser chrome to get back with.</li>
-          <li><strong>Search</strong> the open tabs from the box in the tray header (or press <kbd>/</kbd> while the
-            tray is open) — filter by reference, customer name, or table number. Handy on a busy night with many tabs.</li>
-        </ul>
-      </section>
+  <h2 id="pay-now">How to take an order and pay straight away</h2>
+  <p>Use this for walk-in and takeaway sales where the guest pays at once.</p>
+  <ol class="steps">
+    <li>Choose the order type: <strong>Walk-in</strong> or <strong>Takeaway</strong>. (For <strong>Dine-in</strong> you must pick a table first.)</li>
+    <li>Tap items on the menu. Tap an item name in the order to add a note such as "no onions" (up to 250 characters).</li>
+    <li>Optionally type a <strong>Guest name</strong>.</li>
+    <li>Click <strong>Pay</strong>. The <strong>Take payment</strong> window opens.</li>
+    <li>Under <strong>Payment method</strong> choose one:
+      <ul>
+        <li><strong>Cash</strong> &mdash; type the amount in <strong>Tendered</strong> (or click <strong>Exact</strong>). The change is shown. The <strong>Confirm payment</strong> button stays off until the tendered amount covers the total.</li>
+        <li><strong>Mobile Money</strong> &mdash; choose the <strong>Provider</strong> (<strong>Airtel Money</strong>, <strong>TNM Mpamba</strong> or <strong>Other</strong>) and type the <strong>Transaction reference</strong>. Both are required.</li>
+        <li><strong>Card (manual)</strong> &mdash; type the <strong>Card last 4 digits</strong> and the <strong>Authorisation code (from slip)</strong>. Both are required.</li>
+        <li><strong>Card POS</strong> is marked "soon" and cannot be used yet.</li>
+      </ul>
+    </li>
+    <li>Optionally fill in <strong>Email (for receipt)</strong>, <strong>Phone (for WhatsApp)</strong> and <strong>Notes</strong>.</li>
+    <li>If you have the <strong>POS Discounts</strong> permission, you can choose a discount (see <a href="#discounts">Discounts</a> below).</li>
+    <li>Click <strong>Confirm payment</strong>. You will see <em>"Paid ORD-... &mdash; MWK 12,000.00 &middot; cash. Change: MWK 3,000.00."</em></li>
+  </ol>
+  <p>What happens next: food items are sent to the Kitchen screen. Bar and Coffee Bar drinks are marked as handed over (served) straight away, so they do not wait on the Bar or Coffee Bar screens. Stock for those drinks comes off at that moment.</p>
+  <div class="note"><p>If a station is closed when you send an order, you see a window headed with the closed station, its opening hours and the word "Closed" (for example "Kitchen (06:00 – 23:00) Closed"), saying the ticket "will sit unseen on the station display until it reopens". Click <strong>Cancel</strong> to stop, or <strong>Fire Anyway</strong> to send it. For payment the same warning is shown inside the <strong>Take payment</strong> window.</p></div>
 
-      <section>
-        <h2>Running bar tabs — add another round</h2>
-        <p>A real bar tab grows through the night: the same tab accumulates every round and is settled once at the end.
-          Instead of ringing a brand-new order for each round, append to the existing tab.</p>
-        <ol class="steps">
-          <li>Open the <strong>Tabs</strong> tray and tap <strong>Add items</strong> on the tab you want to grow
-            (also offered as <strong>Add more</strong> on the "Order Fired" confirmation right after you open a tab).</li>
-          <li>You're returned to the menu with an orange <strong>"Adding to TAB-####"</strong> banner above the total.
-            The Fire button now reads <strong>Add to TAB-####</strong>.</li>
-          <li>Tap the new drinks/food and press <strong>Add to TAB-####</strong>. The items are appended, the tab total
-            updates, and the new lines fire to the Bar / Kitchen displays as fresh tickets.</li>
-          <li>Keep adding rounds as needed — the banner stays until you tap the <strong>✕</strong> on it, settle the tab,
-            or it is cancelled/voided.</li>
-          <li>Settle once at the end from the Tabs tray as usual.</li>
-        </ol>
-        <div class="callout note">
-          Adding items recalculates the tab's subtotal, total, cost and VAT automatically. You cannot add to a tab that
-          is already <strong>mid split-payment</strong> — finish settling it first. Restaurant staff can only add to tabs
-          they opened.
-        </div>
-      </section>
+  <h2 id="tab">How to open a tab (send now, pay later)</h2>
+  <p>Use this for dine-in, where the guest eats first and pays later.</p>
+  <ol class="steps">
+    <li>Click <strong>Dine-in</strong> and choose a table in <strong>Select table...</strong>. Only active, free tables are listed. A table that already has an open order cannot be chosen again.</li>
+    <li>Optionally fill in <strong>Guest name</strong> and <strong>Covers</strong>.</li>
+    <li>Tap the items.</li>
+    <li>Click the Fire button (<strong>Fire to Stations</strong>, <strong>Send to Kitchen</strong> or <strong>Send to Bar</strong>).</li>
+    <li>A window <strong>Order Fired!</strong> shows the order reference and the lines. It says <em>"Sent to Kitchen &amp; Bar &middot; MWK 18,500.00 &middot; open tab"</em> (the station names depend on the items). Its buttons are <strong>Print KOT</strong> (kitchen order ticket), <strong>Add more</strong>, <strong>View Tabs</strong> and <strong>New order</strong>.</li>
+  </ol>
+  <p>The tab now waits in <strong>Tabs</strong> until someone settles it. Walk-in and takeaway orders can also be sent as tabs. The Tabs tray lists up to 50 open tabs. Tabs from an earlier day stay on the list until they are settled or cancelled, with a warning that they are from a previous shift.</p>
+  <div class="note"><p>Stock for a tab item is taken off when the Kitchen, Bar or Coffee Bar marks it Ready (or Served), not when you fire it.</p></div>
 
-      <section>
-        <h2>Repeat last round</h2>
-        <p>After you fire or add a round, a <strong>Repeat last round</strong> button appears under the Fire/Pay buttons
-          (only while the cart is empty). Tap it to re-load the exact same items into the cart so you can fire the same
-          round again in one tap — review, then <strong>Fire</strong> or <strong>Add to TAB</strong>.</p>
-      </section>
+  <h2 id="add-round">How to add another round to a tab</h2>
+  <ol class="steps">
+    <li>Click <strong>Tabs</strong>.</li>
+    <li>On the tab card click <strong>Add items</strong>. You return to the menu with a banner saying you are adding to that tab. (The button is not shown once a split payment has started on that tab.)</li>
+    <li>Tap the new items and click the Fire button, now called <strong>Add to</strong> followed by the tab reference.</li>
+    <li>You will see <em>"Added 2 item(s) to ORD-... &mdash; new total MWK 24,000.00."</em> You stay in add mode so you can send more rounds.</li>
+  </ol>
+  <p>You can only add to tabs you opened, unless you have <strong>POS All Cashiers' Tabs</strong>. To stop adding, finish by settling the tab or start a new order. While you are adding to a tab the <strong>Pay</strong> button is switched off; settle from the Tabs tray instead.</p>
 
-      <section>
-        <h2>Covers (guest count)</h2>
-        <p>Use the <strong>Covers</strong> field in the order panel to record how many guests are on the tab. It shows as
-          a pill on the tab card and is stored against the order for per-head spend reporting. Optional — leave it at 0
-          to skip.</p>
-      </section>
+  <h2 id="settle">How to settle a tab (split bill, tip, discount)</h2>
+  <ol class="steps">
+    <li>Click <strong>Tabs</strong>. Use the <strong>Search tabs&hellip;</strong> box to find the tab.</li>
+    <li>Click <strong>Settle</strong> on the tab card. The <strong>Settle tab</strong> window opens with the <strong>Order total</strong>.</li>
+    <li>To split the bill, click a number next to <strong>Split bill</strong>: <strong>Off</strong>, 2, 3, 4, 5 or 6. The window shows <strong>Each person</strong>.</li>
+    <li>Choose a <strong>Tip</strong>: <strong>None</strong>, 5%, 10%, 15%, or type a <strong>Custom tip amount</strong>. When a bill is split, each person pays their share plus their own tip.</li>
+    <li>If you have the <strong>POS Discounts</strong> permission and nobody has paid yet, choose a discount (see <a href="#discounts">Discounts</a>).</li>
+    <li>Choose the <strong>Payment method</strong> (<strong>Cash</strong>, <strong>Mobile</strong> or <strong>Card</strong>) and fill in the same details as in "pay straight away" (<strong>Tendered</strong>; or <strong>Provider</strong> and <strong>Reference</strong>; or <strong>Card last 4</strong> and <strong>Auth code</strong>).</li>
+    <li>Click <strong>Take payment</strong>. On a split bill the button reads <strong>Pay split 1 of 3</strong>, then <strong>Pay split 2 of 3</strong>, and so on. After each person pays you see <em>"Split 1/3 &mdash; cash MWK 4,000.00. Next person ready."</em> and the window stays open for the next person.</li>
+    <li>When the last person has paid, a <strong>Tab settled</strong> window shows the receipt options (see <a href="#receipts">receipts</a>).</li>
+  </ol>
+  <div class="note"><p>On a split, the last person pays whatever is left, so rounding pennies are never lost (for example MWK 100.00 split three ways is 33.33, 33.33 and 33.34). Once the first person has paid, the split cannot be changed and only the next leg can be paid, even after a page refresh.</p></div>
+  <p>Drinks from the Bar and Coffee Bar are marked as served automatically when you settle, so an un-bumped drink ticket never blocks payment. Food is different: see <a href="#force-serve">How to settle a tab whose food was never served</a>.</p>
 
-      <section>
-        <h2>Settling drink tabs (bar auto-serve)</h2>
-        <p>Drinks are handed to the customer immediately, so the till does <strong>not</strong> wait for the Bar Display
-          to "bump" them before you can settle. When you settle a tab, any un-bumped <strong>Bar</strong> and
-          <strong>Coffee Bar</strong> lines are automatically marked served and their stock is deducted at that moment.</p>
-        <div class="callout note">
-          <strong>Food still waits.</strong> Kitchen items must be served (bumped on the Kitchen Display) before a tab
-          containing them can be settled — this protects against billing for food that never arrived. The settle dialog
-          also has quick <strong>+500 / +1k / +5k / Exact</strong> cash-tender buttons to speed up change.
-        </div>
-      </section>
+  <h2 id="discounts">Discounts</h2>
+  <p>A discount section only appears if you have the <strong>POS Discounts</strong> permission.</p>
+  <ul>
+    <li>In the <strong>Take payment</strong> window (pay now) or the <strong>Settle tab</strong> window, click a preset (<strong>None</strong>, 5%, 10%, 15%, 25%) or type an <strong>Amount</strong>.</li>
+    <li>Optionally choose a <strong>Reason</strong>: <strong>Staff discount</strong>, <strong>Happy hour</strong>, <strong>Manager override</strong>, <strong>Complimentary</strong>, <strong>Loyalty discount</strong> or <strong>Event promo</strong>.</li>
+    <li>On a tab, a discount can only be given on the first payment, and only once. If the tab already has a discount, a second one is not applied. Once a split has started the discount section is hidden.</li>
+    <li>A discount can never take the total to zero or below: the lowest total is 0.01.</li>
+    <li>Deal discounts (set up under Deals &amp; Promos) are applied automatically and listed in the payment window. They need no permission.</li>
+  </ul>
+  <p>If you do not have the permission and a discount is sent anyway, you see <em>"You do not have permission to apply discounts."</em></p>
 
-      <section>
-        <h2>Splitting a bill</h2>
-        <p>When a group wants to pay separately, use the <strong>Split Bill</strong> selector inside the Settle / Pay modal before processing any payment.</p>
-        <ol class="steps">
-          <li>Tap <strong>Settle</strong> on the tab (or <strong>Pay &amp; Send</strong> for a new order).</li>
-          <li>In the payment modal, find the <strong>Split Bill</strong> row and choose the number of ways: <strong>2 · 3 · 4 · 5 · 6</strong>. Choose <strong>Off</strong> for a single payer.</li>
-          <li>The modal shows <strong>Person 1 of N</strong> and the share amount (order total ÷ ways).</li>
-          <li>Optionally add a tip for this payer (see Tips section below), then choose a payment method and complete the payment as normal.</li>
-          <li>A green confirmation strip confirms that Person 1's share is paid and the modal advances automatically to <strong>Person 2 of N</strong>.</li>
-          <li>Repeat for each payer — each can use a different payment method and add their own tip.</li>
-          <li>After the last payer the order closes and the receipt is generated.</li>
-        </ol>
-        <div class="callout note">
-          The bill is split <strong>equally</strong> — each person pays the same share of the food total. Tips are per-person on top of the share. You cannot assign specific items to specific payers.
-        </div>
-        <div class="callout warn">
-          Do not close the modal between payers. If the browser is refreshed mid-split the order stays <em>placed</em> and can be re-opened from the Tabs tray to continue from the correct leg.
-        </div>
-      </section>
+  <h2 id="room">How to charge an order to a guest's room</h2>
+  <p>Room orders are never paid at the till. They are added to the guest's room bill (folio) and paid at check-out or through Payments.</p>
+  <ol class="steps">
+    <li>Click the <strong>Room Service</strong> button above the menu (or click <strong>Room</strong> as the order type). The menu shows only items that are switched on for room service.</li>
+    <li>In <strong>Select checked-in room...</strong> choose the room. Only rooms with a checked-in guest are listed. A room that already has an active room-service order is greyed out until that order is served, settled, cancelled or completed.</li>
+    <li>Tap the items and click the Fire button.</li>
+    <li>Each item is posted to the guest's folio straight away as a charge, and the ticket is sent to the Kitchen, Bar or Coffee Bar screen.</li>
+  </ol>
+  <p>The Room Service page (<a href="05-room-service.html">Room Service guide</a>) shows the same orders and lets staff mark them delivered. Room-service orders never show in the Tabs tray and never stop you closing your shift.</p>
+  <div class="warn"><p>Do not use <strong>Pay</strong> for a room order. The system refuses it with <em>"Room-service orders are charged to the guest room folio &mdash; use Park (Fire to Kitchen) to send the order to the kitchen."</em> If the charge cannot be posted to the folio, the whole order is refused and nothing is sent.</p></div>
 
-      <section>
-        <h2>Tips &amp; gratuity</h2>
-        <p>Tips are collected per payer inside the payment modal, on top of the food total (or share).</p>
-        <ul class="checklist">
-          <li>Four preset buttons: <strong>None · 5% · 10% · 15%</strong>. Tap one to apply it instantly.</li>
-          <li>Or type any amount in the <strong>Custom tip</strong> field.</li>
-          <li>The <strong>Amount due</strong> display updates live — share + tip — so the cashier always sees exactly what to collect.</li>
-          <li>For cash payments the tendered field pre-fills to the amount due; adjust it if the guest hands over more.</li>
-          <li>Tips appear as a separate green line on the printed receipt, with a <strong>Grand Total</strong> (food + tip).</li>
-          <li>The full tips total for the shift is shown in the Z-report summary under <strong>Tips collected</strong>.</li>
-        </ul>
-      </section>
+  <h2 id="cancel-void">How to cancel or void an order</h2>
+  <p><strong>Cancel</strong> is for an unpaid tab where nobody has started the food or drink. <strong>Void</strong> reverses an order even after work has started, or after it is paid.</p>
+  <h3>Cancel an unpaid tab</h3>
+  <ol class="steps">
+    <li>Click <strong>Tabs</strong>, then <strong>More</strong> on the tab card, then <strong>Cancel</strong>. The Cancel button only appears while every item is still pending.</li>
+    <li>In the <strong>Cancel order</strong> window type a reason of at least 8 characters. The window counts <em>"0 / 8 characters minimum"</em> as you type.</li>
+    <li>Click <strong>Cancel order</strong>. You will see <em>"Order cancelled."</em> or a message from the system. If the order was a room-service order, its folio charges are voided too.</li>
+  </ol>
+  <p>You can cancel your own tabs. Managers and admins can cancel any tab. Many tabs at once: tick them in the Tabs tray (<strong>Bulk tools</strong> &rarr; <strong>Select all</strong>, <strong>Select stale</strong> or tick each card) and click <strong>Bulk cancel</strong>. You see <em>"3 tabs cancelled."</em>, or <em>"2 cancelled, 1 failed."</em></p>
+  <h3>Void a tab</h3>
+  <ol class="steps">
+    <li>You need <strong>POS Void Tabs</strong> and <strong>Restaurant Orders (POS)</strong>. Without <strong>POS Void Tabs</strong> the button is not shown.</li>
+    <li>Click <strong>Tabs</strong>, <strong>More</strong> on the tab card, then <strong>Void</strong>.</li>
+    <li>Type a reason of at least 8 characters (an optional follow-up note is also offered) and click <strong>Void order</strong>.</li>
+    <li>You will see <em>"Order voided."</em> Stock is restored, the order is removed from the station screens, any payment is reversed with a matching refund line, and any room-service charge is taken off the folio.</li>
+  </ol>
+  <p>Many tabs at once: select them and click <strong>Bulk void</strong>. You see <em>"3 tabs voided."</em> A void is permanent and is recorded with your name and reason.</p>
+  <div class="note"><p>A paid order cannot be voided from the Tabs tray because only open tabs are listed. Managers and admins can void a paid order from <strong>Orders &amp; Tabs</strong> (see the Stock guide). A paid order can also be refunded from <strong>Recent</strong>.</p></div>
 
-      <section>
-        <h2>How stock works</h2>
-        <ul class="checklist">
-          <li>Stock is <strong>not deducted when you fire an order</strong>. It is deducted when the kitchen/bar/coffee
-            station marks each item <strong>Ready</strong> (preparation complete).</li>
-          <li>This means a <em>Cancel Before Prep</em> never needs to restore stock &mdash; nothing was taken yet.</li>
-          <li>A <em>Void</em> on a partially-prepared order only restores stock for items that had already been marked
-            Ready.</li>
-          <li>The POS shows a ready alert from each station when all their items are ready or in the collection queue.
-          </li>
-        </ul>
-      </section>
+  <h2 id="refund">How to refund a paid order</h2>
+  <ol class="steps">
+    <li>Click <strong>Recent</strong>. Only people with <strong>POS Refunds</strong> see the <strong>Refund</strong> button next to paid orders. (Without that permission, ask a manager to do it.)</li>
+    <li>Click <strong>Refund</strong>. The <strong>Process refund</strong> window explains the order will be marked as refunded and a negative payment record created, and that stock is <em>not</em> automatically restored.</li>
+    <li>Type the <strong>Reason for refund</strong> (at least 5 characters, for example "Guest complaint, overcharge, duplicate order").</li>
+    <li>Click <strong>Confirm refund</strong>. You will see <em>"Refund processed for ORD-..."</em></li>
+  </ol>
+  <p>The whole order is refunded, including every leg of a split bill, in the method it was paid with. Only paid orders can be refunded, and an order that is already fully refunded is refused. Because stock is not put back, a manager must correct stock by hand if needed.</p>
 
-      <section>
-        <h2>My orders</h2>
-        <p>Tap <strong>My orders</strong> in the till bar. It opens a large window over the till listing every order
-          you rang up this business day, refreshed every second so station changes show almost at once. The number on
-          the button counts orders that are <strong>still open</strong> &mdash; not paid yet, or food and drink not all
-          out &mdash; so it drops back to nothing when your section is clear.</p>
-        <table>
-          <thead>
-            <tr>
-              <th>On each order card</th>
-              <th>What it means</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Left edge colour</td>
-              <td><strong>Amber</strong> waiting for the station &middot; <strong>blue</strong> being made &middot;
-                <strong>green</strong> ready to collect &middot; <strong>grey</strong> finished.</td>
-            </tr>
-            <tr>
-              <td>First pill</td>
-              <td>Where the food is, in plain words: <em>Waiting for the station</em>, <em>Being made</em>,
-                <em>Ready &mdash; collect it</em>, <em>Served</em>.</td>
-            </tr>
-            <tr>
-              <td>Second pill</td>
-              <td>The money: <em>Not paid</em>, <em>Open tab &mdash; not paid</em>, <em>Paid &middot; method</em>,
-                <em>Refunded</em> or <em>Voided</em>.</td>
-            </tr>
-            <tr>
-              <td><span class="pill red">RUSH</span> tag</td>
-              <td>The order has been marked high-priority; every station sees it highlighted.</td>
-            </tr>
-            <tr>
-              <td>Station pills</td>
-              <td>Shown when an order goes to more than one station &mdash; a tick when that station is done, or how many
-                items it still has to go.</td>
-            </tr>
-          </tbody>
-        </table>
-        <p>Use <strong>Still open</strong> / <strong>All today</strong> at the top to switch the list. Tap any card to
-          open the order, where you can take payment.</p>
-      </section>
+  <h2 id="86">How to 86 an item (mark it unavailable)</h2>
+  <p>"86" means the item is finished. This hides it from the till for everyone.</p>
+  <ol class="steps">
+    <li>You need <strong>POS Quick-86 Items</strong>. Click <strong>More</strong> &rarr; <strong>86 mode</strong>. You see <em>"86 Mode ON &mdash; tap an item to toggle availability"</em>. While this mode is on, tapping a tile changes its availability instead of adding it to the order.</li>
+    <li>Each tile shows <strong>Tap to 86</strong> (available item) or <strong>Tap to enable</strong> (item already 86'd, shown with an 86 badge).</li>
+    <li>Tap the item. You see <em>"86'd: Item name"</em> or <em>"Re-enabled: Item name"</em>.</li>
+    <li>Click <strong>More</strong> &rarr; <strong>86 mode</strong> again to switch the mode off. You see <em>"86 Mode OFF"</em>.</li>
+  </ol>
+  <p>86'd items disappear from the till for staff who cannot 86. You can also change availability on the Menu page (see <a href="#menu">How to add or change a menu item</a>).</p>
+  <div class="note"><p>This is different from "86 this item" on a Kitchen, Bar or Coffee Bar ticket. That removes one line from one order and alerts the cashier. See the <a href="02-kds-kitchen.html">Kitchen guide</a>.</p></div>
 
-      <section>
-        <h2>Sending a note to the kitchen</h2>
-        <p>Tap <strong>Note</strong> in the till bar. The modal asks for things in the order a cashier actually thinks
-          of them:</p>
-        <ol class="steps">
-          <li><strong>Type the message.</strong> The box is focused the moment the modal opens, so you can start typing
-            straight away without tapping anything first.</li>
-          <li><strong>Choose who it goes to</strong> — Kitchen, Bar or Coffee — and tick <strong>Urgent</strong> if it
-            cannot wait. Both sit on one row under the message.</li>
-          <li><strong>Attach it to an order</strong> only if you need to. The order picker is folded away by default;
-            open <em>Attach to an order</em> to pick one. If you opened the modal from an order, it is already selected
-            and the picker opens by itself showing that choice.</li>
-          <li>Tap <strong>Send</strong>. The note lands on the station board in about a second.</li>
-        </ol>
-        <div class="callout note">A note that cannot be delivered now says so. If a message has been dismissed or the
-          order has moved past it, the till shows a clear error rather than a success tick — so "sent" always means
-          sent.</div>
-      </section>
+  <h2 id="force-serve">How to settle a tab whose food was never served</h2>
+  <p>A tab cannot be settled while it has food that the Kitchen has not marked served. If the food was never bumped (for example from an earlier shift), a manager can force it.</p>
+  <ol class="steps">
+    <li>Click <strong>Settle</strong> on the tab and click <strong>Take payment</strong>. If food is not served you see <em>"This tab still has 2 food items not yet served &mdash; complete kitchen service, or ask a manager to force-serve it before settling."</em></li>
+    <li>If you have <strong>POS Force-Serve Tab</strong> the till retries by itself with the force option.</li>
+    <li>If you do not, a <strong>Manager Authorisation</strong> window opens, showing the permission required. A different manager types their <strong>Manager username</strong> and <strong>Password</strong> and clicks <strong>Authorise</strong>. You see <em>"Authorised by (manager name)"</em> and the payment goes through.</li>
+  </ol>
+  <p>The manager approval works once and lasts 5 minutes. You cannot approve your own action. After 5 wrong attempts in 10 minutes the till says <em>"Too many attempts, wait N minute(s) before trying again."</em> If the food's ingredients are not in stock, force-serve is refused with a stock message; receive stock first.</p>
 
-      <section>
-        <h2>Alerts and messages</h2>
-        <p>Anything a station sends <em>you</em> opens as <strong>one large card in the middle of the till</strong>:</p>
-        <ul class="checklist">
-          <li><strong>Order ready</strong> (green) &mdash; the order number, table and items. Tap <strong>Got it</strong>,
-            or <strong>Open order</strong> to go straight to it.</li>
-          <li><strong>Message from a station</strong> (brown, or <strong>red when urgent</strong>, including &ldquo;ready
-            for collection&rdquo;) &mdash; tap <strong>Got it</strong> to tell the station you have seen it, or tap a quick
-            reply such as <em>On my way</em> or <em>2 minutes</em>. <strong>Later</strong> keeps it waiting in Messages.</li>
-          <li><strong>Reply to your note</strong> (blue) &mdash; the station's answer to a note you sent.</li>
-          <li>The card stays until someone taps it and <strong>chimes again every 20 seconds</strong> while it waits, so it
-            cannot be missed during a rush. If several arrive together they queue &mdash; the band shows
-            &ldquo;1 of 3&rdquo; &mdash; and <strong>Got them all &mdash; close</strong> clears the lot.</li>
-          <li><strong>Messages</strong> in the till bar holds everything from today. It turns <strong>red with a
-            count</strong> while a station note is still waiting for you, listed under <strong>Needs you</strong> with the
-            same Got it and reply buttons. Tap <strong>Clear</strong> on an old message to remove it for good.</li>
-          <li>Confirmation and error <strong>toasts appear centred at the bottom</strong> of the till, clear of the cart
-            and the pay buttons, and clear of the on-screen keyboard.</li>
-          <li>Use <strong>Sounds</strong> / <strong>Sound Settings</strong> to choose the normal alert, urgent alert,
-            and
-            volume for the till device.</li>
-          <li>If a tab was already paid elsewhere, stock is short, or there is nothing pending, POS shows a friendly
-            dialog and refreshes the affected tray instead of leaving the cashier guessing.</li>
-          <li>Important action buttons include a brief click lock to prevent accidental double taps.</li>
-        </ul>
-      </section>
+  <h2 id="notes">How to send a note to a station and read replies</h2>
+  <ol class="steps">
+    <li>Click <strong>Note</strong>.</li>
+    <li>Type the <strong>Message</strong> (up to 255 characters). Under <strong>Send to</strong> choose <strong>Kitchen</strong>, <strong>Bar</strong> or <strong>Coffee Bar</strong>. Tick <strong>Urgent</strong> only if it cannot wait.</li>
+    <li>Optionally open <strong>Attach to an order &amp; see its thread</strong> and pick an order.</li>
+    <li>Click <strong>Send note</strong>. You see <em>"Kitchen note sent."</em> (or <em>"[URGENT]"</em> added for urgent notes). If the message is empty you see <em>"Type a station note first."</em></li>
+  </ol>
+  <p>Replies and notes from the stations appear under <strong>Messages</strong> and as alert cards. A station's "ready for collection" message appears as <strong>Ready for collection</strong> with the order reference. An alert from the station about an 86'd item tells you to inform the guest and offer an alternative.</p>
 
-      <section>
-        <h2>Cancelling an order before prep</h2>
-        <p>If you realise a mistake immediately after firing — and the kitchen/bar has not started yet — you can cancel
-          without involving a manager.</p>
-        <ol class="steps">
-          <li>Open the <strong>Tabs tray</strong>.</li>
-          <li>Find the order. If <strong>all items are still pending</strong> (none started), a red
-            <strong>Cancel (Before Prep)</strong> button appears.
-          </li>
-          <li>Enter a reason of at least 8 characters (logged for audit).</li>
-          <li>The order is removed from all station boards. Because no stock was deducted yet, nothing needs restoring.
-          </li>
-        </ol>
-        <div class="callout warn">Once the kitchen or bar taps <strong>Start</strong> or <strong>Ready</strong> on any
-          item, the <em>Cancel Before Prep</em> button disappears. You must use <strong>Void</strong> (manager) instead.
-        </div>
-      </section>
+  <h2 id="receipts">How to print a kitchen ticket or send a receipt</h2>
+  <ul>
+    <li><strong>Kitchen ticket (KOT):</strong> click <strong>Print KOT</strong> in the <strong>Order Fired!</strong> window, or click <strong>Tabs</strong>, <strong>More</strong>, <strong>KOT</strong> on a tab card.</li>
+    <li><strong>Receipt after payment:</strong> the <strong>Payment received</strong> or <strong>Tab settled</strong> window offers <strong>Email</strong> (type the address and click <strong>Send email</strong>), <strong>WhatsApp</strong>, and <strong>Print receipt</strong>. Click <strong>Done</strong> when finished.</li>
+    <li><strong>Receipt later:</strong> click <strong>Recent</strong> and click the order to open its receipt page (<code>stock-receipt.php</code>). There you can email it (<em>"Receipt emailed to name@example.com."</em>), print it, or download a PDF.</li>
+  </ul>
+  <div class="warn"><p>The WhatsApp button does not send a WhatsApp message. The system only records that you asked, and says <em>"WhatsApp delivery is provisioned but not fully configured yet. The intent has been logged &mdash; no billable send was triggered."</em> Use email or print instead.</p></div>
+  <p>On the receipt page, a manager or admin can apply a discount or service charge before an order is paid (<strong>Manual consolidation</strong>). After payment the totals can no longer be changed: <em>"This order has been paid - its totals can no longer be changed. Use the refund flow and take a new sale instead."</em></p>
 
-      <section>
-        <h2>Voiding an order <span class="pill amber">manager only</span></h2>
-        <ol class="steps">
-          <li>Open the <strong>Tabs tray</strong> and find the order, or open it from <strong>Restaurant
-              Orders</strong>.</li>
-          <li>Tap <strong>Void &amp; restore stock</strong>.</li>
-          <li>Type a reason of <strong>at least 8 characters</strong> (saved for audit).</li>
-          <li>Stock is restored for any items that had already been prepared (marked Ready on KDS). Payment is cancelled
-            and the order is removed from KDS/BDS/CDS automatically.</li>
-        </ol>
-      </section>
+  <h2 id="close">How to close your shift (Z-report)</h2>
+  <p>Close your shift at the end of your session. The count is blind: the till does not show you the expected amounts until you submit.</p>
+  <ol class="steps">
+    <li>First settle or cancel every open tab that you opened in this business day. Room-service orders do not count. If any remain, closing is blocked (see Problems).</li>
+    <li>Click <strong>More</strong> &rarr; <strong>Close shift (Z-report)</strong>.</li>
+    <li>Count what you took, then enter all three amounts. Enter 0 if there is none:
+      <ul>
+        <li><strong>Cash counted</strong> &mdash; the cash from sales, including tips, after refunds. Do <em>not</em> include the opening float: subtract it from what is in the drawer.</li>
+        <li><strong>Mobile money totals</strong> &mdash; the total of mobile money payments you took.</li>
+        <li><strong>Card totals</strong> &mdash; the total of card payments you took.</li>
+      </ul>
+    </li>
+    <li>Optionally type a <strong>Note</strong>, for example "Drawer started with X".</li>
+    <li>Click <strong>Close shift</strong>.</li>
+    <li>If each amount is within 1.00 of what the system expects, the shift closes and a <strong>Shift closed</strong> window shows a table with <strong>Tender</strong>, <strong>Expected</strong>, <strong>Declared</strong> and <strong>Variance</strong> for Cash, Mobile and Card, plus orders, voids, tips collected and tabs settled from earlier. You will see <em>"Shift closed. Paid orders: 24 (settled earlier tabs: 2). Variance &mdash; cash: 0.00, mobile: 0.00, card: 0.00."</em></li>
+    <li>Click <strong>Print Z-report</strong> to print that window, or <strong>Continue</strong>.</li>
+  </ol>
+  <h3>If your count does not balance</h3>
+  <ul>
+    <li>Without <strong>POS Shift Override</strong> you see <em>"Shift does not balance (variance 250.00). Recount the drawer or ask a supervisor to close on your behalf with an override."</em> Recount and try again, or ask a supervisor.</li>
+    <li>A supervisor with <strong>POS Shift Override</strong> ticks <strong>Admin override (close despite variance)</strong>, types a <strong>Reason (audit-logged)</strong> of at least 5 characters, and clicks <strong>Close shift</strong>. The reason is saved with the close and shown on the report.</li>
+  </ul>
+  <p>Each time you close, the next close for you starts from this one, so a second close in the same day never counts the first one's sales again.</p>
 
-      <section>
-        <h2>Closing your shift (Z-report)</h2>
-        <ol class="steps">
-          <li>Open <strong>More</strong> (<i class="fas fa-ellipsis"></i>) in the till bar and tap <strong>Close shift
-              (Z-report)</strong>, at the top under <em>Shift</em>.</li>
-          <li>Type your <strong>counted cash drawer total</strong>. Include any cash tips in this count — the system adds expected tips to the expected cash total automatically.</li>
-          <li>The variance is calculated automatically.</li>
-          <li>If variance &gt; tolerance, an <strong>admin override + reason ≥ 5 chars</strong> is required.</li>
-          <li>Confirm. A Z-report is saved and you are signed out.</li>
-        </ol>
-        <div class="callout note">
-          If tips were collected during the shift, the Z-report summary shows a <strong>Tips collected</strong> line with the total. Expected cash, mobile, and card amounts already include tips, so declare your full collected amount including tips.
-        </div>
-      </section>
+  <h2 id="zreport">How to read the shift close report</h2>
+  <p>Management can open the full printable report. You need the <strong>POS Accounting</strong> permission.</p>
+  <ol class="steps">
+    <li>Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>POS Accounting</strong>.</li>
+    <li>Pick the <strong>Business date</strong>, click <strong>Apply</strong>, then click <strong>Z-report</strong>. This opens <code>shift-close-report.php</code> for that date.</li>
+    <li>The day view is titled <strong>Shift Closes</strong> with the date. It shows <strong>Total Revenue</strong>, <strong>All Orders</strong>, <strong>Total Voids</strong> and <strong>Net Variance</strong>, and a table with <strong>Cashier</strong>, <strong>Closed</strong>, <strong>Revenue</strong>, <strong>Orders</strong>, <strong>Voids</strong>, <strong>Cash Var</strong>, <strong>Mobile Var</strong>, <strong>Card Var</strong>, <strong>Variance</strong>, <strong>Override</strong> and <strong>Report</strong>. If any cashier is short a banner reads <em>"TOTAL SHORTFALL ACROSS ALL CASHIERS ... investigate before EOD sign-off."</em> A <strong>Shift Close History</strong> table lists earlier closes.</li>
+    <li>Click <strong>Report</strong> on a row for one cashier's report. It shows <strong>Total Revenue</strong>, <strong>Paid Orders</strong>, <strong>Voids</strong>, <strong>Settled Tabs</strong>, then <strong>Tender Reconciliation</strong> (<strong>Tender</strong>, <strong>System (Expected)</strong>, <strong>Counted (Declared)</strong>, <strong>Variance</strong>, <strong>Status</strong>, where Status is <strong>BALANCED</strong>, <strong>SHORTFALL</strong> or <strong>OVERAGE</strong>), <strong>Shift Notes</strong>, <strong>Top Items</strong>, <strong>Paid Orders</strong>, <strong>Refund / Void Payouts</strong> and <strong>Voided Orders</strong>.</li>
+    <li>Use <strong>Print / Save PDF</strong> to print. A short cashier shows <em>"SHORTFALL DETECTED &mdash; cumulative variance ... Management review required."</em> An override close shows <em>"Override applied."</em> with the reason.</li>
+  </ol>
+  <p>For day-end money checks across the whole hotel see <a href="14-reports-eod.html">Reports and end of day</a>.</p>
 
-      <section>
-        <h2>POS permissions overview</h2>
-        <p>Each POS action is controlled by a granular permission key that can be granted or revoked per user in <strong>User Management → Permissions</strong>. The defaults by role are:</p>
-        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
-          <thead>
-            <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
-              <th style="text-align:left;padding:8px 10px;">Permission</th>
-              <th style="text-align:center;padding:8px 6px;">Admin</th>
-              <th style="text-align:center;padding:8px 6px;">Manager</th>
-              <th style="text-align:center;padding:8px 6px;">Restaurant Staff</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:7px 10px;"><code>pos_till</code> — Access POS</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td></tr>
-            <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:7px 10px;"><code>pos_float</code> — Opening float</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td></tr>
-            <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:7px 10px;"><code>pos_discount</code> — Apply discounts</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td></tr>
-            <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:7px 10px;"><code>pos_86</code> — Quick-86 items</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td><td style="text-align:center;">—</td></tr>
-            <tr><td style="padding:7px 10px;"><code>pos_refund</code> — Process refunds</td><td style="text-align:center;">✓</td><td style="text-align:center;">✓</td><td style="text-align:center;">—</td></tr>
-          </tbody>
-        </table>
-        <div class="callout note" style="margin-top:12px;">
-          Permissions can be individually overridden per user — a restaurant staff member can be granted <code>pos_refund</code> if needed, or a manager can have it revoked.
-        </div>
-      </section>
+  <h2 id="offline">What happens when the internet drops</h2>
+  <ul>
+    <li>A header pill shows <strong>Offline</strong>, and a bar at the bottom says <strong>You are offline</strong>.</li>
+    <li>Only the <strong>Pay</strong> (pay straight away) form is saved on the device while offline. You see <em>"You are offline &mdash; action saved locally and will sync automatically when the connection returns."</em> The bar then reads <strong>Offline &mdash; queued</strong> with a count such as <strong>1 queued</strong>.</li>
+    <li>When the connection returns the bar reads <strong>Back online &mdash; syncing</strong> and sends the saved orders. <strong>Retry now</strong> sends them straight away. If your session has expired you see <em>"Session expired &mdash; log in again to sync N queued action(s)."</em> Sign in again and the orders send.</li>
+    <li>Each saved order carries a unique number, so if it is sent twice the till answers <em>"Order ... was already recorded &mdash; duplicate submission ignored, nothing charged twice."</em></li>
+    <li>Everything else (<strong>Fire</strong>, adding to a tab, settling a tab, refunds, close shift, notes) needs the connection. The till says <em>"Network error &mdash; could not reach the server. Please retry."</em> Do not assume it went through; check <strong>Tabs</strong> once you are back online.</li>
+  </ul>
+  <p>Managers can see what was queued and when it synced: Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Offline Log</strong> (page title <strong>Offline Activity Log</strong>), which needs the <strong>Offline Activity Log</strong> permission.</p>
 
-      <section>
-        <h2>Manager in-session authorisation</h2>
-        <p>If a logged-in cashier attempts an action they don't have permission for (e.g. a refund), the system shows a <strong>Manager Authorisation overlay</strong> instead of blocking with an error. This lets a manager approve the action on the spot — without requiring the cashier to log out.</p>
-        <ol class="steps">
-          <li>The cashier taps the action button (e.g. <strong>Refund</strong> or <strong>86</strong>).</li>
-          <li>The dark <strong>Manager Authorisation</strong> modal appears, showing which permission is required.</li>
-          <li>A manager (or any user with the required permission) enters <strong>their own username and password</strong>.</li>
-          <li>On success, a one-use session token is issued — valid for 5 minutes — and the action proceeds with both the cashier <em>and</em> the authorising manager recorded in the audit log.</li>
-        </ol>
-        <div class="callout warn">
-          The authorising manager must be a <em>different</em> user account than the cashier — self-authorisation is blocked.
-        </div>
-      </section>
+  <h2 id="menu">How to add or change a menu item</h2>
+  <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong> (<code>/admin/menu-management.php</code>). Permission: <strong>Menu</strong>. Only shown when the <strong>POS &amp; Stations</strong> module is on.</p>
+  <p>The page has three buttons: <strong>Food Menu</strong>, <strong>Drinks Menu</strong> and <strong>Room Service</strong> (which jumps to the Room Service category). Food categories are Breakfast, Lunch, Dinner, Snacks and Room Service. Drink categories are Coffee, Tea, Juice, Cocktails, Mocktails, Beer, Wine, Spirits, Soft Drinks and Room Service.</p>
+  <h3>Add an item</h3>
+  <ol class="steps">
+    <li>Open <strong>Food Menu</strong> or <strong>Drinks Menu</strong> and click <strong>Add Food Item</strong> / <strong>Add Drink Item</strong> (or <strong>Add Item</strong> beside a category).</li>
+    <li>In <strong>Add New Menu Item</strong> choose a <strong>Category</strong> and fill in <strong>Item name</strong>, <strong>Description</strong> and <strong>Price</strong>. The price can be 0 or more.</li>
+    <li>Optionally set <strong>Display order</strong> (left blank, the item goes to the end of its category) and, for drinks, <strong>Tags</strong>.</li>
+    <li>Choose the <strong>Station (where this item is prepared)</strong>: <strong>Kitchen (KDS)</strong>, <strong>Bar (BDS)</strong> or <strong>Coffee Bar (CDS)</strong>. This decides which screen receives the ticket.</li>
+    <li>Tick <strong>Available (visible on menu)</strong>, <strong>Show in POS / Till</strong> and <strong>Show in Room Service Dashboard</strong> as needed.</li>
+    <li>Click <strong>Add item</strong>. You will see <em>"Menu item added successfully!"</em></li>
+  </ol>
+  <h3>Change an item</h3>
+  <ol class="steps">
+    <li>Edit the row directly: name, description, price, <strong>Routing</strong> (station and the <strong>POS</strong> and <strong>Room Service</strong> tick boxes) and <strong>Status</strong> (<strong>Available</strong> or <strong>Unavailable</strong>).</li>
+    <li>Click <strong>Save</strong> on that row. You will see <em>"Menu item updated successfully!"</em> You can drag rows to change their order.</li>
+    <li><strong>Toggle</strong> flips Available/Unavailable straight away: <em>"Menu item availability updated!"</em></li>
+    <li><strong>Recipe</strong> opens the stock recipe for the item (see the <a href="08-stock-orders.html">Stock guide</a>). <strong>Feature</strong> posts the item to Facebook, if posting is switched on.</li>
+    <li><strong>Delete</strong> asks <em>"Delete this menu item? Any attached stock recipe will also be removed."</em> Click <strong>Delete</strong> to confirm: <em>"Menu item deleted successfully!"</em></li>
+  </ol>
+  <div class="note"><p>An item shows on the till only if it is <strong>Available</strong> and <strong>Show in POS / Till</strong> is ticked. It shows in room-service mode only if <strong>Show in Room Service Dashboard</strong> is ticked. The price on the menu is the price the guest pays, tax included. The till always uses the price saved here, not a price sent from the screen.</p></div>
 
-      <section>
-        <h2>Opening float <span class="pill">pos_float</span></h2>
-        <p>Record the cash placed in the drawer before your first order so the Z-report variance accounts for it.</p>
-        <ol class="steps">
-          <li>Tap <strong>Float</strong> in the till bar. If you don't have the <code>pos_float</code> permission, the Manager Authorisation overlay appears first.</li>
-          <li>Enter the float amount — quick-fill buttons for common values (2 000, 5 000, 10 000, 20 000).</li>
-          <li>Optionally add a note (e.g. <em>"Float handed over by manager"</em>).</li>
-          <li>Tap <strong>Record float</strong>. The entry is saved to <code>stock_shift_opens</code> and written to the system activity log.</li>
-        </ol>
-        <div class="callout note">
-          The float is purely a declaration — it does not affect order processing. When reconciling, expected cash = float + sales. The float record helps explain any surplus in the drawer.
-        </div>
-      </section>
+  <h2 id="tables">How to set up the dine-in tables</h2>
+  <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Tables</strong> (<code>/admin/restaurant-tables.php</code>). Permission: <strong>Ingredients &amp; Recipes</strong>. The till only offers tables from this list and stops two open orders on the same table.</p>
+  <ol class="steps">
+    <li>Under <strong>Table Range</strong> fill in <strong>From</strong> and <strong>To</strong> (table numbers) and, if you wish, a default <strong>Capacity</strong> (seats).</li>
+    <li>Tick <strong>Deactivate numeric tables outside this range</strong> if tables outside the range should be switched off.</li>
+    <li>Click <strong>Generate / Update Range</strong>. You will see <em>"Restaurant table range saved."</em></li>
+    <li>In the table list, set each table's <strong>Capacity</strong> (optional), <strong>Notes</strong> (for example Window, patio, VIP) and the <strong>Active</strong> tick, then click <strong>Save Table Details</strong>. You will see <em>"Table capacities and active flags saved."</em></li>
+  </ol>
+  <p>The list shows each table's <strong>Live Status</strong> (Available, or Pending, Preparing, Ready, Collecting, Served, Awaiting Payment, Recalled, Active), its <strong>Current Order</strong> and its <strong>Last Payment</strong>. A summary shows total rows, active tables and total capacity. <strong>Open POS</strong> takes you to the till.</p>
 
-      <section>
-        <h2>Discounts at the till <span class="pill">pos_discount</span></h2>
-        <p>Apply a percentage or fixed discount to an order before taking payment — available on both new orders and tab settlements. The discount section is hidden if the logged-in user lacks <code>pos_discount</code>.</p>
-        <ol class="steps">
-          <li>Open the <strong>Pay</strong> modal (new order) or tap <strong>Settle</strong> on a tab.</li>
-          <li>In the <strong>Discount</strong> section, choose a preset: <strong>None · 5% · 10% · 15% · 25%</strong> — or type a custom amount.</li>
-          <li>Pick a <strong>reason</strong> from the dropdown (Staff discount, Happy hour, Manager override, Complimentary, Loyalty, Event promo).</li>
-          <li>The total display updates live — confirm payment as normal.</li>
-          <li>The discount is saved on the order as <code>discount_amount</code> / <code>discount_reason</code>, logged to the activity log, and printed on the receipt.</li>
-        </ol>
-        <div class="callout warn">
-          For split bills, discounts can only be applied on the <strong>first leg</strong>. Once any split payment has been recorded, the discount section is hidden to prevent changing the agreed total.
-        </div>
-      </section>
+  <h2 id="table-pay">How to take payment for a table from the Tables page</h2>
+  <p>You need <strong>Settle Restaurant Tables</strong>.</p>
+  <ol class="steps">
+    <li>Open the <strong>Tables</strong> page. Find the table with an open order.</li>
+    <li>Click <strong>Take payment</strong> in its order box (<strong>POS details</strong> shows the order timeline).</li>
+    <li>Choose <strong>Cash</strong>, <strong>Mobile money</strong> or <strong>Card</strong> and fill in <strong>Tendered</strong>, or <strong>Provider</strong> and <strong>Reference</strong>, or <strong>Card last 4</strong> and <strong>Auth code</strong>.</li>
+    <li>Click <strong>Take payment &amp; close table</strong>. You will see <em>"Table 5 settled &mdash; ORD-... &middot; MWK 18,500.00 &middot; cash."</em> A <strong>Table settled</strong> window offers email, WhatsApp and print.</li>
+  </ol>
+  <p>This takes the full amount at once. It has no split, tip or discount. If part of the bill has already been paid at the till you see <em>"This tab is mid split-payment (1 of 3 paid) - finish it from the POS till."</em></p>
 
-      <section>
-        <h2>Quick-86 item toggle <span class="pill amber">pos_86 — manager</span></h2>
-        <p>Take a menu item off sale instantly — without leaving the POS — when you run out or need to pull it for any reason. Restaurant staff who lack <code>pos_86</code> will see the Manager Authorisation overlay when they tap the 86 button.</p>
-        <ol class="steps">
-          <li>Open <strong>More</strong> (<i class="fas fa-ellipsis"></i>) in the till bar and tap <strong>86
-              mode</strong>, under <em>Kitchen</em>.</li>
-          <li>The menu enters <strong>86 Mode</strong> — all tiles show "Tap to 86" or "Tap to enable", and a dot appears
-            on the <strong>More</strong> button so you can tell at a glance that 86 mode is still on.</li>
-          <li>Tap any item tile to toggle its availability:
-            <ul>
-              <li>An <strong>available</strong> item gets an <span style="background:#c82333;color:#fff;font-size:11px;padding:1px 5px;border-radius:4px;">86</span> badge and is greyed out — it disappears from cashier screens.</li>
-              <li>An <strong>86'd</strong> item (highlighted with green border) is re-enabled and returns to all screens.</li>
-            </ul>
-          </li>
-          <li>Tap <strong>86 mode</strong> again from the More menu to exit. Tapping items goes back to adding them to
-            the cart, and the dot on More clears.</li>
-        </ol>
-        <div class="callout note">
-          Changes take effect immediately — regular cashiers see the item disappear as soon as the page next renders. Each toggle is written to the order audit log and the system activity log.
-        </div>
-      </section>
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>Prices always come from the saved menu, never from the till screen. A line quantity cannot be more than 1000.</li>
+    <li>A dine-in order needs a table, and a room order needs a checked-in room. A table or room that already has an active order cannot be used again until that order is settled, served, cancelled or completed.</li>
+    <li>Room orders are charged to the guest's folio and cannot be paid at the till.</li>
+    <li>The till keeps unique order numbers, so a repeated send or a re-sent offline order never charges twice.</li>
+    <li>A tab already settled cannot be charged again: <em>"This tab is already paid by (name). Refreshing open tabs so it cannot be charged twice."</em></li>
+    <li>You can only settle or add to tabs you opened, unless you have <strong>POS All Cashiers' Tabs</strong>.</li>
+    <li>A tab with unserved food cannot be settled without force-serve. Bar and Coffee Bar drinks do not block settlement.</li>
+    <li>Cash payments need the tendered amount to cover the total plus tip. Mobile money needs a provider and reference. Card needs the last 4 digits and the authorisation code.</li>
+    <li>Cancel only works before any item has started. Void needs a reason of at least 8 characters. Refund needs a reason of at least 5 characters. Both are recorded with your name.</li>
+    <li>You cannot close your shift while you have open tabs from the current business day. All three amounts must be entered. A close that is out by more than 1.00 is blocked unless someone with <strong>POS Shift Override</strong> overrides it with a reason.</li>
+    <li>Manager approval cannot be given by yourself, works once, expires after 5 minutes, and is limited to 5 failed attempts in 10 minutes.</li>
+  </ul>
 
-      <section>
-        <h2>Barcode scanner — USB / Bluetooth wedge <span class="pill amber">pos_86 — manager/admin</span></h2>
-        <p>Plug in any <strong>USB or Bluetooth barcode scanner</strong> (the kind that appears as a keyboard) and the POS can add items to the cart the moment you scan — no tapping the menu grid required. Each terminal remembers its own on/off preference.</p>
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>"Enter a table number before sending the order."</em> / <em>"Enter a room number before sending the order."</em></td><td>Dine-in or Room chosen but no table or room picked.</td><td>Pick one from <strong>Select table...</strong> or <strong>Select checked-in room...</strong>.</td></tr>
+      <tr><td><em>"No active restaurant tables are configured. Ask an admin to set Restaurant Tables first."</em></td><td>The Tables page has no active tables.</td><td>Set up tables (see <a href="#tables">above</a>).</td></tr>
+      <tr><td><em>"Table 5 already has active order ORD-... (...). Settle, serve, cancel, or use the existing order before opening another."</em></td><td>The table or room is in use.</td><td>Use <strong>Add items</strong> on the existing tab, or settle or cancel it first.</td></tr>
+      <tr><td><em>"Room 12 has no checked-in guest booking."</em></td><td>No checked-in guest in that room.</td><td>Check the guest in first.</td></tr>
+      <tr><td><em>"Menu item not found or unavailable."</em></td><td>The item was switched off or 86'd after the till page loaded.</td><td>Refresh the till and choose another item.</td></tr>
+      <tr><td><em>"Tendered 5,000.00 &lt; amount due 6,500.00"</em></td><td>Cash handed over is less than the total plus tip.</td><td>Enter the right amount.</td></tr>
+      <tr><td><em>"Mobile money requires provider + transaction reference."</em></td><td>A field is empty.</td><td>Choose the provider and type the reference.</td></tr>
+      <tr><td><em>"Card requires last 4 digits + authorisation code."</em></td><td>A field is empty.</td><td>Fill in both from the card slip.</td></tr>
+      <tr><td><em>"Card POS terminal is not enabled yet &mdash; use Card (manual)."</em></td><td>Card POS is not switched on.</td><td>Use <strong>Card (manual)</strong>.</td></tr>
+      <tr><td><em>"You do not have permission to apply discounts."</em></td><td>No <strong>POS Discounts</strong> permission.</td><td>Ask a manager.</td></tr>
+      <tr><td><em>"This tab is already ... Refreshing open tabs so it cannot be charged twice."</em></td><td>Someone else settled the tab.</td><td>Check <strong>Recent</strong> and <strong>Tabs</strong>. Do not take payment again.</td></tr>
+      <tr><td><em>"You can only settle tabs you opened."</em> / <em>"You can only add to tabs you opened."</em></td><td>The tab belongs to another cashier.</td><td>Ask them or a manager with <strong>POS All Cashiers' Tabs</strong>.</td></tr>
+      <tr><td><em>"This tab still has N food item(s) not yet served ..."</em></td><td>The Kitchen has not marked the food served.</td><td>Ask the Kitchen to bump it, or use the manager force-serve step.</td></tr>
+      <tr><td><em>"Stock check stopped this action: Chicken short by 2.500 kg ..."</em></td><td>Not enough ingredient in stock for the recipe.</td><td>Receive stock or fix the recipe, or 86 the item.</td></tr>
+      <tr><td><em>"This tab is mid split-payment - only the next split leg can be paid."</em> / <em>"This bill is split 3 ways (1 paid) &mdash; continue with leg 2 of 3. Refresh the page."</em></td><td>A split has started.</td><td>Refresh the till and pay the next leg.</td></tr>
+      <tr><td><em>"Room-service orders are settled via the guest folio at check-out &mdash; they cannot be paid directly at the till."</em></td><td>You tried to pay a room order.</td><td>The room bill is paid at check-out or in Payments.</td></tr>
+      <tr><td><em>"Could not post the room-service charge to the guest folio ... the order was not placed."</em></td><td>The charge failed, so the order was stopped.</td><td>Check the booking is checked in and try again.</td></tr>
+      <tr><td><em>"Cannot close shift: 2 open tab(s) from this shift still need to be settled or cancelled &mdash; ORD-..."</em></td><td>You still have open tabs.</td><td>Open <strong>Tabs</strong> and settle or cancel them.</td></tr>
+      <tr><td><em>"Enter the counted cash amount (0 if none) before closing the shift."</em></td><td>A close amount is empty.</td><td>Fill in cash, mobile and card; use 0 if none.</td></tr>
+      <tr><td><em>"Shift does not balance (variance ...)."</em></td><td>Your count differs from the system by more than 1.00.</td><td>Recount (remember to leave out the float) or ask for an override.</td></tr>
+      <tr><td><em>"Variance of ... exceeds tolerance. Tick the override box to record this close with a reason."</em> / <em>"Override reason is required (minimum 5 characters) and will be saved for audit."</em></td><td>A supervisor closed without the box or reason.</td><td>Tick <strong>Admin override</strong> and add a reason.</td></tr>
+      <tr><td><em>"Refund reason required (minimum 5 characters)."</em> / <em>"Only paid orders can be refunded. Current status: ..."</em> / <em>"Nothing left to refund on ... - it has already been refunded in full."</em></td><td>Refund rules.</td><td>Add a reason, or check the order status in <strong>Recent</strong>.</td></tr>
+      <tr><td><em>"Cancel reason is required (at least 8 characters)"</em> / <em>"Void reason is required (at least 8 characters)"</em></td><td>Reason too short.</td><td>Write a fuller reason.</td></tr>
+      <tr><td><em>"Cannot cancel: preparation has already started"</em></td><td>The station started an item.</td><td>Ask a manager to void it.</td></tr>
+      <tr><td><em>"Order ... has payment recorded against it - it cannot be cancelled. A manager must void it (this writes the reversal)."</em></td><td>Part or all of the tab is paid.</td><td>A manager voids it.</td></tr>
+      <tr><td><em>"You do not have permission to void orders"</em></td><td>No <strong>POS Void Tabs</strong> permission.</td><td>Ask a manager.</td></tr>
+      <tr><td><em>"Invalid manager credentials."</em> / <em>"You cannot authorise your own actions &mdash; a different manager must approve."</em> / <em>"(Name) does not have the POS Force-Serve Tab permission."</em></td><td>The approval failed.</td><td>Ask a manager who holds that permission to sign in.</td></tr>
+      <tr><td><em>"Security token invalid &mdash; refresh the page."</em></td><td>The till page is out of date.</td><td>Refresh the till page and repeat.</td></tr>
+      <tr><td><em>"Network error &mdash; could not reach the server. Please retry."</em></td><td>No connection.</td><td>Check the internet and look in <strong>Tabs</strong> before retrying.</td></tr>
+    </tbody>
+  </table>
 
-        <h3 style="font-size:1rem;margin:20px 0 8px;">Enable or disable the scanner</h3>
-        <ol class="steps">
-          <li>Tap the <strong>barcode icon</strong> button in the search toolbar — it sits just to the right of the red <strong>×</strong> clear button.</li>
-          <li>The button turns <strong>green</strong> and a dark status strip appears at the bottom of the screen: <em>"Barcode scanner active — scan an item to add it to the cart."</em></li>
-          <li>Tap it again to turn the scanner <strong>off</strong>. The strip disappears.</li>
-          <li>You can also toggle from the <strong>hamburger menu → Tools → Scanner: ON / OFF</strong>.</li>
-        </ol>
-        <div class="callout note">
-          The on/off state is saved <strong>per device</strong> in the browser, so a terminal with a scanner stays enabled across logins, and a tablet without one stays off — no settings page needed.
-        </div>
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="02-kds-kitchen.html">Kitchen display (KDS)</a></li>
+    <li><a href="03-bds-bar.html">Bar display (BDS)</a></li>
+    <li><a href="04-cds-coffee.html">Coffee bar display (CDS)</a></li>
+    <li><a href="05-room-service.html">Room service</a></li>
+    <li><a href="08-stock-orders.html">Stock, recipes and Orders &amp; Tabs</a></li>
+    <li><a href="14-reports-eod.html">Reports and end of day</a></li>
+  </ul>
 
-        <h3 style="font-size:1rem;margin:20px 0 8px;">How scanning works</h3>
-        <ol class="steps">
-          <li>Point the scanner at a product barcode and pull the trigger (or it auto-scans).</li>
-          <li>The scanner types the barcode number in under 50 ms and sends Enter — the POS intercepts this as a scan, not human typing.</li>
-          <li>If the barcode matches an item: the item is <strong>instantly added to the cart</strong> and a green toast confirms it (<em>"Added: Heineken"</em>).</li>
-          <li>If nothing matches: a warning toast shows <em>"Barcode not recognised: 12345678"</em> — the item needs its barcode registered first (see the <em>Registering retail items</em> section below).</li>
-          <li>The status strip at the bottom always shows the <strong>last scan result</strong>.</li>
-        </ol>
-        <div class="callout note">
-          Normal typing is <strong>not affected</strong>. The scanner only triggers when you are not focused inside a text field (search box, payment amount, customer name, etc.).
-        </div>
-
-        <h3 style="font-size:1rem;margin:20px 0 8px;">Assign a barcode to an existing menu item <span class="pill amber">manager</span></h3>
-        <p>If an item is already on the menu and you just need to link its barcode, you can do it from the POS grid directly.</p>
-        <ol class="steps">
-          <li>Make sure you are logged in as a <strong>manager or admin</strong>.</li>
-          <li>Find the item in the menu grid and <strong>hold your finger (or mouse button) on the tile for about 1 second</strong>. A dark <strong>Assign Barcode</strong> modal opens.</li>
-          <li>Scan the product barcode directly into the input field — or type it manually.</li>
-          <li>Tap <strong>Save</strong>. The barcode is saved to the database instantly and works from that moment — no page refresh needed.</li>
-          <li>Items with a barcode assigned show a small <strong>green barcode icon</strong> in the bottom-right corner of their tile.</li>
-        </ol>
-        <div class="callout note">
-          To <strong>remove</strong> a barcode from an item, long-press the tile, clear the barcode field completely, and tap Save. Each barcode can only be linked to <strong>one item</strong> — duplicates are rejected.
-        </div>
-      </section>
-
-      <section>
-        <h2>Camera barcode scanner — mobile <span class="pill">all roles</span></h2>
-        <p>On phones and tablets, use the device's rear camera to scan barcodes directly into the POS — no physical scanner hardware needed. This is ideal for bar staff scanning cans and bottles at speed.</p>
-
-        <h3 style="font-size:1rem;margin:20px 0 8px;">Opening the camera scanner</h3>
-        <ol class="steps">
-          <li>On mobile, tap the <strong>≡ Menu</strong> button in the top-right corner to open the POS menu sheet.</li>
-          <li>Tap the green <strong>📷 Scan</strong> button — the first button in the Till Actions row.</li>
-          <li>The camera viewfinder opens full-screen. Allow camera access if prompted — this is a one-time browser permission per device.</li>
-          <li>A green corner-bracket target and animated scan line show the active scan area.</li>
-        </ol>
-        <div class="callout note">
-          On desktop, a green camera icon also appears in the search toolbar next to the barcode toggle button. Clicking it opens the same camera scanner in a full-screen overlay.
-        </div>
-
-        <h3 style="font-size:1rem;margin:20px 0 8px;">Scanning an item</h3>
-        <ol class="steps">
-          <li>Point the camera at the product barcode — hold steady for a moment.</li>
-          <li>When recognised: a short <strong>beep + vibration</strong> confirms the scan, and a green card pops up inside the viewfinder showing the <strong>item name and price</strong> (like a live comment on a Facebook Live stream).</li>
-          <li>The item is <strong>instantly added to the cart</strong>. A collapsible <strong>mini-cart panel</strong> at the bottom of the scanner shows all scanned items and the running total — tap the cart header to expand or collapse it.</li>
-          <li>By default, the scanner <strong>closes after one successful scan</strong> so you return straight to the cart. Check <strong>Keep open</strong> in the scanner footer if you are scanning a full round of drinks and want to stay in camera mode between scans.</li>
-          <li>Press the device <strong>Back button</strong> (Android hardware button or swipe gesture) to close the scanner without adding anything — it will not navigate away from the POS.</li>
-        </ol>
-
-        <h3 style="font-size:1rem;margin:20px 0 8px;">Flashlight</h3>
-        <p>If the bolt ⚡ icon appears in the top-right of the scanner header, your device supports flashlight control. Tap it to toggle the torch on/off for scanning in dim bars or stockrooms.</p>
-
-        <h3 style="font-size:1rem;margin:20px 0 8px;">Quick reference</h3>
-        <table>
-          <thead>
-            <tr><th>Situation</th><th>What to do</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Camera says "access denied"</td>
-              <td>Go to your browser Settings → Site permissions → Camera → allow for this site. On iOS Safari: Settings app → Safari → Camera → Allow.</td>
-            </tr>
-            <tr>
-              <td>"Camera scanning not supported on this browser"</td>
-              <td>Use Chrome or Safari (iOS 16+). Firefox mobile does not yet support the BarcodeDetector API.</td>
-            </tr>
-            <tr>
-              <td>"Barcode not recognised" toast</td>
-              <td>The product is not yet registered. Go to <strong>Stock → Barcode Receive</strong> and register it as a POS item — takes 30 seconds. See the Stock guide.</td>
-            </tr>
-            <tr>
-              <td>Back button leaves the POS</td>
-              <td>This means the scanner was open before that app session had any history. Simply re-open the POS page from your home screen shortcut — the back button correctly closes the scanner once a session is established.</td>
-            </tr>
-            <tr>
-              <td>Scanner keeps scanning the same item</td>
-              <td>A 2-second cooldown prevents double-scans. If you need to scan the same item twice, wait for the scan line animation to restart.</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-      <section>
-        <h2>Registering retail items for barcode scanning <span class="pill amber">manager / admin</span></h2>
-        <p>Products like cans of Coca-Cola or bottles of water are sold as-is — they are not <em>ingredients</em> in a recipe. Before their barcodes work at the POS, a manager registers them once via the <strong>Barcode Stock Receive</strong> page.</p>
-        <ol class="steps">
-          <li>Go to <strong>Stock → Barcode Receive</strong> (<code>/admin/stock-barcode-receive.php</code>) — or open it on your phone with the camera.</li>
-          <li>Scan the product barcode (or type it into the keyboard-wedge field).</li>
-          <li>If the barcode is new, the <strong>Register product</strong> modal appears. Choose <strong>POS Item</strong> (not Ingredient).</li>
-          <li>Fill in: <strong>Item name</strong>, <strong>Price</strong> (what the customer pays), <strong>Category</strong> (e.g. "Retail Items" — pre-created for you).</li>
-          <li>Tap <strong>Save POS Item</strong>. The item is immediately live on the POS and scannable at the camera scanner.</li>
-        </ol>
-        <div class="callout note">
-          Once registered, the item appears on the POS menu grid under its category with a green barcode badge. Staff can also tap it manually. The same barcode now works with both the camera scanner and any USB/Bluetooth wedge scanner connected to a till.
-        </div>
-        <div class="callout tip">
-          For stock-tracked ingredients (beer kegs, bottles of spirits that are measured), register as <strong>Ingredient</strong> instead, and link it to the correct stock ingredient record so stock levels are maintained automatically. See the Stock &amp; Orders guide for full details.
-        </div>
-      </section>
-
-      <section>
-        <h2>POS refunds <span class="pill amber">pos_refund — manager</span></h2>
-        <p>Process a refund for a paid order without voiding it — the audit trail is preserved and a negative payment record is created. Cashiers without <code>pos_refund</code> will see the Manager Authorisation overlay before the refund modal opens.</p>
-        <ol class="steps">
-          <li>Open the <strong>Recent</strong> orders panel (till bar).</li>
-          <li>Find the paid order and tap the purple <strong>Refund</strong> button on the right.</li>
-          <li>If you need manager auth, enter the manager's credentials in the overlay that appears first.</li>
-          <li>In the refund modal, enter a <strong>reason</strong> (minimum 5 characters).</li>
-          <li>Tap <strong>Confirm refund</strong>. The order status changes to <em>Refunded</em>, a negative payment entry is created in the ledger, and the event is logged to the system activity log (including the authorising manager's name if applicable).</li>
-        </ol>
-        <div class="callout warn">
-          <strong>Stock is not automatically reversed.</strong> If physical stock was already used, record a manual stock adjustment in the Stock section. The negative payment record is sufficient for financial reconciliation.
-        </div>
-      </section>
-
-      <section>
-        <h2>Working offline <span class="pill green">automatic</span></h2>
-        <p class="lead">The Till keeps trading when the internet drops. Nothing is lost, nothing double-charges, and
-          you can see exactly what happened afterwards.</p>
-
-        <h3>What the cashier sees</h3>
-        <ol class="steps">
-          <li>The connection pill in the header turns <strong>red — "Offline"</strong>. The Till keeps working:
-            the page, menu and buttons are already stored on the device.</li>
-          <li>The cashier builds and fires orders exactly as normal. Each order is <strong>saved on the till
-              itself</strong> and a message confirms: <em>"You are offline — action saved locally and will sync
-              automatically when the connection returns."</em></li>
-          <li>A dark banner at the bottom counts what is waiting, e.g. <strong>"Offline — queued · 3 queued"</strong>.
-            Keep serving — every order stacks up safely.</li>
-          <li>When the internet returns, the pill turns <strong>amber — "Syncing 3…"</strong> while queued orders are
-            sent to the server one by one, then <strong>green — "Online"</strong> when done. No one has to press
-            anything (a <strong>Retry now</strong> button exists if you're impatient).</li>
-        </ol>
-
-        <h3>The guarantees</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Worry</th>
-              <th>What actually happens</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>"Will the order be charged twice if it syncs twice?"</td>
-              <td>No. Every queued order carries a unique fingerprint. If the same order arrives twice, the server
-                recognises it and keeps only one.</td>
-            </tr>
-            <tr>
-              <td>"What if the till is closed before the internet returns?"</td>
-              <td>The queue lives on the device, not the page. Queued orders sync automatically the next time the
-                Till page is opened with a connection.</td>
-            </tr>
-            <tr>
-              <td>"What if the cashier was logged out while offline?"</td>
-              <td>Syncing pauses and asks them to log in again. The queued orders wait and sync right after login —
-                they are not discarded.</td>
-            </tr>
-            <tr>
-              <td>"Will the report show the wrong time?"</td>
-              <td>No. Each order records <em>when it was actually taken</em> and <em>when it synced</em> — both are
-                kept.</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h3>Checking afterwards — the Offline Log</h3>
-        <p>Every order that was taken offline and synced later is listed in <strong>Admin → Offline Log</strong>
-          (<code>/admin/offline-log.php</code>): who took it, on which page, when it was queued and when it arrived.
-          Use it to reconcile end-of-day totals after an outage — e.g. "order taken 14:02, synced 14:40" explains a
-          burst of orders appearing at once.</p>
-
-        <div class="callout warn">
-          <strong>One limitation to know:</strong> while offline, the till uses the menu and prices it last saw. If
-          you change a price during an outage, orders queued before the change keep the price the cashier saw on
-          screen. Avoid editing menu prices while tills are known to be offline.
-        </div>
-        <div class="callout note">
-          The same offline protection covers <strong>reception's Create Booking</strong> and <strong>Add
-            Payment</strong> pages — forms queue on the device and sync with the same no-duplicates guarantee.
-        </div>
-      </section>
-
-      <section>
-        <h2>Tips</h2>
-        <ul class="checklist">
-          <li>All hard buttons are at least 44px tall &mdash; designed for touch.</li>
-          <li>Press <code>?</code> on a keyboard to see the help bubbles.</li>
-          <li><strong>Fullscreen kiosk mode</strong> &mdash; on first load a small banner at the bottom says "Tap
-            anywhere to go fullscreen". Tap anywhere and the browser enters full-screen, hiding tabs and the address
-            bar. If you accidentally exit (e.g. back-swipe), the banner reappears and the next tap re-enters it
-            automatically.</li>
-        </ul>
-      </section>
-
-    </div>
-  </main>
-
-  <footer class="guide-footer">
-    <div class="deck">
-      <div class="crest">— R H —</div>
-      <p><a href="index.html">← All guides</a> &middot; <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-        &middot; <a href="owner-handover.php">Owner handover</a> &middot; <a href="02-kds-kitchen.html">Next: KDS
-          Kitchen →</a></p>
-    </div>
-  </footer>
-
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

@@ -1,281 +1,259 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Packages &amp; Rate Plans — Rosalyn's Hotel</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-        rel="stylesheet">
-    <link rel="stylesheet" href="assets/guide-theme.css">
-    <script src="assets/guide-init.js" defer></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Room Prices, Rate Plans and Packages — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
-    <nav class="top">
-        <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-        <div class="nav-links">
-            <a href="index.html">All Guides</a>
-            <a href="08-stock-orders.html">← Stock</a>
-            <a href="10-conference-events.html">Conference →</a>
-        </div>
-    </nav>
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
 
-    <header class="hero">
-        <div class="deck">
-            <div class="eyebrow">9 &middot; Revenue Management</div>
-            <h1>Packages &amp; Rate Plans</h1>
-            <p class="lead">Add-on packages guests love, and dynamic pricing that optimises revenue automatically.</p>
-            <div class="meta">
-                <span>Audience <strong>Manager &amp; admin</strong></span>
-                <span>Read time <strong>~5 min</strong></span>
-                <span>Pages <strong>/admin/packages.php &middot; /admin/rate-plans.php</strong></span>
-            </div>
-        </div>
-    </header>
+  <h1>Room Prices, Rate Plans and Packages</h1>
+  <p>This guide covers three places that decide what a guest pays for a room at <span class="g-site-name">Rosalyns Beach Hotel</span>: the room prices on the Rooms page, automatic price changes on the Rate Plans page, and optional extras on the Packages page.</p>
 
-    <main class="content">
-        <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Managers and anyone who sets prices</dd>
+      <dt>Rooms and room prices</dt><dd>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Rooms</strong> (<code>/admin/room-management.php</code>). Permission: <strong>Room Management</strong></dd>
+      <dt>Rate plans</dt><dd>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Rate Plans</strong> (<code>/admin/rate-plans.php</code>). Permission: <strong>Hotel Settings</strong></dd>
+      <dt>Packages</dt><dd>Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Packages</strong> (<code>/admin/packages.php</code>). Permission: <strong>Hotel Settings</strong></dd>
+      <dt>Only shown when</dt><dd>The <strong>Bookings &amp; Reservations</strong> module is switched on in Settings &rarr; Modules. All three pages need it.</dd>
+    </dl>
+  </div>
 
-            <!-- PACKAGES -->
-            <section>
-                <h2>Room Packages</h2>
-                <p class="lead">Packages are add-ons a guest can select when booking — honeymoon extras, half-board
-                    meals,
-                    airport transfers, spa access, and more.</p>
+  <div class="toc">
+    <ol>
+      <li><a href="#how-price">How a booking price is worked out</a></li>
+      <li><a href="#screen">What is on the screens</a></li>
+      <li><a href="#room-add">How to add a room type</a></li>
+      <li><a href="#room-prices">How to change room prices</a></li>
+      <li><a href="#room-hide">How to hide, feature, reorder or delete a room</a></li>
+      <li><a href="#plan-add">How to create a rate plan</a></li>
+      <li><a href="#plan-edit">How to edit, switch off or delete a rate plan</a></li>
+      <li><a href="#pkg-add">How to create a package</a></li>
+      <li><a href="#pkg-edit">How to edit, switch off or delete a package</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+    </ol>
+  </div>
 
-                <h3>Creating a package</h3>
-                <ol class="steps">
-                    <li>Go to <strong>Admin → Packages</strong> (<code>/admin/packages.php</code>).</li>
-                    <li>Click <strong>Add Package</strong>. Fill in the name, short description, and inclusions (one
-                        item per
-                        line).</li>
-                    <li>Choose a <strong>pricing model</strong>:
-                        <ul class="checklist" style="margin-top:0.5rem;">
-                            <li><strong>Per night</strong> — multiplied by the number of nights in the booking.</li>
-                            <li><strong>Per stay</strong> — a flat charge regardless of duration.</li>
-                            <li><strong>Per person per night</strong> — multiplied by guest count × nights.</li>
-                        </ul>
-                    </li>
-                    <li>Set the price, choose a Font Awesome icon (e.g. <code>fa-heart</code>, <code>fa-plane</code>),
-                        and assign
-                        a sort order.</li>
-                    <li>Tick <strong>Featured</strong> to promote it on the homepage packages section.</li>
-                    <li>Scope to <strong>All room types</strong> or pick specific types from the list. Guests only see
-                        packages
-                        valid for the room they are booking.</li>
-                    <li><strong>Save</strong>. The system auto-generates a URL slug from the name.</li>
-                </ol>
+  <h2 id="how-price">How a booking price is worked out</h2>
+  <p>The same steps are used on the website booking form and in the admin when staff create a booking.</p>
+  <ol class="steps">
+    <li>The system picks the nightly room price from the number of guests sharing the room: the <strong>Single Occupancy Price</strong> for 1 guest, the <strong>Double Occupancy Price</strong> for 2, the <strong>Triple Occupancy Price</strong> for 3. If that price is left empty, the <strong>Price Per Night</strong> is used instead.</li>
+    <li>Any matching, active <strong>rate plan</strong> then raises or lowers that nightly price.</li>
+    <li>The nightly price is multiplied by the number of nights.</li>
+    <li>If children are staying, a child supplement is added: the nightly price after the rate plan, times the <strong>Child Supplement (%)</strong>, times the number of children, times the number of nights.</li>
+    <li>If VAT or the tourism levy is switched on in Hotel Settings, they are worked out on the stay amount and added. The tourism levy is not charged on packages.</li>
+    <li>Any <strong>packages</strong> the guest ticked are added on top.</li>
+  </ol>
+  <p>Example: a double room has a Double Occupancy Price of MWK 100,000. A 10% discount rate plan matches, so the night costs MWK 90,000. Two nights is MWK 180,000. One child with a Child Supplement of 50% adds 90,000 &times; 50% &times; 2 nights = MWK 90,000.</p>
 
-                <div class="callout note">
-                    <strong>Inclusions</strong> appear as a bullet list under the package title on the booking page.
-                    Keep each
-                    line short — one item, one line.
-                </div>
+  <h2 id="screen">What is on the screens</h2>
 
-                <h3>Editing &amp; disabling packages</h3>
-                <ul class="checklist">
-                    <li>Click <strong>Edit</strong> on any package card. All fields are editable; the slug updates
-                        automatically
-                        if you change the name (existing booking links still work).</li>
-                    <li>Toggle the <strong>Active</strong> switch to hide a package from guests without deleting it.
-                    </li>
-                    <li>Set <strong>Sort order</strong> (lower number appears earlier), then save to control display
-                        sequence on the booking form.</li>
-                </ul>
+  <h3>Rooms page (<em>Manage Hotel Rooms</em>)</h3>
+  <ul>
+    <li><strong>Add New Room</strong> button at the top.</li>
+    <li><strong>Joined Rooms</strong> button (opens the joined-rooms screen).</li>
+    <li>One card per room type. Each card shows the price per night, then <em>Single</em>, <em>Double</em> and <em>Triple</em> prices (only those that are filled in) and <em>Child: +50%</em> style supplement. It also shows an <strong>Active</strong> or <strong>Inactive</strong> badge and a <strong>Featured</strong> badge.</li>
+    <li>Small icon buttons on each card: change featured image, manage gallery photos, room video, active on/off, featured on/off, post to Facebook (only if Facebook posting is on), and delete.</li>
+    <li><strong>Edit Room</strong> button on each card.</li>
+    <li>The text <em>Drag cards to reorder</em>.</li>
+  </ul>
 
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Pricing model</th>
-                            <th>Best for</th>
-                            <th>Example</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Per night</td>
-                            <td>Breakfast, dinner, airport pick-up on each day</td>
-                            <td>MWK 8,500 × 3 nights = MWK 25,500</td>
-                        </tr>
-                        <tr>
-                            <td>Per stay</td>
-                            <td>One-off gifts: bouquet, champagne, early check-in</td>
-                            <td>MWK 35,000 flat</td>
-                        </tr>
-                        <tr>
-                            <td>Per person per night</td>
-                            <td>Full board, guided activities, spa passes</td>
-                            <td>MWK 6,000 × 2 guests × 4 nights = MWK 48,000</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
+  <h3>Rate Plans page</h3>
+  <ul>
+    <li><strong>New Rate Plan</strong> button.</li>
+    <li>A short box called <em>How it works</em>.</li>
+    <li>One card per plan, highest priority first. Each card shows the name, the type (Seasonal, Weekend, Length of Stay, Last-Minute, Early Bird or Promotion), the change (for example <em>-10%</em> or <em>+20%</em>, or an amount in MWK), the condition (dates, days, nights or days before arrival; <em>Always active</em> for a Promotion), <em>All room types</em> or <em>Selected rooms</em>, <em>Priority</em> and <em>Stacking</em> if it stacks. Inactive plans look faded.</li>
+    <li>Three buttons on each card: edit (pencil), activate or deactivate (toggle), delete (bin).</li>
+    <li>If there are no plans you see <em>"No rate plans yet. Create your first one to start applying dynamic pricing."</em></li>
+  </ul>
 
-            <!-- RATE PLANS -->
-            <section>
-                <h2>Dynamic Rate Plans</h2>
-                <p class="lead">Rate plans automatically adjust room prices at booking time based on season, demand, or
-                    booking
-                    behaviour — no manual discounting needed.</p>
+  <h3>Packages page (<em>Room Packages</em>)</h3>
+  <ul>
+    <li><strong>New Package</strong> button.</li>
+    <li>A short box called <em>How it works</em>: packages appear as optional add-ons on the booking form, guests tick them before submitting, and the cost is added to the booking total.</li>
+    <li>One card per package, shown in <strong>Sort Order</strong>. Each card shows the name, a <strong>Featured</strong> badge if set, and the price (for example <em>MWK 15,000 per night</em>). A package priced at 0 shows <strong>Complimentary</strong> and <em>FREE</em>. The card also shows <em>All rooms</em> or <em>2 room type(s)</em>, the short description, and up to 6 inclusions (then <em>+3 more</em>).</li>
+    <li>Three buttons on each card: edit, activate or deactivate, delete.</li>
+    <li>If there are no packages you see <em>"No packages yet. Create your first package to offer guests extras like breakfast or spa access."</em></li>
+  </ul>
 
-                <h3>Creating a rate plan</h3>
-                <ol class="steps">
-                    <li>Go to <strong>Admin → Rate Plans</strong> (<code>/admin/rate-plans.php</code>).</li>
-                    <li>Click <strong>Add Rate Plan</strong>. Choose a plan type:</li>
-                </ol>
+  <h2 id="room-add">How to add a room type</h2>
+  <p>A room type is a kind of room (for example Deluxe Double) that guests book. The individual physical rooms are managed under Advanced &rarr; Individual Rooms.</p>
+  <ol class="steps">
+    <li>Open <strong>Settings</strong> &rarr; <strong>Rooms</strong> and click <strong>Add New Room</strong>.</li>
+    <li>Under <strong>Room Information</strong> fill in <strong>Room Name</strong> (required), <strong>Short Description</strong>, <strong>Full Description</strong> and <strong>Featured Image URL / Path</strong> (optional; you can also upload a picture afterwards with the image button on the card).</li>
+    <li>Under <strong>Pricing</strong> fill in <strong>Price Per Night</strong> (required). Fill in <strong>Single Occupancy Price</strong>, <strong>Double Occupancy Price</strong> and <strong>Triple Occupancy Price</strong> if the price changes with the number of guests (see the next section). Set <strong>Child Supplement (%)</strong> (it starts at 50). Tick <strong>Enable Triple Occupancy (3 guests)</strong> if the room can take three guests. Leave <strong>Allow Children for this Room Type</strong> ticked if children may stay (it is ticked to start with).</li>
+    <li>Under <strong>Room Details</strong> fill in <strong>Size (sqm)</strong>, <strong>Max Guests</strong>, <strong>Bed Type</strong>, <strong>Rooms Available</strong> (starts at 1), <strong>Total Rooms</strong> (starts at 1), <strong>Display Order</strong> and <strong>Amenities (comma-separated)</strong>.</li>
+    <li>Under <strong>Video (Optional)</strong> you can paste a <strong>Video URL</strong> (YouTube, Vimeo, Dailymotion or a direct video link).</li>
+    <li>Under <strong>Status</strong> tick <strong>Featured Room</strong> if you want it shown on the homepage.</li>
+    <li>Click <strong>Add Room</strong>. You will see <em>"New room added successfully!"</em> inside the window and the new card appears behind it. Click <strong>Close</strong> when finished.</li>
+  </ol>
+  <div class="note"><p>A new room is always created as <strong>Active</strong>. The Add window has no Active tick box. To hide it, use the active on/off icon on its card afterwards.</p></div>
 
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Plan type</th>
-                            <th>When it fires</th>
-                            <th>Typical use</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>Seasonal</strong></td>
-                            <td>Stay falls within a date range</td>
-                            <td>Christmas / school holiday surcharge, low-season discount</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Weekend</strong></td>
-                            <td>Stay includes specific days of the week</td>
-                            <td>Friday–Sunday premium</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Length of stay</strong></td>
-                            <td>Minimum nights threshold is met</td>
-                            <td>10% off 5-night stays, 15% off 7+ nights</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Last-minute</strong></td>
-                            <td>Booking made within X days of check-in</td>
-                            <td>Fill empty rooms at 20% off, booked &lt; 3 days before</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Early-bird</strong></td>
-                            <td>Booking made at least X days in advance</td>
-                            <td>5% off if booked ≥ 60 days ahead</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Promotion</strong></td>
-                            <td>Booking falls within an active promo window</td>
-                            <td>Anniversary sale, Valentine's special</td>
-                        </tr>
-                    </tbody>
-                </table>
+  <h2 id="room-prices">How to change room prices</h2>
+  <ol class="steps">
+    <li>Open <strong>Settings</strong> &rarr; <strong>Rooms</strong> and click <strong>Edit Room</strong> on the room.</li>
+    <li>Go to the <strong>Pricing</strong> section. The window title reads <em>Edit: [room name]</em>.</li>
+    <li>Change the prices you need:
+      <ul>
+        <li><strong>Price Per Night</strong> — required. Used whenever a more specific price below is empty.</li>
+        <li><strong>Single Occupancy Price</strong> — one guest in the room. Optional.</li>
+        <li><strong>Double Occupancy Price</strong> — two guests. Optional.</li>
+        <li><strong>Triple Occupancy Price</strong> — three guests. Optional.</li>
+        <li><strong>Child Supplement (%)</strong> — each child pays this percentage of the nightly price. 50 means half. The highest you can set is 100; a larger number is saved as 100.</li>
+      </ul>
+    </li>
+    <li>Tick or untick <strong>Enable Triple Occupancy (3 guests)</strong> and <strong>Allow Children for this Room Type</strong> as needed.</li>
+    <li>Click <strong>Save Changes</strong>. You will see <em>"Room updated successfully!"</em> inside the window.</li>
+  </ol>
+  <div class="note"><p>Prices are in Malawi Kwacha (MWK). Rate plans change these prices automatically; do not edit room prices just to run a short promotion. Use a rate plan so the normal price comes back by itself.</p></div>
 
-                <ol class="steps">
-                    <li>Set the <strong>adjustment</strong>: choose <em>Percentage</em> or <em>Fixed amount</em> and
-                        enter the
-                        value (negative for a discount, positive for a surcharge).</li>
-                    <li>Set the <strong>active date range</strong> — the plan only applies to bookings made OR stays
-                        falling
-                        within these dates (depending on type).</li>
-                    <li>Optionally restrict to specific <strong>days of the week</strong>, minimum/maximum nights, or
-                        room types.
-                    </li>
-                    <li>Set a <strong>priority</strong> number — higher number = higher priority when multiple plans
-                        match.</li>
-                    <li>Toggle <strong>Stacking</strong> to allow this plan to compound with others on the same booking,
-                        or leave
-                        it off to let the highest-priority plan win alone.</li>
-                    <li><strong>Save</strong>. The plan is active immediately.</li>
-                </ol>
+  <h2 id="room-hide">How to hide, feature, reorder or delete a room</h2>
+  <ol class="steps">
+    <li><strong>Hide or show:</strong> click the active icon on the card. Hovering shows <em>"ACTIVE — visible to guests. Click to deactivate."</em> or <em>"INACTIVE — hidden from guests. Click to make live."</em> The page reloads. You can also untick or tick <strong>Active</strong> under <strong>Status</strong> in <strong>Edit Room</strong>.</li>
+    <li><strong>Feature on the homepage:</strong> click the star icon on the card. You can also use <strong>Featured</strong> in <strong>Edit Room</strong>.</li>
+    <li><strong>Change the order:</strong> drag the cards into the order you want. You can also type a number in <strong>Display Order</strong> in <strong>Edit Room</strong>.</li>
+    <li><strong>Delete:</strong> click the bin icon. Confirm the question <em>Delete "[room name]" permanently? This removes all images, videos and data. Cannot be undone.</em></li>
+  </ol>
+  <div class="warn"><p>A room type that has ever had a booking cannot be deleted. Deactivate it instead.</p></div>
 
-                <div class="callout warn">
-                    <strong>Review plans before peak season.</strong> If stacking is ON across multiple plans, discounts
-                    compound.
-                    Run a test booking to verify the final price before going live.
-                </div>
+  <h2 id="plan-add">How to create a rate plan</h2>
+  <p>A rate plan raises or lowers the nightly room price automatically when a booking matches its conditions. Use a minus number for a discount and a plus number for an extra charge.</p>
+  <ol class="steps">
+    <li>Open <strong>Settings</strong> &rarr; <strong>Rate Plans</strong> and click <strong>New Rate Plan</strong>.</li>
+    <li>Type a <strong>Plan Name</strong> (required, up to 100 characters), for example <em>Festive Season Surcharge</em>.</li>
+    <li>Choose a <strong>Rule Type</strong> (required). The fields below change to match:
+      <ul>
+        <li><strong>Seasonal (date range)</strong> — fill in <strong>Start Date</strong> and <strong>End Date</strong>. The plan applies when the check-in date falls inside this range. Both dates are required.</li>
+        <li><strong>Weekend (day of week)</strong> — tick one or more days (Sun to Sat). The plan applies if any night of the stay falls on a ticked day. You must tick at least one day.</li>
+        <li><strong>Length of Stay</strong> — fill in <strong>Minimum Nights</strong> and, if you want, <strong>Maximum Nights (optional)</strong>. You need at least one of the two.</li>
+        <li><strong>Last-Minute</strong> — fill in <strong>Min Days Before Arrival</strong> and <strong>Max Days Before Arrival</strong>. Example: min 0, max 3 means the guest books within 3 days of arrival.</li>
+        <li><strong>Early Bird</strong> — fill in <strong>Min Days Before Arrival</strong> and, if you want, <strong>Max Days Before Arrival (optional)</strong>. Example: min 30 means the guest books at least 30 days ahead.</li>
+        <li><strong>Promotion (always)</strong> — no conditions. It applies to every stay while it is active.</li>
+      </ul>
+    </li>
+    <li>Optionally type a <strong>Description (optional)</strong>. It is a note for staff only and is not shown to guests.</li>
+    <li>Choose the <strong>Adjustment Type</strong>: <strong>Percentage (%)</strong> or <strong>Fixed Amount (MWK)</strong>.</li>
+    <li>Type the <strong>Adjustment Value</strong> (required). A negative number is a discount and a positive number is a surcharge. Example: <em>-10</em> is 10% off, <em>+20</em> is a 20% surcharge. A fixed amount of <em>-15000</em> takes MWK 15,000 off each night.</li>
+    <li>Choose <strong>Applies To</strong>: <strong>All Room Types</strong> or <strong>Selected Room Types Only</strong>. If you choose the second, tick the room types under <strong>Select Room Types</strong>. Only active room types are listed.</li>
+    <li>Set <strong>Priority (0–255)</strong>. A higher number is checked first.</li>
+    <li>Under <strong>Options</strong>, switch <strong>Stack with other plans</strong> on if this plan may combine with others, and leave <strong>Active</strong> on for the plan to start working.</li>
+    <li>Click <strong>Save Rate Plan</strong>. You will see <em>"Rate plan created successfully."</em> inside the window, and the card appears on the page behind it. Click <strong>Close</strong> when finished.</li>
+  </ol>
+  <div class="note"><p>If the new plan overlaps another active plan of the same type, the message adds <em>Note: it overlaps active plan(s) of the same type: [names]. Guests get the single best price if any overlapping plan is non-stacking.</em> The plan is still saved.</p></div>
 
-                <h3>Managing existing plans</h3>
-                <ul class="checklist">
-                    <li>Edit the <strong>Priority</strong> value (higher number is evaluated first), then save.</li>
-                    <li>Toggle <strong>Active</strong> to enable/disable without deleting.</li>
-                    <li><strong>Edit</strong> to change any field; changes apply to new bookings only (existing bookings
-                        are
-                        unaffected).</li>
-                    <li><strong>Delete</strong> removes the plan permanently; use deactivation instead if you want to
-                        reuse it
-                        next season.</li>
-                </ul>
+  <h3>When more than one plan matches a booking</h3>
+  <ul>
+    <li>If at least one matching plan does <strong>not</strong> stack, only the single plan that gives the lowest price is used. The others are ignored.</li>
+    <li>If every matching plan stacks, all of them are applied one after the other, highest priority first.</li>
+    <li>The price never goes below 0.</li>
+    <li>Example: a stay matches a Weekend plan of +10% (stacking) and a Promotion plan of -5% (stacking). MWK 100,000 becomes 110,000 and then 104,500.</li>
+  </ul>
 
-                <h3>How plans interact at booking</h3>
-                <ol class="steps">
-                    <li>System collects all active plans that match the booking's dates, room type, nights, and lead
-                        time.</li>
-                    <li>Plans are sorted by priority (highest number first).</li>
-                    <li>If the top-priority plan has <em>stacking OFF</em>, only that plan is applied.</li>
-                    <li>If it has <em>stacking ON</em>, the next-priority matching plan is also applied, and so on down
-                        the stack.
-                    </li>
-                    <li>The adjusted price is shown to the guest at checkout and stored with the booking for audit.</li>
-                </ol>
-            </section>
+  <h2 id="plan-edit">How to edit, switch off or delete a rate plan</h2>
+  <ol class="steps">
+    <li><strong>Edit:</strong> click the pencil button on the plan. Change the fields and click <strong>Save Rate Plan</strong>. You will see <em>"Rate plan updated successfully."</em></li>
+    <li><strong>Switch off or on:</strong> click the toggle button on the plan. You will see <em>"Rate plan deactivated."</em> or <em>"Rate plan activated."</em> A switched-off plan is never applied to bookings.</li>
+    <li><strong>Delete:</strong> click the bin button. The window asks <em>Delete rate plan "[name]"? This cannot be undone.</em> Click <strong>Yes, Delete</strong> (or <strong>Cancel</strong>). You will see <em>"Rate plan deleted."</em></li>
+  </ol>
+  <div class="note"><p>To stop a plan for a while and bring it back later, switch it off instead of deleting it.</p></div>
 
-            <!-- QUICK REFERENCE -->
-            <section>
-                <h2>Quick reference</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Task</th>
-                            <th>Where</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Create a new add-on package</td>
-                            <td><code>/admin/packages.php</code> → Add Package</td>
-                        </tr>
-                        <tr>
-                            <td>Feature a package on the homepage</td>
-                            <td>Edit package → tick <strong>Featured</strong></td>
-                        </tr>
-                        <tr>
-                            <td>Temporarily hide a package</td>
-                            <td>Edit package → toggle <strong>Active</strong> off</td>
-                        </tr>
-                        <tr>
-                            <td>Create a seasonal discount</td>
-                            <td><code>/admin/rate-plans.php</code> → Add Rate Plan → Seasonal</td>
-                        </tr>
-                        <tr>
-                            <td>Set a minimum-stay deal</td>
-                            <td>Add Rate Plan → Length of Stay → set min nights</td>
-                        </tr>
-                        <tr>
-                            <td>Run a last-minute flash sale</td>
-                            <td>Add Rate Plan → Last-minute → set lead-time window</td>
-                        </tr>
-                        <tr>
-                            <td>Pause a rate plan temporarily</td>
-                            <td>Rate Plans list → toggle <strong>Active</strong> off</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
+  <h2 id="pkg-add">How to create a package</h2>
+  <p>A package is an optional extra (for example breakfast) that a guest can tick on the booking form. Its cost is added to the booking total.</p>
+  <ol class="steps">
+    <li>Open <strong>Advanced</strong> &rarr; <strong>Packages</strong> and click <strong>New Package</strong>.</li>
+    <li>Under <strong>Identity</strong> type the <strong>Package Name</strong> (required, up to 100 characters), for example <em>Bed &amp; Breakfast</em>.</li>
+    <li>Choose an <strong>Icon (Font Awesome class)</strong> if you want, for example <em>fas fa-coffee</em> (up to 60 characters). If you leave it empty, a gift icon is shown.</li>
+    <li>Type a <strong>Short Description</strong> (up to 255 characters, shown on the booking form) and, if you want, a <strong>Full Description (optional)</strong>.</li>
+    <li>Type the <strong>Inclusions (one per line)</strong>. Each line appears as a tick on the booking form.</li>
+    <li>Under <strong>Pricing</strong> choose the button <strong>Priced Add-on</strong> or <strong>Complimentary (FREE)</strong>. With Complimentary the hint reads <em>This package will be offered at no charge to guests.</em></li>
+    <li>For a priced package choose the <strong>Price Type</strong> and type the <strong>Price Amount (MWK)</strong>:
+      <ul>
+        <li><strong>Per Night</strong> — amount &times; number of nights.</li>
+        <li><strong>Per Stay (flat fee)</strong> — the amount once for the whole stay.</li>
+        <li><strong>Per Person Per Night</strong> — amount &times; number of adults &times; number of nights.</li>
+      </ul>
+    </li>
+    <li>Under <strong>Scope &amp; Visibility</strong> choose <strong>Applies To</strong>: <strong>All Room Types</strong> or <strong>Selected Room Types Only</strong> (then tick the room types).</li>
+    <li>Type a <strong>Sort Order</strong>. A lower number is shown first on the booking form.</li>
+    <li>Switch <strong>Featured (shown prominently)</strong> on if you want it highlighted, and leave <strong>Active</strong> on for guests to see it.</li>
+    <li>Click <strong>Save Package</strong>. You will see <em>"Package created successfully."</em> Click <strong>Close</strong> when finished.</li>
+  </ol>
+  <p>Example: breakfast at MWK 15,000, <strong>Per Person Per Night</strong>, for 2 adults staying 3 nights costs 15,000 &times; 2 &times; 3 = MWK 90,000.</p>
 
-        </div>
-    </main>
+  <h2 id="pkg-edit">How to edit, switch off or delete a package</h2>
+  <ol class="steps">
+    <li><strong>Edit:</strong> click the pencil button on the package, change the fields and click <strong>Save Package</strong>. You will see <em>"Package updated successfully."</em></li>
+    <li><strong>Switch off or on:</strong> click the toggle button. You will see <em>"Package deactivated."</em> or <em>"Package activated."</em> A switched-off package is not offered to guests.</li>
+    <li><strong>Delete:</strong> click the bin button and confirm <em>Delete package "[name]"? Guests with existing bookings will keep it, but new bookings won't see it.</em> You will see <em>"Package deleted."</em></li>
+  </ol>
 
-    <footer class="guide-footer">
-        <div class="deck">
-            <div class="crest">— R H —</div>
-            <p><a href="08-stock-orders.html">← Stock &amp; Orders</a> &middot; <a href="index.html">All guides</a>
-                &middot;
-                <a href="10-conference-events.html">Conference &amp; Events →</a>
-            </p>
-        </div>
-    </footer>
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>Changes to a room, rate plan or package affect new bookings only. Existing bookings keep the price they were made with, and packages already on a booking stay on it.</li>
+    <li>A room type needs a name. <strong>Rooms Available</strong> cannot be more than <strong>Total Rooms</strong> when you edit a room (<em>"Availability cannot exceed total rooms."</em>). When you add a room, an Available number above Total is lowered to match Total.</li>
+    <li>The triple tier can only be switched on when <strong>Max Guests</strong> is 3 or more. Single and double tiers are on when Max Guests allows them (1 and 2 or more).</li>
+    <li>If <strong>Allow Children for this Room Type</strong> is not ticked, a booking with children for that room is refused. The message starts <em>"Children are not allowed"</em>.</li>
+    <li>If Single, Double or Triple Occupancy Price is left empty, the <strong>Price Per Night</strong> is used for that number of guests.</li>
+    <li>Rate plans only change a nightly price above 0. A percentage cannot be -100 or lower, or above 1000. A fixed amount cannot be more than 9,999,999 either way. The adjustment cannot be 0.</li>
+    <li>A seasonal plan is matched on the <strong>check-in date</strong> only. A plan that is switched off, or that does not match the stay, does nothing.</li>
+    <li>The "days before arrival" is counted from today to the check-in date. A check-in date in the past counts as 0.</li>
+    <li>A rate plan or package set to <strong>Selected Room Types Only</strong> must have at least one room type ticked.</li>
+    <li>Package price must be between 0 and 99,999,999.99. A price of 0 is shown as Complimentary.</li>
+    <li>A guest can only choose packages that are active and apply to the room they picked.</li>
+    <li>You need the <strong>Room Management</strong> permission for the Rooms page and the <strong>Hotel Settings</strong> permission for Rate Plans and Packages.</li>
+  </ul>
 
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>Room name is required.</em> (when adding a room: <em>Error: Room name is required.</em>)</td><td>The name box is empty.</td><td>Type a room name and save again.</td></tr>
+      <tr><td><em>Availability cannot exceed total rooms.</em></td><td>Rooms Available is higher than Total Rooms.</td><td>Lower Rooms Available or raise Total Rooms.</td></tr>
+      <tr><td><em>This room has booking history and cannot be deleted. Deactivate it instead.</em></td><td>The room type has bookings.</td><td>Use the active icon on the card to hide it.</td></tr>
+      <tr><td><em>Network error — please try again.</em></td><td>The connection dropped while saving.</td><td>Check the connection and click save again.</td></tr>
+      <tr><td><em>Plan name is required.</em></td><td>The rate plan name is empty.</td><td>Type a name.</td></tr>
+      <tr><td><em>Plan name cannot exceed 100 characters.</em> / <em>Description cannot exceed 2000 characters.</em></td><td>Text is too long.</td><td>Shorten it.</td></tr>
+      <tr><td><em>Adjustment value must be a non-zero number.</em></td><td>Adjustment Value is empty, not a number, or 0.</td><td>Type a number such as -10 or 20.</td></tr>
+      <tr><td><em>A percentage adjustment must be above -100 (a 100% discount makes the room free) and at most 1000.</em></td><td>Percentage is out of range.</td><td>Use a number above -100 and no more than 1000.</td></tr>
+      <tr><td><em>A fixed adjustment cannot exceed 9,999,999 either way.</em></td><td>Fixed amount is too large.</td><td>Use a smaller amount.</td></tr>
+      <tr><td><em>A seasonal plan needs both a start and an end date.</em></td><td>One or both dates are empty.</td><td>Fill in both dates.</td></tr>
+      <tr><td><em>The end date cannot be before the start date.</em></td><td>Dates are the wrong way round.</td><td>Correct the dates.</td></tr>
+      <tr><td><em>Choose at least one day of the week.</em></td><td>A weekend plan with no day ticked.</td><td>Tick at least one day.</td></tr>
+      <tr><td><em>A length-of-stay plan needs a minimum or maximum number of nights.</em></td><td>Both night boxes are empty.</td><td>Fill in at least one.</td></tr>
+      <tr><td><em>Maximum nights cannot be lower than minimum nights.</em></td><td>Nights are the wrong way round.</td><td>Correct them.</td></tr>
+      <tr><td><em>Set the days-before-arrival window for this plan.</em></td><td>A Last-Minute or Early Bird plan with both boxes empty.</td><td>Fill in at least one.</td></tr>
+      <tr><td><em>The maximum days before arrival cannot be lower than the minimum.</em></td><td>Days are the wrong way round.</td><td>Correct them.</td></tr>
+      <tr><td><em>Choose at least one valid room type, or set the plan to apply to all rooms.</em></td><td>Selected Room Types Only with none ticked.</td><td>Tick a room type or choose All Room Types.</td></tr>
+      <tr><td><em>That rate plan no longer exists.</em></td><td>Someone deleted it while you were editing.</td><td>Close the window and create it again if needed.</td></tr>
+      <tr><td><em>Package name is required.</em> / <em>Package name cannot exceed 100 characters.</em></td><td>Name is empty or too long.</td><td>Fix the name.</td></tr>
+      <tr><td><em>Short description cannot exceed 255 characters.</em> / <em>Icon class cannot exceed 60 characters.</em></td><td>Text is too long.</td><td>Shorten it.</td></tr>
+      <tr><td><em>Price must be a number between 0 and 99,999,999.99.</em></td><td>Price is empty, negative or too large.</td><td>Type a valid amount, or choose Complimentary (FREE).</td></tr>
+      <tr><td><em>Choose at least one valid room type, or set the package to apply to all rooms.</em></td><td>Selected Room Types Only with none ticked.</td><td>Tick a room type or choose All Room Types.</td></tr>
+      <tr><td><em>That package no longer exists.</em></td><td>Someone deleted it while you were editing.</td><td>Close the window and create it again if needed.</td></tr>
+      <tr><td><em>Invalid security token. Please refresh and try again.</em> (Packages shows <em>Invalid security token.</em>)</td><td>Your page was open too long.</td><td>Refresh the page and try again.</td></tr>
+      <tr><td><em>Database error saving rate plan.</em> / <em>Database error saving package.</em></td><td>The save failed on the server.</td><td>Try again. If it repeats, tell the system owner.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="07-reception-bookings.html">Reception and bookings</a></li>
+    <li><a href="13-finance-payments.html">Finance and payments</a></li>
+    <li><a href="18-staff-access.html">Staff and access</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

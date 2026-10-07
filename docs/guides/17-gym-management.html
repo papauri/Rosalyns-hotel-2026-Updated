@@ -1,229 +1,333 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gym Management Guide — Rosalyn's Hotel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-    rel="stylesheet">
+  <title>Gym Management — Rosalyns Beach Hotel</title>
   <link rel="stylesheet" href="assets/guide-theme.css">
   <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
   <nav class="top">
-    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-    <div class="nav-links">
-      <a href="index.html">All Guides</a>
-      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-      <a href="owner-handover.php">Owner</a>
-      <a href="16-business-presets.html">← Prev</a>
-    </div>
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
   </nav>
 
-  <header class="hero">
-    <div class="deck">
-      <div class="eyebrow">Guide 17 &middot; Gym Staff / Manager</div>
-      <h1>Gym Management</h1>
-      <p class="lead">From a website inquiry to a scanned check-in: packages, members, barcode cards, attendance,
-        renewal reminders and reports.</p>
-      <div class="meta">
-        <span>URL <strong>/admin/gym-members.php</strong></span>
-        <span>Role <strong>gym_staff · manager · admin</strong></span>
-        <span>Read time <strong>10 min</strong></span>
-      </div>
-    </div>
-  </header>
+  <h1>Gym Management</h1>
+  <p>This guide covers everything for the gym at <span class="g-site-name">Rosalyns Beach Hotel</span>: the public booking form, inquiries, the member register, the check-in scanner, the schedule and slot bookings, classes, packages and gym reports.</p>
 
-  <main class="content">
-    <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Gym front-desk staff, managers</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Gym</strong> &rarr; <strong>Members</strong>, <strong>Check-In</strong>, <strong>Inquiries</strong>, <strong>Schedule</strong>. Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Gym Packages</strong>, <strong>Gym Classes</strong>, <strong>Gym Reports</strong>. (The <strong>Advanced</strong> group starts folded &mdash; click its name to open it.)</dd>
+      <dt>Permission needed</dt><dd>
+        <strong>Gym Inquiries</strong> &mdash; Members, Inquiries, Schedule and Gym Classes pages.<br>
+        <strong>Gym Check-In Scanner</strong> &mdash; Check-In page.<br>
+        <strong>Manage Gym Packages</strong> &mdash; Gym Packages page, and the edit controls on Schedule and Gym Classes.<br>
+        <strong>Gym Reports</strong> &mdash; Gym Reports page.<br>
+        <strong>Gym Invoicing &amp; Pricing</strong> &mdash; money and manager actions (see the rules below).<br>
+        <strong>Gym Member History</strong> &mdash; the change history of a member.
+      </dd>
+      <dt>Only shown when</dt><dd>The <strong>Gym &amp; Fitness</strong> module is switched on in Settings &rarr; Modules.</dd>
+    </dl>
+  </div>
 
-      <section>
-        <h2>The gym pipeline at a glance</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Stage</th>
-              <th>Where</th>
-              <th>What happens</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>1. Packages</strong></td>
-              <td>Gym Packages</td>
-              <td>Define what you sell — name, price, and <strong>duration in days</strong> (30 = monthly, 365 = yearly,
-                etc., which drives each member's expiry date). Tick <strong>Complimentary</strong> for a free package
-                (e.g. hotel-guest access). Package prices are the accounting source of truth for member fees.</td>
-            </tr>
-            <tr>
-              <td><strong>2. Inquiry</strong></td>
-              <td>Gym Inquiries</td>
-              <td>A visitor fills the gym form on your website (package choices come from your live packages). The lead
-                lands here with status <em>new</em>; you can also send quotations and record payments per inquiry.</td>
-            </tr>
-            <tr>
-              <td><strong>3. Enrolment</strong></td>
-              <td>Gym Members</td>
-              <td>Click <strong>Enrol</strong> on the inquiry — the enrolment form opens pre-filled and the
-                lead is marked converted. The member gets a unique number (GM-XXXXXX) and their barcode card by email.
-              </td>
-            </tr>
-            <tr>
-              <td><strong>4. Visits</strong></td>
-              <td>Gym Check-In</td>
-              <td>Members scan in and out with their emailed barcode. Attendance feeds the analytics.</td>
-            </tr>
-            <tr>
-              <td><strong>5. Retention</strong></td>
-              <td>Gym Members / Reports</td>
-              <td>Renewal reminders go out automatically before expiry; segments and peak-hour data drive your
-                marketing.</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#public-form">How guests send a gym booking request</a></li>
+      <li><a href="#inquiries">How to work an inquiry</a></li>
+      <li><a href="#inquiry-pay">How to quote, invoice and record payment for an inquiry</a></li>
+      <li><a href="#inquiry-cancel">How to cancel or delete an inquiry</a></li>
+      <li><a href="#enrol">How to enrol a member</a></li>
+      <li><a href="#edit-member">How to edit a member, renew, suspend or reactivate</a></li>
+      <li><a href="#card">How to resend a membership card</a></li>
+      <li><a href="#reminders">How to set up renewal reminders</a></li>
+      <li><a href="#delete-member">How to remove a member</a></li>
+      <li><a href="#checkin">How to check members in and out</a></li>
+      <li><a href="#forgot-out">What to do when someone forgot to scan out</a></li>
+      <li><a href="#schedule">How to use the Gym Schedule and slot bookings</a></li>
+      <li><a href="#hours">How to set opening hours and slot rules</a></li>
+      <li><a href="#classes">How to manage gym classes</a></li>
+      <li><a href="#roster">How to enrol members in a class and send reminders</a></li>
+      <li><a href="#packages">How to manage gym packages</a></li>
+      <li><a href="#reports">How to read Gym Reports</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+    </ol>
+  </div>
 
-      <section>
-        <h2>Members register <span class="pill gold">gym</span></h2>
-        <p>Each row is one person with a live membership picture: status, package, a colour-coded
-          <strong>days-to-expiry</strong> pill (red ≤ 7 days, amber inside the reminder window, green beyond), visit
-          frequency over the last 30 days, their personal <strong>peak workout slot</strong>, and a marketing
-          <strong>segment chip</strong>.</p>
-        <ul class="checklist">
-          <li><strong>Enrolment is package-driven.</strong> Pick a package from the dropdown and it fills in the
-            membership name, the fee, and — from the <strong>start date plus the package's duration</strong> — the
-            expiry date automatically. You choose the start date; the system works out when it ends (monthly = +30 days,
-            yearly = +365, a 5-day pass = +5, and so on). No more picking a from/to range by hand.</li>
-          <li><strong>Fees follow the package.</strong> The price comes straight from the package; only a manager
-            (<code>gym_financials</code>) can override the fee or the auto expiry, or enrol a "Custom" member without a
-            package. Ordinary staff must always pick a package.</li>
-          <li><strong>Free entry for hotel guests.</strong> When the gym is part of a hotel (not the standalone Gym
-            preset), a <strong>Complimentary</strong> option appears — enrol a staying guest with zero fee. You can also
-            mark any package itself as complimentary in Gym Packages so it's always free.</li>
-          <li><strong>Names are protected against churn.</strong> Renaming a member needs a manager, requires a typed
-            <strong>reason</strong> (recorded in the log), and is <strong>rate-limited</strong> — no more than two name
-            changes per 180 days unless an administrator overrides. Memberships belong to one person and are not
-            transferable, so name edits are for genuine legal corrections only.</li>
-          <li><strong>Full change history.</strong> Every enrolment, edit, name change, reprice, status change and
-            deletion is written to an audit log. Managers with <strong>Gym Member History</strong>
-            (<code>gym_logs</code>) see a <strong>History</strong> button on each member showing who changed what, when,
-            and the before/after values. Deleting a member also needs <code>gym_financials</code> — mark them
-            <em>cancelled</em> instead to keep their record.</li>
-          <li><strong>Resend card</strong> re-emails the member's barcode card any time.</li>
-        </ul>
-        <div class="callout note">
-          <strong>Segments explained:</strong> <em>Loyal regular</em> (12+ visits / 30 days — reward them), <em>At risk
-            — 14d+ absent</em> (used to visit, has stopped — reach out before they lapse), <em>Win-back — lapsed</em>
-          (membership over — send a comeback offer), <em>New member</em> (joined under 2 weeks — onboard them),
-          <em>On hold</em> (suspended).
-        </div>
-      </section>
+  <h2 id="screen">What is on the screen</h2>
+  <table>
+    <thead><tr><th>Page</th><th>What it is for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Gym &rarr; Members</strong> (<code>/admin/gym-members.php</code>)</td><td>The register of enrolled members: number, contact, package, start and expiry dates, fee, visits and status.</td></tr>
+      <tr><td><strong>Gym &rarr; Check-In</strong> (<code>/admin/gym-checkin.php</code>)</td><td>Scan or type a member number to check them in, and again to check them out.</td></tr>
+      <tr><td><strong>Gym &rarr; Inquiries</strong> (<code>/admin/gym-inquiries.php</code>)</td><td>Booking requests sent from the public gym page. Follow up, quote, invoice, confirm, cancel.</td></tr>
+      <tr><td><strong>Gym &rarr; Schedule</strong> (<code>/admin/gym-schedule.php</code>)</td><td>Day view of hourly slots and who has reserved them. Also opening hours and slot settings.</td></tr>
+      <tr><td><strong>Advanced &rarr; Gym Packages</strong> (<code>/admin/gym-management.php</code>)</td><td>The membership packages guests and staff choose from. The older address <code>/admin/gym-packages.php</code> sends you to this same page.</td></tr>
+      <tr><td><strong>Advanced &rarr; Gym Classes</strong> (<code>/admin/gym-classes.php</code>)</td><td>Classes shown on the public gym page, with a roster for each.</td></tr>
+      <tr><td><strong>Advanced &rarr; Gym Reports</strong> (<code>/admin/gym-reports.php</code>)</td><td>Member numbers, attendance, revenue and unpaid balances.</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><p>Each member has a number like <strong>GM-A1B2C3</strong>. The member's barcode on the emailed membership card is this number. An inquiry (a request) is not a member until you enrol it.</p></div>
 
-      <section>
-        <h2>Barcode check-in <span class="pill gold">gym_checkin</span></h2>
-        <p>On enrolment every member with an email receives their <strong>digital membership card</strong> — a CODE-128
-          barcode of their member number, embedded in the email and attached as an image they can save to their phone.
-        </p>
-        <ol class="steps">
-          <li>Open <strong>Gym Check-In</strong> at reception (works on phones, tablets and desktops).</li>
-          <li>Scan the member's barcode with a <strong>USB scanner</strong>, the <strong>camera</strong> button, or
-            type the member number manually.</li>
-          <li>Green card = checked in (with their expiry date; amber note if it is within 7 days). Scanning again on
-            the way out checks them out and shows the visit duration.</li>
-          <li>Red card = refused — expired or suspended memberships cannot check in.</li>
-        </ol>
-        <div class="callout warn">
-          <strong>Pass-sharing guard:</strong> a member can check in at most <strong>2 times per day</strong> (setting
-          <code>gym_max_daily_visits</code>). A third scan is refused with a warning and logged — verify the person at
-          the desk actually matches the membership.
-        </div>
-        <div class="callout tip">
-          <strong>Forgot to scan out?</strong> Anyone still marked "in the gym" from a previous day is automatically
-          checked out at closing time (setting <code>gym_close_time</code>, default 22:00) — the next morning's scan is
-          always a fresh check-in and the "In gym now" count stays truthful.
-        </div>
-      </section>
+  <h2 id="public-form">How guests send a gym booking request</h2>
+  <p>You do not do this yourself, but you need to know what guests see. On the public gym page the guest clicks a <strong>Book Package</strong>, <strong>Book a Class</strong> or <strong>Book a Session</strong> button. A form titled <strong>Request a Session</strong> opens.</p>
+  <ol class="steps">
+    <li>The guest fills in <strong>Full Name</strong>, <strong>Email</strong> and <strong>Phone</strong> (all required).</li>
+    <li>They can enter <strong>Guests</strong> (1 to 10), then pick <strong>Preferred Date</strong> and <strong>Preferred Time</strong> (both required; the date cannot be in the past).</li>
+    <li>They choose <strong>Select Package</strong> from the list of active packages with their prices. If there are no active packages, the only choice is <strong>Custom Request</strong>.</li>
+    <li>They may write <strong>Fitness Goals / Notes</strong> (up to 1000 characters).</li>
+    <li>They tick <em>"I agree to be contacted about this booking request."</em> The <strong>Send Booking Request</strong> button stays greyed out until they do.</li>
+    <li>The guest is taken to a page headed <strong>Wellness Booking Received</strong> with a reference like <strong>GYM-1A2B3C4D</strong>. They also get a confirmation email, and the hotel gets a notification email.</li>
+  </ol>
+  <div class="note"><p>The request appears in <strong>Gym &rarr; Inquiries</strong> with status <strong>New</strong>. The guest is told the team will contact them within 24 hours. A guest can send at most 5 requests in 10 minutes.</p></div>
 
-      <section>
-        <h2>Fitness report per member</h2>
-        <p>Click the <strong>Visits</strong> count on any member row to open their personal fitness report:</p>
-        <ul class="checklist">
-          <li>Headline stats — total visits, last 30 / 7 days, average and longest session, lifetime gym hours,
-            <strong>current &amp; best attendance streak</strong>, and <strong>cost per visit</strong> (total paid ÷ visits)
-            — a concrete renewal talking point.</li>
-          <li><strong>Training habits</strong> — a part-of-day breakdown (early / morning / midday / afternoon / evening)
-            showing when this member actually trains.</li>
-          <li><strong>Monthly momentum</strong> — a 6-month visit trend so you can spot members losing steam before they lapse.</li>
-          <li><strong>Weekly consistency</strong> — a bar per week for the last 8 weeks.</li>
-          <li><strong>Peak training time</strong> — their hour-by-hour histogram and weekday preference (e.g.
-            "Evenings 18:00–20:00 · mostly Tue/Thu") — ideal for targeted class invites and offers.</li>
-          <li>The full visit log with in/out times and durations, <strong>paginated 10 per page</strong> so long histories
-            stay quick to browse.</li>
-        </ul>
-      </section>
+  <h2 id="inquiries">How to work an inquiry</h2>
+  <ol class="steps">
+    <li>Open <strong>Gym &rarr; Inquiries</strong>. The tabs at the top filter by status: <strong>All</strong>, <strong>New</strong>, <strong>Contacted</strong>, <strong>Converted</strong>, <strong>Closed</strong>, <strong>Cancelled</strong>, each with a count.</li>
+    <li>To find one, type in the search box (<em>"Search by name, email, phone, or reference..."</em>) and click <strong>Search</strong>. Click <strong>Clear</strong> to go back.</li>
+    <li>Click <strong>View</strong> on a row. The <strong>Gym Inquiry Details</strong> window shows reference, name, email, phone, membership type, preferred date and time, number of people, status, consent, the guest's message and the money figures.</li>
+    <li>To contact the guest by email, click <strong>Email</strong> on the row (or <strong>Email Member</strong> in the details window). Fill in <strong>Subject</strong> and <strong>Message</strong> (both required; subject is cut at 200 characters) and click <strong>Send Email</strong>. You will see <em>"Message emailed to name@example.com."</em></li>
+    <li>When you have spoken to the guest, change the status in the <strong>Status</strong> column. The choices are <strong>New</strong>, <strong>Contacted</strong>, <strong>Confirmed (paid)</strong>, <strong>Converted</strong>, <strong>Closed / Completed</strong> and <strong>Cancelled</strong>. The change is saved straight away.
+      <ul>
+        <li><strong>Contacted</strong>: the guest is emailed. You will see <em>"Inquiry marked as Contacted. Notification email sent to ..."</em></li>
+        <li><strong>Converted</strong>: the guest gets a welcome email. You will see <em>"Inquiry converted to member. Welcome email sent to ..."</em></li>
+        <li>Any other change shows <em>"Inquiry status updated successfully!"</em></li>
+      </ul>
+    </li>
+    <li>You can also use the buttons in the details window: <strong>Confirm</strong> (only for <strong>New</strong> inquiries; asks <em>"Confirm this gym membership?"</em>; emails the guest; shows <em>"Gym membership confirmed successfully! Confirmation email sent."</em>) and <strong>Mark Completed</strong> (only for <strong>Confirmed</strong> inquiries; asks <em>"Mark this membership as completed?"</em>; shows <em>"Gym membership marked as completed!"</em>).</li>
+    <li>To keep private notes, type in the <em>"Internal notes..."</em> box in the details window and click <strong>Save Notes</strong>. You will see <em>"Notes updated successfully!"</em></li>
+    <li>To turn the guest into a member, click the green <strong>Enrol</strong> button on the row (not shown for cancelled inquiries). The Members page opens with the name, email, phone and package already filled in. Go on to <a href="#enrol">How to enrol a member</a>.</li>
+  </ol>
+  <div class="note"><p>If the inquiry has a required deposit that is not fully paid, <strong>Confirm</strong>, <strong>Mark Completed</strong> and the <strong>Confirmed (paid)</strong> and <strong>Converted</strong> statuses are blocked with <em>"Required gym deposit has not been fully paid yet."</em></p></div>
 
-      <section>
-        <h2>Renewal reminders</h2>
-        <p>The <strong>Renewal Reminders</strong> strip on Gym Members controls automatic expiry emails:</p>
-        <ol class="steps">
-          <li>Switch reminders on and choose how many days before expiry to send (1–30, default 3). Save.</li>
-          <li>Nothing to schedule: reminders go out by themselves as people use the site (Admin → Automated Emails
-            shows the last run). Need them right now? Use the <strong>Send due reminders now</strong> button — it
-            does the same sweep.</li>
-          <li>Each member gets <strong>exactly one</strong> warm renewal email per expiry — never duplicates, even if
-            the sweep runs twice. A renewal (new expiry date) makes them remindable again.</li>
-        </ol>
-      </section>
+  <h2 id="inquiry-pay">How to quote, invoice and record payment for an inquiry</h2>
+  <p>You need the <strong>Gym Invoicing &amp; Pricing</strong> permission. Without it you do not see the three controls below, and if you try you get <em>"You do not have permission to handle gym invoicing or pricing."</em></p>
+  <ol class="steps">
+    <li>Click <strong>View</strong> on the inquiry. Look at the <strong>Accounting</strong> part: <strong>Total Amount</strong>, <strong>Amount Paid</strong>, <strong>Amount Due</strong> and <strong>Payment Status</strong>.</li>
+    <li>Type the price (for example 30000) in <strong>Set Total Amount</strong> and click <strong>Save Amount</strong>. You will see <em>"Total amount updated successfully!"</em> The amount must be a number, 0 or more.</li>
+    <li>To send a price quote first, type the number of days it stays valid (default 7) and click <strong>Send Quotation</strong>. A PDF quotation is emailed to the guest. You will see <em>"Gym membership quotation sent to name@example.com."</em> The system also tries to send it by WhatsApp and adds <em>"WhatsApp delivered."</em> when that works.</li>
+    <li>When the guest pays in the gym, click <strong>Record Payment &amp; Send Invoice</strong>. The button is greyed out until a total amount is set.</li>
+    <li>The system records a payment of the outstanding balance as <strong>cash</strong>, issues a receipt, and emails the invoice. You will see <em>"Payment recorded successfully! Invoice sent to name@example.com"</em>.</li>
+  </ol>
+  <div class="warn"><p>This button always records a <strong>cash</strong> payment for the full amount still owed. It cannot be used for card, mobile money or part payments. For those, record the payment on the Payments screen instead (see the finance guide). If the inquiry is already fully paid, the button only resends the invoice: <em>"Payment already recorded. Invoice resent to ..."</em></p></div>
 
-      <section>
-        <h2>Calendar &amp; slot booking <span class="pill gold">gym</span></h2>
-        <p>An optional booking calendar that lets members plan their visit and keeps the floor from getting
-          overcrowded. Turn it on in <strong>Gym Schedule → Slot Booking Settings</strong>; it is off by default.</p>
-        <ul class="checklist">
-          <li><strong>Set your opening hours.</strong> On the Gym Schedule admin page, set open/close times for each
-            weekday (untick a day to close it). The system divides each open day into time slots automatically.</li>
-          <li><strong>Set the slot rules.</strong> Capacity per slot (how many people are allowed on the floor at once),
-            slot length in minutes (default 60), and how many days ahead members can book (default 7).</li>
-          <li><strong>Members book from their phones — no login.</strong> When enabled, a <em>"View gym schedule"</em>
-            button appears on the public gym page linking to <code>gym-schedule.php</code>. There, anyone sees a clear
-            day-by-day calendar showing how full each hour is, and reserves a slot with just their name and a phone or
-            email (member number optional). Full slots can't be over-booked — capacity is enforced.</li>
-          <li><strong>See the day at a glance (admin).</strong> Gym Schedule shows every hour of the chosen day with a
-            fill meter and the list of who's booked in. Managers (<code>gym_packages</code>) can mark a reservation
-            <em>attended</em> or cancel it; anyone with gym access can view the day.</li>
-        </ul>
-        <div class="callout note">
-          Opening hours and slot capacity are stored live and take effect immediately on the public page. Classes you've
-          set up under Gym Packages / classes show up against their hour on both the public and admin calendars.
-        </div>
-      </section>
+  <h2 id="inquiry-cancel">How to cancel or delete an inquiry</h2>
+  <ol class="steps">
+    <li>To cancel, click <strong>View</strong>, then <strong>Cancel Membership</strong>. Read the question: <em>"Cancel this membership? The bill is voided; any payment already recorded stays as credit owed back (refund it from the Payments screen)."</em> Confirm.</li>
+    <li>You will see <em>"Gym membership cancelled successfully! Cancellation email sent."</em> If money had been paid, the message adds how much stays as credit owed back. Refund it from the payment's <strong>Refund</strong> screen.</li>
+    <li>To delete a mistaken inquiry, click <strong>Delete</strong> on its row and confirm <em>"Are you sure you want to delete this inquiry?"</em> You will see <em>"Gym inquiry deleted successfully!"</em></li>
+  </ol>
+  <div class="warn"><p>A cancelled inquiry cannot be reopened. The guest must send a new request. An inquiry that has any payment recorded cannot be deleted &mdash; cancel it instead.</p></div>
 
-      <section>
-        <h2>Gym Reports <span class="pill gold">gym_reports</span></h2>
-        <p>The date-filtered operations report for the owner: members by status, new joiners and churn, expiring soon,
-          <strong>unpaid members with total outstanding</strong>, attendance analytics (busiest check-in and check-out
-          hours, busiest weekday, average visit duration, daily trend) and the gym revenue strip. Gym payments also
-          appear across the normal finance pages — payments, receipts, invoices — labelled as memberships.</p>
-      </section>
+  <h2 id="enrol">How to enrol a member</h2>
+  <ol class="steps">
+    <li>Open <strong>Gym &rarr; Members</strong> and click <strong>Enrol Member</strong>. (If you came from an inquiry, the window is already open and filled in.)</li>
+    <li>Type <strong>Full name</strong> (required, up to 255 characters).</li>
+    <li>Optionally fill in <strong>Email</strong> and <strong>Phone</strong>. If you give an email, it must be valid.</li>
+    <li>Choose <strong>Membership package</strong>. Each choice shows the package name, its length and its price, for example <strong>Monthly &middot; 30 days &middot; MWK30,000</strong>. Free packages show <strong>(Free)</strong>. The fee and the expiry date fill in by themselves.</li>
+    <li>If the bookings module is on, a tick box <strong>Complimentary &mdash; free entry for a hotel guest</strong> is also shown. Tick it for a free membership. The fee becomes 0.</li>
+    <li>Check <strong>Start date</strong> (today by default). <strong>Expiry</strong> is worked out from the start date and the package length. A package with no length has no expiry.</li>
+    <li>Leave <strong>Status</strong> as <strong>Active</strong>. Add <strong>Notes</strong> if you need to.</li>
+    <li>Click <strong>Save Member</strong>. You will see <em>"Member enrolled &mdash; GM-A1B2C3. Membership card emailed."</em> The card goes out only if you gave an email. If the email fails you see <em>"(Card email failed: ...)"</em> but the member is still saved.</li>
+  </ol>
+  <div class="note"><p>If the member came from an inquiry, that inquiry is marked <strong>Converted</strong> automatically. One inquiry can be enrolled only once: a second try shows <em>"This inquiry is already enrolled as member GM-A1B2C3."</em></p></div>
+  <p>Staff without the <strong>Gym Invoicing &amp; Pricing</strong> permission can only enrol against a real package. The <strong>Expiry</strong> and <strong>Fee (MWK)</strong> boxes are greyed out for them. A manager with that permission also sees the choice <strong>Custom (manager) &mdash; set fee &amp; dates manually</strong>, and can type a different fee and expiry date.</p>
 
-    </div>
-  </main>
+  <h2 id="edit-member">How to edit a member, renew, suspend or reactivate</h2>
+  <p>The member list shows tabs <strong>All</strong>, <strong>Active</strong>, <strong>Expiring &le;30d</strong> and <strong>Expired</strong> with counts. Members expiring first are listed first. Under each expiry date a small label shows <strong>30d left</strong>, <strong>Expires today</strong> or <strong>Lapsed 4d ago</strong>.</p>
+  <ol class="steps">
+    <li>Find the member. Click the pen button (<strong>Edit</strong>) on their row. The window is titled <strong>Edit Member</strong>.</li>
+    <li>Change what you need and click <strong>Save Member</strong>. You will see <em>"Member updated."</em></li>
+    <li>To renew, change <strong>Start date</strong> or choose the package again so the expiry date moves forward, and make sure <strong>Status</strong> is <strong>Active</strong>. A manager can also type the new <strong>Expiry</strong> date directly.</li>
+    <li>To pause a member, click the pause button (<strong>Suspend</strong>) on their row. You will see <em>"Member marked suspended."</em></li>
+    <li>To bring them back, click the play button (<strong>Reactivate</strong>). You will see <em>"Member marked active."</em></li>
+  </ol>
+  <div class="note"><p>If you only change contact details, the expiry date stays as it was, as long as the package and start date are unchanged. <strong>Status</strong> can be <strong>Active</strong>, <strong>Expired</strong>, <strong>Suspended</strong> or <strong>Cancelled</strong>. Use <strong>Cancelled</strong> instead of deleting, so the history is kept.</p></div>
+  <p><strong>Changing a name.</strong> A membership belongs to one person and cannot be passed on. Only a manager (with <strong>Gym Invoicing &amp; Pricing</strong>) can change a name, and only to correct a legal name. When you change the name and click <strong>Save Member</strong>, a box appears asking for <strong>Reason for name change</strong> (at least 5 characters, for example <em>Legal name correction &mdash; marriage</em>). Type it and click <strong>Save Member</strong> again. Non-administrators can change a given member's name at most twice in 180 days.</p>
+  <p><strong>Visit history.</strong> Click the number in the <strong>Visits</strong> column. A window titled <strong>Fitness Report &mdash; member name</strong> opens with total visits, visits in the last 30 and 7 days, average and longest session, streak, peak training time, and a list of visits 10 per page (<strong>&laquo; Prev</strong> / <strong>Next &raquo;</strong>).</p>
+  <p><strong>Change history.</strong> If you have <strong>Gym Member History</strong>, the edit window shows <strong>View change history</strong>. It lists every enrolment, update, name change, status change and deletion with who did it and when.</p>
 
-  <footer class="guide-footer">
-    <div class="deck">
-      <div class="crest">— R H —</div>
-      <p><a href="index.html">← All guides</a> &middot; <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-        &middot; <a href="owner-handover.php">Owner handover</a> &middot; <a href="16-business-presets.html">Prev:
-          Business Presets</a></p>
-    </div>
-  </footer>
+  <h2 id="card">How to resend a membership card</h2>
+  <ol class="steps">
+    <li>On the member's row, click the envelope button (<strong>Resend membership card email</strong>). It only shows when the member has an email address.</li>
+    <li>The card with their barcode is emailed again. If the member has no email you see <em>"This member has no email address on file."</em></li>
+  </ol>
 
+  <h2 id="reminders">How to set up renewal reminders</h2>
+  <ol class="steps">
+    <li>On <strong>Gym &rarr; Members</strong>, click <strong>Renewal reminders</strong> to unfold the box.</li>
+    <li>Tick <strong>Email members</strong> and type how many days before expiry to send (<strong>day(s) before expiry</strong>, from 1 to 30).</li>
+    <li>Click <strong>Save</strong>. You will see <em>"Renewal reminders on &mdash; members are emailed 3 day(s) before expiry."</em> (with your number of days), or <em>"Renewal reminders switched off."</em></li>
+    <li>To send now instead of waiting, click <strong>Send due reminders now</strong>. You will see for example <em>"Checked 4 due membership(s): 3 reminder(s) sent, 1 already reminded."</em> It is safe to click more than once; a member is not reminded twice.</li>
+  </ol>
+  <div class="note"><p>When no reminder has been sent yet, the line on the right of the box says reminders go out automatically (set up under Automated Emails). It also shows when the last reminder was sent. If reminders are switched off, <strong>Send due reminders now</strong> shows <em>"Reminders are switched off &mdash; enable them first."</em></p></div>
+
+  <h2 id="delete-member">How to remove a member</h2>
+  <ol class="steps">
+    <li>Prefer setting the member's <strong>Status</strong> to <strong>Cancelled</strong>. This keeps their history.</li>
+    <li>To delete for good, a manager clicks the bin button (<strong>Delete</strong>) on the row and confirms <em>Delete member "name"? This cannot be undone.</em> with <strong>Yes, continue</strong>.</li>
+    <li>You will see <em>"Member deleted."</em></li>
+  </ol>
+  <div class="warn"><p>Without the <strong>Gym Invoicing &amp; Pricing</strong> permission you get <em>"Deleting a member requires a manager. Mark them cancelled instead to preserve their history."</em></p></div>
+
+  <h2 id="checkin">How to check members in and out</h2>
+  <p>Open <strong>Gym &rarr; Check-In</strong>. The top bar shows how many people are <strong>in gym</strong>, <strong>visits today</strong> and <strong>active members</strong>.</p>
+  <ol class="steps">
+    <li>Use a USB or Bluetooth barcode scanner while the <strong>Scanner: ON</strong> button is on (it is on by default). Scan the barcode on the member's card. You do not need to click in a box first.</li>
+    <li>Or click <strong>Camera</strong> to scan with the device camera. Allow camera access if asked. The torch (flash) button shows if the camera supports it. The camera only works on a secure (https) address.</li>
+    <li>Or type the member number (for example <strong>GM-A1B2C3</strong>) into the box and click <strong>Check</strong> (or press Enter).</li>
+    <li>Read the big result card. A green card <em>"Welcome name &mdash; membership expires Dec 31, 2026."</em> means checked in. An amber card adds <em>"membership expires soon!"</em> when expiry is within 7 days. A blue card <em>"Goodbye name &mdash; visit duration 1h 20m."</em> means checked out. A beep and a short vibration confirm each result.</li>
+    <li>Scanning the same card again checks the member out.</li>
+  </ol>
+  <p>The lists below show <strong>Currently in the gym</strong> (who, since when, how long) and <strong>Today's activity</strong> (each visit; <strong>IN GYM</strong> or the length of the visit). They refresh every minute.</p>
+  <div class="note"><p>Click <strong>Scanner: ON</strong> to turn it off (then it shows <strong>Scanner: OFF</strong>). The camera stays shut for 3 seconds on the same barcode so one scan is not counted twice.</p></div>
+
+  <h2 id="forgot-out">What to do when someone forgot to scan out</h2>
+  <ol class="steps">
+    <li>On <strong>Gym &rarr; Check-In</strong>, find the person under <strong>Currently in the gym</strong>.</li>
+    <li>Click <strong>Out</strong> next to their name. They are checked out and the list updates.</li>
+    <li>If nobody does this, the system closes any visit still open from a previous day automatically at the gym closing time, <strong>22:00</strong> (fixed — there is no screen to change it), so yesterday's visit never turns today's arrival into a check-out.</li>
+  </ol>
+  <p>A member who is already inside can always check out, even if their membership has lapsed or been suspended since they came in.</p>
+
+  <h2 id="schedule">How to use the Gym Schedule and slot bookings</h2>
+  <p>The <strong>Gym &rarr; Schedule</strong> page shows one day at a time. Guests reserve slots on the public page <strong>Plan Your Workout</strong> (gym-schedule page on the website) when slot booking is switched on. If it is off, guests see <em>"Slot booking isn't available"</em> and are asked to contact the front desk.</p>
+  <ol class="steps">
+    <li>Open <strong>Gym &rarr; Schedule</strong>. The title bar shows <strong>Booked today: N</strong> (or <strong>Booked this day</strong>) and <strong>Booking ON</strong> or <strong>Booking OFF</strong>. <strong>Public page</strong> opens the guest page in a new tab.</li>
+    <li>Move between days with <strong>&laquo; Prev</strong>, <strong>Next &raquo;</strong>, the date box, or <strong>Today</strong>.</li>
+    <li>Each row is an hour slot with a bar and a count like <strong>12 / 20</strong>. A full slot shows <strong>FULL</strong>. Class names running in that slot are listed. Under it are the people booked in, with <strong>&times;2</strong> after the name for a party of 2. Hover on a name to see phone, email and reference.</li>
+    <li>When a booked person arrives, click the tick button (<strong>Mark attended</strong>) next to their name. To release their place, click the cross button (<strong>Cancel</strong>). You need <strong>Manage Gym Packages</strong> for both.</li>
+  </ol>
+  <p>You will see <em>"Marked attended."</em> or <em>"Reservation cancelled."</em> If the gym is closed on that weekday you see <em>"The gym is closed on Monday (set opening hours below to open it)."</em></p>
+  <p>What guests do on the public page: they click a day, then <strong>Reserve</strong> on a slot (slots that have gone show <strong>Passed</strong>; full ones show <strong>Fully booked</strong>). In <strong>Reserve your slot</strong> they enter <strong>Your name</strong>, <strong>Phone</strong> (or email), <strong>Email</strong> (optional), <strong>Member no.</strong> (optional), <strong>People</strong>, and click <strong>Confirm reservation</strong>. They see <em>"You're booked in!"</em> with a reference.</p>
+  <div class="note"><p>A cancelled reservation cannot be switched back (<em>"This reservation is cancelled and cannot be changed."</em>). The guest has to book again.</p></div>
+
+  <h2 id="hours">How to set opening hours and slot rules</h2>
+  <p>These two boxes appear at the bottom of <strong>Gym &rarr; Schedule</strong> only if you have <strong>Manage Gym Packages</strong>.</p>
+  <ol class="steps">
+    <li>In <strong>Slot Booking Settings</strong>, tick <strong>Enable public slot booking</strong> to show the schedule page and reserve buttons on the gym site.</li>
+    <li>Set <strong>Capacity per slot</strong> (maximum people at once, 1 to 1000), <strong>Slot length (minutes)</strong> (15 to 240) and <strong>Bookable days ahead</strong> (0 to 60).</li>
+    <li>Click <strong>Save settings</strong>. You will see <em>"Slot booking settings saved."</em></li>
+    <li>In <strong>Opening Hours</strong>, tick each weekday the gym is open and set its opening and closing times.</li>
+    <li>Click <strong>Save hours</strong>. You will see <em>"Opening hours saved."</em></li>
+  </ol>
+  <div class="warn"><p>Closing time must be after opening time, otherwise you get <em>"Closing time must be after opening time for Tuesday."</em> and nothing is saved.</p></div>
+
+  <h2 id="classes">How to manage gym classes</h2>
+  <p>Open <strong>Advanced &rarr; Gym Classes</strong>. Each class appears on its own card (hidden classes are shown faded with a <strong>Hidden</strong> badge). The same classes show on the public gym page.</p>
+  <ol class="steps">
+    <li>Click <strong>Add Class</strong> (needs <strong>Manage Gym Packages</strong>).</li>
+    <li>Fill in <strong>Class title</strong> (required, up to 150 characters), <strong>Description</strong> (optional, up to 500), <strong>Days</strong> (required, for example <em>Tuesday &amp; Thursday</em>) and <strong>Time</strong> (required, for example <em>7:00 AM</em>).</li>
+    <li>Choose <strong>Level</strong> (you can type your own, or pick <strong>All Levels</strong>, <strong>Beginner</strong>, <strong>Intermediate</strong>, <strong>Advanced</strong>) and <strong>Order</strong> (lower numbers first).</li>
+    <li>Leave <strong>Active &mdash; show on the public schedule</strong> ticked to show it to guests. Untick to hide it.</li>
+    <li>Click <strong>Save Class</strong>. You will see <em>"Class created."</em></li>
+    <li>To change a class, click <strong>Edit</strong> on its card, change it and click <strong>Save Class</strong>: <em>"Class updated."</em></li>
+    <li>To remove a class, click the bin button and confirm <em>Delete class "name"? Enrolments are removed too. This cannot be undone.</em> You will see <em>"Class deleted."</em></li>
+  </ol>
+
+  <h2 id="roster">How to enrol members in a class and send reminders</h2>
+  <ol class="steps">
+    <li>On the class card click <strong>Roster</strong> (or the <strong>N enrolled</strong> badge). Anyone with the <strong>Gym Inquiries</strong> permission can look at the roster.</li>
+    <li>To add someone, pick them in <em>"&mdash; Add an active member &mdash;"</em> (members with no email are marked <em>no email</em>) and click <strong>Enrol</strong>. You will see <em>"name enrolled."</em></li>
+    <li>To take someone out, click the remove button next to their name. You will see <em>"Member removed from class."</em></li>
+    <li>To email everyone enrolled, click <strong>Remind</strong> on the card, or <strong>Send reminder to all</strong> in the roster. Confirm. You will see for example <em>"5 reminders sent &middot; 1 skipped (no email)."</em> If nobody is enrolled: <em>"No enrolled members to remind."</em></li>
+  </ol>
+  <p>Enrolling, removing, editing, deleting and reminding need <strong>Manage Gym Packages</strong>. Otherwise you get <em>"You do not have permission to manage classes."</em> Only members with an active, unexpired membership can be enrolled.</p>
+
+  <h2 id="packages">How to manage gym packages</h2>
+  <p>Open <strong>Advanced &rarr; Gym Packages</strong> (needs <strong>Manage Gym Packages</strong>). Packages appear as cards with price, length, what is included and an <strong>Active</strong> or <strong>Inactive</strong> label. The page has <strong>View Inquiries</strong> and <strong>Add Package</strong> buttons.</p>
+  <ol class="steps">
+    <li>Click <strong>Add Package</strong>. The window is titled <strong>Add Gym Package</strong>.</li>
+    <li>Fill in <strong>Package Name</strong> (required, up to 150 characters, must be unique) and <strong>Price</strong> (required, 0 or more). <strong>Currency Code</strong> is <strong>MWK</strong> by default.</li>
+    <li>Enter <strong>Duration (days)</strong>, for example 30 for monthly, 365 for yearly. This decides the member's expiry date. Leave blank or 0 for no expiry. <strong>Duration Label</strong> is the display text; if you leave it empty it is filled from the days (for example <em>Monthly</em>).</li>
+    <li>Tick <strong>Complimentary (free &mdash; e.g. hotel guest)</strong> for a free package. The price is ignored and no fee is recorded.</li>
+    <li>Type <strong>What's Included</strong>, one item per line. Set <strong>Display Order</strong> (lower first). <strong>Icon Class</strong>, <strong>CTA Button Text</strong> and <strong>CTA Link</strong> change how the package appears on the public gym page.</li>
+    <li>Tick <strong>Active</strong> to offer it, and <strong>Featured</strong> to highlight it.</li>
+    <li>Click <strong>Add Package</strong>. You will see <em>"Gym package added successfully!"</em></li>
+    <li>To change one, click <strong>Edit Package</strong>, then <strong>Save Changes</strong>: <em>"Gym package updated successfully!"</em></li>
+    <li>On a card, the toggle button switches <strong>Activate</strong> / <strong>Deactivate</strong>, and the star button switches <strong>Mark as featured</strong> / <strong>Unfeature</strong>.</li>
+    <li>To delete, click the bin button and confirm <em>Delete "name"? This cannot be undone.</em> The system answers <em>"Package deleted."</em></li>
+  </ol>
+  <div class="note"><p>Deactivate a package instead of deleting it if you only want to stop offering it. If Facebook posting is switched on, each card also has a <strong>Share on Facebook</strong> button and the page has <strong>Share All Packages</strong>. See the Facebook guide.</p></div>
+
+  <h2 id="reports">How to read Gym Reports</h2>
+  <ol class="steps">
+    <li>Open <strong>Advanced &rarr; Gym Reports</strong> (needs <strong>Gym Reports</strong>).</li>
+    <li>Choose the period at the top right: <strong>Today</strong>, <strong>7 days</strong>, <strong>30 days</strong> or <strong>90 days</strong>. The dates are printed under the title.</li>
+    <li>Read the first row of boxes: <strong>Members</strong> (total, with active, suspended and expired), <strong>New Members</strong> (joined in the period), <strong>Expiring &le;30 Days</strong> (link <strong>Renewal follow-ups</strong> opens the Members page filtered to those) and <strong>Outstanding</strong> (money owed, number of unpaid accounts, and members lost in the period).</li>
+    <li>Read the second row: <strong>Check-Ins</strong> and unique members, <strong>Avg Visit</strong> and busiest day, <strong>In Gym Now</strong> (link to the scanner), and <strong>Gym Revenue</strong> (payments in the period, link <strong>ledger</strong> to Payments).</li>
+    <li>Below are <strong>Busiest Check-In Hours</strong>, <strong>Busiest Check-Out Hours</strong> and <strong>Daily Visits &mdash; Last 14 Days</strong> (check-ins, unique members, average duration).</li>
+    <li><strong>Unpaid / Outstanding Balances</strong> lists each unpaid account with <strong>Total</strong>, <strong>Paid</strong> and <strong>Due</strong>. Click <strong>Follow up</strong> to go to Inquiries. If everyone has paid you see <em>"No outstanding membership balances &mdash; everyone is paid up."</em></li>
+  </ol>
+
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>A member can check in only if their status is <strong>Active</strong>, the expiry date has not passed, and the start date has arrived. Otherwise the card is red.</li>
+    <li>A member can check in at most <strong>2 times a day</strong> (fixed — there is no screen to change it). A third scan is refused as possible pass sharing and is logged. The person at the desk must check the face matches the membership.</li>
+    <li>Scanning a member who is still checked in always checks them out.</li>
+    <li>Memberships are not transferable. Only a manager with <strong>Gym Invoicing &amp; Pricing</strong> can rename a member, with a written reason, and the change is recorded.</li>
+    <li>Staff without <strong>Gym Invoicing &amp; Pricing</strong> cannot type a price or an expiry date, cannot enrol without a package, cannot delete a member and cannot edit an inquiry's amounts, send quotations or invoices.</li>
+    <li>Every change to a member (enrolment, edits, status, deletion) is written to the member's change history.</li>
+    <li>Two packages cannot have the same name.</li>
+    <li>A cancelled inquiry cannot be reopened and cannot have its amount changed. An inquiry with payments cannot be deleted.</li>
+    <li>Cancelling an inquiry does not refund automatically (unless your refund settings say so). What was paid stays as credit owed back.</li>
+    <li>Only active members with an unexpired membership can be put in a class.</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>"Member name is required (max 255 characters)."</em></td><td>Name empty or too long.</td><td>Type the full name.</td></tr>
+      <tr><td><em>"Enter a valid email address or leave it empty."</em></td><td>The email is not in a valid format.</td><td>Correct it, or clear the box.</td></tr>
+      <tr><td><em>"A valid start date is required."</em></td><td>Start date is empty or not a real date.</td><td>Pick the start date.</td></tr>
+      <tr><td><em>"Expiry date cannot be before the start date."</em></td><td>Manager typed an earlier expiry.</td><td>Fix the expiry date.</td></tr>
+      <tr><td><em>"Choose a membership package. Only a manager can enrol a member without one."</em></td><td>No package chosen and you do not have <strong>Gym Invoicing &amp; Pricing</strong>.</td><td>Pick a package, or ask a manager.</td></tr>
+      <tr><td><em>"The selected package is no longer available. Refresh and try again."</em></td><td>The package was deactivated or deleted.</td><td>Refresh the page and pick another.</td></tr>
+      <tr><td><em>"Member name changes require a manager (legal name corrections only ...)"</em></td><td>You tried to rename a member without <strong>Gym Invoicing &amp; Pricing</strong>.</td><td>Ask a manager. Do not reuse a card for someone else.</td></tr>
+      <tr><td><em>"A reason (min 5 characters) is required to change a member's name. ..."</em></td><td>Name changed without a reason.</td><td>Type a reason of 5 or more characters.</td></tr>
+      <tr><td><em>"This member's name has already been changed twice in the last 180 days. ..."</em></td><td>Name-change limit reached.</td><td>Ask an administrator.</td></tr>
+      <tr><td><em>"This inquiry is already enrolled as member GM-A1B2C3."</em></td><td>The inquiry was already turned into a member.</td><td>Find that member on the Members page.</td></tr>
+      <tr><td><em>"Security token invalid &mdash; refresh the page."</em></td><td>Your page was open too long.</td><td>Reload the page and try again.</td></tr>
+      <tr><td><em>"No member found for "GM-XXXXXX". Check the number or enrol the member first."</em></td><td>Wrong number scanned or typed.</td><td>Check the number, or enrol the person.</td></tr>
+      <tr><td><em>"name cannot check in &mdash; membership expired Jan 5, 2026."</em> (also <em>membership is suspended</em>, <em>membership starts ...</em>)</td><td>Membership is not valid today.</td><td>Renew or reactivate the member on the Members page, then scan again.</td></tr>
+      <tr><td><em>"name has already visited 2&times; today &mdash; possible pass sharing. ..."</em></td><td>Daily visit limit reached.</td><td>Check the person's identity before letting them in.</td></tr>
+      <tr><td><em>"Database error while processing the scan."</em></td><td>A system problem.</td><td>Try again. If it repeats, tell your manager.</td></tr>
+      <tr><td><em>Camera permission denied</em>, <em>HTTPS required</em>, <em>No camera found</em></td><td>The device blocks the camera, the address is not secure, or there is no camera.</td><td>Allow the camera in the browser, or use a USB scanner or type the number.</td></tr>
+      <tr><td><em>"Required gym deposit has not been fully paid yet."</em></td><td>A deposit is required on the inquiry and not fully paid.</td><td>Record the deposit payment first, then confirm.</td></tr>
+      <tr><td><em>"Only new inquiries can be confirmed."</em></td><td>The inquiry is no longer <strong>New</strong>.</td><td>Use the <strong>Status</strong> list instead.</td></tr>
+      <tr><td><em>"Cancelled inquiries cannot be reopened. Ask the guest to submit a new one."</em></td><td>You tried to change a cancelled inquiry's status.</td><td>Ask the guest to send a new request.</td></tr>
+      <tr><td><em>"Use the Cancel button in the inquiry details to cancel ..."</em></td><td>You picked <strong>Cancelled</strong> in the status list.</td><td>Click <strong>View</strong>, then <strong>Cancel Membership</strong>.</td></tr>
+      <tr><td><em>"This inquiry has payments recorded against it and cannot be deleted. Cancel it instead."</em></td><td>Payments are kept as records.</td><td>Use <strong>Cancel Membership</strong>.</td></tr>
+      <tr><td><em>"This inquiry has no valid email address on file."</em></td><td>Cannot email the guest.</td><td>Phone the guest instead.</td></tr>
+      <tr><td><em>"Both a subject and a message are required to email the member."</em></td><td>One box is empty.</td><td>Fill in both.</td></tr>
+      <tr><td><em>"Set a total amount before recording payment."</em></td><td>Total amount is 0.</td><td>Use <strong>Set Total Amount</strong> first.</td></tr>
+      <tr><td><em>"Package name is required (max 150 characters)."</em></td><td>Package name empty or too long.</td><td>Type a name.</td></tr>
+      <tr><td><em>"A package with that name already exists."</em></td><td>Names must be unique.</td><td>Use a different name.</td></tr>
+      <tr><td><em>"Price must be a number (0 or more)."</em></td><td>Price missing or negative.</td><td>Enter a valid price.</td></tr>
+      <tr><td><em>"Class title is required (max 150 characters)."</em>, <em>"Days are required ..."</em>, <em>"A time is required ..."</em></td><td>A required class box is empty.</td><td>Fill in title, days and time.</td></tr>
+      <tr><td><em>"You do not have permission to change gym settings."</em> (also opening hours, reservations)</td><td>You lack <strong>Manage Gym Packages</strong>.</td><td>Ask a manager.</td></tr>
+      <tr><td>Public form: <em>"Too many submissions. Please wait a few minutes before trying again."</em></td><td>Guest sent too many requests.</td><td>Wait 10 minutes, or take the booking by phone.</td></tr>
+      <tr><td>Public form: <em>"Gym bookings are temporarily unavailable. Please contact us directly."</em></td><td>The gym is switched off.</td><td>Check <strong>Gym &amp; Fitness</strong> in Settings &rarr; Modules.</td></tr>
+      <tr><td>Slot page: <em>"That time slot has already passed."</em>, <em>"You already have a reservation for that slot."</em></td><td>Guest chose a past slot or booked it twice.</td><td>Pick another slot.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="13-finance-payments.html">Finance and payments</a> &mdash; refunds and recording other payment types</li>
+    <li><a href="16-business-presets.html">Business presets</a> &mdash; switching the Gym module on or off</li>
+    <li><a href="11-social-facebook-sharing.html">Social and Facebook sharing</a></li>
+    <li><a href="18-staff-access.html">Staff and access</a> &mdash; giving a person the gym permissions</li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

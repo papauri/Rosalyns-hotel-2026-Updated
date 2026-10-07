@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hotel Settings — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
+
+  <h1>Hotel Settings</h1>
+  <p>Hotel Settings is one long page of cards. Each card controls one part of how <span class="g-site-name">Rosalyns Beach Hotel</span> takes bookings, charges money, produces documents and sends email. This guide goes through the cards in the order they appear on the page.</p>
+
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Manager or owner. Staff do not need this page for daily work.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Hotel Settings</strong> (<code>/admin/booking-settings.php</code>)</dd>
+      <dt>Permission needed</dt><dd><strong>Hotel Settings</strong> to open the page and change most cards. Three kinds of setting also need <strong>Change VAT &amp; refund settings</strong> (marked below). The email and PDF wording is a separate page that needs <strong>Edit message templates</strong>.</dd>
+      <dt>Only shown when</dt><dd>Most cards are only shown when the <strong>Bookings &amp; Reservations</strong> module is switched on in Settings &rarr; Modules. With it off, the page is called <strong>Business Settings</strong> and shows only Frontend Maintenance Mode, Email Configuration, Service Modules and PWA Install Banner. The cards that need the module are marked below.</dd>
+    </dl>
+  </div>
+
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#maintenance">Frontend Maintenance Mode</a></li>
+      <li><a href="#booking-status">Booking System Status</a></li>
+      <li><a href="#advance">Advance Booking Configuration</a></li>
+      <li><a href="#refunds">Refunds &amp; cancellations</a></li>
+      <li><a href="#details">Hotel details &amp; policies</a></li>
+      <li><a href="#references">Booking references</a></li>
+      <li><a href="#branding">Document branding</a></li>
+      <li><a href="#tentative">Tentative Bookings</a></li>
+      <li><a href="#levy">Tourism Levy / City Tax</a></li>
+      <li><a href="#email-config">Email Configuration</a></li>
+      <li><a href="#notify">Booking Notification Email</a></li>
+      <li><a href="#services">Service Modules &amp; Dedicated Notification Emails</a></li>
+      <li><a href="#pwa">PWA Install Banner</a></li>
+      <li><a href="#elsewhere">Where the wording and other hotel details live</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
+
+  <h2 id="screen">What is on the screen</h2>
+  <ul>
+    <li>The heading <strong>Hotel Settings</strong> and a <strong>Back to Dashboard</strong> link.</li>
+    <li>A <strong>Jump to</strong> bar with links: <strong>Maintenance</strong>, <strong>Booking status</strong>, <strong>Advance booking</strong>, <strong>Refunds</strong>, <strong>Hotel details</strong>, <strong>References</strong>, <strong>Branding</strong>, <strong>Tentative</strong>, <strong>Tourism levy</strong>, <strong>Email</strong>, <strong>Notifications</strong>, <strong>Service modules</strong>, <strong>PWA</strong>, and <strong>Email templates &rarr;</strong> (opens the separate Email Templates page).</li>
+    <li>After you save, a green box at the top shows the result. A red box shows an error. Each card has its own save button, and a save button saves <strong>only its own card</strong>. Anything you typed in another card is not saved.</li>
+  </ul>
+  <div class="warn"><p>Always click the save button on the card you changed before you scroll to another card. A card's save button saves that card only.</p></div>
+
+  <h2 id="maintenance">Frontend Maintenance Mode</h2>
+  <p>This card shows the current state: <strong>Frontend is Live</strong> (<em>"Public pages available"</em>) or <strong>Frontend is In Maintenance</strong> (<em>"Public pages blocked (admin stays online)"</em>).</p>
+  <h3>Fields</h3>
+  <ul>
+    <li><strong>Enable Full Frontend Maintenance Mode</strong> (tick box). It saves the moment you tick or untick it. There is no save button and no question first.</li>
+    <li><strong>Maintenance Message</strong> (text area, up to 1,000 characters). Shown to every visitor while maintenance mode is on. If you save it empty, the standard text is used: <em>"Our website is temporarily unavailable while we complete scheduled maintenance. Please check back shortly."</em></li>
+  </ul>
+  <h3>What people notice</h3>
+  <ul>
+    <li>Guests who open any page of the public website see the maintenance page with your message. Booking and all other guest pages are blocked.</li>
+    <li>The admin, including the POS and the stations, keeps working. Admin and API addresses stay reachable.</li>
+  </ul>
+  <h3>Messages</h3>
+  <ul>
+    <li>Ticking: <em>"Frontend maintenance mode enabled. Public pages now show the maintenance page."</em></li>
+    <li>Unticking: <em>"Frontend maintenance mode disabled. Public pages are live again."</em></li>
+    <li>Saving the message with <strong>Save Maintenance Message</strong>: <em>"Frontend maintenance message updated successfully!"</em></li>
+  </ul>
+  <div class="warn"><p>Ticking the box takes the whole guest website offline straight away. Untick it as soon as you are finished.</p></div>
+
+  <h2 id="booking-status">Booking System Status</h2>
+  <p>Only shown when the Bookings &amp; Reservations module is on. The card shows <strong>Booking System is Enabled</strong> (<em>Active</em>) or <strong>Booking System is Disabled</strong> (<em>Inactive</em>).</p>
+  <h3>Fields</h3>
+  <ul>
+    <li><strong>Enable Online Booking System</strong> (tick box). It saves the moment you tick or untick it.</li>
+  </ul>
+  <h3>What people notice</h3>
+  <p>The note on the card says it: <em>"When disabled, all booking forms, buttons, and widgets will be hidden. Guests will see a message instead of booking options."</em></p>
+  <h3>Messages</h3>
+  <ul>
+    <li><em>"Booking system enabled successfully!"</em></li>
+    <li><em>"Booking system disabled successfully!"</em></li>
+  </ul>
+  <h3>Disabled Mode Settings</h3>
+  <p>Below the switch is the <strong>Disabled Mode Settings</strong> box. It decides what guests see on the booking page while online booking is off. You can set it before switching booking off. (While booking is off, a yellow <strong>Booking System Disabled</strong> box also appears, and its <strong>Configure Disabled Message</strong> link jumps to these settings.)</p>
+  <ul>
+    <li><strong>Action When Disabled</strong> (list): <strong>Show Custom Message</strong>, <strong>Show Contact Information</strong> or <strong>Redirect to URL</strong>. The first two look the same to guests: your message plus <strong>Call Us</strong> and email buttons with the hotel phone and reservations email. <strong>Redirect to URL</strong> sends guests to the page you give instead.</li>
+    <li><strong>Redirect URL</strong> (only for <strong>Redirect to URL</strong>). Must start with <code>http://</code>, <code>https://</code> or a single <code>/</code> (for example <code>/contact</code>). Up to 500 characters.</li>
+    <li><strong>Custom Message</strong> (up to 1,000 characters). You can type <code>[phone]</code>, <code>[email]</code> or <code>[contact info]</code> and the hotel's main phone and reservations email are put in for you.</li>
+    <li>Save button: <strong>Save Settings</strong>. Message: <em>"Disabled mode settings updated successfully!"</em></li>
+  </ul>
+  <p>Errors: <em>"Redirect URL is too long (500 characters maximum)."</em> and <em>"Redirect URL must start with http://, https:// or a single /."</em></p>
+
+  <h2 id="advance">Advance Booking Configuration</h2>
+  <p>Only shown when the Bookings &amp; Reservations module is on.</p>
+  <h3>Fields</h3>
+  <ul>
+    <li><strong>Maximum Advance Booking Days</strong>: a whole number from 1 to 365. Default 30. Guests can only book up to this many days from today.</li>
+  </ul>
+  <h3>What guests notice</h3>
+  <p>The date pickers on the booking form only allow dates inside this window. The system also refuses bookings beyond it, and guests see a message about the booking window.</p>
+  <h3>Save button and messages</h3>
+  <ul>
+    <li><strong>Save Changes</strong> &rarr; <em>"Maximum advance booking days updated to N days successfully!"</em></li>
+    <li>Below 1: <em>"Error: Maximum advance booking days must be at least 1"</em>. Above 365: <em>"Error: Maximum advance booking days cannot exceed 365 (one year)"</em>.</li>
+  </ul>
+
+  <h2 id="refunds">Refunds &amp; cancellations</h2>
+  <p>Only shown when the Bookings &amp; Reservations module is on. It shows <strong>Current handling</strong> and four groups of choices. Everyone with Hotel Settings can see them. <strong>Only people with Change VAT &amp; refund settings can change them</strong>; for everyone else the choices are greyed out, there is no save button, and the card says <em>"You can view these rules. Only users with the "Change VAT &amp; refund settings" permission can change them."</em></p>
+  <h3>Fields (choose one in each group)</h3>
+  <table>
+    <thead><tr><th>Group</th><th>Choices and what they do</th></tr></thead>
+    <tbody>
+      <tr><td><strong>When a room booking is cancelled</strong></td><td>
+        <strong>Void the bill and refund everything paid</strong>: the booking owes nothing and the full net amount paid is refunded automatically.<br>
+        <strong>Void the bill, keep payments as guest credit</strong>: the booking owes nothing but no refund is made automatically. The money paid shows as owed back to the guest, for staff to refund or issue a credit note.<br>
+        <strong>Charge the first night, refund the rest</strong>: the guest is charged the first night (nightly rate including its VAT and levy share); the bill is reduced to that amount and the rest of the net paid is refunded.</td></tr>
+      <tr><td><strong>When a guest cancels online</strong></td><td>
+        <strong>Staff approve the refund</strong>: the refund is queued as pending until staff settle it.<br>
+        <strong>Refund immediately</strong>: the refund is marked completed the moment the guest cancels.</td></tr>
+      <tr><td><strong>When a conference, event or gym account is cancelled</strong></td><td>
+        <strong>Keep payments as credit</strong>: the bill is voided and money paid stays as credit owed back; staff refund it manually.<br>
+        <strong>Refund everything paid</strong>: the net amount paid is refunded automatically when the account is cancelled.</td></tr>
+      <tr><td><strong>How refunds are paid out</strong></td><td>
+        <strong>Always to the original payment method</strong>: refunds go back the way the money came in and staff cannot change the method.<br>
+        <strong>Staff choose on the refund screen</strong>: the refund screen starts on the original method but staff may pick another.</td></tr>
+    </tbody>
+  </table>
+  <h3>What people notice</h3>
+  <p>The new rules apply to every cancellation made after you save. Bookings already cancelled are not changed. Charges already posted to a booking's folio stay billable.</p>
+  <h3>Save button and messages</h3>
+  <ul>
+    <li><strong>Save Refund Settings</strong> &rarr; <em>"Refund and cancellation settings saved."</em></li>
+    <li><em>"You do not have permission to change refund and cancellation settings."</em></li>
+    <li><em>"Invalid refund or cancellation option."</em></li>
+  </ul>
+  <p>Each change is written to the system log with the person's name, the old choices and the new choices.</p>
+
+  <h2 id="details">Hotel details &amp; policies</h2>
+  <p>Only shown when the Bookings &amp; Reservations module is on. One form with four groups of fields. Nothing is saved until you click <strong>Save Hotel Details</strong> at the bottom. Under the button the page shows the system time zone: <em>"Time zone: ..."</em>. It is set when the system is installed and cannot be changed here.</p>
+  <p>Fields marked <strong>(VAT &amp; refund)</strong> need the permission <strong>Change VAT &amp; refund settings</strong>. Without it they are greyed out and the group shows <em>"Only users with the "Change VAT &amp; refund settings" permission can change these."</em> The other fields need only <strong>Hotel Settings</strong>.</p>
+
+  <h3>Group: Hotel identity &amp; contact</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Allowed values</th><th>What it affects</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Website address (used in emails, documents and password-reset links)</strong></td><td>The full address of the hotel's website, for example <code>https://www.yourhotel.com</code>. Must start with <code>http://</code> or <code>https://</code>. No <code>?</code> or <code>#</code>. Up to 255 characters. A slash at the end is removed. May be left empty.</td><td>The links and logos inside emails and PDFs, and the links in password-reset and staff invitation emails, and the site address tag in email templates. <strong>It does not change the website pages themselves</strong>; the website works out its own address from the browser. If it is empty or wrong, links in emails can point to the wrong place.</td></tr>
+      <tr><td><strong>Short name (app icon / home screen)</strong></td><td>Text, up to 30 characters.</td><td>The name under the app icon when the admin is installed on a phone or tablet. See <a href="15-pwa-install-guide.html">Installing the admin as an app</a>.</td></tr>
+      <tr><td><strong>Star rating (0 = not rated)</strong></td><td>Whole number 0 to 5. Default 5.</td><td>The hotel's star rating.</td></tr>
+      <tr><td><strong>Price range (search engines)</strong></td><td>List: <strong>$</strong>, <strong>$$</strong>, <strong>$$$</strong>, <strong>$$$$</strong>. Default <strong>$$$</strong>.</td><td>Passed to search engines.</td></tr>
+      <tr><td><strong>Full postal address (documents)</strong></td><td>Text, up to 255 characters.</td><td>The address printed on invoices and other documents.</td></tr>
+      <tr><td><strong>Region / district (contact page)</strong></td><td>Text, up to 100 characters.</td><td>The guest Contact page.</td></tr>
+      <tr><td><strong>Second phone number</strong></td><td>Digits, spaces, ( ), - and an optional leading +. At least 6 characters, up to 30. May be left empty.</td><td>Shown under the main phone number on the guest Contact page.</td></tr>
+      <tr><td><strong>Staff notification email</strong></td><td>One valid email address. May be left empty.</td><td>A staff notification address. It also appears as the starting value of <strong>Notification Recipient Email</strong> if that has never been saved (see <a href="#notify">Booking Notification Email</a>).</td></tr>
+      <tr><td><strong>Google Maps embed (link or iframe code from Google Maps &gt; Share &gt; Embed)</strong></td><td>Paste either the embed link or the whole iframe code. It must be a Google Maps embed address. May be left empty.</td><td>The map on the guest Contact page.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Group: Stay policies</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Allowed values</th><th>What it affects</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Check-in from</strong></td><td>A time such as <code>2:00 PM</code> or <code>14:00</code>. Default 2:00 PM.</td><td>The check-in time shown to guests and in emails.</td></tr>
+      <tr><td><strong>Check-out by</strong></td><td>A time such as <code>11:00 AM</code> or <code>11:00</code>. Default 11:00 AM.</td><td>The check-out time shown to guests and in emails.</td></tr>
+      <tr><td><strong>Tentative hold reminder (hours before it lapses)</strong></td><td>Whole number 1 to 168. Default 24.</td><td>How long before a tentative hold runs out the guest is reminded.</td></tr>
+      <tr><td><strong>Guest self-cancel notice (days before arrival, 0 = any time)</strong></td><td>Whole number 0 to 60. Default 0.</td><td>How many days before arrival a guest may still cancel online. 0 means any time.</td></tr>
+      <tr><td><strong>Booking time buffer (minutes)</strong></td><td>Whole number 0 to 720. Default 60.</td><td>The minimum notice, in minutes, used on the Conference and Gym booking forms when a same-day time is chosen.</td></tr>
+      <tr><td><strong>Child price (% of the adult rate)</strong></td><td>Whole number 0 to 100. Default 50.</td><td>The price charged for a child, as a percentage of the adult rate.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Group: Payments &amp; documents (all fields are VAT &amp; refund)</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Allowed values</th><th>What it affects</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Bank name</strong></td><td>Text, up to 100 characters.</td><td>Bank details on invoices.</td></tr>
+      <tr><td><strong>Account name</strong></td><td>Text, up to 150 characters.</td><td>Bank details on invoices.</td></tr>
+      <tr><td><strong>Account number</strong></td><td>Letters, digits, spaces and dashes only. At least 3, up to 50. The system log only keeps the last 4 characters.</td><td>Bank details on invoices.</td></tr>
+      <tr><td><strong>Branch</strong></td><td>Text, up to 100 characters.</td><td>Bank details on invoices.</td></tr>
+      <tr><td><strong>Payment methods note</strong></td><td>Text, up to 255 characters. Default <em>"We accept cash payments only."</em></td><td>The payment methods note given to guests.</td></tr>
+      <tr><td><strong>Payment info in arrival reminders</strong></td><td>Text, up to 500 characters. Default <em>"Payment will be collected at the hotel reception upon check-in."</em></td><td>The payment line in the pre-arrival reminder email.</td></tr>
+      <tr><td><strong>Invoice terms</strong></td><td>Text, up to 1,000 characters.</td><td>The <strong>Invoice Terms</strong> box on room invoices.</td></tr>
+      <tr><td><strong>Invoice footer</strong></td><td>Text, up to 255 characters.</td><td>The footer on invoices.</td></tr>
+      <tr><td><strong>Receipt footer</strong></td><td>Text, up to 255 characters.</td><td>The footer on receipts.</td></tr>
+      <tr><td><strong>Quotation footer</strong></td><td>Text, up to 255 characters.</td><td>The footer on quotations.</td></tr>
+      <tr><td><strong>Credit notes expire after (months, 0 = never)</strong></td><td>Whole number 0 to 120. Default 12.</td><td>How long a new credit note stays usable.</td></tr>
+      <tr><td><strong>End-of-day report CC (comma-separated emails)</strong></td><td>One or more valid email addresses separated by commas, up to 1,000 characters in all.</td><td>Who is copied on the End of Day report email.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Group: Restaurant &amp; stock</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Allowed values</th><th>What it affects</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Restaurant tagline</strong></td><td>Text, up to 100 characters. Default <em>"Fresh. Local. Inspired."</em></td><td>The restaurant tagline.</td></tr>
+      <tr><td><strong>Restaurant receipt footer</strong></td><td>Text, up to 160 characters. Default <em>"Thank you for dining with us!"</em></td><td>The restaurant receipt footer line.</td></tr>
+      <tr><td><strong>Menu PDF link (optional)</strong></td><td>A full <code>http://</code> or <code>https://</code> link, up to 500 characters. May be left empty.</td><td>A link to a menu PDF.</td></tr>
+      <tr><td><strong>Restaurant service charge (%)</strong> (VAT &amp; refund)</td><td>Number 0 to 25. Default 0.</td><td>The restaurant service charge percentage.</td></tr>
+      <tr><td><strong>Stock count: alert at variance (%)</strong></td><td>Number 0 to 100. Default 2.</td><td>The difference between counted and expected stock at which an alert is raised.</td></tr>
+      <tr><td><strong>Stock count: needs approval above (%)</strong></td><td>Number 0 to 100. Default 10.</td><td>Above this difference a stock count needs approval.</td></tr>
+      <tr><td><strong>Stock count: ignore variances worth less than</strong></td><td>Number 0 to 100,000,000. Default 5000 (MWK).</td><td>Small differences below this value are ignored.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>How to change the details</h3>
+  <ol class="steps">
+    <li>Open <strong>Hotel Settings</strong> and go to <strong>Hotel details &amp; policies</strong> (or click <strong>Hotel details</strong> in the Jump to bar).</li>
+    <li>Change the fields you need. You can change fields in several groups in one go.</li>
+    <li>Click <strong>Save Hotel Details</strong>.</li>
+    <li>You will see <em>"N setting(s) saved."</em>, or <em>"No changes to save."</em> if you changed nothing.</li>
+  </ol>
+  <p>If any field is wrong, <strong>nothing at all is saved</strong>. You see the problem field with its rule, then <em>"Nothing was saved."</em> Fix it and save again. Examples of the rule text: <em>"Check-in from: a time such as 2:00 PM or 14:00."</em>, <em>"Star rating (0 = not rated): a whole number from 0 to 5."</em>, <em>"Website address (used in emails, documents and password-reset links): the full address of the site, e.g. https://www.yourhotel.com (no ? or #)."</em>, <em>"Account number: letters, digits, spaces and dashes only."</em></p>
+  <p>Every change is written to the system log, with the old and new value.</p>
+
+  <h2 id="references">Booking references</h2>
+  <p>Only shown when the Bookings &amp; Reservations module is on.</p>
+  <h3>Fields</h3>
+  <ul>
+    <li><strong>Reference prefix (2-6 letters or digits)</strong>: 2 to 6 letters or digits. Letters are turned into capitals.</li>
+  </ul>
+  <h3>What people notice</h3>
+  <p>New bookings get references made of the prefix, the year and a number, for example <strong>RBH2026012345</strong> (the card shows the real example for your prefix). The website, the Create Booking screen and the API all use it. <strong>Existing bookings keep the reference they already have.</strong></p>
+  <h3>Save button and messages</h3>
+  <ul>
+    <li><strong>Save Prefix</strong> &rarr; <em>"Booking reference prefix saved. New bookings will look like &lt;prefix&gt;&lt;year&gt;012345."</em></li>
+    <li><em>"The booking reference prefix must be 2 to 6 letters or digits (for example RBH)."</em></li>
+  </ul>
+
+  <h2 id="branding">Document branding</h2>
+  <p>Only shown when the Bookings &amp; Reservations module is on. It needs <strong>Change VAT &amp; refund settings</strong> to change. Without it the fields are greyed out and the card says <em>"You can view these. Only users with the "Change VAT &amp; refund settings" permission can change them."</em></p>
+  <h3>Fields</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Allowed values</th><th>What it changes on the PDFs</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Primary colour (table headers, total bar, title band)</strong></td><td>A colour picked from the colour box (hex colour such as #524b3f).</td><td>Table headers, the total bar and the title band.</td></tr>
+      <tr><td><strong>Accent colour (small labels and rules)</strong></td><td>A colour picked from the colour box.</td><td>Small labels and lines.</td></tr>
+      <tr><td><strong>Footer line (printed at the bottom of every PDF)</strong></td><td>One line of text, up to 160 characters.</td><td>The line at the bottom of every PDF.</td></tr>
+      <tr><td><strong>Terms / note under the totals</strong></td><td>Text, up to 600 characters.</td><td>A note under the totals.</td></tr>
+      <tr><td><strong>Logo height on documents (10-40 mm)</strong></td><td>A number from 10 to 40 in steps of 0.5. Leave blank for the default (24 mm).</td><td>The size of the hotel logo on documents.</td></tr>
+    </tbody>
+  </table>
+  <h3>Save button and messages</h3>
+  <ul>
+    <li><strong>Save Document Branding</strong> &rarr; <em>"Document branding saved. New PDFs use it straight away."</em></li>
+    <li><em>"Logo height must be between 10 and 40 mm."</em></li>
+    <li><em>"Primary colour must be a hex colour such as #524b3f."</em> and the same for Accent colour.</li>
+    <li><em>"You do not have permission to change document branding."</em></li>
+  </ul>
+  <p>Documents already sent are not changed. Only new PDFs use the new look.</p>
+
+  <h2 id="tentative">Tentative Bookings</h2>
+  <p>Only shown when the Bookings &amp; Reservations module is on. The card shows <strong>Tentative Bookings are Enabled</strong> or <strong>Disabled</strong>. A tentative booking is a hold on a room with no payment up front.</p>
+  <h3>Fields</h3>
+  <ul>
+    <li><strong>Allow Tentative (Hold) Bookings</strong> (tick box).</li>
+  </ul>
+  <p>The card also says how many hours a hold lasts (48 hours unless the hotel has set another value). The reminder time is the <strong>Tentative hold reminder</strong> field in Hotel details &amp; policies.</p>
+  <h3>What people notice when it is switched off</h3>
+  <ul>
+    <li>The <strong>Tentative Booking</strong> card on the public booking page is removed.</li>
+    <li>The <strong>Tentative (hold)</strong> option on the admin booking forms is removed.</li>
+    <li>Tentative bookings that already exist stay as they are. The tentative email templates stay set up for later.</li>
+  </ul>
+  <h3>How to change it</h3>
+  <ol class="steps">
+    <li>Tick or untick <strong>Allow Tentative (Hold) Bookings</strong>. The button label changes to <strong>Save — Enable Tentative Bookings</strong> or <strong>Save — Disable Tentative Bookings</strong>. When you untick it, an orange box says <em>"Disabled: Guests cannot create new tentative holds. Existing holds in the system are unaffected."</em></li>
+    <li>Click the button. If you are disabling, the browser asks <em>"Disable tentative bookings? Guests will no longer be able to place tentative holds from the public booking page or admin forms."</em> followed by <em>"Existing tentative bookings in the system will not be affected."</em> Click OK.</li>
+    <li>You will see <em>"Tentative bookings enabled — guests can hold dates without immediate payment."</em> or <em>"Tentative bookings disabled — only standard bookings will appear on the website and admin forms."</em></li>
+  </ol>
+  <p>When nothing has been changed the button reads <strong>Save — Keep Enabled</strong> or <strong>Save — Keep Disabled</strong>.</p>
+
+  <h2 id="levy">Tourism Levy / City Tax</h2>
+  <p>Only shown when the Bookings &amp; Reservations module is on. It needs <strong>Change VAT &amp; refund settings</strong> to change. Without it, saving shows <em>"You do not have permission to change the tourism levy."</em> The page does not grey the fields out, so the message only appears after you click save.</p>
+  <h3>Fields</h3>
+  <ul>
+    <li><strong>Enable Tourism Levy</strong> (tick box).</li>
+    <li><strong>Tourism Levy Percentage (%)</strong>: a number from 0 to 100, with up to 2 decimals (for example 1.5). The card says common values are 1% to 5%.</li>
+  </ul>
+  <h3>What people notice</h3>
+  <ul>
+    <li>The levy is worked out as (room rate + child supplement) &times; (levy % / 100) and added to <strong>new</strong> bookings. Existing bookings are not changed.</li>
+    <li>The booking page shows a hint <em>"Includes X% Tourism Levy"</em>.</li>
+    <li>Invoices show the levy as a separate line.</li>
+  </ul>
+  <h3>Save button and messages</h3>
+  <ul>
+    <li><strong>Save Tourism Levy Settings</strong> &rarr; <em>"Tourism levy enabled at N% successfully!"</em> or <em>"Tourism levy disabled successfully!"</em></li>
+    <li><em>"Error: Tourism levy percent cannot be negative"</em> and <em>"Error: Tourism levy percent cannot exceed 100%"</em>.</li>
+  </ul>
+  <div class="note"><p>Make sure the percentage matches the local tourism tax rules before you switch the levy on.</p></div>
+
+  <h2 id="email-config">Email Configuration</h2>
+  <p>Always shown. This is where the system is told how to send email. Fields marked * are required. Save with <strong>Save Email Settings</strong>.</p>
+  <h3>SMTP Server Settings</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Allowed values</th></tr></thead>
+    <tbody>
+      <tr><td><strong>SMTP Host *</strong></td><td>The mail server name, for example <code>mail.yourdomain.com</code>. Letters, digits, dots and dashes only, up to 253 characters.</td></tr>
+      <tr><td><strong>SMTP Port *</strong></td><td>A number from 1 to 65535. The card suggests 465 (SSL), 587 (TLS), 25 (standard).</td></tr>
+      <tr><td><strong>SMTP Username *</strong></td><td>Usually the full email address.</td></tr>
+      <tr><td><strong>SMTP Password</strong></td><td>The mail account password. The box is always empty (<em>"Leave blank to keep current password"</em>). Type a password only when you want to change it. It is stored scrambled.</td></tr>
+      <tr><td><strong>SMTP Security</strong></td><td>List: <strong>SSL</strong>, <strong>TLS</strong> or <strong>None</strong>.</td></tr>
+    </tbody>
+  </table>
+  <h3>Email Identity</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Allowed values</th></tr></thead>
+    <tbody>
+      <tr><td><strong>From Name *</strong></td><td>One line, up to 100 characters. The sender name guests see.</td></tr>
+      <tr><td><strong>From Email *</strong></td><td>A valid email address. The sender address guests see.</td></tr>
+      <tr><td><strong>Admin Notification Email</strong></td><td>A valid email address, optional. Receives booking notifications and is the address that is copied when <strong>BCC Admin on all emails</strong> is on.</td></tr>
+    </tbody>
+  </table>
+  <h3>Email Settings</h3>
+  <table>
+    <thead><tr><th>Field</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>BCC Admin on all emails</strong> (tick box)</td><td>Sends a hidden copy of every email to the admin email address.</td></tr>
+      <tr><td><strong>Development Mode (Preview Only)</strong> (tick box)</td><td><strong>When ticked, emails are saved as preview files and are NOT sent.</strong> If it has never been saved, it starts ticked.</td></tr>
+      <tr><td><strong>Enable Email Logging</strong> (tick box)</td><td>Keeps a log of email activity.</td></tr>
+      <tr><td><strong>Enable Email Previews</strong> (tick box)</td><td>Saves an HTML preview of each email.</td></tr>
+      <tr><td><strong>Invoice Email CC Recipients</strong></td><td>One or more valid addresses separated by commas, up to 1,000 characters in all. They are copied on every invoice and reminder email. The SMTP username is always copied as well.</td></tr>
+    </tbody>
+  </table>
+  <h3>Messages</h3>
+  <ul>
+    <li><em>"Email settings updated successfully!"</em></li>
+    <li>Errors start with <em>"Error: "</em>, for example <em>"Error: Smtp host is required"</em>, <em>"Error: Smtp port is required"</em>, <em>"Error: Smtp username is required"</em>, <em>"Error: Email from name is required"</em>, <em>"Error: Email from email is required"</em>, <em>"Error: SMTP port must be a valid port number (1-65535)"</em>, <em>"Error: SMTP host must be a host name such as mail.example.com"</em>, <em>"Error: From email address is invalid"</em>, <em>"Error: Admin email address is invalid"</em>, <em>"Error: Invoice recipients must be valid email addresses separated by commas"</em>.</li>
+  </ul>
+  <h3>How to send a test email</h3>
+  <p>There is no test button on this card. Test emails are sent from the Email Templates page:</p>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Email Templates</strong> (needs <strong>Edit message templates</strong>).</li>
+    <li>Choose a template and make a preview.</li>
+    <li>Type a valid email address in the test box and click <strong>Send</strong>. You will see <em>"Sent to &lt;address&gt;!"</em>. The subject starts with <em>[TEST]</em>.</li>
+  </ol>
+  <p>The Automated Emails page also has a <strong>Send test to me</strong> button that sends sample emails to your own admin email address (see <a href="#elsewhere">below</a>).</p>
+  <div class="warn"><p>If <strong>Development Mode (Preview Only)</strong> is ticked, no guest gets any email, and the test email will not arrive. Untick it when the hotel is ready to send real email, and save.</p></div>
+
+  <h2 id="notify">Booking Notification Email</h2>
+  <p>Only shown when the Bookings &amp; Reservations module is on. It says who inside the hotel is told about new bookings, and sets the reminder and review emails to guests. Save with <strong>Save Notification Email</strong>.</p>
+  <h3>Fields</h3>
+  <ul>
+    <li><strong>Notification Recipient Email</strong>: a valid email address. New booking notifications go here first; if it is empty the <strong>Admin Notification Email</strong> from Email Configuration is used.</li>
+    <li><strong>Booking Notification CC Emails</strong>: optional list of addresses separated by commas, up to 1,000 characters. Copied on all new booking notifications.</li>
+    <li><strong>Send pre-arrival reminder email to guests</strong> (tick box) and <strong>Days before check-in</strong> (whole number 1 to 14; sent once per booking). A number outside the range is changed to the nearest allowed number.</li>
+    <li><strong>Send post-stay review request email to guests</strong> (tick box) and <strong>Days after check-out</strong> (whole number 0 to 14; 0 means the day of check-out; sent once per booking).</li>
+  </ul>
+  <h3>Messages</h3>
+  <ul>
+    <li><em>"Booking notification email updated successfully!"</em></li>
+    <li><em>"Error: Booking notification email address is invalid"</em>, <em>"Error: One or more booking CC email addresses are invalid"</em>, <em>"Error: Too many CC addresses (1000 characters maximum)"</em>.</li>
+  </ul>
+
+  <h2 id="services">Service Modules &amp; Dedicated Notification Emails</h2>
+  <p>Always shown, but each row only appears when its module is on in Settings &rarr; Modules. The note says: <em>"Turning a service off here also removes its page — and every page that module governs — from the guest site navigation. The Events switch lives in Module Settings."</em> (The words <strong>Module Settings</strong> link to the Modules page.)</p>
+  <h3>Fields</h3>
+  <table>
+    <thead><tr><th>Row (needs this module)</th><th>Fields</th></tr></thead>
+    <tbody>
+      <tr><td>Conference</td><td><strong>Enable Conference page &amp; conference enquiry functionality</strong> (tick box); <strong>Conference Notification Email</strong> (valid address or empty).</td></tr>
+      <tr><td>Gym</td><td><strong>Enable Gym page &amp; gym booking/enquiry functionality</strong> (tick box); <strong>Gym Notification Email</strong>.</td></tr>
+      <tr><td>POS &amp; Stations</td><td><strong>Enable Restaurant page and related restaurant functionality</strong> (tick box); <strong>Restaurant Notification Email</strong>.</td></tr>
+    </tbody>
+  </table>
+  <p>The notification email is where enquiries for that service are sent. A row for a module that is off is hidden, and its stored values are kept as they are.</p>
+  <h3>What guests notice</h3>
+  <p>Unticking a service removes its page from the website menu, along with its enquiry functionality.</p>
+  <h3>Save button and messages</h3>
+  <ul>
+    <li><strong>Save Service Module Settings</strong> &rarr; <em>"Service channels and notification emails updated successfully!"</em></li>
+    <li><em>"Error: Conference notification email is invalid"</em>, <em>"Error: Gym notification email is invalid"</em>, <em>"Error: Restaurant notification email is invalid"</em>.</li>
+  </ul>
+
+  <h2 id="pwa">PWA Install Banner</h2>
+  <p>Always shown. It sets how long the <strong>Install Admin App</strong> box stays hidden after staff dismiss it.</p>
+  <h3>Fields</h3>
+  <ul>
+    <li><strong>Re-show banner after dismissal (days)</strong>: a whole number from 1 to 365. Default 14. A 1 shows it every day. A 365 almost never shows it.</li>
+  </ul>
+  <h3>What staff notice</h3>
+  <p>After dismissing the banner, staff do not see it again on that device for this many days. See <a href="15-pwa-install-guide.html">Installing the admin as an app</a>.</p>
+  <h3>Save button and messages</h3>
+  <ul>
+    <li><strong>Save PWA Settings</strong> &rarr; <em>"PWA install banner settings saved — staff will be prompted every N day(s) after dismissing."</em></li>
+    <li><em>"Error: Dismiss period must be at least 1 day."</em> and <em>"Error: Dismiss period cannot exceed 365 days."</em></li>
+  </ul>
+
+  <h2 id="elsewhere">Where the wording and other hotel details live</h2>
+  <ul>
+    <li><strong>Email and PDF wording</strong> (subject lines, body text, invoice and quotation layouts) is on Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Email Templates</strong>, and needs the permission <strong>Edit message templates</strong>. The list of tags you can put in a template is in <a href="12-email-templates.php">Email template tags</a>. This page, Hotel Settings, does not edit any wording.</li>
+    <li><strong>Automated Emails</strong> (Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Automated Emails</strong>, <code>/admin/automated-emails.php</code>, permission <strong>Hotel Settings</strong>): the master switch for automatic jobs, the overdue payment reminder stages, the run interval, a test-recipient box and a <strong>Send test to me</strong> button. If the <strong>Test recipient</strong> box has an address in it, every automatic email goes to that address instead of to real guests, and a yellow <strong>TEST MODE</strong> bar shows at the top. Leave it empty in normal use.</li>
+    <li><strong>Footer</strong> (Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Footer</strong>, <code>/admin/footer-management.php</code>, permission <strong>Footer Management</strong>, needs the Website &amp; CMS module): this is where the hotel name (<strong>Site Name</strong>), tagline, logo, main <strong>Phone Number</strong>, <strong>Email Address</strong>, <strong>Address</strong>, <strong>Working Hours</strong>, the social media links (<strong>Facebook URL</strong>, <strong>Instagram URL</strong>, <strong>Twitter / X URL</strong>, <strong>LinkedIn URL</strong>) and the copyright text are set. Saving shows <em>"Site and footer settings saved."</em> The site name cannot be empty: <em>"Site name is required."</em></li>
+  </ul>
+
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>Each card saves on its own. A save button never saves another card.</li>
+    <li>Refund rules, document branding, tourism levy, and the payments fields and restaurant service charge in Hotel details need <strong>Change VAT &amp; refund settings</strong>.</li>
+    <li>The Hotel details form saves nothing if even one field is wrong.</li>
+    <li>A changed booking reference prefix, tourism levy, refund rule or branding only affects new bookings and new documents. Existing ones are not changed.</li>
+    <li>Changes to refund rules, document branding, booking prefix, maintenance mode and hotel details are written to the system log with the person's name.</li>
+    <li>The page itself is kept available even when modules are switched off, because it is the only place email sending is set up.</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>"Security token invalid. Refresh the page."</em></td><td>The page was open too long.</td><td>Reload the page and make the change again.</td></tr>
+      <tr><td>My change did not stick</td><td>You changed a card and clicked the save button of another card.</td><td>Make the change again and click the save button on the same card.</td></tr>
+      <tr><td><em>"... Nothing was saved."</em> under Hotel details</td><td>One or more fields break their rule.</td><td>Read the rule text, fix the field, click <strong>Save Hotel Details</strong> again.</td></tr>
+      <tr><td>Fields are greyed out</td><td>You do not have <strong>Change VAT &amp; refund settings</strong>.</td><td>Ask the owner to give you the permission in Staff &amp; Access, or ask someone who has it.</td></tr>
+      <tr><td><em>"You do not have permission to change the tourism levy."</em></td><td>Same reason.</td><td>Same fix.</td></tr>
+      <tr><td>Guests do not receive any email</td><td><strong>Development Mode (Preview Only)</strong> is ticked, or the SMTP details are wrong, or the Automated Emails <strong>Test recipient</strong> box is filled in.</td><td>Untick Development Mode and save, check the SMTP fields, and clear the Test recipient box.</td></tr>
+      <tr><td>Links in emails or password-reset links open the wrong website</td><td>The <strong>Website address</strong> is empty or wrong.</td><td>Enter the full hotel address, for example <code>https://www.yourhotel.com</code>, and save Hotel details.</td></tr>
+      <tr><td>The guest website shows a maintenance page</td><td><strong>Enable Full Frontend Maintenance Mode</strong> is ticked.</td><td>Untick it.</td></tr>
+      <tr><td>Guests cannot book online</td><td>The <strong>Enable Online Booking System</strong> box is unticked.</td><td>Tick it.</td></tr>
+      <tr><td>A card I expect is missing</td><td>The Bookings &amp; Reservations module (or the module for that service row) is off.</td><td>Switch the module on in Settings &rarr; Modules. See <a href="16-business-presets.html">Modules and business presets</a>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="12-email-templates.php">Email template tags</a></li>
+    <li><a href="13-finance-payments.html">Finance and payments</a></li>
+    <li><a href="07-reception-bookings.html">Reception and bookings</a></li>
+    <li><a href="15-pwa-install-guide.html">Installing the admin as an app</a></li>
+    <li><a href="16-business-presets.html">Modules and business presets</a></li>
+    <li><a href="18-staff-access.html">Staff &amp; Access</a></li>
+    <li><a href="99-admin-dashboard-full-guide.html">Admin reference</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
+</body>
+</html>

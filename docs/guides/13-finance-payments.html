@@ -1,975 +1,295 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Finance &amp; Payments — Rosalyn's Hotel</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-        rel="stylesheet">
-    <link rel="stylesheet" href="assets/guide-theme.css">
-    <script src="assets/guide-init.js" defer></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Finance and Payments — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
-
-    <nav class="top">
-        <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-        <div class="nav-links">
-            <a href="index.html">All Guides</a>
-            <a href="12-email-templates.php">← Email Tags</a>
-            <a href="14-reports-eod.html">Reports →</a>
-        </div>
-    </nav>
-
-    <header class="hero">
-        <div class="deck">
-            <div class="eyebrow">13 &middot; Finance</div>
-            <h1>Finance &amp; Payments</h1>
-            <p class="lead">Record payments, generate invoices and receipts, issue credit notes, send quotations, and
-                manage the full payment lifecycle for every booking.</p>
-            <div class="meta">
-                <span>Audience <strong>Receptionist &amp; Manager &amp; Admin</strong></span>
-                <span>Read time <strong>~18 min</strong></span>
-                <span>Pages <strong>payments · payment-add · invoices · receipts · credit-notes · quotations · accounting-dashboard</strong></span>
-            </div>
-        </div>
-    </header>
-
-    <main class="content">
-        <div class="deck">
-
-            <!-- TABLE OF CONTENTS -->
-            <section>
-                <h2>On this page</h2>
-                <ul class="checklist">
-                    <li><a href="#payment-add">Adding a payment</a></li>
-                    <li><a href="#payments-list">Payments ledger</a></li>
-                    <li><a href="#invoices">Invoices</a></li>
-                    <li><a href="#receipts">Receipts</a></li>
-                    <li><a href="#credit-notes">Credit notes</a></li>
-                    <li><a href="#quotations">Quotations</a></li>
-                    <li><a href="#refunds">Refunds</a></li>
-                    <li><a href="#vat">VAT &amp; tax</a></li>
-                    <li><a href="#accounting-dashboard">Accounting Dashboard</a></li>
-                    <li><a href="#presets-finance">Presets and your finance pages</a></li>
-                </ul>
-            </section>
-
-            <!-- ADD PAYMENT -->
-            <section id="payment-add">
-                <h2>1. Adding a Payment</h2>
-                <p>Use <strong>Add Payment</strong> (<code>/admin/payment-add.php</code>) to record any money received
-                    or owed against a booking. Reach it from:</p>
-                <ul class="checklist">
-                    <li>A booking details page → <strong>Add Payment</strong> button</li>
-                    <li>Admin sidebar → Finance → <strong>Add Payment</strong></li>
-                    <li>Invoices page header → <strong>New Payment</strong></li>
-                </ul>
-
-                <h3>Payment form fields</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Field</th>
-                            <th>What to enter</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>Payment date</strong></td>
-                            <td>Date money was received (defaults to today).</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Amount</strong></td>
-                            <td>The amount charged to the customer for this line. The system derives the VAT split from it
-                                automatically using your pricing mode (see <a href="#vat">VAT &amp; tax</a>) — you don't
-                                enter VAT by hand.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Method</strong></td>
-                            <td>Cash · Card (manual) · Card (POS terminal) · Mobile money · Bank transfer · Credit note
-                            </td>
-                        </tr>
-                        <tr>
-                            <td><strong>Type</strong></td>
-                            <td>Payment · Deposit · Part-payment · Balance payment · Advance · Refund · Adjustment</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Status</strong></td>
-                            <td>Completed / Paid = money in hand. Pending = awaiting clearance. Refunded = money
-                                returned.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Transaction ref</strong></td>
-                            <td>Mpesa code, POS transaction ID, bank reference — anything that links to the
-                                transaction.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Notes</strong></td>
-                            <td>Internal notes (not shown to guest).</td>
-                        </tr>
-                        <tr>
-                            <td><strong>CC emails</strong></td>
-                            <td>Comma-separated extra email addresses to copy on any invoice/receipt email sent.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Document actions</h3>
-                <p>Tick any combination before saving:</p>
-                <ul class="checklist">
-                    <li><strong>Generate invoice</strong> — creates a PDF invoice for this payment.</li>
-                    <li><strong>Email invoice</strong> — sends the invoice PDF to the guest (and CC addresses).</li>
-                    <li><strong>Generate receipt</strong> — creates a PDF receipt.</li>
-                    <li><strong>Email receipt</strong> — sends the receipt to the guest.</li>
-                    <li><strong>Generate quotation</strong> — creates a quote PDF (useful before payment is
-                        collected).</li>
-                    <li><strong>Send quotation</strong> — emails the quote; set validity days and optional notes in the
-                        fields that appear.</li>
-                </ul>
-
-                <div class="callout note">
-                    <strong>Double-submission protection:</strong> a hidden idempotency ID prevents the same payment
-                    being saved twice if the form is accidentally submitted more than once. The system detects the
-                    duplicate and redirects you to the existing record.
-                </div>
-
-                <h3>Paying with a credit note</h3>
-                <ol class="steps">
-                    <li>Select <strong>Method → Credit note</strong>.</li>
-                    <li>An extra field appears — enter the <code>CN-YYYY-NNNNNN</code> number.</li>
-                    <li>The system verifies the CN is active and has enough balance.</li>
-                    <li>The CN balance decrements automatically and the booking amount-due updates.</li>
-                </ol>
-
-                <h3>Editing a payment</h3>
-                <p>Open the payment via <code>/admin/payment-add.php?edit=N</code> or from the <strong>Edit</strong>
-                    link in the payments ledger. All fields and document actions are available. VAT and booking totals
-                    recalculate automatically on save.</p>
-
-                <div class="callout warn">
-                    <strong>Refund type requires Refunded status.</strong> If you set Type = Refund, Status must be
-                    Refunded — the form will not save otherwise.
-                </div>
-            </section>
-
-            <!-- PAYMENTS LEDGER -->
-            <section id="payments-list">
-                <h2>2. Payments Ledger</h2>
-                <p><code>/admin/payments.php</code> — every payment row across rooms and conferences, with filters,
-                    search, and inline actions.</p>
-
-                <h3>Filters</h3>
-                <ul class="checklist">
-                    <li><strong>Date range</strong> — filter by payment date.</li>
-                    <li><strong>Method</strong> — cash, card, mobile money, bank transfer, credit note.</li>
-                    <li><strong>Status</strong> — pending, partial, completed, refunded, cancelled.</li>
-                    <li><strong>Booking type</strong> — rooms, conference, restaurant/POS.</li>
-                    <li><strong>Search</strong> — payment reference, receipt number, invoice number, booking reference, guest name, email, phone, transaction reference, or amount.</li>
-                </ul>
-
-                <h3>Analytics strip (top of the page)</h3>
-                <p>The four KPI tiles above the table always reflect the <em>current filter set</em>:</p>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Tile</th>
-                            <th>What it counts</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Gross collected</td>
-                            <td>Sum of <code>total_amount</code> for <em>completed/paid</em> rows where <code>payment_type</code> is not <em>refund</em>.</td>
-                        </tr>
-                        <tr>
-                            <td>VAT collected</td>
-                            <td>Sum of <code>vat_amount</code> on the same completed/paid, non-refund rows.</td>
-                        </tr>
-                        <tr>
-                            <td>Pending / partial</td>
-                            <td>Sum of <code>total_amount</code> on rows with status <em>pending</em> or <em>partial</em>. Does <strong>not</strong> include pending refunds (those are the hotel's liability, not a receivable).</td>
-                        </tr>
-                        <tr>
-                            <td>Refunds</td>
-                            <td>Sum of rows where <code>payment_type = 'refund'</code>. Identified by type, not status — this avoids double-counting rows that carry both a refund type and a refunded status.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Side panels</h3>
-                <ul class="checklist">
-                    <li><strong>Today / Week / Month</strong> — quick period totals always calculated on the full dataset (independent of the active filter), so you always see current context.</li>
-                    <li><strong>By source</strong> — breakdown of collected amounts by booking type (Rooms / Conference / Restaurant).</li>
-                    <li><strong>By method</strong> — collected amounts by payment method.</li>
-                    <li><strong>Status mix</strong> — proportion bar showing the split of completed vs pending vs refunded transactions.</li>
-                </ul>
-
-                <h3>CSV export</h3>
-                <p>Click <strong>Export CSV</strong> in the header. The export applies all active filters but removes the pagination limit — you receive every matching row. Columns include: Reference, Type, BookingID, BookingRef, Customer, Date, Subtotal, VAT %, VAT, Total, Method, PaymentType, Status, ReceiptNo, InvoiceNo, TransactionRef, Created, ProcessedBy.</p>
-
-                <h3>Inline actions per row</h3>
-                <ul class="checklist">
-                    <li><strong>View</strong> — full payment details with audit log.</li>
-                    <li><strong>Edit</strong> — opens payment-add in edit mode.</li>
-                    <li><strong>Refund</strong> — opens the refund flow (see <a href="#refunds">Refunds</a>).</li>
-                    <li><strong>PDF / Resend</strong> — regenerate or email invoice/receipt.</li>
-                </ul>
-            </section>
-
-            <!-- INVOICES -->
-            <section id="invoices">
-                <h2>3. Invoices</h2>
-                <p><code>/admin/invoices.php</code> — lists every payment as an invoice with generation status,
-                    receivables aging, and document actions.</p>
-
-                <h3>KPI tiles at a glance</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Tile</th>
-                            <th>What it means</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Paid &amp; Closed</td>
-                            <td>Total value of completed/paid invoices (non-refund rows only). Sub-line shows count + month-to-date total.</td>
-                        </tr>
-                        <tr>
-                            <td>Outstanding</td>
-                            <td>Value still owed on <em>pending</em> or <em>partial</em> invoices. Pending refunds (money owed to the guest) are excluded — this figure represents only what guests still owe the hotel.</td>
-                        </tr>
-                        <tr>
-                            <td>Generated</td>
-                            <td>How many invoices have had a PDF created, plus coverage %.</td>
-                        </tr>
-                        <tr>
-                            <td>Refunded / Credit</td>
-                            <td>Total and count of rows where <code>payment_type = 'refund'</code> — identified by type for consistency with the rest of the accounting suite.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Receivables aging</h3>
-                <p>Outstanding (pending/partial, non-refund) invoices are bucketed by how long they have been outstanding. Age is measured from the <strong>invoice creation date</strong> — the date the payment record was first entered in the system — not from any subsequent payment activity. This gives a true picture of how long a balance has gone unpaid.</p>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Bucket</th>
-                            <th>Action recommended</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>0 – 30 days</td>
-                            <td>Routine — send a polite reminder if no payment plan is in place.</td>
-                        </tr>
-                        <tr>
-                            <td>31 – 60 days</td>
-                            <td>Follow up by phone; confirm payment commitment.</td>
-                        </tr>
-                        <tr>
-                            <td>61 – 90 days</td>
-                            <td>Escalate to manager; consider a formal demand notice.</td>
-                        </tr>
-                        <tr>
-                            <td>90+ days</td>
-                            <td>Highlighted red — immediate action required; consider collections process.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Per-row actions</h3>
-                <ul class="checklist">
-                    <li><strong>Resend Invoice</strong> — emails the existing invoice PDF to the guest.</li>
-                    <li><strong>Send Reminder</strong> — same email, different subject ("Payment Reminder").</li>
-                    <li><strong>Regenerate Invoice</strong> — rebuilds the PDF and assigns a new invoice number if one
-                        was missing.</li>
-                    <li><strong>Generate Credit Note</strong> — only available for refund-type payments. Issues a CN
-                        against the refunded amount and links it to the invoice.</li>
-                </ul>
-
-                <div class="callout note">
-                    Invoice numbers are sequential and permanent — <code>INV-YYYY-NNNNNN</code>. You cannot edit a
-                    number; you can only regenerate the document.
-                </div>
-            </section>
-
-            <!-- RECEIPTS -->
-            <section id="receipts">
-                <h2>4. Receipts</h2>
-                <p><code>/admin/receipts.php</code> — the receipt register for every completed payment. Covers PDF
-                    generation, email delivery, WhatsApp sending, bulk backfill, and template editing.</p>
-
-                <h3>KPI tiles</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Tile</th>
-                            <th>What it means</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Receipt rows</td>
-                            <td>Total matched by the current filters.</td>
-                        </tr>
-                        <tr>
-                            <td>Missing numbers</td>
-                            <td>Completed payments with no receipt number yet — run Backfill to fix.</td>
-                        </tr>
-                        <tr>
-                            <td>Generated PDFs</td>
-                            <td>Receipts where a PDF file has been created.</td>
-                        </tr>
-                        <tr>
-                            <td>Receipt value</td>
-                            <td>Sum of matched payment amounts.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Filters</h3>
-                <ul class="checklist">
-                    <li><strong>Type</strong> — All / Rooms / Conference / Restaurant &amp; POS</li>
-                    <li><strong>Status</strong> — All / Missing number / PDF generated / Emailed</li>
-                    <li><strong>Date range</strong> — filter by payment date</li>
-                    <li><strong>Search</strong> — receipt number, payment reference, booking reference, notes</li>
-                </ul>
-
-                <h3>Per-row actions</h3>
-                <ul class="checklist">
-                    <li><strong>Generate</strong> — creates the PDF receipt file.</li>
-                    <li><strong>View</strong> — opens the PDF in a new tab (visible once generated).</li>
-                    <li><strong>Email</strong> — sends the receipt to the guest email (you can override the address in
-                        the modal).</li>
-                    <li><strong>WhatsApp</strong> — opens a pre-filled WhatsApp message in a new tab using the guest's
-                        registered phone number.</li>
-                </ul>
-
-                <h3>Bulk backfill</h3>
-                <p>Click <strong>Generate Missing</strong> in the page header to auto-generate PDFs for up to 500
-                    completed payments that have no receipt yet. Useful after a system migration or when receipts were
-                    skipped.</p>
-
-                <h3>CSV export</h3>
-                <p>Click <strong>Export CSV</strong> to download up to 5,000 rows matching the current filters.
-                    Columns: Receipt Number, Payment Reference, Type, Booking Reference, Payment Date, Method, Payment
-                    Type, Status, Amount, Generated, Emailed At, Recorded By.</p>
-
-                <h3>Editing receipt templates</h3>
-                <p>Scroll to the <strong>Receipt Templates</strong> panel at the bottom of the page. You can customise
-                    three fields saved to Site Settings:</p>
-                <ul class="checklist">
-                    <li><strong>Email subject</strong> — shown in the guest's inbox subject line.</li>
-                    <li><strong>Email body (HTML)</strong> — full HTML template for the email body. Preview renders a
-                        live sample below the field.</li>
-                    <li><strong>WhatsApp message</strong> — plain-text template for the WA deep link.</li>
-                </ul>
-
-                <p>Available placeholders in receipt templates:</p>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Placeholder</th>
-                            <th>Replaced with</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><code>{{site_name}}</code></td>
-                            <td>Hotel name</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{guest_name}}</code></td>
-                            <td>Guest full name</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{receipt_number}}</code></td>
-                            <td>Receipt number (e.g. REC-2026-000123)</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{payment_reference}}</code></td>
-                            <td>Internal payment reference</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{booking_reference}}</code></td>
-                            <td>Booking reference code</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{payment_date}}</code></td>
-                            <td>Formatted payment date</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{payment_method}}</code></td>
-                            <td>Cash / Mobile money / Card etc.</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{payment_type}}</code></td>
-                            <td>Payment / Deposit / Refund etc.</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{payment_amount}}</code></td>
-                            <td>Amount paid (excluding VAT)</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{vat_amount}}</code></td>
-                            <td>VAT portion</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{total_amount}}</code></td>
-                            <td>Total including VAT</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{description}}</code></td>
-                            <td>Payment notes / description</td>
-                        </tr>
-                        <tr>
-                            <td><code>{{contact_email}}</code></td>
-                            <td>Hotel contact email</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <div class="callout note">
-                    Click <strong>Preview</strong> next to the template fields to see a rendered sample before saving.
-                </div>
-            </section>
-
-            <!-- CREDIT NOTES -->
-            <section id="credit-notes">
-                <h2>5. Credit Notes</h2>
-                <p><code>/admin/credit-notes.php</code> — issue, apply, void, regenerate, and resend credit notes.
-                    Credit notes are used when a refund is owed but cash cannot be returned immediately.</p>
-
-                <h3>When to issue a credit note</h3>
-                <ul class="checklist">
-                    <li>Early checkout — guest departs before their scheduled check-out date.</li>
-                    <li>Service issue — compensation for a problem during the stay.</li>
-                    <li>Goodwill gesture — complimentary credit for a returning guest.</li>
-                    <li>Overpayment — guest paid more than the booking total.</li>
-                    <li>Pricing error — a booking was charged at an incorrect rate.</li>
-                    <li>Cancellation — when a refund cannot be processed in cash immediately.</li>
-                </ul>
-
-                <h3>CN lifecycle</h3>
-                <div
-                    style="background:var(--sand,#f5f0e8);border-radius:8px;padding:1rem 1.25rem;margin:1rem 0;font-size:0.9rem;font-family:'Jost',sans-serif;">
-                    <strong>Active</strong> → <strong>Partially applied</strong> → <strong>Fully used</strong><br>
-                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓<br>
-                    <strong>Voided</strong> (irreversible) &nbsp;&nbsp;&nbsp;&nbsp; <strong>Expired</strong> (auto, past
-                    expiry date)
-                </div>
-
-                <h3>KPI tiles</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Tile</th>
-                            <th>What it shows</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Total issued</td>
-                            <td>Count and face value of all CNs.</td>
-                        </tr>
-                        <tr>
-                            <td>Total redeemed</td>
-                            <td>Sum of all amounts applied against bookings.</td>
-                        </tr>
-                        <tr>
-                            <td>Outstanding</td>
-                            <td>Balance remaining on active / partially-applied CNs.</td>
-                        </tr>
-                        <tr>
-                            <td>Status counts</td>
-                            <td>Active · Partially applied · Fully used · Voided · Expired</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Issuing a credit note</h3>
-                <ol class="steps">
-                    <li>Click <strong>Issue Credit Note</strong>.</li>
-                    <li>Enter the <strong>guest name</strong> (required), guest email, and <strong>amount</strong>
-                        (required, must be &gt; 0).</li>
-                    <li>Select a <strong>reason</strong>: Goodwill · Cancellation · Service issue · Early checkout ·
-                        Overpayment · Pricing error · Other.</li>
-                    <li>Add <strong>reason notes</strong> for a fuller explanation (logged for audit).</li>
-                    <li>Optionally link to an existing booking by selecting it with the live search.</li>
-                    <li>Tick <strong>Send email to guest</strong> to dispatch the CN PDF immediately.</li>
-                    <li>Click <strong>Issue</strong>. The CN number <code>CN-YYYY-NNNNNN</code> is assigned
-                        automatically.</li>
-                </ol>
-
-                <div class="callout note">
-                    <strong>Expiry:</strong> CNs expire after the period set in Booking Settings
-                    (<code>credit_note_expiry_months</code>). Set to <code>0</code> for no expiry. The system
-                    auto-expires stale CNs on every page load.
-                </div>
-
-                <h3>Applying a credit note to a booking</h3>
-                <ol class="steps">
-                    <li>Find the CN in the list and click <strong>Apply</strong>.</li>
-                    <li>The available balance is shown.</li>
-                    <li>Select the booking type and search for the booking by reference or guest name.</li>
-                    <li>Enter the <strong>amount to apply</strong> (cannot exceed the CN balance).</li>
-                    <li>Add optional notes and click <strong>Apply Credit</strong>.</li>
-                    <li>A <code>credit_note</code> payment row is inserted against the booking; the booking's
-                        amount-due decreases.</li>
-                </ol>
-
-                <h3>Voiding a credit note</h3>
-                <ol class="steps">
-                    <li>Click <strong>Void</strong> on the CN row.</li>
-                    <li>Enter a <strong>void reason</strong> (required).</li>
-                    <li>Confirm — this is <strong>irreversible</strong>. The CN cannot be re-activated.</li>
-                </ol>
-
-                <h3>Other actions</h3>
-                <ul class="checklist">
-                    <li><strong>Regen PDF</strong> — rebuilds the credit note PDF (useful if the template was updated).
-                    </li>
-                    <li><strong>Resend Email</strong> — re-emails the CN PDF to the guest.</li>
-                    <li><strong>History</strong> — view every application and redemption event for the CN.</li>
-                </ul>
-            </section>
-
-            <!-- QUOTATIONS -->
-            <section id="quotations">
-                <h2>6. Quotations</h2>
-                <p><code>/admin/quotations.php</code> — manage quotations (price proposals) sent to guests before
-                    payment is collected. Quotations cover every booking type — <strong>room, conference, event and
-                    gym</strong> — and the <strong>Type</strong> filter only lists the types your <a
-                    href="16-business-presets.html">business preset</a> actually uses. Each type generates its own
-                    branded PDF that respects the VAT pricing mode above.</p>
-
-                <h3>Quotation statuses</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Status</th>
-                            <th>Meaning</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><span style="color:#1565c0;font-weight:600;">Sent</span></td>
-                            <td>Quotation emailed; awaiting guest response.</td>
-                        </tr>
-                        <tr>
-                            <td><span style="color:#2e7d32;font-weight:600;">Accepted</span></td>
-                            <td>Guest confirmed they will proceed.</td>
-                        </tr>
-                        <tr>
-                            <td><span style="color:#c62828;font-weight:600;">Expired</span></td>
-                            <td>Validity date passed; auto-set by the system.</td>
-                        </tr>
-                        <tr>
-                            <td><span style="color:#6c757d;font-weight:600;">Declined</span></td>
-                            <td>Guest declined the quote.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Per-row actions</h3>
-                <ul class="checklist">
-                    <li><strong>Download PDF</strong> — serves the stored PDF or regenerates it if the file is missing.
-                    </li>
-                    <li><strong>Resend</strong> — re-emails the quotation to the guest; resets status to
-                        <em>Sent</em>.
-                    </li>
-                    <li><strong>Mark Accepted</strong> — record that the guest agreed to the quote.</li>
-                    <li><strong>Mark Declined</strong> — record that the guest declined.</li>
-                    <li><strong>View booking</strong> — opens the linked booking or conference inquiry.</li>
-                </ul>
-
-                <div class="callout note">
-                    Quotations are never deleted — they are a permanent audit trail. Expired quotes are auto-set by the
-                    system each time the page loads.
-                </div>
-
-                <h3>Sending a quotation from Add Payment</h3>
-                <p>You can generate and email a quotation at the same time you record a payment by ticking the
-                    <strong>Generate Quotation</strong> and <strong>Send Quotation</strong> checkboxes on the Add
-                    Payment form. Set the validity period (days) and add optional notes for the guest.
-                </p>
-            </section>
-
-            <!-- REFUNDS -->
-            <section id="refunds">
-                <h2>7. Refunds</h2>
-                <p>Use <code>/admin/payment-refund.php</code> to process a refund against an existing payment.</p>
-
-                <h3>Refund workflow</h3>
-                <ol class="steps">
-                    <li>Open the original payment from the <strong>Payments Ledger</strong> → click
-                        <strong>Refund</strong>.
-                    </li>
-                    <li>Enter the refund amount (cannot exceed the original payment).</li>
-                    <li>Select the refund method (usually the same as the original).</li>
-                    <li>Enter a reason — this is mandatory and logged.</li>
-                    <li>Choose: <strong>Cash refund</strong> (money returned) or <strong>Credit note</strong> (issue a
-                        CN instead — use this when you can't return cash immediately).</li>
-                    <li>Save. The booking's <code>amount_paid</code> and <code>amount_due</code> are recalculated
-                        automatically.</li>
-                </ol>
-
-                <div class="callout warn">
-                    Refunds reduce the booking's paid total. If a refund would make the booking balance go negative,
-                    the system will alert you before saving.
-                </div>
-
-                <h3>Viewing pending refunds</h3>
-                <p>The dashboard <strong>Refunds Pending</strong> tile (Money Today section) shows refunds with
-                    status <em>pending</em> or <em>processing</em>. Click it to filter the Payments Ledger to those
-                    rows.</p>
-            </section>
-
-            <!-- VAT -->
-            <section id="vat">
-                <h2>8. VAT &amp; Tax Settings</h2>
-                <p>Configure VAT in <strong>Admin → Finance → Accounting Dashboard</strong> → scroll to <strong>VAT
-                        Settings</strong> at the bottom.</p>
-
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Setting</th>
-                            <th>Notes</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>VAT status</strong></td>
-                            <td>Enabled or Disabled. Disable for zero-rated periods or businesses that don't charge VAT — no VAT is applied or shown anywhere.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Pricing mode</strong></td>
-                            <td>How your listed prices relate to VAT. Two options — see below. This is the setting that changes how totals and documents behave.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>VAT rate (%)</strong></td>
-                            <td>Numeric, 0–100. Current Malawi standard rate is 16.5%. A rate of 0 is treated the same as VAT disabled.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>VAT number</strong></td>
-                            <td>Printed on every invoice and receipt PDF.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Pricing mode — the two ways VAT can work</h3>
-                <p>Businesses handle VAT differently, so the system supports both approaches. Pick the one that matches how
-                    you quote your prices:</p>
-
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Mode</th>
-                            <th>What it means</th>
-                            <th>On invoices / receipts / quotations</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>VAT added on top of prices</strong><br>(exclusive)</td>
-                            <td>Your prices are pre-tax. VAT is added on top, so the customer pays more than the listed
-                                price. This is the classic behaviour.</td>
-                            <td>Shows the VAT <strong>amount</strong> as a separate line, then a higher grand total.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Prices already include VAT</strong><br>(inclusive)</td>
-                            <td>Your listed prices already contain VAT. The total the customer pays <strong>equals your
-                                listed price</strong> — it never inflates. VAT is worked out inside that figure for your
-                                own records.</td>
-                            <td>Shows only the VAT <strong>rate</strong> (e.g. "Included at 16.5%") and a note that prices
-                                are VAT-inclusive — never a separate amount, because it's already in the price.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <p>The maths behind each mode (on a listed price of MWK&nbsp;1,000 at 16.5%):</p>
-                <div
-                    style="background:var(--sand,#f5f0e8);border-radius:8px;padding:0.75rem 1rem;font-family:monospace;font-size:0.9rem;margin:0.5rem 0;">
-                    <strong>Added on top (exclusive):</strong><br>
-                    VAT = 1,000 &times; 16.5% = 165 &nbsp;&rarr;&nbsp; customer pays 1,165<br><br>
-                    <strong>Included in price (inclusive):</strong><br>
-                    Net = 1,000 &divide; 1.165 = 858.37 &nbsp;&rarr;&nbsp; VAT = 141.63 &nbsp;&rarr;&nbsp; customer pays 1,000<br><br>
-                    <strong>Disabled:</strong><br>
-                    VAT = 0 &nbsp;&rarr;&nbsp; customer pays 1,000
-                </div>
-
-                <div class="callout note">
-                    Whichever mode you use, the <strong>net (pre-VAT) figure</strong> is always what's stored as the
-                    payment amount, and the accounting dashboard / reports always show the correct net-vs-VAT split.
-                    Only the <em>customer-facing</em> documents differ. The same setting applies to every module — rooms,
-                    conference, gym, events and the POS till.
-                </div>
-
-                <div class="callout note">
-                    VAT settings are stored in <code>site_settings</code>. Changes take effect on the next transaction —
-                    they do not retroactively modify existing payment records.
-                </div>
-            </section>
-
-            <!-- ACCOUNTING DASHBOARD -->
-            <section id="accounting-dashboard">
-                <h2>9. Accounting Dashboard</h2>
-                <p><code>/admin/accounting-dashboard.php</code> — the accountant's command centre for any date range.
-                    Defaults to the current calendar month. Use <strong>Show All</strong> to remove date limits.</p>
-
-                <div class="callout note">
-                    <strong>Access:</strong> Requires the <em>Accountant</em> role or Admin. Receptionists cannot see this page.
-                </div>
-
-                <h3>Overall financial summary</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Field</th>
-                            <th>What it means</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Total payments</td>
-                            <td>All payment rows in the selected range (all types and statuses).</td>
-                        </tr>
-                        <tr>
-                            <td>Gross collected</td>
-                            <td>Sum of completed/paid non-refund payments. This is revenue received.</td>
-                        </tr>
-                        <tr>
-                            <td>Net excl. VAT</td>
-                            <td>Gross collected minus VAT — the pre-tax revenue figure.</td>
-                        </tr>
-                        <tr>
-                            <td>VAT collected</td>
-                            <td>VAT on completed/paid sales, net of VAT returned on completed refunds.</td>
-                        </tr>
-                        <tr>
-                            <td>Pending</td>
-                            <td>Sum owed on unpaid/partial invoices in the range. Refunds pending are tracked separately (see below).</td>
-                        </tr>
-                        <tr>
-                            <td>Refunds issued</td>
-                            <td>Sum of <code>refund_amount</code> on refund-type rows. Tracks money returned to guests.</td>
-                        </tr>
-                        <tr>
-                            <td>Pending refunds</td>
-                            <td>Refunds with <code>refund_status = 'pending'</code> — money owed to guests not yet paid out.</td>
-                        </tr>
-                        <tr>
-                            <td>Completed refunds</td>
-                            <td>Refunds with <code>refund_status = 'completed'</code> — money already returned.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Revenue by source</h3>
-                <p>Three panels — <strong>Rooms</strong>, <strong>Conference</strong>, <strong>Restaurant &amp; POS</strong> — each showing:</p>
-                <ul class="checklist">
-                    <li>Booking count with payments in the period.</li>
-                    <li>Gross collected for that source.</li>
-                    <li>VAT component.</li>
-                    <li>Outstanding <code>amount_due</code> on bookings that had payments in the period.</li>
-                </ul>
-
-                <h3>POS analytics</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Panel</th>
-                            <th>What it shows</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Revenue by order type</td>
-                            <td>Walk-in, room service, tab — order count, gross revenue, COGS, voided amount.</td>
-                        </tr>
-                        <tr>
-                            <td>Gross margin</td>
-                            <td>Gross revenue minus COGS (cost of goods sold). COGS is read from <code>stock_orders.total_cost</code>. A zero COGS indicates recipes without ingredient costs set up.</td>
-                        </tr>
-                        <tr>
-                            <td>Daily revenue trend</td>
-                            <td>Last 14 days within the range: room, conference, F&amp;B, and refund amounts per day — useful for spotting unusual spikes or dips.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Compliance checks</h3>
-                <p>Four counters flag data-quality issues. Address them before filing or exporting reports:</p>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Alert</th>
-                            <th>What it means</th>
-                            <th>Fix</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Missing receipts</td>
-                            <td>Completed payments with no receipt number yet.</td>
-                            <td><code>receipts.php</code> → <strong>Generate Missing</strong>.</td>
-                        </tr>
-                        <tr>
-                            <td>Invoices without numbers</td>
-                            <td><code>invoice_generated = 1</code> but <code>invoice_number</code> is blank.</td>
-                            <td><code>invoices.php</code> → <strong>Regenerate Invoice</strong> per row.</td>
-                        </tr>
-                        <tr>
-                            <td>POS orders without ledger entry</td>
-                            <td>Paid stock orders not matched to a payment row in the <code>payments</code> table.</td>
-                            <td>Run <code>pos-accounting.php</code> for the affected date and close the shift.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Quotation pipeline</h3>
-                <p>Shows count and total value for each quotation status (Sent / Accepted / Expired / Declined) in the selected period. Use this to track conversion of proposals into confirmed payments.</p>
-
-                <h3>Credit notes summary</h3>
-                <p>Issued, redeemed, and outstanding CN balance for the period. Outstanding = balance remaining on <em>active</em> and <em>partially applied</em> CNs — representing future discount liability.</p>
-
-                <h3>VAT Settings form</h3>
-                <p>Scroll to the bottom of the page to update:</p>
-                <ul class="checklist">
-                    <li><strong>VAT status (enabled / disabled)</strong> — affects all new transactions going forward. Does not retroactively change existing records.</li>
-                    <li><strong>Pricing mode</strong> — "VAT added on top of prices" or "Prices already include VAT". See <a href="#vat">VAT &amp; tax</a> above for what each does to totals and documents.</li>
-                    <li><strong>VAT rate (%)</strong> — Malawi standard is 16.5%. Update here when the rate changes.</li>
-                    <li><strong>VAT number</strong> — printed on every invoice and receipt PDF.</li>
-                </ul>
-            </section>
-
-            <!-- PRESETS & FINANCE -->
-            <section id="presets-finance">
-                <h2>Presets and your finance pages</h2>
-                <p>The finance pages adapt to your <a href="16-business-presets.html">business preset</a> so staff only
-                    see what their business actually uses:</p>
-                <ul class="checklist">
-                    <li><strong>Lists open on your records.</strong> Payments, receipts, invoices, quotations and
-                        credit notes default to records from your active modules. If older records from disabled
-                        modules exist, a notice offers <strong>Show all history</strong> — nothing is ever deleted.</li>
-                    <li><strong>Invoices &amp; Quotations</strong> appear only for billing businesses (rooms,
-                        conference, gym memberships). Pure till businesses — supermarket, retail, bar — sell at the
-                        point of sale: receipts and POS refunds cover them.</li>
-                    <li><strong>Credit Notes</strong> appear only for businesses with advance bookings (rooms,
-                        conference) where deposits and balances exist. A shop or gym refunds at source instead.</li>
-                    <li><strong>Wording follows the business.</strong> With a restaurant the reports say
-                        <em>F&amp;B</em>; without one, the same money is labelled <em>POS / Till Sales</em>.</li>
-                    <li><strong>Gym and event payments</strong> show their own source card on the payment detail page —
-                        <em>Member</em> or <em>Attendee</em>, with a link to the owning inquiry — never disguised as a
-                        room booking.</li>
-                </ul>
-                <div class="callout note">
-                    On a <strong>Full Hotel</strong> preset every module is on, so all pages, filters and records show
-                    with no scoping at all.
-                </div>
-            </section>
-
-            <!-- QUICK REFERENCE -->
-            <section>
-                <h2>Quick Reference — Which page to use?</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>I need to…</th>
-                            <th>Go to…</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Record money received from a guest</td>
-                            <td><code>payment-add.php</code></td>
-                        </tr>
-                        <tr>
-                            <td>See every payment in one list</td>
-                            <td><code>payments.php</code></td>
-                        </tr>
-                        <tr>
-                            <td>Re-send or regenerate an invoice</td>
-                            <td><code>invoices.php</code> → row actions</td>
-                        </tr>
-                        <tr>
-                            <td>Send a receipt to a guest (email or WhatsApp)</td>
-                            <td><code>receipts.php</code> → row actions</td>
-                        </tr>
-                        <tr>
-                            <td>Generate receipts for all payments in bulk</td>
-                            <td><code>receipts.php</code> → Generate Missing</td>
-                        </tr>
-                        <tr>
-                            <td>Issue a credit note for a service issue or early checkout</td>
-                            <td><code>credit-notes.php</code> → Issue Credit Note</td>
-                        </tr>
-                        <tr>
-                            <td>Apply a credit note against a booking</td>
-                            <td><code>credit-notes.php</code> → Apply (on the CN row)</td>
-                        </tr>
-                        <tr>
-                            <td>Send a price quote before taking payment</td>
-                            <td><code>payment-add.php</code> → tick Generate &amp; Send Quotation</td>
-                        </tr>
-                        <tr>
-                            <td>Check outstanding invoices and how overdue they are</td>
-                            <td><code>invoices.php</code> → Receivables Aging section</td>
-                        </tr>
-                        <tr>
-                            <td>Process a refund</td>
-                            <td><code>payment-refund.php</code> (via Payments → Refund)</td>
-                        </tr>
-                        <tr>
-                            <td>See the financial overview for a date range</td>
-                            <td><code>accounting-dashboard.php</code></td>
-                        </tr>
-                        <tr>
-                            <td>Configure VAT rate and VAT number</td>
-                            <td><code>accounting-dashboard.php</code> → VAT Settings</td>
-                        </tr>
-                        <tr>
-                            <td>Review gross margin on F&amp;B for the month</td>
-                            <td><code>accounting-dashboard.php</code> → POS Analytics panel</td>
-                        </tr>
-                        <tr>
-                            <td>Check compliance before tax filing</td>
-                            <td><code>accounting-dashboard.php</code> → Compliance section</td>
-                        </tr>
-                        <tr>
-                            <td>Track quotation conversion to paid bookings</td>
-                            <td><code>accounting-dashboard.php</code> → Quotation Pipeline</td>
-                        </tr>
-                        <tr>
-                            <td>Export all payments matching current filters</td>
-                            <td><code>payments.php</code> → Export CSV (header button)</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
-
-        </div>
-    </main>
-
-    <footer class="guide-footer">
-        <div class="deck">
-            <div class="crest">— R H —</div>
-            <p>Rosalyn's Hotel Management System &middot; Finance &amp; Payments Guide</p>
-            <p>
-                <a href="14-reports-eod.html">Reports &amp; End of Day →</a> &nbsp;|&nbsp;
-                <a href="index.html">All Guides</a>
-            </p>
-        </div>
-    </footer>
-
+<div class="wrap">
+
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
+
+  <h1>Finance and Payments</h1>
+  <p>How to record money received at <span class="g-site-name">Rosalyns Beach Hotel</span>, refund it, find it again, and produce the documents that go with it: receipts, invoices, credit notes and quotations.</p>
+
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Accounts staff, managers, and front desk staff who take payments</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Money</strong> &rarr; <strong>Payments</strong>, <strong>Invoices</strong>, <strong>Accounting</strong>. Add Payment, Receipts, Credit Notes and Quotations are under <strong>Advanced</strong>.</dd>
+      <dt>Permission needed</dt><dd>Payments list and details: <strong>View Payments</strong>. Add or edit a payment: <strong>Add Payments</strong>. Refunds: <strong>Issue &amp; settle refunds</strong>. Invoices and Credit Notes: <strong>Invoices</strong>. Quotations: <strong>Create Bookings</strong>. Receipts: <strong>Receipts</strong>. Accounting dashboard: <strong>Accounting</strong>. VAT settings: <strong>Change VAT &amp; refund settings</strong>.</dd>
+      <dt>Only shown when</dt><dd>The <strong>Finance &amp; Accounting</strong> module is switched on in Settings &rarr; Modules. Invoices and Quotations also need Bookings, Conference or Gym switched on. Credit Notes need Bookings or Conference.</dd>
+    </dl>
+  </div>
+
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#find">How to find a payment</a></li>
+      <li><a href="#add">How to record a payment</a></li>
+      <li><a href="#overpay">What happens when a guest pays too much</a></li>
+      <li><a href="#edit">How to edit a payment</a></li>
+      <li><a href="#receipt">How to send or reprint a receipt</a></li>
+      <li><a href="#refund">How to refund a payment</a></li>
+      <li><a href="#settle">How to settle a pending refund</a></li>
+      <li><a href="#owing">How to see who still owes money</a></li>
+      <li><a href="#invoices">Invoices</a></li>
+      <li><a href="#credit">Credit notes</a></li>
+      <li><a href="#quotes">Quotations</a></li>
+      <li><a href="#receipts">Receipts register</a></li>
+      <li><a href="#accounting">Accounting dashboard and VAT</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+    </ol>
+  </div>
+
+  <h2 id="screen">What is on the screen</h2>
+  <p>Every payment is one line in the <strong>Payments Ledger</strong>. A refund is its own line, marked as a refund, linked to the payment it refunds.</p>
+  <table>
+    <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Pending, Partial</td><td>Recorded but not received yet. It does <strong>not</strong> reduce what the guest owes.</td></tr>
+      <tr><td>Paid, Completed</td><td>Money received. It reduces the balance and gets a receipt number.</td></tr>
+      <tr><td>Refunded, Partially refunded</td><td>Set only by the refund process. Money was received and some or all has gone back.</td></tr>
+      <tr><td>Failed, Cancelled</td><td>Does not count as money received.</td></tr>
+    </tbody>
+  </table>
+  <p>A refund line counts against the guest only once it is <strong>Processing</strong> or <strong>Completed</strong>. A <strong>Pending</strong> or <strong>Failed</strong> refund does not change the balance yet.</p>
+  <p>The Payments page shows these buttons at the top: <strong>Record Payment</strong>, <strong>Export CSV</strong>, <strong>Dashboard</strong>, and <strong>Invoices</strong> (Invoices only appears when invoicing is switched on for your hotel). Below them are four figures: <strong>Collected (filtered)</strong>, <strong>Pending / Partial</strong>, <strong>Today</strong> (with the last 7 days) and <strong>Refunds (filtered)</strong>. A fold-out called <strong>Breakdown by source, method and status</strong> splits the same figures three ways. The figures follow whatever filters you have set.</p>
+
+  <h2 id="find">How to find a payment</h2>
+  <ol class="steps">
+    <li>Go to <strong>Money</strong> &rarr; <strong>Payments</strong>.</li>
+    <li>Use the quick date buttons: <strong>All time</strong>, <strong>Today</strong>, <strong>Last 7 days</strong>, <strong>This month</strong>, <strong>Last 30 days</strong>, <strong>YTD</strong>.</li>
+    <li>Or use the filter boxes: <strong>Booking Type</strong> (Room, Conference, Gym, Event, and the till), <strong>Booking ID</strong>, <strong>Quick Search</strong>, <strong>Status</strong>, <strong>Payment Method</strong>, <strong>Start Date</strong>, <strong>End Date</strong>.</li>
+    <li>Click <strong>Filter</strong>. Click <strong>Reset</strong> to clear everything.</li>
+    <li>Click the eye button on a row to open the payment.</li>
+  </ol>
+  <p><strong>Quick Search</strong> matches payment reference, receipt number, invoice number, booking reference, transaction reference, method, status, the booking number, the amount, and the guest or company name, email, phone and reference. Results show 50 to a page.</p>
+  <div class="note"><p>The list normally shows only the kinds of payment your hotel has switched on. If older records are hidden you will see <em>"Showing records for your active modules only"</em> with a link <strong>Show all history</strong>. Click it to see everything.</p></div>
+  <div class="note"><p>Pending refunds show up when you set <strong>Status</strong> to <strong>Pending</strong>, because a pending refund has the status Pending. They are marked as refunds in the <strong>Type</strong> and <strong>Reference</strong> columns.</p></div>
+  <p>Each row has these buttons: the eye (<strong>View Details</strong>), the invoice button (only when invoicing is on), the undo arrow (<strong>Process Refund</strong>, only for Paid or Completed payments that are not refunds), the pencil (<strong>Edit</strong>, only for payments that are not yet Paid or Completed), and a WhatsApp button when the guest has a phone number. The <strong>Receipt / Txn</strong> column shows the receipt number, or <em>Missing</em> if a Paid or Completed payment has none.</p>
+  <p>Click <strong>Export CSV</strong> to download the filtered list as a spreadsheet.</p>
+
+  <h2 id="add">How to record a payment</h2>
+  <ol class="steps">
+    <li>Click <strong>Record Payment</strong> on the Payments page. You can also open <strong>Advanced</strong> &rarr; <strong>Add Payment</strong>, or click <strong>Collect</strong> next to an account on the outstanding balances list.</li>
+    <li><strong>Step 1, Booking:</strong> choose the type: <strong>Room Booking</strong>, <strong>Conference</strong>, <strong>Gym</strong> or <strong>Event</strong>. Only types your hotel uses are shown.</li>
+    <li>Type at least 2 characters of the guest or contact name, reference, or email in the search box. Click the right result. You will see the card with <strong>Amount Due</strong>, dates, total and what is paid. Click <strong>Change Booking</strong> to pick a different one.</li>
+    <li><strong>Step 2, Payment Method:</strong> click one of <strong>Cash</strong>, <strong>Bank Transfer</strong>, <strong>Credit Card</strong>, <strong>Debit Card</strong>, <strong>Mobile Money</strong>, <strong>Cheque</strong> or <strong>Other</strong>. If you skip this you will see <em>"Please choose a payment method."</em></li>
+    <li>Fill in <strong>Transaction Reference</strong> if there is one: a bank reference, cheque number or mobile money transaction ID.</li>
+    <li><strong>Step 3, Amount &amp; Details:</strong> enter <strong>Payment Amount</strong>. This is the full amount received, including VAT. Set <strong>Payment Date</strong> (today by default).</li>
+    <li>Choose <strong>Payment Status</strong>. It starts on <strong>Completed</strong>. Use <strong>Completed</strong> or <strong>Paid</strong> for money you have in hand. Use <strong>Pending</strong> or <strong>Partial</strong> for money not yet confirmed.</li>
+    <li>Optional: <strong>Additional CC Emails</strong> (separate with commas) and <strong>Notes</strong>.</li>
+    <li>Check the <strong>Payment Preview</strong> on the right: <strong>Subtotal</strong>, <strong>VAT</strong> (only when VAT is on), <strong>Total to record</strong>, and <strong>Outstanding after this payment</strong>.</li>
+    <li>Click <strong>Record Payment</strong>, then confirm. You will see <em>"Payment recorded successfully."</em> and the payment details page opens.</li>
+  </ol>
+  <p>Amount rules: it must be more than zero and not above 99,999,999. Example: a guest owes MWK 150,000 and hands over MWK 100,000 cash. Enter 100000, method Cash, status Completed. The balance becomes MWK 50,000.</p>
+  <p>If the booking already has no balance, a box <em>"Booking fully paid"</em> appears and the amount box stays locked until you tick <strong>Allow payment anyway (adjustment / credit)</strong>.</p>
+  <p>What goes out automatically when you save as <strong>Paid</strong> or <strong>Completed</strong>:</p>
+  <ul>
+    <li>Room booking: an invoice email and a receipt email go to the guest, with your CC addresses and the hotel's invoice CC list.</li>
+    <li>Conference booking: an invoice email goes out with the same CC addresses.</li>
+    <li>Gym and Event: nothing is sent by itself. Use <strong>Send Receipt</strong> on the payment page (see below).</li>
+  </ul>
+  <div class="note"><p>Clicking <strong>Record Payment</strong> twice by accident does not record it twice. You will see <em>"Payment already recorded (reference). Duplicate submission ignored."</em></p></div>
+
+  <h2 id="overpay">What happens when a guest pays too much</h2>
+  <p>Enter what the guest actually handed over. If it is more than they owe, the system keeps the booking at zero balance and moves the extra into a credit note.</p>
+  <ol class="steps">
+    <li>Record the payment as <strong>Completed</strong> or <strong>Paid</strong>.</li>
+    <li>You will see <em>"Overpayment detected — credit note CN... for ... issued and queued under Credit Notes."</em></li>
+    <li>On the booking, the extra shows as a refund line with reason <strong>Overpayment</strong>, paid by credit note. The booking reads Paid with no balance.</li>
+    <li>If the guest has an email address, the credit note is emailed to them.</li>
+  </ol>
+  <p>Example: a guest owes MWK 40,000 and pays MWK 50,000. The booking is settled and a credit note for MWK 10,000 is issued. A cancelled booking is never converted this way; its paid money stays as credit that staff refund on purpose.</p>
+
+  <h2 id="edit">How to edit a payment</h2>
+  <ol class="steps">
+    <li>Open the payment and click <strong>Edit</strong>, or click the pencil on the Payments list.</li>
+    <li>Change the method, date, amount, status, CC emails or notes. The booking cannot be changed.</li>
+    <li>Click <strong>Update Payment</strong> and confirm. You will see <em>"Payment updated successfully"</em>.</li>
+  </ol>
+  <ul>
+    <li>The amount is the full amount received. The VAT split keeps the rate the payment was first recorded with.</li>
+    <li>Marking a Pending payment as Paid or Completed gives it a receipt number and recalculates the balance.</li>
+    <li>Refund lines cannot be edited. Use <strong>Settle this refund</strong> instead.</li>
+    <li>A payment with refunds against it is locked: its amount and status cannot be changed.</li>
+    <li>If an edit raises the amount above what is owed, the extra becomes a credit note, as described above.</li>
+  </ul>
+
+  <h2 id="receipt">How to send or reprint a receipt</h2>
+  <ol class="steps">
+    <li>Open the payment (Paid or Completed, not a refund).</li>
+    <li>Click <strong>Send Receipt</strong>. A window opens. After you record a new payment this window may open for you.</li>
+    <li>To email: check the <strong>Email</strong> address and click <strong>Send email</strong>. To use WhatsApp: check the number and click <strong>Send WhatsApp</strong>. WhatsApp opens in a new tab with the message ready.</li>
+    <li>Close the window with <strong>Done</strong>.</li>
+  </ol>
+  <p>If the box is empty you will see <em>"Enter a email address."</em> or <em>"Enter a phone number."</em> For till payments the window also has a <strong>Print</strong> button.</p>
+
+  <h2 id="refund">How to refund a payment</h2>
+  <ol class="steps">
+    <li>Open the payment and click <strong>Refund</strong> (or the undo arrow on the Payments list, then <strong>Open Refund</strong> to confirm).</li>
+    <li>Check the strip: <strong>Original Payment</strong>, <strong>Already Refunded</strong>, <strong>Refundable Balance</strong>. Earlier refunds appear under <strong>Refund History</strong>.</li>
+    <li><strong>Refund to:</strong> <strong>Original payment method</strong> returns the money the way it was paid. <strong>Store credit (credit note)</strong> appears only when the hotel setting allows staff to choose. It is settled at once and a credit note is issued.</li>
+    <li>Enter <strong>Refund Amount</strong>, or click <strong>Full</strong>, <strong>50%</strong> or <strong>Clear</strong>. It cannot be more than the refundable balance.</li>
+    <li>Choose <strong>Refund Reason</strong>: Early Checkout, Late Checkout Charge, Cancellation, Service Issue, Overpayment or Other. This reason is shown to the customer in the refund email.</li>
+    <li>Choose <strong>Refund Status</strong>: <strong>Pending</strong>, <strong>Processing</strong>, <strong>Completed</strong> or <strong>Failed</strong>. Use Pending if the money has not gone out yet. Use Completed only when it has.</li>
+    <li>Add <strong>Refund Notes</strong> if you want. They are internal and the customer does not see them.</li>
+    <li>Check the <strong>Refund Summary</strong> and click <strong>Process Refund</strong>, then confirm.</li>
+    <li>You will see <em>"Refund processed"</em> and <em>"Refund created successfully! Reference: REF-..."</em>. A box shows whether the customer was emailed. If not, it says <em>"Email not sent — notify the customer manually"</em>.</li>
+  </ol>
+  <div class="warn"><p>Mobile money refunds cannot be saved as Completed. They must start as Pending or Processing until the provider confirms.</p></div>
+  <p>Example: a guest paid MWK 200,000 and leaves a day early. Refund MWK 60,000, reason Early Checkout, status Pending. Later, when the money is sent, settle it (next section).</p>
+
+  <h2 id="settle">How to settle a pending refund</h2>
+  <ol class="steps">
+    <li>Open the refund line (reference starting with REF). A panel <strong>Settle this refund</strong> shows when it is Pending or Processing.</li>
+    <li>In <strong>Move to</strong> choose <strong>Processing (sent to provider)</strong>, <strong>Completed (money paid out)</strong> or <strong>Failed (money not paid out)</strong>.</li>
+    <li>Add a <strong>Note (optional)</strong> such as a provider reference.</li>
+    <li>Click <strong>Update refund</strong> and confirm. You will see <em>"Refund REF-... is now completed."</em> (or the status you chose).</li>
+  </ol>
+  <p>A Pending refund can go to Processing, Completed or Failed. A Processing refund can go to Completed or Failed. Nothing else is allowed. Store-credit refunds cannot be settled here; void the credit note to reverse one.</p>
+
+  <h2 id="owing">How to see who still owes money</h2>
+  <ol class="steps">
+    <li>On the Payments page click <strong>View Outstanding Balances</strong>.</li>
+    <li>You will see every account with a balance, largest first: <strong>Reference</strong>, <strong>Client</strong>, <strong>Type</strong>, <strong>Total</strong>, <strong>Paid</strong>, <strong>Outstanding</strong>, <strong>Status</strong>. The top shows the number of accounts and the total owed.</li>
+    <li>Click <strong>Collect</strong> to record a payment for that account, or the eye to open it.</li>
+    <li>Click <strong>Back to payment ledger</strong> to return.</li>
+  </ol>
+  <p>A balance of one tambala (0.01) or less counts as paid. Anything above that is shown as owing.</p>
+
+  <h2 id="invoices">Invoices</h2>
+  <p><strong>Money</strong> &rarr; <strong>Invoices</strong> (page title <strong>Invoices &amp; Credit Notes</strong>). It lists one line per payment, with the invoice number once an invoice exists. Filters: <strong>Booking Type</strong>, <strong>Payment Status</strong>, <strong>Search</strong> (invoice number, payment number, booking reference). Changing a dropdown applies at once. The fold-out <strong>Receivables aging and outstanding by source</strong> groups unpaid amounts into 0&ndash;30, 31&ndash;60, 61&ndash;90 and 90+ day age bands.</p>
+  <table>
+    <thead><tr><th>Button</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>View</strong></td><td>Opens the saved PDF in a new tab.</td></tr>
+      <tr><td><strong>Resend</strong> / <strong>Email</strong></td><td>Emails the invoice to the customer. Message: <em>"Invoice resent successfully!"</em></td></tr>
+      <tr><td><strong>Reminder</strong></td><td>Only for Pending or Partial payments. Sends the invoice as a reminder: <em>"Payment reminder email sent successfully!"</em></td></tr>
+      <tr><td><strong>WhatsApp</strong></td><td>Opens WhatsApp with a reminder message.</td></tr>
+      <tr><td><strong>Regenerate</strong></td><td>Rebuilds the PDF. You are asked to confirm.</td></tr>
+      <tr><td><strong>Credit Note</strong></td><td>Only on refund lines that have no document yet.</td></tr>
+    </tbody>
+  </table>
+  <p>Invoice emails are supported for Room, Conference, Gym and Event payments only.</p>
+
+  <h2 id="credit">Credit notes</h2>
+  <p><strong>Advanced</strong> &rarr; <strong>Credit Notes</strong>. A credit note is a stored amount owed to a guest that can be used against a later bill. Figures at the top: <strong>Total Issued</strong>, <strong>Total Redeemed</strong>, <strong>Outstanding Balance</strong>, <strong>Status Breakdown</strong>. Statuses: Active, Partial (partially applied), Used (fully applied), Voided, Expired.</p>
+  <h3>Issue a credit note</h3>
+  <ol class="steps">
+    <li>Click <strong>Issue Credit Note</strong>.</li>
+    <li>Optional: tick <strong>Link to Existing Booking</strong> and pick the booking. Leave it unticked for a walk-in.</li>
+    <li>Enter the guest name (required), email, <strong>Credit Note Value</strong> (more than zero), and a <strong>Reason</strong>: Goodwill Gesture, Booking Cancellation, Service Issue / Complaint, Early Checkout, Overpayment, Pricing / Billing Error or Other. Add notes if useful.</li>
+    <li>Tick <strong>Send credit note by email to guest</strong> if wanted, then click <strong>Issue Credit Note</strong>.</li>
+    <li>You will see <em>"Credit note CN-... issued successfully."</em></li>
+  </ol>
+  <h3>Apply a credit note to a booking</h3>
+  <ol class="steps">
+    <li>Click the double-tick button on an Active or Partial note.</li>
+    <li>Choose the <strong>Booking Type</strong>, search for the booking, and click it.</li>
+    <li>Enter <strong>Amount to Apply</strong> and optional notes, then click <strong>Apply Credit Note</strong>.</li>
+    <li>You will see <em>"Credit note applied: ... Remaining balance: ..."</em>. The amount is capped at the lower of what you typed, the note balance, and what the booking still owes.</li>
+  </ol>
+  <h3>Other actions</h3>
+  <p>Click the three-dot button on a row for <strong>View PDF</strong>, <strong>Redemption history</strong>, <strong>Regenerate PDF</strong>, <strong>Resend email</strong> (only if the guest has an email) and <strong>Void credit note</strong> (only for Active or Partial notes). Voiding asks for <strong>Reason for Voiding</strong> and cannot be undone. It gives the money back to the booking. The note then shows as Voided.</p>
+  <p>Expiry: a new note expires after the number of months set in Hotel Settings (<strong>Credit notes expire after (months, 0 = never)</strong>). The <strong>Expires</strong> column shows the date. Expired notes cannot be applied.</p>
+
+  <h2 id="quotes">Quotations</h2>
+  <p><strong>Advanced</strong> &rarr; <strong>Quotations</strong>. Quotations are created from the booking or enquiry. This page tracks them. Filters: <strong>Search</strong>, <strong>Type</strong>, <strong>Status</strong> (Sent, Accepted, Expired, Declined), <strong>From</strong>, <strong>To</strong>. Figures: Total Issued, Sent / Active, Accepted, Expired, Declined, Total Quoted Value.</p>
+  <ul>
+    <li><strong>PDF</strong> downloads the quotation.</li>
+    <li><strong>Resend</strong> emails it again (not available once accepted). Only room quotations can be resent here; resend conference and event quotations from their own enquiry page.</li>
+    <li><strong>Booking</strong> opens the booking.</li>
+    <li>The tick marks it accepted. For a room it confirms a pending or tentative booking: <em>"Quotation marked as accepted and booking confirmed."</em> An expired one gives <em>"Cannot accept an expired quotation (expired date)."</em></li>
+    <li>The cross marks it declined: <em>"Quotation marked as declined."</em></li>
+  </ul>
+  <p>A quotation still marked Sent after its <strong>Valid Until</strong> date changes to Expired when you open the page.</p>
+
+  <h2 id="receipts">Receipts register</h2>
+  <p><strong>Advanced</strong> &rarr; <strong>Receipts</strong> lists Paid and Completed payments with their receipt status. Figures: Total receipts, Missing numbers, Generated PDFs, Receipt value. Filter by type, status (<strong>Missing No.</strong>, <strong>Generated</strong>, <strong>Emailed</strong>), dates and search. Ten rows show per page.</p>
+  <ul>
+    <li><strong>Generate Missing</strong> creates receipts for up to 500 payments that have none: <em>"Generated receipts for N completed payment(s)."</em></li>
+    <li>The row buttons generate or regenerate the PDF, view it, send by WhatsApp or <strong>Email receipt</strong> (enter the address, click <strong>Send Receipt</strong>).</li>
+    <li><strong>Export CSV</strong> downloads the filtered list. <strong>Recent receipt activity</strong> shows the last 20 actions.</li>
+    <li>The page also holds the receipt email and WhatsApp wording. Without <strong>Edit message templates</strong> it is view-only. With it, edit and click <strong>Save Templates</strong>. All three fields are required.</li>
+  </ul>
+
+  <h2 id="accounting">Accounting dashboard and VAT</h2>
+  <p><strong>Money</strong> &rarr; <strong>Accounting</strong>. Pick a period with <strong>This month</strong>, <strong>Today</strong>, <strong>7 days</strong>, <strong>30 days</strong>, <strong>This year</strong>, <strong>All time</strong>, or set <strong>From</strong> and <strong>To</strong> and click <strong>Apply</strong>. It opens on this month.</p>
+  <table>
+    <thead><tr><th>Figure</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Net revenue</td><td>Money collected after refunds.</td></tr>
+      <tr><td>Owed to us</td><td>What customers owe and have not paid.</td></tr>
+      <tr><td>Cash today</td><td>Cash and mobile money received today. Card, bank transfer and credit are not included.</td></tr>
+      <tr><td>VAT collected</td><td>Tax held on behalf of MRA. It is not the hotel's income.</td></tr>
+      <tr><td>Refunds</td><td>Refunds issued in the period.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Needs attention</strong> lists things to chase: balances owed, pending payments, refunds waiting to be settled, quotations awaiting a reply, voided till orders, stock lost. The tabs below show <strong>Recent payments</strong>, <strong>Receivables</strong>, <strong>Daily detail</strong>, <strong>Refunds</strong>, <strong>POS by type</strong> and <strong>Compliance</strong>.</p>
+  <h3>VAT settings</h3>
+  <ol class="steps">
+    <li>On the Accounting page open <strong>VAT settings</strong> (or click <strong>VAT</strong> at the top).</li>
+    <li>It shows the VAT mode, Rate and VAT Registration No. Without the <strong>Change VAT &amp; refund settings</strong> permission you can only read it.</li>
+    <li>With permission, click <strong>Unlock to Edit</strong> and answer <strong>Yes, unlock to edit</strong>.</li>
+    <li>Choose the mode: <strong>No VAT</strong>, <strong>Prices include VAT</strong> (totals equal listed prices; documents show only the rate) or <strong>VAT added on top of prices</strong> (VAT is itemised).</li>
+    <li>Enter <strong>VAT Rate (%)</strong> (0 to 100) and <strong>VAT Registration Number</strong>.</li>
+    <li>Click <strong>Save VAT Settings</strong>. You will see <em>"VAT settings updated successfully."</em></li>
+  </ol>
+  <p>The new rate applies to future payments only. Existing invoices are not recalculated. When you record a payment, the VAT part is taken out of the amount received using that account's own VAT share; the rate in settings is used only when the account has no VAT figures. Refund rules (who is refunded automatically, and whether staff may choose store credit) are in Hotel Settings under <strong>Refunds &amp; cancellations</strong>.</p>
+
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>Only Paid or Completed payments that are not refunds can be refunded. Total refunds can never exceed the amount paid.</li>
+    <li>Refunded or Partially refunded cannot be picked by hand. You will see <em>"Refunded statuses are set by the refund process only. Use "Process Refund" on the payment details page."</em></li>
+    <li>A collected payment cannot be changed to Cancelled or Refunded by editing. Refund it instead.</li>
+    <li>You cannot lower a payment below what has already been refunded from it.</li>
+    <li>No payments on a cancelled, no-show or expired room booking. A checked-out booking accepts payments only while a balance remains.</li>
+    <li>Paid and Completed payments get a receipt number automatically.</li>
+    <li>A balance of 0.01 or less counts as settled.</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>Please fill in all required fields</em></td><td>No booking chosen, or no method.</td><td>Pick the booking and a method, then save.</td></tr>
+      <tr><td><em>Payment amount must be greater than zero</em></td><td>Amount empty or zero.</td><td>Enter the amount received.</td></tr>
+      <tr><td><em>Payment amount exceeds the maximum allowed value</em></td><td>Amount above 99,999,999.</td><td>Check for an extra digit.</td></tr>
+      <tr><td><em>Error: Payments cannot be recorded against a cancelled booking.</em> (or no-show, expired)</td><td>The booking is closed.</td><td>Check the booking status.</td></tr>
+      <tr><td><em>Error: This booking is checked-out and fully settled. No further payments can be recorded.</em></td><td>Nothing is owed.</td><td>None needed. For a gift or adjustment, issue a credit note.</td></tr>
+      <tr><td><em>This account type is not available for the active preset.</em></td><td>That module is switched off.</td><td>Ask an administrator to switch it on in Settings &rarr; Modules.</td></tr>
+      <tr><td><em>This payment has already been collected. Use "Process Refund"...</em></td><td>You tried to cancel a collected payment by editing.</td><td>Use Refund.</td></tr>
+      <tr><td><em>Refund amount cannot exceed remaining refundable balance</em></td><td>Too much entered.</td><td>Use <strong>Full</strong> or a smaller amount.</td></tr>
+      <tr><td><em>Mobile money refunds must start as pending or processing until provider confirmation.</em></td><td>Completed chosen for a mobile money payment.</td><td>Choose Pending or Processing, then settle later.</td></tr>
+      <tr><td><em>This payment has been fully refunded. No further refunds can be processed.</em></td><td>Nothing left to refund.</td><td>None needed.</td></tr>
+      <tr><td><em>You do not have permission to settle refunds.</em></td><td>Missing <strong>Issue &amp; settle refunds</strong>.</td><td>Ask an administrator.</td></tr>
+      <tr><td><em>A pending refund cannot be moved to ...</em> style message</td><td>That change is not allowed.</td><td>See the allowed moves under "How to settle a pending refund".</td></tr>
+      <tr><td><em>Security token invalid. Refresh and try again.</em></td><td>The page was open too long.</td><td>Reload the page and repeat.</td></tr>
+      <tr><td><em>Cannot accept an expired quotation</em></td><td>Valid Until date has passed.</td><td>Issue a new quotation.</td></tr>
+      <tr><td><em>A void reason is required.</em></td><td>Void box empty.</td><td>Type the reason.</td></tr>
+      <tr><td><em>This credit note has expired and can no longer be used.</em></td><td>Past its Expires date.</td><td>Issue a new credit note.</td></tr>
+      <tr><td><em>Nothing is due on this account, so there is nothing to apply the credit note to.</em></td><td>The booking has no balance.</td><td>Choose a booking that owes money.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="14-reports-eod.html">Reports and End of Day</a></li>
+    <li><a href="07-reception-bookings.html">Reception and Bookings</a></li>
+    <li><a href="12-email-templates.php">Email template tags</a></li>
+    <li><a href="10-conference-events.html">Conference and Events</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

@@ -1,653 +1,164 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reports &amp; End of Day — Rosalyn's Hotel</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-        rel="stylesheet">
-    <link rel="stylesheet" href="assets/guide-theme.css">
-    <script src="assets/guide-init.js" defer></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports and End of Day — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
-    <nav class="top">
-        <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-        <div class="nav-links">
-            <a href="index.html">All Guides</a>
-            <a href="13-finance-payments.html">← Finance</a>
-            <a href="99-admin-dashboard-full-guide.html">Admin Bible →</a>
-        </div>
-    </nav>
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
 
-    <header class="hero">
-        <div class="deck">
-            <div class="eyebrow">14 &middot; Analytics</div>
-            <h1>Reports &amp; End of Day</h1>
-            <p class="lead">Every metric the hotel needs — nightly EOD review, Z-reports for cashiers, POS
-                reconciliation, and the full analytics suite covering revenue, occupancy, guests, and stock.</p>
-            <div class="meta">
-                <span>Audience <strong>Manager &amp; Admin</strong></span>
-                <span>Read time <strong>~10 min</strong></span>
-                <span>Pages <strong>end-of-day-report · reports · pos-accounting · shift-close-report ·
-                        accounting-dashboard</strong></span>
-            </div>
-        </div>
-    </header>
+  <h1>Reports and End of Day</h1>
+  <p>How to read the financial reports, close the day with the End of Day report, and reconcile each cashier's till at <span class="g-site-name">Rosalyns Beach Hotel</span>.</p>
 
-    <main class="content">
-        <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Managers, accounts staff, and whoever closes the day</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Money</strong> &rarr; <strong>Reports</strong> (<code>/admin/reports.php</code>) and <strong>End of Day</strong> (<code>/admin/end-of-day-report.php</code>). <strong>POS Accounting</strong> (<code>/admin/pos-accounting.php</code>) is under <strong>Advanced</strong>. The Z-report and Drift report open from buttons on POS Accounting.</dd>
+      <dt>Permission needed</dt><dd>Reports and End of Day: <strong>Reports</strong>. POS Accounting, Z-report and Drift report: <strong>POS Accounting</strong></dd>
+      <dt>Only shown when</dt><dd><strong>Finance &amp; Accounting</strong> is switched on in Settings &rarr; Modules. POS Accounting also needs <strong>POS &amp; Stations</strong>.</dd>
+    </dl>
+  </div>
 
-            <section>
-                <h2>On this page</h2>
-                <ul class="checklist">
-                    <li><a href="#eod">End-of-Day report</a></li>
-                    <li><a href="#reports">Comprehensive Reports &amp; Analytics</a></li>
-                    <li><a href="#accounting-dashboard">Accounting Dashboard</a></li>
-                    <li><a href="#pos-accounting">POS Accounting &amp; Shift Close</a></li>
-                    <li><a href="#z-report">Z-Report (Shift Close Report)</a></li>
-                </ul>
-                <div class="callout note">
-                    <strong>Reports follow your business preset.</strong> Tabs, KPI panels and the End-of-Day content —
-                    including the PDF, email and WhatsApp exports — include only the modules your business runs. A
-                    hotel sees Occupancy and ADR in the headline strip; a till business (shop, supermarket, bar, gym)
-                    sees <em>Orders Today</em> and <em>Average Order Value</em> instead. Room, conference, gym and
-                    event revenue lines each appear only when that module is on; a Full Hotel preset shows everything.
-                    See the <a href="16-business-presets.html">Business Presets guide</a>.
-                </div>
-            </section>
+  <div class="toc">
+    <ol>
+      <li><a href="#reports">Reports: the tabs</a></li>
+      <li><a href="#range">How to change the dates and export</a></li>
+      <li><a href="#deferred">The deferred revenue notice</a></li>
+      <li><a href="#eod">End of Day report</a></li>
+      <li><a href="#send">How to email, WhatsApp, print or download the End of Day report</a></li>
+      <li><a href="#posacc">POS Accounting: closing cashier shifts</a></li>
+      <li><a href="#z">Z-report (shift close report)</a></li>
+      <li><a href="#drift">Drift report</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+    </ol>
+  </div>
 
-            <!-- END OF DAY -->
-            <section id="eod">
-                <h2>1. End-of-Day Report</h2>
-                <p><code>/admin/end-of-day-report.php</code> — the owner/manager's nightly snapshot. Review it every
-                    evening before closing. Shows a full day's operations, revenue, POS performance, compliance items,
-                    and a preview of tomorrow.</p>
+  <h2 id="reports">Reports: the tabs</h2>
+  <p>The page is called <strong>Reports &amp; Analytics</strong>. It opens on this month. Tabs only appear for the parts of the business that are switched on.</p>
+  <table>
+    <thead><tr><th>Tab</th><th>What it shows</th></tr></thead>
+    <tbody>
+      <tr><td><strong>P&amp;L Overview</strong></td><td>The <strong>P&amp;L Summary</strong> (revenue by source, total gross revenue, cost of goods, gross profit, refunds, credit notes issued, VAT collected, net revenue) with a comparison to the previous period. Then <strong>Hotel KPIs</strong> (occupancy, ADR, RevPAR, average stay, average booking value, cancellation rate, no-show rate, revenue forecast), <strong>Revenue by Source</strong>, <strong>Payment Methods</strong>, <strong>Payment Status Mix</strong> and <strong>Top Outstanding Balances</strong>.</td></tr>
+      <tr><td><strong>Revenue</strong></td><td>Payment method breakdown, <strong>Daily Revenue Trend</strong>, <strong>Monthly Revenue</strong> (with month-on-month %), <strong>Top Clients by Revenue</strong>, <strong>VAT Collection Report</strong>, <strong>Refund Analysis</strong> (by reason and by status), <strong>Monthly ADR Trend</strong>, quotation pipeline.</td></tr>
+      <tr><td><strong>VAT Register</strong></td><td>Total VAT collected, gross and net revenue, <strong>VAT by Revenue Source</strong>, <strong>Monthly VAT Summary</strong>, <strong>VAT by Quarter</strong> and the <strong>Transaction VAT Register</strong> line by line. A fold-out <strong>VAT Filing Guide</strong> explains how to use it.</td></tr>
+      <tr><td><strong>Aging &amp; AR</strong></td><td><strong>Receivables Aging Summary</strong> in bands 0&ndash;30, 31&ndash;60, 61&ndash;90 and 90+ days, and the <strong>Outstanding Accounts Ledger</strong>.</td></tr>
+      <tr><td><strong>Bookings</strong></td><td>Booking status breakdown, bookings by room type, recent bookings.</td></tr>
+      <tr><td><strong>Occupancy</strong></td><td>Overall occupancy rate, occupancy by room type, ADR and RevPAR by room type.</td></tr>
+      <tr><td><strong>Guests</strong></td><td>Guest origin countries, guest reviews summary, repeat guests.</td></tr>
+      <tr><td><strong>Conference</strong></td><td>Status tables for conference, gym and event enquiries, conference room utilisation, gym and event revenue trends.</td></tr>
+      <tr><td><strong>POS</strong> (named after your till), <strong>Stock</strong>, <strong>Staff</strong>, <strong>Voids</strong></td><td>Till sales, stock value and wastage, activity per user, and voided orders and refunds, for the chosen dates.</td></tr>
+    </tbody>
+  </table>
+  <p>Hover over a tab or a column heading to see a short explanation. Each tab also has a fold-out help box at the top.</p>
 
-                <h3>Selecting a date</h3>
-                <p>The report defaults to <strong>today</strong>. Use the date picker to pull any past date.
-                    Day-over-day comparison deltas are shown automatically alongside most figures.</p>
+  <h2 id="range">How to change the dates and export</h2>
+  <ol class="steps">
+    <li>Set <strong>Start Date</strong> and <strong>End Date</strong> and click <strong>Apply</strong>. If the dates are the wrong way round, they are swapped for you.</li>
+    <li>Or click a quick button: <strong>Today</strong>, <strong>This Week</strong> (from Sunday), <strong>This Month</strong>, <strong>This Quarter</strong>, <strong>This Year</strong>, <strong>All Time</strong> (the last five years).</li>
+    <li>Click <strong>Export CSV</strong> to download the tab you are on for those dates. The file is named like <code>hotel-report-revenue-2026-10-07.csv</code>.</li>
+  </ol>
+  <p>Export covers these tabs: P&amp;L Overview, Revenue, VAT Register (the <strong>Export for Filing</strong> button), Bookings, Occupancy, Guests and Conference. On the Aging &amp; AR, till, Stock, Staff and Voids tabs the button downloads the overview export instead.</p>
+  <p>You need <strong>Reports</strong> or <strong>Accounting</strong> permission to export.</p>
 
-                <h3>Sections at a glance</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Section</th>
-                            <th>What it covers</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>Room Operations</strong></td>
-                            <td>Expected vs actual check-ins and check-outs, stayovers, new bookings, cancellations,
-                                no-shows, occupancy % with day-over-day delta.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Revenue breakdown</strong></td>
-                            <td>Room, conference, and F&amp;B revenue split with VAT; refunds; pending amounts;
-                                transaction count; gross and net totals; ADR; RevPAR.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Payment method mix</strong></td>
-                            <td>Cash, mobile money, card, bank transfer — counts and amounts. Non-cash total shown
-                                separately.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>POS / Restaurant</strong></td>
-                            <td>Orders by type (walk-in, room service, tab), gross margin, average order value, voids,
-                                and <strong>top 8 selling items</strong> for the day.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Reviews today</strong></td>
-                            <td>New reviews submitted and average star rating.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Housekeeping snapshot</strong></td>
-                            <td>Pending, in-progress, and completed tasks.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Outstanding folio</strong></td>
-                            <td>Total still owed by in-house and confirmed guests.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Credit notes</strong></td>
-                            <td>CNs issued today and CN redemptions applied today.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Dynamic pricing</strong></td>
-                            <td>Bookings using a rate plan, discount given, package revenue, top rate plan and package
-                                for the day.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Tomorrow preview</strong></td>
-                            <td>Expected arrivals, departures, and forecast revenue from confirmed bookings.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Day-over-day comparison</strong></td>
-                            <td>Previous day vs today: gross, net, refunds, room revenue, POS, bookings, occupancy —
-                                each with a colour-coded trend arrow.</td>
-                        </tr>
-                    </tbody>
-                </table>
+  <h2 id="deferred">The deferred revenue notice</h2>
+  <p>On P&amp;L Overview you may see a <strong>Deferred Revenue Notice</strong> and a line <em>Deferred Revenue (unearned)</em>. It adds up money received for room bookings whose check-in is after today and whose status is Confirmed or Tentative, minus refunds on them. It tells you how much of the money collected belongs to stays that have not happened yet, so you do not count it as earned. Click the link in the notice to open the Bookings tab.</p>
 
-                <h3>Key metrics explained</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Metric</th>
-                            <th>Formula</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>ADR</td>
-                            <td>Room gross revenue ÷ rooms occupied</td>
-                        </tr>
-                        <tr>
-                            <td>RevPAR</td>
-                            <td>Room gross revenue ÷ total rooms</td>
-                        </tr>
-                        <tr>
-                            <td>Room sell-through</td>
-                            <td>Rooms occupied ÷ total rooms × 100</td>
-                        </tr>
-                        <tr>
-                            <td>Empty room opportunity</td>
-                            <td>Unsold rooms × ADR (revenue left on the table)</td>
-                        </tr>
-                        <tr>
-                            <td>F&amp;B per occupied room</td>
-                            <td>POS gross ÷ rooms occupied</td>
-                        </tr>
-                        <tr>
-                            <td>Payment capture rate</td>
-                            <td>Gross collected ÷ (gross + pending) × 100</td>
-                        </tr>
-                        <tr>
-                            <td>Unpaid risk</td>
-                            <td>Pending payments + outstanding folio</td>
-                        </tr>
-                    </tbody>
-                </table>
+  <h2 id="eod">End of Day report</h2>
+  <p>Open <strong>Money</strong> &rarr; <strong>End of Day</strong>. It shows one day. The label says <strong>Live (today)</strong> or <strong>Archived day</strong>. Change the day with the date box, the arrows, <strong>Refresh</strong> or <strong>Today</strong>. You cannot pick a future day.</p>
+  <table>
+    <thead><tr><th>Part</th><th>What it shows</th></tr></thead>
+    <tbody>
+      <tr><td>Heading line</td><td>One sentence summing up the day and how many items need attention.</td></tr>
+      <tr><td><strong>Net takings</strong></td><td>Money received minus refunds.</td></tr>
+      <tr><td><strong>Occupancy</strong>, <strong>ADR</strong></td><td>Rooms sold against rooms available, and average room rate. RevPAR is shown under ADR.</td></tr>
+      <tr><td><strong>Cash to bank</strong></td><td>The cash taken today. Count the till; it must match. Other methods are listed below it.</td></tr>
+      <tr><td><strong>Still owed</strong></td><td>Open folio balances plus payments still pending.</td></tr>
+      <tr><td><strong>Close score</strong></td><td>100 minus points for open items: arrivals and departures not done, no-shows, cancellations, unpaid folio, rooms out of order, till voids, pending payments, housekeeping not finished. 90 or more is <em>Excellent close</em>, 75 or more <em>Good close</em>, 55 or more <em>Needs attention</em>, below that <em>Critical review</em>.</td></tr>
+      <tr><td><strong>Needs attention</strong></td><td>The checks behind the score, most urgent first. If none: <em>Clean closeout</em>.</td></tr>
+      <tr><td><strong>Takings, 7 days</strong>, <strong>What moved</strong>, <strong>Front desk</strong>, <strong>Tomorrow</strong></td><td>Last seven days, change against the day before, arrivals and departures, and tomorrow's arrivals, departures and forecast.</td></tr>
+      <tr><td><strong>The day in detail</strong></td><td>Tabs: <strong>Revenue</strong>, <strong>Front office</strong>, your till tab, <strong>Room types</strong>, <strong>7-day trend</strong>, <strong>Yield &amp; guests</strong>, <strong>Pricing &amp; quotes</strong>, <strong>Housekeeping &amp; more</strong>.</td></tr>
+    </tbody>
+  </table>
+  <p>Room revenue paid for food and drink charged to a room is moved to the till figure so it is not counted twice.</p>
 
-                <div class="callout note">
-                    <strong>Evening routine:</strong> open EOD, check occupancy vs target, review outstanding folio,
-                    check tomorrow's arrivals, flag any voids that need a manager review, then close.
-                </div>
-            </section>
+  <h2 id="send">How to email, WhatsApp, print or download the End of Day report</h2>
+  <ol class="steps">
+    <li>Choose the day you want.</li>
+    <li>Optional: type extra addresses in <strong>CC email (optional)</strong>, separated by commas. It starts with the CC list set in Hotel Settings (<strong>End-of-day report CC</strong>).</li>
+    <li>Click <strong>Email</strong>. The report goes to the hotel's report recipients, or to the hotel admin email if none is set. You will see <em>"Report Sent"</em> with <em>"Sent to N recipient(s): ..."</em>.</li>
+    <li>Click <strong>WhatsApp</strong> to send a summary to the hotel's WhatsApp number from WhatsApp Settings.</li>
+    <li>Click <strong>Print</strong> to print the page, <strong>PDF</strong> to download a PDF, or <strong>CSV</strong> to download the day's figures.</li>
+  </ol>
+  <p>If sending fails you will see <em>"Could Not Send"</em> and the reason, for example <em>"No admin recipient configured. Add an email to site setting "eod_report_recipients" or "email_admin_email"."</em> or <em>"No WhatsApp recipient number configured..."</em>.</p>
 
-            <!-- COMPREHENSIVE REPORTS -->
-            <section id="reports">
-                <h2>2. Comprehensive Reports &amp; Analytics</h2>
-                <p><code>/admin/reports.php</code> — 13-tab analytics suite. Set a date range at the top then switch
-                    tabs. Most tabs support CSV export.</p>
+  <h2 id="posacc">POS Accounting: closing cashier shifts</h2>
+  <p>Use this to check each cashier's till against the system and close their shift. Open <strong>Advanced</strong> &rarr; <strong>POS Accounting</strong>. Pick the <strong>Business date</strong> and click <strong>Apply</strong>.</p>
+  <p>The top shows <strong>Paid POS sales</strong>, <strong>Cash collected</strong>, <strong>Mobile / card</strong> and <strong>Voids</strong> for the day. Below that, <strong>Cashier close matching</strong> lists every cashier who took sales that day.</p>
+  <ol class="steps">
+    <li>Tick the cashier (or use the select-all box). Cashiers already closed show <strong>Closed</strong> and cannot be ticked. A cashier with unfinished orders shows how many are <strong>open</strong>.</li>
+    <li>Expand the row. Count the drawer and enter <strong>Declared cash</strong>, <strong>Declared mobile</strong> and <strong>Declared card</strong>. Enter 0 if there is none. The expected amounts are hidden until you close, so the count is blind.</li>
+    <li>Optional: open the list of sales to review them. Tick each as checked, or click <strong>Tick all</strong>. This does not close anything. Add an <strong>Accountant note</strong> to any sale, and a count note for the cashier.</li>
+    <li>Optional: type a <strong>Bulk note for selected closes</strong>.</li>
+    <li>Click <strong>Close selected</strong>.</li>
+    <li>You will see <em>"N POS shift(s) closed. Variance (counted - expected) - name: cash 0.00, mobile 0.00, card 0.00."</em> A negative number means less was counted than expected.</li>
+  </ol>
+  <p>Example: the system expects MWK 250,000 cash and you count MWK 248,000. The variance is -2,000.00. Write the reason in the note.</p>
+  <p>Further down are the <strong>POS sales log</strong> and the <strong>POS audit logs</strong> for the day.</p>
 
-                <h3>Date range</h3>
-                <p>Defaults to the current calendar month. Adjust <strong>Start date</strong> and <strong>End
-                        date</strong> and click Apply.</p>
+  <h2 id="z">Z-report (shift close report)</h2>
+  <p>Click <strong>Z-report</strong> on POS Accounting to see all the shift closes for the chosen date. Managers and admins only; anyone else gets <em>"Access denied."</em> It shows total revenue, orders, voids and net variance. A red banner warns of a <em>total shortfall across all cashiers</em> to investigate before sign-off. The table lists each cashier with their cash, mobile and card variance, an <strong>OVERRIDE</strong> tag where the close was approved despite a difference, and a <strong>View</strong> link.</p>
+  <p>The single report for one close shows the cashier, date and time, record number, then <strong>Tender Reconciliation</strong> (System (Expected), Counted (Declared), Variance, and BALANCED, SHORTFALL or OVERAGE for each of cash, mobile and card), notes, top items, the paid orders, refund and void payouts, and voided orders. Click <strong>Print / Save PDF</strong> to keep a copy. A cashier who is not a manager can open only their own closes. With no date given, the page shows the last 30 closes.</p>
 
-                <h3>Tabs</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Tab</th>
-                            <th>What you'll find</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>Overview</strong></td>
-                            <td>Payment status breakdown, revenue by booking type, outstanding payments list with days
-                                overdue, payment capture rates.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Revenue</strong></td>
-                            <td>Payment method breakdown, daily and monthly revenue trends, top 10 clients by spend, VAT
-                                collected per day.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>VAT</strong></td>
-                            <td>Daily VAT collected table — date, transaction count, VAT amount, total revenue.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Aging</strong></td>
-                            <td>Receivables aging: 0–30, 31–60, 61–90, and 90+ day buckets for outstanding (pending/partial, non-refund) invoices. Age is measured from the <strong>invoice creation date</strong> — giving a true picture of how long a balance has remained unpaid regardless of any payment date activity.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Bookings</strong></td>
-                            <td>Booking status breakdown, room-level stats (count, nights, revenue), cancellation rate,
-                                recent 15 bookings.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Occupancy</strong></td>
-                            <td>Occupancy % by room type, ADR, RevPAR, no-show rate, upcoming booking forecast.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Guests</strong></td>
-                            <td>Top 15 guest countries, repeat guests (more than 1 booking in period).</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Conference</strong></td>
-                            <td>Conference room stats, conference revenue, average event size.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>F&amp;B</strong></td>
-                            <td>F&amp;B / POS revenue split by order type, void summary.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Stock</strong></td>
-                            <td>Stock-level data and usage for the period.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Staff</strong></td>
-                            <td>Staff activity summary for the period.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Voids &amp; Refunds</strong></td>
-                            <td>Refund reason breakdown, refund status breakdown, daily refund trends.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Credit Notes</strong></td>
-                            <td>CN list for the period, KPI summary (issued, redeemed, outstanding, voided, expired),
-                                type breakdown, redemption history.</td>
-                        </tr>
-                    </tbody>
-                </table>
+  <h2 id="drift">Drift report</h2>
+  <p>Click <strong>Drift report</strong> on POS Accounting. It is read-only and changes nothing. It measures how far older till figures were out because of two faults that have since been fixed: tips counted inside revenue and VAT, and split payments. It looks at the last 90 days; change <strong>Start</strong> and <strong>End</strong> and click <strong>Apply</strong>, or click <strong>All time</strong>.</p>
+  <ul>
+    <li><strong>Tip/VAT overstatement register</strong>: each affected sale with the recorded total, the correct total, and how much revenue and VAT were overstated. Refunded sales are marked.</li>
+    <li><strong>Historical shift-close accuracy</strong>: closed shifts whose expected figures would be different today, and whether a manager override was used at the time.</li>
+  </ul>
+  <p>If the lists are empty you will see a green line saying no drift was found. Whether to correct any past figure is a decision for finance or the owner.</p>
 
-                <h3>Key occupancy metrics computed</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Metric</th>
-                            <th>Formula</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>ADR</td>
-                            <td>Total room revenue ÷ total nights sold</td>
-                        </tr>
-                        <tr>
-                            <td>RevPAR</td>
-                            <td>Total room revenue ÷ (total room inventory × days in period)</td>
-                        </tr>
-                        <tr>
-                            <td>Occupancy rate</td>
-                            <td>Total nights booked ÷ total room nights available × 100</td>
-                        </tr>
-                        <tr>
-                            <td>Cancellation rate</td>
-                            <td>Cancelled bookings ÷ total bookings × 100</td>
-                        </tr>
-                        <tr>
-                            <td>Avg stay length</td>
-                            <td>Total nights ÷ booking count</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>A cashier can be closed only once for a business date.</li>
+    <li>All three declared amounts must be entered, and none can be negative.</li>
+    <li>A cashier with no paid orders is skipped when you close.</li>
+    <li>The End of Day report cannot be run for a future date.</li>
+    <li>Reports show only the sections for modules that are switched on.</li>
+  </ul>
 
-            <!-- ACCOUNTING DASHBOARD -->
-            <section id="accounting-dashboard">
-                <h2>3. Accounting Dashboard</h2>
-                <p><code>/admin/accounting-dashboard.php</code> — the accountant's command centre. Select a date range
-                    (defaults to current calendar month). Use <strong>Show All</strong> to remove date limits.</p>
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>Choose at least one POS user to close.</em></td><td>No cashier ticked.</td><td>Tick at least one cashier.</td></tr>
+      <tr><td><em>Enter the counted cash for (name) (enter 0 if none) before closing.</em></td><td>A declared box was blank.</td><td>Fill cash, mobile and card; type 0 if none. Same for mobile and card.</td></tr>
+      <tr><td><em>Declared amounts cannot be negative.</em></td><td>A minus sign was typed.</td><td>Enter a positive number.</td></tr>
+      <tr><td><em>Skipped - already closed: N, no paid orders: N.</em></td><td>Those cashiers were closed already or had no sales.</td><td>None needed.</td></tr>
+      <tr><td><em>Security token invalid. Please refresh and try again.</em></td><td>Page open too long.</td><td>Reload and repeat.</td></tr>
+      <tr><td><em>Access denied.</em> or <em>Record not found or access denied.</em></td><td>Z-report is for managers and admins, or you opened someone else's close.</td><td>Ask a manager.</td></tr>
+      <tr><td>Export CSV gives a different report than the tab</td><td>That tab has no export of its own.</td><td>See the list of exportable tabs above.</td></tr>
+      <tr><td><em>Could Not Send</em></td><td>No recipient or WhatsApp number is set, or sending failed.</td><td>Read the reason shown. Set the number in WhatsApp Settings, or the email in Hotel Settings, and try again.</td></tr>
+    </tbody>
+  </table>
 
-                <h3>Financial summary panel</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Metric</th>
-                            <th>Definition</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Gross collected</td>
-                            <td>Sum of completed/paid payments (refunds excluded). Revenue received in the period.</td>
-                        </tr>
-                        <tr>
-                            <td>Net excl. VAT</td>
-                            <td>Gross collected minus the VAT component — pre-tax revenue.</td>
-                        </tr>
-                        <tr>
-                            <td>VAT collected</td>
-                            <td>VAT on all completed/paid sales, net of VAT returned on processed refunds. This is the net VAT figure for tax returns.</td>
-                        </tr>
-                        <tr>
-                            <td>Pending</td>
-                            <td>Amounts on unpaid/partial invoices. Only guest receivables — pending refunds (liability) are tracked separately.</td>
-                        </tr>
-                        <tr>
-                            <td>Refunds issued</td>
-                            <td>Total on refund-type rows. Identified by <code>payment_type = 'refund'</code> for consistency — does not double-count rows that also carry a refunded status.</td>
-                        </tr>
-                        <tr>
-                            <td>Pending refunds</td>
-                            <td>Refunds authorised but not yet paid out. Represents a liability to guests.</td>
-                        </tr>
-                    </tbody>
-                </table>
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="13-finance-payments.html">Finance and Payments</a></li>
+    <li><a href="01-pos-till.html">POS Till</a></li>
+    <li><a href="11-social-facebook-sharing.html">Social, Facebook and WhatsApp</a></li>
+  </ul>
 
-                <h3>Revenue by source</h3>
-                <p>Three panels — <strong>Rooms</strong>, <strong>Conference</strong>, <strong>Restaurant &amp; POS</strong> — each showing booking count, gross collected, VAT component, and outstanding balance on bookings that had payments in the period.</p>
-
-                <h3>POS analytics</h3>
-                <ul class="checklist">
-                    <li><strong>Revenue by order type</strong> — walk-in, room service, tab: orders, gross, COGS, voids.</li>
-                    <li><strong>Gross margin</strong> — gross revenue minus COGS from <code>stock_orders.total_cost</code>. If COGS is zero for any type, the margin will be inflated — this usually means ingredient costs have not been entered on those recipes.</li>
-                    <li><strong>Inventory shrinkage</strong> — the value of stock lost to <em>wastage</em>, <em>stock-count variance</em>, <em>expiry</em> and <em>recalls</em> for the period. This is a real hit to margin that COGS does not capture, so the panel also shows the <strong>net F&amp;B contribution</strong> (margin minus shrinkage) with a breakdown by loss type.</li>
-                    <li><strong>Folio F&amp;B (room service / minibar)</strong> — food &amp; drink billed to room folios. Because it is collected under the room booking, it is <em>included inside Room revenue</em> above; this memo line shows it separately for F&amp;B-department visibility and is <strong>not</strong> added on top (so nothing double-counts).</li>
-                    <li><strong>Daily revenue trend</strong> — last 14 days: room, conference, F&amp;B, and refunds per day as a visual breakdown.</li>
-                </ul>
-                <div class="callout note">Conference outstanding balances now use the same VAT-inclusive (gross) basis as
-                    rooms, gym and events — a fix that previously understated what conference clients still owed when VAT
-                    is charged on top.</div>
-
-                <h3>Compliance checks — what to do</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Alert</th>
-                            <th>What it means</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Missing receipts</td>
-                            <td>Completed payments with no receipt number.</td>
-                            <td><code>receipts.php</code> → <strong>Generate Missing</strong>.</td>
-                        </tr>
-                        <tr>
-                            <td>Invoices without numbers</td>
-                            <td><code>invoice_generated = 1</code> but no invoice number stored.</td>
-                            <td><code>invoices.php</code> → <strong>Regenerate Invoice</strong> per row.</td>
-                        </tr>
-                        <tr>
-                            <td>POS orders without ledger entry</td>
-                            <td>Paid stock orders not matched to a payments row.</td>
-                            <td>Run <code>pos-accounting.php</code> for the affected date and close the shift.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Quotation pipeline</h3>
-                <p>Count and value of quotations in each status (Sent / Accepted / Expired / Declined) for the selected period. Use this to track conversion of proposals into confirmed revenue.</p>
-
-                <h3>Credit notes summary</h3>
-                <p>Issued count and value, total redeemed, and outstanding balance (remaining on active and partially-applied CNs). Outstanding CN balance is a future discount liability — monitor it monthly.</p>
-
-                <h3>Outstanding summary</h3>
-                <p>The <strong>Current Outstanding</strong> panel shows all-time unpaid balances on room and conference bookings (<code>amount_due &gt; 0</code>). This is a current-state snapshot, not filtered by the selected date range — it shows what the hotel is owed right now regardless of when the booking was made.</p>
-            </section>
-
-            <!-- POS ACCOUNTING -->
-            <section id="pos-accounting">
-                <h2>4. POS Accounting &amp; Shift Close</h2>
-                <p><code>/admin/pos-accounting.php</code> — the accountant's daily POS reconciliation screen. Use this
-                    after every trading session to verify cashier counts and formally close shifts.</p>
-
-                <div class="callout warn">
-                    <strong>Permission required:</strong> <code>pos_accounting</code>. Only users with this role can
-                    access this page.
-                </div>
-
-                <h3>Page overview</h3>
-                <ul class="checklist">
-                    <li>Select the <strong>business date</strong> at the top (defaults to today).</li>
-                    <li>KPI strip shows: Paid POS sales, Cash expected, Mobile/Card totals, Void count and value.</li>
-                    <li>The <strong>Cashier Close Matching</strong> table lists every cashier who placed orders that
-                        day.</li>
-                </ul>
-
-                <h3>Cashier table columns</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Column</th>
-                            <th>Meaning</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Cashier</td>
-                            <td>Staff full name.</td>
-                        </tr>
-                        <tr>
-                            <td>Orders</td>
-                            <td>Number of paid orders for the day.</td>
-                        </tr>
-                        <tr>
-                            <td>Expected</td>
-                            <td>System-calculated cash / mobile / card totals from <code>stock_orders</code>.</td>
-                        </tr>
-                        <tr>
-                            <td>Declared</td>
-                            <td>Editable inputs — enter the actual counted cash, mobile receipts, and card slip total.
-                            </td>
-                        </tr>
-                        <tr>
-                            <td>Variance</td>
-                            <td>Declared − Expected. Computed in real time. Green = OK, Amber = small difference, Red =
-                                shortfall.</td>
-                        </tr>
-                        <tr>
-                            <td>Status</td>
-                            <td>Open / Has open tabs / Closed.</td>
-                        </tr>
-                        <tr>
-                            <td>Notes</td>
-                            <td>Text box for the accountant to record an explanation for any variance.</td>
-                        </tr>
-                        <tr>
-                            <td>Expand (▶)</td>
-                            <td>Opens a drawer showing the full order list for that cashier; each order has an
-                                accountant note field.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Closing a shift</h3>
-                <ol class="steps">
-                    <li>Enter the <strong>Declared</strong> amounts for each cashier (count the cash drawer and check
-                        mobile money receipts).</li>
-                    <li>Add a <strong>Note</strong> if there is a variance that needs explanation.</li>
-                    <li>Tick the checkbox next to each cashier you want to close (or use <strong>Select All</strong>).
-                    </li>
-                    <li>Optionally type a <strong>bulk note</strong> that applies to all closes in this batch.</li>
-                    <li>Click <strong>Close Selected</strong>.</li>
-                    <li>Each close is written to <code>stock_shift_closes</code> with variances recorded. An audit
-                        event is also logged to <code>stock_order_audit</code>.</li>
-                </ol>
-
-                <h3>Understanding variance colours</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Colour</th>
-                            <th>Variance range</th>
-                            <th>What to do</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td style="color:#2e7d32;font-weight:600;">Green</td>
-                            <td>Declared = Expected (or within rounding)</td>
-                            <td>Good — proceed to close.</td>
-                        </tr>
-                        <tr>
-                            <td style="color:#f57c00;font-weight:600;">Amber</td>
-                            <td>Small positive or negative difference</td>
-                            <td>Add a note explaining the difference before closing.</td>
-                        </tr>
-                        <tr>
-                            <td style="color:#c62828;font-weight:600;">Red</td>
-                            <td>Significant shortfall (declared &lt; expected)</td>
-                            <td>Investigate before closing. Ask cashier to recount.</td>
-                        </tr>
-                    </tbody>
-                </table>
-                <p>Variance = <strong>Declared − Expected</strong>. A positive number means the cashier has more than the system expects (overage). A negative number means a shortfall.</p>
-
-                <h3>Settled from tabs</h3>
-                <p>The <em>Settled from tabs</em> count and amount on each cashier row shows orders that were <em>created before</em> the current business date but <em>paid during</em> it — i.e., orders that sat as open tabs overnight and were settled that day. This is informational; the amounts are already included in the Expected totals.</p>
-
-                <div class="callout note">
-                    <strong>Open tabs warning:</strong> if a cashier has orders still in <em>placed</em> status, the
-                    Status column shows a warning. Resolve those open tabs in the POS before closing the shift.
-                </div>
-
-                <div class="callout note">
-                    <strong>Already closed:</strong> closed shift rows are greyed out and their checkboxes are
-                    disabled. You cannot re-close the same cashier for the same day.
-                </div>
-
-                <h3>Viewing the Z-Report</h3>
-                <p>Click the <strong>Z-Report</strong> button in the page header to open the date-summary Z-report for
-                    the current business date (<code>shift-close-report.php?date=…</code>).</p>
-            </section>
-
-            <!-- Z-REPORT -->
-            <section id="z-report">
-                <h2>5. Z-Report — Shift Close Report</h2>
-                <p><code>/admin/shift-close-report.php</code> — a printable close-of-shift summary. Three modes:</p>
-
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Mode</th>
-                            <th>URL</th>
-                            <th>Who can view</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>Single Z-report</strong></td>
-                            <td><code>?id=N</code></td>
-                            <td>FOH staff: own closes only. Manager/Admin: any.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Date summary</strong></td>
-                            <td><code>?date=YYYY-MM-DD</code></td>
-                            <td>Manager &amp; Admin only.</td>
-                        </tr>
-                        <tr>
-                            <td><strong>List</strong></td>
-                            <td>(no params)</td>
-                            <td>Admin/Manager: last 30 closes. FOH: own last 30.</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Single Z-report sections</h3>
-                <ul class="checklist">
-                    <li><strong>Header bar</strong> — cashier name, shift date, closed-at time, record ID. Red
-                        <em>Shortfall</em> banner if total variance is negative. Amber <em>Override</em> banner if a
-                        manager forced the close.
-                    </li>
-                    <li><strong>Summary strip</strong> — Total revenue · Orders · Voids (count + value) · Settled from tabs · <strong>Tips collected</strong> (shown when tips &gt; 0).</li>
-                    <li><strong>Variance table</strong> — Cash, Mobile money, Card: Expected vs Declared vs Variance, each coloured. <strong>Expected amounts include any tips collected</strong> via that method — cashiers must declare their full collected total including tips.</li>
-                    <li><strong>Notes</strong> — cashier or accountant notes.</li>
-                    <li><strong>Paid orders table</strong> — every order paid during the shift window.</li>
-                    <li><strong>Voided orders table</strong> — voided orders with reasons.</li>
-                    <li><strong>Top selling items</strong> — top 10 items by revenue for the shift.</li>
-                </ul>
-
-                <div class="callout note">
-                    <strong>Tips and cash reconciliation:</strong> when a guest leaves a cash tip, the cashier keeps it in the drawer. The system adds expected tips to the Expected Cash total on the variance table, so the declared cash count must include those tips. Mobile money and card tips are reflected in the respective Expected columns the same way.
-                </div>
-
-                <h3>Date summary</h3>
-                <p>Shows every close record for the day side-by-side, plus aggregated totals — total revenue, orders,
-                    voids, and per-method variances — so a manager can see the whole day at a glance.</p>
-
-                <div class="callout note">
-                    <strong>Print tip:</strong> use <strong>Ctrl + P</strong> (or browser print) on a Z-report page —
-                    the admin header and sidebar are hidden automatically for a clean printout.
-                </div>
-            </section>
-
-            <!-- QUICK REFERENCE -->
-            <section>
-                <h2>Quick Reference — Which page to use?</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>I need to…</th>
-                            <th>Go to…</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Review today's full operation at the end of shift</td>
-                            <td><code>end-of-day-report.php</code></td>
-                        </tr>
-                        <tr>
-                            <td>View occupancy, ADR, RevPAR for a date range</td>
-                            <td><code>reports.php</code> → Occupancy tab</td>
-                        </tr>
-                        <tr>
-                            <td>See monthly revenue trends</td>
-                            <td><code>reports.php</code> → Revenue tab</td>
-                        </tr>
-                        <tr>
-                            <td>Export VAT collected for a period</td>
-                            <td><code>reports.php</code> → VAT tab → Export CSV</td>
-                        </tr>
-                        <tr>
-                            <td>Check for overdue invoices (aging)</td>
-                            <td><code>reports.php</code> → Aging tab <em>or</em> <code>invoices.php</code></td>
-                        </tr>
-                        <tr>
-                            <td>Reconcile a cashier's cash drawer</td>
-                            <td><code>pos-accounting.php</code></td>
-                        </tr>
-                        <tr>
-                            <td>Print a cashier's Z-report</td>
-                            <td><code>shift-close-report.php?id=N</code></td>
-                        </tr>
-                        <tr>
-                            <td>See all closes for a business day</td>
-                            <td><code>shift-close-report.php?date=YYYY-MM-DD</code></td>
-                        </tr>
-                        <tr>
-                            <td>See the financial overview for this month</td>
-                            <td><code>accounting-dashboard.php</code></td>
-                        </tr>
-                        <tr>
-                            <td>Spot compliance issues (missing receipts, unsubmitted sales)</td>
-                            <td><code>accounting-dashboard.php</code> → Compliance section</td>
-                        </tr>
-                        <tr>
-                            <td>See which items sold most in F&amp;B</td>
-                            <td><code>end-of-day-report.php</code> (top 8 items) <em>or</em> <code>reports.php</code> →
-                                F&amp;B tab</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
-
-        </div>
-    </main>
-
-    <footer class="guide-footer">
-        <div class="deck">
-            <div class="crest">— R H —</div>
-            <p>Rosalyn's Hotel Management System &middot; Reports &amp; End of Day Guide</p>
-            <p>
-                <a href="13-finance-payments.html">← Finance &amp; Payments</a> &nbsp;|&nbsp;
-                <a href="99-admin-dashboard-full-guide.html">Admin Bible →</a> &nbsp;|&nbsp;
-                <a href="index.html">All Guides</a>
-            </p>
-        </div>
-    </footer>
-
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

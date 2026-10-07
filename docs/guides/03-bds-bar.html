@@ -1,167 +1,170 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BDS Bar Guide — Rosalyn's Hotel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-    rel="stylesheet">
+  <title>Bar Display (BDS) — Rosalyns Beach Hotel</title>
   <link rel="stylesheet" href="assets/guide-theme.css">
   <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
   <nav class="top">
-    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-    <div class="nav-links">
-      <a href="index.html">All Guides</a>
-      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-      <a href="owner-handover.php">Owner</a>
-      <a href="02-kds-kitchen.html">← Prev</a>
-      <a href="04-cds-coffee.html">Next →</a>
-    </div>
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
   </nav>
 
-  <header class="hero">
-    <div class="deck">
-      <div class="eyebrow">Guide 03 &middot; Bar</div>
-      <h1>BDS — Bar Display</h1>
-      <p class="lead">Same engine as the kitchen &mdash; tuned for bar drinks. Works as a standalone touchscreen.</p>
-      <div class="meta">
-        <span>URL <strong>/admin/bds.php</strong></span>
-        <span>Role <strong>bar_staff · manager · admin</strong></span>
-        <span>Read time <strong>4 min</strong></span>
-      </div>
-    </div>
-  </header>
+  <h1>Bar Display (BDS)</h1>
+  <p>The Bar Display is the screen the bar uses to see drink orders sent from the till, make them, and mark them ready and served. It is the same screen as the Kitchen Display, showing only the lines that are set to go to the Bar.</p>
 
-  <main class="content">
-    <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Bartenders (default role: Bar Staff). Managers.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Bar Display (BDS)</strong> (<code>/admin/bds.php</code>). It opens in a new browser tab.</dd>
+      <dt>Permission needed</dt><dd><strong>Bar Display (BDS)</strong></dd>
+      <dt>Only shown when</dt><dd>The <strong>Point of Sale</strong> and <strong>Bar Display (BDS)</strong> modules are switched on in Settings &rarr; Modules.</dd>
+    </dl>
+  </div>
 
-      <section>
-        <h2>What's different from the kitchen?</h2>
-        <ul class="checklist">
-          <li>Only <strong>drink</strong> items appear here (cocktails, beer, wine, soft drinks, spirits).</li>
-          <li>Tickets are usually short (1–3 lines) and fast &mdash; the bar pace is high.</li>
-          <li>Each drink can be ticked off individually as it's poured.</li>
-        </ul>
-      </section>
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#flow">How a drink ticket moves</a></li>
+      <li><a href="#work">How to make a ticket</a></li>
+      <li><a href="#bump">How to bump a whole ticket</a></li>
+      <li><a href="#rush">How to mark a ticket as a rush</a></li>
+      <li><a href="#cancel">How to cancel a ticket before work starts</a></li>
+      <li><a href="#86">How to 86 an item on a ticket</a></li>
+      <li><a href="#chat">How to talk to the front of house</a></li>
+      <li><a href="#served">How to look at served tickets</a></li>
+      <li><a href="#hours">Bar hours, pause and the daily report</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
 
-      <section>
-        <h2>Step-by-step</h2>
-        <ol class="steps">
-          <li><strong>New ticket</strong> lands → chime + card.</li>
-          <li>Tap <strong>Start</strong> when you begin pouring.</li>
-          <li>When each drink is poured, tap <strong>Ready</strong> on that line. This signals the drink is at the pass
-            and <strong>deducts the bottle/ingredient from stock</strong> at this moment.</li>
-          <li>If the required bottle or ingredient is short, BDS shows a friendly stock dialog and blocks Ready/Bump
-            until stock is received, the recipe is fixed, or the item is 86'd.</li>
-          <li>Tap <strong>Collect</strong> to mark the drink taken by the runner for delivery to the guest.</li>
-          <li>Tap <strong>Bump</strong> when the full round is complete — any items not yet marked Ready are deducted
-            at Bump.</li>
-        </ol>
-        <div class="callout note">
-          <strong>Stock deducts at Ready, not at order fire.</strong> If an order is cancelled at the till before you
-          tap Ready, no stock is removed.
-        </div>
-        <div class="callout tip">Use <strong>Sound Settings</strong> from the top/drawer menu to choose bar alert tones
-          and volume. Ticket cards show FOH/orderer, guest/service type and item counts, and action buttons spin while
-          each change is being saved.</div>
-      </section>
+  <h2 id="screen">What is on the screen</h2>
+  <ul>
+    <li><strong>Top bar:</strong> <strong>BDS</strong> and the hotel name; counts for <strong>Open</strong>, <strong>Ready</strong> and <strong>Served shift</strong>; <strong>Hours</strong> with an <strong>Open</strong> or <strong>Closed</strong> label; filter buttons <strong>All</strong>, <strong>New</strong>, <strong>Cooking</strong>, <strong>Ready</strong>; the clock; <strong>FOH chat</strong>; <strong>Sound</strong>; <strong>Settings</strong> (sound settings); <strong>Served</strong>; <strong>Help</strong>; <strong>BDS Guide</strong>; <strong>Daily Report</strong> (only with the <strong>Station Reports (KDS/BDS/CDS)</strong> permission); <strong>Dashboard</strong> (only with the Dashboard permission); <strong>Logout</strong>. On small screens these are in a <strong>Menu</strong> panel.</li>
+    <li><strong>Board:</strong> one card per ticket, showing the table or order type, a timer, the order reference, who took the order, any order note, the lines (quantity, name, line note and the next-step tag) and the buttons at the bottom. Lines for other stations (for example food) are shown with that station's name, and a note such as <strong>1 item at other station</strong> tells you the Kitchen is still working.</li>
+    <li><strong>Bottom panels:</strong> <strong>FOH Notes</strong>, <strong>All Day</strong> (total of drinks still waiting or being made) and <strong>Online Flow</strong>.</li>
+    <li>If the bar is outside its hours a banner reads <strong>BDS is currently closed</strong> with the hours. When there is nothing to make the board says <strong>No open tickets</strong>.</li>
+  </ul>
+  <p>Which drinks come here is decided on the Menu page by each item's <strong>Station</strong>: choose <strong>Bar (BDS)</strong> for bar drinks. Items set to <strong>Coffee Bar (CDS)</strong> go to the coffee bar screen instead (see the <a href="01-pos-till.html#menu">POS guide</a>).</p>
 
-      <section>
-        <h2>Filters</h2>
-        <p><span class="pill gold">All</span> · <span class="pill blue">New</span> · <span
-            class="pill amber">Cooking</span> · <span class="pill green">Ready</span> &mdash; same logic as the kitchen.
-        </p>
-      </section>
+  <h2 id="flow">How a drink ticket moves</h2>
+  <table>
+    <thead><tr><th>Line is</th><th>Tag shows</th><th>Tap does</th></tr></thead>
+    <tbody>
+      <tr><td>Pending (just arrived)</td><td><strong>Start</strong></td><td>Marks that you are making it.</td></tr>
+      <tr><td>Being made</td><td><strong>Ready</strong></td><td>Marks it ready. The ingredients for the recipe come off stock now.</td></tr>
+      <tr><td>Ready</td><td><strong>Collect</strong></td><td>Marks that a runner is collecting it. The cashier gets a "ready for collection" note.</td></tr>
+      <tr><td>Collecting</td><td><strong>Serve</strong></td><td>Marks it delivered.</td></tr>
+      <tr><td>Served or cancelled</td><td>none</td><td>Finished.</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><p>Drinks are handed over at the till. When a guest pays straight away at the till, or when a tab is settled, the system marks the Bar drinks as served by itself, takes the stock off, and the ticket leaves your board. You do not need to bump drinks for the cashier to be able to take payment.</p></div>
 
-      <section>
-        <h2>RUSH priority</h2>
-        <ul class="checklist">
-          <li>A <span class="pill red">⚡ RUSH</span> badge on a ticket means the cashier or manager has marked the order
-            high-priority. Rush tickets sort to the top of the board.</li>
-          <li>An <span class="pill red">URGENT</span> message in the bottom bar appears the moment Rush is set or
-            cleared — you can't miss it.</li>
-          <li>Tap <strong>Rush</strong> in the ticket footer to toggle it from the bar screen.</li>
-        </ul>
-      </section>
+  <h2 id="work">How to make a ticket</h2>
+  <ol class="steps">
+    <li>Watch for a new ticket. Its timer starts when the cashier sends it.</li>
+    <li>Click <strong>Start all</strong> to mark every pending drink as being made, or tap each line. <strong>Start all</strong> only shows while the ticket still has pending lines for the bar.</li>
+    <li>When a drink is ready, tap its line (tag <strong>Ready</strong>). If an ingredient is short you see <em>"Stock check stopped this action: Gin short by 750.000 ml. Receive stock, adjust the recipe, or 86 the item before marking it ready."</em> and the line does not move.</li>
+    <li>When the runner takes it, tap again (<strong>Collect</strong>), then once more when it is delivered (<strong>Serve</strong>).</li>
+  </ol>
+  <p>The timer changes at 5 minutes (warning) and 10 minutes (late). A ticket waiting more than 12 minutes without being ready is flagged urgent. The small icons on your lines are <strong>Recipe card</strong> and <strong>86 this item</strong>. The eye icon (<strong>View whole order</strong>) shows all stations' lines and the stream icon (<strong>Order log</strong>) shows the order's history.</p>
 
-      <section>
-        <h2>Ticket timer &amp; age colours</h2>
-        <ul class="checklist">
-          <li>Each ticket shows elapsed time since fired: <strong>just fired → 45 sec → 3m 12s → 12 min → 1h
-              04m</strong>.</li>
-          <li>Sub-label gives context: <em>On time</em> · <em>Watch closely</em> · <em>Late</em> · <em>Overdue — check
-              with FOH</em> (over 1 hour on the board).</li>
-          <li>All times are accurate in Malawi local time (UTC+2).</li>
-        </ul>
-      </section>
+  <h2 id="bump">How to bump a whole ticket</h2>
+  <ol class="steps">
+    <li>Click <strong>Bump</strong> at the bottom of the ticket.</li>
+    <li>All remaining bar lines are marked served and the ticket leaves the board. Stock for any line not yet deducted comes off now.</li>
+  </ol>
+  <p>If stock is short the bump is refused and nothing changes. <strong>Bump</strong> is greyed out when the ticket has no bar lines.</p>
 
-      <section>
-        <h2>Bar-specific tips</h2>
-        <div class="callout tip">
-          <strong>Stock deducts when you tap Ready</strong> on each drink &mdash; bottle counts in <strong>Stock
-            Ingredients</strong> drop at that moment, not when the order fires.
-        </div>
-        <ul class="checklist">
-          <li>Use the built-in ticket message flow to send quick clarifications back to POS when needed.</li>
-          <li>If you cancel a drink (broken glass, refused), tell the cashier to use <strong>Cancel Before Prep</strong>
-            (if not yet started) or <strong>Void</strong> (manager, if already poured). Stock for poured items is
-            restored automatically on void. Never just remove the ticket.</li>
-          <li>Voids are admin/manager-only. If your manager isn't there, leave the ticket on the board and notify the
-            till.</li>
-          <li>A short countdown badge on each ticket shows how long it's been waiting.</li>
-        </ul>
-      </section>
+  <h2 id="rush">How to mark a ticket as a rush</h2>
+  <ol class="steps">
+    <li>Click <strong>Rush</strong>. You see <em>"Marked as RUSH &mdash; FOH notified"</em>. The ticket moves to the top of the board.</li>
+    <li>Click <strong>Un-rush</strong> to clear it. You see <em>"Rush cleared"</em>.</li>
+  </ol>
 
-      <section>
-        <h2>Mobile / tablet &amp; fullscreen kiosk</h2>
-        <ul class="checklist">
-          <li>Burger menu in the top-right contains: filter, sound, sign-out.</li>
-          <li>Action buttons use brief click-lock behavior to prevent double taps.</li>
-          <li>Long-press any button for help text.</li>
-          <li><strong>Fullscreen kiosk mode</strong> &mdash; a banner at the bottom says "Tap anywhere to go fullscreen"
-            on load. One tap hides the browser tabs, address bar and all chrome. If you exit accidentally, the banner
-            reappears and the next tap re-enters fullscreen. Keeps the board full-screen on any device.</li>
-          <li>The board polls every <strong>2 seconds</strong> &mdash; RUSH alerts and FOH note changes arrive in under
-            2 seconds. POS receives ready and station-note popups within about 1 second, with item summaries and a
-            2-minute closeable banner.</li>
-        </ul>
-      </section>
+  <h2 id="cancel">How to cancel a ticket before work starts</h2>
+  <p>The <strong>Cancel before prep</strong> button (a cross in a circle) only shows while no line on the order has been started at any station.</p>
+  <ol class="steps">
+    <li>Click it. <strong>Cancel Order Before Prep</strong> opens.</li>
+    <li>Click a reason: <strong>Customer cancelled</strong>, <strong>Wrong order sent</strong>, <strong>Out of ingredient</strong>, <strong>Quality issue</strong>, <strong>Test / training order</strong> or <strong>Other</strong>. You can add more in <strong>Additional details or custom reason&hellip;</strong>.</li>
+    <li>Click <strong>Confirm Cancel</strong> (or <strong>Keep</strong>). A reason shorter than 8 characters gives <em>"Choose a reason before confirming"</em>.</li>
+    <li>You see <em>"Order cancelled &mdash; FOH notified"</em>.</li>
+  </ol>
+  <p>An order that already has any payment recorded cannot be cancelled here; a manager must void it at the till.</p>
 
-      <section>
-        <h2>Order Lifecycle Log (ticket footer)</h2>
-        <p>Each BDS ticket card has a <strong>Log</strong> link in the footer. Tap it to open
-          <code>/admin/order-lifecycle.php</code> in a new tab — shows every event on the order: placement, KDS/BDS
-          events, stock deductions, payment, and any void with reason. Use this when a guest disputes a charge or a
-          drink needs investigating.</p>
-        <div class="callout note">Cancel and Void actions inside the lifecycle page require admin or manager role.</div>
-      </section>
+  <h2 id="86">How to 86 an item on a ticket</h2>
+  <ol class="steps">
+    <li>Click <strong>86 this item</strong> on the line. The window <strong>86 Item</strong> says <em>"86 (item name)? This removes it from the order and sends an urgent alert to FOH."</em></li>
+    <li>Click <strong>86 this item</strong> to confirm (or <strong>Keep</strong>). You see <em>"Item 86'd &mdash; FOH notified"</em>.</li>
+  </ol>
+  <p>The line is cancelled and the order total comes down. If it had not been started the stock is put back; if it had, it is recorded as wastage. If the order was already paid a pending refund is raised for the cashier. The cashier who opened the order is told to inform the guest and offer an alternative.</p>
+  <div class="warn"><p>This does not switch the drink off for future orders. Ask the till to 86 the menu item (see the <a href="01-pos-till.html#86">POS guide</a>).</p></div>
 
-      <section>
-        <h2>End of shift</h2>
-        <p>Tap <strong>Daily Report</strong> to see the bar's served tickets, total drink count, top sellers and average
-          prep time. Use this to settle stock variance against <strong>Stock Ingredients</strong>.</p>
-      </section>
+  <h2 id="chat">How to talk to the front of house</h2>
+  <ol class="steps">
+    <li>Click the speech-bubble icon on a ticket to open its notes. A number shows how many there are, and the icon turns red when a note is unread.</li>
+    <li>Reply with a quick reply (<strong>On it!</strong>, <strong>5 minutes</strong>, <strong>10 minutes</strong>, <strong>Ready soon</strong>, <strong>Out of stock</strong>, <strong>Need clarification</strong>) or type in <strong>Custom reply&hellip;</strong> and click the send arrow. You see <em>"Reply sent to FOH"</em>.</li>
+    <li>To start a note, type in <strong>Send a note to FOH about this ticket&hellip;</strong> (up to 240 characters) and send it. You see <em>"Sent to FOH"</em>.</li>
+    <li>Click the small cross on a note to dismiss it. <strong>FOH chat</strong> keeps the last 6 hours of messages.</li>
+  </ol>
+  <p>An urgent note covers the middle of the screen. Click <strong>Got it</strong> to dismiss it or <strong>Open chat</strong> to reply.</p>
 
-    </div>
-  </main>
+  <h2 id="served">How to look at served tickets</h2>
+  <ol class="steps">
+    <li>Click <strong>Served</strong>. The <strong>Served Menu</strong> opens.</li>
+    <li>Choose <strong>Current Shift</strong>, <strong>Yesterday</strong> or <strong>After Hours</strong>.</li>
+    <li>You see <strong>Orders served</strong>, <strong>Items served</strong>, <strong>Revenue</strong>, <strong>Avg prep</strong> and the tickets.</li>
+  </ol>
 
-  <footer class="guide-footer">
-    <div class="deck">
-      <div class="crest">— R H —</div>
-      <p><a href="02-kds-kitchen.html">← KDS</a> &middot; <a href="index.html">All guides</a> &middot; <a
-          href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot; <a href="owner-handover.php">Owner
-          handover</a> &middot; <a href="04-cds-coffee.html">CDS Coffee →</a></p>
-    </div>
-  </footer>
+  <h2 id="hours">Bar hours, pause and the daily report</h2>
+  <ul>
+    <li><strong>Hours:</strong> set at Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Station Hours</strong> (permission <strong>Ingredients &amp; Recipes</strong>). If never saved, the bar uses 11:00 to 03:00 (closing the next morning). Hours decide the business day for the board, <strong>Served shift</strong>, reports and shift closes, and the "station closed" warning at the till. A ticket sent while the bar is closed is still accepted, once the cashier clicks <strong>Fire Anyway</strong>. Full steps are in the <a href="02-kds-kitchen.html#hours">Kitchen guide</a>.</li>
+    <li><strong>Online Flow:</strong> <strong>Pause</strong> / <strong>Go Live</strong> and a wait time from 5 to 180 minutes (<strong>Save</strong>). It is saved and shown on this panel only. The till does not check it.</li>
+    <li><strong>Daily report:</strong> click <strong>Daily Report</strong> (or Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Station Reports</strong>). Bar staff see the Bar only. Use <strong>CSV</strong>, <strong>Print</strong> or <strong>Email</strong>. Details are in the <a href="02-kds-kitchen.html#report">Kitchen guide</a>.</li>
+  </ul>
 
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>You can only change lines that belong to the bar. Other stations' lines are shown but cannot be tapped.</li>
+    <li>Stock comes off when a line is marked Ready, Served or bumped, or when the till hands the drink over. If an ingredient is short, the action is refused.</li>
+    <li>A ticket cannot be cancelled once any line has started or any payment is recorded.</li>
+    <li>An item cannot be 86'd on an order that is already refunded, voided or cancelled, or once the line is served.</li>
+    <li>A cancel needs a reason of at least 8 characters.</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>"Stock check stopped this action: ... short by ..."</em></td><td>Not enough of an ingredient.</td><td>Ask the manager to receive stock (<a href="08-stock-orders.html">Stock guide</a>), fix the recipe, or 86 the item.</td></tr>
+      <tr><td><em>"Can only collect from ready state (current: preparing)"</em></td><td>Collect used before Ready.</td><td>Mark the line Ready first.</td></tr>
+      <tr><td><em>"Already served"</em> / <em>"Cannot serve a voided item"</em></td><td>The line is already finished.</td><td>Nothing to do.</td></tr>
+      <tr><td><em>"This order was voided - refresh the board."</em> (or another status)</td><td>The order changed at the till.</td><td>Wait for the board to refresh.</td></tr>
+      <tr><td><em>"Item does not belong to your station"</em></td><td>The line is for another station.</td><td>Leave it to that station.</td></tr>
+      <tr><td><em>"Cannot cancel: preparation has already started"</em></td><td>A line was started.</td><td>Ask a manager to void the order.</td></tr>
+      <tr><td><em>"Choose a reason before confirming"</em></td><td>Reason too short.</td><td>Pick a reason or add detail.</td></tr>
+      <tr><td><em>"Network error while updating the ticket. Please try again."</em></td><td>No connection.</td><td>Check the internet and repeat.</td></tr>
+      <tr><td><em>"Forbidden"</em></td><td>No <strong>Bar Display (BDS)</strong> permission.</td><td>Ask a manager to add it in Staff &amp; Access.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="02-kds-kitchen.html">Kitchen display (KDS)</a> &mdash; full steps for hours and reports</li>
+    <li><a href="04-cds-coffee.html">Coffee bar display (CDS)</a></li>
+    <li><a href="01-pos-till.html">POS till, menu and tables</a></li>
+    <li><a href="08-stock-orders.html">Stock, recipes and orders</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

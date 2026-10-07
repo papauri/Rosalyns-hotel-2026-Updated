@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Staff &amp; Access — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
+
+  <h1>Staff &amp; Access</h1>
+  <p>How to add staff, invite them to set their own password, decide exactly what each person can open, and handle sign-in problems.</p>
+
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Administrator, Manager</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong> (<code>/admin/user-management.php</code>)</dd>
+      <dt>Permissions needed</dt><dd><strong>Create Users</strong> to add people, <strong>Edit Users</strong> to change them and resend invitations, <strong>Assign Permissions</strong> to change what they can open, <strong>Delete Users</strong> to remove them. An Administrator has all of these.</dd>
+    </dl>
+  </div>
+
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#roles">Roles</a></li>
+      <li><a href="#add">How to add a new staff member and invite them</a></li>
+      <li><a href="#perms-first">How to set permissions before the invitation goes out</a></li>
+      <li><a href="#accept">What the new person does with the invitation</a></li>
+      <li><a href="#perms">How to change what someone can open</a></li>
+      <li><a href="#edit">How to edit, deactivate or change someone's role</a></li>
+      <li><a href="#resend">How to resend an invitation</a></li>
+      <li><a href="#delete">How to delete a staff member</a></li>
+      <li><a href="#passwords">Passwords and signing in</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+    </ol>
+  </div>
+
+  <h2 id="screen">What is on the screen</h2>
+  <ul>
+    <li><strong>Add New User</strong> button — opens the form for a new staff member.</li>
+    <li>Role filter buttons (<strong>All</strong>, then one per role) — show only the people with that role.</li>
+    <li>The staff table — name, username, email, role, status and last activity. Each row has buttons:
+      <ul>
+        <li><strong>Edit</strong> — name, email, role, active/inactive, new password.</li>
+        <li><strong>Permissions</strong> — tick exactly which pages and actions this person may use. Not shown for Administrators (they always have everything).</li>
+        <li>Envelope button — resend the invitation.</li>
+        <li>Bin button — delete the person.</li>
+      </ul>
+    </li>
+  </ul>
+  <p>You only see the buttons you have permission for, and only for people below your own level (see <a href="#rules">Rules</a>).</p>
+
+  <h2 id="roles">Roles</h2>
+  <p>A role is a starting set of permissions. Pick the closest role, then adjust with <strong>Permissions</strong> if needed.</p>
+  <table>
+    <thead><tr><th>Role</th><th>Meant for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Administrator</strong></td><td>Full access to all features and settings. Permissions cannot be narrowed.</td></tr>
+      <tr><td><strong>Manager</strong></td><td>Operations, bookings and staff activities.</td></tr>
+      <tr><td><strong>Receptionist</strong></td><td>Front desk: bookings, check-ins and check-outs.</td></tr>
+      <tr><td><strong>Accountant</strong></td><td>Payments, invoices and financial records.</td></tr>
+      <tr><td><strong>Housekeeping</strong></td><td>Room cleaning and maintenance.</td></tr>
+      <tr><td><strong>Viewer</strong></td><td>Read-only access to bookings and reports.</td></tr>
+      <tr><td><strong>Restaurant Staff</strong></td><td>POS till: place orders, take payments, print or email receipts.</td></tr>
+      <tr><td><strong>Chef / Kitchen</strong></td><td>Kitchen screen: see tickets, mark items ready or served.</td></tr>
+      <tr><td><strong>Bar Staff</strong></td><td>Bar screen: drink tickets.</td></tr>
+      <tr><td><strong>Coffee Bar Staff</strong></td><td>Coffee bar screen: coffee and tea tickets.</td></tr>
+      <tr><td><strong>Room Service</strong></td><td>Room-service orders, charge to the guest's bill, confirm delivery.</td></tr>
+      <tr><td><strong>Gym Staff</strong></td><td>Gym front desk: membership enquiries. Cannot change package prices.</td></tr>
+      <tr><td><strong>Conference Staff</strong></td><td>Conference bookings: confirm, cancel, complete. Cannot edit rooms or invoicing.</td></tr>
+    </tbody>
+  </table>
+  <p>Only roles that match the parts of the system switched on for this hotel appear in the list.</p>
+
+  <h2 id="add">How to add a new staff member and invite them</h2>
+  <ol class="steps">
+    <li>Click <strong>Add New User</strong>.</li>
+    <li><strong>Full Name</strong> — e.g. <em>Jane Banda</em>. This appears in the invitation and on records they create.</li>
+    <li><strong>Username</strong> — what they type to sign in, e.g. <em>jane.b</em>. Letters, numbers, dots, dashes and underscores only. It cannot be changed later.</li>
+    <li><strong>Email</strong> — their own working email address. The invitation is sent here and password resets go here.</li>
+    <li><strong>Role</strong> — choose the closest role (see the table above).</li>
+    <li><strong>Password</strong> — leave this <strong>blank</strong>. The person will choose their own from the invitation. (Only type one if you must give it to them in person; it must be at least 8 characters.)</li>
+    <li>Leave <strong>Send invitation email</strong> ticked.</li>
+    <li>If the role's normal permissions are fine, leave <strong>Set their permissions before the invitation goes out</strong> unticked and click <strong>Create User</strong>. You will see <em>"User '…' created successfully. Invitation sent to … (link valid 72 h)."</em></li>
+    <li>If you want to choose their permissions first, tick it and follow the next section.</li>
+  </ol>
+  <div class="note"><p>No password is ever emailed. The invitation contains their username, role and a one-time <strong>Accept invitation &amp; set your password</strong> button.</p></div>
+
+  <h2 id="perms-first">How to set permissions before the invitation goes out</h2>
+  <p>Use this when the person needs more or less than their role normally gets, so their very first sign-in already has the right access.</p>
+  <ol class="steps">
+    <li>In <strong>Add New User</strong>, fill in the form as above and tick <strong>Set their permissions before the invitation goes out</strong>.</li>
+    <li>Click <strong>Create User</strong>. You will see <em>"… Choose their permissions, then press "Save &amp; send invitation"."</em> and the permissions window opens by itself for that person.</li>
+    <li>Tick or untick permissions (see <a href="#perms">How to change what someone can open</a>).</li>
+    <li>Click <strong>Save &amp; send invitation</strong>. The permissions are saved first, then the invitation is sent. You will see <em>"Permissions updated successfully. Invitation sent to …"</em></li>
+  </ol>
+  <div class="warn"><p>If you close the window without saving, the account exists but <strong>no invitation has been sent</strong> and nobody can sign in to it. Open <strong>Permissions</strong> later, save, then use the envelope button to send the invitation.</p></div>
+
+  <h2 id="accept">What the new person does with the invitation</h2>
+  <ol class="steps">
+    <li>Open the email titled <em>"You're invited to <span class="g-site-name">Rosalyns Beach Hotel</span> — accept your staff account"</em>.</li>
+    <li>Click <strong>Accept invitation &amp; set your password</strong>. The page <strong>Accept your invitation</strong> opens on the hotel's own website.</li>
+    <li>Type a password of at least 8 characters twice and save.</li>
+    <li>Go to the sign-in page and sign in with the <strong>username</strong> from the email and the new password.</li>
+  </ol>
+  <ul>
+    <li>The link works <strong>once</strong> and expires after <strong>72 hours</strong> (the exact time is printed in the email).</li>
+    <li>The link opens on the same website address the administrator was using when they sent it.</li>
+    <li>Sending a new invitation cancels any earlier link that was not used.</li>
+  </ul>
+
+  <h2 id="perms">How to change what someone can open</h2>
+  <ol class="steps">
+    <li>Click <strong>Permissions</strong> on the person's row. The window <strong>Edit Permissions</strong> opens with their current ticks.</li>
+    <li>Permissions are grouped by area (Core, Reservations, Guest Services, Property, Content, Restaurant &amp; Stock, Stations, Finance, Settings, System, Administration). Tick what they may do; untick what they may not.</li>
+    <li>Shortcuts: <strong>Select All</strong>, <strong>Deselect All</strong>, <strong>Role Defaults</strong> (back to the normal set for their role).</li>
+    <li>Click <strong>Save Permissions</strong>. You will see <em>"Permissions updated successfully."</em></li>
+  </ol>
+  <p>Their menu changes on their next page load: items they cannot open disappear, and opening such a page directly sends them back to a page they are allowed to see.</p>
+  <h3>Common set-ups</h3>
+  <table>
+    <thead><tr><th>You want them to…</th><th>Tick (as well as <strong>Dashboard</strong>)</th></tr></thead>
+    <tbody>
+      <tr><td>Only edit email and PDF templates</td><td><strong>Edit message templates</strong>. They get <strong>Settings &rarr; Email Templates</strong> and nothing else in Settings.</td></tr>
+      <tr><td>Check guests out even when they still owe money</td><td><strong>Check-out With Balance</strong> (under Guest Services). They must confirm, and it is recorded on the booking's timeline.</td></tr>
+      <tr><td>Change hotel details, email server and booking rules</td><td><strong>Hotel Settings</strong>. Add <strong>Change VAT &amp; refund settings</strong> if they may also change VAT, refund rules and bank/invoice details.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="edit">How to edit, deactivate or change someone's role</h2>
+  <ol class="steps">
+    <li>Click <strong>Edit</strong> on their row.</li>
+    <li>Change <strong>Full Name</strong>, <strong>Email</strong> or <strong>Role</strong> as needed. <strong>Username</strong> is read-only.</li>
+    <li>To stop someone signing in without deleting their history, untick <strong>Active Account</strong>.</li>
+    <li>To set a password for them directly, type it in <strong>New Password (leave blank to keep current)</strong> (at least 8 characters). Normally use the invitation or "Forgot password" instead.</li>
+    <li>Click <strong>Save Changes</strong>.</li>
+  </ol>
+  <div class="warn"><p>Changing someone's <strong>role</strong> resets their permissions to the new role's defaults. You will see <em>"Permissions reset to role defaults."</em> Re-apply any custom ticks afterwards.</p></div>
+
+  <h2 id="resend">How to resend an invitation</h2>
+  <p>Use this when the first email was lost, the 72 hours passed, or you created the account with "set permissions first" and closed the window.</p>
+  <ol class="steps">
+    <li>Click the envelope button on their row and confirm.</li>
+    <li>You will see <em>"Invitation sent to … (link valid 72 h)."</em> Any earlier unused link stops working.</li>
+  </ol>
+  <p>Resending does not change their current password. It also works as a "set a new password" link for someone who has forgotten theirs.</p>
+
+  <h2 id="delete">How to delete a staff member</h2>
+  <ol class="steps">
+    <li>Click the bin button on their row.</li>
+    <li>In the <strong>Delete User</strong> window, click <strong>Delete User</strong>. You will see <em>"User deleted successfully."</em> Their permissions are removed with them.</li>
+  </ol>
+  <p>Prefer <strong>deactivating</strong> (untick <strong>Active Account</strong>) for people who have left: their name stays on the bookings and payments they handled.</p>
+
+  <h2 id="passwords">Passwords and signing in</h2>
+  <h3>Forgot password (staff do this themselves)</h3>
+  <ol class="steps">
+    <li>On the sign-in page click <strong>Forgot Password?</strong></li>
+    <li>Enter the email address on their account and send.</li>
+    <li>Open the email and click the link within <strong>1 hour</strong>, then choose a new password (at least 8 characters).</li>
+  </ol>
+  <h3>Change my password (while signed in)</h3>
+  <ol class="steps">
+    <li>Click the key button in the top bar.</li>
+    <li>Enter the current password and the new one twice (at least 8 characters, different from the current one).</li>
+    <li>A 6-digit code is emailed to you. Enter it within <strong>10 minutes</strong> to confirm. You will see <em>"Your password has been changed. Use it from your next sign-in."</em></li>
+  </ol>
+  <h3>Automatic sign-out</h3>
+  <p>After <strong>8 hours</strong> with no activity you are signed out and must sign in again.</p>
+
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>You can only manage people whose role is <strong>below</strong> yours (a Manager cannot edit another Manager or an Administrator). Administrators can manage everyone.</li>
+    <li>Someone who is not an Administrator cannot give permissions they do not have themselves.</li>
+    <li>Administrator permissions cannot be changed — an Administrator always has everything.</li>
+    <li>The <strong>last active Administrator</strong> cannot be deactivated, demoted or deleted.</li>
+    <li>You cannot delete your own account.</li>
+    <li>Usernames and email addresses must be unique.</li>
+    <li>After <strong>5 wrong passwords</strong> an account is locked for <strong>15 minutes</strong>. Too many failures from one location also blocks sign-in from there for 15 minutes.</li>
+    <li>Deactivated accounts cannot sign in or reset their password.</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>Set a password, or tick "Send invitation" so they choose their own.</em></td><td>Password blank and invitation unticked.</td><td>Tick <strong>Send invitation email</strong>.</td></tr>
+      <tr><td><em>Username or email already exists.</em></td><td>Someone already has that username or email.</td><td>Use another username; if the email belongs to an old account, edit or delete that account first.</td></tr>
+      <tr><td><em>… (The invitation email could not be sent - use "Resend invitation".)</em></td><td>The email could not be delivered (wrong address, or the mail server refused it).</td><td>Check the address with <strong>Edit</strong>, then use the envelope button.</td></tr>
+      <tr><td><em>Permissions saved, but the invitation could not be sent: …</em></td><td>Same as above, after "Save &amp; send invitation".</td><td>Permissions are kept. Fix the email address, then use the envelope button.</td></tr>
+      <tr><td>New person says the link shows <em>"This reset link is invalid or has expired."</em></td><td>Link already used, older than 72 hours, or replaced by a newer invitation.</td><td>Send a new invitation with the envelope button.</td></tr>
+      <tr><td><em>Account temporarily locked due to too many failed attempts.</em></td><td>5 wrong passwords.</td><td>Wait the minutes shown, or use <strong>Forgot Password?</strong></td></tr>
+      <tr><td><em>This account has been deactivated. Contact your administrator.</em></td><td><strong>Active Account</strong> is unticked.</td><td>An administrator ticks it again in <strong>Edit</strong>.</td></tr>
+      <tr><td><em>Cannot change role or deactivate: this is the last active admin.</em></td><td>The system must always keep one active Administrator.</td><td>Make another person an Administrator first.</td></tr>
+      <tr><td>A menu item they need is missing</td><td>The permission is not ticked, or that part of the system is switched off in <strong>Modules</strong>.</td><td>Tick it in <strong>Permissions</strong>; ask an Administrator to check <strong>Modules</strong>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="99-admin-dashboard-full-guide.html">Admin reference</a> — menus, search and every settings page</li>
+    <li><a href="12-email-templates.php">Email template tags</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
+</body>
+</html>

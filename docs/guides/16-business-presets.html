@@ -1,184 +1,234 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Business Presets Guide — Rosalyn's Hotel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-    rel="stylesheet">
+  <title>Modules and business presets — Rosalyns Beach Hotel</title>
   <link rel="stylesheet" href="assets/guide-theme.css">
   <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
   <nav class="top">
-    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-    <div class="nav-links">
-      <a href="index.html">All Guides</a>
-      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-      <a href="owner-handover.php">Owner</a>
-      <a href="17-gym-management.html">Next →</a>
-    </div>
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
   </nav>
 
-  <header class="hero">
-    <div class="deck">
-      <div class="eyebrow">Guide 16 &middot; Owner / Admin</div>
-      <h1>Business Presets &amp; Module Settings</h1>
-      <p class="lead">Shape the whole system around your actual business — hotel, bar, gym, shop or supermarket — with
-        one click.</p>
-      <div class="meta">
-        <span>URL <strong>/admin/module-settings.php</strong></span>
-        <span>Role <strong>admin only (module_settings)</strong></span>
-        <span>Read time <strong>8 min</strong></span>
-      </div>
-    </div>
-  </header>
+  <h1>Modules and business presets</h1>
+  <p>This screen switches whole areas of the system on or off for <span class="g-site-name">Rosalyns Beach Hotel</span>. A preset sets many switches at once for a type of business. Nothing is ever deleted: switching an area off only hides it, and switching it on again brings it back with all its data.</p>
 
-  <main class="content">
-    <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Owner or administrator only. This is a set-up screen, not a daily one.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Modules</strong> (<code>/admin/module-settings.php</code>). The page title is <strong>Module Settings</strong>.</dd>
+      <dt>Permission needed</dt><dd><strong>Module Settings</strong></dd>
+    </dl>
+  </div>
 
-      <section>
-        <h2>What a preset is</h2>
-        <p>A <strong>business preset</strong> is a one-click profile that switches the right feature modules on and off
-          for your type of business. Instead of toggling ten modules by hand, you pick what you are — and the admin
-          menus, dashboard, finance pages, guest website and even the report exports all reshape themselves to match.
-        </p>
-        <table>
-          <thead>
-            <tr>
-              <th>Preset</th>
-              <th>What it turns on</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>Full Hotel</strong></td>
-              <td>Everything — rooms, housekeeping, POS + all station displays, stock, conference, gym, website. The
-                complete system.</td>
-            </tr>
-            <tr>
-              <td><strong>Hotel (No Restaurant)</strong></td>
-              <td>Rooms, housekeeping, conference and gym — no POS or stock.</td>
-            </tr>
-            <tr>
-              <td><strong>Bar / Restaurant</strong></td>
-              <td>POS with Kitchen and Bar displays, stock, tables and recipes. No rooms, no website CMS.</td>
-            </tr>
-            <tr>
-              <td><strong>Conference Venue</strong></td>
-              <td>Bookings, conference rooms and the website. No POS or stock.</td>
-            </tr>
-            <tr>
-              <td><strong>Gym / Fitness</strong></td>
-              <td>Gym suite (packages, members, check-in, reports), a POS till for the front desk, events and the
-                website. No stock, no rooms.</td>
-            </tr>
-            <tr>
-              <td><strong>Retail / Shop</strong></td>
-              <td>POS till + stock + finance only. Products instead of menus; no food-service pages.</td>
-            </tr>
-            <tr>
-              <td><strong>Supermarket</strong></td>
-              <td>Like Retail, plus the website. Starter categories (Groceries, Household…) are seeded so you can start
-                scanning products immediately.</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="callout note">
-          <strong>Finance is always on.</strong> Every business reconciles takings, issues receipts and reads reports —
-          the Finance module can never be disabled.
-        </div>
-      </section>
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#presets-list">The presets</a></li>
+      <li><a href="#apply-preset">How to apply a preset</a></li>
+      <li><a href="#toggle">How to switch one module on or off</a></li>
+      <li><a href="#stations">How to switch a station on or off</a></li>
+      <li><a href="#pages">How to switch the Restaurant or Events page on or off</a></li>
+      <li><a href="#off">What disappears when something is off</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
 
-      <section>
-        <h2>Applying a preset</h2>
-        <ol class="steps">
-          <li>Open <strong>Configuration → Module Settings</strong>.</li>
-          <li>Click the preset that matches your business. The currently active preset carries a green
-            <strong>Active</strong> badge.</li>
-          <li>An <strong>impact dialog</strong> opens first — nothing changes until you confirm. It shows exactly what
-            turns ON, what turns OFF, which <strong>menus &amp; pages appear or disappear</strong>, and which
-            <strong>staff accounts would lose access</strong> to areas being switched off.</li>
-          <li>Confirm. Modules apply in one step, guest-facing pages follow, starter product categories are seeded for
-            shop-style presets, and the admin view refreshes itself so the new menus show immediately.</li>
-        </ol>
-        <div class="callout tip">
-          You can also toggle any <strong>single module</strong> on or off on the same page — presets are just
-          shortcuts. Station sub-modules (Kitchen, Bar, Coffee, Room Service displays) live inside the POS card and can
-          be switched individually.
-        </div>
-      </section>
+  <h2 id="screen">What is on the screen</h2>
+  <p>From top to bottom:</p>
+  <ul>
+    <li>A short note: <em>"Disabled modules are hidden from the sidebar and dashboard — no data is deleted. Finance &amp; Accounting is always on and cannot be disabled."</em></li>
+    <li><strong>Quick Setup — Business Presets</strong>: one button per business type. The button that matches the current settings shows a green <strong>Active</strong> badge. If your settings do not match any preset exactly, no button has the badge.</li>
+    <li>A yellow note: <em>"Changes take effect immediately. The navigation sidebar updates on your next page load."</em></li>
+    <li><strong>Individual Modules</strong>: one card per module, each with an on/off switch and a status line (<strong>Enabled</strong> or <strong>Disabled</strong>).</li>
+    <li><strong>Guest Website Pages</strong>: two cards, <strong>Events Page</strong> and <strong>Restaurant Page</strong>.</li>
+  </ul>
 
-      <section>
-        <h2>What changes when a module is off</h2>
-        <ul class="checklist">
-          <li><strong>Admin menus</strong> — items and whole menu groups for that module disappear; typing the page URL
-            directly is blocked too.</li>
-          <li><strong>Dashboard</strong> — cards, widgets and quick links for that module vanish; a POS-first business
-            gets an orders/takings overview instead of check-ins.</li>
-          <li><strong>Finance pages</strong> — payments, receipts, invoices and other lists open showing records from
-            your active modules; wording adapts (e.g. "F&amp;B" becomes "POS / Till Sales" when there is no
-            restaurant).</li>
-          <li><strong>Guest website</strong> — navigation links, footer links, policies and the pages themselves follow
-            the preset. A gym preset shows no Rooms or Restaurant pages; the homepage always stays.</li>
-          <li><strong>Reports &amp; End of Day</strong> — tabs, KPI panels and the PDF / email / WhatsApp exports all
-            include only what your business runs.</li>
-          <li><strong>User roles</strong> — creating a staff account only offers roles relevant to your preset (a
-            supermarket is not offered "Chef").</li>
-        </ul>
-        <div class="callout warn">
-          <strong>No data is ever deleted.</strong> Switching presets hides features, not history. Finance lists show a
-          "Showing records for your active modules only" notice with a <strong>Show all history</strong> link whenever
-          older records from disabled modules exist — one click brings everything back into view.
-        </div>
-      </section>
+  <h3>The individual modules</h3>
+  <table>
+    <thead><tr><th>Switch</th><th>What it covers (as written on the card)</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Bookings &amp; Reservations</strong></td><td>Room bookings, calendar, blocked dates, tentative holds, check-in and check-out flows. Card warning: <em>"Disabling hides all booking pages and the Bookings nav section."</em></td></tr>
+      <tr><td><strong>Housekeeping</strong></td><td>Room cleaning schedules, task assignment, and housekeeping reconciliation.</td></tr>
+      <tr><td><strong>POS &amp; Stations</strong></td><td>Point-of-sale till, deals, offline log and station displays. This card has a <strong>Configure Stations</strong> button that opens the four station switches.</td></tr>
+      <tr><td><strong>Stock Management</strong></td><td>Ingredients, recipes, batch tracking, stock orders, barcode receiving, stock counts and wastage.</td></tr>
+      <tr><td><strong>Conference Rooms</strong></td><td>Conference room management, bookings and inquiry handling.</td></tr>
+      <tr><td><strong>Gym &amp; Fitness</strong></td><td>Gym packages, membership management and gym inquiry tracking.</td></tr>
+      <tr><td><strong>Finance &amp; Accounting</strong></td><td>Payments, invoices, receipts, credit notes, quotations, accounting dashboard, reports and end-of-day. Marked <strong>Core</strong> and <strong>Always On</strong>. The switch is greyed out.</td></tr>
+      <tr><td><strong>Website &amp; CMS</strong></td><td>Gallery, media portal, pages, events, reviews, contact inquiries, footer and section headers.</td></tr>
+    </tbody>
+  </table>
 
-      <section>
-        <h2>Products vs menus (shop-style presets)</h2>
-        <p>The POS sells from one catalog, but it is scoped by business type. A restaurant manages <strong>Food &amp;
-            Drinks menus</strong> with recipes and kitchen routing; a shop, gym or supermarket manages
-          <strong>Products</strong> — simple items with a price and a barcode. Selling a product deducts one unit of
-          stock automatically (product = stock item), and the same barcode is used to receive stock in and sell it out.
-          Switching presets swaps which catalog the till shows; neither is deleted.</p>
-      </section>
+  <h3>The station switches</h3>
+  <p>Click <strong>Configure Stations</strong> on the POS card to show them. They only work while <strong>POS &amp; Stations</strong> is on; when POS is off the station list is greyed out and cannot be clicked.</p>
+  <table>
+    <thead><tr><th>Switch</th><th>Description on screen</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Kitchen Display (KDS)</strong></td><td>Kitchen order tickets and prep display.</td></tr>
+      <tr><td><strong>Bar Display (BDS)</strong></td><td>Bar drink orders and display screen.</td></tr>
+      <tr><td><strong>Coffee Bar Display (CDS)</strong></td><td>Coffee bar orders and display screen.</td></tr>
+      <tr><td><strong>Room Service Station</strong></td><td>In-room dining orders and dashboard.</td></tr>
+    </tbody>
+  </table>
 
-      <section>
-        <h2>Adding employees</h2>
-        <ol class="steps">
-          <li>Open <strong>Configuration → User Management</strong> and click <strong>Add User</strong>.</li>
-          <li>Pick a role — the list only offers roles that make sense for your preset. Existing users keep whatever
-            role they already have.</li>
-          <li>Tick <strong>Send welcome email</strong> — the new employee receives their username, a temporary password
-            and the login link. A <strong>Resend welcome</strong> button on each user row issues a fresh temporary
-            password later if needed.</li>
-          <li>Station staff land on their own screen after login — a bartender opens straight onto the Bar Display, a
-            cashier onto the POS till.</li>
-        </ol>
-        <div class="callout tip">
-          <strong>Self-service password change:</strong> every employee can click the <strong>key icon</strong> in the
-          admin header, enter their current and new password, and confirm with a <strong>6-digit code emailed</strong>
-          to them (valid 10 minutes). No admin needed.
-        </div>
-      </section>
+  <h3>The guest website page switches</h3>
+  <table>
+    <thead><tr><th>Switch</th><th>Description on screen</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Events Page</strong></td><td>Guest events page, event bookings and the admin events inbox.</td></tr>
+      <tr><td><strong>Restaurant Page</strong></td><td>Guest restaurant page, dine-in tables, recipes and station reports.</td></tr>
+    </tbody>
+  </table>
 
-    </div>
-  </main>
+  <h2 id="presets-list">The presets</h2>
+  <p>Each preset sets every module switch, every station switch, and both guest page switches. &#10003; means on, &ndash; means off. Finance is on in every preset.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Preset</th><th>Short description on the button</th>
+        <th>Bookings</th><th>Housekeeping</th><th>POS</th><th>Stock</th><th>Conference</th><th>Gym</th><th>Website &amp; CMS</th>
+        <th>KDS</th><th>BDS</th><th>CDS</th><th>Room Service</th>
+        <th>Restaurant page</th><th>Events page</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Full Hotel</strong></td><td>All modules + all stations active</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td></tr>
+      <tr><td><strong>Hotel (No Restaurant)</strong></td><td>Rooms + conference + gym, no POS or stock</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td></tr>
+      <tr><td><strong>Bar / Restaurant</strong></td><td>POS + KDS + BDS + stock</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td></tr>
+      <tr><td><strong>Conference Venue</strong></td><td>Bookings + conference + website</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td></tr>
+      <tr><td><strong>Gym / Fitness</strong></td><td>Gym + POS till + website</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td></tr>
+      <tr><td><strong>Retail / Shop</strong></td><td>POS + stock + finance only</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td></tr>
+      <tr><td><strong>Supermarket</strong></td><td>POS + stock + finance + website</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><p><span class="g-site-name">Rosalyns Beach Hotel</span> is a full hotel, so <strong>Full Hotel</strong> is the preset that matches it. The other presets exist because the same system is used for other kinds of business.</p></div>
+  <p>Three presets also add starting categories to the POS (only categories that do not already exist are added; nothing existing is changed or removed). They are for till businesses, with the <strong>Bar</strong> station as the default:</p>
+  <ul>
+    <li><strong>Gym / Fitness</strong>: Supplements, Beverages, Merchandise, Day Passes.</li>
+    <li><strong>Retail / Shop</strong>: General Merchandise, Accessories.</li>
+    <li><strong>Supermarket</strong>: Groceries, Beverages, Household, Personal Care.</li>
+  </ul>
 
-  <footer class="guide-footer">
-    <div class="deck">
-      <div class="crest">— R H —</div>
-      <p><a href="index.html">← All guides</a> &middot; <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-        &middot; <a href="owner-handover.php">Owner handover</a> &middot; <a href="17-gym-management.html">Next: Gym
-          Management →</a></p>
-    </div>
-  </footer>
+  <h2 id="apply-preset">How to apply a preset</h2>
+  <ol class="steps">
+    <li>Open <strong>Settings</strong> &rarr; <strong>Modules</strong>.</li>
+    <li>Click the preset button you want. The button greys out for a moment while the system checks the effect.</li>
+    <li>A window opens titled <strong>Apply "&lt;preset name&gt;" preset?</strong>. Read it:
+      <ul>
+        <li>The first line says what the preset <em>"Turns ON"</em> and what it <em>"Turns OFF"</em>. If nothing changes it says <em>"This preset matches the current module state — nothing changes."</em></li>
+        <li><strong>Menus &amp; pages removed</strong> (orange) lists the menu areas that will disappear.</li>
+        <li><strong>Menus &amp; pages added</strong> (green) lists the menu areas that will appear.</li>
+        <li>If staff will lose access, you see <em>"N users will lose access to the following:"</em>, then each person by name and role with <em>"Will lose: ..."</em> and the names of the permissions. If nobody is affected you see <em>"No active users currently rely on the modules being turned off."</em></li>
+      </ul>
+    </li>
+    <li>Click <strong>Apply Preset</strong> to go ahead, or <strong>Cancel</strong> (or click outside the window) to change nothing.</li>
+    <li>You will see <em>"Preset applied: &lt;preset name&gt; — refreshing admin view..."</em>. The page reloads by itself after a second so the menu matches.</li>
+  </ol>
+  <div class="note"><p>The preview only lists active staff whose role is not <strong>admin</strong>. People with the admin role are never listed because their permissions are not removed.</p></div>
+  <div class="warn"><p>Applying a preset changes every switch at once, including the Restaurant and Events guest pages. Always read the list in the window before clicking <strong>Apply Preset</strong>. The preset is all-or-nothing: if saving fails part way, nothing is changed.</p></div>
 
+  <h2 id="toggle">How to switch one module on or off</h2>
+  <ol class="steps">
+    <li>Open <strong>Settings</strong> &rarr; <strong>Modules</strong>.</li>
+    <li>Click the switch on the module card.</li>
+    <li>Switching <strong>Bookings &amp; Reservations</strong> off asks first: a window titled <strong>Disable Module?</strong> says <em>"Disabling "Bookings &amp; Reservations" will hide its pages and navigation links. Disabling hides all booking pages and the Bookings nav section. You can re-enable it at any time."</em> Click <strong>Yes, Disable</strong> to continue or <strong>Keep Enabled</strong> to stop. Every other module switches off straight away with no question.</li>
+    <li>You will see <em>"Disabled: &lt;module&gt; — refreshing admin view..."</em> (or <em>"Enabled: ..."</em>). The page reloads after a second.</li>
+  </ol>
+  <p>Unlike a preset, a single switch does not show a list of affected staff. Use a preset if you want that preview.</p>
+
+  <h2 id="stations">How to switch a station on or off</h2>
+  <ol class="steps">
+    <li>On the <strong>POS &amp; Stations</strong> card, make sure the main switch is on.</li>
+    <li>Click <strong>Configure Stations</strong>. The four station rows appear.</li>
+    <li>Click the switch next to the station. The label changes between <strong>On</strong> and <strong>Off</strong>.</li>
+    <li>The page reloads after a second.</li>
+  </ol>
+  <p>A station screen needs two things to be on: <strong>POS &amp; Stations</strong> and its own station switch. Turning a station off removes its screen and its menu entry.</p>
+
+  <h2 id="pages">How to switch the Restaurant or Events page on or off</h2>
+  <ol class="steps">
+    <li>Scroll to <strong>Guest Website Pages</strong>.</li>
+    <li>Click the switch on <strong>Events Page</strong> or <strong>Restaurant Page</strong>.</li>
+    <li>The page reloads after a second.</li>
+  </ol>
+  <p>These two switches control the guest-facing page and the staff pages that go with it (see the next section). They are separate from the module switches. For example, a gym may use the POS for a snack till and still not want a restaurant page.</p>
+
+  <h2 id="off">What disappears when something is off</h2>
+  <p>Three things happen when a module is off:</p>
+  <ol>
+    <li><strong>Its menu items disappear</strong> from the admin menu. If every item in a menu group is gone, the whole group disappears.</li>
+    <li><strong>Its pages are blocked</strong>, even by typing the address. Staff who try to open one are sent back to their home page. The one exception: users with the <strong>admin</strong> role can still open a page by its direct address, but they will not see it in the menu.</li>
+    <li><strong>Its permissions stop applying.</strong> The staff permission is still stored (switch the module on again and it works again), but the person cannot use the page. In <strong>Staff &amp; Access</strong>, permissions for an off module are no longer offered for new grants, although anything a person already holds is still shown.</li>
+  </ol>
+
+  <h3>Which menu items belong to which switch</h3>
+  <table>
+    <thead><tr><th>Switch</th><th>Menu items that need it</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Bookings &amp; Reservations</strong></td><td>Front Desk: Bookings, Calendar, Room Maintenance. Settings: Rooms, Rate Plans. Advanced: Individual Rooms, Blocked Dates, Packages. Also the booking pages themselves (create, edit, details, check-in, tentative bookings, room dashboard) and the guest booking pages.</td></tr>
+      <tr><td><strong>Housekeeping</strong></td><td>Front Desk: Housekeeping.</td></tr>
+      <tr><td><strong>POS &amp; Stations</strong></td><td>Restaurant &amp; Bar: POS Till, Kitchen (KDS), Bar Display (BDS), Coffee Bar (CDS), Room Service, Menu (called Products when the restaurant page is off). Advanced: Deals &amp; Promos, Offline Log. Also needed for Station Reports, Station Hours and POS Accounting.</td></tr>
+      <tr><td><strong>Stock Management</strong></td><td>Restaurant &amp; Bar: Orders &amp; Tabs (called Orders when the restaurant page is off), Tables. The whole <strong>Stock</strong> group (Stock Overview, Ingredients, Recipes, Receive Stock, Buying, Stock Count, Wastage). Advanced: Batch Tracker, Suppliers, Purchase Orders, Stock Reports.</td></tr>
+      <tr><td><strong>Conference Rooms</strong></td><td>Front Desk: Conference.</td></tr>
+      <tr><td><strong>Gym &amp; Fitness</strong></td><td>The whole <strong>Gym</strong> group (Members, Check-In, Inquiries, Schedule). Advanced: Gym Packages, Gym Classes, Gym Reports.</td></tr>
+      <tr><td><strong>Finance &amp; Accounting</strong></td><td>Always on. Money group: Accounting, Payments, Invoices, End of Day, Reports. Advanced: Receipts, Credit Notes, Quotations, Add Payment, POS Accounting.</td></tr>
+      <tr><td><strong>Website &amp; CMS</strong></td><td>The whole <strong>Website</strong> group (Reviews, Contact Inquiries, Gallery, Pages). Front Desk: Event Bookings. Advanced: Events, Media Portal, Footer, Section Headers.</td></tr>
+      <tr><td><strong>Kitchen / Bar / Coffee / Room Service station switches</strong></td><td>Only the matching screen: Kitchen (KDS), Bar Display (BDS), Coffee Bar (CDS), Room Service. The POS switch must also be on.</td></tr>
+      <tr><td><strong>Restaurant Page</strong></td><td>Restaurant &amp; Bar: Tables. Stock: Recipes. Advanced: Station Reports, Station Hours. Menu and Orders change their names (Menu &harr; Products, Orders &amp; Tabs &harr; Orders) and the guest restaurant page is hidden.</td></tr>
+      <tr><td><strong>Events Page</strong></td><td>Front Desk: Event Bookings. Advanced: Events. The guest events page is hidden. (Both also need Website &amp; CMS to be on.)</td></tr>
+    </tbody>
+  </table>
+  <p>Three menu items depend on a combination, not a single switch:</p>
+  <ul>
+    <li><strong>Invoices</strong> and <strong>Quotations</strong> need Finance plus at least one of Bookings, Conference or Gym. They disappear for a till-only business.</li>
+    <li><strong>Credit Notes</strong> needs Finance plus either Bookings or Conference.</li>
+    <li><strong>POS Accounting</strong> needs both Finance and POS.</li>
+  </ul>
+  <p>These pages are never switched off by a module: the Dashboard, Hotel Settings, Email Templates, Staff &amp; Access, Backups, Modules, Visitor Analytics, Automated Emails, WhatsApp Settings, Facebook Settings, API Keys, System Logs, Cache and the Staff Guides links. Hotel Settings is deliberately kept available, because it is the only place email sending is set up.</p>
+  <p>The Hotel Settings page also adapts: with <strong>Bookings &amp; Reservations</strong> off, the page is called <strong>Business Settings</strong> and the booking-only cards are hidden (see <a href="19-hotel-settings.html">Hotel Settings</a>).</p>
+
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li><strong>Finance &amp; Accounting</strong> can never be switched off. If something tries, the system answers <em>"Finance &amp; Accounting cannot be disabled — it is required by all business types."</em></li>
+    <li>No data is deleted when a module is switched off. Bookings, stock, members and money records stay as they were.</li>
+    <li>A station only works when both POS and the station switch are on.</li>
+    <li>Starting categories added by a preset are only added when they do not already exist.</li>
+    <li>Every module and preset change is written to the system log, with the name of the person who made it.</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>"Security token invalid. Refresh the page."</em></td><td>The page has been open a long time.</td><td>Reload the page and try again.</td></tr>
+      <tr><td><em>"Finance &amp; Accounting cannot be disabled — it is required by all business types."</em></td><td>Finance is always on.</td><td>Nothing to do. The switch is greyed out for this reason.</td></tr>
+      <tr><td><em>"Database error — please try again."</em></td><td>The change could not be saved.</td><td>Try again. If it keeps happening, tell the administrator.</td></tr>
+      <tr><td><em>"Network error — please try again."</em> or <em>"Network error — preset was not applied. Please try again."</em></td><td>Your connection dropped.</td><td>Check the <strong>Online</strong> light in the top bar and try again. A preset that shows this message was not applied.</td></tr>
+      <tr><td><em>"Could not check preset impact."</em></td><td>The preview could not be loaded.</td><td>Try again. The preset is not applied until you click <strong>Apply Preset</strong>.</td></tr>
+      <tr><td><em>"Unknown preset."</em> or <em>"Invalid module key."</em></td><td>The page was out of date.</td><td>Reload the page.</td></tr>
+      <tr><td>A staff member says a menu item or page has vanished</td><td>The module it belongs to is off.</td><td>Check this screen. If the module is meant to be on, switch it on. Staff do not need new permissions.</td></tr>
+      <tr><td>A staff member is sent back to their home page when they open a page</td><td>The page belongs to a module that is off.</td><td>Same as above.</td></tr>
+      <tr><td>The menu did not change straight after a switch</td><td>The menu is built when the page loads.</td><td>Wait one second for the automatic reload, or reload the page.</td></tr>
+      <tr><td>A permission is missing from the list in Staff &amp; Access</td><td>Permissions for an off module are no longer offered for new grants.</td><td>Switch the module on, then give the permission.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="19-hotel-settings.html">Hotel Settings</a></li>
+    <li><a href="18-staff-access.html">Staff &amp; Access</a></li>
+    <li><a href="99-admin-dashboard-full-guide.html">Admin reference</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

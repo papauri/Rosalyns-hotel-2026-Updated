@@ -1,390 +1,294 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stock &amp; Orders Guide — Rosalyn's Hotel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-    rel="stylesheet">
+  <title>Stock, Recipes and Orders — Rosalyns Beach Hotel</title>
   <link rel="stylesheet" href="assets/guide-theme.css">
   <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
   <nav class="top">
-    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-    <div class="nav-links">
-      <a href="index.html">All Guides</a>
-      <a href="owner-handover.php">Owner</a>
-      <a href="07-reception-bookings.html">← Prev</a>
-      <a href="99-admin-dashboard-full-guide.html">Admin Bible →</a>
-    </div>
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
   </nav>
 
-  <header class="hero">
-    <div class="deck">
-      <div class="eyebrow">Guide 08 &middot; Stock manager</div>
-      <h1>Stock &amp; Stock Orders</h1>
-      <p class="lead">Every drink, ingredient, and consumable is tracked here. The KDS, BDS, CDS and Room Service
-        stations automatically deduct stock when they mark each item prepared.</p>
-      <div class="meta">
-        <span>URL <strong>/admin/stock-orders.php</strong></span>
-        <span>Role <strong>stock_manager · manager · admin</strong></span>
-        <span>Read time <strong>5 min</strong></span>
-      </div>
-    </div>
-  </header>
+  <h1>Stock, Recipes and Orders</h1>
+  <p>This guide covers keeping track of ingredients: receiving deliveries, recipes, buying, counting, wastage, batches and expiry, reports, and the Orders &amp; Tabs page that lists restaurant orders. It also explains how every sale takes stock off the shelf.</p>
 
-  <main class="content">
-    <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Store keepers, chefs, managers, accountants.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Stock</strong>: <strong>Stock Overview</strong>, <strong>Ingredients</strong>, <strong>Recipes</strong>, <strong>Receive Stock</strong>, <strong>Buying</strong>, <strong>Stock Count</strong>, <strong>Wastage</strong>. Admin menu &rarr; <strong>Advanced</strong>: <strong>Batch Tracker</strong>, <strong>Suppliers</strong>, <strong>Purchase Orders</strong>, <strong>Stock Reports</strong>. Admin menu &rarr; <strong>Restaurant &amp; Bar</strong>: <strong>Orders &amp; Tabs</strong>.</dd>
+      <dt>Permission needed</dt><dd>See the table "Who can do what".</dd>
+      <dt>Only shown when</dt><dd>The <strong>Stock &amp; Inventory</strong> module is switched on in Settings &rarr; Modules. Recipes and Tables also need the <strong>Restaurant Page</strong> module.</dd>
+    </dl>
+  </div>
 
-      <section>
-        <h2>Pages you'll use</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Page</th>
-              <th>Purpose</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>Stock Orders</strong> <code>stock-orders.php</code></td>
-              <td>All restaurant / bar / coffee / room-service orders, voids, reconciliation.</td>
-            </tr>
-            <tr>
-              <td><strong>Stock Ingredients</strong> <code>stock-ingredients.php</code></td>
-              <td>Master list of every item: name, unit, current count, cost, <strong>reorder point</strong>, <strong>par level</strong>, preferred supplier &amp; lead time.</td>
-            </tr>
-            <tr>
-              <td><strong>Suppliers</strong> <code>stock-suppliers.php</code></td>
-              <td>Supplier master — contact, lead time, payment terms, total purchased. Replaces typing supplier names free-hand.</td>
-            </tr>
-            <tr>
-              <td><strong>Reorder / Buying</strong> <code>stock-reorder.php</code></td>
-              <td>Everything at or below its reorder point, with a suggested order quantity, grouped by supplier. One click turns a group into a draft purchase order.</td>
-            </tr>
-            <tr>
-              <td><strong>Purchase Orders</strong> <code>purchase-orders.php</code></td>
-              <td>Raise, send and receive purchase orders. Receiving posts stock straight into the batch/FIFO ledger with full supplier traceability.</td>
-            </tr>
-            <tr>
-              <td><strong>Stock Receipts</strong></td>
-              <td>Goods-in (delivery from supplier) &mdash; restocks ingredients. Now lets you pick a supplier from the master list.</td>
-            </tr>
-            <tr>
-              <td><strong>Stock Variance</strong></td>
-              <td>Daily / weekly variance between <em>system count</em> and <em>physical count</em>.</td>
-            </tr>
-            <tr>
-              <td><strong>Barcode Receive</strong> <code>stock-barcode-receive.php</code></td>
-              <td>Scan delivery barcodes with phone camera — registers new products and fills stock receipts hands-free.</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+  <div class="toc">
+    <ol>
+      <li><a href="#perms">Who can do what</a></li>
+      <li><a href="#how">How a sale takes stock off the shelf</a></li>
+      <li><a href="#overview">What the Stock Overview shows</a></li>
+      <li><a href="#ingredients">How to add and change ingredients</a></li>
+      <li><a href="#stockin">How to receive stock by hand (Stock In)</a></li>
+      <li><a href="#scan">How to receive a delivery with Receive Stock</a></li>
+      <li><a href="#recipes">How to build a recipe</a></li>
+      <li><a href="#suppliers">How to add a supplier</a></li>
+      <li><a href="#buying">How to see what to buy (Buying)</a></li>
+      <li><a href="#po">How to raise and receive a purchase order</a></li>
+      <li><a href="#count">How to do a stock count</a></li>
+      <li><a href="#wastage">How to record wastage</a></li>
+      <li><a href="#batches">How to deal with expiring and recalled batches</a></li>
+      <li><a href="#reports">How to read Stock Reports</a></li>
+      <li><a href="#orders">How to use Orders &amp; Tabs</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
 
-      <section>
-        <h2>Procurement — suppliers, reordering &amp; purchase orders</h2>
-        <p>Buying stock now follows a proper retail flow so nothing runs out unnoticed and every delivery is traceable to a supplier.</p>
+  <h2 id="perms">Who can do what</h2>
+  <table>
+    <thead><tr><th>Page</th><th>Permission</th></tr></thead>
+    <tbody>
+      <tr><td>Stock Overview</td><td><strong>Stock Dashboard</strong></td></tr>
+      <tr><td>Ingredients, Recipes, Receive Stock, Buying, Suppliers, Purchase Orders, Tables</td><td><strong>Ingredients &amp; Recipes</strong></td></tr>
+      <tr><td>Batch Tracker</td><td><strong>Batch Tracker</strong></td></tr>
+      <tr><td>Stock Count</td><td><strong>Stock Count &amp; Variance</strong> (approving or rejecting a count needs the Admin or Manager role)</td></tr>
+      <tr><td>Wastage</td><td><strong>Wastage Log</strong></td></tr>
+      <tr><td>Stock Reports</td><td><strong>Stock Reports</strong></td></tr>
+      <tr><td>Orders &amp; Tabs</td><td><strong>Restaurant Orders (POS)</strong> (voiding a paid order and reconciling need the Admin or Manager role)</td></tr>
+    </tbody>
+  </table>
+  <p>On setups without a restaurant these pages are named <strong>Products</strong>, <strong>Orders</strong> and <strong>Stock Items</strong>. This guide uses the restaurant names.</p>
 
-        <h3>1. Set up your suppliers</h3>
-        <ol class="steps">
-          <li>Go to <strong>Stock → Suppliers</strong> and add each supplier: contact, phone/email, <strong>lead time</strong> (days from order to delivery) and payment terms.</li>
-          <li>Existing suppliers were created automatically from the names already on your past deliveries — check the list and tidy any duplicates.</li>
-        </ol>
+  <h2 id="how">How a sale takes stock off the shelf</h2>
+  <p>Stock only comes off for items that have a recipe (see <a href="#recipes">recipes</a>). An item with no recipe sells normally and shows <strong>Untracked</strong> on the till.</p>
+  <ul>
+    <li><strong>Food and drink on a tab or an order sent to a station:</strong> stock comes off when the Kitchen, Bar or Coffee Bar marks the line <strong>Ready</strong>, <strong>Served</strong>, or bumps the ticket. Firing the order does not take stock.</li>
+    <li><strong>Drinks paid for at the till, or on a tab that is settled:</strong> the till marks Bar and Coffee Bar drinks as handed over, and stock comes off then.</li>
+    <li><strong>Room service:</strong> stock comes off when the charge is posted to the guest's bill, at the moment the order is placed.</li>
+    <li><strong>How much comes off:</strong> the recipe quantity for one portion, times the number sold, divided by the yield %. For example 150 g of chicken at 75% yield takes off 200 g.</li>
+    <li><strong>Which batch:</strong> the oldest batch is used first. The ingredient's total and its average cost update.</li>
+    <li><strong>If there is not enough:</strong> the station action is refused with <em>"Stock check stopped this action: (ingredient) short by (amount) ..."</em></li>
+    <li><strong>Put back:</strong> cancelling before work starts, voiding an order, and 86 of an item that was not started all put the stock back. A refund does <em>not</em> put stock back.</li>
+    <li><strong>Other ways stock goes down:</strong> wastage, expired or recalled batches, approved stock count shortages, and manual adjustments by a manager.</li>
+  </ul>
 
-        <h3>2. Tell each item when to reorder</h3>
-        <ol class="steps">
-          <li>Open <strong>Stock → Ingredients</strong>, edit an item.</li>
-          <li>Set the <strong>reorder point</strong> (the level that triggers a top-up — usually enough to cover the supplier's lead time) and the <strong>par level</strong> (the level you want to order back up to).</li>
-          <li>Pick the item's <strong>preferred supplier</strong> so it groups correctly on the buying report.</li>
-        </ol>
-        <div class="callout note">If you leave reorder point at 0, the item falls back to its old <em>min quantity</em> for low-stock alerts — nothing breaks, you just don't get a purchase suggestion for it.</div>
+  <h2 id="overview">What the Stock Overview shows</h2>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Overview</strong>. It checks for expired batches each time you open it and removes them from stock.</p>
+  <ul>
+    <li>A banner: either <em>"All good! Inventory is healthy &mdash; no urgent alerts right now."</em>, or <strong>Heads up</strong> / <strong>Action needed</strong> with what needs attention.</li>
+    <li>Cards: <strong>Settled Today</strong>, <strong>Open Tabs</strong>, <strong>Inventory Value</strong>, <strong>Wastage</strong> (30-day total, with today's figure). Each card opens the related page.</li>
+    <li><strong>Needs Attention</strong>, in groups you can open: <strong>Out of Stock</strong>, <strong>Expiring Soon</strong> (within 3 days), <strong>Expired Batches Still Active</strong>, <strong>Running Low</strong> and <strong>Pending Reconciliation</strong> (room-service charges that were posted without stock being tracked).</li>
+    <li><strong>Recipe Coverage</strong> for the Food menu and Drinks menu: how many items have a recipe. More coverage means more accurate stock and cost figures.</li>
+    <li><strong>Top Items Sold Today</strong>, <strong>Most Wasted Ingredients (30 days)</strong>, and quick links to Ingredients, Recipes, Batches, Orders, Wastage and Reports.</li>
+  </ul>
+  <p>The buttons in <strong>Needs Attention</strong> (<strong>View</strong>, <strong>Review</strong>, <strong>Dispose</strong>, <strong>Process</strong>) open the matching page. The <strong>Order</strong> button on an out-of-stock or low item opens <strong>Orders &amp; Tabs</strong>, not a purchase order. To buy stock use <a href="#buying">Buying</a>.</p>
 
-        <h3>3. Reorder / Buying report</h3>
-        <ol class="steps">
-          <li>Open <strong>Stock → Reorder / Buying</strong> (also reachable from the "Running low" tile on the Stock Dashboard).</li>
-          <li>It lists everything at or below its reorder point, with a <strong>suggested quantity</strong> = par level − what's on hand − what's already on order, grouped by supplier.</li>
-          <li>Click <strong>Create draft PO</strong> on a supplier group to turn those lines into a purchase order in one step.</li>
-        </ol>
+  <h2 id="ingredients">How to add and change ingredients</h2>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Ingredients</strong>. Each ingredient keeps a running quantity and an average cost. Stock arrives in batches, each with its own expiry date.</p>
+  <h3>Add an ingredient</h3>
+  <ol class="steps">
+    <li>Click <strong>Add Ingredient</strong>.</li>
+    <li>Fill in <strong>Name</strong> and <strong>Unit</strong> (both required). Units are Grams (g), Kilograms (kg), Millilitres (ml), Litres (L), Pieces (pcs), Slices, Teaspoons (tsp), Tablespoons (tbsp). Optionally set <strong>Category</strong>.</li>
+    <li><strong>Min quantity (low-stock threshold)</strong>: when stock is at or below this, the ingredient shows Low.</li>
+    <li><strong>Default yield %</strong>: the usable part after trimming or cooking. 100 means no loss. It can be 0.1 to 100.</li>
+    <li>For buying: <strong>Reorder point</strong>, <strong>Par level (order up to)</strong>, <strong>Preferred supplier</strong> and <strong>Supplier lead time (days)</strong>. Notes are optional.</li>
+    <li>Click <strong>Save</strong>. You will see <em>"Ingredient &quot;Chicken breast&quot; added."</em></li>
+  </ol>
+  <h3>Other actions on each row</h3>
+  <ul>
+    <li><strong>Edit</strong> &mdash; change the details. <em>"Ingredient updated."</em></li>
+    <li><strong>Stock In</strong> &mdash; see the next section.</li>
+    <li><strong>Batches</strong> &mdash; the batches for that ingredient. Use <strong>Edit Batch</strong> to fix an expiry date, alert days or notes (<em>"Batch updated."</em>). Use <strong>Discard</strong> to write off a batch as expired, recalled or wasted. You are asked <em>"This will subtract the remaining quantity from your total stock and close the batch. Continue?"</em> and then see <em>"Wasted &mdash; batch closed and stock adjusted."</em> (or <em>"Expired ..."</em>, <em>"Recalled ..."</em>).</li>
+    <li><strong>Adjust</strong> &mdash; a manual correction, for Admin and Manager roles only. Choose <strong>Direction</strong> (<strong>Add stock (+)</strong> or <strong>Subtract stock (&minus;)</strong>), <strong>Quantity</strong> and a <strong>Reason</strong> of at least 8 characters, then <strong>Save Adjustment</strong>. <em>"Manual adjustment recorded."</em> For anything else use a stock count.</li>
+    <li><strong>Archive</strong> (<em>"Archive this ingredient?"</em>) hides an ingredient: <em>"Ingredient archived."</em> Choose <strong>Archived</strong> in the status filter to find it, then <strong>Restore</strong> (<em>"Ingredient restored."</em>) or <strong>Delete</strong> (<em>"Permanently delete? This cannot be undone."</em>). An ingredient used in any recipe cannot be deleted.</li>
+    <li><strong>Export to Excel</strong> downloads the list.</li>
+  </ul>
+  <p>Use the category and status filters (<strong>Low</strong>, <strong>Critical</strong>, <strong>Expiring soon</strong>, <strong>Archived</strong>) to narrow the list. The Status column shows <strong>OK</strong>, <strong>Low</strong>, <strong>Expiring</strong> (within 7 days), <strong>Expired</strong> or <strong>Critical</strong> (nothing left).</p>
 
-        <h3>4. Purchase orders</h3>
-        <ol class="steps">
-          <li>On <strong>Stock → Purchase Orders</strong> a PO moves through <span class="pill blue">draft</span> → <span class="pill amber">sent</span> → <span class="pill amber">partial</span> / <span class="pill green">received</span> → <span class="pill">closed</span>.</li>
-          <li>Add or edit lines while it is <strong>draft</strong>, then <strong>Mark as sent</strong> when you place it with the supplier.</li>
-          <li>When the delivery arrives, open the PO and enter the <strong>Receive now</strong> quantity (and expiry, if any) per line, then <strong>Receive stock</strong>. Partial deliveries are supported — the PO stays <em>partial</em> until every line is fully received.</li>
-        </ol>
-        <div class="callout note">Receiving against a PO creates the batch, updates the weighted-average cost and links the batch to the supplier automatically — exactly the same engine as a manual stock receipt, so costs stay consistent.</div>
-      </section>
+  <h2 id="stockin">How to receive stock by hand (Stock In)</h2>
+  <ol class="steps">
+    <li>On the Ingredients page click <strong>Stock In</strong> on the row.</li>
+    <li>Type <strong>Quantity received</strong>. Fill in <strong>Cost per unit</strong>, choose the <strong>Supplier</strong> (or <strong>&mdash; Other / one-off &mdash;</strong>), and set <strong>Expiry date</strong> and <strong>Alert me ___ days before expiry</strong> if the goods expire.</li>
+    <li>Click <strong>Receive Stock</strong>. If the quantity is more than 5 times what you hold, or the expiry date is in the past, the page asks you to confirm.</li>
+    <li>You will see <em>"Stock received: 5.000 units. New avg cost: MWK 120.00/unit."</em></li>
+  </ol>
+  <p>A new batch is created with the next batch number, and the ingredient's average cost is recalculated from the old stock and the new delivery.</p>
 
-      <section>
-        <h2>A typical day</h2>
+  <h2 id="scan">How to receive a delivery with Receive Stock</h2>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Receive Stock</strong>. This page is built for phones and tablets and works with a camera or a USB barcode scanner.</p>
+  <ol class="steps">
+    <li>Click the <strong>Scanner: OFF</strong> button so it reads <strong>Scanner: ON</strong>. The <strong>Camera</strong> button and the box <strong>Type or scan barcode here&hellip;</strong> appear. The camera needs a secure (https) connection and your permission.</li>
+    <li>Optionally type the supplier in <strong>Supplier name (optional)</strong> and check the date field (it starts as today).</li>
+    <li>Scan each product. Each scan adds one pack to <strong>Scanned Items</strong>. Scan again to add another pack, or use the plus and minus buttons. Type the <strong>Cost</strong> per unit on each line (if you leave it blank the current average cost is used).</li>
+    <li>If a barcode is not known, <strong>Unknown Barcode</strong> opens and asks <strong>What is this barcode for?</strong>:
+      <ul>
+        <li><strong>Ingredient</strong> &mdash; choose the <strong>Ingredient</strong>, the <strong>Pack Size</strong> and a <strong>Pack Label</strong>, and click <strong>Save &amp; Add to Batch</strong>.</li>
+        <li><strong>Item for Sale</strong> &mdash; type the <strong>Item Name</strong>, the <strong>Sale Price</strong> and optionally a <strong>Category</strong> (blank uses "Retail Items"), and click <strong>Register on POS</strong>.</li>
+      </ul>
+    </li>
+    <li>Click <strong>Receive into Stock</strong>. You will see a message that the batches were received into stock. A line that could not be saved is listed: <em>"2 received &mdash; not saved: (names)"</em>.</li>
+  </ol>
+  <p>Each line becomes a new batch, like Stock In by hand. A barcode already linked to another item is refused: <em>"This barcode is already registered to another ingredient."</em></p>
 
-        <h3>1. Morning — receive deliveries</h3>
-        <ol class="steps">
-          <li>If the delivery is against a purchase order, open it on <strong>Stock → Purchase Orders</strong> and use
-            <strong>Receive stock</strong> — this reconciles what you ordered against what arrived.</li>
-          <li>For an ad-hoc delivery, go to <strong>Stock Receipts → New Receipt</strong> — or use <strong>Stock → Barcode Receive</strong> on
-            mobile to scan deliveries with your phone camera (faster for large deliveries).</li>
-          <li>Pick the supplier from the master list.</li>
-          <li>Add each item delivered with <strong>quantity</strong> and <strong>unit cost</strong>.</li>
-          <li>Save. Stock is added to the relevant ingredients automatically.</li>
-        </ol>
+  <h2 id="recipes">How to build a recipe</h2>
+  <p>A recipe says how much of each ingredient goes into one portion of a menu item. Open Admin menu &rarr; Stock &rarr; <strong>Recipes</strong>.</p>
+  <ol class="steps">
+    <li>On the left use <strong>All</strong>, <strong>Food</strong>, <strong>Drinks</strong> or <strong>No recipe</strong>, or <strong>Search menu items...</strong>, and click a menu item. Each shows its food cost %.</li>
+    <li>On the right fill in the ingredient lines: <strong>Ingredient</strong>, <strong>Qty / portion</strong> (in the ingredient's own unit, for example 0.05 kg is 50 g) and <strong>Yield %</strong>. Click <strong>Add ingredient line</strong> for more lines. If an ingredient is missing click <strong>+ Add new ingredient (without leaving page)</strong> and fill in <strong>Name</strong>, <strong>Category</strong>, <strong>Unit</strong>, <strong>Cost / unit</strong>.</li>
+    <li>Watch <strong>Total recipe cost</strong>, <strong>Sale price</strong>, <strong>Food cost %</strong> and <strong>Gross margin / portion</strong>. Under 30% is healthy, 30 to 40% is acceptable, over 40% means re-price or rework.</li>
+    <li>Click <strong>Save recipe</strong>. You will see <em>"Recipe saved with 4 ingredient(s)."</em> Saving with no ingredients removes the recipe: <em>"Recipe removed (no ingredients)."</em></li>
+    <li>To remove a recipe click <strong>Delete recipe</strong>. <em>"Recipe deleted."</em></li>
+  </ol>
+  <p>You can also open an item's recipe from the Menu page (<strong>Recipe</strong> button). The same screen shows <strong>Sell price</strong>, <strong>Plate cost</strong> and <strong>Food cost %</strong>.</p>
 
-        <h3>2. During service — automatic deduction</h3>
-        <ul class="checklist">
-          <li>Stock is <strong>not deducted when the till fires an order</strong>. It deducts when the
-            kitchen/bar/coffee station marks each item <strong>Ready</strong> (tap the Ready button on the station
-            screen).</li>
-          <li>This means orders cancelled before any item is marked Ready cost no stock — nothing has been used yet.
-          </li>
-          <li>Voids on partially-prepared orders restore only the stock that was deducted at the Ready step for items
-            that were prepared.</li>
-          <li>The <strong>Bump</strong> action catches any items that were never individually marked Ready and deducts
-            their stock at that point.</li>
-        </ul>
+  <h2 id="suppliers">How to add a supplier</h2>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; Advanced &rarr; <strong>Suppliers</strong> and click <strong>Add Supplier</strong>.</li>
+    <li>Fill in <strong>Supplier name</strong> (required, must be unique), <strong>Contact person</strong>, <strong>Phone</strong>, <strong>Email</strong>, <strong>Lead time (days)</strong>, <strong>Payment terms</strong>, <strong>Account ref</strong>, <strong>Address</strong>, <strong>Notes</strong>, and tick <strong>Active</strong>.</li>
+    <li>Click <strong>Save Supplier</strong>. You will see <em>"Supplier added."</em> or <em>"Supplier updated."</em></li>
+  </ol>
+  <p>The list shows <strong>Items</strong> (ingredients that name this supplier as preferred) and <strong>Total purchased</strong>. The pencil icon edits a supplier. The power icon switches it on or off (<em>"Toggle this supplier's status?"</em>, then <em>"Supplier status updated."</em>).</p>
 
-        <h3>3. End of day — variance check</h3>
-        <ol class="steps">
-          <li>Go to <strong>Stock Variance</strong>.</li>
-          <li>The page lists every ingredient with <strong>system count</strong> vs <strong>counted count</strong>.</li>
-          <li>Walk the bar / kitchen, count physically, type counts in.</li>
-          <li>Save. The variance % is logged. Anything over 5% is flagged red.</li>
-        </ol>
-      </section>
+  <h2 id="buying">How to see what to buy (Buying)</h2>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Buying</strong>. It lists every ingredient at or below its reorder point (or its minimum quantity if no reorder point is set). Ingredients with neither set are not listed.</p>
+  <ol class="steps">
+    <li>Read the summary: <strong>Items to reorder</strong>, <strong>Supplier orders</strong>, <strong>Est. purchase value</strong>.</li>
+    <li>Each supplier group lists <strong>On hand</strong>, <strong>Reorder pt</strong>, <strong>Par</strong>, <strong>On order</strong>, <strong>Suggested</strong> and <strong>Est. cost</strong>. Suggested is the par level (or twice the reorder point if no par is set) minus what you hold and minus what is already on open purchase orders.</li>
+    <li>Click <strong>Create draft PO</strong> to turn the group into a draft purchase order. The button is off for the <strong>Unassigned</strong> group: give those ingredients a preferred supplier first.</li>
+  </ol>
+  <p>If nothing is low the page says <em>"Nothing to reorder &mdash; every tracked item is above its reorder point."</em></p>
 
-      <section>
-        <h2>Cancelling an order (before prep)</h2>
-        <p>Cashiers can cancel an order themselves if preparation has not started yet.</p>
-        <ol class="steps">
-          <li>Open the order (or use the Cancel Before Prep button on the POS Tabs tray).</li>
-          <li>Tap <strong>Cancel</strong>, enter a reason ≥ 8 characters.</li>
-          <li>The order is removed from all station boards. No stock is restored because nothing was deducted yet.</li>
-        </ol>
-        <div class="callout warn">Cancel is blocked once any item reaches <em>preparing</em>, <em>ready</em>,
-          <em>collection</em>, or <em>served</em> status on any station. Use <strong>Void</strong> (admin/manager) in
-          those cases.</div>
-      </section>
+  <h2 id="po">How to raise and receive a purchase order</h2>
+  <p>Open Admin menu &rarr; Advanced &rarr; <strong>Purchase Orders</strong>. Orders move from draft to sent, then partly or fully received, then closed (or cancelled).</p>
+  <ol class="steps">
+    <li>Click <strong>New PO</strong> (or use <strong>Create draft PO</strong> from Buying). Choose the <strong>Supplier</strong>, <strong>Order date</strong>, <strong>Expected date</strong> and <strong>Notes</strong>, then <strong>Create draft</strong>. <em>"Draft purchase order PO-... created."</em></li>
+    <li>While it is a draft, use <strong>Add line</strong>: choose an <strong>Ingredient</strong> (or <strong>&mdash; Custom / non-stock &mdash;</strong>), a <strong>Description</strong>, <strong>Unit</strong>, <strong>Qty</strong> and <strong>Unit cost</strong>, then <strong>Add</strong>. <em>"Line added."</em> The bin icon removes a line.</li>
+    <li>Click <strong>Mark as sent</strong> (<em>"Mark this PO as sent to the supplier?"</em>). It needs at least one line. <em>"Purchase order marked as sent."</em></li>
+    <li>When goods arrive, fill in <strong>Receive now</strong> (and <strong>Expiry</strong>) on each line you received, then click <strong>Receive stock</strong> (<em>"Receive the entered quantities into stock?"</em>). <em>"Stock received against purchase order."</em></li>
+    <li>The order becomes partly received until every line is complete, then received. A line cannot receive more than is outstanding.</li>
+    <li>Click <strong>Close</strong> when finished (outstanding lines will not be received) or <strong>Cancel</strong> for a draft or sent order. <strong>Print</strong> prints the order.</li>
+  </ol>
+  <p>Receiving creates stock batches linked to the supplier and the order. Lines for custom or non-stock items are recorded but add no stock. Once an order is received, closed or cancelled its lines cannot be changed.</p>
 
-      <section>
-        <h2>Voiding a stock order</h2>
-        <ol class="steps">
-          <li>Open the order on <strong>Stock Orders</strong>.</li>
-          <li>Tap <strong>Void</strong>.</li>
-          <li>Reason ≥ 8 characters required.</li>
-          <li>Stock is restored for any items that had been marked Ready (deducted at KDS), the folio is reversed (if
-            the order was charged to a room), and KDS/BDS/CDS stations are cleared.</li>
-        </ol>
-        <div class="callout note">Void works at <strong>any stage</strong> of an order, regardless of whether prep has
-          started. Only admin and manager roles can void.</div>
-      </section>
+  <h2 id="count">How to do a stock count</h2>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Count</strong>. Every shortage must be explained and approved by a manager.</p>
+  <ol class="steps">
+    <li>Under <strong>Start a Count</strong> choose the <strong>Scope</strong>: <strong>Full count (every ingredient)</strong>, <strong>By category</strong> (then pick a <strong>Category</strong>) or <strong>Spot check (specific items)</strong> (pick ingredients with Ctrl/Cmd-click). Optionally add a <strong>Shift label</strong> and <strong>Notes</strong>.</li>
+    <li>Click <strong>Start count</strong>. The system saves the quantity it expects for each ingredient at that moment. <em>"Count ... started. Enter your physical readings."</em></li>
+    <li>Enter the <strong>Actual Qty</strong> you counted for each line. The page shows <strong>Variance</strong> and <strong>Cost Impact</strong> as you type. For every shortage choose a <strong>Reason</strong>: <strong>Spillage</strong>, <strong>Expired</strong>, <strong>Staff meal</strong>, <strong>Sampling</strong>, <strong>Prep waste</strong>, <strong>Theft suspected</strong>, <strong>Correction</strong> or <strong>Other</strong>, and add <strong>Notes</strong> if useful.</li>
+    <li>Click <strong>Save readings</strong> (<em>"Count readings saved."</em>). Use the filters to find shortage-only rows.</li>
+    <li>Click <strong>Submit for approval</strong> (<em>"Submit count for approval? Once submitted you cannot edit it."</em>). <em>"Count submitted for approval. Shortage cost: MWK ..."</em></li>
+    <li>A manager or admin opens the count and clicks <strong>Approve &amp; post variances</strong> (<em>"Approve count and post variances to stock? This cannot be undone."</em>) or <strong>Reject &amp; send back</strong> (type a reason of at least 8 characters).</li>
+    <li>On approval the differences are applied to stock, with the approver's name and time kept. <em>"Count ... approved. Variances applied to stock."</em> A rejected count shows the reason and can be reopened with <strong>Reopen for re-count</strong>.</li>
+  </ol>
+  <p>The page also shows <strong>Theft Radar (last 30d)</strong>, the ingredients losing stock to shortages or manual adjustments that no sale or wastage explains, and <strong>Recent Counts</strong>. Only the person who started a count, or a manager, can change its readings. Surpluses need no reason.</p>
 
-      <section>
-        <h2>Order Lifecycle Viewer <code>/admin/order-lifecycle.php</code></h2>
-        <p>Every stock order has a dedicated full-page audit trail at <code>/admin/order-lifecycle.php?id=&lt;order_id&gt;</code>. Open it from:</p>
-        <ul class="checklist">
-          <li><strong>Stock Orders</strong> list → click the order reference.</li>
-          <li><strong>KDS / BDS / CDS</strong> ticket footer → <em>Log</em> button (opens in new tab).</li>
-          <li><strong>POS → Tabs tray → Details → Lifecycle</strong> link (admin/manager only).</li>
-        </ul>
-        <h3>What the page shows</h3>
-        <table>
-          <thead>
-            <tr><th>Section</th><th>Content</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>Order header</strong></td>
-              <td>Reference, status badge, order type, table/room, cashier, total.</td>
-            </tr>
-            <tr>
-              <td><strong>Metrics bar</strong></td>
-              <td>Placed time → Fired → Ready → Served → Paid + Total cycle elapsed.</td>
-            </tr>
-            <tr>
-              <td><strong>Items table</strong></td>
-              <td>Every line item with qty, price, kitchen status, station, and timestamps for started/ready/served.</td>
-            </tr>
-            <tr>
-              <td><strong>Activity timeline</strong></td>
-              <td>Chronological log of every audit event and KDS event: placement, stock deductions (ingredient · qty · cost), bumps, voids — with actor name, timestamp and IP.</td>
-            </tr>
-            <tr>
-              <td><strong>Linked payment</strong></td>
-              <td>Payment reference, method, amount and recorded timestamp (if paid).</td>
-            </tr>
-            <tr>
-              <td><strong>Void banner</strong></td>
-              <td>For voided/cancelled orders: reason, who voided, and when.</td>
-            </tr>
-          </tbody>
-        </table>
-        <h3>Actions available on the lifecycle page</h3>
-        <table>
-          <thead>
-            <tr><th>Action</th><th>Role</th><th>Conditions</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span class="pill amber">Cancel order</span></td>
-              <td>admin · manager</td>
-              <td>Status is <em>placed / new</em> and kitchen has not started any item (all still <em>pending</em>).</td>
-            </tr>
-            <tr>
-              <td><span class="pill red">Void order</span></td>
-              <td>admin only</td>
-              <td>Status is <em>paid</em> or <em>completed</em>. Restores stock for all previously Ready items, cancels payment row, clears station boards.</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="callout note">The lifecycle page is <strong>read-only</strong> for restaurant_staff. Cancel and Void are gated by role and order state — the buttons only appear when the action is permitted.</div>
-      </section>
+  <h2 id="wastage">How to record wastage</h2>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; Stock &rarr; <strong>Wastage</strong>.</li>
+    <li>Under <strong>Record wastage</strong> check the <strong>Date</strong> (today or earlier). On each row choose the ingredient (<strong>Select ingredient...</strong>), type the <strong>Quantity</strong>, and choose a reason: Spoiled, Breakage, Over-prepared, Customer return, Trim/peel waste, Burnt, Spilled or Other. Click <strong>Add row</strong> for more.</li>
+    <li>Click <strong>Save wastage</strong>. You will see <em>"3 wastage entry(ies) recorded."</em></li>
+  </ol>
+  <p>The stock comes off at once at the real cost of the batches used. <strong>Recent entries</strong> lists date, ingredient, quantity, cost, reason and who recorded it. The cards at the top (<strong>This month wastage</strong>, <strong>Last month</strong>, <strong>Days since last entry</strong>) open a detail window. A banner reminds you if no wastage has been logged for some days.</p>
 
-      <section>
-        <h2>Order item lifecycle</h2>
-        <p>Each item on an order passes through these statuses on the station display:</p>
-        <table>
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th>Meaning</th>
-              <th>Stock effect</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span class="pill blue">pending</span></td>
-              <td>Order fired, not yet started in the kitchen/bar.</td>
-              <td>None.</td>
-            </tr>
-            <tr>
-              <td><span class="pill amber">preparing</span></td>
-              <td>Station tapped Start on this item.</td>
-              <td>None.</td>
-            </tr>
-            <tr>
-              <td><span class="pill green">ready</span></td>
-              <td>Item prepared, at the pass.</td>
-              <td><strong>Deducted here.</strong></td>
-            </tr>
-            <tr>
-              <td><span class="pill amber">collection</span></td>
-              <td>Runner has taken the item for delivery.</td>
-              <td>Already deducted at ready.</td>
-            </tr>
-            <tr>
-              <td><span class="pill green">served</span></td>
-              <td>Delivered to guest. Ticket bumped.</td>
-              <td>Already deducted.</td>
-            </tr>
-            <tr>
-              <td><span class="pill red">void</span></td>
-              <td>Voided. Stock restored if it had been deducted.</td>
-              <td>Restored (if was ready/collection/served).</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+  <h2 id="batches">How to deal with expiring and recalled batches</h2>
+  <p>Open Admin menu &rarr; Advanced &rarr; <strong>Batch Tracker</strong>. Each time the page opens, active batches past their expiry date are removed from stock automatically: <em>"3 batch(es) automatically marked as expired."</em></p>
+  <ol class="steps">
+    <li>Use the cards <strong>Expiring &le; 3 days</strong> (with <strong>Value at risk</strong>), <strong>Expiring 4&ndash;7 days</strong>, <strong>Expiring 8&ndash;30 days</strong> and <strong>Total active batches</strong>, or the filters (ingredient, status <strong>Active</strong>, <strong>Depleted</strong>, <strong>Expired</strong>, <strong>Wasted</strong>, <strong>Recalled</strong>, <strong>All</strong>, and expiry range).</li>
+    <li>For spoiled or damaged stock click <strong>Mark Wasted</strong>, give a <strong>Reason</strong>, and click <strong>Confirm Wastage</strong>. <em>"Batch marked as wasted."</em> It is logged as wastage.</li>
+    <li>For a supplier problem click <strong>Recall</strong>, give the <strong>Recall reason</strong>, and click <strong>Confirm Recall</strong>. <em>"Batch recalled and removed from stock."</em></li>
+    <li><strong>Receive Stock</strong> at the top takes you to the delivery page.</li>
+  </ol>
 
-      <section>
-        <h2>Order types</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Source</th>
-              <th>Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>restaurant</code></td>
-              <td>POS Till dine-in</td>
-              <td>Charged at till.</td>
-            </tr>
-            <tr>
-              <td><code>room_service</code></td>
-              <td>Room Service Dashboard</td>
-              <td>Charged to guest folio.</td>
-            </tr>
-            <tr>
-              <td><code>staff_meal</code></td>
-              <td>Manual (manager)</td>
-              <td>Stock deducts but no charge.</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+  <h2 id="reports">How to read Stock Reports</h2>
+  <p>Open Admin menu &rarr; Advanced &rarr; <strong>Stock Reports</strong>. Tabs: <strong>Inventory</strong>, <strong>Stock-In</strong>, <strong>Usage</strong>, <strong>Wastage</strong>, <strong>Yield</strong>, <strong>Adjustments</strong>, <strong>Expiry</strong>.</p>
+  <ul>
+    <li>Inventory and Expiry are a snapshot of now. The other tabs cover a date range (the last 30 days to start with): set <strong>From</strong> and <strong>To</strong> and click <strong>Apply</strong>.</li>
+    <li>Every tab has a <strong>CSV</strong> download and a "how to read this report" hint with an example.</li>
+    <li>Columns: Inventory (Ingredient, Category, Current qty, Cost / unit, Stock value, Active batches); Stock-In (Date, Ingredient, Batch, Qty, Unit cost, Total, Supplier, By); Usage (Ingredient, Quantity used, Cost); Wastage (Date, Ingredient, Qty, Cost, Reason, By); Yield (Ingredient, Used, Wasted, Expired, Yield %, Loss cost); Adjustments (When, Ingredient, Source, change in quantity, Reason, By); Expiry (Batch, Ingredient, Expiry date, Days left, Remaining, Status).</li>
+  </ul>
 
-      <section id="barcode-receiving">
-        <h2>Barcode stock receiving <span class="badge">Camera scanner</span></h2>
-        <p>When a delivery arrives, instead of typing each item manually you can scan product barcodes with your phone
-          camera. The system matches the barcode to an existing ingredient (or offers to register a new one) and fills
-          in the receipt line automatically.</p>
+  <h2 id="orders">How to use Orders &amp; Tabs</h2>
+  <p>Open Admin menu &rarr; Restaurant &amp; Bar &rarr; <strong>Orders &amp; Tabs</strong> (page title <strong>Restaurant Orders</strong>). Orders are taken at the POS Till, not on this page. This page is the office view of all orders.</p>
+  <ul>
+    <li><strong>Top cards:</strong> <strong>Orders Today</strong>, <strong>Revenue Today</strong>, <strong>Cash</strong>, <strong>Mobile Money</strong>, <strong>Card</strong>, <strong>Voids</strong> and <strong>Needs Review</strong>. Click a card to filter the list. <strong>End-of-Shift</strong> has a <strong>Run Count</strong> link to Stock Count.</li>
+    <li><strong>Operational Insights:</strong> revenue and orders against yesterday, average ticket, live open orders (walk-in and room service), cash, mobile and card collected, voids today, peak hour and cashier totals. Click a card for detail.</li>
+    <li><strong>Recent Orders</strong> table: <strong>Reference</strong>, <strong>Type</strong>, <strong>Customer</strong>, <strong>Table</strong>, <strong>Table Status</strong>, <strong>Room / Folio</strong>, <strong>Items</strong>, <strong>Total</strong>, <strong>Payment</strong>, <strong>Status</strong>, <strong>Health</strong>, <strong>Cashier</strong>, <strong>Created</strong>, <strong>Actions</strong>. Filter chips show what is applied, with <strong>Clear filters</strong>.</li>
+  </ul>
+  <p>Buttons on each row:</p>
+  <ul>
+    <li><strong>Timeline</strong> &mdash; the order's full history. <strong>Items</strong> &mdash; the lines. <strong>Receipt</strong> &mdash; for paid, voided, cancelled and room-service orders. <strong>Review</strong> &mdash; for orders whose items, payments and room charges do not balance.</li>
+    <li><strong>Open</strong> and <strong>Settle</strong> &mdash; on an open order. <strong>Settle</strong> asks for the payment method (<strong>Cash</strong>, <strong>Mobile Money</strong> or <strong>Card (Manual / Slip)</strong>) and the same details as at the till. <em>"Order ORD-... settled &mdash; MWK ... via cash."</em> It is not offered for room-service orders, and a part-paid (split) tab must be finished at the till.</li>
+    <li><strong>Cancel</strong> (<em>"Cancel unpaid order and restore stock?"</em>) &mdash; an unpaid order that nobody has started.</li>
+    <li><strong>Void</strong> &mdash; Admin and Manager roles only, for open or paid orders. A reason of at least 8 characters is required. <em>"Order ORD-... voided. Stock restored. Reason logged."</em></li>
+    <li>Reconcile (in the review window) &mdash; Admin and Manager roles only. <em>"Order reconciled: ..."</em></li>
+  </ul>
+  <p>The <strong>Receipt</strong> page can be printed, saved as PDF or emailed to the guest. <strong>Manual consolidation</strong> on it lets a manager add a discount (with a reason of at least 4 characters) or a service charge before payment. Once paid, totals are final.</p>
 
-        <h3>Opening the scanner</h3>
-        <ol class="steps">
-          <li>Go to <strong>Stock → Barcode Receive</strong> (<code>/admin/stock-barcode-receive.php</code>).</li>
-          <li>Tap <strong>Start Scanner</strong> — your phone camera activates and shows a viewfinder.</li>
-          <li>Point the camera at a product barcode. A beep and vibration confirm a successful read.</li>
-          <li>The matched item is added to the receipt list. Scan the next product immediately.</li>
-        </ol>
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>Stock never goes below what exists: wastage, adjustments and station actions are refused if there is not enough.</li>
+    <li>Manual adjustments are for Admin and Manager roles only and need a reason of at least 8 characters.</li>
+    <li>Every stock count shortage needs a reason and a manager's approval. The approved count cannot be undone.</li>
+    <li>An ingredient used in a recipe cannot be deleted; archive it instead.</li>
+    <li>Expired batches are removed from stock automatically when the Stock Overview or Batch Tracker opens.</li>
+    <li>A purchase order's lines can only change while it is a draft. Receiving is only for sent or partly received orders. You cannot receive more than is outstanding.</li>
+    <li>Supplier names must be different from each other.</li>
+    <li>Wastage cannot be dated in the future.</li>
+    <li>A paid order's totals cannot be changed. Use refund or void.</li>
+  </ul>
 
-        <h3>First-time scan of an unregistered product</h3>
-        <p>If the barcode hasn't been seen before, a registration dialog appears:</p>
-        <ol class="steps">
-          <li>Choose whether this product is an <strong>Ingredient</strong> (kitchen/bar stock, e.g. a beer keg) or a
-            <strong>POS Item</strong> (retail product sold directly from the till, e.g. a can of Coca-Cola).</li>
-          <li>Fill in the name, unit, and unit cost.</li>
-          <li>Save — the barcode is linked to the new record and the scanner continues immediately.</li>
-        </ol>
-        <div class="callout info">POS Items registered here appear on the <strong>Retail Items</strong> category on the
-          POS grid straight away and can be scanned at the till using the camera barcode scanner on mobile.</div>
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>"Name and unit are required."</em></td><td>Ingredient form incomplete.</td><td>Fill in both.</td></tr>
+      <tr><td><em>"Quantity must be greater than zero."</em></td><td>Zero or empty quantity.</td><td>Enter a positive number.</td></tr>
+      <tr><td><em>"Manual adjustments are restricted. Use Stock Count for variance reconciliation."</em></td><td>You do not have the Admin or Manager role.</td><td>Use a stock count.</td></tr>
+      <tr><td><em>"A reason of at least 8 characters is required for manual adjustments."</em></td><td>Reason too short.</td><td>Explain in more words.</td></tr>
+      <tr><td><em>"Cannot subtract more than current stock. Use Stock Count to reconcile physical differences."</em></td><td>Subtracting more than is held.</td><td>Correct the quantity or count the stock.</td></tr>
+      <tr><td><em>"Cannot delete: ingredient is used in one or more recipes. Archive it instead."</em></td><td>The ingredient is in a recipe.</td><td>Archive it.</td></tr>
+      <tr><td><em>"Wastage quantity exceeds current stock for ingredient #12."</em></td><td>More wasted than held.</td><td>Count the stock or lower the quantity.</td></tr>
+      <tr><td><em>"Enter a valid wastage date (not in the future)."</em></td><td>Bad date.</td><td>Use today or an earlier date.</td></tr>
+      <tr><td><em>"No valid wastage rows submitted."</em></td><td>No row had an ingredient and quantity.</td><td>Fill in at least one row.</td></tr>
+      <tr><td><em>"Batch already empty."</em></td><td>Nothing remains in the batch.</td><td>Nothing to do.</td></tr>
+      <tr><td><em>"Every shortage line must have a reason. Save your readings, pick a reason for each negative variance, then submit."</em></td><td>A shortage has no reason.</td><td>Pick reasons, save readings, submit again.</td></tr>
+      <tr><td><em>"Only the original counter or a manager can edit this count."</em></td><td>Another person started the count.</td><td>Ask them or a manager.</td></tr>
+      <tr><td><em>"Only admin/manager can approve counts."</em> / <em>"... reject counts."</em></td><td>Wrong role.</td><td>Ask a manager.</td></tr>
+      <tr><td><em>"Provide a rejection reason (min 8 characters)."</em></td><td>Reason too short.</td><td>Write more.</td></tr>
+      <tr><td><em>"Variance exceeds current live stock for ingredient #12. Reopen and recount."</em></td><td>Stock changed after the count started.</td><td>Reject, reopen and recount.</td></tr>
+      <tr><td><em>"Supplier name is required."</em> / <em>"A supplier with that name already exists."</em> / <em>"Enter a valid email address."</em></td><td>Supplier form rules.</td><td>Correct the field.</td></tr>
+      <tr><td><em>"Add at least one line before sending."</em></td><td>Empty purchase order.</td><td>Add a line.</td></tr>
+      <tr><td><em>"This purchase order is received - its lines can no longer be changed."</em> (or closed, cancelled)</td><td>The order is finished.</td><td>Raise a new order.</td></tr>
+      <tr><td><em>"Stock has already been received against this line - it cannot be removed."</em> / <em>"Quantity cannot be lower than the ... already received."</em></td><td>The line is part received.</td><td>Leave it, or close the order.</td></tr>
+      <tr><td><em>"Enter a quantity to receive on at least one line."</em></td><td>All receive boxes are 0.</td><td>Fill in what arrived.</td></tr>
+      <tr><td><em>"This purchase order can no longer receive stock."</em></td><td>It is closed or cancelled.</td><td>Raise a new order.</td></tr>
+      <tr><td><em>"Enter an item or description."</em></td><td>A custom PO line has no description.</td><td>Type one.</td></tr>
+      <tr><td><em>"Could not save this delivery. Nothing was received &mdash; please try again."</em></td><td>A problem saving the delivery.</td><td>Try again. Nothing was added.</td></tr>
+      <tr><td><em>"Order ... is paid &mdash; only an open, unpaid order can be cancelled. Use Void for a paid order."</em></td><td>Cancel used on a paid order.</td><td>A manager voids it.</td></tr>
+      <tr><td><em>"Only admins or managers can void a paid order."</em></td><td>Wrong role.</td><td>Ask a manager.</td></tr>
+      <tr><td><em>"Room-service orders are charged to the booking folio &mdash; use the booking module to settle them."</em></td><td>Settle used on a room order.</td><td>Settle at check-out or in Payments.</td></tr>
+      <tr><td><em>"Security token invalid."</em></td><td>The page is out of date.</td><td>Reload and repeat.</td></tr>
+    </tbody>
+  </table>
 
-        <h3>Quick reference</h3>
-        <table class="guide-table">
-          <thead>
-            <tr><th>Situation</th><th>What to do</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Camera permission denied</td><td>Open browser site settings and allow camera for this site, then refresh.</td></tr>
-            <tr><td>Barcode not scanning</td><td>Ensure good lighting or toggle the <strong>Torch</strong> button. Hold the camera 10–20 cm from the barcode.</td></tr>
-            <tr><td>Wrong quantity received</td><td>Tap the quantity field on the receipt line and correct it before saving.</td></tr>
-            <tr><td>Duplicate scan</td><td>A 2-second cooldown prevents double-counting. Quantity increments automatically if you scan the same barcode twice.</td></tr>
-            <tr><td>Scanner keeps closing</td><td>Enable <strong>Keep open</strong> in the scanner footer — the camera stays on between scans.</td></tr>
-          </tbody>
-        </table>
-      </section>
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="01-pos-till.html">POS till, menu and tables</a></li>
+    <li><a href="02-kds-kitchen.html">Kitchen display (KDS)</a></li>
+    <li><a href="05-room-service.html">Room service</a></li>
+    <li><a href="13-finance-payments.html">Finance and payments</a></li>
+    <li><a href="14-reports-eod.html">Reports and end of day</a></li>
+  </ul>
 
-      <section>
-        <h2>Tips</h2>
-        <div class="callout warn">Always <strong>void</strong>, never edit and re-save. The audit trail depends on it.
-        </div>
-        <ul class="checklist">
-          <li>Set <strong>par levels</strong> on every ingredient &mdash; the system will warn when stock falls below
-            the par.</li>
-          <li>Print the <strong>Variance Report</strong> at month-end and file it.</li>
-        </ul>
-      </section>
-
-    </div>
-  </main>
-
-  <footer class="guide-footer">
-    <div class="deck">
-      <div class="crest">— R H —</div>
-      <p><a href="07-reception-bookings.html">← Reception</a> &middot; <a href="index.html">All guides</a> &middot; <a
-          href="owner-handover.php">Owner handover</a> &middot; <a href="99-admin-dashboard-full-guide.html">Admin Bible
-          →</a></p>
-    </div>
-  </footer>
-
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

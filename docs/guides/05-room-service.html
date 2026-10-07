@@ -1,142 +1,136 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Room Service Guide — Rosalyn's Hotel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-    rel="stylesheet">
+  <title>Room Service — Rosalyns Beach Hotel</title>
   <link rel="stylesheet" href="assets/guide-theme.css">
   <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
   <nav class="top">
-    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-    <div class="nav-links">
-      <a href="index.html">All Guides</a>
-      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-      <a href="owner-handover.php">Owner</a>
-      <a href="04-cds-coffee.html">← Prev</a>
-      <a href="06-housekeeping.html">Next →</a>
-    </div>
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
   </nav>
 
-  <header class="hero">
-    <div class="deck">
-      <div class="eyebrow">Guide 05 &middot; In-room service</div>
-      <h1>Room Service</h1>
-      <p class="lead">The control panel for in-room food, drink and service requests. Charges go directly to the guest
-        folio.</p>
-      <div class="meta">
-        <span>URL <strong>/admin/room-service-dashboard.php</strong></span>
-        <span>Role <strong>room_service · receptionist · manager · admin</strong></span>
-        <span>Read time <strong>5 min</strong></span>
-      </div>
-    </div>
-  </header>
+  <h1>Room Service</h1>
+  <p>The Room Service Dashboard is where staff place in-room dining orders for checked-in guests, watch them move through the Kitchen, Bar and Coffee Bar, and mark them delivered. Every item is charged to the guest's room bill (folio) the moment the order is placed.</p>
 
-  <main class="content">
-    <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Room service staff, restaurant staff, receptionists, managers.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Room Service</strong> (<code>/admin/room-service-dashboard.php</code>).</dd>
+      <dt>Permission needed</dt><dd><strong>Room Service Dashboard</strong> to see the page. <strong>Manage Room Service</strong> to place orders and mark them delivered.</dd>
+      <dt>Only shown when</dt><dd>The <strong>Point of Sale</strong> and <strong>Room Service Station</strong> modules are switched on in Settings &rarr; Modules.</dd>
+    </dl>
+  </div>
 
-      <section>
-        <h2>At-a-glance KPIs</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Card</th>
-              <th>Meaning</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>Active orders</strong></td>
-              <td>Orders not yet delivered to a room.</td>
-            </tr>
-            <tr>
-              <td><strong>Delivered today</strong></td>
-              <td>Completed today (resets at midnight).</td>
-            </tr>
-            <tr>
-              <td><strong>Avg. delivery time</strong></td>
-              <td>From order placement to <em>mark delivered</em>.</td>
-            </tr>
-            <tr>
-              <td><strong>Revenue today</strong></td>
-              <td>Sum of room-service charges added to folios today.</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#place">How to place a room service order</a></li>
+      <li><a href="#deliver">How to mark an order delivered</a></li>
+      <li><a href="#folio">How the order reaches the guest's bill</a></li>
+      <li><a href="#fix">How to cancel or correct an order</a></li>
+      <li><a href="#menu">How to change what room service sells</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
 
-      <section>
-        <h2>Place a new order</h2>
-        <ol class="steps">
-          <li>Click <strong>+ Place Room-Service Order</strong>.</li>
-          <li>Search the <strong>room number</strong> or guest name &mdash; current in-house bookings autocomplete.</li>
-          <li>Pick items from the menu (grouped by station &mdash; kitchen / bar / coffee).</li>
-          <li>Enter qty for each line.</li>
-          <li>(Optional) Add a <strong>special note</strong> (e.g. "no ice", "extra towels").</li>
-          <li>Tap <strong>Send to kitchen &amp; charge to folio</strong>.</li>
-        </ol>
-        <div class="callout note">
-          The order fires to the right station (KDS / BDS / CDS); a line is added to the guest's
-          <strong>booking folio</strong> with VAT applied. <strong>Stock is deducted when the station marks each item
-            Ready</strong> — not at order placement. The folio charge posts immediately at placement for billing
-          accuracy.
-        </div>
-      </section>
+  <h2 id="screen">What is on the screen</h2>
+  <ul>
+    <li><strong>Edit Room Service Menu</strong> &mdash; a button that opens the Menu page at the Room Service items.</li>
+    <li>Five figures for today: <strong>Today's RS orders</strong>, <strong>Revenue today</strong>, <strong>Items served</strong>, <strong>Avg delivery</strong> (time from sent to served) and <strong>In progress</strong>.</li>
+    <li><strong>Place a Room Service Order</strong> &mdash; on the left the <strong>Room Service menu</strong> with a tab for each menu type (the tab name shows the item count) and a tile for each item. On the right the <strong>Checked-in booking</strong> list (<strong>&mdash; Select a guest / room &mdash;</strong>), the <strong>Order</strong> lines, the <strong>Total</strong>, <strong>Delivery notes (optional)</strong> and the button <strong>Send to kitchen &amp; charge to folio</strong>.</li>
+    <li><strong>Active queue</strong> &mdash; every room-service order not yet delivered, with columns <strong>Ref</strong>, <strong>Room / Guest</strong>, <strong>Items</strong> (with R: how many are ready and S: how many are served), <strong>Stations</strong> (stations still working), <strong>Total</strong>, <strong>Status</strong>, <strong>Placed</strong>, <strong>Fired</strong> (when it reached the stations, with any delay), <strong>Wait</strong> and a <strong>Delivered</strong> button. Click the reference to see the order's full history. It says <em>"No room service orders in progress."</em> when empty.</li>
+    <li><strong>Today's folio charges</strong> &mdash; the food and drink charges posted to bookings today, with <strong>Time</strong>, <strong>Booking</strong>, <strong>Room</strong>, <strong>Guest</strong>, <strong>Item</strong>, <strong>Qty</strong>, <strong>Total</strong> and <strong>Stock</strong>. It says <em>"No food/drink charges posted to bookings today."</em> when empty.</li>
+  </ul>
+  <p>Without <strong>Manage Room Service</strong> you can look at the page but cannot place or deliver orders. When a station finishes all its items for an order the page shows a "ready for collection" alert and plays a sound, for example <em>"Kitchen: order ORD-... (Rm 12) is ready for collection."</em></p>
 
-      <section>
-        <h2>Mark an order delivered</h2>
-        <ol class="steps">
-          <li>From the <strong>Active queue</strong>, tap <strong>Mark Delivered</strong> on the order card.</li>
-          <li>The card moves to <strong>Delivered today</strong> and the runner timestamp is recorded.</li>
-        </ol>
-      </section>
+  <h2 id="place">How to place a room service order</h2>
+  <ol class="steps">
+    <li>In <strong>Checked-in booking</strong> choose the guest. The list shows only guests who are checked in, as room number, guest name and booking reference.</li>
+    <li>Tap items on the menu. Only items that are available and switched on for room service are shown. Each tile shows which station will prepare it.</li>
+    <li>In the <strong>Order</strong> list change quantities if needed (1 to 99 per line).</li>
+    <li>Optionally type <strong>Delivery notes (optional)</strong>.</li>
+    <li>Click <strong>Send to kitchen &amp; charge to folio</strong>. The button stays off until the order has at least one item.</li>
+    <li>You will see <em>"Room service order ORD-... placed for Rm 12 &mdash; 3 item(s), MWK 24,500.00. Charged to folio."</em></li>
+  </ol>
+  <p>You can also take a room order at the till (Room button). See the <a href="01-pos-till.html#room">POS guide</a>. Both ways produce the same kind of order.</p>
 
-      <section>
-        <h2>Voiding <span class="pill amber">admin / manager only</span></h2>
-        <ol class="steps">
-          <li>Open the order from <strong>Stock Orders → Room Service</strong>.</li>
-          <li>Tap <strong>Void</strong>, type a reason ≥ 8 characters.</li>
-          <li>Stock is restored for any items already marked Ready on the station display, the folio line is reversed,
-            and the order disappears from KDS/BDS/CDS.</li>
-        </ol>
-      </section>
+  <h2 id="deliver">How to mark an order delivered</h2>
+  <ol class="steps">
+    <li>Find the order in <strong>Active queue</strong>.</li>
+    <li>Click <strong>Delivered</strong>. The page asks <em>"Mark order ORD-... as delivered?"</em> Confirm.</li>
+    <li>You will see <em>"Order #123 marked as delivered."</em> The order leaves the queue.</li>
+  </ol>
+  <p>Marking delivered marks every line as served and closes the order. Any item whose stock had not yet been taken off is taken off now. The room charge is not changed: it was posted when the order was placed.</p>
 
-      <section>
-        <h2>Tips</h2>
-        <ul class="checklist">
-          <li>Always confirm the room number with the guest before placing &mdash; folios cannot be moved between
-            bookings.</li>
-          <li>If a guest checks out before paying, the room-service line stays on the unpaid folio and shows on the
-            <strong>final invoice</strong>.
-          </li>
-          <li>For complimentary orders, admin or manager can void the line after delivery, which clears the folio charge
-            but
-            <strong>keeps the stock deducted</strong> (use this for staff meals / comps).
-          </li>
-        </ul>
-      </section>
+  <h2 id="folio">How the order reaches the guest's bill</h2>
+  <ul>
+    <li>When the order is placed, one charge per item is added to the guest's booking as a food or drink charge, at the menu price (tax included). The booking balance is recalculated at once.</li>
+    <li>The guest pays it with the rest of the bill: through Payments or at check-out. It is never paid at the till.</li>
+    <li>Stock for the recipe ingredients is taken off when the charge is posted. The Kitchen, Bar and Coffee Bar do not take it off a second time.</li>
+    <li>The order goes straight to the station screens. Each station works the lines as normal (see the <a href="02-kds-kitchen.html">Kitchen guide</a>).</li>
+    <li>If any charge cannot be posted, the whole order is refused and nothing is sent.</li>
+    <li>After the guest has checked out the bill is locked, and new orders cannot be placed because only checked-in guests are listed.</li>
+  </ul>
 
-    </div>
-  </main>
+  <h2 id="fix">How to cancel or correct an order</h2>
+  <ul>
+    <li><strong>Before any station has started it:</strong> the Kitchen, Bar or Coffee Bar can use <strong>Cancel before prep</strong>, or someone with the till can cancel it from the Tabs tray. The folio charges are cancelled (voided) and stock is put back.</li>
+    <li><strong>After work has started:</strong> a manager voids the order (<a href="01-pos-till.html#cancel-void">POS guide</a>). The folio charges are voided and the booking balance is recalculated.</li>
+    <li><strong>One item cannot be made:</strong> the station uses <strong>86 this item</strong> on the line. That line's charge is removed from the folio.</li>
+  </ul>
 
-  <footer class="guide-footer">
-    <div class="deck">
-      <div class="crest">— R H —</div>
-      <p><a href="04-cds-coffee.html">← CDS</a> &middot; <a href="index.html">All guides</a> &middot; <a
-          href="99-admin-dashboard-full-guide.html">Admin Bible</a> &middot; <a href="owner-handover.php">Owner
-          handover</a> &middot; <a href="06-housekeeping.html">Housekeeping →</a></p>
-    </div>
-  </footer>
+  <h2 id="menu">How to change what room service sells</h2>
+  <ol class="steps">
+    <li>Click <strong>Edit Room Service Menu</strong> (or open Restaurant &amp; Bar &rarr; <strong>Menu</strong>).</li>
+    <li>On the item's row tick or untick <strong>Room Service</strong> under <strong>Routing</strong>, and click <strong>Save</strong>. Items need to be <strong>Available</strong> too.</li>
+  </ol>
+  <p>Full menu steps are in the <a href="01-pos-till.html#menu">POS guide</a>.</p>
 
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>Only checked-in bookings can have room service orders: <em>"Only checked-in bookings can have room-service orders."</em></li>
+    <li>An order needs at least one item and a total above zero.</li>
+    <li>A line quantity cannot be more than 100.</li>
+    <li>Prices come from the saved menu, not from the screen.</li>
+    <li>A room that already has an active room service order cannot get another through the till until the first is finished.</li>
+    <li>Only people with <strong>Manage Room Service</strong> can place orders or mark them delivered.</li>
+    <li>An order that is already delivered or cancelled cannot be marked delivered again.</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>"Pick a checked-in booking."</em></td><td>No guest chosen.</td><td>Choose one in <strong>Checked-in booking</strong>.</td></tr>
+      <tr><td><em>"Add at least one item."</em></td><td>The order is empty.</td><td>Tap at least one menu item.</td></tr>
+      <tr><td><em>"Only checked-in bookings can have room-service orders."</em></td><td>The guest has checked out or is not yet in.</td><td>Check the booking status.</td></tr>
+      <tr><td><em>"Menu item not found or not available."</em></td><td>The item was switched off after the page loaded.</td><td>Reload the page and choose again.</td></tr>
+      <tr><td><em>"Failed to add charge for (item): ..."</em></td><td>The bill could not take the charge.</td><td>Read the reason, fix it and try again. Nothing was placed.</td></tr>
+      <tr><td><em>"Quantity cap: 100 per line."</em></td><td>Quantity too high.</td><td>Lower it.</td></tr>
+      <tr><td><em>"You do not have permission to perform this action."</em></td><td>No <strong>Manage Room Service</strong> permission.</td><td>Ask a manager.</td></tr>
+      <tr><td><em>"Order is already finalized and cannot be marked delivered."</em></td><td>It was already delivered or cancelled.</td><td>Nothing to do.</td></tr>
+      <tr><td><em>"Security token invalid. Refresh and try again."</em></td><td>The page is out of date.</td><td>Reload and repeat.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="01-pos-till.html">POS till, menu and tables</a></li>
+    <li><a href="02-kds-kitchen.html">Kitchen display (KDS)</a></li>
+    <li><a href="07-reception-bookings.html">Reception and bookings</a></li>
+    <li><a href="13-finance-payments.html">Finance and payments</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>

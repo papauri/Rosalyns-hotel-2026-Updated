@@ -194,7 +194,7 @@ $_nav_groups = [
         ['cache-management.php',           'fas fa-bolt',           'Cache',             'cache',             '', null],
         // Guides
         ['../docs/guides/index.html',                         'fas fa-book-open',          'Staff Guides',        null, '', null],
-        ['../docs/guides/99-admin-dashboard-full-guide.html', 'fas fa-scroll',             'Admin Bible',         null, '', null],
+        ['../docs/guides/99-admin-dashboard-full-guide.html', 'fas fa-scroll',             'Admin Reference',     null, '', null],
         ['../docs/guides/12-email-templates.php',             'fas fa-envelope-open-text', 'Email Template Tags', null, '', null],
     ],
 ];

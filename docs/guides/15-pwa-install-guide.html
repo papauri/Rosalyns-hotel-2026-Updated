@@ -1,285 +1,156 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PWA Install &amp; Service Worker Guide — Rosalyn's Hotel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-    rel="stylesheet">
+  <title>Installing the admin as an app — Rosalyns Beach Hotel</title>
   <link rel="stylesheet" href="assets/guide-theme.css">
   <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
   <nav class="top">
-    <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-    <div class="nav-links">
-      <a href="index.html">All Guides</a>
-      <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-      <a href="owner-handover.php">Owner</a>
-    </div>
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
   </nav>
 
-  <header class="hero">
-    <div class="deck">
-      <div class="eyebrow">Guide 15 &middot; Admin</div>
-      <h1>PWA &amp; Service Worker</h1>
-      <p class="lead">Install the hotel system as an app on any device — phone, tablet, or laptop — and keep it running smoothly offline.</p>
-      <div class="meta">
-        <span>URL <strong>/admin/cache-management.php</strong></span>
-        <span>Role <strong>admin</strong></span>
-        <span>Read time <strong>5 min</strong></span>
-      </div>
-    </div>
-  </header>
+  <h1>Installing the admin as an app</h1>
+  <p>You can install the <span class="g-site-name">Rosalyns Beach Hotel</span> admin on a phone, tablet or computer so it opens in its own window, without the browser address bar and tabs. This is most useful for the POS till and the kitchen, bar and coffee screens.</p>
 
-  <main class="content">
-    <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Anyone who signs in to the admin on a till, tablet, phone or office computer.</dd>
+      <dt>Where to find it</dt><dd>You install it from your browser. The hotel can change how often the install banner comes back in Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Hotel Settings</strong> &rarr; <strong>PWA Install Banner</strong>.</dd>
+      <dt>Permission needed</dt><dd>Installing needs none. Changing the banner setting needs <strong>Hotel Settings</strong>.</dd>
+    </dl>
+  </div>
 
-      <!-- ─── WHAT IS A PWA ─────────────────────────────────────────── -->
-      <section>
-        <h2>What is a PWA?</h2>
-        <p>
-          PWA stands for <strong>Progressive Web App</strong>. It lets you install the Rosalyn's website
-          (guest-facing) or the Admin Panel directly onto any device — like a real app — without going through
-          the App Store or Google Play.
-        </p>
-        <p>Once installed:</p>
-        <ul>
-          <li>It opens in its own window, no browser address bar in the way.</li>
-          <li>It loads instantly because common files (CSS, JS, images) are saved on the device.</li>
-          <li>It works even when internet is slow or cut (load-shedding friendly).</li>
-          <li>Staff can pin POS, KDS, and BDS to the tablet home screen.</li>
-        </ul>
-      </section>
+  <div class="toc">
+    <ol>
+      <li><a href="#what">What installing does</a></li>
+      <li><a href="#banner">The Install Admin App banner</a></li>
+      <li><a href="#android">How to install on Android (Chrome)</a></li>
+      <li><a href="#ios">How to install on iPhone or iPad (Safari)</a></li>
+      <li><a href="#desktop">How to install on Windows or Mac (Chrome or Edge)</a></li>
+      <li><a href="#setting">How to change how often the banner returns</a></li>
+      <li><a href="#offline">What happens with no internet</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
 
-      <!-- ─── WHAT IS A SERVICE WORKER ──────────────────────────────── -->
-      <section>
-        <h2>What is a Service Worker?</h2>
-        <p>
-          A <strong>service worker</strong> is a tiny background script the browser downloads once and keeps running silently.
-          Think of it as a smart cache assistant that:
-        </p>
-        <table>
-          <thead>
-            <tr><th>It does</th><th>Why it helps</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Saves CSS, JS, and fonts on the device</td>
-              <td>Pages load in under a second even on slow 3G</td>
-            </tr>
-            <tr>
-              <td>Serves a friendly offline page when there's no internet</td>
-              <td>Guests don't see a blank browser error</td>
-            </tr>
-            <tr>
-              <td>Keeps the admin POS/KDS working during brief network drops</td>
-              <td>Orders aren't lost during load-shedding cut-overs</td>
-            </tr>
-          </tbody>
-        </table>
-        <p>
-          There are two separate service workers in use:<br>
-          &bull; <strong>Public SW</strong> — covers the guest-facing website (<code>/public-sw.js</code>).<br>
-          &bull; <strong>Admin SW</strong> — covers the admin panel, POS, KDS, BDS (<code>/admin/sw.js</code>).
-        </p>
-      </section>
+  <h2 id="what">What installing does</h2>
+  <ul>
+    <li>The app is called <strong>&lt;hotel name&gt; Admin</strong> (for example <strong><span class="g-site-name">Rosalyns Beach Hotel</span> Admin</strong>). The name under the icon on your home screen is the hotel's short name, set in Hotel Settings &rarr; Hotel details &amp; policies &rarr; <strong>Short name (app icon / home screen)</strong>. The icon is the hotel logo.</li>
+    <li>It opens full screen. There is no browser address bar.</li>
+    <li>It opens on the <strong>POS Till</strong> page. If you are not signed in yet, you sign in first as normal.</li>
+    <li>The app covers the whole admin, not only the till. You reach every page you have permission for, the same as in a browser.</li>
+    <li>On devices that support it, pressing and holding the app icon offers four shortcuts: <strong>POS Till</strong>, <strong>Receive Stock</strong>, <strong>Kitchen Display</strong> and <strong>Dashboard</strong>.</li>
+    <li>Installing does not change your sign-in, your permissions or any data. You can remove the app at any time, the same way you remove any other app.</li>
+  </ul>
 
-      <!-- ─── INSTALLING ON EACH DEVICE ─────────────────────────────── -->
-      <section>
-        <h2>Installing the App on a Device</h2>
+  <h2 id="banner">The Install Admin App banner</h2>
+  <p>In browsers that offer installing to web pages (Chrome and Edge), the admin shows a small dark box called <strong>Install Admin App</strong> with the text <em>"Run POS &amp; KDS without a browser tab."</em> It has these controls:</p>
+  <table>
+    <thead><tr><th>Control</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Install</strong></td><td>Opens your browser's own install question. Confirm it there to install. The box then goes away.</td></tr>
+      <tr><td>Minus button (<strong>Minimise</strong>)</td><td>Shrinks the box to just its icon and two buttons. Click the plus button (<strong>Expand</strong>) to open it again.</td></tr>
+      <tr><td>Cross button (<strong>Dismiss</strong>)</td><td>Hides the box and starts a waiting period. The box does not come back until the waiting period is over (see <a href="#setting">below</a>). The default is 14 days.</td></tr>
+      <tr><td>Drag</td><td>You can drag the box by any part that is not a button, to move it out of the way.</td></tr>
+    </tbody>
+  </table>
+  <ul>
+    <li>On a computer or tablet the box sits at the top right. On a small phone screen (480 pixels wide or less) it sits near the bottom right.</li>
+    <li>The box is never shown on the <strong>POS Till</strong> or the kitchen, bar, coffee and room service station screens, because it would cover their buttons. It appears on the Dashboard and the other admin pages. Install from there.</li>
+    <li>If you click <strong>Install</strong> and then cancel your browser's own question, the box goes away but the waiting period does not start, so it comes back on the next page you open.</li>
+    <li>The waiting period is remembered separately in each browser on each device. Dismissing it on the till does not hide it on the manager's laptop.</li>
+    <li>If you do not see the banner, you can still install with the steps below.</li>
+  </ul>
 
-        <h3>Android phone / tablet (Chrome)</h3>
-        <ol>
-          <li>Open <strong>Chrome</strong> and go to the site (or admin panel).</li>
-          <li>A banner will appear at the bottom: <em>"Install Rosalyn's Hotel"</em>. Tap <strong>Install</strong>.</li>
-          <li>If you missed the banner: tap the three-dot menu (⋮) → <strong>Add to Home Screen</strong>.</li>
-          <li>The icon appears on the home screen. Tap it — it opens as a full-screen app.</li>
-        </ol>
+  <h2 id="android">How to install on Android (Chrome)</h2>
+  <ol class="steps">
+    <li>Open Chrome and go to the admin address, then sign in.</li>
+    <li>If the <strong>Install Admin App</strong> banner appears, tap <strong>Install</strong>, then confirm in the box Chrome shows. Skip to step 5.</li>
+    <li>If it does not appear, tap the three-dot menu at the top right of Chrome.</li>
+    <li>Tap <strong>Install app</strong> (some versions say <strong>Add to Home screen</strong>), then confirm.</li>
+    <li>Find the <strong><span class="g-site-name">Rosalyns Beach Hotel</span></strong> icon on your home screen or in your app list. Tap it to open the admin as an app.</li>
+  </ol>
+  <div class="note"><p>Use Chrome. Other Android browsers may not offer the install question. Tablets used as a till or kitchen screen are best installed once, then opened from the icon.</p></div>
 
-        <h3>iPhone / iPad (Safari)</h3>
-        <ol>
-          <li>Open <strong>Safari</strong> (must be Safari — Chrome on iOS cannot install PWAs).</li>
-          <li>Go to the site or admin panel.</li>
-          <li>Tap the <strong>Share</strong> button (the square with an arrow pointing up).</li>
-          <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
-          <li>Give it a name and tap <strong>Add</strong>.</li>
-        </ol>
+  <h2 id="ios">How to install on iPhone or iPad (Safari)</h2>
+  <p>Safari on iPhone and iPad does not show the <strong>Install Admin App</strong> banner. You add the admin to the Home Screen by hand.</p>
+  <ol class="steps">
+    <li>Open <strong>Safari</strong> (not Chrome) and go to the admin address, then sign in.</li>
+    <li>Tap the <strong>Share</strong> button (a square with an arrow pointing up).</li>
+    <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+    <li>Check the name, then tap <strong>Add</strong>.</li>
+    <li>Tap the new icon on your Home Screen to open the admin as an app.</li>
+  </ol>
+  <div class="note"><p>The wording of the Safari menus can change a little between iOS versions. If you cannot find <strong>Add to Home Screen</strong>, scroll further down the Share menu.</p></div>
 
-        <h3>Windows laptop / desktop (Chrome or Edge)</h3>
-        <ol>
-          <li>Open <strong>Chrome</strong> or <strong>Edge</strong> and go to the site.</li>
-          <li>Look for the install icon (⊕) in the address bar on the right side.</li>
-          <li>Click it and choose <strong>Install</strong>.</li>
-          <li>The app opens in its own window and appears in the Start Menu.</li>
-        </ol>
+  <h2 id="desktop">How to install on Windows or Mac (Chrome or Edge)</h2>
+  <ol class="steps">
+    <li>Open Chrome or Edge and go to the admin address, then sign in.</li>
+    <li>If the <strong>Install Admin App</strong> banner appears, click <strong>Install</strong>, then confirm in the box the browser shows. Skip to step 5.</li>
+    <li>If it does not appear, look at the right-hand end of the address bar for an install icon (a small screen with a down arrow) and click it. Or open the browser's three-dot menu and look for an entry with the word <strong>Install</strong> in it.</li>
+    <li>Confirm the install.</li>
+    <li>The admin opens in its own window. On Windows, it is added to the Start menu. You can pin it to the taskbar.</li>
+  </ol>
+  <div class="note"><p>The exact menu wording depends on the browser version. Look for the word <strong>Install</strong>.</p></div>
 
-        <p class="callout callout--info">
-          <strong>Tip for POS/KDS tablets:</strong> Install the Admin App on every tablet used in the restaurant, bar, and kitchen. This means even if the Wi-Fi drops briefly, orders on-screen stay visible.
-        </p>
-      </section>
+  <h2 id="setting">How to change how often the banner returns</h2>
+  <p>This is the number of days the banner stays hidden after a staff member dismisses it.</p>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Hotel Settings</strong>, then go to the card <strong>PWA Install Banner</strong> (near the bottom). The <strong>PWA</strong> link in the <strong>Jump to</strong> bar at the top takes you there.</li>
+    <li>In <strong>Re-show banner after dismissal (days)</strong>, type a whole number from 1 to 365. The default is 14. A <strong>1</strong> shows it every day. A <strong>365</strong> hides it for almost a year.</li>
+    <li>Click <strong>Save PWA Settings</strong>. You will see <em>"PWA install banner settings saved — staff will be prompted every N day(s) after dismissing."</em></li>
+  </ol>
+  <p>Staff see the new number the next time they load an admin page. A banner that was already dismissed starts counting from the day it was dismissed, using the new number.</p>
 
-      <!-- ─── SW VERSION BUMP ────────────────────────────────────────── -->
-      <section>
-        <h2>Bumping the SW Version (Cache Refresh)</h2>
-        <p>
-          Occasionally, after a big update to the site's design or code, you want all devices — including those with the PWA installed — to throw away their old cached files and download the latest.
-          That is what <strong>Bumping the SW Version</strong> does.
-        </p>
+  <h2 id="offline">What happens with no internet</h2>
+  <ul>
+    <li>The <strong>Online</strong> pill in the top bar turns red and says <strong>Offline</strong> when the connection drops. It turns amber and says <strong>Syncing N...</strong> while saved actions are being sent.</li>
+    <li>Pages you opened recently may still open from the device's memory. A page that was never opened shows <em>"You're offline"</em> with <em>"This page is not available offline."</em></li>
+    <li>On screens that support it (the POS), actions you take while offline are kept on the device and sent to the server automatically when the connection returns. A dark bar at the bottom of the screen says <em>"Offline — queued"</em>, then <em>"Back online — syncing"</em>, with a count of queued actions and a <strong>Retry now</strong> button.</li>
+    <li>Screens, styles and code are always loaded fresh from the server when you are online, so an installed app is never stuck on an old version.</li>
+    <li>Offline sales appear in Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Offline Log</strong> (permission <strong>Offline Activity Log</strong>).</li>
+  </ul>
 
-        <h3>When should I bump the version?</h3>
-        <table>
-          <thead>
-            <tr><th>Situation</th><th>Bump needed?</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>New CSS or JS deployed (site redesign, big feature)</td>
-              <td>✅ Yes</td>
-            </tr>
-            <tr>
-              <td>New images or logos uploaded</td>
-              <td>✅ Yes</td>
-            </tr>
-            <tr>
-              <td>Minor text edits, DB changes, settings updates</td>
-              <td>❌ No</td>
-            </tr>
-            <tr>
-              <td>PHP page changes only (no new CSS/JS)</td>
-              <td>❌ No</td>
-            </tr>
-            <tr>
-              <td>After a MSP developer deployment</td>
-              <td>✅ Yes — developer will tell you</td>
-            </tr>
-          </tbody>
-        </table>
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>The install banner never covers the POS Till or the station screens.</li>
+    <li>The banner is hidden for the number of days set in <strong>Re-show banner after dismissal (days)</strong>. That number must be between 1 and 365.</li>
+    <li>Sign-in and permissions work exactly as in a browser. Installing never gives extra access.</li>
+  </ul>
 
-        <h3>How to bump the version</h3>
-        <ol>
-          <li>Go to <strong>Admin → Cache Management</strong> (<code>/admin/cache-management.php</code>).</li>
-          <li>Scroll down to the <strong>PWA Service Worker</strong> section.</li>
-          <li>You will see the current version codes for both the Public SW and Admin SW (e.g. <code>rh-public-v1-2026-05-22</code>).</li>
-          <li>Click <strong>Bump SW Version Now</strong>.</li>
-          <li>Confirm the dialog. Done.</li>
-        </ol>
-        <p>
-          The date in both version strings is now updated to today. The next time any device loads the site,
-          the browser notices the version changed and automatically discards the old cache and downloads fresh files.
-          Devices with the PWA installed will update silently in the background.
-        </p>
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td>No Install Admin App banner</td><td>You dismissed it recently, you are on the POS or a station screen, the app is already installed, or the browser does not offer installing (for example Safari).</td><td>Open the Dashboard. Use the browser's own menu to install (see the steps above). On iPhone or iPad use Add to Home Screen.</td></tr>
+      <tr><td>The banner keeps coming back</td><td>The waiting period is short.</td><td>Raise <strong>Re-show banner after dismissal (days)</strong> in Hotel Settings.</td></tr>
+      <tr><td><em>"Dismiss period must be at least 1 day."</em> (shown as <em>"Error: Dismiss period must be at least 1 day."</em>)</td><td>You typed 0 or a negative number.</td><td>Type a number from 1 to 365.</td></tr>
+      <tr><td><em>"Dismiss period cannot exceed 365 days."</em> (shown with <em>"Error: "</em> in front)</td><td>You typed more than 365.</td><td>Type a number from 1 to 365.</td></tr>
+      <tr><td>The app opens on the till when you wanted the dashboard</td><td>The app always starts on the POS Till page.</td><td>Open <strong>Dashboard</strong> from the menu, or press and hold the icon and choose <strong>Dashboard</strong>.</td></tr>
+      <tr><td><em>"You're offline"</em> / <em>"This page is not available offline."</em></td><td>No internet and that page was never opened on this device.</td><td>Reconnect and open the page once.</td></tr>
+      <tr><td>The app shows the old name or logo</td><td>The device remembers the hotel name and logo for up to a day.</td><td>Wait a day, or remove the app and install it again.</td></tr>
+      <tr><td>Staff see a page they do not expect to be in the app</td><td>The app is the whole admin.</td><td>Use <strong>Staff &amp; Access</strong> to give each person only the permissions they need.</td></tr>
+    </tbody>
+  </table>
 
-        <p class="callout callout--warning">
-          <strong>Note:</strong> You do not need to do this regularly. Bumping too often is harmless but forces every visitor to re-download all cached files, which uses more data. Only bump when actually needed.
-        </p>
-      </section>
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="19-hotel-settings.html">Hotel Settings</a></li>
+    <li><a href="01-pos-till.html">POS Till</a></li>
+    <li><a href="02-kds-kitchen.html">Kitchen display (KDS)</a></li>
+    <li><a href="18-staff-access.html">Staff &amp; Access</a></li>
+  </ul>
 
-      <!-- ─── WHAT THE VERSION STRING MEANS ────────────────────────── -->
-      <section>
-        <h2>Reading the Version String</h2>
-        <p>The version string looks like this:</p>
-        <pre style="background:#f5f0eb; border-left:4px solid #8A775F; padding:14px 18px; border-radius:6px; font-size:14px; overflow-x:auto;">rh-public-v1-2026-05-22</pre>
-        <table>
-          <thead>
-            <tr><th>Part</th><th>Meaning</th></tr>
-          </thead>
-          <tbody>
-            <tr><td><code>rh</code></td><td>Rosalyn's Hotel</td></tr>
-            <tr><td><code>public</code> / <code>admin</code></td><td>Which app the SW covers</td></tr>
-            <tr><td><code>v1</code></td><td>Major version (only changed by MSP developers)</td></tr>
-            <tr><td><code>2026-05-22</code></td><td>Date of last bump — this is the part that changes when you click the button</td></tr>
-          </tbody>
-        </table>
-      </section>
-
-      <!-- ─── OFFLINE PAGE ──────────────────────────────────────────── -->
-      <section>
-        <h2>The Offline Page</h2>
-        <p>
-          If a guest visits the website while their device has no internet connection, they will see a
-          friendly offline page (<code>/offline.php</code>) instead of a browser error.
-          It displays the hotel branding and a "Try Again" button. No action is needed from your side — this is automatic.
-        </p>
-        <p>The admin panel has its own offline handling built into the service worker for POS and KDS screens.</p>
-      </section>
-
-      <!-- ─── TROUBLESHOOTING ───────────────────────────────────────── -->
-      <section>
-        <h2>Troubleshooting</h2>
-        <table>
-          <thead>
-            <tr><th>Problem</th><th>Fix</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>The install banner didn't appear</td>
-              <td>You may have already dismissed it. On Android, use ⋮ → Add to Home Screen. On iPhone, use Safari Share → Add to Home Screen.</td>
-            </tr>
-            <tr>
-              <td>I can see old CSS/JS after a deployment</td>
-              <td>Bump the SW version from Cache Management. Then on the affected device, close the app and reopen it.</td>
-            </tr>
-            <tr>
-              <td>POS is showing a stale menu after updating prices</td>
-              <td>Menu/price data is never cached by the SW — do a normal browser refresh (pull-down to refresh on mobile, or Ctrl+R on desktop).</td>
-            </tr>
-            <tr>
-              <td>A device is stuck on an old version even after bumping</td>
-              <td>On the device, go to Settings → Apps → find Chrome/Safari → Clear Cache. Then reopen the site.</td>
-            </tr>
-            <tr>
-              <td>The install icon doesn't appear on desktop</td>
-              <td>Make sure you are using Chrome or Edge (not Firefox). The site must be served over HTTPS.</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-      <!-- ─── QUICK REFERENCE ───────────────────────────────────────── -->
-      <section>
-        <h2>Quick Reference</h2>
-        <table>
-          <thead>
-            <tr><th>Task</th><th>Where</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Bump SW version after deployment</td>
-              <td>Admin → Cache Management → PWA Service Worker section</td>
-            </tr>
-            <tr>
-              <td>Install app on Android</td>
-              <td>Chrome → tap Install banner or ⋮ → Add to Home Screen</td>
-            </tr>
-            <tr>
-              <td>Install app on iPhone/iPad</td>
-              <td>Safari → Share button → Add to Home Screen</td>
-            </tr>
-            <tr>
-              <td>Install app on Windows laptop</td>
-              <td>Chrome/Edge → ⊕ icon in address bar → Install</td>
-            </tr>
-            <tr>
-              <td>View current SW versions</td>
-              <td>Admin → Cache Management → PWA Service Worker section</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-    </div>
-  </main>
-
-  <footer style="text-align:center; padding:40px 20px; color:#aaa; font-family:'Jost',sans-serif; font-size:13px;">
-    Rosalyn's Hotel PMS &mdash; Internal Documentation &mdash; MSP &copy; 2026
-  </footer>
-
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
 </html>

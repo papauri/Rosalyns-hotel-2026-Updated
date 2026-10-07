@@ -1961,7 +1961,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <summary class="ck-btn ck-btn--ghost" aria-label="Guides"><i class="fas fa-book-open"></i><span>Guides</span><i class="fas fa-chevron-down ck-menu__caret"></i></summary>
                     <div class="ck-menu__list">
                         <a href="../docs/guides/index.html" target="_blank" rel="noopener"><i class="fas fa-book-open"></i> All guides</a>
-                        <a href="../docs/guides/99-admin-dashboard-full-guide.html" target="_blank" rel="noopener"><i class="fas fa-scroll"></i> Admin bible</a>
+                        <a href="../docs/guides/99-admin-dashboard-full-guide.html" target="_blank" rel="noopener"><i class="fas fa-scroll"></i> Admin reference</a>
                         <?php if ($mod_bookings): ?><a href="../docs/guides/07-reception-bookings.html" target="_blank" rel="noopener"><i class="fas fa-calendar-check"></i> Reception</a><?php endif; ?>
                         <?php if ($mod_pos): ?><a href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-cash-register"></i> POS till</a><?php endif; ?>
                         <?php if ($mod_pos && $mod_station_kds): ?><a href="../docs/guides/02-kds-kitchen.html" target="_blank" rel="noopener"><i class="fas fa-utensils"></i> Kitchen (KDS)</a><?php endif; ?>

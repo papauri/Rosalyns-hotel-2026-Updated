@@ -1,218 +1,150 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Social Media & Facebook Sharing Guide — Rosalyn's Hotel</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Jost:wght@300;400;500;600&display=swap"
-        rel="stylesheet">
-    <link rel="stylesheet" href="assets/guide-theme.css">
-    <script src="assets/guide-init.js" defer></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Facebook and WhatsApp — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
 </head>
-
 <body>
+<div class="wrap">
 
-    <nav class="top">
-        <a href="index.html" class="brand">ROSALYN'S HOTEL</a>
-        <div class="nav-links">
-            <a href="index.html">All Guides</a>
-            <a href="99-admin-dashboard-full-guide.html">Admin Bible</a>
-            <a href="11-social-facebook-sharing.html" class="active">Facebook Guide</a>
-        </div>
-    </nav>
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
 
-    <header class="hero">
-        <div class="deck">
-            <div class="eyebrow">Guide 11 · Marketing</div>
-            <h1>Social Media &amp; Facebook Sharing</h1>
-            <p class="lead">How to connect your Facebook Page, publish from admin, and keep posts accurate, safe, and
-                consistent.
-            </p>
-            <div class="meta">
-                <span>Audience <strong>Manager &amp; marketing team</strong></span>
-                <span>Read time <strong>8 min</strong></span>
-                <span>Main page <strong>/admin/facebook-settings.php</strong></span>
-            </div>
-        </div>
-    </header>
+  <h1>Facebook and WhatsApp</h1>
+  <p>How to connect the <span class="g-site-name">Rosalyns Beach Hotel</span> Facebook Page so staff can post rooms, events, conference rooms, gym packages and menu items from the admin, and how to set up WhatsApp notifications.</p>
 
-    <main class="content">
-        <div class="deck">
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>An administrator sets it up. Staff with access to rooms, events, conference, gym or menu then post.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Advanced</strong> &rarr; <strong>Facebook Settings</strong> (<code>/admin/facebook-settings.php</code>) and <strong>WhatsApp Settings</strong> (<code>/admin/whatsapp-settings.php</code>)</dd>
+      <dt>Permission needed</dt><dd><strong>Facebook Settings</strong> and <strong>WhatsApp Settings</strong>. To post: the permission for the page you post from (Rooms, Events, Conference, Gym or Menu).</dd>
+      <dt>Only shown when</dt><dd>The pages that carry the share buttons follow their own modules: Rooms and Conference Rooms need Bookings and Conference switched on; Events needs the Events page; Gym needs Gym. The two settings pages need <strong>Website &amp; CMS</strong> switched on in Settings &rarr; Modules.</dd>
+    </dl>
+  </div>
 
-            <section>
-                <h2>1. What this feature does</h2>
-                <ul class="checklist">
-                    <li>Lets you publish content to the hotel Facebook Page directly from admin.</li>
-                    <li>Supports sharing content from Rooms, Events, Conference, and Menu areas.</li>
-                    <li>Allows default hashtags to be appended automatically.</li>
-                    <li>Includes a test-post tool so you can validate the setup before daily use.</li>
-                </ul>
-            </section>
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#connect">How to connect the Facebook Page</a></li>
+      <li><a href="#test">How to send a test post</a></li>
+      <li><a href="#post">How to post one item to Facebook</a></li>
+      <li><a href="#postall">How to post several items together</a></li>
+      <li><a href="#whatsapp">How to set up WhatsApp</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+    </ol>
+  </div>
 
-            <section>
-                <h2>2. Prerequisites</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Requirement</th>
-                            <th>Why it matters</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Facebook Page admin/editor access</td>
-                            <td>You need permission to post to the Page.</td>
-                        </tr>
-                        <tr>
-                            <td>Facebook app token with page permissions</td>
-                            <td>Without a valid token, posts cannot be sent.</td>
-                        </tr>
-                        <tr>
-                            <td>Page ID configured in admin</td>
-                            <td>The system needs to know which Page receives posts.</td>
-                        </tr>
-                        <tr>
-                            <td>Stable internet</td>
-                            <td>Publishing uses Facebook Graph API in real time.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
+  <h2 id="screen">What is on the screen</h2>
+  <table>
+    <thead><tr><th>Facebook Settings part</th><th>What it holds</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Page Credentials</strong></td><td><strong>Enable Facebook Page Posting</strong>, <strong>Facebook Page ID</strong> with a <strong>Fetch from Token</strong> button, <strong>Page Display Name</strong> (a label for staff only), <strong>Page Access Token</strong>, and a short <strong>Token Setup Guide</strong>.</td></tr>
+      <tr><td><strong>Posting Options</strong></td><td><strong>Default Hashtags</strong>, and ticks: <strong>Show share button on Rooms</strong>, <strong>Show share button on Events</strong>, <strong>Show share button on Conference rooms</strong>, <strong>Show share button on Menu items</strong>, <strong>Log all post attempts to system log</strong>.</td></tr>
+      <tr><td><strong>Test Post</strong></td><td>A message box and the button <strong>Send Test Post to Facebook Page</strong>.</td></tr>
+    </tbody>
+  </table>
 
-            <section>
-                <h2>3. First-time setup</h2>
-                <ol class="steps">
-                    <li>Open <code>/admin/facebook-settings.php</code>.</li>
-                    <li>Turn on <strong>Enable Facebook Page Posting</strong>.</li>
-                    <li>Paste the <strong>Page Access Token</strong> and save.</li>
-                    <li>Click <strong>Fetch from Token</strong> to auto-fill Page ID and Page Name.</li>
-                    <li>Set <strong>Default Hashtags</strong> (for example: <code>#RosalynsHotel #Mangochi</code>).</li>
-                    <li>Choose which sections can show share buttons (Rooms, Events, Conference, Menu).</li>
-                    <li>Click <strong>Save Facebook Settings</strong>.</li>
-                </ol>
+  <h2 id="connect">How to connect the Facebook Page</h2>
+  <ol class="steps">
+    <li>Open <strong>Advanced</strong> &rarr; <strong>Facebook Settings</strong>.</li>
+    <li>Paste the <strong>Page Access Token</strong>. Follow the on-screen <strong>Token Setup Guide</strong> (Graph API Explorer, permissions pages_manage_posts, pages_read_engagement and pages_show_list). A saved token is never shown again; to keep it, leave the box blank.</li>
+    <li>Click <strong>Save Facebook Settings</strong> once so the token is stored.</li>
+    <li>Click <strong>Fetch from Token</strong>. If your token covers several Pages, pick the right one. The Page ID and name fill in.</li>
+    <li>Tick <strong>Enable Facebook Page Posting</strong>.</li>
+    <li>Set <strong>Default Hashtags</strong>. Each one must start with # and be separated by spaces, for example <code>#hotel #malawi</code>. They are added to the end of every post and can be changed before posting.</li>
+    <li>Tick the areas where you want share buttons.</li>
+    <li>Click <strong>Save Facebook Settings</strong>. You will see <em>"Facebook settings saved successfully."</em></li>
+  </ol>
+  <div class="note"><p>If posting is switched off, every <strong>Post to Facebook</strong> button disappears from the admin. The Page ID must be numbers only. The Page ID and token are needed before posting can be switched on.</p></div>
 
-                <div class="callout tip">
-                    Keep your token private and rotate it whenever the Facebook app security policy changes.
-                </div>
-            </section>
+  <h2 id="test">How to send a test post</h2>
+  <ol class="steps">
+    <li>Save a token first. Until then the test button and <strong>Fetch from Token</strong> are greyed out.</li>
+    <li>Type a message, or leave it blank for a standard test line.</li>
+    <li>Click <strong>Send Test Post to Facebook Page</strong>.</li>
+    <li>You will see <strong>Success!</strong> with a <strong>View post on Facebook</strong> link, or <strong>Failed.</strong> with the reason.</li>
+  </ol>
+  <div class="warn"><p>The test publishes a real post on your Page. Delete it on Facebook afterwards if you do not want it to stay.</p></div>
 
-            <section>
-                <h2>4. Validate with a test post</h2>
-                <ol class="steps">
-                    <li>In the same settings page, go to <strong>Test Post</strong>.</li>
-                    <li>Enter a short message like <code>Test post from Rosalyns admin</code>.</li>
-                    <li>Click <strong>Send Test Post to Facebook Page</strong>.</li>
-                    <li>Confirm success and open the returned Facebook link.</li>
-                    <li>Delete the test post from Facebook if it is only for setup verification.</li>
-                </ol>
+  <h2 id="post">How to post one item to Facebook</h2>
+  <p>The button appears on these pages when posting is enabled, a token is saved, and the matching share tick is on:</p>
+  <ul>
+    <li>Rooms: <strong>Settings</strong> &rarr; <strong>Rooms</strong>, the Facebook button on each room card (tooltip <em>Preview &amp; post this room to your Facebook Page</em>).</li>
+    <li>Events: <strong>Advanced</strong> &rarr; <strong>Events</strong>, the Facebook button on each event.</li>
+    <li>Conference: <strong>Front Desk</strong> &rarr; <strong>Conference</strong>, the Facebook button on each room card.</li>
+    <li>Gym packages: <strong>Advanced</strong> &rarr; <strong>Gym Packages</strong> (<strong>Share on Facebook</strong>).</li>
+    <li>Menu items: the <strong>Feature</strong> button on each item in the menu page.</li>
+  </ul>
+  <ol class="steps">
+    <li>Click the Facebook button. A window opens: <strong>Compose post</strong> on the left, a <strong>Post preview</strong> on the right.</li>
+    <li>Read the caption. It is written for you from the item's details and your hashtags. Edit it as you like. A character count sits under it.</li>
+    <li>Tick or untick <strong>Include room image in post</strong> (the wording changes for events, conferences and menu items).</li>
+    <li>Click <strong>Post to Facebook Page</strong>.</li>
+    <li>You will see <em>"Posted to Facebook!"</em> with a link to the post. If the caption is empty you will see <em>"Please enter a caption."</em></li>
+  </ol>
 
-                <div class="callout warn">
-                    Test Post publishes a real post to your live Facebook Page.
-                </div>
-            </section>
+  <h2 id="postall">How to post several items together</h2>
+  <ol class="steps">
+    <li>On the Rooms page click <strong>Compose &amp; Preview Post</strong> in the banner <strong>Share All Rooms on Facebook</strong>. Conference has the same banner for conference rooms. Gym has <strong>Share All Packages</strong>. The menu page has <strong>Share Full Menu</strong>.</li>
+    <li>Tick the items to include. Use the select-all and clear buttons if you want.</li>
+    <li>Edit the caption and the image option, check the preview, then click the post button.</li>
+  </ol>
 
-            <section>
-                <h2>5. Daily publishing workflow</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Step</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>1</td>
-                            <td>Open content in admin (room, event, conference item, or menu item).</td>
-                        </tr>
-                        <tr>
-                            <td>2</td>
-                            <td>Click the Facebook share action when available.</td>
-                        </tr>
-                        <tr>
-                            <td>3</td>
-                            <td>Review generated caption; keep it short, clear, and specific.</td>
-                        </tr>
-                        <tr>
-                            <td>4</td>
-                            <td>Confirm media and key details (price, date, phone, booking link).</td>
-                        </tr>
-                        <tr>
-                            <td>5</td>
-                            <td>Publish and verify immediately on the Facebook Page.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
+  <h2 id="whatsapp">How to set up WhatsApp</h2>
+  <p>The WhatsApp Settings page sends booking messages through Meta's WhatsApp Business service. The same hotel number is used for the End of Day WhatsApp summary.</p>
+  <ol class="steps">
+    <li>Open <strong>Advanced</strong> &rarr; <strong>WhatsApp Settings</strong>.</li>
+    <li>In <strong>API Configuration</strong> fill in <strong>Hotel WhatsApp Number</strong> (with country code, like +265888123456), <strong>WhatsApp Phone Number ID</strong>, <strong>WhatsApp Business Account ID</strong> (both numbers from Meta) and <strong>Permanent Access Token</strong>.</li>
+    <li>Under <strong>Notification Triggers</strong> tick the events to message about: <strong>New Booking Created</strong>, <strong>Booking Confirmed</strong>, <strong>Booking Cancelled</strong>, <strong>Guest Check-in</strong>, <strong>Guest Check-out</strong>.</li>
+    <li>Under <strong>Notification Recipients</strong> choose <strong>Send to Guest</strong> (uses the phone number on the booking) and <strong>Send to Hotel/Admin</strong>. Enter the staff numbers in <strong>Admin WhatsApp Numbers</strong>, separated by commas.</li>
+    <li>Under <strong>Message Template Names</strong> type the names of your approved Meta templates for <strong>Booking Confirmed Template</strong> and <strong>Booking Cancelled Template</strong>. They must match Meta exactly. Letters, digits and underscores only. Blank gives <code>booking_confirmed</code> and <code>booking_cancelled</code>.</li>
+    <li>Tick <strong>Enable WhatsApp Notifications</strong> and click <strong>Save Settings</strong>. You will see <em>"WhatsApp settings saved successfully!"</em></li>
+    <li>To check it works, enter a number under <strong>Test WhatsApp Integration</strong> and click <strong>Send Test Message</strong>. Confirm the prompt. The result shows as <strong>Test Result</strong> at the top.</li>
+  </ol>
+  <div class="warn"><p>A test sends a live message and may be charged by Meta or WhatsApp.</p></div>
 
-            <section>
-                <h2>6. Caption quality checklist</h2>
-                <ul class="checklist">
-                    <li>Lead with one strong message in the first line.</li>
-                    <li>Include a clear call-to-action: book now, call, or WhatsApp.</li>
-                    <li>Keep hashtags relevant and limited (3 to 6 is usually enough).</li>
-                    <li>Never publish placeholder text like lorem ipsum or test amounts.</li>
-                    <li>Match currency format to MWK where pricing is shown.</li>
-                </ul>
-            </section>
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>Posting needs the right permission for the thing you post: Rooms, Events, Conference, Gym or Menu.</li>
+    <li>You can post only active rooms and events.</li>
+    <li>Each area can be turned off with its share tick on Facebook Settings. A gym toggle does not exist on that page; gym sharing follows the main switch.</li>
+    <li>WhatsApp cannot be enabled without the access token and phone number ID.</li>
+  </ul>
 
-            <section>
-                <h2>7. Troubleshooting</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Issue</th>
-                            <th>Fix</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Share button not visible</td>
-                            <td>Enable posting globally and enable the specific section toggle in Facebook Settings.
-                            </td>
-                        </tr>
-                        <tr>
-                            <td>"Invalid token" or permission error</td>
-                            <td>Generate a new token with <code>pages_manage_posts</code>,
-                                <code>pages_read_engagement</code>, and <code>pages_show_list</code>.</td>
-                        </tr>
-                        <tr>
-                            <td>No pages returned by Fetch from Token</td>
-                            <td>Confirm the token belongs to a user/system user with access to the hotel Page.</td>
-                        </tr>
-                        <tr>
-                            <td>Post succeeded but content is wrong</td>
-                            <td>Correct the source content in admin and re-post with a revised caption.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>Add the Page ID and an access token before enabling Facebook posting.</em></td><td>One of them is missing.</td><td>Add both, then tick Enable.</td></tr>
+      <tr><td><em>Facebook Page ID must be numeric.</em></td><td>Letters in the ID.</td><td>Use the number only, or use Fetch from Token.</td></tr>
+      <tr><td><em>Hashtags must each start with # and be separated by spaces, e.g. #hotel #malawi.</em></td><td>Wrong format.</td><td>Fix the hashtags.</td></tr>
+      <tr><td><em>The access token looks invalid (no spaces, 1000 characters maximum).</em></td><td>Token has spaces or is too long.</td><td>Paste it again without spaces.</td></tr>
+      <tr><td><em>No access token is saved. Paste and save a token first.</em></td><td>Fetch from Token used before saving.</td><td>Save the token first.</td></tr>
+      <tr><td><em>No Pages found for this token.</em></td><td>Token lacks pages_show_list.</td><td>Create the token again with that permission.</td></tr>
+      <tr><td><em>Facebook posting is not enabled.</em></td><td>The main switch is off.</td><td>Turn it on in Facebook Settings.</td></tr>
+      <tr><td><em>Room posting is disabled in Facebook settings.</em> (also Event, Conference, Menu)</td><td>The share tick for that area is off.</td><td>Tick it in Posting Options and save.</td></tr>
+      <tr><td><em>You do not have permission to post to Facebook.</em></td><td>You lack the permission for that page.</td><td>Ask an administrator.</td></tr>
+      <tr><td><em>Hotel WhatsApp number must be a phone number such as +265888123456.</em></td><td>Bad number format.</td><td>Use digits with country code.</td></tr>
+      <tr><td><em>Add the access token and phone number ID before enabling WhatsApp.</em></td><td>Missing Meta details.</td><td>Fill both, then enable.</td></tr>
+      <tr><td><em>Confirmed template name may only contain letters, digits and underscores.</em></td><td>Wrong characters in a template name.</td><td>Use the exact Meta template name.</td></tr>
+    </tbody>
+  </table>
 
-            <section>
-                <h2>8. Governance and safety</h2>
-                <ul class="checklist">
-                    <li>Limit publishing rights to manager-level users.</li>
-                    <li>Log all post attempts for audit (keep post logging enabled).</li>
-                    <li>Review posts daily for brand consistency and factual accuracy.</li>
-                    <li>Use official contact details only: hotel phone, WhatsApp, and booking URL.</li>
-                </ul>
-            </section>
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="10-conference-events.html">Conference and Events</a></li>
+    <li><a href="14-reports-eod.html">Reports and End of Day</a></li>
+    <li><a href="12-email-templates.php">Email template tags</a></li>
+  </ul>
 
-        </div>
-    </main>
-
-    <footer class="guide-footer">
-        <div class="deck">
-            <div class="crest">— R H —</div>
-            <p>Rosalyn's Hotel Management System · Documentation Suite</p>
-            <p><a href="index.html">Back to all guides →</a></p>
-        </div>
-    </footer>
-
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
 </body>
-
 </html>
