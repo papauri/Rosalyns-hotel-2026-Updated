@@ -20,6 +20,10 @@ if (!function_exists('rh_hotel_details_fields')) {
     {
         return [
             'Hotel identity & contact' => [
+                // Used where no browser request says which domain we are on: links and logos in
+                // emails and PDFs, password-reset links, the {{site_url}} template tag. Website
+                // pages themselves detect their own domain and ignore this.
+                'site_url'                 => ['label' => 'Website address (used in emails, documents and password-reset links)', 'type' => 'siteurl', 'default' => ''],
                 'site_short_name'          => ['label' => 'Short name (app icon / home screen)', 'type' => 'text', 'max' => 30, 'default' => ''],
                 'hotel_star_rating'        => ['label' => 'Star rating (0 = not rated)', 'type' => 'int', 'min' => 0, 'max' => 5, 'default' => '5'],
                 'price_range_indicator'    => ['label' => 'Price range (search engines)', 'type' => 'select', 'options' => ['$', '$$', '$$$', '$$$$'], 'default' => '$$$'],
@@ -119,6 +123,12 @@ if (!function_exists('rh_hotel_details_fields')) {
                 }
                 $out = implode(',', $list);
                 return strlen($out) > 1000 ? [null, "$label: too many addresses."] : [$out, null];
+            case 'siteurl':
+                if ($raw === '') return ['', null];
+                if (!filter_var($raw, FILTER_VALIDATE_URL) || !preg_match('#^https?://[^/?\#]+(/[^?\#]*)?$#i', $raw) || strlen($raw) > 255) {
+                    return [null, "$label: the full address of the site, e.g. https://www.yourhotel.com (no ? or #)."];
+                }
+                return [rtrim($raw, '/'), null]; // stored without a trailing slash; consumers append /admin/... or /booking.php
             case 'url':
                 if ($raw === '') return ['', null];
                 return (filter_var($raw, FILTER_VALIDATE_URL) && preg_match('#^https?://#i', $raw) && strlen($raw) <= 500) ? [$raw, null] : [null, "$label: must be a full http(s) link."];
@@ -220,7 +230,7 @@ if (!function_exists('rh_hotel_details_fields')) {
                     }
                     echo '</select>';
                 } else {
-                    $type = ['int' => 'number', 'decimal' => 'number', 'email' => 'email', 'url' => 'url'][$spec['type']] ?? 'text';
+                    $type = ['int' => 'number', 'decimal' => 'number', 'email' => 'email', 'url' => 'url', 'siteurl' => 'url'][$spec['type']] ?? 'text';
                     $attrs = '';
                     if (in_array($spec['type'], ['int', 'decimal'], true)) {
                         $attrs = ' min="' . $spec['min'] . '" max="' . $spec['max'] . '" step="' . ($spec['type'] === 'int' ? '1' : '0.01') . '"';
