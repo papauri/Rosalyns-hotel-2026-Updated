@@ -538,12 +538,13 @@ function checkAvailability(int $roomId, string $checkIn, string $checkOut): arra
             : ['pending', 'tentative', 'confirmed', 'checked-in'];
         $placeholders = implode(',', array_fill(0, count($blockingStatuses), '?'));
 
+        $effCo = rh_effective_checkout_sql('');
         $bookingsStmt = $pdo->prepare("
-            SELECT check_in_date, check_out_date FROM bookings
+            SELECT check_in_date, {$effCo} AS check_out_date FROM bookings
             WHERE room_id = ?
             AND status IN ({$placeholders})
             AND NOT (status = 'tentative' AND tentative_expires_at IS NOT NULL AND tentative_expires_at < NOW())
-            AND NOT (check_out_date <= ? OR check_in_date >= ?)
+            AND NOT ({$effCo} <= ? OR check_in_date >= ?)
         ");
         $bookingsStmt->execute(array_merge([$roomId], $blockingStatuses, [$checkIn, $checkOut]));
         $overlappingRows = $bookingsStmt->fetchAll(PDO::FETCH_ASSOC);

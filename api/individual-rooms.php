@@ -155,7 +155,7 @@ function listIndividualRooms() {
                 FROM bookings
                 WHERE individual_room_id = ?
                 AND status IN ('confirmed', 'checked-in')
-                AND check_out_date >= CURDATE()
+                AND " . rh_effective_checkout_sql('') . " >= CURDATE()
                 ORDER BY check_in_date DESC
                 LIMIT 1
             ");
@@ -232,7 +232,7 @@ function getIndividualRoom($id) {
             FROM bookings
             WHERE individual_room_id = ?
             AND status IN ('confirmed', 'checked-in')
-            AND check_out_date >= CURDATE()
+            AND " . rh_effective_checkout_sql('') . " >= CURDATE()
             ORDER BY check_in_date DESC
             LIMIT 1
         ");
@@ -494,7 +494,7 @@ function deleteIndividualRoom($id) {
         FROM bookings 
         WHERE individual_room_id = ? 
         AND status IN ('pending', 'confirmed', 'checked-in')
-        AND check_out_date >= CURDATE()
+        AND " . rh_effective_checkout_sql('') . " >= CURDATE()
     ");
     $bookingsCheck->execute([$id]);
     $bookingsCount = $bookingsCheck->fetch(PDO::FETCH_ASSOC)['count'];

@@ -348,7 +348,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Check for active bookings, including joined-room bookings via booking_rooms
             $bookingsCheck = $pdo->prepare("
                 SELECT COUNT(*) FROM bookings b
-                WHERE b.status IN ('pending', 'confirmed', 'checked-in') AND b.check_out_date >= CURDATE()
+                WHERE b.status IN ('pending', 'confirmed', 'checked-in') AND (b.check_out_date >= CURDATE() OR b.status = 'checked-in')
                   AND (b.individual_room_id = ? OR EXISTS (
                         SELECT 1 FROM booking_rooms br
                         WHERE br.booking_id = b.id
@@ -518,7 +518,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 ))
                   AND b.status IN ('confirmed','checked-in')
                   AND b.check_in_date <= CURDATE()
-                  AND b.check_out_date >= CURDATE()
+                  AND (b.check_out_date >= CURDATE() OR b.status = 'checked-in')
                 ORDER BY b.check_in_date ASC
                 LIMIT 1
             ");
@@ -752,7 +752,7 @@ $stmt = $pdo->prepare("
         ))
         AND active_b.status IN ('confirmed', 'checked-in')
         AND active_b.check_in_date <= CURDATE()
-        AND active_b.check_out_date >= CURDATE()
+        AND (active_b.check_out_date >= CURDATE() OR active_b.status = 'checked-in')
     -- Reserved booking: future confirmed booking (stay hasn't started yet)
     LEFT JOIN bookings reserved_b ON (ir.id = reserved_b.individual_room_id OR EXISTS (
             SELECT 1 FROM booking_rooms rbr

@@ -150,7 +150,6 @@ function getOccupiedRooms(PDO $pdo): array
         INNER JOIN bookings b ON b.individual_room_id = ir.id
         WHERE b.status = 'checked-in'
           AND b.check_in_date <= CURDATE()
-          AND b.check_out_date >= CURDATE()
           AND ir.is_active = 1
         ORDER BY
             CASE

@@ -197,6 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
         ");
         $ir_stmt->execute([$room_type_id]);
         $result = [];
+        $eff_co = rh_effective_checkout_sql('b');
         foreach ($ir_stmt->fetchAll(PDO::FETCH_ASSOC) as $ir) {
             $conflict_stmt = $pdo->prepare("
                                 SELECT COUNT(*) FROM bookings b
@@ -207,7 +208,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
                                             AND br.released_at IS NULL
                                 ))
                                     AND b.status NOT IN ('cancelled','no-show')
-                  AND check_in_date < ? AND check_out_date > ?
+                  AND b.check_in_date < ? AND {$eff_co} > ?
             ");
             $conflict_stmt->execute([$ir['id'], $ir['id'], $co, $ci]);
             $has_conflict = (int)$conflict_stmt->fetchColumn() > 0;

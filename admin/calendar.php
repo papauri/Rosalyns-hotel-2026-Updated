@@ -126,8 +126,9 @@ try {
     $startDate = sprintf('%04d-%02d-01', $currentYear, $currentMonth);
     $endDate = date('Y-m-t', strtotime($startDate)); // real last day: '-31' is an invalid DATE in short months and throws under strict SQL
 
+    $effCo = rh_effective_checkout_sql('b');
     $stmt = $pdo->prepare("
-        SELECT b.*, r.name as room_name, r.id as room_id, r.price_per_night,
+        SELECT b.*, {$effCo} AS effective_check_out, r.name as room_name, r.id as room_id, r.price_per_night,
                ir.id as individual_room_id, ir.room_number as individual_room_number,
                ir.room_name as individual_room_name, ir.floor as individual_room_floor,
                ir.status as individual_room_status
@@ -136,7 +137,7 @@ try {
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
         WHERE b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
         AND (
-            (b.check_in_date <= :end_date AND b.check_out_date >= :start_date)
+            (b.check_in_date <= :end_date AND {$effCo} >= :start_date)
         )
         ORDER BY b.check_in_date ASC, r.name ASC, ir.room_number ASC
     ");
@@ -146,7 +147,7 @@ try {
     // Group bookings by date and individual room (or room type if no individual room assigned)
     foreach ($bookings as $booking) {
         $checkIn = new DateTime($booking['check_in_date']);
-        $checkOut = new DateTime($booking['check_out_date']);
+        $checkOut = new DateTime($booking['effective_check_out'] ?? $booking['check_out_date']);
 
         $currentDate = clone $checkIn;
         while ($currentDate < $checkOut) {
@@ -184,7 +185,8 @@ function getTimelineAwareRoomStatus(array $room, string $date, array $bookingsBy
     if (isset($bookingsByDate[$dateKey][$roomKey])) {
         foreach ($bookingsByDate[$dateKey][$roomKey] as $booking) {
             $checkIn = $booking['check_in_date'];
-            $checkOut = $booking['check_out_date'];
+            // Overdue checked-in guests occupy the room until checked out (effective checkout).
+            $checkOut = $booking['effective_check_out'] ?? $booking['check_out_date'];
             $status = $booking['status'];
 
             // Timeline-aware status logic

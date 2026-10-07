@@ -149,7 +149,7 @@ function getRoomsNeedingMaintenance(PDO $pdo): array
         FROM individual_rooms ir
         LEFT JOIN bookings b ON b.individual_room_id = ir.id
             AND b.status IN ('checked-in', 'checked-out')
-            AND b.check_out_date >= CURDATE()
+            AND (b.check_out_date >= CURDATE() OR b.status = 'checked-in')
         WHERE ir.is_active = 1
           AND (
               ir.status = 'out_of_order'

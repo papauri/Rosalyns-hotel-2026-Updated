@@ -3333,6 +3333,18 @@ function getAvailableRoomCombinations(int $roomTypeId, string $checkIn, string $
 }
 
 /**
+ * Effective check-out for availability tests. A 'checked-in' booking whose check_out_date has
+ * passed (overdue guest still in the room) keeps the room occupied through tomorrow; every
+ * other case uses check_out_date unchanged. CURDATE() is the hotel date (session time_zone set
+ * above). Pass '' for $alias when the query has no table alias.
+ */
+function rh_effective_checkout_sql(string $alias = 'b'): string
+{
+    $p = $alias === '' ? '' : $alias . '.';
+    return "(CASE WHEN {$p}status = 'checked-in' AND {$p}check_out_date < CURDATE() THEN DATE_ADD(CURDATE(), INTERVAL 1 DAY) ELSE {$p}check_out_date END)";
+}
+
+/**
  * Joined-room bookings that have no rooms assigned yet (website bookings arrive this way)
  * still need a combination. They hold the first free combinations for their dates, so the
  * joined type cannot be oversold and those member rooms are not sold on their own meanwhile.
@@ -3344,11 +3356,12 @@ function rh_combination_unassigned_holds(int $combinedTypeId, string $checkIn, s
     global $pdo;
     $statuses = getBookingStatusesThatBlockAvailability(false);
     $ph = implode(',', array_fill(0, count($statuses), '?'));
-    $sql = "SELECT b.id, b.check_in_date, b.check_out_date FROM bookings b
+    $effCo = rh_effective_checkout_sql('b');
+    $sql = "SELECT b.id, b.check_in_date, {$effCo} AS check_out_date FROM bookings b
         WHERE b.room_id = ? AND b.individual_room_id IS NULL
           AND b.status IN ({$ph})
           AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
-          AND NOT (b.check_out_date <= ? OR b.check_in_date >= ?)
+          AND NOT ({$effCo} <= ? OR b.check_in_date >= ?)
           AND NOT EXISTS (SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.released_at IS NULL)";
     $params = array_merge([$combinedTypeId], $statuses, [$checkIn, $checkOut]);
     if ($excludeBookingId) {
@@ -3628,14 +3641,15 @@ function getRoomTypeIndividualAvailabilitySummary(int $room_id, string $check_in
 
     $blockingStatuses = getBookingStatusesThatBlockAvailability(false);
     $placeholders = implode(',', array_fill(0, count($blockingStatuses), '?'));
+    $effCo = rh_effective_checkout_sql('');
     $sql = "
-        SELECT child_guests, check_in_date, check_out_date
+        SELECT child_guests, check_in_date, {$effCo} AS check_out_date
         FROM bookings
         WHERE room_id = ?
         AND individual_room_id IS NULL
         AND status IN ({$placeholders})
         AND NOT (status = 'tentative' AND tentative_expires_at IS NOT NULL AND tentative_expires_at < NOW())
-        AND NOT (check_out_date <= ? OR check_in_date >= ?)
+        AND NOT ({$effCo} <= ? OR check_in_date >= ?)
     ";
     $params = array_merge([$room_id], $blockingStatuses, [$check_in_date, $check_out_date]);
     if ($exclude_booking_id) {
@@ -3946,19 +3960,20 @@ function checkRoomAvailability(int $room_id, string $check_in_date, string $chec
         $blockingStatuses = getBookingStatusesThatBlockAvailability(false);
         $placeholders = str_repeat('?,', count($blockingStatuses) - 1) . '?';
 
+        $effCo = rh_effective_checkout_sql('');
         $sql = "
             SELECT
                 id,
                 booking_reference,
                 check_in_date,
-                check_out_date,
+                {$effCo} AS check_out_date,
                 status,
                 guest_name
             FROM bookings
             WHERE room_id = ?
             AND status IN ({$placeholders})
             AND NOT (status = 'tentative' AND tentative_expires_at IS NOT NULL AND tentative_expires_at < NOW())
-            AND NOT (check_out_date <= ? OR check_in_date >= ?)
+            AND NOT ({$effCo} <= ? OR check_in_date >= ?)
         ";
         $params = array_merge([$room_id], $blockingStatuses, [$check_in_date, $check_out_date]);
 
@@ -4168,15 +4183,16 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
     // Active bookings holding a specific room
     $statuses = getBookingStatusesThatBlockAvailability(true);
     $stPh = implode(',', array_fill(0, count($statuses), '?'));
-    $live = "b.status IN ($stPh) AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW()) AND b.check_in_date < ? AND b.check_out_date > ?";
+    $effCo = rh_effective_checkout_sql('b');
+    $live = "b.status IN ($stPh) AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW()) AND b.check_in_date < ? AND {$effCo} > ?";
 
-    $st = $pdo->prepare("SELECT b.individual_room_id AS rid, b.check_in_date AS ci, b.check_out_date AS co FROM bookings b WHERE b.individual_room_id IN ($idPh) AND $live");
+    $st = $pdo->prepare("SELECT b.individual_room_id AS rid, b.check_in_date AS ci, {$effCo} AS co FROM bookings b WHERE b.individual_room_id IN ($idPh) AND $live");
     $st->execute(array_merge($roomIds, $statuses, [$end, $start]));
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $markRange((int)$row['rid'], substr($row['ci'], 0, 10), substr($row['co'], 0, 10));
     }
     if (bookingAvailabilityTableExists('booking_rooms')) {
-        $st = $pdo->prepare("SELECT br.individual_room_id AS rid, b.check_in_date AS ci, b.check_out_date AS co FROM booking_rooms br JOIN bookings b ON b.id = br.booking_id WHERE br.individual_room_id IN ($idPh) AND br.released_at IS NULL AND $live");
+        $st = $pdo->prepare("SELECT br.individual_room_id AS rid, b.check_in_date AS ci, {$effCo} AS co FROM booking_rooms br JOIN bookings b ON b.id = br.booking_id WHERE br.individual_room_id IN ($idPh) AND br.released_at IS NULL AND $live");
         $st->execute(array_merge($roomIds, $statuses, [$end, $start]));
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $markRange((int)$row['rid'], substr($row['ci'], 0, 10), substr($row['co'], 0, 10));
@@ -4186,7 +4202,7 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
     // Bookings of this type that hold no physical room yet each consume one unit per night.
     $unassignedPerNight = array_fill_keys($nights, 0);
     $noLink = bookingAvailabilityTableExists('booking_rooms') ? " AND NOT EXISTS (SELECT 1 FROM booking_rooms br2 WHERE br2.booking_id = b.id AND br2.released_at IS NULL)" : '';
-    $st = $pdo->prepare("SELECT b.check_in_date AS ci, b.check_out_date AS co FROM bookings b WHERE b.room_id = ? AND b.individual_room_id IS NULL AND $live" . $noLink);
+    $st = $pdo->prepare("SELECT b.check_in_date AS ci, {$effCo} AS co FROM bookings b WHERE b.room_id = ? AND b.individual_room_id IS NULL AND $live" . $noLink);
     $st->execute(array_merge([$room_id], $statuses, [$end, $start]));
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $from = max(substr($row['ci'], 0, 10), $start);
@@ -4209,7 +4225,7 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
         }
         foreach ($familyPairs as $ft => $fps) {
             $need = array_fill_keys($nights, 0);
-            $ust = $pdo->prepare("SELECT b.check_in_date AS ci, b.check_out_date AS co FROM bookings b WHERE b.room_id = ? AND b.individual_room_id IS NULL AND $live" . $noLink);
+            $ust = $pdo->prepare("SELECT b.check_in_date AS ci, {$effCo} AS co FROM bookings b WHERE b.room_id = ? AND b.individual_room_id IS NULL AND $live" . $noLink);
             $ust->execute(array_merge([$ft], $statuses, [$end, $start]));
             foreach ($ust->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $from = max(substr($row['ci'], 0, 10), $start);
@@ -4310,15 +4326,16 @@ function getBookedDatesForRoom(int $room_id, string $start_date, string $end_dat
         $placeholders = str_repeat('?,', count($blockingStatuses) - 1) . '?';
 
         // Get all overlapping bookings for the date range
+        $effCo = rh_effective_checkout_sql('');
         $sql = "
             SELECT
                 check_in_date,
-                check_out_date
+                {$effCo} AS check_out_date
             FROM bookings
             WHERE room_id = ?
             AND status IN ({$placeholders})
             AND NOT (status = 'tentative' AND tentative_expires_at IS NOT NULL AND tentative_expires_at < NOW())
-            AND NOT (check_out_date <= ? OR check_in_date >= ?)
+            AND NOT ({$effCo} <= ? OR check_in_date >= ?)
             ORDER BY check_in_date ASC
         ";
         $params = array_merge([$room_id], $blockingStatuses, [$start_date, $end_date]);
@@ -4764,13 +4781,14 @@ function getAvailableDates(int $room_id, string $start_date, string $end_date)
         $blocked_dates = $blocked_stmt->fetchAll(PDO::FETCH_COLUMN);
 
         // Get booked dates
+        $effCo = rh_effective_checkout_sql('');
         $booked_sql = "
             SELECT DISTINCT DATE(check_in_date) as date
             FROM bookings
             WHERE room_id = ?
             AND status IN ('pending', 'confirmed', 'checked-in')
             AND check_in_date <= ?
-            AND check_out_date > ?
+            AND {$effCo} > ?
         ";
         $booked_stmt = $pdo->prepare($booked_sql);
         $booked_stmt->execute([$room_id, $end_date, $start_date]);
@@ -5046,22 +5064,23 @@ function getBookingsOverlappingBlockDates(?int $roomTypeId, ?int $individualRoom
 
     $statuses = getBookingStatusesThatBlockAvailability(true);
     $ph = implode(',', array_fill(0, count($statuses), '?'));
-    $where = "b.status IN ($ph) AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW()) AND b.check_in_date < ? AND b.check_out_date > ?";
+    $effCo = rh_effective_checkout_sql('b');
+    $where = "b.status IN ($ph) AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW()) AND b.check_in_date < ? AND {$effCo} > ?";
     $params = array_merge($statuses, [$lastEx, $first]);
 
     if ($individualRoomId !== null) {
-        $sql = "SELECT DISTINCT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.check_out_date, b.status
+        $sql = "SELECT DISTINCT b.id, b.booking_reference, b.guest_name, b.check_in_date, {$effCo} AS check_out_date, b.status
                 FROM bookings b
                 WHERE $where AND (b.individual_room_id = ? OR EXISTS (
                     SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.individual_room_id = ? AND br.released_at IS NULL))";
         $params[] = $individualRoomId;
         $params[] = $individualRoomId;
     } elseif ($roomTypeId !== null) {
-        $sql = "SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.check_out_date, b.status
+        $sql = "SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, {$effCo} AS check_out_date, b.status
                 FROM bookings b WHERE $where AND b.room_id = ?";
         $params[] = $roomTypeId;
     } else {
-        $sql = "SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.check_out_date, b.status
+        $sql = "SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, {$effCo} AS check_out_date, b.status
                 FROM bookings b WHERE $where";
     }
 
@@ -6307,27 +6326,28 @@ function checkIndividualRoomAvailability(int $individualRoomId, string $checkIn,
         $placeholders = str_repeat('?,', count($blockingStatuses) - 1) . '?';
 
         $excludeSql = $excludeBookingId ? " AND b.id != ?" : "";
+        $effCo = rh_effective_checkout_sql('b');
         $sql = "
             SELECT * FROM (
                 SELECT
                     b.id,
                     b.booking_reference,
                     b.check_in_date,
-                    b.check_out_date,
+                    {$effCo} AS check_out_date,
                     b.status,
                     b.guest_name
                 FROM bookings b
                 WHERE b.individual_room_id = ?
                 AND b.status IN ({$placeholders})
                 AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
-                AND NOT (b.check_out_date <= ? OR b.check_in_date >= ?)
+                AND NOT ({$effCo} <= ? OR b.check_in_date >= ?)
                 {$excludeSql}
                 UNION
                 SELECT
                     b.id,
                     b.booking_reference,
                     b.check_in_date,
-                    b.check_out_date,
+                    {$effCo} AS check_out_date,
                     b.status,
                     b.guest_name
                 FROM booking_rooms br
@@ -6336,7 +6356,7 @@ function checkIndividualRoomAvailability(int $individualRoomId, string $checkIn,
                 AND br.released_at IS NULL
                 AND b.status IN ({$placeholders})
                 AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
-                AND NOT (b.check_out_date <= ? OR b.check_in_date >= ?)
+                AND NOT ({$effCo} <= ? OR b.check_in_date >= ?)
                 {$excludeSql}
             ) conflicts
             ORDER BY check_in_date ASC
@@ -6754,12 +6774,13 @@ function rh_individual_room_locked_conflict(int $individualRoomId, string $check
     $statuses = getBookingStatusesThatBlockAvailability(true);
     $ph = implode(',', array_fill(0, count($statuses), '?'));
     $exclude = $excludeBookingId ? ' AND b.id <> ?' : '';
+    $effCo = rh_effective_checkout_sql('b');
 
     $direct = $pdo->prepare("
         SELECT b.booking_reference FROM bookings b
         WHERE b.individual_room_id = ? AND b.status IN ($ph)
           AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
-          AND b.check_in_date < ? AND b.check_out_date > ? $exclude
+          AND b.check_in_date < ? AND {$effCo} > ? $exclude
         LIMIT 1 FOR UPDATE
     ");
     $p = array_merge([$individualRoomId], $statuses, [$checkOut, $checkIn]);
@@ -6778,7 +6799,7 @@ function rh_individual_room_locked_conflict(int $individualRoomId, string $check
             JOIN bookings b ON b.id = br.booking_id
             WHERE br.individual_room_id = ? AND br.released_at IS NULL AND b.status IN ($ph)
               AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
-              AND b.check_in_date < ? AND b.check_out_date > ? $exclude
+              AND b.check_in_date < ? AND {$effCo} > ? $exclude
             LIMIT 1 FOR UPDATE
         ");
         $joined->execute($p);
@@ -6946,7 +6967,7 @@ function getIndividualRoomDetails(int $individualRoomId)
                 FROM bookings
                 WHERE individual_room_id = ?
                 AND status IN ('confirmed', 'checked-in')
-                AND check_out_date >= CURDATE()
+                AND " . rh_effective_checkout_sql('') . " >= CURDATE()
                 ORDER BY check_in_date DESC
                 LIMIT 1
             ");

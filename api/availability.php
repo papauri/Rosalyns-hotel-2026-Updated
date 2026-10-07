@@ -145,19 +145,20 @@ try {
         $total            = $pricePerNight * $nights;
 
         // Get any conflicting bookings for detailed info
+        $effCo = rh_effective_checkout_sql('b');
         $conflictsStmt = $pdo->prepare("
             SELECT
                 b.booking_reference,
                 b.guest_name,
                 b.check_in_date,
-                b.check_out_date,
+                {$effCo} AS check_out_date,
                 b.status
             FROM bookings b
             WHERE b.room_id = ?
             AND b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
             AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
             AND (
-                (b.check_in_date < ? AND b.check_out_date > ?) OR
+                (b.check_in_date < ? AND {$effCo} > ?) OR
                 (b.check_in_date >= ? AND b.check_in_date < ?)
             )
             ORDER BY b.check_in_date ASC
@@ -196,19 +197,20 @@ try {
         ApiResponse::success($response, 'Room available');
     } else {
         // Get conflicting bookings for detailed error
+        $effCo = rh_effective_checkout_sql('b');
         $conflictsStmt = $pdo->prepare("
             SELECT
                 b.booking_reference,
                 b.guest_name,
                 b.check_in_date,
-                b.check_out_date,
+                {$effCo} AS check_out_date,
                 b.status
             FROM bookings b
             WHERE b.room_id = ?
             AND b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
             AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
             AND (
-                (b.check_in_date < ? AND b.check_out_date > ?) OR
+                (b.check_in_date < ? AND {$effCo} > ?) OR
                 (b.check_in_date >= ? AND b.check_in_date < ?)
             )
             ORDER BY b.check_in_date ASC
