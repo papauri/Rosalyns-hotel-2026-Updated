@@ -145,6 +145,7 @@ $_nav_groups = [
     ],
     'Settings' => [
         ['booking-settings.php',  'fas fa-cog',          'Hotel Settings', 'booking_settings',  '', null],
+        ['email-templates.php',   'fas fa-envelope-open-text', 'Email Templates', 'edit_templates', '', null],
         ['room-management.php',   'fas fa-bed',          'Rooms',          'rooms',             '', 'bookings'],
         ['rate-plans.php',        'fas fa-tags',         'Rate Plans',     'booking_settings',  '', 'bookings'],
         ['user-management.php',   'fas fa-users-cog',    'Staff & Access', 'user_management',   '', null],
@@ -420,6 +421,8 @@ if ($_admin_back_target !== null) {
 <link rel="stylesheet" href="css/page-zoom.css?v=<?php echo @filemtime(__DIR__ . '/../css/page-zoom.css'); ?>">
 <?php /* One size for every summary card and data table — loaded after page CSS so it wins. */ ?>
 <link rel="stylesheet" href="css/admin-uniform.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-uniform.css'); ?>">
+<link rel="stylesheet" href="css/admin-global-search.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-global-search.css'); ?>">
+<script src="js/admin-global-search.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-global-search.js'); ?>" defer></script>
 <div id="adminPageLoader" class="admin-page-loader is-visible" data-boot-loader="1" role="status" aria-live="polite" aria-hidden="false">
     <div class="admin-page-loader-card">
         <div class="admin-page-loader-brand"><i class="fas fa-hotel" aria-hidden="true"></i><span id="adminPageLoaderBrand"><?php echo htmlspecialchars($site_name); ?></span></div>
@@ -447,6 +450,9 @@ if ($_admin_back_target !== null) {
             <i class="fas fa-circle" id="rhConnDot" style="font-size:.55rem"></i>
             <span id="rhConnLabel">Online</span>
         </div>
+        <button type="button" class="admin-gsearch-btn" data-rh-global-search aria-label="Search everything (Ctrl+K)" title="Search everything (Ctrl+K or /)">
+            <i class="fas fa-search" aria-hidden="true"></i><span>Search</span><kbd>Ctrl K</kbd>
+        </button>
         <?php rh_page_zoom_control(); ?>
         <div class="user-meta">
             <div class="user-name"><?php echo htmlspecialchars($user['full_name']); ?></div>

@@ -201,7 +201,7 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                         <span><?php echo $esc($job['label']); ?></span></label>
                 <?php endforeach; ?>
             </div>
-            <p class="help-text">Tentative holds use the reminder hours from Booking Settings. Pre-arrival, post-stay and gym renewal share the switches (and day settings) they always had in Booking Settings / Gym Members.</p>
+            <p class="help-text">Tentative holds use the reminder hours from Hotel Settings. Pre-arrival, post-stay and gym renewal share the switches (and day settings) they always had in Hotel Settings / Gym Members.</p>
 
             <h3>Overdue payment reminders</h3>
             <div class="ae-grid">
@@ -243,7 +243,7 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                                 <td>
                                     <?php if ($editable): ?>
                                         <?php echo (int)($tplCfg['is_active'] ?? 1) === 1 ? 'Active' : '<strong>Switched off</strong>'; ?> &middot;
-                                        <a href="booking-settings.php?section=email-templates#email-templates">Edit in Email Templates</a>
+                                        <a href="email-templates.php">Edit in Email Templates</a>
                                     <?php else: ?>
                                         Built-in wording
                                     <?php endif; ?>

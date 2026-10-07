@@ -208,7 +208,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
 
     <div class="content">
         <a href="booking-settings.php" class="back-link">
-            <i class="fas fa-arrow-left"></i> Back to Booking Settings
+            <i class="fas fa-arrow-left"></i> Back to Hotel Settings
         </a>
 
         <div class="page-header">

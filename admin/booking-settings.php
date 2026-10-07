@@ -19,6 +19,22 @@ $template_preview = null;
    guest receives. Without this the email/PDF template editors are hidden and
    the panel is preview-only; the save and reset actions are refused below. */
 $canEditTemplates = hasPermission((int)($user['id'] ?? 0), 'edit_templates');
+
+/* Email & PDF templates have their own page (email-templates.php includes this file with
+   RH_TEMPLATES_PAGE), so template access can be given without the rest of Hotel Settings.
+   That page renders only the template editor and refuses every other settings POST. */
+$rh_templates_only = defined('RH_TEMPLATES_PAGE');
+$rh_self = $rh_templates_only ? 'email-templates.php' : 'booking-settings.php';
+if (!$rh_templates_only && ($_GET['section'] ?? '') === 'email-templates') {
+    header('Location: email-templates.php');
+    exit;
+}
+if ($rh_templates_only && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $rh_template_posts = ['booking_email_template_preview', 'send_test_email', 'reset_all_booking_templates_to_defaults', 'booking_email_templates'];
+    if (!array_intersect($rh_template_posts, array_keys($_POST))) {
+        $_SERVER['REQUEST_METHOD'] = '__BLOCKED__';
+    }
+}
 $default_site_maintenance_message = 'Our website is temporarily unavailable while we complete scheduled maintenance. Please check back shortly.';
 
 // Module flags — gate settings sections/templates by the active business
@@ -1276,7 +1292,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo $mod_bookings ? 'Booking Settings' : 'Business Settings'; ?> - Admin Panel</title>
+    <title><?php echo $rh_templates_only ? 'Email &amp; PDF Templates' : ($mod_bookings ? 'Hotel Settings' : 'Business Settings'); ?> - Admin Panel</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -1292,7 +1308,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
         <header class="rh-page-head">
             <div class="rh-page-head__main">
                 <div class="rh-page-head__title">
-                    <h1><?php echo $mod_bookings ? 'Booking Settings' : 'Business Settings'; ?></h1>
+                    <h1><?php echo $rh_templates_only ? 'Email &amp; PDF Templates' : ($mod_bookings ? 'Hotel Settings' : 'Business Settings'); ?></h1>
                 </div>
             </div>
             <div class="rh-page-head__actions">
@@ -1302,6 +1318,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </div>
         </header>
 
+        <?php if (!$rh_templates_only): ?>
         <nav class="bs-jump" aria-label="Settings sections">
             <span class="bs-jump__label">Jump to</span>
             <a href="#maintenance">Maintenance</a>
@@ -1321,8 +1338,9 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <?php endif; ?>
             <a href="#service-modules">Service modules</a>
             <a href="#pwa-settings">PWA</a>
-            <a href="#email-templates">Templates</a>
+            <a href="email-templates.php">Email templates &rarr;</a>
         </nav>
+        <?php endif; ?>
 
         <?php if ($message): ?>
             <div class="alert alert-success">
@@ -1338,6 +1356,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </div>
         <?php endif; ?>
 
+        <?php if (!$rh_templates_only): ?>
         <div class="rh-panel settings-card" id="maintenance">
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Frontend Maintenance Mode</h2></div>
 
@@ -2145,6 +2164,9 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </form>
             </div>
 
+            <?php endif; /* !$rh_templates_only: settings cards above */ ?>
+
+            <?php if ($rh_templates_only): ?>
             <?php
             // Determine which tab to show first
             $activeTabKey = array_key_first($booking_template_defs);
@@ -2254,7 +2276,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <?php endforeach; ?>
                 </div>
 
-                <form method="POST" id="tpl-main-form" action="booking-settings.php">
+                <form method="POST" id="tpl-main-form" action="<?php echo $rh_self; ?>">
                     <input type="hidden" name="booking_email_templates" value="1">
 
                     <?php foreach ($booking_template_defs as $tkey => $tname):
@@ -2742,7 +2764,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading…';
                         }
 
-                        fetch('booking-settings.php', {
+                        fetch(<?php echo json_encode($rh_self); ?>, {
                                 method: 'POST',
                                 body: buildPreviewFd(key)
                             })
@@ -2856,7 +2878,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             btn.disabled = true;
                             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-                            fetch('booking-settings.php', {
+                            fetch(<?php echo json_encode($rh_self); ?>, {
                                     method: 'POST',
                                     body: fd
                                 })
@@ -2921,6 +2943,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
 
                 })();
             </script>
+            <?php endif; /* $rh_templates_only: template editor */ ?>
 
             </div><!-- /.content -->
 

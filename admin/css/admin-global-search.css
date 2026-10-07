@@ -1,0 +1,161 @@
+/* Universal admin search: navbar button + command palette (js/admin-global-search.js). */
+
+.admin-header .admin-gsearch-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+.admin-header .admin-gsearch-btn:hover,
+.admin-header .admin-gsearch-btn:focus-visible {
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.32);
+    outline: none;
+}
+.admin-header .admin-gsearch-btn kbd {
+    font: 600 11px/1 inherit;
+    padding: 3px 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.85);
+}
+@media (max-width: 900px) {
+    .admin-header .admin-gsearch-btn span,
+    .admin-header .admin-gsearch-btn kbd { display: none; }
+    .admin-header .admin-gsearch-btn { padding: 0 10px; }
+}
+
+.rh-gs {
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 9vh 16px 16px;
+    background: rgba(17, 24, 39, 0.45);
+    backdrop-filter: blur(2px);
+}
+.rh-gs[hidden] { display: none; }
+html.rh-gs-open { overflow: hidden; }
+
+.rh-gs__panel {
+    width: min(680px, 100%);
+    max-height: 78vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--admin-surface, #fffdfb);
+    color: var(--admin-text, #1f2a37);
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(17, 24, 39, 0.28);
+    overflow: hidden;
+    animation: rh-gs-in 0.14s ease-out;
+}
+@keyframes rh-gs-in { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.rh-gs__bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--admin-surface-border, #d7dde6);
+}
+.rh-gs__bar > .fa-search { color: var(--admin-accent, #766550); }
+.rh-gs__input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    font: inherit;
+    font-size: 16px; /* 16px stops iOS zooming on focus */
+    color: inherit;
+}
+.rh-gs__close {
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    padding: 4px;
+}
+.rh-gs__close kbd {
+    font: 600 11px/1 inherit;
+    padding: 4px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.rh-gs__list {
+    list-style: none;
+    margin: 0;
+    padding: 6px 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.rh-gs__group {
+    padding: 10px 16px 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--admin-muted, #5f6b7c);
+}
+.rh-gs__item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 6px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.rh-gs__item.is-active { background: var(--admin-hover-bg, #edf2f8); }
+.rh-gs__icon {
+    width: 18px;
+    text-align: center;
+    color: var(--admin-accent, #766550);
+    flex-shrink: 0;
+}
+.rh-gs__text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.rh-gs__title,
+.rh-gs__sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rh-gs__title { font-size: 14px; font-weight: 600; }
+.rh-gs__sub { font-size: 12px; color: var(--admin-muted, #5f6b7c); }
+.rh-gs__item mark { background: rgba(200, 164, 90, 0.35); color: inherit; border-radius: 2px; padding: 0 1px; }
+.rh-gs__go { color: var(--admin-muted, #5f6b7c); opacity: 0; font-size: 12px; }
+.rh-gs__item.is-active .rh-gs__go { opacity: 1; }
+
+.rh-gs__status {
+    padding: 9px 16px;
+    border-top: 1px solid var(--admin-surface-border, #d7dde6);
+    font-size: 12px;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+/* Landing highlight on the destination row (on top of the shared deep-link flash). */
+.rh-gs-landed { outline: 2px solid rgba(200, 164, 90, 0.85); outline-offset: 2px; border-radius: 6px; }
+
+@media (max-width: 600px) {
+    .rh-gs { padding: 0; align-items: stretch; }
+    .rh-gs__panel { max-height: none; height: 100%; border-radius: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .rh-gs__panel { animation: none; }
+    .admin-header .admin-gsearch-btn { transition: none; }
+}
+
+/* Phones: the header has no room for the hotel name next to search, zoom and account
+   buttons — it was squeezed to a single letter. Keep the brand icon only. */
+@media (max-width: 480px) {
+    .admin-header .admin-header-brand h1 { display: none; }
+}

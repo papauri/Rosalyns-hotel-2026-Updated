@@ -251,7 +251,7 @@ foreach ($active as $bk) {
                 <i class="fas fa-toggle-off"></i>
                 <strong>Tentative bookings are currently disabled.</strong>
                 Guests cannot create new tentative holds — the option is hidden on the public booking page and admin forms.
-                <a href="booking-settings.php#tentative" style="color: inherit; font-weight: 700; margin-left: 8px;">Enable in Booking Settings →</a>
+                <a href="booking-settings.php#tentative" style="color: inherit; font-weight: 700; margin-left: 8px;">Enable in Hotel Settings →</a>
             </div>
         <?php endif; ?>
 

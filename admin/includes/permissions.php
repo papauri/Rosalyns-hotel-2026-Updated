@@ -868,10 +868,10 @@ function getAllPermissions()
         ],
         'edit_templates' => [
             'label' => 'Edit message templates',
-            'description' => 'Change the wording guests receive: receipt email and WhatsApp templates, and the booking email and PDF templates. Without it those templates are preview-only.',
+            'description' => 'Open Settings > Email Templates and change the wording guests receive: booking email and PDF templates, and the receipt email and WhatsApp templates. Gives no other settings access (receipt templates on the Receipts page also need Receipts access); without it the templates are preview-only.',
             'icon' => 'fa-file-pen',
             'category' => 'Settings',
-            'page' => 'receipts.php',
+            'page' => 'email-templates.php',
             'group' => 'settings'
         ],
         'finance_settings' => [
@@ -941,8 +941,8 @@ function getAllPermissions()
             'group' => 'content'
         ],
         'booking_settings' => [
-            'label' => 'Booking Settings',
-            'description' => 'Configure booking system settings',
+            'label' => 'Hotel Settings',
+            'description' => 'Hotel details, policies, booking rules, email server and notifications (Settings > Hotel Settings)',
             'icon' => 'fa-cog',
             'category' => 'Settings',
             'page' => 'booking-settings.php',
