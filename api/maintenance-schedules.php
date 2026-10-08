@@ -130,24 +130,41 @@ function maintenanceApiHasActiveBlockNow(PDO $pdo, int $roomId): bool {
 }
 
 function maintenanceApiSyncRoomStatus(PDO $pdo, int $roomId, ?int $performedBy = null, string $reason = 'Maintenance schedule API sync'): void {
+    require_once __DIR__ . '/../includes/room-management.php';
+
     $statusStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
     $statusStmt->execute([$roomId]);
     $current = (string)$statusStmt->fetchColumn();
-    if ($current === '') {
+    if ($current === '' || in_array($current, ['occupied', 'out_of_order'], true)) {
         return;
     }
 
-    $hasBlock = maintenanceApiHasActiveBlockNow($pdo, $roomId);
-    if ($hasBlock) {
-        if (!in_array($current, ['occupied', 'out_of_order', 'maintenance'], true)) {
-            maintenanceApiSetRoomStatus($pdo, $roomId, 'maintenance', $reason, $performedBy);
+    if (rh_room_has_active_maintenance($pdo, $roomId)) {
+        if ($current !== 'maintenance') {
+            // Standard prefix marks the status as schedule-driven so it may be released later.
+            maintenanceApiSetRoomStatus($pdo, $roomId, 'maintenance', 'Maintenance assignment active (' . $reason . ')', $performedBy);
         }
         return;
     }
 
-    if ($current === 'maintenance') {
-        maintenanceApiSetRoomStatus($pdo, $roomId, 'available', $reason, $performedBy);
+    if ($current !== 'maintenance') {
+        return;
     }
+
+    // Release only a maintenance status that a schedule set (never a manually-set one).
+    $setBySchedule = false;
+    if (maintenanceApiTableExists($pdo, 'room_maintenance_log')) {
+        $logStmt = $pdo->prepare("SELECT reason FROM room_maintenance_log WHERE individual_room_id = ? AND status_to = 'maintenance' ORDER BY created_at DESC, id DESC LIMIT 1");
+        $logStmt->execute([$roomId]);
+        $lastReason = $logStmt->fetchColumn();
+        $setBySchedule = is_string($lastReason) && strpos($lastReason, 'Maintenance assignment active') === 0;
+    }
+    if (!$setBySchedule) {
+        return;
+    }
+
+    maintenanceApiSetRoomStatus($pdo, $roomId, 'cleaning', $reason . ' - room needs cleaning', $performedBy);
+    createHousekeepingAssignment($roomId, $performedBy, ['notes' => 'Post-maintenance cleaning']);
 }
 
 function maintenanceApiOverlaps(PDO $pdo, int $roomId, string $startDate, string $endDate, ?int $excludeId = null): bool {
@@ -632,12 +649,24 @@ function verifySchedule($id) {
         ApiResponse::error('Schedule must be completed (and not already verified) before verification', 400);
     }
 
+    // The verifier is the person doing the verifying, never the schedule's creator. API calls are
+    // key-authenticated (no admin session), so the caller passes verified_by in the JSON body; it
+    // must be an active admin user, otherwise it is stored as NULL.
+    $body = json_decode((string)file_get_contents('php://input'), true);
+    $verifierId = null;
+    if (is_array($body) && !empty($body['verified_by'])) {
+        $vStmt = $pdo->prepare("SELECT id FROM admin_users WHERE id = ? AND is_active = 1");
+        $vStmt->execute([(int)$body['verified_by']]);
+        $vId = $vStmt->fetchColumn();
+        $verifierId = $vId !== false ? (int)$vId : null;
+    }
+
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare("UPDATE room_maintenance_schedules SET verified_by = ?, verified_at = NOW() WHERE id = ? AND status = 'completed'");
-        $stmt->execute([isset($row['created_by']) ? (int)$row['created_by'] : null, $id]);
-        
-        maintenanceApiSyncRoomStatus($pdo, (int)$row['individual_room_id'], isset($row['created_by']) ? (int)$row['created_by'] : null, 'Maintenance schedule verified via API');
+        $stmt->execute([$verifierId, $id]);
+
+        maintenanceApiSyncRoomStatus($pdo, (int)$row['individual_room_id'], $verifierId, 'Maintenance schedule verified via API');
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {

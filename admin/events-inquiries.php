@@ -379,11 +379,26 @@ try {
         $params[] = $status_filter;
     }
 
-    $sql .= " ORDER BY ei.created_at DESC";
+    // The waitlist is first-come-first-served: oldest first so staff promote from the top.
+    $sql .= $status_filter === 'waitlisted' ? " ORDER BY ei.created_at ASC, ei.id ASC" : " ORDER BY ei.created_at DESC";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $event_inquiries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // For each waitlisted booking, how many people joined the same event's waitlist before it
+    // (drives the "promoting out of order" warning).
+    $earlierStmt = $pdo->prepare("SELECT COUNT(*) FROM event_inquiries
+        WHERE event_id = ? AND status = 'waitlisted' AND id <> ?
+          AND (created_at < ? OR (created_at = ? AND id < ?))");
+    foreach ($event_inquiries as &$wlRow) {
+        $wlRow['earlier_waitlisted'] = 0;
+        if (($wlRow['status'] ?? '') === 'waitlisted') {
+            $earlierStmt->execute([(int)$wlRow['event_id'], (int)$wlRow['id'], $wlRow['created_at'], $wlRow['created_at'], (int)$wlRow['id']]);
+            $wlRow['earlier_waitlisted'] = (int)$earlierStmt->fetchColumn();
+        }
+    }
+    unset($wlRow);
 } catch (PDOException $e) {
     $event_inquiries = [];
     $error = 'Error fetching event bookings: ' . $e->getMessage();
@@ -650,7 +665,7 @@ try {
                         <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-check"></i> Confirm</button>
                     </form>` : ''}
                     ${inquiry.status === 'waitlisted' ? `
-                    <form method="POST" onsubmit="return confirm('Move this booking off the waitlist? The guest will be emailed that a place is available.');">
+                    <form method="POST" onsubmit="return confirm((${Number(inquiry.earlier_waitlisted) || 0} > 0 ? 'WARNING: ${Number(inquiry.earlier_waitlisted) || 0} guest(s) joined this waitlist before this booking and are still waiting. Promoting this one skips them.\\n\\n' : '') + 'Move this booking off the waitlist? The guest will be emailed that a place is available.');">
                         <input type="hidden" name="inquiry_action" value="promote">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${eventCsrfToken}">

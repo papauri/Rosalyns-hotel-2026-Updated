@@ -521,10 +521,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             if (($enquiry['status'] ?? '') !== 'confirmed') {
                 throw new Exception('Only confirmed enquiries can be marked completed.');
             }
+            // An event that has not happened yet cannot be completed.
+            if (!empty($enquiry['event_date']) && (string)$enquiry['event_date'] > date('Y-m-d')) {
+                throw new Exception('This conference is on ' . date('M j, Y', strtotime((string)$enquiry['event_date'])) . ' and has not taken place yet - it cannot be marked completed.');
+            }
+            // Money still owed: require an explicit confirmation (the Complete button's dialog sets the flag) and log it.
+            $outstandingAtComplete = (float)($paymentSnapshot['amount_due'] ?? $enquiry['amount_due'] ?? 0);
+            $completeWithBalance = $outstandingAtComplete > BALANCE_TOLERANCE;
+            if ($completeWithBalance && empty($_POST['confirm_outstanding'])) {
+                throw new Exception('This conference still has an outstanding balance of ' . number_format($outstandingAtComplete, 2) . '. Confirm the completion explicitly to proceed.');
+            }
 
             $stmt = $pdo->prepare("UPDATE conference_inquiries SET status = 'completed', updated_at = NOW() WHERE id = ?");
             $stmt->execute([$enquiry_id]);
-            $message = 'Conference marked as completed!';
+            if ($completeWithBalance) {
+                rh_log_event('conference', 'warning', 'Conference ' . ($enquiry['inquiry_reference'] ?? ('#' . $enquiry_id)) . ' marked completed with an outstanding balance', [
+                    'enquiry_id'  => $enquiry_id,
+                    'amount_due'  => $outstandingAtComplete,
+                    'actor'       => $user['full_name'] ?? $user['username'] ?? '',
+                ]);
+            }
+            $message = 'Conference marked as completed!' . ($completeWithBalance ? ' (Outstanding balance of ' . number_format($outstandingAtComplete, 2) . ' logged.)' : '');
         } elseif ($action === 'send_invoice') {
             try {
                 $totalAmount = (float)$enquiry['total_amount'];
@@ -930,8 +947,14 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                                                     <input type="hidden" name="enquiry_action" value="complete">
                                                     <input type="hidden" name="enquiry_id" value="<?php echo $enquiry['id']; ?>">
+                                                    <?php $completeDue = (float)($enquiry['amount_due'] ?? 0);
+                                                    if ($completeDue > BALANCE_TOLERANCE): ?>
+                                                        <input type="hidden" name="confirm_outstanding" value="1">
+                                                    <?php endif; ?>
                                                     <button type="submit" class="btn btn-primary btn-sm"
-                                                        data-admin-confirm="Mark this conference as completed?"
+                                                        data-admin-confirm="<?php echo $completeDue > BALANCE_TOLERANCE
+                                                            ? htmlspecialchars('This conference still has an outstanding balance of ' . $currency . ' ' . number_format($completeDue, 2) . '. Mark it completed anyway?', ENT_QUOTES, 'UTF-8')
+                                                            : 'Mark this conference as completed?'; ?>"
                                                         data-admin-confirm-title="Complete conference"
                                                         data-admin-confirm-ok="Complete"
                                                         data-admin-confirm-cancel="Cancel"

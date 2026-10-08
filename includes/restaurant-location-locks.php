@@ -185,6 +185,7 @@ function rh_restaurant_resolve_pos_location(PDO $pdo, string $orderType, ?string
             FROM bookings b
             INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
             WHERE b.status = 'checked-in'
+              AND b.deleted_at IS NULL
               AND b.individual_room_id = ?
             ORDER BY b.check_in_date DESC, b.id DESC
             LIMIT 1 FOR UPDATE");

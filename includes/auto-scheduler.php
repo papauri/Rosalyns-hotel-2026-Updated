@@ -46,6 +46,7 @@ if (!function_exists('rh_auto_defaults')) {
             'automated_email_job_unpaid_reminder' => '1',
             'automated_email_job_unpaid_release' => '1',
             'automated_backup_enabled'          => '1',
+            'automated_job_recurring_maintenance' => '1',
             'scheduler_last_run'                => '0',
             'scheduler_last_result'             => '',
         ];
@@ -120,6 +121,11 @@ if (!function_exists('rh_auto_defaults')) {
             'gym_membership_renewal' => [
                 'label' => 'Gym membership renewal reminders', 'fn' => 'rh_job_gym_membership_renewal',
                 'toggle' => 'gym_reminder_enabled', 'toggle_default' => '1', 'interval' => 360, 'legacy' => true, 'bcc' => 'global',
+            ],
+            // Not an email: creates the next occurrence of recurring room-maintenance series (idempotent).
+            'recurring_maintenance' => [
+                'label' => 'Recurring maintenance generation', 'fn' => 'rh_job_recurring_maintenance',
+                'toggle' => 'automated_job_recurring_maintenance', 'toggle_default' => '1', 'interval' => 360, 'legacy' => false, 'bcc' => 'global',
             ],
             // Last on purpose: a backup can take a while, so every email job runs first.
             'nightly_backup' => [

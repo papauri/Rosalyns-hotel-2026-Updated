@@ -234,7 +234,7 @@ try {
                                 <?php endif; ?>
                                 <?php if ($total > 0): ?>
                                 <div class="conf-detail-row conf-detail-row--total">
-                                    <span>Estimated Total</span>
+                                    <span>Estimated Total <small>(estimate, confirmed by our team)</small></span>
                                     <span><?php echo $currency_symbol . number_format($total, 0); ?></span>
                                 </div>
                                 <?php endif; ?>

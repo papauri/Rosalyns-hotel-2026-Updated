@@ -60,6 +60,12 @@ $inquiry_email_warning = '';
 $success_reference = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Module gate: a disabled conference module must not accept enquiries (same pattern as requireEventsEnabled()).
+    if (!$conferenceEnabled) {
+        error_log('Conference enquiry POST rejected while conference module disabled');
+        header('Location: ' . (defined('BASE_URL') ? BASE_URL : '/'), true, 303);
+        exit;
+    }
     try {
         // CSRF validation — must pass before any processing
         if (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'conference')) {
@@ -104,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $validation_errors['email'] = $email_validation['error'];
         } else {
             // Use validated email directly - no need to sanitize as validation already ensures it's safe
-            $sanitized_data['email'] = $_POST['email'];
+            $sanitized_data['email'] = strtolower(trim((string)$_POST['email']));
             if (strlen($sanitized_data['email']) > 100) {
                 $validation_errors['email'] = 'Email address is too long (maximum 100 characters)';
             }
@@ -228,8 +234,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'av_equipment' => $sanitized_data['av_equipment']
         ];
 
-        // Log booking data for diagnostics
-        error_log("Conference enquiry data prepared: " . print_r($booking_data, true));
+        // (Enquiry details are intentionally not logged - they contain guest PII; the reference is logged on success.)
 
         $room_id = $sanitized_data['conference_room_id'];
         $company_name = $sanitized_data['company_name'];
@@ -335,7 +340,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$customer_result['success']) {
             error_log("Failed to send conference enquiry confirmation email: " . $customer_result['message']);
         } else {
-            error_log("Conference customer email sent successfully to: " . $sanitized_data['email']);
+            error_log("Conference customer email sent successfully");
         }
 
         // Send notification email to admin
@@ -361,7 +366,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $inquiry_email_warning = $email_warning;
         }
 
-        error_log("Conference enquiry submitted successfully from: " . $sanitized_data['email'] . " with reference: " . $inquiry_reference);
+        error_log("Conference enquiry submitted successfully with reference: " . $inquiry_reference);
 
         // Redirect to dedicated confirmation page
         pub_confirm_remember('conference', (string)$inquiry_reference);

@@ -295,7 +295,16 @@ function createHousekeepingAssignment(int $roomId, ?int $performedBy, array $opt
 {
     global $pdo;
 
+    $ownTx = !$pdo->inTransaction();
     try {
+        // Serialise concurrent callers on the room row so the check-then-insert below cannot
+        // create two open assignments for the same room.
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        $lockStmt = $pdo->prepare("SELECT id FROM individual_rooms WHERE id = ? FOR UPDATE");
+        $lockStmt->execute([$roomId]);
+
         // Check for existing pending assignment
         $existingStmt = $pdo->prepare("
             SELECT id FROM housekeeping_assignments
@@ -303,6 +312,9 @@ function createHousekeepingAssignment(int $roomId, ?int $performedBy, array $opt
         ");
         $existingStmt->execute([$roomId]);
         if ($existingStmt->fetch()) {
+            if ($ownTx) {
+                $pdo->commit();
+            }
             return ['success' => true, 'message' => 'Housekeeping assignment already exists'];
         }
 
@@ -338,13 +350,21 @@ function createHousekeepingAssignment(int $roomId, ?int $performedBy, array $opt
 
         // Update room's housekeeping status
         $pdo->prepare("UPDATE individual_rooms SET housekeeping_status = 'pending' WHERE id = ?")->execute([$roomId]);
+        $assignmentId = $pdo->lastInsertId();
+
+        if ($ownTx) {
+            $pdo->commit();
+        }
 
         return [
             'success' => true,
             'message' => 'Housekeeping assignment created',
-            'assignment_id' => $pdo->lastInsertId()
+            'assignment_id' => $assignmentId
         ];
     } catch (PDOException $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         error_log("Housekeeping assignment error: " . $e->getMessage());
         return ['success' => false, 'message' => $e->getMessage()];
     }
@@ -416,6 +436,64 @@ function closeFolioChargedRoomServiceOrders($pdo, $bookingId): int
         WHERE booking_id = ? AND order_type = 'room_service' AND status = 'placed' AND folio_posted_at IS NOT NULL");
     $stmt->execute([(int)$bookingId]);
     return $stmt->rowCount();
+}
+
+/** Cached column-exists check for room_maintenance_schedules (no schema assumptions). */
+function rh_maint_schedule_column_exists(PDO $pdo, string $column): bool
+{
+    static $cache = [];
+    if (!array_key_exists($column, $cache)) {
+        try {
+            $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'room_maintenance_schedules' AND COLUMN_NAME = ?");
+            $st->execute([$column]);
+            $cache[$column] = ((int)$st->fetchColumn() > 0);
+        } catch (Throwable $e) {
+            $cache[$column] = false;
+        }
+    }
+    return $cache[$column];
+}
+
+/**
+ * Does this room have a maintenance schedule that should hold it in maintenance right now?
+ * Active = in progress; or planned/pending whose start date (start_date, else due_date) has
+ * arrived in the hotel timezone; or completed but not yet verified (the inspection gate).
+ * A schedule planned for a future date is NOT active.
+ */
+function rh_room_has_active_maintenance(PDO $pdo, int $roomId): bool
+{
+    $hasStart = rh_maint_schedule_column_exists($pdo, 'start_date');
+    $hasDue = rh_maint_schedule_column_exists($pdo, 'due_date');
+    $startExpr = null;
+    if ($hasStart && $hasDue) {
+        $startExpr = 'COALESCE(DATE(start_date), due_date)';
+    } elseif ($hasStart) {
+        $startExpr = 'DATE(start_date)';
+    } elseif ($hasDue) {
+        $startExpr = 'due_date';
+    }
+
+    $params = [$roomId];
+    $plannedCond = "status IN ('planned', '')";
+    if ($startExpr !== null) {
+        $plannedCond .= " AND ({$startExpr} IS NULL OR {$startExpr} <= ?)";
+        $params[] = date('Y-m-d'); // hotel timezone (RH_TIMEZONE is the PHP default timezone)
+    }
+    $completedCond = "status = 'completed'" . (rh_maint_schedule_column_exists($pdo, 'verified_at') ? ' AND verified_at IS NULL' : '');
+
+    try {
+        $st = $pdo->prepare("
+            SELECT 1 FROM room_maintenance_schedules
+            WHERE individual_room_id = ?
+              AND (status = 'in_progress' OR ({$plannedCond}) OR ({$completedCond}))
+            LIMIT 1
+        ");
+        $st->execute($params);
+        return (bool)$st->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('rh_room_has_active_maintenance: ' . $e->getMessage());
+        return false;
+    }
 }
 
 /**
@@ -512,10 +590,21 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
             if ($roomId <= 0) {
                 continue;
             }
+            // A room with an active maintenance schedule goes to maintenance, not cleaning; the
+            // housekeeping task is still created and waits until maintenance releases the room.
+            $roomNext = $nextStatus;
+            $toMaintenance = ($nextStatus === ROOM_STATUS_CLEANING && rh_room_has_active_maintenance($pdo, $roomId));
+            if ($toMaintenance) {
+                $roomNext = ROOM_STATUS_MAINTENANCE;
+            }
+            // The 'Maintenance assignment active' prefix marks the status as schedule-driven so the
+            // maintenance reconcile may release it when the schedule closes.
             $roomResult = updateRoomStatus(
                 $roomId,
-                $nextStatus,
-                "Guest checkout - Booking #{$booking['booking_reference']}",
+                $roomNext,
+                $toMaintenance
+                    ? "Maintenance assignment active (guest checkout - Booking #{$booking['booking_reference']})"
+                    : "Guest checkout - Booking #{$booking['booking_reference']}",
                 $performedBy,
                 ['force' => true, 'notes' => $booking['booking_reference']]
             );
@@ -544,7 +633,7 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
             $pdo->prepare("
                 INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by, created_at)
                 VALUES (?, 'occupied', ?, ?, ?, NOW())
-            ")->execute([$roomId, $nextStatus, "Checkout: {$booking['booking_reference']}", $performedBy]);
+            ")->execute([$roomId, $roomNext, ($toMaintenance ? 'Maintenance assignment active - checkout: ' : 'Checkout: ') . $booking['booking_reference'], $performedBy]);
         }
 
         // Release all room holds so availability and future checkouts stay clean.
@@ -635,6 +724,20 @@ function markRoomClean(int $roomId, ?int $performedBy = null, array $options = [
         if (!$room) {
             $pdo->rollBack();
             return ['success' => false, 'message' => 'Room not found'];
+        }
+
+        // Cleaning must never release a room that is in use or out of service.
+        if (in_array($room['status'], [ROOM_STATUS_OCCUPIED, ROOM_STATUS_MAINTENANCE, ROOM_STATUS_OUT_OF_ORDER], true)) {
+            $pdo->rollBack();
+            $labels = [
+                ROOM_STATUS_OCCUPIED => 'occupied (a guest is in the room)',
+                ROOM_STATUS_MAINTENANCE => 'under maintenance',
+                ROOM_STATUS_OUT_OF_ORDER => 'out of order',
+            ];
+            return [
+                'success' => false,
+                'message' => 'Room ' . $room['room_number'] . ' cannot be marked clean because it is ' . $labels[$room['status']] . '.'
+            ];
         }
 
         // Determine if inspection is required
@@ -1047,13 +1150,15 @@ function autoReleaseStaleCleaningRooms(int $hours = 4): array
 
     try {
         // Find rooms in cleaning status for too long
-        $stmt = $pdo->query("
+        $hours = max(1, $hours);
+        $stmt = $pdo->prepare("
             SELECT id, room_number
             FROM individual_rooms
             WHERE status = 'cleaning'
             AND is_active = 1
-            AND updated_at < DATE_SUB(NOW(), INTERVAL {$hours} HOUR)
+            AND updated_at < DATE_SUB(NOW(), INTERVAL ? HOUR)
         ");
+        $stmt->execute([$hours]);
         $staleRooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $released = [];
@@ -1066,16 +1171,15 @@ function autoReleaseStaleCleaningRooms(int $hours = 4): array
             $hkStmt->execute([$room['id']]);
 
             if (!$hkStmt->fetch()) {
-                // No active assignment - auto-release
-                $result = updateRoomStatus(
-                    $room['id'],
-                    ROOM_STATUS_AVAILABLE,
-                    "Auto-released: no active cleaning for {$hours}+ hours",
+                // No open task: raise one so the room gets cleaned. The room stays in cleaning
+                // (never made sellable by a timer).
+                $result = createHousekeepingAssignment(
+                    (int)$room['id'],
                     null,
-                    ['force' => true]
+                    ['priority' => 'high', 'notes' => "Auto-created: room in cleaning for {$hours}+ hours with no open task"]
                 );
 
-                if ($result['success']) {
+                if (!empty($result['success'])) {
                     $released[] = $room['room_number'];
                 }
             }

@@ -49,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])
         if (!$email_validation['valid']) {
             $validation_errors['email'] = $email_validation['error'];
         } else {
-            $sanitized_data['email'] = $_POST['email'];
+            $sanitized_data['email'] = strtolower(trim((string)$_POST['email']));
         }
 
         $phone_validation = validatePhone($_POST['phone'] ?? '');
@@ -95,6 +95,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])
                 $rsvpStatus = rh_event_rsvp_status($pdo, $event_id, (int)($sanitized_data['guests'] ?? 1));
                 if ($rsvpStatus === null) {
                     throw new RuntimeException('event_unavailable');
+                }
+                // The event row is locked by rh_event_rsvp_status(), so this check is race-safe.
+                if (rh_event_has_active_rsvp($pdo, $event_id, $sanitized_data['email'])) {
+                    throw new RuntimeException('duplicate_rsvp');
                 }
                 $stmt = $pdo->prepare("
                     INSERT INTO event_inquiries (
@@ -145,7 +149,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['event_booking_form'])
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                $bookingError = 'This event is no longer taking bookings.';
+                $bookingError = $e->getMessage() === 'duplicate_rsvp'
+                    ? 'You already have a booking for this event with that email address. Check your inbox for the confirmation, or contact us if you need to change it.'
+                    : 'This event is no longer taking bookings.';
             }
 
             if ($bookingError === '') {

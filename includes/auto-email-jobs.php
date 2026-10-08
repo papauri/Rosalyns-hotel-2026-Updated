@@ -911,6 +911,20 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         return $res;
     }
 
+    /** Create the next occurrence of due recurring maintenance series. No email; 'sent' = schedules created. */
+    function rh_job_recurring_maintenance(PDO $pdo, array $o = []): array
+    {
+        $res = ['checked' => 1, 'sent' => 0, 'skipped' => 0, 'errors' => []];
+        require_once __DIR__ . '/maintenance-recurring.php';
+        try {
+            $res['sent'] = rh_create_recurring_maintenance($pdo, null);
+        } catch (Throwable $e) {
+            $res['errors'][] = $e->getMessage();
+            error_log('auto-scheduler recurring maintenance: ' . $e->getMessage());
+        }
+        return $res;
+    }
+
     /* ── sample sends ("Send test to me" on Automated Emails) ─ */
 
     /** @return array<string,string> template/job key => label */

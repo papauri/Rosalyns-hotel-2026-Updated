@@ -143,12 +143,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $count = is_array($itemIds) ? count($itemIds) : 0;
                 if ($count === 0) throw new RuntimeException('Add at least one item.');
 
+                // Idempotency: each rendered form carries a one-time token. A repeated submit
+                // (double tap, browser resubmit, retry) finds the token already consumed and is refused.
+                $rsToken = trim((string)($_POST['rs_order_token'] ?? ''));
+                if ($rsToken === '' || !isset($_SESSION['rs_order_tokens'][$rsToken])) {
+                    throw new RuntimeException('This order was already submitted, or the form has expired. Reload the page and check the active queue before sending it again.');
+                }
+                unset($_SESSION['rs_order_tokens'][$rsToken]);
+
+                $pdo->beginTransaction();
+                // Lock the booking row and re-check it inside the transaction so a concurrent
+                // check-out / deletion cannot slip a charge onto a closed folio.
+                $bkLock = $pdo->prepare("SELECT id, status, deleted_at FROM bookings WHERE id = ? FOR UPDATE");
+                $bkLock->execute([$bookingId]);
+                $bkLocked = $bkLock->fetch(PDO::FETCH_ASSOC);
+                if (!$bkLocked || $bkLocked['deleted_at'] !== null) throw new RuntimeException('Booking not found.');
+                if ($bkLocked['status'] !== 'checked-in') throw new RuntimeException('Only checked-in bookings can have room-service orders.');
+
                 // Verify booking is checked-in
                 $bk = $pdo->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.guest_email, b.guest_phone, b.status, b.individual_room_id, ir.room_number, r.name AS room_type_name
                                      FROM bookings b
                                      LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                                      LEFT JOIN rooms r ON r.id = b.room_id
-                                     WHERE b.id = ?");
+                                     WHERE b.id = ? AND b.deleted_at IS NULL");
                 $bk->execute([$bookingId]);
                 $booking = $bk->fetch(PDO::FETCH_ASSOC);
                 if (!$booking) throw new RuntimeException('Booking not found.');
@@ -158,7 +175,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ? 'Rm ' . $booking['room_number']
                     : ('Booking #' . $booking['booking_reference']);
 
-                $pdo->beginTransaction();
                 // Guard: rh_restaurant_resolve_pos_location throws if room_number is empty.
                 // If a booking is checked-in but not yet assigned to a physical room, fall
                 // back to using the booking data directly so the order is still allowed.
@@ -175,6 +191,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'booking'           => $booking,
                     ];
                 }
+                // One authoritative booking id: the resolver's booking for this room must be the
+                // booking the staff member picked, otherwise the room changed hands since page load.
+                if ((int)($resolvedRoom['booking_id'] ?? 0) !== $bookingId) {
+                    throw new RuntimeException('That room now belongs to a different booking. Reload the page and pick the guest again.');
+                }
                 $tableLabel = $resolvedRoom['label'] ?: $tableLabel;
 
                 // Build stock_orders row first (so items can be linked)
@@ -182,7 +203,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("INSERT INTO stock_orders (reference, order_type, booking_id, individual_room_id, table_number, room_number, customer_name, customer_email, customer_phone, notes, status, total_amount, created_by) VALUES (?, 'room_service', ?, ?, ?, ?, ?, ?, ?, ?, 'placed', 0, ?)")
                     ->execute([
                         $reference,
-                        $resolvedRoom['booking_id'] ?: $bookingId,
+                        $bookingId,
                         $resolvedRoom['individual_room_id'] ?: (!empty($booking['individual_room_id']) ? (int)$booking['individual_room_id'] : null),
                         $resolvedRoom['table_number'] ?: $tableLabel,
                         $resolvedRoom['room_number'] ?: ($booking['room_number'] ?: null),
@@ -427,7 +448,7 @@ $bkSt = $pdo->query("SELECT b.id, b.booking_reference, b.guest_name, b.status, i
                      FROM bookings b
                      LEFT JOIN individual_rooms ir ON ir.id=b.individual_room_id
                      LEFT JOIN rooms r ON r.id=b.room_id
-                     WHERE b.status='checked-in'
+                     WHERE b.status='checked-in' AND b.deleted_at IS NULL
                      ORDER BY ir.room_number, b.guest_name");
 $checkedIn = $bkSt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -496,6 +517,10 @@ function rs_fmt_time(?string $dt): string
 }
 
 $csrf_token = generateCsrfToken();
+// One-time token for the place-order form (idempotency); keep only the 20 most recent.
+$rsOrderToken = bin2hex(random_bytes(16));
+$_SESSION['rs_order_tokens'] = array_slice(($_SESSION['rs_order_tokens'] ?? []) + [], -19, null, true);
+$_SESSION['rs_order_tokens'][$rsOrderToken] = time();
 $current_page = basename($_SERVER['PHP_SELF']);
 ?>
 <!DOCTYPE html>
@@ -573,6 +598,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                 <form method="POST" id="rsOrderForm">
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                     <input type="hidden" name="action" value="place_rs_order">
+                    <input type="hidden" name="rs_order_token" value="<?php echo htmlspecialchars($rsOrderToken, ENT_QUOTES, 'UTF-8'); ?>">
                     <?php /* minmax(0,1fr) not 1fr: plain `1fr` floors each track at its
                              content's min-content width, so the menu column could not shrink
                              and pushed the order cart to x=2088 inside an 859px box, where the
@@ -909,6 +935,25 @@ $current_page = basename($_SERVER['PHP_SELF']);
             if (fireBtn) fireBtn.disabled = false;
             rsUpdateFireBtn();
         }
+        // Block double submits: disable the button as soon as the form is sent.
+        (function() {
+            const f = document.getElementById('rsOrderForm');
+            if (!f) return;
+            f.addEventListener('submit', function(e) {
+                const b = document.getElementById('rsFireBtn');
+                if (f.dataset.submitting === '1') {
+                    e.preventDefault();
+                    return;
+                }
+                f.dataset.submitting = '1';
+                if (b) {
+                    // Defer so the button's own value/disabled state doesn't cancel the submit.
+                    setTimeout(function() {
+                        b.disabled = true;
+                    }, 0);
+                }
+            });
+        })();
         // Works for both direct load (DOMContentLoaded not yet fired) and SPA
         // navigation (DOMContentLoaded already fired, readyState is 'complete').
         if (document.readyState === 'loading') {

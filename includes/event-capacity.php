@@ -25,6 +25,24 @@ if (!function_exists('rh_event_seat_statuses')) {
         return (int)$st->fetchColumn();
     }
 
+    /** Normalise an RSVP e-mail for storage and comparison. */
+    function rh_event_normalise_email(string $email): string
+    {
+        return strtolower(trim($email));
+    }
+
+    /**
+     * True when this e-mail already holds an active (non-cancelled) RSVP for the event.
+     * Call inside the transaction that holds the event-row lock so two submits cannot both pass.
+     */
+    function rh_event_has_active_rsvp(PDO $pdo, int $eventId, string $email): bool
+    {
+        $st = $pdo->prepare("SELECT COUNT(*) FROM event_inquiries
+            WHERE event_id = ? AND LOWER(TRIM(email)) = ? AND status <> 'cancelled'");
+        $st->execute([$eventId, rh_event_normalise_email($email)]);
+        return (int)$st->fetchColumn() > 0;
+    }
+
     /**
      * @return array{capacity:int,taken:int,left:?int,waitlisted:int} left is null when unlimited
      */
@@ -53,13 +71,18 @@ if (!function_exists('rh_event_seat_statuses')) {
     function rh_event_rsvp_status(PDO $pdo, int $eventId, int $guests): ?string
     {
         // Past events are closed to new RSVPs (the page greys them out, the server must agree).
-        $st = $pdo->prepare('SELECT capacity FROM events WHERE id = ? AND is_active = 1 AND event_date >= ? FOR UPDATE');
+        $st = $pdo->prepare('SELECT capacity, event_date, start_time FROM events WHERE id = ? AND is_active = 1 AND event_date >= ? FOR UPDATE');
         $st->execute([$eventId, date('Y-m-d')]);
-        $capacity = $st->fetchColumn();
-        if ($capacity === false) {
+        $evRow = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$evRow) {
             return null;
         }
-        $capacity = max(0, (int)$capacity);
+        // A same-day event closes to new RSVPs once its start time has passed (server/hotel timezone).
+        if ((string)$evRow['event_date'] === date('Y-m-d') && !empty($evRow['start_time'])
+            && date('H:i:s') >= date('H:i:s', strtotime((string)$evRow['start_time']))) {
+            return null;
+        }
+        $capacity = max(0, (int)$evRow['capacity']);
         if ($capacity === 0) {
             return 'pending';
         }

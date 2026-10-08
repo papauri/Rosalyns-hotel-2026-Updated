@@ -184,6 +184,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif (!ctype_digit($cp) || (int)$cp > 1000000) {
                 throw new Exception('Capacity must be a whole number (leave blank or 0 for unlimited).');
             }
+            // Never lower capacity below the seats already held by pending/confirmed/completed RSVPs.
+            if ($action === 'update' && $cp !== '' && (int)$cp > 0) {
+                require_once __DIR__ . '/../includes/event-capacity.php';
+                $seatsHeld = rh_event_seats_taken($pdo, (int)$_POST['id']);
+                if ((int)$cp < $seatsHeld) {
+                    throw new Exception('Capacity cannot be set to ' . (int)$cp . ': ' . $seatsHeld . ' seat(s) are already held by pending or confirmed bookings. Cancel or move some bookings first, or choose a capacity of at least ' . $seatsHeld . '.');
+                }
+            }
             if ((float)$_POST['ticket_price'] > 99999999.99) {
                 throw new Exception('Ticket price is too large.');
             }

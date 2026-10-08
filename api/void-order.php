@@ -103,14 +103,45 @@ function v_voidRoomServiceFolioCharges(PDO $pdo, int $orderId, string $reason, i
 
 try {
     $pdo->beginTransaction();
-    $oh = $pdo->prepare("SELECT id, reference, status, order_type FROM stock_orders WHERE id=? FOR UPDATE");
+    $oh = $pdo->prepare("SELECT id, reference, status, order_type, booking_id FROM stock_orders WHERE id=? FOR UPDATE");
     $oh->execute([$orderId]);
     $order = $oh->fetch(PDO::FETCH_ASSOC);
     if (!$order) { $pdo->rollBack(); vjerr('Order not found', 404); }
-    /* Only a live sale can be voided: 'placed' (open tab, possibly part-paid on a split) or 'paid'.
+
+    /* A delivered room-service order is 'completed' (room-service-dashboard mark_delivered). It can still
+     * be reversed, but ONLY while its folio charges are open: the linked booking must still be
+     * checked-in and not yet final-invoiced. After checkout the charges are on an issued invoice and must
+     * be corrected with a credit on the booking instead. */
+    $isDeliveredRoomService = ($order['order_type'] ?? '') === 'room_service' && ($order['status'] ?? '') === 'completed';
+    if ($isDeliveredRoomService) {
+        $bookingIdForVoid = (int)($order['booking_id'] ?? 0);
+        if ($bookingIdForVoid <= 0) {
+            $lk = $pdo->prepare("SELECT booking_id FROM booking_charges WHERE stock_order_id = ? AND voided = 0 ORDER BY id LIMIT 1");
+            $lk->execute([$orderId]);
+            $bookingIdForVoid = (int)$lk->fetchColumn();
+        }
+        $folioOpen = false;
+        if ($bookingIdForVoid > 0) {
+            $bkLock = $pdo->prepare("SELECT status FROM bookings WHERE id = ? FOR UPDATE");
+            $bkLock->execute([$bookingIdForVoid]);
+            $bkRow = $bkLock->fetch(PDO::FETCH_ASSOC);
+            $folioOpen = $bkRow && ($bkRow['status'] ?? '') === 'checked-in';
+            if ($folioOpen && v_column_exists($pdo, 'bookings', 'final_invoice_generated')) {
+                $invChk = $pdo->prepare("SELECT final_invoice_generated FROM bookings WHERE id = ?");
+                $invChk->execute([$bookingIdForVoid]);
+                if ((int)$invChk->fetchColumn() === 1) $folioOpen = false;
+            }
+        }
+        if (!$folioOpen) {
+            $pdo->rollBack();
+            vjerr('Order ' . $order['reference'] . ' was delivered and the guest has checked out (or the folio is closed) - it can no longer be voided here. Issue a credit on the booking instead.');
+        }
+    }
+    /* Only a live sale can be voided: 'placed' (open tab, possibly part-paid on a split) or 'paid'
+     * (or a delivered room-service order whose folio is still open, checked above).
      * 'refunded' already had its money returned, 'voided'/'cancelled' are already reversed -
      * voiding them again would reverse the ledger a second time. */
-    if (!in_array($order['status'], ['placed','paid'], true)) {
+    if (!$isDeliveredRoomService && !in_array($order['status'], ['placed','paid'], true)) {
         $pdo->rollBack();
         vjerr('Order ' . $order['reference'] . ' is ' . str_replace('_', ' ', (string)$order['status']) . ' - only an open or paid order can be voided.');
     }

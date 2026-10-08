@@ -191,11 +191,9 @@ function getCheckoutCleanupRooms(PDO $pdo): array
 {
     $hasAssignmentType = housekeepingColumnExists($pdo, 'assignment_type');
 
-    // A room needs at most ONE checkout cleanup regardless of how many past
-    // bookings it has. We deliberately do NOT match on linked_booking_id here:
-    // if the room already has any checkout cleanup (open OR already done), it is
-    // excluded — this is what prevents the same room being listed/created twice
-    // when it has more than one qualifying past booking.
+    // Checked per booking: a booking is listed only if no checkout cleanup is linked to it
+    // (linked_booking_id), so a room with an old cleanup is listed again after its next
+    // checkout. Still at most ONE row per room (latest checked-out booking, below).
     $notExistsConditions = [
         "ha.individual_room_id = ir.id",
         "ha.status IN ('pending', 'in_progress', 'completed', 'verified')"
@@ -203,6 +201,9 @@ function getCheckoutCleanupRooms(PDO $pdo): array
 
     if ($hasAssignmentType) {
         $notExistsConditions[] = "ha.assignment_type = 'checkout_cleanup'";
+    }
+    if (housekeepingColumnExists($pdo, 'linked_booking_id')) {
+        $notExistsConditions[] = "ha.linked_booking_id = b.id";
     }
 
     $notExistsClause = implode(' AND ', $notExistsConditions);
@@ -220,7 +221,7 @@ function getCheckoutCleanupRooms(PDO $pdo): array
             b.check_out_date
         FROM individual_rooms ir
         INNER JOIN bookings b ON b.individual_room_id = ir.id
-        WHERE b.status IN ('checked-out', 'checked-in')
+        WHERE b.status = 'checked-out'
           AND b.deleted_at IS NULL
           AND b.check_out_date <= CURDATE()
           AND ir.is_active = 1
@@ -228,7 +229,7 @@ function getCheckoutCleanupRooms(PDO $pdo): array
               SELECT b2.id
               FROM bookings b2
               WHERE b2.individual_room_id = ir.id
-                AND b2.status IN ('checked-out', 'checked-in')
+                AND b2.status = 'checked-out'
                 AND b2.deleted_at IS NULL
                 AND b2.check_out_date <= CURDATE()
               ORDER BY b2.check_out_date DESC, b2.id DESC
@@ -237,6 +238,15 @@ function getCheckoutCleanupRooms(PDO $pdo): array
           AND NOT EXISTS (
               SELECT 1 FROM housekeeping_assignments ha
               WHERE {$notExistsClause}
+          )
+          -- the normal checkout flow already queues a (non-linked) turnover task: skip rooms with
+          -- any open task, or one completed after this checkout
+          AND NOT EXISTS (
+              SELECT 1 FROM housekeeping_assignments hx
+              WHERE hx.individual_room_id = ir.id
+                AND (hx.status IN ('pending', 'in_progress')
+                     OR (hx.status IN ('completed', 'verified')
+                         AND hx.completed_at >= COALESCE(b.checkout_completed_at, b.check_out_date)))
           )
         ORDER BY b.check_out_date ASC, ir.room_number ASC
     ";

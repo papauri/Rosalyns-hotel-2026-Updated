@@ -315,10 +315,13 @@ function pos_appendCartItemsToOrder(PDO $pdo, int $orderId, string $orderType): 
             FROM menu_items mi
             JOIN menu_categories mc ON mc.id = mi.category_id
             WHERE mi.id = ? AND mi.is_available = 1
+              AND (? <> 'room_service' OR mi.show_room_service = 1)
         ");
-        $sel->execute([$itemId]);
+        $sel->execute([$itemId, $orderType]);
         $row = $sel->fetch(PDO::FETCH_ASSOC);
-        if (!$row) throw new RuntimeException('Menu item not found or unavailable.');
+        if (!$row) throw new RuntimeException($orderType === 'room_service'
+            ? 'Menu item not found, unavailable, or not offered for room service.'
+            : 'Menu item not found or unavailable.');
         $menuType = $row['menu_type'];
         $line = round((float)$row['price'] * $qty, 2);
         $lineCost = pos_calculateMenuItemRecipeCost($pdo, $itemId, $menuType, $qty);

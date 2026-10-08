@@ -143,17 +143,23 @@ try {
             $booking_stmt->execute([$booking_id]);
             $booking = $booking_stmt->fetch(PDO::FETCH_ASSOC);
 
-            // Update individual room status back to available if it was assigned
+            // Release the room only if it is still 'occupied' (maintenance / out-of-order rooms are
+            // left alone). The guest was in the room, so it goes to cleaning, not straight to available.
             if ($booking && !empty($booking['individual_room_id'])) {
-                $roomUpdate = $pdo->prepare("UPDATE individual_rooms SET status = 'available' WHERE id = ?");
-                $roomUpdate->execute([$booking['individual_room_id']]);
-
-                // Log the status change
-                $logStmt = $pdo->prepare("
-                    INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by)
-                    VALUES (?, 'occupied', 'available', ?, ?)
-                ");
-                $logStmt->execute([$booking['individual_room_id'], 'Check-in cancelled: ' . $booking['booking_reference'], $admin_user_id ?: null]);
+                $roomStatusStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+                $roomStatusStmt->execute([$booking['individual_room_id']]);
+                if ($roomStatusStmt->fetchColumn() === ROOM_STATUS_OCCUPIED) {
+                    $roomRelease = updateRoomStatus(
+                        (int)$booking['individual_room_id'],
+                        ROOM_STATUS_CLEANING,
+                        'Check-in cancelled: ' . $booking['booking_reference'],
+                        $admin_user_id ?: null,
+                        ['force' => true]
+                    );
+                    if (empty($roomRelease['success'])) {
+                        error_log('Cancel check-in room release failed: ' . ($roomRelease['message'] ?? ''));
+                    }
+                }
             }
 
             // Send status update email

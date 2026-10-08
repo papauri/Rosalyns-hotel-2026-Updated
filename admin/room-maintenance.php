@@ -9,6 +9,8 @@
 require_once 'admin-init.php';
 require_once 'includes/admin-modal.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/../includes/room-management.php';
+require_once __DIR__ . '/../includes/maintenance-recurring.php';
 /** @var array{id: int, username: string, role: string} $user */
 /** @var string $csrf_token */
 
@@ -340,230 +342,61 @@ function autoCreateMaintenanceTasks(PDO $pdo, int $performedBy): int
 }
 
 /**
- * Reconcile individual room maintenance status
- * Backward compatible: works with or without migration 005 columns
+ * Reconcile individual room maintenance status.
+ *
+ * - An ACTIVE schedule (in progress; planned/pending whose start date has arrived in the hotel
+ *   timezone; or completed-but-unverified) holds the room in maintenance. A schedule planned for
+ *   a future date does not.
+ * - Release happens only when $allowRelease is true (the explicit add/edit/delete/start/complete/
+ *   verify actions, never the page-load sweep) AND the room's current maintenance status was set
+ *   by a schedule (its latest status log entry to 'maintenance' is the "Maintenance assignment
+ *   active" one). A room put into maintenance manually is never released here. A released room
+ *   goes to cleaning with a housekeeping task, not straight to available.
  */
-function reconcileMaintenanceRoomStatus(PDO $pdo, int $roomId, ?int $performedBy = null): void
+function reconcileMaintenanceRoomStatus(PDO $pdo, int $roomId, ?int $performedBy = null, bool $allowRelease = true): void
 {
-    $hasPriority = maintenanceColumnExists($pdo, 'priority');
-    $hasDueDate = maintenanceColumnExists($pdo, 'due_date');
-
-    // Verified is stored as status 'completed' + verified_at (see rh_maint_status_to_db). A
-    // Completed task holds the room in Maintenance until it is Verified (the inspection gate),
-    // so a verified row must no longer count as open or the room could never be released.
-    $verifiedExclusion = maintenanceColumnExists($pdo, 'verified_at')
-        ? " AND NOT (status = 'completed' AND verified_at IS NOT NULL)"
-        : '';
-
-    // Build SELECT columns based on available columns
-    $selectColumns = ['status', 'title'];
-    if ($hasPriority) {
-        $selectColumns[] = 'priority';
-    }
-    if ($hasDueDate) {
-        $selectColumns[] = 'due_date';
+    $roomStatusStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+    $roomStatusStmt->execute([$roomId]);
+    $roomStatus = (string)$roomStatusStmt->fetchColumn();
+    if ($roomStatus === '') {
+        return;
     }
 
-    // Build ORDER BY clause based on available columns
-    $orderByClauses = [];
-
-    if ($hasPriority) {
-        $orderByClauses[] = "CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END";
-    }
-
-    if ($hasDueDate) {
-        $orderByClauses[] = "due_date ASC";
-    }
-
-    $orderByClauses[] = "created_at DESC";
-
-    $sql = "
-        SELECT " . implode(', ', $selectColumns) . "
-        FROM room_maintenance_schedules
-        WHERE individual_room_id = ?
-                    AND status IN ('pending','in_progress','completed','planned')" . $verifiedExclusion . "
-        ORDER BY " . implode(', ', $orderByClauses) . "
-        LIMIT 1
-    ";
-    $openStmt = $pdo->prepare($sql);
-    $openStmt->execute([$roomId]);
-    $open = $openStmt->fetch(PDO::FETCH_ASSOC);
-
-    if ($open) {
-        $roomStatusStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
-        $roomStatusStmt->execute([$roomId]);
-        $roomStatus = (string)$roomStatusStmt->fetchColumn();
-
-        // Only set to maintenance if not occupied
+    if (rh_room_has_active_maintenance($pdo, $roomId)) {
+        // Only set to maintenance if not occupied / out of order
         if (!in_array($roomStatus, ['occupied', 'out_of_order'], true)) {
             maintenanceSetRoomStatus($pdo, $roomId, 'maintenance', 'Maintenance assignment active', $performedBy);
         }
         return;
     }
 
-    // No active maintenance - check if room should be available
-    $roomStatusStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
-    $roomStatusStmt->execute([$roomId]);
-    $roomStatus = (string)$roomStatusStmt->fetchColumn();
-
-    if ($roomStatus === 'maintenance') {
-        maintenanceSetRoomStatus($pdo, $roomId, 'available', 'Maintenance assignment cleared', $performedBy);
+    if (!$allowRelease || $roomStatus !== 'maintenance') {
+        return;
     }
+
+    // Provenance: release only a maintenance status that a schedule put the room into.
+    $setBySchedule = false;
+    if (maintenanceTableExists($pdo, 'room_maintenance_log')) {
+        $logStmt = $pdo->prepare("SELECT reason FROM room_maintenance_log WHERE individual_room_id = ? AND status_to = 'maintenance' ORDER BY created_at DESC, id DESC LIMIT 1");
+        $logStmt->execute([$roomId]);
+        $lastReason = $logStmt->fetchColumn();
+        $setBySchedule = is_string($lastReason) && strpos($lastReason, 'Maintenance assignment active') === 0;
+    }
+    if (!$setBySchedule) {
+        return;
+    }
+
+    maintenanceSetRoomStatus($pdo, $roomId, 'cleaning', 'Maintenance assignment cleared - room needs cleaning', $performedBy);
+    createHousekeepingAssignment($roomId, $performedBy, ['notes' => 'Post-maintenance cleaning']);
 }
 
 /**
- * Create recurring maintenance assignments
- * Backward compatible: works with or without migration 005 columns
+ * Create recurring maintenance assignments.
+ * The logic lives in includes/maintenance-recurring.php (shared with the daily scheduler job).
  */
 function createRecurringMaintenance(PDO $pdo, int $performedBy): int
 {
-    $hasIsRecurring = maintenanceColumnExists($pdo, 'is_recurring');
-    $hasRecurringPattern = maintenanceColumnExists($pdo, 'recurring_pattern');
-    $hasRecurringEndDate = maintenanceColumnExists($pdo, 'recurring_end_date');
-    $hasMaintenanceType = maintenanceColumnExists($pdo, 'maintenance_type');
-    $hasPriority = maintenanceColumnExists($pdo, 'priority');
-    $hasEstimatedDuration = maintenanceColumnExists($pdo, 'estimated_duration');
-    $hasDueDate = maintenanceColumnExists($pdo, 'due_date');
-
-    // If we don't have the required columns for recurring assignments, return early
-    if (!$hasIsRecurring || !$hasRecurringPattern) {
-        return 0;
-    }
-
-    $today = date('Y-m-d');
-    $created = 0;
-
-    // Build WHERE clause based on available columns
-    $whereConditions = [
-        "is_recurring = 1",
-        "recurring_pattern IS NOT NULL"
-    ];
-
-    if ($hasRecurringEndDate) {
-        $whereConditions[] = "(recurring_end_date IS NULL OR recurring_end_date >= ?)";
-    }
-
-    $whereConditions[] = "status IN ('completed', 'verified')";
-    // Only the newest task of a recurring chain spawns the next one. Without this every completed
-    // ancestor re-spawned a task each period, so the number of open tasks grew without bound.
-    $whereConditions[] = "NOT EXISTS (SELECT 1 FROM room_maintenance_schedules nx
-        WHERE nx.individual_room_id = room_maintenance_schedules.individual_room_id
-          AND nx.title = room_maintenance_schedules.title AND nx.is_recurring = 1
-          AND nx.id > room_maintenance_schedules.id)";
-
-    $sql = "SELECT * FROM room_maintenance_schedules WHERE " . implode(' AND ', $whereConditions);
-    $stmt = $pdo->prepare($sql);
-
-    $params = [];
-    if ($hasRecurringEndDate) {
-        $params[] = $today;
-    }
-
-    $stmt->execute($params);
-    $recurring = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    foreach ($recurring as $assignment) {
-        $lastCreated = $assignment['created_at'];
-        $shouldCreate = false;
-
-        switch ($assignment['recurring_pattern']) {
-            case 'daily':
-                $shouldCreate = (date('Y-m-d', strtotime($lastCreated)) < $today);
-                break;
-            case 'weekly':
-                $shouldCreate = (strtotime($lastCreated) < strtotime('-7 days'));
-                break;
-            case 'monthly':
-                $shouldCreate = (strtotime($lastCreated) < strtotime('-30 days'));
-                break;
-        }
-
-        if ($shouldCreate) {
-            // Calculate new dates
-            $startDate = date('Y-m-d H:i:s');
-            $endDate = date('Y-m-d H:i:s', strtotime('+1 day'));
-            $dueDate = $today;
-
-            // Build INSERT columns and values based on available columns
-            $insertColumns = ['individual_room_id', 'title', 'description', 'status', 'start_date', 'end_date', 'assigned_to', 'created_by'];
-            $insertValues = ['?', '?', '?', '?', '?', '?', '?', '?'];
-            $insertParams = [
-                $assignment['individual_room_id'],
-                $assignment['title'],
-                $assignment['description'],
-                'planned',
-                $startDate,
-                $endDate,
-                $assignment['assigned_to'],
-                $performedBy
-            ];
-
-            if ($hasDueDate) {
-                $insertColumns[] = 'due_date';
-                $insertValues[] = '?';
-                $insertParams[] = $dueDate;
-            }
-            if ($hasMaintenanceType) {
-                $insertColumns[] = 'maintenance_type';
-                $insertValues[] = '?';
-                $insertParams[] = $assignment['maintenance_type'] ?? 'inspection';
-            }
-            if ($hasPriority) {
-                $insertColumns[] = 'priority';
-                $insertValues[] = '?';
-                $insertParams[] = $assignment['priority'] ?? 'medium';
-            }
-            if ($hasIsRecurring) {
-                $insertColumns[] = 'is_recurring';
-                $insertValues[] = '?';
-                $insertParams[] = 1;
-            }
-            if ($hasRecurringPattern) {
-                $insertColumns[] = 'recurring_pattern';
-                $insertValues[] = '?';
-                $insertParams[] = $assignment['recurring_pattern'];
-            }
-            if ($hasRecurringEndDate) {
-                $insertColumns[] = 'recurring_end_date';
-                $insertValues[] = '?';
-                $insertParams[] = $assignment['recurring_end_date'];
-            }
-            if ($hasEstimatedDuration) {
-                $insertColumns[] = 'estimated_duration';
-                $insertValues[] = '?';
-                $insertParams[] = $assignment['estimated_duration'] ?? 60;
-            }
-
-            $insertSql = "INSERT INTO room_maintenance_schedules (" . implode(', ', $insertColumns) . ") VALUES (" . implode(', ', $insertValues) . ")";
-            $newStmt = $pdo->prepare($insertSql);
-            $newStmt->execute($insertParams);
-            $newMaintenanceId = (int)$pdo->lastInsertId();
-            $created++;
-
-            // Log audit trail for recurring maintenance creation
-            $newData = [
-                'individual_room_id' => $assignment['individual_room_id'],
-                'title' => $assignment['title'],
-                'description' => $assignment['description'],
-                'status' => 'pending',
-                'start_date' => $startDate,
-                'end_date' => $endDate,
-                'assigned_to' => $assignment['assigned_to'],
-                'created_by' => $performedBy,
-            ];
-            if ($hasDueDate) $newData['due_date'] = $dueDate;
-            if ($hasMaintenanceType) $newData['maintenance_type'] = $assignment['maintenance_type'] ?? 'inspection';
-            if ($hasPriority) $newData['priority'] = $assignment['priority'] ?? 'medium';
-            if ($hasIsRecurring) $newData['is_recurring'] = 1;
-            if ($hasRecurringPattern) $newData['recurring_pattern'] = $assignment['recurring_pattern'];
-            if ($hasRecurringEndDate) $newData['recurring_end_date'] = $assignment['recurring_end_date'];
-            if ($hasEstimatedDuration) $newData['estimated_duration'] = $assignment['estimated_duration'] ?? 60;
-
-            logMaintenanceAction($newMaintenanceId, 'recurring_created', null, $newData, $performedBy);
-        }
-    }
-
-    return $created;
+    return rh_create_recurring_maintenance($pdo, $performedBy);
 }
 
 /** Shared field checks for add/update; returns an error string or ''. */
@@ -1277,11 +1110,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Reconcile all rooms with open assignments
+// Page-load sweep: may put rooms INTO maintenance (a schedule started) but never releases one.
 try {
     $roomRows = $pdo->query("SELECT DISTINCT individual_room_id FROM room_maintenance_schedules")->fetchAll(PDO::FETCH_COLUMN);
     foreach ($roomRows as $roomId) {
-        reconcileMaintenanceRoomStatus($pdo, (int)$roomId, $user['id'] ?? null);
+        reconcileMaintenanceRoomStatus($pdo, (int)$roomId, $user['id'] ?? null, false);
     }
 } catch (Throwable $syncError) {
     error_log('Maintenance reconciliation warning: ' . $syncError->getMessage());

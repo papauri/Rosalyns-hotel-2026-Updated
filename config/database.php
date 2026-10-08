@@ -7497,7 +7497,11 @@ function addBookingChargeFromMenu(int $bookingId, string $menuType, int $menuIte
 
     try {
         // Fetch menu item from unified menu_items table
-        $stmt = $pdo->prepare("SELECT item_name, price, category FROM menu_items WHERE id = ? AND is_available = 1");
+        $stmt = $pdo->prepare("SELECT mi.item_name, mi.price, mi.category,
+                                      COALESCE(mi.station, mc.default_station) AS station
+                               FROM menu_items mi
+                               LEFT JOIN menu_categories mc ON mc.id = mi.category_id
+                               WHERE mi.id = ? AND mi.is_available = 1");
         $stmt->execute([$menuItemId]);
         $item = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -7510,7 +7514,17 @@ function addBookingChargeFromMenu(int $bookingId, string $menuType, int $menuIte
 
         $description = $item['item_name'];
         $unitPrice = (float)$item['price'];
-        $chargeType = $menuType === 'food' ? 'food' : 'drink';
+        /* $menuType is a menu_categories.slug (arbitrary, e.g. 'retail'), not strictly food/drink.
+         * Classify by the item's prep station first (bar / coffee_bar = drink, kitchen = food);
+         * fall back to the legacy slug mapping when the station is unknown. */
+        $itemStation = (string)($item['station'] ?? '');
+        if ($itemStation === 'kitchen') {
+            $chargeType = 'food';
+        } elseif ($itemStation === 'bar' || $itemStation === 'coffee_bar') {
+            $chargeType = 'drink';
+        } else {
+            $chargeType = $menuType === 'food' ? 'food' : 'drink';
+        }
 
         $result = addBookingCharge($bookingId, $chargeType, $description, $quantity, $unitPrice, $menuItemId, $addedBy);
 
@@ -7534,9 +7548,24 @@ function addBookingChargeFromMenu(int $bookingId, string $menuType, int $menuIte
                 if ($stockOk && $hasRecipe) {
                     $upd = $pdo->prepare("UPDATE booking_charges SET stock_tracked = 1 WHERE id = ?");
                     $upd->execute([(int)$result['charge_id']]);
+                } elseif (!$stockOk) {
+                    rh_log_event('stock', 'warning', "Room-service stock deduction failed after charge #{$result['charge_id']} was posted", [
+                        'charge_id'    => (int)$result['charge_id'],
+                        'booking_id'   => $bookingId,
+                        'menu_item_id' => $menuItemId,
+                        'quantity'     => $quantity,
+                        'action'       => 'charge kept; reconcile stock manually',
+                    ]);
                 }
             } catch (Throwable $stockEx) {
                 error_log("addBookingChargeFromMenu stock deduction failed for charge {$result['charge_id']}: " . $stockEx->getMessage());
+                rh_log_event('stock', 'warning', "Room-service stock deduction errored after charge #{$result['charge_id']} was posted", [
+                    'charge_id'    => (int)$result['charge_id'],
+                    'booking_id'   => $bookingId,
+                    'menu_item_id' => $menuItemId,
+                    'quantity'     => $quantity,
+                    'error'        => $stockEx->getMessage(),
+                ]);
             }
         }
 
