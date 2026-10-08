@@ -434,8 +434,8 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 .cam-error-msg .cam-err-retry{margin-top:14px;padding:8px 20px;background:var(--gold);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
 
 /* ── Manual / fallback input ── */
-.manual-row{display:flex;gap:8px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border)}
-.manual-row input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:14px;font-family:inherit;outline:none}
+.manual-row{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border)}
+.manual-row input{flex:1 1 180px;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:14px;font-family:inherit;outline:none}
 .manual-row input:focus{border-color:var(--primary)}
 .manual-row button{padding:10px 16px;background:var(--primary);border:none;border-radius:8px;color:#fff;font-weight:600;cursor:pointer;font-size:14px;white-space:nowrap}
 
@@ -544,6 +544,8 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 .scan-app>.camera-zone,.scan-app>#scannerStrip,.scan-app>.manual-row,.scan-app>.meta-strip{grid-column:1}
 .scan-app>.manual-row,.scan-app>.meta-strip{border:1px solid var(--border);border-radius:12px;margin-bottom:12px}
 .scan-app>.camera-zone{border-radius:12px;margin-bottom:12px}
+.scan-app>#scannerStrip{border:1px solid #b5dcc4;border-radius:12px;margin-bottom:12px}
+.scan-app>#scannerStrip.off{border-color:#d7c0b0}
 .scan-app>.section-head{grid-column:2;grid-row:2}
 .scan-app>.batch-list{grid-column:2;grid-row:3/span 20;padding:0 0 120px}
 }
