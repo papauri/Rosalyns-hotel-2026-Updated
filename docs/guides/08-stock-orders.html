@@ -139,6 +139,16 @@
   </ol>
   <p>Each line becomes a new batch, like Stock In by hand. A barcode already linked to another item is refused: <em>"This barcode is already registered to another ingredient."</em></p>
 
+  <h3>Barcodes on file: view, search, fix or remove a barcode</h3>
+  <p>At the top of Receive Stock, the <strong>Barcodes on file</strong> card shows how many barcodes are linked. Click it to open the <strong>Barcodes on file</strong> panel (press Esc or the &times; to close it). The <strong>Ingredients</strong> card next to it opens the ingredients list.</p>
+  <ol class="steps">
+    <li>In the panel, the <strong>Ingredients</strong> tab lists each barcode with its ingredient and unit, the pack size and pack label, who added it and when. Type in <strong>Search barcode or name&hellip;</strong> to narrow the list (part of the barcode digits or part of the name). Click <strong>Show more</strong> to see further results. Click an ingredient name to open the ingredients list.</li>
+    <li>The <strong>POS items with barcodes</strong> tab lists the items for sale that have a barcode (item, barcode, category). It is read-only here; change those in Menu Management.</li>
+    <li>To fix a pack size, click <strong>Edit</strong> on the row, change <strong>Pack size</strong> (must be more than zero) or <strong>Pack label</strong> (up to 50 characters) and click <strong>Save</strong>.</li>
+    <li>To remove a wrong link, click <strong>Remove</strong>, then <strong>Remove link</strong> to confirm (or <strong>Keep it</strong> to back out). Only the link between that barcode and the ingredient is deleted. The ingredient, its stock and its history are not touched, and the barcode becomes unknown, so the next scan asks you to link it again.</li>
+  </ol>
+  <p>Only a user with the <strong>Admin</strong> or <strong>Manager</strong> role sees the <strong>Edit</strong> and <strong>Remove</strong> buttons; everyone else can view and search. Edits and removals are recorded in the activity log, and the next scan uses the new details straight away.</p>
+
   <h2 id="recipes">How to build a recipe</h2>
   <p>A recipe says how much of each ingredient goes into one portion of a menu item. Open Admin menu &rarr; Stock &rarr; <strong>Recipes</strong>. Quantities are per portion sold. Stock comes off when the kitchen marks the dish Ready or Served on the station screen (or it is bumped), when drinks are handed over at payment, and immediately when an item is charged to a room.</p>
   <ol class="steps">
@@ -276,6 +286,7 @@
   <table>
     <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
     <tbody>
+      <tr><td>A scanned item adds the wrong ingredient, or the wrong pack size (for example 1 instead of 24).</td><td>The barcode is linked to the wrong ingredient, or was saved with the wrong pack size.</td><td>Click the <strong>Barcodes on file</strong> card, search for the barcode, then <strong>Edit</strong> the pack size or <strong>Remove</strong> the link and scan again to link it correctly. Only a manager or admin can do this.</td></tr>
       <tr><td><em>"Name and unit are required."</em></td><td>Ingredient form incomplete.</td><td>Fill in both.</td></tr>
       <tr><td><em>"Quantity must be greater than zero."</em></td><td>Zero or empty quantity.</td><td>Enter a positive number.</td></tr>
       <tr><td><em>"Manual adjustments are restricted. Use Stock Count for variance reconciliation."</em></td><td>You do not have the Admin or Manager role.</td><td>Use a stock count.</td></tr>

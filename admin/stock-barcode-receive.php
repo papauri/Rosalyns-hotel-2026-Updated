@@ -24,8 +24,11 @@ if (!hasPermission($user['id'], 'stock_management')) {
     rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF'])); exit;
 }
 
+// Same rule stock-ingredients.php uses for privileged stock edits (manual adjust / discard).
+$canManageBarcodes = in_array($user['role'] ?? '', ['admin', 'manager'], true);
+
 $csrf_token    = generateCsrfToken();
-$currency      = getSetting('currency_symbol', 'MWK');
+$currency     = getSetting('currency_symbol', 'MWK');
 $siteName      = getSetting('site_name', 'Hotel');
 
 // ── AJAX handlers ────────────────────────────────────────────────────────────
@@ -377,6 +380,133 @@ if (isset($_GET['ajax'])) {
         exit;
     }
 
+    // list_barcodes — read-only list of every code the scanner knows.
+    // kind=ingredient (stock_ingredient_barcodes) or kind=pos (menu_items.barcode).
+    if ($_GET['ajax'] === 'list_barcodes') {
+        if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+            http_response_code(403); echo json_encode(['error' => 'Invalid token.']); exit;
+        }
+        $kind   = ($_POST['kind'] ?? 'ingredient') === 'pos' ? 'pos' : 'ingredient';
+        $qRaw   = mb_substr(trim((string)($_POST['q'] ?? '')), 0, 60);
+        $like   = '%' . rhEscapeLike($qRaw) . '%';
+        $limit  = 50;
+        $offset = max(0, min(100000, (int)($_POST['offset'] ?? 0)));
+        try {
+            if ($kind === 'pos') {
+                $where = "mi.barcode IS NOT NULL AND mi.barcode <> ''";
+                $args  = [];
+                if ($qRaw !== '') { $where .= " AND (mi.barcode LIKE ? OR mi.item_name LIKE ?)"; $args = [$like, $like]; }
+                $cnt = $pdo->prepare("SELECT COUNT(*) FROM menu_items mi WHERE $where");
+                $cnt->execute($args);
+                $total = (int)$cnt->fetchColumn();
+                $st = $pdo->prepare("SELECT mi.id, mi.item_name AS name, mi.barcode, mc.name AS category_name
+                    FROM menu_items mi LEFT JOIN menu_categories mc ON mc.id = mi.category_id
+                    WHERE $where ORDER BY mi.item_name, mi.id LIMIT ? OFFSET ?");
+                $i = 1;
+                foreach ($args as $a) { $st->bindValue($i++, $a); }
+                $st->bindValue($i++, $limit + 1, PDO::PARAM_INT);
+                $st->bindValue($i, $offset, PDO::PARAM_INT);
+                $st->execute();
+            } else {
+                $hasAt = rh_column_exists($pdo, 'stock_ingredient_barcodes', 'created_at');
+                $hasBy = rh_column_exists($pdo, 'stock_ingredient_barcodes', 'created_by');
+                $sel   = "sib.id, sib.barcode, sib.pack_size, sib.pack_label, si.id AS ingredient_id, si.name, si.unit"
+                       . ($hasAt ? ", sib.created_at" : "")
+                       . ($hasBy ? ", au.full_name AS added_by" : "");
+                $join  = $hasBy ? " LEFT JOIN admin_users au ON au.id = sib.created_by" : "";
+                $where = '1=1'; $args = [];
+                if ($qRaw !== '') { $where = "(sib.barcode LIKE ? OR si.name LIKE ?)"; $args = [$like, $like]; }
+                $cnt = $pdo->prepare("SELECT COUNT(*) FROM stock_ingredient_barcodes sib JOIN stock_ingredients si ON si.id = sib.ingredient_id WHERE $where");
+                $cnt->execute($args);
+                $total = (int)$cnt->fetchColumn();
+                $st = $pdo->prepare("SELECT $sel FROM stock_ingredient_barcodes sib
+                    JOIN stock_ingredients si ON si.id = sib.ingredient_id $join
+                    WHERE $where ORDER BY si.name, sib.barcode LIMIT ? OFFSET ?");
+                $i = 1;
+                foreach ($args as $a) { $st->bindValue($i++, $a); }
+                $st->bindValue($i++, $limit + 1, PDO::PARAM_INT);
+                $st->bindValue($i, $offset, PDO::PARAM_INT);
+                $st->execute();
+            }
+            $rows    = $st->fetchAll(PDO::FETCH_ASSOC);
+            $hasMore = count($rows) > $limit;
+            if ($hasMore) { array_pop($rows); }
+            $allCount = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredient_barcodes")->fetchColumn();
+            echo json_encode(['ok' => true, 'kind' => $kind, 'rows' => $rows, 'total' => $total,
+                'has_more' => $hasMore, 'next_offset' => $offset + $limit, 'all_count' => $allCount,
+                'can_manage' => $canManageBarcodes]);
+        } catch (Throwable $e) {
+            error_log('[barcode-receive] list_barcodes: ' . $e->getMessage());
+            http_response_code(500); echo json_encode(['error' => 'Could not load the barcode list. Please try again.']);
+        }
+        exit;
+    }
+
+    // update_barcode — change pack size / pack label of one ingredient mapping (admin/manager)
+    if ($_GET['ajax'] === 'update_barcode') {
+        if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+            http_response_code(403); echo json_encode(['error' => 'Invalid token.']); exit;
+        }
+        if (!$canManageBarcodes) {
+            http_response_code(403); echo json_encode(['error' => 'Only a manager or admin can change a barcode link.']); exit;
+        }
+        $mapId   = (int)($_POST['id'] ?? 0);
+        $packRaw = trim((string)($_POST['pack_size'] ?? ''));
+        if ($mapId <= 0) { http_response_code(400); echo json_encode(['error' => 'Barcode link not specified.']); exit; }
+        if ($packRaw === '' || !is_numeric($packRaw) || (float)$packRaw <= 0 || (float)$packRaw > 1000000) {
+            http_response_code(400); echo json_encode(['error' => 'Pack size must be a number greater than zero.']); exit;
+        }
+        $packSize  = (float)$packRaw;
+        $labelRaw  = rh_clean_text($_POST['pack_label'] ?? '');
+        if (mb_strlen($labelRaw) > 50) {
+            http_response_code(400); echo json_encode(['error' => 'Pack label is too long (50 characters maximum).']); exit;
+        }
+        $packLabel = $labelRaw !== '' ? $labelRaw : null;
+        try {
+            $cur = $pdo->prepare("SELECT sib.barcode, sib.pack_size, sib.pack_label, si.name
+                FROM stock_ingredient_barcodes sib JOIN stock_ingredients si ON si.id = sib.ingredient_id WHERE sib.id = ?");
+            $cur->execute([$mapId]);
+            $old = $cur->fetch(PDO::FETCH_ASSOC);
+            if (!$old) { http_response_code(404); echo json_encode(['error' => 'That barcode link no longer exists.']); exit; }
+            $pdo->prepare("UPDATE stock_ingredient_barcodes SET pack_size = ?, pack_label = ? WHERE id = ?")
+                ->execute([$packSize, $packLabel, $mapId]);
+            logActivity($user['id'], 'barcode_updated', "Updated barcode {$old['barcode']} → {$old['name']}: pack "
+                . (float)$old['pack_size'] . ' ' . ($old['pack_label'] ?? '') . ' → ' . $packSize . ' ' . ($packLabel ?? ''));
+            echo json_encode(['ok' => true, 'id' => $mapId, 'pack_size' => $packSize, 'pack_label' => $packLabel]);
+        } catch (Throwable $e) {
+            error_log('[barcode-receive] update_barcode: ' . $e->getMessage());
+            http_response_code(500); echo json_encode(['error' => 'Could not save the change. Please try again.']);
+        }
+        exit;
+    }
+
+    // delete_barcode — remove ONE barcode→ingredient link; never the ingredient or its stock (admin/manager)
+    if ($_GET['ajax'] === 'delete_barcode') {
+        if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+            http_response_code(403); echo json_encode(['error' => 'Invalid token.']); exit;
+        }
+        if (!$canManageBarcodes) {
+            http_response_code(403); echo json_encode(['error' => 'Only a manager or admin can remove a barcode link.']); exit;
+        }
+        $mapId = (int)($_POST['id'] ?? 0);
+        if ($mapId <= 0) { http_response_code(400); echo json_encode(['error' => 'Barcode link not specified.']); exit; }
+        try {
+            $cur = $pdo->prepare("SELECT sib.barcode, si.name
+                FROM stock_ingredient_barcodes sib JOIN stock_ingredients si ON si.id = sib.ingredient_id WHERE sib.id = ?");
+            $cur->execute([$mapId]);
+            $old = $cur->fetch(PDO::FETCH_ASSOC);
+            if (!$old) { http_response_code(404); echo json_encode(['error' => 'That barcode link no longer exists.']); exit; }
+            $pdo->prepare("DELETE FROM stock_ingredient_barcodes WHERE id = ? LIMIT 1")->execute([$mapId]);
+            logActivity($user['id'], 'barcode_removed', "Removed barcode {$old['barcode']} link to {$old['name']}");
+            $left = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredient_barcodes")->fetchColumn();
+            echo json_encode(['ok' => true, 'id' => $mapId, 'all_count' => $left]);
+        } catch (Throwable $e) {
+            error_log('[barcode-receive] delete_barcode: ' . $e->getMessage());
+            http_response_code(500); echo json_encode(['error' => 'Could not remove the link. Please try again.']);
+        }
+        exit;
+    }
+
     http_response_code(400); echo json_encode(['error' => 'Unknown action.']); exit;
 }
 
@@ -524,6 +654,43 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 .reg-type-card span{font-size:11px;color:var(--ck-muted);line-height:1.4;margin-top:2px}
 .reg-type-card.selected{border-color:var(--ck-primary);background:var(--ck-gold-soft)}
 
+/* Barcodes on file panel */
+.scanmodal-sheet--wide{max-width:860px}
+.bcp-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 12px}
+.bcp-tab{min-height:44px;padding:9px 14px;background:var(--ck-soft);border:1px solid var(--ck-line-strong);border-radius:8px;color:var(--ck-muted);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+.bcp-tab[aria-selected="true"]{background:var(--ck-gold-soft);border-color:var(--ck-primary);color:var(--ck-primary)}
+.bcp-search{width:100%;min-height:44px;background:var(--ck-surface);border:1px solid var(--ck-line-strong);border-radius:8px;padding:10px 14px;color:var(--ck-text);font-size:15px;font-family:inherit;outline:none}
+.bcp-search:focus,.bcp-edit input:focus{border-color:var(--ck-primary);box-shadow:0 0 0 3px rgba(118,101,80,.15)}
+.bcp-meta{margin:10px 0 6px;font-size:12px;font-weight:600;color:var(--ck-muted)}
+.bcp-list{border:1px solid var(--ck-line);border-radius:var(--ck-radius-sm);overflow:hidden;min-width:0}
+.bcp-row{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.1fr) auto;gap:6px 12px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--ck-line);min-width:0}
+.bcp-row:last-child{border-bottom:none}
+.bcp-row--head{background:var(--ck-softer);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ck-muted)}
+.bcp-row--pos{grid-template-columns:minmax(0,1.2fr) minmax(0,1.6fr) minmax(0,1fr)}
+.bcp-row>*{min-width:0;overflow-wrap:anywhere}
+.bcp-code{font-family:monospace;font-size:13px}
+.bcp-name{font-weight:600;font-size:14px;color:var(--ck-ink)}
+a.bcp-name{text-decoration:underline;text-underline-offset:2px}
+.bcp-sub{font-size:12px;color:var(--ck-muted)}
+.bcp-lbl{display:none;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ck-muted)}
+.bcp-acts{display:flex;gap:6px;justify-content:flex-end}
+.bcp-btn{min-width:44px;min-height:44px;padding:8px 12px;background:var(--ck-soft);border:1px solid var(--ck-line-strong);border-radius:8px;color:var(--ck-text);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+.bcp-btn--danger{color:var(--ck-bad)}
+.bcp-btn--danger:hover{background:var(--ck-bad-soft);border-color:var(--ck-bad)}
+.bcp-btn--primary{background:var(--ck-primary);border-color:var(--ck-primary);color:#fff}
+.bcp-inline{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;padding:10px 12px;background:var(--ck-softer);border-radius:8px}
+.bcp-edit label{display:flex;flex-direction:column;gap:4px;flex:1 1 120px;min-width:0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ck-muted)}
+.bcp-edit input{min-height:44px;width:100%;min-width:0;background:var(--ck-surface);border:1px solid var(--ck-line-strong);border-radius:8px;padding:8px 10px;color:var(--ck-text);font-size:14px;font-family:inherit;text-transform:none;letter-spacing:normal;font-weight:400;outline:none}
+.bcp-confirm{flex:1 1 100%;font-size:13px;color:var(--ck-text)}
+.bcp-err{flex:1 1 100%;font-size:13px;color:var(--ck-bad)}
+.bcp-empty{padding:28px 18px;text-align:center;color:var(--ck-muted);font-size:14px}
+.bcp-more{margin-top:12px;width:100%}
+@media (max-width:700px){
+.bcp-row--head{display:none}
+.bcp-row,.bcp-row--pos{grid-template-columns:minmax(0,1fr)}
+.bcp-lbl{display:block}
+.bcp-acts{justify-content:flex-start}
+}
 @media (prefers-reduced-motion:reduce){
 .scan-line,.batch-item.pulse{animation:none}
 .scan-flash,.reg-type-card{transition:none}
@@ -544,8 +711,8 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 </div>
 
 <div class="ck-kpis ck-kpis--2 sbr-kpis">
-    <div class="ck-kpi"><span class="ck-kpi__label">Barcodes on file</span><span class="ck-kpi__value"><?php echo $barcodeCount; ?></span></div>
-    <div class="ck-kpi"><span class="ck-kpi__label">Ingredients</span><span class="ck-kpi__value"><?php echo $ingredientCount; ?></span></div>
+    <button type="button" class="ck-kpi" id="barcodesKpi" aria-haspopup="dialog" aria-controls="barcodesModal" onclick="openBarcodesPanel()" title="View, search and fix the barcodes on file"><span class="ck-kpi__label">Barcodes on file</span><span class="ck-kpi__value" id="barcodeCountVal"><?php echo $barcodeCount; ?></span></button>
+    <a class="ck-kpi" href="stock-ingredients.php" title="Open the ingredients list"><span class="ck-kpi__label">Ingredients</span><span class="ck-kpi__value"><?php echo $ingredientCount; ?></span></a>
 </div>
 
 <div class="sbr-grid">
@@ -722,6 +889,26 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
                 <button class="scanmodal-btn scanmodal-btn-primary" id="registerItemSaveBtn" onclick="saveItem()">Register on POS</button>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Barcodes on file panel -->
+<div class="scanmodal-overlay" id="barcodesModal" style="display:none">
+    <div class="scanmodal-sheet scanmodal-sheet--wide" role="dialog" aria-modal="true" aria-labelledby="bcpTitle" tabindex="-1">
+        <div class="scanmodal-handle"></div>
+        <div class="scanmodal-header">
+            <div class="scanmodal-title" id="bcpTitle">Barcodes on file</div>
+            <button type="button" class="scanmodal-close" id="bcpClose" aria-label="Close" onclick="closeBarcodesPanel()">&times;</button>
+        </div>
+        <div class="scanmodal-sub">Every code the scanner knows. Search by barcode digits or by name.<?php echo $canManageBarcodes ? '' : ' Only a manager or admin can change or remove a link.'; ?></div>
+        <div class="bcp-tabs" role="tablist" aria-label="Barcode lists">
+            <button type="button" class="bcp-tab" role="tab" id="bcpTabIng" aria-selected="true" onclick="bcpSetKind('ingredient')">Ingredients</button>
+            <button type="button" class="bcp-tab" role="tab" id="bcpTabPos" aria-selected="false" onclick="bcpSetKind('pos')">POS items with barcodes</button>
+        </div>
+        <input type="search" class="bcp-search" id="bcpSearch" placeholder="Search barcode or name…" autocomplete="off" spellcheck="false" aria-label="Search barcodes">
+        <div class="bcp-meta" id="bcpMeta" aria-live="polite"></div>
+        <div class="bcp-list" id="bcpList"></div>
+        <button type="button" class="bcp-btn bcp-more" id="bcpMore" style="display:none" onclick="bcpLoad(false)">Show more</button>
     </div>
 </div>
 
@@ -1040,7 +1227,7 @@ let _lookupInFlight = false;
 let _lookupQueued   = null;
 
 function processBarcode(barcode) {
-    if (_modalOpen) return; // don't scan while register modal is open
+    if (_modalOpen || _bcpOpen) return; // don't scan while a modal/panel is open
 
     const cached = cacheGet(barcode);
     if (cached) { _handleResult(barcode, cached); return; }
@@ -1419,6 +1606,204 @@ function flashMsg(msg, isError = false) {
 function esc(str) {
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+
+// ── Barcodes on file panel ────────────────────────────────────────────────
+const CAN_MANAGE_BARCODES = <?php echo json_encode($canManageBarcodes); ?>;
+let _bcpOpen = false, _bcpKind = 'ingredient', _bcpOffset = 0, _bcpTimer = null, _bcpReq = 0, _bcpOpener = null;
+
+function bcpPost(action, fields) {
+    const fd = new FormData();
+    fd.append('csrf_token', CSRF);
+    Object.keys(fields).forEach(k => fd.append(k, fields[k]));
+    return fetch(PAGE + '?ajax=' + action, { method: 'POST', body: fd })
+        .then(r => r.json().catch(() => ({ error: 'Unexpected response.' })));
+}
+
+function setBarcodeCount(n) {
+    const el = document.getElementById('barcodeCountVal');
+    if (el && typeof n === 'number') el.textContent = n;
+}
+
+function openBarcodesPanel() {
+    _bcpOpener = document.activeElement;
+    _bcpOpen = true;
+    document.getElementById('barcodesModal').style.display = 'flex';
+    document.getElementById('bcpSearch').value = '';
+    bcpSetKind('ingredient');
+    setTimeout(() => document.getElementById('bcpSearch').focus(), 50);
+}
+
+function closeBarcodesPanel() {
+    _bcpOpen = false;
+    document.getElementById('barcodesModal').style.display = 'none';
+    if (_bcpOpener && document.contains(_bcpOpener) && _bcpOpener.focus) _bcpOpener.focus();
+}
+
+function bcpSetKind(kind) {
+    _bcpKind = kind;
+    document.getElementById('bcpTabIng').setAttribute('aria-selected', kind === 'ingredient' ? 'true' : 'false');
+    document.getElementById('bcpTabPos').setAttribute('aria-selected', kind === 'pos' ? 'true' : 'false');
+    bcpLoad(true);
+}
+
+function bcpEmptyText(searching) {
+    if (searching) return 'No barcodes match that search.';
+    return _bcpKind === 'pos'
+        ? 'No POS items have a barcode yet.'
+        : 'No barcodes yet — scan an unknown barcode on this page to link it to an ingredient.';
+}
+
+async function bcpLoad(reset) {
+    const list = document.getElementById('bcpList');
+    const meta = document.getElementById('bcpMeta');
+    const more = document.getElementById('bcpMore');
+    const q = document.getElementById('bcpSearch').value.trim();
+    if (reset) { _bcpOffset = 0; list.innerHTML = ''; meta.textContent = 'Loading…'; more.style.display = 'none'; }
+    const myReq = ++_bcpReq;
+    let data;
+    try { data = await bcpPost('list_barcodes', { kind: _bcpKind, q: q, offset: _bcpOffset }); }
+    catch (e) { data = { error: 'Network error.' }; }
+    if (myReq !== _bcpReq) return; // a newer search superseded this one
+    if (!data.ok) { meta.textContent = data.error || 'Could not load the list.'; return; }
+    setBarcodeCount(data.all_count);
+    if (reset && data.rows.length === 0) {
+        list.innerHTML = '<div class="bcp-empty">' + esc(bcpEmptyText(q !== '')) + '</div>';
+        meta.textContent = '';
+        more.style.display = 'none';
+        return;
+    }
+    if (reset) list.innerHTML = _bcpKind === 'pos' ? bcpHeadPos() : bcpHeadIng();
+    const frag = document.createElement('div');
+    frag.innerHTML = data.rows.map(r => _bcpKind === 'pos' ? bcpRowPos(r) : bcpRowIng(r, data.can_manage)).join('');
+    while (frag.firstChild) list.appendChild(frag.firstChild);
+    _bcpOffset = data.next_offset;
+    const shown = list.querySelectorAll('.bcp-row:not(.bcp-row--head)').length;
+    meta.textContent = 'Showing ' + shown + ' of ' + data.total + (q ? ' matching' : '');
+    more.style.display = data.has_more ? '' : 'none';
+}
+
+function bcpHeadIng() { return '<div class="bcp-row bcp-row--head"><span>Barcode</span><span>Ingredient</span><span>Pack</span><span>Added</span><span></span></div>'; }
+function bcpHeadPos() { return '<div class="bcp-row bcp-row--pos bcp-row--head"><span>Barcode</span><span>Item</span><span>Category</span></div>'; }
+
+function bcpRowPos(r) {
+    return '<div class="bcp-row bcp-row--pos">' +
+        '<div><span class="bcp-lbl">Barcode</span><span class="bcp-code">' + esc(r.barcode) + '</span></div>' +
+        '<div><span class="bcp-lbl">Item</span><span class="bcp-name">' + esc(r.name) + '</span></div>' +
+        '<div><span class="bcp-lbl">Category</span><span class="bcp-sub">' + esc(r.category_name || '') + '</span></div></div>';
+}
+
+function bcpFmtNum(n) { const x = parseFloat(n); return isNaN(x) ? '' : String(Math.round(x * 10000) / 10000); }
+
+function bcpRowIng(r, canManage) {
+    const added = [r.added_by || '', r.created_at ? String(r.created_at).slice(0, 10) : ''].filter(Boolean).join(' · ');
+    const acts = (canManage && CAN_MANAGE_BARCODES)
+        ? '<div class="bcp-acts"><button type="button" class="bcp-btn" data-act="edit" aria-label="Edit pack size for ' + esc(r.name) + '">Edit</button>' +
+          '<button type="button" class="bcp-btn bcp-btn--danger" data-act="remove" aria-label="Remove barcode link for ' + esc(r.name) + '">Remove</button></div>'
+        : '<div></div>';
+    return '<div class="bcp-row" data-id="' + esc(r.id) + '" data-barcode="' + esc(r.barcode) + '" data-pack="' + esc(bcpFmtNum(r.pack_size)) + '" data-label="' + esc(r.pack_label || '') + '">' +
+        '<div><span class="bcp-lbl">Barcode</span><span class="bcp-code">' + esc(r.barcode) + '</span></div>' +
+        '<div><span class="bcp-lbl">Ingredient</span><a class="bcp-name" href="stock-ingredients.php">' + esc(r.name) + '</a> <span class="bcp-sub">(' + esc(r.unit) + ')</span></div>' +
+        '<div><span class="bcp-lbl">Pack</span><span class="bcp-pack">' + esc(bcpFmtNum(r.pack_size)) + ' ' + esc(r.pack_label || r.unit || '') + '</span></div>' +
+        '<div><span class="bcp-lbl">Added</span><span class="bcp-sub">' + esc(added || '—') + '</span></div>' +
+        acts + '</div>';
+}
+
+function bcpClearInline(row) { const o = row.querySelector('.bcp-inline'); if (o) o.remove(); }
+
+function bcpStartEdit(row) {
+    bcpClearInline(row);
+    const box = document.createElement('div');
+    box.className = 'bcp-inline bcp-edit';
+    box.innerHTML = '<label>Pack size<input type="number" min="0.0001" step="any" data-f="size" value="' + esc(row.dataset.pack) + '"></label>' +
+        '<label>Pack label<input type="text" maxlength="50" data-f="label" value="' + esc(row.dataset.label) + '"></label>' +
+        '<button type="button" class="bcp-btn bcp-btn--primary" data-act="save">Save</button>' +
+        '<button type="button" class="bcp-btn" data-act="cancel">Cancel</button>' +
+        '<div class="bcp-err" role="alert" style="display:none"></div>';
+    row.appendChild(box);
+    box.querySelector('[data-f="size"]').focus();
+}
+
+function bcpStartRemove(row) {
+    bcpClearInline(row);
+    const box = document.createElement('div');
+    box.className = 'bcp-inline';
+    box.innerHTML = '<div class="bcp-confirm">Remove the link from barcode <strong class="bcp-code">' + esc(row.dataset.barcode) + '</strong> to this ingredient? The ingredient and its stock are not touched; the barcode will be unknown until it is linked again.</div>' +
+        '<button type="button" class="bcp-btn bcp-btn--danger" data-act="confirm-remove">Remove link</button>' +
+        '<button type="button" class="bcp-btn" data-act="cancel">Keep it</button>' +
+        '<div class="bcp-err" role="alert" style="display:none"></div>';
+    row.appendChild(box);
+    box.querySelector('[data-act="cancel"]').focus();
+}
+
+function bcpShowErr(row, msg) {
+    const e = row.querySelector('.bcp-err');
+    if (e) { e.textContent = msg; e.style.display = 'block'; }
+}
+
+async function bcpSave(row) {
+    const size = row.querySelector('[data-f="size"]').value.trim();
+    const label = row.querySelector('[data-f="label"]').value.trim();
+    if (size === '' || isNaN(parseFloat(size)) || parseFloat(size) <= 0) { bcpShowErr(row, 'Pack size must be a number greater than zero.'); return; }
+    if (label.length > 50) { bcpShowErr(row, 'Pack label is too long (50 characters maximum).'); return; }
+    const btn = row.querySelector('[data-act="save"]'); btn.disabled = true;
+    let data;
+    try { data = await bcpPost('update_barcode', { id: row.dataset.id, pack_size: size, pack_label: label }); }
+    catch (e) { data = { error: 'Network error.' }; }
+    btn.disabled = false;
+    if (!data.ok) { bcpShowErr(row, data.error || 'Save failed.'); return; }
+    _barcodeCache.clear(); // next scan must see the new pack size
+    flashMsg('Barcode link updated');
+    bcpLoad(true);
+}
+
+async function bcpRemove(row) {
+    const btn = row.querySelector('[data-act="confirm-remove"]'); btn.disabled = true;
+    let data;
+    try { data = await bcpPost('delete_barcode', { id: row.dataset.id }); }
+    catch (e) { data = { error: 'Network error.' }; }
+    btn.disabled = false;
+    if (!data.ok) { bcpShowErr(row, data.error || 'Remove failed.'); return; }
+    _barcodeCache.clear(); // a removed link must not keep resolving from cache
+    setBarcodeCount(data.all_count);
+    flashMsg('Barcode link removed');
+    bcpLoad(true);
+}
+
+document.getElementById('bcpList').addEventListener('click', function(e) {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const row = btn.closest('.bcp-row');
+    if (!row) return;
+    const act = btn.dataset.act;
+    if (act === 'edit') bcpStartEdit(row);
+    else if (act === 'remove') bcpStartRemove(row);
+    else if (act === 'cancel') { bcpClearInline(row); const b = row.querySelector('[data-act="edit"],[data-act="remove"]'); if (b) b.focus(); }
+    else if (act === 'save') bcpSave(row);
+    else if (act === 'confirm-remove') bcpRemove(row);
+});
+document.getElementById('bcpList').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target.matches('.bcp-edit input')) { e.preventDefault(); bcpSave(e.target.closest('.bcp-row')); }
+});
+document.getElementById('bcpSearch').addEventListener('input', function() {
+    clearTimeout(_bcpTimer);
+    _bcpTimer = setTimeout(() => bcpLoad(true), 300);
+});
+document.getElementById('barcodesModal').addEventListener('click', function(e) {
+    if (e.target === this) closeBarcodesPanel();
+});
+document.addEventListener('keydown', function(e) {
+    if (!_bcpOpen) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeBarcodesPanel(); return; }
+    if (e.key === 'Tab') { // keep focus inside the panel
+        const sheet = document.querySelector('#barcodesModal .scanmodal-sheet');
+        const f = Array.from(sheet.querySelectorAll('button:not([disabled]),input,a[href]')).filter(el => el.offsetParent !== null);
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (!sheet.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+        else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+});
 
 // Close modal when tapping overlay
 document.getElementById('registerModal').addEventListener('click', function(e) {
