@@ -3293,6 +3293,13 @@ body:not(:has(> .admin-header)) .admin-page-loader {
     overflow-x: auto;
 }
 
+/* Content placed straight inside a panel (no .rh-panel__body wrapper) used to touch the
+   panel edges. Give it the body's spacing. :where() keeps this at zero specificity, so
+   any page that styles its own panel children (e.g. Reports) still wins. */
+:where(.rh-panel) > :where(:not(.rh-panel__head, .rh-panel__body, .rh-empty, table, .table-responsive, .table-wrap, .table-container, script, style, input[type="hidden"])) {
+    margin: 0.85rem 1rem;
+}
+
 .rh-empty {
     margin: 0;
     padding: 0.85rem 1rem;

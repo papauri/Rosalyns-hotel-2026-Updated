@@ -91,7 +91,7 @@
 
 .breakdown-list {
     list-style: none;
-    margin: 0;
+    margin: 0.85rem 1rem; /* inside a panel: keep off the edges */
     padding: 0;
     display: grid;
     gap: 8px;
@@ -429,7 +429,7 @@
 
 .va-issues {
     list-style: none;
-    margin: 0;
+    margin: 0.85rem 1rem; /* inside a panel: keep off the edges */
     padding: 0;
 }
 
