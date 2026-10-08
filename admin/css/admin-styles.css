@@ -4196,6 +4196,17 @@ button:focus-visible {
     line-height: 1.2;
 }
 
+/* These controls have a fixed height, so vertical padding (often added again by page
+   stylesheets) only eats into the text and clips the bottom of the letters. Browsers
+   centre the text in a fixed-height field on their own. */
+.filter-bar input[type="text"], .filter-bar input[type="search"], .filter-bar input[type="date"], .filter-bar select,
+.toolbar input[type="text"], .toolbar input[type="search"], .toolbar input[type="date"], .toolbar select,
+.search-bar input[type="text"], .search-bar input[type="search"], .search-bar input[type="date"], .search-bar select,
+.table-toolbar input[type="text"], .table-toolbar input[type="search"], .table-toolbar input[type="date"], .table-toolbar select {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
 .filter-bar button,
 .filter-bar .btn,
 .toolbar button,
@@ -6258,3 +6269,7 @@ body>:is(.content,
         justify-content: flex-start;
     }
 }
+
+/* Toolbar/filter buttons lay out as flex, which drops the space between the icon and the
+   label ("Apply" sat against its magnifier). */
+.filter-bar button, .filter-bar .btn, .toolbar button, .toolbar .btn, .btn-filter { column-gap: 0.4em; }
