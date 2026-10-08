@@ -564,26 +564,26 @@ $current_page = basename($_SERVER['PHP_SELF']);
             <button type="button" onclick="rsDismissNotifs()" style="background:none; border:none; cursor:pointer; color:#6c757d; padding:0; flex-shrink:0;" title="Dismiss"><i class="fas fa-times"></i></button>
         </div>
 
-        <div class="kpi-grid">
-            <div class="kpi">
-                <div class="lbl">Today's RS orders</div>
-                <div class="val"><?php echo (int)$kpis['orders_today']; ?></div>
+        <div class="ck-kpis">
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Today's RS orders</span>
+                <span class="ck-kpi__value"><?php echo (int)$kpis['orders_today']; ?></span>
             </div>
-            <div class="kpi green">
-                <div class="lbl">Revenue today</div>
-                <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)$kpis['revenue_today'], 2); ?></div>
+            <div class="ck-kpi ck-kpi--good">
+                <span class="ck-kpi__label">Revenue today</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format((float)$kpis['revenue_today'], 2); ?></span>
             </div>
-            <div class="kpi">
-                <div class="lbl">Items served</div>
-                <div class="val"><?php echo $itemsServedToday; ?></div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Items served</span>
+                <span class="ck-kpi__value"><?php echo $itemsServedToday; ?></span>
             </div>
-            <div class="kpi">
-                <div class="lbl">Avg delivery</div>
-                <div class="val"><?php echo rs_fmt_dur((int)$kpis['avg_seconds']); ?></div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Avg delivery</span>
+                <span class="ck-kpi__value"><?php echo rs_fmt_dur((int)$kpis['avg_seconds']); ?></span>
             </div>
-            <div class="kpi amber">
-                <div class="lbl">In progress</div>
-                <div class="val"><?php echo (int)$kpis['in_progress']; ?></div>
+            <div class="ck-kpi ck-kpi--warn">
+                <span class="ck-kpi__label">In progress</span>
+                <span class="ck-kpi__value"><?php echo (int)$kpis['in_progress']; ?></span>
             </div>
         </div>
 

@@ -213,6 +213,7 @@ $bootstrap['fingerprint'] = md5(
     <meta name="apple-mobile-web-app-title" content="RH KDS">
     <link rel="manifest" href="manifest.php">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+    <link rel="stylesheet" href="css/admin-kpi.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-kpi.css'); ?>">
     <link rel="stylesheet" href="css/kds.css?v=<?php echo @filemtime(__DIR__ . '/css/kds.css'); ?>">
     <style>
         :root {
@@ -2571,11 +2572,11 @@ $bootstrap['fingerprint'] = md5(
             </div>` : '';
 
                 /* ── KPIs ── */
-                const kpi = `<div class="rh-kpi-row">
-                <div class="rh-kpi"><div class="lbl"><i class="fas fa-receipt"></i> Orders served</div><div class="val">${rows.length}</div></div>
-                <div class="rh-kpi"><div class="lbl"><i class="fas fa-utensils"></i> Items served</div><div class="val">${fmtQty(j.total_qty)}</div></div>
-                <div class="rh-kpi"><div class="lbl"><i class="fas fa-coins"></i> Revenue</div><div class="val">${fmtMoney(j.revenue)}</div></div>
-                <div class="rh-kpi"><div class="lbl"><i class="fas fa-stopwatch"></i> Avg prep</div><div class="val">${fmtDur(j.avg_seconds)}</div></div>
+                const kpi = `<div class="ck-kpis ck-kpis--4 rh-kpi-row">
+                <div class="ck-kpi ck-kpi--dark"><span class="ck-kpi__icon"><i class="fas fa-receipt"></i></span><span class="ck-kpi__label">Orders served</span><span class="ck-kpi__value">${rows.length}</span></div>
+                <div class="ck-kpi ck-kpi--dark"><span class="ck-kpi__icon"><i class="fas fa-utensils"></i></span><span class="ck-kpi__label">Items served</span><span class="ck-kpi__value">${fmtQty(j.total_qty)}</span></div>
+                <div class="ck-kpi ck-kpi--dark"><span class="ck-kpi__icon"><i class="fas fa-coins"></i></span><span class="ck-kpi__label">Revenue</span><span class="ck-kpi__value ck-kpi__value--money">${fmtMoney(j.revenue)}</span></div>
+                <div class="ck-kpi ck-kpi--dark"><span class="ck-kpi__icon"><i class="fas fa-stopwatch"></i></span><span class="ck-kpi__label">Avg prep</span><span class="ck-kpi__value">${fmtDur(j.avg_seconds)}</span></div>
             </div>`;
 
                 /* ── Log event type metadata ── */

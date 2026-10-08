@@ -467,31 +467,31 @@ $modalsHtml = ob_get_clean();
         </div>
 
         <!-- KPI Strip -->
-        <div class="acct-kpis cn-kpis">
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">Total Issued</div>
-                <div class="acct-kpi__value"><span class="acct-kpi__currency"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_value'] ?? 0), 2); ?></div>
-                <div class="acct-kpi__meta"><?php echo (int)($kpi['total_issued'] ?? 0); ?> credit note<?php echo (int)($kpi['total_issued'] ?? 0) !== 1 ? 's' : ''; ?></div>
+        <div class="ck-kpis ck-kpis--4">
+            <div class="ck-kpi ck-kpi--good">
+                <span class="ck-kpi__label">Total Issued</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_value'] ?? 0), 2); ?></span>
+                <span class="ck-kpi__sub"><?php echo (int)($kpi['total_issued'] ?? 0); ?> credit note<?php echo (int)($kpi['total_issued'] ?? 0) !== 1 ? 's' : ''; ?></span>
             </div>
-            <div class="acct-kpi acct-kpi--paid">
-                <div class="acct-kpi__label">Total Redeemed</div>
-                <div class="acct-kpi__value"><span class="acct-kpi__currency"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_redeemed'] ?? 0), 2); ?></div>
-                <div class="acct-kpi__meta">Applied to bookings</div>
+            <div class="ck-kpi ck-kpi--good">
+                <span class="ck-kpi__label">Total Redeemed</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_redeemed'] ?? 0), 2); ?></span>
+                <span class="ck-kpi__sub">Applied to bookings</span>
             </div>
-            <div class="acct-kpi acct-kpi--pending">
-                <div class="acct-kpi__label">Outstanding Balance</div>
-                <div class="acct-kpi__value"><span class="acct-kpi__currency"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_outstanding'] ?? 0), 2); ?></div>
-                <div class="acct-kpi__meta"><?php echo (int)($kpi['count_active'] ?? 0) + (int)($kpi['count_partial'] ?? 0); ?> active</div>
+            <div class="ck-kpi ck-kpi--warn">
+                <span class="ck-kpi__label">Outstanding Balance</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_outstanding'] ?? 0), 2); ?></span>
+                <span class="ck-kpi__sub"><?php echo (int)($kpi['count_active'] ?? 0) + (int)($kpi['count_partial'] ?? 0); ?> active</span>
             </div>
-            <div class="acct-kpi">
-                <div class="acct-kpi__label">Status Breakdown</div>
-                <div class="acct-kpi__value" style="font-size:18px;"><?php echo (int)($kpi['count_active'] ?? 0); ?> active</div>
-                <div class="acct-kpi__meta">
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Status Breakdown</span>
+                <span class="ck-kpi__value"><?php echo (int)($kpi['count_active'] ?? 0); ?> <small>active</small></span>
+                <span class="ck-kpi__sub">
                     <?php echo (int)($kpi['count_partial'] ?? 0); ?> partial &middot;
                     <?php echo (int)($kpi['count_used'] ?? 0); ?> used &middot;
                     <?php echo (int)($kpi['count_voided'] ?? 0); ?> voided &middot;
                     <?php echo (int)($kpi['count_expired'] ?? 0); ?> expired
-                </div>
+                </span>
             </div>
         </div>
 

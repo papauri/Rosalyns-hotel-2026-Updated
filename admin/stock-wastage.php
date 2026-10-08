@@ -243,39 +243,33 @@ $csrf_token = generateCsrfToken();
             </div>
         <?php endif; ?>
 
-        <div class="summary-cards">
-            <div class="summary-card warning summary-card--interactive js-stock-wastage-insight-trigger"
-                role="button"
-                tabindex="0"
+        <div class="ck-kpis ck-kpis--3">
+            <button type="button" class="ck-kpi ck-kpi--warn js-stock-wastage-insight-trigger"
                 data-insight-key="this-month"
                 data-insight-title="Current Month Wastage"
                 aria-label="Open current month wastage insight">
-                <div class="label">This month wastage</div>
-                <div class="value"><?php echo $currency_symbol . ' ' . number_format($totalThisMonth, 2); ?></div>
-                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
-            </div>
+                <span class="ck-kpi__label">This month wastage</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($totalThisMonth, 2); ?></span>
+                <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
+            </button>
 
-            <div class="summary-card summary-card--interactive js-stock-wastage-insight-trigger"
-                role="button"
-                tabindex="0"
+            <button type="button" class="ck-kpi js-stock-wastage-insight-trigger"
                 data-insight-key="last-month"
                 data-insight-title="Previous Month Baseline"
                 aria-label="Open previous month baseline insight">
-                <div class="label">Last month</div>
-                <div class="value"><?php echo $currency_symbol . ' ' . number_format($totalLastMonth, 2); ?></div>
-                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
-            </div>
+                <span class="ck-kpi__label">Last month</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($totalLastMonth, 2); ?></span>
+                <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
+            </button>
 
-            <div class="summary-card summary-card--interactive js-stock-wastage-insight-trigger"
-                role="button"
-                tabindex="0"
+            <button type="button" class="ck-kpi js-stock-wastage-insight-trigger"
                 data-insight-key="recency"
                 data-insight-title="Logging Recency Health"
                 aria-label="Open wastage logging recency health">
-                <div class="label">Days since last entry</div>
-                <div class="value"><?php echo $daysSinceLast === null ? '—' : $daysSinceLast; ?></div>
-                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
-            </div>
+                <span class="ck-kpi__label">Days since last entry</span>
+                <span class="ck-kpi__value"><?php echo $daysSinceLast === null ? '—' : $daysSinceLast; ?></span>
+                <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
+            </button>
         </div>
 
         <div class="modal-overlay" id="stockWastageInsightModal" style="align-items:flex-start; padding-top:60px;">

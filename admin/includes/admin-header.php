@@ -296,6 +296,7 @@ if ($_admin_back_target !== null) {
 <?php require_once __DIR__ . '/page-zoom.php'; rh_page_zoom_bootstrap(); ?>
 <link rel="stylesheet" href="css/page-zoom.css?v=<?php echo @filemtime(__DIR__ . '/../css/page-zoom.css'); ?>">
 <?php /* One size for every summary card and data table — loaded after page CSS so it wins. */ ?>
+<link rel="stylesheet" href="css/admin-kpi.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-kpi.css'); ?>">
 <link rel="stylesheet" href="css/admin-uniform.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-uniform.css'); ?>">
 <link rel="stylesheet" href="css/admin-global-search.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-global-search.css'); ?>">
 <script src="js/admin-global-search.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-global-search.js'); ?>" defer></script>

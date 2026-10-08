@@ -224,22 +224,22 @@ $site_name = getSetting('site_name');
     </div>
 
     <!-- Stats row -->
-    <div class="stats-row">
-        <div class="stat-mini new-card">
-            <div class="val"><?php echo $status_counts['new']; ?></div>
-            <div class="lbl">New / Unread</div>
+    <div class="ck-kpis ck-kpis--4">
+        <div class="ck-kpi ck-kpi--alert">
+            <span class="ck-kpi__label">New / Unread</span>
+            <span class="ck-kpi__value"><?php echo $status_counts['new']; ?></span>
         </div>
-        <div class="stat-mini read-card">
-            <div class="val"><?php echo $status_counts['read']; ?></div>
-            <div class="lbl">Read</div>
+        <div class="ck-kpi ck-kpi--info">
+            <span class="ck-kpi__label">Read</span>
+            <span class="ck-kpi__value"><?php echo $status_counts['read']; ?></span>
         </div>
-        <div class="stat-mini replied-card">
-            <div class="val"><?php echo $status_counts['replied']; ?></div>
-            <div class="lbl">Replied</div>
+        <div class="ck-kpi ck-kpi--good">
+            <span class="ck-kpi__label">Replied</span>
+            <span class="ck-kpi__value"><?php echo $status_counts['replied']; ?></span>
         </div>
-        <div class="stat-mini archived-card">
-            <div class="val"><?php echo $status_counts['archived']; ?></div>
-            <div class="lbl">Archived</div>
+        <div class="ck-kpi">
+            <span class="ck-kpi__label">Archived</span>
+            <span class="ck-kpi__value"><?php echo $status_counts['archived']; ?></span>
         </div>
     </div>
 

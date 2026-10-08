@@ -1,0 +1,209 @@
+/* ==========================================================================
+   Admin KPI card — THE standard stat/summary card for every admin page.
+   Self-contained: works anywhere, no .ck ancestor needed. Loaded globally by
+   admin/includes/admin-header.php (and before admin-cockpit.css on the
+   cockpit pages). Prefix: .ck-kpi / .ck-kpis
+
+   MARKUP CONTRACT
+     <div class="ck-kpis [ck-kpis--2|--3|--4]">
+       <a class="ck-kpi [variant]" href="...">        (static: <div class="ck-kpi">;
+                                                       interactive: a / button /
+                                                       [data-href])
+         <span class="ck-kpi__icon"><i class="fas fa-..."></i></span>   optional
+         <span class="ck-kpi__label">Label</span>                       required
+         <span class="ck-kpi__value">123 <small>unit</small></span>     required
+           money value: class "ck-kpi__value ck-kpi__value--money" with
+           <span class="ck-cur">MWK</span> before the number
+           (add data-fit to any value that must never overflow)
+         <span class="ck-kpi__sub">Supporting text</span>               optional
+         <span class="ck-meter ck-meter--good"><span style="width:60%"></span></span>   optional
+         <span class="ck-spark"><span style="height:40%"></span>...</span>              optional
+       </a>
+     </div>
+   Variants: ck-kpi--dark | --warn | --alert | --good | --info
+   Meter colours: ck-meter--info | --gold | --good | --amber | --red
+   Sparkline: last bar may carry .is-today
+   ========================================================================== */
+
+:root {
+    --ck-ink: var(--navy, #231F1C);
+    --ck-ink-2: #3b342e;
+    --ck-text: var(--admin-text, #1f2a37);
+    --ck-muted: #786d62;
+    --ck-line: #ebe4da;
+    --ck-line-strong: #ddd3c6;
+    --ck-surface: var(--admin-surface, #fffdfb);
+    --ck-soft: #f7f3ee;
+    --ck-softer: #fbf8f4;
+    --ck-gold: var(--gold, #8F6A35);
+    --ck-gold-soft: var(--gold-light, #F3ECE4);
+    --ck-gold-on-dark: var(--gold-on-dark, #D2AE72);
+    --ck-primary: var(--color-primary, #766550);
+    --ck-good: #3f8f5a;
+    --ck-good-soft: #e7f2ea;
+    --ck-warn: #a96f12;
+    --ck-warn-soft: #fbf0dc;
+    --ck-bad: #a63d32;
+    --ck-bad-soft: #f8e6e3;
+    --ck-info: #2f6fad;
+    --ck-info-soft: #e7f0f9;
+    --ck-radius: 18px;
+    --ck-radius-sm: 12px;
+    --ck-shadow: 0 1px 2px rgba(35, 31, 28, .04), 0 6px 24px -12px rgba(35, 31, 28, .14);
+    --ck-shadow-hover: 0 2px 4px rgba(35, 31, 28, .06), 0 14px 32px -14px rgba(35, 31, 28, .28);
+    --ck-gap: clamp(12px, 1.4vw, 20px);
+}
+
+/* ---------- Grid ----------
+   Intrinsic (auto-fit) so it adapts to the space the page really gets, in or
+   out of .ck. (A container cannot query itself, so no @container here; the
+   --N modifiers cap the column count and still collapse on narrow widths.) */
+.ck-kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: var(--ck-gap);
+    min-width: 0;
+    box-sizing: border-box;
+    margin-bottom: var(--ck-gap);
+}
+/* Inside the cockpit layout the parent's flex gap does the spacing. */
+.ck > .ck-kpis,
+.ck-kpis:last-child { margin-bottom: 0; }
+.ck-kpis--2 { grid-template-columns: repeat(auto-fit, minmax(max(150px, calc((100% - var(--ck-gap)) / 2)), 1fr)); }
+.ck-kpis--3 { grid-template-columns: repeat(auto-fit, minmax(max(150px, calc((100% - 2 * var(--ck-gap)) / 3)), 1fr)); }
+.ck-kpis--4 { grid-template-columns: repeat(auto-fit, minmax(max(150px, calc((100% - 3 * var(--ck-gap)) / 4)), 1fr)); }
+
+/* ---------- Card ---------- */
+.ck-kpi,
+.ck-kpi *,
+.ck-kpi *::before,
+.ck-kpi *::after { box-sizing: border-box; }
+.ck-kpi {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    container-type: inline-size;
+    padding: 18px 18px 16px;
+    border-radius: var(--ck-radius);
+    background: var(--ck-surface);
+    border: 1px solid var(--ck-line);
+    box-shadow: var(--ck-shadow);
+    color: var(--ck-text);
+    font-variant-numeric: tabular-nums;
+    text-decoration: none;
+}
+a.ck-kpi { color: inherit; }
+a.ck-kpi,
+button.ck-kpi,
+.ck-kpi[data-href] {
+    cursor: pointer;
+    transition: transform .18s, box-shadow .18s, border-color .18s;
+}
+button.ck-kpi { font: inherit; text-align: left; width: 100%; }
+a.ck-kpi:hover,
+button.ck-kpi:hover,
+.ck-kpi[data-href]:hover { transform: translateY(-2px); box-shadow: var(--ck-shadow-hover); border-color: var(--ck-line-strong); }
+a.ck-kpi:focus-visible,
+button.ck-kpi:focus-visible,
+.ck-kpi[data-href]:focus-visible { outline: 3px solid var(--ck-gold-on-dark); outline-offset: 2px; }
+
+.ck-kpi__icon {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: var(--ck-gold-soft);
+    color: var(--ck-gold);
+    font-size: 14px;
+}
+.ck-kpi__label {
+    padding-right: 40px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ck-muted);
+}
+.ck-kpi__value {
+    font-family: 'Jost', system-ui, sans-serif;
+    font-weight: 600;
+    /* Sized to the card (container query units), not the viewport */
+    font-size: clamp(22px, 15cqi, 32px);
+    line-height: 1.1;
+    color: var(--ck-ink);
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.ck-kpi__value small { font-size: .55em; font-weight: 500; color: var(--ck-muted); margin-left: 2px; }
+.ck-kpi__value--money { font-size: clamp(15px, 11cqi, 26px); white-space: nowrap; overflow-wrap: normal; }
+.ck-kpi__sub { font-size: 13px; color: var(--ck-muted); margin-top: auto; }
+.ck-cur { font-size: .62em; font-weight: 500; opacity: .7; margin-right: 2px; letter-spacing: 0; }
+
+/* Variants */
+.ck-kpi--dark { background: var(--ck-ink); border-color: var(--ck-ink); color: #f3ece4; }
+.ck-kpi--dark .ck-kpi__value { color: #fff; }
+.ck-kpi--dark .ck-kpi__value small,
+.ck-kpi--dark .ck-kpi__label,
+.ck-kpi--dark .ck-kpi__sub { color: rgba(243, 236, 228, .72); }
+.ck-kpi--dark .ck-kpi__icon { background: rgba(210, 174, 114, .16); color: var(--ck-gold-on-dark); }
+.ck-kpi--dark .ck-meter { background: rgba(255, 255, 255, .14); }
+.ck-kpi--dark .ck-meter > span { background: var(--ck-gold-on-dark); }
+.ck-kpi--warn { border-color: #ecd4a6; background: linear-gradient(180deg, var(--ck-warn-soft), var(--ck-surface) 70%); }
+.ck-kpi--warn .ck-kpi__icon { background: var(--ck-warn-soft); color: var(--ck-warn); }
+.ck-kpi--alert { border-color: #edc9c3; background: linear-gradient(180deg, var(--ck-bad-soft), var(--ck-surface) 70%); }
+.ck-kpi--alert .ck-kpi__icon { background: var(--ck-bad-soft); color: var(--ck-bad); }
+.ck-kpi--alert .ck-kpi__value { color: var(--ck-bad); }
+.ck-kpi--good .ck-kpi__icon { background: var(--ck-good-soft); color: var(--ck-good); }
+.ck-kpi--info { border-color: #c6dbef; background: linear-gradient(180deg, var(--ck-info-soft), var(--ck-surface) 70%); }
+.ck-kpi--info .ck-kpi__icon { background: var(--ck-info-soft); color: var(--ck-info); }
+
+/* Meter bar */
+.ck-meter {
+    display: block;
+    height: 6px;
+    border-radius: 99px;
+    background: var(--ck-soft);
+    overflow: hidden;
+}
+.ck-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--ck-ink); transition: width .6s cubic-bezier(.2, .8, .2, 1); }
+.ck-meter--info > span { background: var(--ck-info); }
+.ck-meter--gold > span { background: var(--ck-gold); }
+.ck-meter--good > span { background: var(--ck-good); }
+.ck-meter--amber > span { background: #c9922a; }
+.ck-meter--red > span { background: var(--ck-bad); }
+
+/* Sparkline (mini bars) */
+.ck-spark { display: flex; align-items: flex-end; gap: 3px; height: 26px; }
+.ck-spark > span { flex: 1; min-height: 2px; border-radius: 3px 3px 1px 1px; background: var(--ck-line-strong); }
+.ck-spark > span.is-today { background: var(--ck-gold); }
+
+/* Phone */
+@media (max-width: 680px) {
+    .ck-kpis { gap: 10px; }
+    .ck-kpi { padding: 14px; border-radius: 16px; }
+    .ck-kpi__icon { width: 28px; height: 28px; top: 12px; right: 12px; font-size: 12px; }
+    .ck-kpi__label { font-size: 11px; padding-right: 32px; }
+    .ck-kpi__sub { font-size: 12px; }
+}
+@media (max-width: 380px) {
+    .ck-kpis,
+    .ck-kpis[class] { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ck-kpi,
+    .ck-meter > span { transition: none !important; }
+    a.ck-kpi:hover,
+    button.ck-kpi:hover,
+    .ck-kpi[data-href]:hover { transform: none; }
+}
+
+@media print {
+    .ck-kpi { box-shadow: none; break-inside: avoid; }
+}

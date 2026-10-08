@@ -257,26 +257,26 @@ foreach ($closeRows as $c) {
 
         <?php if ($allTime): ?><p style="color:#6c757d;font-size:13px;margin:-8px 0 14px;"><i class="fas fa-infinity"></i> Showing all-time results (date filter above is ignored while this is active).</p><?php endif; ?>
 
-        <div class="stats-grid">
-            <div class="stat-card warning">
-                <div class="stat-label">Tip/VAT overstated revenue</div>
-                <div class="acct-kpi__value"><?php echo drift_money($tipKpiOverstatedRevenue, $currency_symbol); ?></div>
-                <div class="stat-sub"><?php echo count($tipDrift); ?> sale row(s) affected</div>
+        <div class="ck-kpis ck-kpis--4">
+            <div data-filter-card class="ck-kpi ck-kpi--warn">
+                <span class="ck-kpi__label">Tip/VAT overstated revenue</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($tipKpiOverstatedRevenue, 2); ?></span>
+                <span class="ck-kpi__sub"><?php echo count($tipDrift); ?> sale row(s) affected</span>
             </div>
-            <div class="stat-card warning">
-                <div class="stat-label">VAT overstated on tips</div>
-                <div class="acct-kpi__value"><?php echo drift_money($tipKpiOverstatedVat, $currency_symbol); ?></div>
-                <div class="stat-sub">Declared VAT was too high by this much</div>
+            <div data-filter-card class="ck-kpi ck-kpi--warn">
+                <span class="ck-kpi__label">VAT overstated on tips</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($tipKpiOverstatedVat, 2); ?></span>
+                <span class="ck-kpi__sub">Declared VAT was too high by this much</span>
             </div>
-            <div class="stat-card danger">
-                <div class="stat-label">Unresolved after refund</div>
-                <div class="acct-kpi__value"><?php echo drift_money($tipKpiResidualAmount, $currency_symbol); ?></div>
-                <div class="stat-sub"><?php echo $tipKpiResidualCount; ?> refunded order(s) still don't net to zero</div>
+            <div data-filter-card class="ck-kpi ck-kpi--alert">
+                <span class="ck-kpi__label">Unresolved after refund</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($tipKpiResidualAmount, 2); ?></span>
+                <span class="ck-kpi__sub"><?php echo $tipKpiResidualCount; ?> refunded order(s) still don't net to zero</span>
             </div>
-            <div class="stat-card info">
-                <div class="stat-label">Shift closes affected</div>
-                <div class="stat-value"><?php echo $shiftKpiAffectedCount; ?></div>
-                <div class="stat-sub"><?php echo $shiftKpiOverrideAffectedCount; ?> of those needed a manager override at the time</div>
+            <div data-filter-card class="ck-kpi ck-kpi--info">
+                <span class="ck-kpi__label">Shift closes affected</span>
+                <span class="ck-kpi__value"><?php echo $shiftKpiAffectedCount; ?></span>
+                <span class="ck-kpi__sub"><?php echo $shiftKpiOverrideAffectedCount; ?> of those needed a manager override at the time</span>
             </div>
         </div>
 

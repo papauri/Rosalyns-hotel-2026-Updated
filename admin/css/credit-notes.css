@@ -28,14 +28,6 @@
     flex-wrap: wrap;
 }
 
-/* ── KPI strip ──────────────────────────────────────────────── */
-.cn-kpis {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px;
-    margin-bottom: 20px;
-}
-
 /* ── CN Table ───────────────────────────────────────────────── */
 .cn-table {
     width: 100%;
@@ -519,17 +511,10 @@
     .admin-table tbody td {
         padding: 9px 10px;
     }
-
-    .cn-kpis {
-        grid-template-columns: repeat(2, 1fr);
-    }
 }
 
 /* ≤ 768px — stack filter bar + hide lower-priority columns */
 @media (max-width: 768px) {
-    .cn-kpis {
-        grid-template-columns: 1fr 1fr;
-    }
 
     /* Filter bar full-width stacking is already handled by admin-styles.css */
     .filter-section {
@@ -548,9 +533,6 @@
 
 /* ≤ 600px — aggressive column hiding, vertical actions */
 @media (max-width: 600px) {
-    .cn-kpis {
-        grid-template-columns: 1fr 1fr;
-    }
 
     .cn-page-header {
         flex-direction: column;
@@ -574,9 +556,6 @@
 
 /* ≤ 480px — single-column KPIs */
 @media (max-width: 480px) {
-    .cn-kpis {
-        grid-template-columns: 1fr;
-    }
 
     .filter-section {
         padding: 8px;

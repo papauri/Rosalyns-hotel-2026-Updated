@@ -1054,10 +1054,10 @@ foreach ($tables as $table) {
 
             <section class="rt-card">
                 <h2>Current Table Summary</h2>
-                <div class="rt-stats">
-                    <div class="rt-stat"><strong><?php echo count($tables); ?></strong><span>Total Rows</span></div>
-                    <div class="rt-stat"><strong><?php echo $activeCount; ?></strong><span>Active Tables</span></div>
-                    <div class="rt-stat"><strong><?php echo $totalCapacity > 0 ? $totalCapacity : '&mdash;'; ?></strong><span>Total Capacity</span></div>
+                <div class="ck-kpis ck-kpis--3">
+                    <div class="ck-kpi"><span class="ck-kpi__label">Total Rows</span><span class="ck-kpi__value"><?php echo count($tables); ?></span></div>
+                    <div class="ck-kpi ck-kpi--good"><span class="ck-kpi__label">Active Tables</span><span class="ck-kpi__value"><?php echo $activeCount; ?></span></div>
+                    <div class="ck-kpi"><span class="ck-kpi__label">Total Capacity</span><span class="ck-kpi__value"><?php echo $totalCapacity > 0 ? $totalCapacity : '&mdash;'; ?></span></div>
                 </div>
                 <p class="rt-muted" style="margin-top:12px;">Capacity is optional. Leave it blank if the table exists but seating changes often.</p>
             </section>

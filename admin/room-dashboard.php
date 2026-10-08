@@ -129,37 +129,46 @@ $roomStatuses = getRoomStatuses();
     <?php endif; ?>
 
     <!-- Today's Stats -->
-    <div class="today-stats">
-        <div class="today-stat">
-            <div class="value"><?php echo $summary['checkouts_today'] ?? 0; ?></div>
-            <div class="label"><i class="fas fa-sign-out-alt"></i> Check-outs Today</div>
+    <div class="ck-kpis ck-kpis--4">
+        <div class="ck-kpi">
+            <span class="ck-kpi__icon"><i class="fas fa-sign-out-alt"></i></span>
+            <span class="ck-kpi__label">Check-outs Today</span>
+            <span class="ck-kpi__value"><?php echo $summary['checkouts_today'] ?? 0; ?></span>
         </div>
-        <div class="today-stat">
-            <div class="value"><?php echo $summary['checkins_today'] ?? 0; ?></div>
-            <div class="label"><i class="fas fa-sign-in-alt"></i> Check-ins Today</div>
+        <div class="ck-kpi">
+            <span class="ck-kpi__icon"><i class="fas fa-sign-in-alt"></i></span>
+            <span class="ck-kpi__label">Check-ins Today</span>
+            <span class="ck-kpi__value"><?php echo $summary['checkins_today'] ?? 0; ?></span>
         </div>
-        <div class="today-stat">
-            <div class="value"><?php echo $summary['cleaning_queue'] ?? 0; ?></div>
-            <div class="label"><i class="fas fa-broom"></i> Rooms to Clean</div>
+        <div class="ck-kpi ck-kpi--warn">
+            <span class="ck-kpi__icon"><i class="fas fa-broom"></i></span>
+            <span class="ck-kpi__label">Rooms to Clean</span>
+            <span class="ck-kpi__value"><?php echo $summary['cleaning_queue'] ?? 0; ?></span>
         </div>
-        <div class="today-stat">
-            <div class="value"><?php echo $summary['available_now'] ?? 0; ?></div>
-            <div class="label"><i class="fas fa-check-circle"></i> Available Now</div>
+        <div class="ck-kpi ck-kpi--good">
+            <span class="ck-kpi__icon"><i class="fas fa-check-circle"></i></span>
+            <span class="ck-kpi__label">Available Now</span>
+            <span class="ck-kpi__value"><?php echo $summary['available_now'] ?? 0; ?></span>
         </div>
     </div>
 
     <!-- Room Status Overview -->
-    <div class="status-overview">
+    <?php
+    $statusKpiVariant = [
+        'available' => ' ck-kpi--good',
+        'cleaning' => ' ck-kpi--warn',
+        'inspection' => ' ck-kpi--info',
+        'maintenance' => ' ck-kpi--warn',
+        'out_of_order' => ' ck-kpi--alert',
+    ];
+    ?>
+    <div class="ck-kpis">
         <?php foreach ($roomStatuses as $status => $info): ?>
         <?php $count = $summary['status_counts'][$status] ?? 0; ?>
-        <div class="status-card <?php echo $status; ?>">
-            <div class="icon">
-                <i class="fas <?php echo $info['icon']; ?>"></i>
-            </div>
-            <div class="info">
-                <h3><?php echo $count; ?></h3>
-                <span><?php echo $info['label']; ?></span>
-            </div>
+        <div data-filter-card data-status="<?php echo htmlspecialchars($status); ?>" class="ck-kpi<?php echo $statusKpiVariant[$status] ?? ''; ?>">
+            <span class="ck-kpi__icon"><i class="fas <?php echo htmlspecialchars($info['icon']); ?>"></i></span>
+            <span class="ck-kpi__label"><?php echo htmlspecialchars($info['label']); ?></span>
+            <span class="ck-kpi__value"><?php echo (int)$count; ?></span>
         </div>
         <?php endforeach; ?>
     </div>

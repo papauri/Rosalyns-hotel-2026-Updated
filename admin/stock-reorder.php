@@ -121,10 +121,7 @@ $csrf_token = generateCsrfToken();
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <style>
-        .ro-summary { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:22px; }
-        .ro-stat { background:#fff; border:1px solid #e6e0d6; border-radius:2px; padding:16px 20px; min-width:160px; box-shadow:0 2px 8px rgba(70,60,50,.06); }
-        .ro-stat .num { font-size:1.7rem; font-weight:600; color:#3e3930; }
-        .ro-stat .lbl { font-size:.76rem; text-transform:uppercase; letter-spacing:.05em; color:#8a8172; }
+        .ro-summary { margin-bottom:22px; }
         .ro-group { background:#fff; border:1px solid #e6e0d6; border-radius:2px; margin-bottom:22px; box-shadow:0 2px 8px rgba(70,60,50,.06); overflow:hidden; }
         .ro-group > header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; padding:14px 18px; background:#faf8f4; border-bottom:1px solid #efeae1; }
         .ro-group h3 { margin:0; font-family:'Cormorant Garamond',serif; font-size:1.3rem; color:#3e3930; }
@@ -152,10 +149,10 @@ $csrf_token = generateCsrfToken();
 
         <?php if ($error): showAlert($error, 'error'); endif; ?>
 
-        <div class="ro-summary">
-            <div class="ro-stat"><div class="num"><?php echo (int)$itemCount; ?></div><div class="lbl">Items to reorder</div></div>
-            <div class="ro-stat"><div class="num"><?php echo count($groups); ?></div><div class="lbl">Supplier orders</div></div>
-            <div class="ro-stat"><div class="num"><?php echo htmlspecialchars($currency_symbol) . number_format($grandTotal, 2); ?></div><div class="lbl">Est. purchase value</div></div>
+        <div class="ck-kpis ck-kpis--3 ro-summary">
+            <div class="ck-kpi ck-kpi--warn"><span class="ck-kpi__label">Items to reorder</span><span class="ck-kpi__value"><?php echo (int)$itemCount; ?></span></div>
+            <div class="ck-kpi"><span class="ck-kpi__label">Supplier orders</span><span class="ck-kpi__value"><?php echo count($groups); ?></span></div>
+            <div class="ck-kpi"><span class="ck-kpi__label">Est. purchase value</span><span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($grandTotal, 2); ?></span></div>
         </div>
 
         <?php if (empty($groups)): ?>

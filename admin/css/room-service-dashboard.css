@@ -39,40 +39,8 @@
     font-size: 14px;
 }
 
-.kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 14px;
+.ck-kpis {
     margin-bottom: 18px;
-}
-
-.kpi {
-    background: var(--color-white, #fff);
-    border: 1px solid var(--admin-surface-border, #eaecef);
-    border-radius: 8px;
-    padding: 16px;
-}
-
-.kpi .lbl {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #6c757d;
-}
-
-.kpi .val {
-    font-size: 26px;
-    font-weight: 600;
-    margin-top: 4px;
-    font-variant-numeric: tabular-nums;
-}
-
-.kpi.green .val {
-    color: #0a7058;
-}
-
-.kpi.amber .val {
-    color: #856404;
 }
 
 .panel {

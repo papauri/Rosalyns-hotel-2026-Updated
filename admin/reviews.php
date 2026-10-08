@@ -274,26 +274,26 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
         </section>
 
         <!-- Headline stats -->
-        <div class="stats-grid reviews-stats">
-            <a class="stat-card reviews-stat-link" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'rating' => '', 'reply' => '', 'type' => '', 'source' => '', 'search' => '', 'sort' => 'newest'])); ?>">
-                <div class="stat-icon"><i class="fas fa-star"></i></div>
-                <div class="stat-value"><?php echo $avg_rating !== null ? number_format($avg_rating, 1) . ' / 5' : '—'; ?></div>
-                <div class="stat-label">Average rating · <?php echo $approved_count; ?> published</div>
+        <div class="ck-kpis ck-kpis--4 reviews-stats">
+            <a class="ck-kpi reviews-stat-link" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'rating' => '', 'reply' => '', 'type' => '', 'source' => '', 'search' => '', 'sort' => 'newest'])); ?>">
+                <span class="ck-kpi__icon"><i class="fas fa-star"></i></span>
+                <span class="ck-kpi__label">Average rating · <?php echo $approved_count; ?> published</span>
+                <span class="ck-kpi__value"><?php echo $avg_rating !== null ? number_format($avg_rating, 1) . ' / 5' : '—'; ?></span>
             </a>
-            <a class="stat-card stat-card-warning reviews-stat-link" href="<?php echo htmlspecialchars($filter_url(['status' => 'pending', 'rating' => '', 'reply' => '', 'type' => '', 'search' => '', 'sort' => 'oldest'])); ?>">
-                <div class="stat-icon"><i class="fas fa-hourglass-half"></i></div>
-                <div class="stat-value"><?php echo $pending_count; ?></div>
-                <div class="stat-label">Awaiting moderation</div>
+            <a class="ck-kpi reviews-stat-link ck-kpi--warn" href="<?php echo htmlspecialchars($filter_url(['status' => 'pending', 'rating' => '', 'reply' => '', 'type' => '', 'search' => '', 'sort' => 'oldest'])); ?>">
+                <span class="ck-kpi__icon"><i class="fas fa-hourglass-half"></i></span>
+                <span class="ck-kpi__label">Awaiting moderation</span>
+                <span class="ck-kpi__value"><?php echo $pending_count; ?></span>
             </a>
-            <a class="stat-card stat-card-info reviews-stat-link" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'reply' => 'needs', 'rating' => '', 'type' => '', 'search' => '', 'sort' => 'newest'])); ?>">
-                <div class="stat-icon"><i class="fas fa-reply"></i></div>
-                <div class="stat-value"><?php echo $awaiting_reply; ?></div>
-                <div class="stat-label">Published, no reply yet</div>
+            <a class="ck-kpi reviews-stat-link ck-kpi--info" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'reply' => 'needs', 'rating' => '', 'type' => '', 'search' => '', 'sort' => 'newest'])); ?>">
+                <span class="ck-kpi__icon"><i class="fas fa-reply"></i></span>
+                <span class="ck-kpi__label">Published, no reply yet</span>
+                <span class="ck-kpi__value"><?php echo $awaiting_reply; ?></span>
             </a>
-            <a class="stat-card stat-card-danger reviews-stat-link" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'rating' => 'low', 'reply' => '', 'type' => '', 'source' => '', 'search' => '', 'sort' => 'newest'])); ?>">
-                <div class="stat-icon"><i class="fas fa-exclamation-triangle"></i></div>
-                <div class="stat-value"><?php echo $low_rated; ?></div>
-                <div class="stat-label">Published 1–2★ reviews</div>
+            <a class="ck-kpi reviews-stat-link ck-kpi--alert" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'rating' => 'low', 'reply' => '', 'type' => '', 'source' => '', 'search' => '', 'sort' => 'newest'])); ?>">
+                <span class="ck-kpi__icon"><i class="fas fa-exclamation-triangle"></i></span>
+                <span class="ck-kpi__label">Published 1–2★ reviews</span>
+                <span class="ck-kpi__value"><?php echo $low_rated; ?></span>
             </a>
         </div>
 

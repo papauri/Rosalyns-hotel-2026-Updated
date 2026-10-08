@@ -22,42 +22,6 @@
     margin: 0;
 }
 
-/* ── Stat pills ── */
-.qt-stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-    margin-bottom: 24px;
-}
-
-.qt-stat {
-    background: #fff;
-    border: 1px solid var(--tbl-border, #E8E0D6);
-    border-radius: 8px;
-    padding: 14px 20px;
-    min-width: 130px;
-    flex: 1;
-}
-
-.qt-stat__label {
-    font-size: 12px;
-    font-weight: 500;
-    color: #888;
-    text-transform: uppercase;
-    letter-spacing: .06em;
-}
-
-.qt-stat__value {
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: var(--tbl-ref-color, #231F1C);
-    margin-top: 2px;
-}
-
-.qt-stat--value .qt-stat__value {
-    color: #2F4F78;
-}
-
 /* ── Filters ── */
 .qt-filters {
     background: #fff;
@@ -140,18 +104,6 @@
     margin-bottom: 12px;
     display: block;
     color: #C4B49A;
-}
-
-/* ── Responsive ── */
-@media (max-width: 1024px) {
-    .qt-stats {
-        gap: 8px;
-    }
-
-    .qt-stat {
-        min-width: 0;
-        padding: 10px 14px;
-    }
 }
 
 @media (max-width: 600px) {

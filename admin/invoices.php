@@ -482,41 +482,35 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
         <?php endif; ?>
 
         <!-- KPI Strip -->
-        <div class="acct-kpis">
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">Paid &amp; Closed</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format((float)($invoiceKpi['paid_total'] ?? 0), 0); ?></div>
-                <div class="acct-kpi__meta">
-                    <?php echo number_format((int)($invoiceKpi['paid_count'] ?? 0)); ?> invoices · MTD <?php echo $currency_symbol . number_format((float)($invoiceKpi['mtd_collected'] ?? 0), 0); ?>
-                </div>
+        <div class="ck-kpis ck-kpis--4">
+            <div class="ck-kpi ck-kpi--good">
+                <span class="ck-kpi__label">Paid &amp; Closed</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($invoiceKpi['paid_total'] ?? 0), 0); ?></span>
+                <span class="ck-kpi__sub"><?php echo number_format((int)($invoiceKpi['paid_count'] ?? 0)); ?> invoices · MTD <?php echo $currency_symbol . number_format((float)($invoiceKpi['mtd_collected'] ?? 0), 0); ?></span>
             </div>
-            <div class="acct-kpi acct-kpi--receivables">
-                <div class="acct-kpi__label">Outstanding</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format((float)($invoiceKpi['outstanding_total'] ?? 0), 0); ?></div>
-                <div class="acct-kpi__meta">
-                    <?php echo number_format((int)($invoiceKpi['outstanding_count'] ?? 0)); ?> awaiting ·
+            <div class="ck-kpi ck-kpi--warn">
+                <span class="ck-kpi__label">Outstanding</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($invoiceKpi['outstanding_total'] ?? 0), 0); ?></span>
+                <span class="ck-kpi__sub">                    <?php echo number_format((int)($invoiceKpi['outstanding_count'] ?? 0)); ?> awaiting ·
                     <a href="?filter_status=pending" class="acct-link">view pending</a>
-                </div>
+                </span>
             </div>
-            <div class="acct-kpi acct-kpi--cash">
-                <div class="acct-kpi__label">Generated</div>
-                <div class="acct-kpi__value"><?php echo number_format((int)($stats['invoices_generated'] ?? 0)); ?></div>
-                <div class="acct-kpi__meta">
-                    of <?php echo number_format((int)($stats['total_invoices'] ?? 0)); ?> ·
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Generated</span>
+                <span class="ck-kpi__value"><?php echo number_format((int)($stats['invoices_generated'] ?? 0)); ?></span>
+                <span class="ck-kpi__sub">                    of <?php echo number_format((int)($stats['total_invoices'] ?? 0)); ?> ·
                     <?php
                     $genPct = ($stats['total_invoices'] ?? 0) > 0
                         ? (((int)$stats['invoices_generated'] / (int)$stats['total_invoices']) * 100)
                         : 0;
                     echo number_format($genPct, 0) . '% coverage';
                     ?>
-                </div>
+                </span>
             </div>
-            <div class="acct-kpi acct-kpi--vat">
-                <div class="acct-kpi__label">Refunded / Credit</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format((float)($invoiceKpi['refunded_total'] ?? 0), 0); ?></div>
-                <div class="acct-kpi__meta">
-                    <?php echo number_format((int)($invoiceKpi['refunded_count'] ?? 0)); ?> credit notes
-                </div>
+            <div class="ck-kpi ck-kpi--info">
+                <span class="ck-kpi__label">Refunded / Credit</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($invoiceKpi['refunded_total'] ?? 0), 0); ?></span>
+                <span class="ck-kpi__sub"><?php echo number_format((int)($invoiceKpi['refunded_count'] ?? 0)); ?> credit notes</span>
             </div>
         </div>
 

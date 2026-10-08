@@ -99,67 +99,8 @@
     color: #212529;
 }
 
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px;
+.ck-kpis {
     margin-bottom: 18px;
-}
-
-.kr-stat {
-    background: var(--color-white, #fff);
-    border: 1px solid var(--admin-surface-border, #eaecef);
-    padding: 14px 16px;
-    border-radius: 8px;
-}
-
-.kr-stat .lbl {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #6c757d;
-}
-
-.kr-stat .val {
-    font-size: 24px;
-    font-weight: 600;
-    color: #212529;
-    margin-top: 4px;
-    font-variant-numeric: tabular-nums;
-}
-
-.kr-stat.danger .val {
-    color: #c82333;
-}
-
-@media (max-width: 1200px) {
-    .kr-stat {
-        padding: 10px 12px;
-    }
-
-    .kr-stat .val {
-        font-size: 19px;
-    }
-}
-
-@media (max-width: 768px) {
-    .kr-stat {
-        padding: 9px 10px;
-    }
-
-    .kr-stat .val {
-        font-size: 16px;
-    }
-
-    .kr-stat .lbl {
-        font-size: 10px;
-    }
-}
-
-@media (max-width: 480px) {
-    .kr-stat .val {
-        font-size: 14px;
-    }
 }
 
 .panel {

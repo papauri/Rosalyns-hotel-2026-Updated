@@ -288,30 +288,30 @@ $current_page = basename($_SERVER['PHP_SELF']);
             <span><?php echo htmlspecialchars($reportWindow['window_label']); ?></span>
         </div>
 
-        <div class="stats-grid">
-            <div class="kr-stat">
-                <div class="lbl">Items Served</div>
-                <div class="val"><?php echo number_format($totalItems); ?></div>
+        <div class="ck-kpis">
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Items Served</span>
+                <span class="ck-kpi__value"><?php echo number_format($totalItems); ?></span>
             </div>
-            <div class="kr-stat">
-                <div class="lbl">Total Qty</div>
-                <div class="val"><?php echo number_format($totalQty, 2); ?></div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Total Qty</span>
+                <span class="ck-kpi__value"><?php echo number_format($totalQty, 2); ?></span>
             </div>
-            <div class="kr-stat">
-                <div class="lbl">Revenue</div>
-                <div class="val"><?php echo $currency_symbol . ' ' . number_format($totalRevenue, 2); ?></div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Revenue</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($totalRevenue, 2); ?></span>
             </div>
-            <div class="kr-stat">
-                <div class="lbl">Avg Prep Time</div>
-                <div class="val"><?php echo rh_fmt_dur($avgPrep); ?></div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Avg Prep Time</span>
+                <span class="ck-kpi__value"><?php echo rh_fmt_dur($avgPrep); ?></span>
             </div>
-            <div class="kr-stat">
-                <div class="lbl">Min · Max</div>
-                <div class="val" style="font-size:16px;"><?php echo rh_fmt_dur($minPrep) . ' · ' . rh_fmt_dur($maxPrep); ?></div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Min · Max</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo rh_fmt_dur($minPrep) . ' · ' . rh_fmt_dur($maxPrep); ?></span>
             </div>
-            <div class="kr-stat danger">
-                <div class="lbl">Voided / Cancelled</div>
-                <div class="val"><?php echo $totalVoid; ?></div>
+            <div class="ck-kpi ck-kpi--alert">
+                <span class="ck-kpi__label">Voided / Cancelled</span>
+                <span class="ck-kpi__value"><?php echo $totalVoid; ?></span>
             </div>
         </div>
 

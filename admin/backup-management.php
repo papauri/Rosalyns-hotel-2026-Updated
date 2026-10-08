@@ -338,35 +338,30 @@ $current_page = 'backup-management.php';
 
         <!-- Status bar -->
         <div class="bm-card" style="margin-top:0">
-            <div class="stats-row">
-                <div class="stat-box">
-                    <div class="big-stat"><?php echo count($backups); ?></div>
-                    <div class="stat-label">Backup files on disk</div>
+            <div class="ck-kpis ck-kpis--4">
+                <div class="ck-kpi">
+                    <span class="ck-kpi__label">Backup files on disk</span>
+                    <span class="ck-kpi__value"><?php echo count($backups); ?></span>
                 </div>
-                <div class="stat-box">
-                    <?php if ($lastBackupAt): ?>
-                        <div class="big-stat" style="font-size:1.2rem"><?php echo htmlspecialchars($lastBackupAt); ?></div>
-                        <div class="stat-label">Last successful backup</div>
-                    <?php else: ?>
-                        <div class="big-stat" style="color:#dc2626">None</div>
-                        <div class="stat-label">No backup recorded yet</div>
-                    <?php endif; ?>
+                <?php if ($lastBackupAt): ?>
+                    <div class="ck-kpi ck-kpi--good">
+                        <span class="ck-kpi__label">Last successful backup</span>
+                        <span class="ck-kpi__value"><?php echo htmlspecialchars($lastBackupAt); ?></span>
+                    </div>
+                <?php else: ?>
+                    <div class="ck-kpi ck-kpi--alert">
+                        <span class="ck-kpi__label">No backup recorded yet</span>
+                        <span class="ck-kpi__value">None</span>
+                    </div>
+                <?php endif; ?>
+                <div class="ck-kpi">
+                    <span class="ck-kpi__label">Last backup size</span>
+                    <span class="ck-kpi__value"><?php echo $lastBackupSize ? number_format(round($lastBackupSize / 1024)) . ' <small>KB</small>' : '—'; ?></span>
                 </div>
-                <div class="stat-box">
-                    <div class="big-stat"><?php echo $lastBackupSize ? number_format(round($lastBackupSize / 1024)) . ' KB' : '—'; ?></div>
-                    <div class="stat-label">Last backup size</div>
-                </div>
-                <div class="stat-box" style="display:flex;flex-direction:column;align-items:center;justify-content:center">
-                    <?php if ($backupAgeHours === null): ?>
-                        <span class="status-pill stale"><i class="fas fa-times-circle"></i> No backups</span>
-                    <?php elseif ($backupAgeHours <= 25): ?>
-                        <span class="status-pill ok"><i class="fas fa-check-circle"></i> Fresh (<?php echo $backupAgeHours; ?>h ago)</span>
-                    <?php elseif ($backupAgeHours <= 36): ?>
-                        <span class="status-pill warn"><i class="fas fa-exclamation-circle"></i> Getting old (<?php echo $backupAgeHours; ?>h ago)</span>
-                    <?php else: ?>
-                        <span class="status-pill stale"><i class="fas fa-exclamation-triangle"></i> Stale — <?php echo $backupAgeHours; ?>h ago!</span>
-                    <?php endif; ?>
-                    <div class="stat-label" style="margin-top:6px">Backup health</div>
+                <div class="ck-kpi <?php echo ($backupAgeHours === null || $backupAgeHours > 36) ? 'ck-kpi--alert' : ($backupAgeHours <= 25 ? 'ck-kpi--good' : 'ck-kpi--warn'); ?>">
+                    <span class="ck-kpi__label">Backup health</span>
+                    <span class="ck-kpi__value"><?php echo $backupAgeHours === null ? 'None' : ($backupAgeHours <= 25 ? 'Fresh' : ($backupAgeHours <= 36 ? 'Ageing' : 'Stale')); ?></span>
+                    <span class="ck-kpi__sub"><?php echo $backupAgeHours === null ? 'No backups' : (int)$backupAgeHours . 'h ago'; ?></span>
                 </div>
             </div>
 

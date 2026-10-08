@@ -185,50 +185,50 @@ $gr_fmt_dur = static function (int $mins): string {
         <?php endif; ?>
 
         <!-- KPI row: membership -->
-        <div class="acct-kpis" style="margin-bottom:20px;">
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">Members</div>
-                <div class="acct-kpi__value"><?php echo $gr_m['total']; ?></div>
-                <div class="acct-kpi__sub"><?php echo $gr_m['active']; ?> active · <?php echo $gr_m['suspended']; ?> suspended · <?php echo $gr_m['expired']; ?> expired</div>
+        <div class="ck-kpis ck-kpis--4">
+            <div class="ck-kpi ck-kpi--good">
+                <span class="ck-kpi__label">Members</span>
+                <span class="ck-kpi__value"><?php echo $gr_m['total']; ?></span>
+                <span class="ck-kpi__sub"><?php echo $gr_m['active']; ?> active · <?php echo $gr_m['suspended']; ?> suspended · <?php echo $gr_m['expired']; ?> expired</span>
             </div>
-            <div class="acct-kpi acct-kpi--cash">
-                <div class="acct-kpi__label">New Members</div>
-                <div class="acct-kpi__value"><?php echo $gr_m['new_in_range']; ?></div>
-                <div class="acct-kpi__sub">Joined in this period</div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">New Members</span>
+                <span class="ck-kpi__value"><?php echo $gr_m['new_in_range']; ?></span>
+                <span class="ck-kpi__sub">Joined in this period</span>
             </div>
-            <div class="acct-kpi <?php echo $gr_m['expiring_30d'] > 0 ? 'acct-kpi--vat' : 'acct-kpi--cash'; ?>">
-                <div class="acct-kpi__label">Expiring ≤30 Days</div>
-                <div class="acct-kpi__value"><?php echo $gr_m['expiring_30d']; ?></div>
-                <div class="acct-kpi__sub"><a href="gym-members.php?filter=expiring" class="acct-link">Renewal follow-ups →</a></div>
+            <div class="ck-kpi <?php echo $gr_m['expiring_30d'] > 0 ? 'ck-kpi--info' : ''; ?>">
+                <span class="ck-kpi__label">Expiring ≤30 Days</span>
+                <span class="ck-kpi__value"><?php echo $gr_m['expiring_30d']; ?></span>
+                <span class="ck-kpi__sub"><a href="gym-members.php?filter=expiring" class="acct-link">Renewal follow-ups →</a></span>
             </div>
-            <div class="acct-kpi <?php echo $gr_outstanding_total > 0 ? 'acct-kpi--receivables' : 'acct-kpi--cash'; ?>">
-                <div class="acct-kpi__label">Outstanding</div>
-                <div class="acct-kpi__value"><?php echo $gr_currency . number_format($gr_outstanding_total, 0); ?></div>
-                <div class="acct-kpi__sub"><?php echo count($gr_outstanding_rows); ?> unpaid account<?php echo count($gr_outstanding_rows) === 1 ? '' : 's'; ?> · churn: <?php echo $gr_m['churn_in_range']; ?></div>
+            <div class="ck-kpi <?php echo $gr_outstanding_total > 0 ? 'ck-kpi--warn' : ''; ?>">
+                <span class="ck-kpi__label">Outstanding</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($gr_currency); ?></span><?php echo number_format($gr_outstanding_total, 0); ?></span>
+                <span class="ck-kpi__sub"><?php echo count($gr_outstanding_rows); ?> unpaid account<?php echo count($gr_outstanding_rows) === 1 ? '' : 's'; ?> · churn: <?php echo $gr_m['churn_in_range']; ?></span>
             </div>
         </div>
 
         <!-- KPI row: attendance + revenue -->
-        <div class="acct-kpis" style="margin-bottom:20px;">
-            <div class="acct-kpi acct-kpi--cash">
-                <div class="acct-kpi__label">Check-Ins</div>
-                <div class="acct-kpi__value"><?php echo $gr_a['checkins']; ?></div>
-                <div class="acct-kpi__sub"><?php echo $gr_a['unique']; ?> unique member<?php echo $gr_a['unique'] === 1 ? '' : 's'; ?> in period</div>
+        <div class="ck-kpis ck-kpis--4">
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Check-Ins</span>
+                <span class="ck-kpi__value"><?php echo $gr_a['checkins']; ?></span>
+                <span class="ck-kpi__sub"><?php echo $gr_a['unique']; ?> unique member<?php echo $gr_a['unique'] === 1 ? '' : 's'; ?> in period</span>
             </div>
-            <div class="acct-kpi acct-kpi--cash">
-                <div class="acct-kpi__label">Avg Visit</div>
-                <div class="acct-kpi__value"><?php echo $gr_fmt_dur($gr_a['avg_minutes']); ?></div>
-                <div class="acct-kpi__sub">Busiest day: <?php echo htmlspecialchars($gr_a['busiest_day'] ?? '—'); ?></div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Avg Visit</span>
+                <span class="ck-kpi__value"><?php echo $gr_fmt_dur($gr_a['avg_minutes']); ?></span>
+                <span class="ck-kpi__sub">Busiest day: <?php echo htmlspecialchars($gr_a['busiest_day'] ?? '—'); ?></span>
             </div>
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">In Gym Now</div>
-                <div class="acct-kpi__value"><?php echo $gr_a['in_now']; ?></div>
-                <div class="acct-kpi__sub"><a href="gym-checkin.php" class="acct-link">Open check-in scanner →</a></div>
+            <div class="ck-kpi ck-kpi--good">
+                <span class="ck-kpi__label">In Gym Now</span>
+                <span class="ck-kpi__value"><?php echo $gr_a['in_now']; ?></span>
+                <span class="ck-kpi__sub"><a href="gym-checkin.php" class="acct-link">Open check-in scanner →</a></span>
             </div>
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">Gym Revenue</div>
-                <div class="acct-kpi__value"><?php echo $gr_currency . number_format($gr_rev['total'], 0); ?></div>
-                <div class="acct-kpi__sub"><?php echo $gr_rev['count']; ?> payment<?php echo $gr_rev['count'] === 1 ? '' : 's'; ?> · <a href="payments.php?booking_type=gym" class="acct-link">ledger →</a></div>
+            <div class="ck-kpi ck-kpi--good">
+                <span class="ck-kpi__label">Gym Revenue</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($gr_currency); ?></span><?php echo number_format($gr_rev['total'], 0); ?></span>
+                <span class="ck-kpi__sub"><?php echo $gr_rev['count']; ?> payment<?php echo $gr_rev['count'] === 1 ? '' : 's'; ?> · <a href="payments.php?booking_type=gym" class="acct-link">ledger →</a></span>
             </div>
         </div>
 

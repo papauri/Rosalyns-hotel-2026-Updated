@@ -348,30 +348,30 @@ try {
         <?php if ($error): showAlert($error, 'error'); endif; ?>
 
         <!-- Stats -->
-        <div class="qt-stats">
-            <div class="qt-stat">
-                <div class="qt-stat__label">Total Issued</div>
-                <div class="qt-stat__value"><?php echo $stats['total']; ?></div>
+        <div class="ck-kpis ck-kpis--3">
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Total Issued</span>
+                <span class="ck-kpi__value"><?php echo $stats['total']; ?></span>
             </div>
-            <div class="qt-stat">
-                <div class="qt-stat__label">Sent / Active</div>
-                <div class="qt-stat__value" style="color:#2F4F78;"><?php echo $stats['sent']; ?></div>
+            <div class="ck-kpi ck-kpi--info">
+                <span class="ck-kpi__label">Sent / Active</span>
+                <span class="ck-kpi__value"><?php echo $stats['sent']; ?></span>
             </div>
-            <div class="qt-stat">
-                <div class="qt-stat__label">Accepted</div>
-                <div class="qt-stat__value" style="color:#155724;"><?php echo $stats['accepted']; ?></div>
+            <div class="ck-kpi ck-kpi--good">
+                <span class="ck-kpi__label">Accepted</span>
+                <span class="ck-kpi__value"><?php echo $stats['accepted']; ?></span>
             </div>
-            <div class="qt-stat">
-                <div class="qt-stat__label">Expired</div>
-                <div class="qt-stat__value" style="color:#888;"><?php echo $stats['expired']; ?></div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Expired</span>
+                <span class="ck-kpi__value"><?php echo $stats['expired']; ?></span>
             </div>
-            <div class="qt-stat">
-                <div class="qt-stat__label">Declined</div>
-                <div class="qt-stat__value" style="color:#721C24;"><?php echo $stats['declined']; ?></div>
+            <div class="ck-kpi ck-kpi--alert">
+                <span class="ck-kpi__label">Declined</span>
+                <span class="ck-kpi__value"><?php echo $stats['declined']; ?></span>
             </div>
-            <div class="qt-stat qt-stat--value">
-                <div class="qt-stat__label">Total Quoted Value</div>
-                <div class="qt-stat__value"><?php echo $currency_symbol . ' ' . number_format($stats['total_value'], 0); ?></div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Total Quoted Value</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($stats['total_value'], 0); ?></span>
             </div>
         </div>
 

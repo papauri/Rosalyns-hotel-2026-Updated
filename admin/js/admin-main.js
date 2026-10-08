@@ -878,15 +878,15 @@
     // ============================================
 
     function initAdminStatusCardFilters() {
-        const cards = Array.from(document.querySelectorAll('.status-card, .stat-card, [data-status-filter]'));
+        const cards = Array.from(document.querySelectorAll('.status-card, .stat-card, .ck-kpi[data-filter-card], [data-status-filter]'));
         if (!cards.length) return;
 
         let tableCounter = 0;
         const activeByTable = new Map();
 
         function cardHelpCopy(card, token) {
-            const labelNode = card.querySelector('.stat-label, .kpi-card__label, .summary-card .label, h3, h4');
-            const subNode = card.querySelector('.stat-sub, .report-analysis__hint, .kpi-card__meta, p, small');
+            const labelNode = card.querySelector('.ck-kpi__label, .stat-label, .kpi-card__label, .summary-card .label, h3, h4');
+            const subNode = card.querySelector('.ck-kpi__sub, .stat-sub, .report-analysis__hint, .kpi-card__meta, p, small');
             const label = ((labelNode && labelNode.textContent) || readableStatusLabel(token)).replace(/\s+/g, ' ').trim();
             const sub = ((subNode && subNode.textContent) || '').replace(/\s+/g, ' ').trim();
             const lowerLabel = label.toLowerCase();
@@ -1165,13 +1165,13 @@
         applyBySelector('.pagination a', 'Pagination|Move between result pages while keeping the same filters.', true);
 
         // KPI / report cards should explain themselves when Help mode is on.
-        document.querySelectorAll('.report-analysis__card, .stat-card, .status-card, .kpi-card, .summary-card, .ops-card, .qt-stat, .dashboard-card, .analytics-card, [data-metric-card]').forEach(function (card) {
+        document.querySelectorAll('.report-analysis__card, .ck-kpi, .stat-card, .status-card, .kpi-card, .summary-card, .ops-card, .qt-stat, .dashboard-card, .analytics-card, [data-metric-card]').forEach(function (card) {
             if (hintsApplied >= maxHints) return;
             if (!(card instanceof HTMLElement)) return;
             if (card.hasAttribute('data-help')) return;
 
-            const labelNode = card.querySelector('.report-analysis__label, .stat-card__label, .status-card__label, .kpi-card__label, .qt-stat__label, .metric-label, .stat-label, .status-label, .ops-label, .summary-card .label, h3, h4');
-            const hintNode = card.querySelector('.report-analysis__hint, .stat-card__meta, .kpi-card__meta, .qt-stat__value, .stat-value, .ops-value, .acct-kpi__value, .summary-card .value, .stat-sub, .ops-sub, small, p');
+            const labelNode = card.querySelector('.report-analysis__label, .ck-kpi__label, .stat-card__label, .status-card__label, .kpi-card__label, .qt-stat__label, .metric-label, .stat-label, .status-label, .ops-label, .summary-card .label, h3, h4');
+            const hintNode = card.querySelector('.report-analysis__hint, .ck-kpi__sub, .ck-kpi__value, .stat-card__meta, .kpi-card__meta, .qt-stat__value, .stat-value, .ops-value, .acct-kpi__value, .summary-card .value, .stat-sub, .ops-sub, small, p');
             const label = (labelNode && labelNode.textContent ? labelNode.textContent : '').replace(/\s+/g, ' ').trim();
             const hint = (hintNode && hintNode.textContent ? hintNode.textContent : '').replace(/\s+/g, ' ').trim();
             if (!label) return;

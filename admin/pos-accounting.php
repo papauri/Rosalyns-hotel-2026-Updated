@@ -547,26 +547,26 @@ try {
         <?php if ($message): ?><div class="pos-acct-alert pos-acct-alert--success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
         <?php if ($error): ?><div class="pos-acct-alert pos-acct-alert--danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
-        <div class="stats-grid">
-            <div class="stat-card primary">
-                <div class="stat-label">Paid POS sales</div>
-                <div class="acct-kpi__value"><?php echo rh_pos_accounting_money((float)$summary['paid_total'], $currency_symbol); ?></div>
-                <div class="stat-sub"><?php echo (int)$summary['orders']; ?> total order rows</div>
+        <div class="ck-kpis ck-kpis--4">
+            <div data-filter-card class="ck-kpi">
+                <span class="ck-kpi__label">Paid POS sales</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)$summary['paid_total'], 2); ?></span>
+                <span class="ck-kpi__sub"><?php echo (int)$summary['orders']; ?> total order rows</span>
             </div>
-            <div class="stat-card success">
-                <div class="stat-label">Cash collected</div>
-                <div class="acct-kpi__value"><?php echo rh_pos_accounting_money((float)$summary['cash'], $currency_symbol); ?></div>
-                <div class="stat-sub">Gross by payment date &middot; refunds paid out <?php echo rh_pos_accounting_money((float)$summary['refund_total'], $currency_symbol); ?> (<?php echo (int)$summary['refunds']; ?>)</div>
+            <div data-filter-card class="ck-kpi ck-kpi--good">
+                <span class="ck-kpi__label">Cash collected</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)$summary['cash'], 2); ?></span>
+                <span class="ck-kpi__sub">Gross by payment date &middot; refunds paid out <?php echo rh_pos_accounting_money((float)$summary['refund_total'], $currency_symbol); ?> (<?php echo (int)$summary['refunds']; ?>)</span>
             </div>
-            <div class="stat-card info">
-                <div class="stat-label">Mobile / card</div>
-                <div class="acct-kpi__value"><?php echo rh_pos_accounting_money((float)$summary['mobile'] + (float)$summary['card'], $currency_symbol); ?></div>
-                <div class="stat-sub">Mobile <?php echo rh_pos_accounting_money((float)$summary['mobile'], $currency_symbol); ?> · Card <?php echo rh_pos_accounting_money((float)$summary['card'], $currency_symbol); ?></div>
+            <div data-filter-card class="ck-kpi ck-kpi--info">
+                <span class="ck-kpi__label">Mobile / card</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)$summary['mobile'] + (float)$summary['card'], 2); ?></span>
+                <span class="ck-kpi__sub">Mobile <?php echo rh_pos_accounting_money((float)$summary['mobile'], $currency_symbol); ?> · Card <?php echo rh_pos_accounting_money((float)$summary['card'], $currency_symbol); ?></span>
             </div>
-            <div class="stat-card warning">
-                <div class="stat-label">Voids</div>
-                <div class="stat-value"><?php echo (int)$summary['voids']; ?></div>
-                <div class="stat-sub"><?php echo rh_pos_accounting_money((float)$summary['voided_total'], $currency_symbol); ?> voided</div>
+            <div data-filter-card class="ck-kpi ck-kpi--warn">
+                <span class="ck-kpi__label">Voids</span>
+                <span class="ck-kpi__value"><?php echo (int)$summary['voids']; ?></span>
+                <span class="ck-kpi__sub"><?php echo rh_pos_accounting_money((float)$summary['voided_total'], $currency_symbol); ?> voided</span>
             </div>
         </div>
 

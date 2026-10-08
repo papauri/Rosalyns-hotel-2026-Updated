@@ -68,7 +68,7 @@
         '.admin-page-hero'
     ];
 
-    const TOP_SKIP_SELECTORS = '.card, .stats-grid, .table-container, .alert, .stat-card';
+    const TOP_SKIP_SELECTORS = '.card, .stats-grid, .ck-kpis, .table-container, .alert, .stat-card, .ck-kpi';
 
     let normalizeRaf = 0;
     let isNormalizing = false;
@@ -84,6 +84,7 @@
         '.permissions-panel',
         '.role-overview',
         '.stats-grid',
+        '.ck-kpis',
         '.bookings-toolbar',
         '#booking-results',
         '.bookings-section'

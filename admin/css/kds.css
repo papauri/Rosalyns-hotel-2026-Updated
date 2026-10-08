@@ -2295,30 +2295,9 @@ body.kds-sidebar-resizing .station-bottom {
 }
 
 .rh-kpi-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 10px;
     margin-bottom: 20px;
 }
 
-.rh-kpi {
-    padding: 13px 14px;
-    border-radius: var(--r);
-    background: var(--surface-2);
-    border: 1px solid var(--line);
-}
-
-.rh-kpi .lbl {
-    display: block;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-    color: var(--txt-3);
-    margin-bottom: 6px;
-}
-
-.rh-kpi .val,
 .rh-num {
     font-size: 23px;
     font-weight: 800;
@@ -2326,13 +2305,6 @@ body.kds-sidebar-resizing .station-bottom {
     letter-spacing: -.02em;
     color: var(--txt);
     line-height: 1.1;
-}
-
-.rh-kpi .u {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--txt-3);
-    margin-left: 3px;
 }
 
 .rh-section-title {

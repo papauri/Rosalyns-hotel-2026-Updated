@@ -94,12 +94,12 @@ function fmt_lag(?int $s): string {
         </p>
 
         <!-- KPIs -->
-        <div class="ol-kpis">
-            <div class="ol-kpi"><div class="lbl">Replayed actions</div><div class="val"><?php echo (int)($kpi['total'] ?? 0); ?></div></div>
-            <div class="ol-kpi"><div class="lbl">Unique submissions</div><div class="val"><?php echo (int)($kpi['unique_actions'] ?? 0); ?></div></div>
-            <div class="ol-kpi"><div class="lbl">Distinct users</div><div class="val"><?php echo (int)($kpi['users'] ?? 0); ?></div></div>
-            <div class="ol-kpi"><div class="lbl">Avg sync lag</div><div class="val"><?php echo fmt_lag(isset($kpi['avg_lag']) && $kpi['avg_lag'] !== null ? (int)$kpi['avg_lag'] : null); ?></div></div>
-            <div class="ol-kpi"><div class="lbl">Max sync lag</div><div class="val"><?php echo fmt_lag(isset($kpi['max_lag']) ? (int)$kpi['max_lag'] : null); ?></div></div>
+        <div class="ck-kpis">
+            <div class="ck-kpi"><span class="ck-kpi__label">Replayed actions</span><span class="ck-kpi__value"><?php echo (int)($kpi['total'] ?? 0); ?></span></div>
+            <div class="ck-kpi"><span class="ck-kpi__label">Unique submissions</span><span class="ck-kpi__value"><?php echo (int)($kpi['unique_actions'] ?? 0); ?></span></div>
+            <div class="ck-kpi"><span class="ck-kpi__label">Distinct users</span><span class="ck-kpi__value"><?php echo (int)($kpi['users'] ?? 0); ?></span></div>
+            <div class="ck-kpi"><span class="ck-kpi__label">Avg sync lag</span><span class="ck-kpi__value"><?php echo fmt_lag(isset($kpi['avg_lag']) && $kpi['avg_lag'] !== null ? (int)$kpi['avg_lag'] : null); ?></span></div>
+            <div class="ck-kpi"><span class="ck-kpi__label">Max sync lag</span><span class="ck-kpi__value"><?php echo fmt_lag(isset($kpi['max_lag']) ? (int)$kpi['max_lag'] : null); ?></span></div>
         </div>
 
         <!-- Filters -->

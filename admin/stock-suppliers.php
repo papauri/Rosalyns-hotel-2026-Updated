@@ -214,10 +214,7 @@ $csrf_token = generateCsrfToken();
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <style>
-        .sup-stats { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
-        .sup-stat { background:#fff; border:1px solid #e6e0d6; border-radius:2px; padding:16px 20px; min-width:150px; box-shadow:0 2px 8px rgba(70,60,50,.06); }
-        .sup-stat .num { font-size:1.8rem; font-weight:600; color:#3e3930; }
-        .sup-stat .lbl { font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; color:#8a8172; }
+        .sup-stats { margin-bottom:20px; }
         .sup-table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #e6e0d6; }
         .sup-table th, .sup-table td { padding:11px 14px; text-align:left; border-bottom:1px solid #efeae1; font-size:.9rem; }
         .sup-table th { background:#faf8f4; font-size:.74rem; text-transform:uppercase; letter-spacing:.05em; color:#8a8172; }
@@ -261,9 +258,9 @@ $csrf_token = generateCsrfToken();
         <?php if ($message): showAlert($message, 'success'); endif; ?>
         <?php if ($error):   showAlert($error,   'error');   endif; ?>
 
-        <div class="sup-stats">
-            <div class="sup-stat"><div class="num"><?php echo (int)$stats['total']; ?></div><div class="lbl">Suppliers</div></div>
-            <div class="sup-stat"><div class="num"><?php echo (int)$stats['active']; ?></div><div class="lbl">Active</div></div>
+        <div class="ck-kpis ck-kpis--2 sup-stats">
+            <div class="ck-kpi"><span class="ck-kpi__label">Suppliers</span><span class="ck-kpi__value"><?php echo (int)$stats['total']; ?></span></div>
+            <div class="ck-kpi ck-kpi--good"><span class="ck-kpi__label">Active</span><span class="ck-kpi__value"><?php echo (int)$stats['active']; ?></span></div>
         </div>
 
         <p class="sup-help"><i class="fas fa-circle-info"></i> <strong>Deactivate</strong> (<i class="fas fa-power-off"></i>) hides a supplier from pickers but keeps it on record — usually the right choice. <strong>Delete</strong> (<i class="fas fa-trash"></i>) removes it for good; past deliveries keep its name as text. Suppliers on purchase orders can only be deactivated (<i class="fas fa-lock"></i>).</p>

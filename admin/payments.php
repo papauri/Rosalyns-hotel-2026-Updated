@@ -582,36 +582,30 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
         </div>
 
         <!-- KPI Strip -->
-        <div class="acct-kpis">
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">Collected (filtered)</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format($gross_collected_total, 0); ?></div>
-                <div class="acct-kpi__meta">
-                    <?php echo number_format((int)($kpi['txn_count'] ?? 0)); ?> txns · VAT <?php echo $currency_symbol . number_format((float)($kpi['vat_collected'] ?? 0), 0); ?>
-                </div>
+        <div class="ck-kpis ck-kpis--4">
+            <div class="ck-kpi ck-kpi--good">
+                <span class="ck-kpi__label">Collected (filtered)</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($gross_collected_total, 0); ?></span>
+                <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['txn_count'] ?? 0)); ?> txns · VAT <?php echo $currency_symbol . number_format((float)($kpi['vat_collected'] ?? 0), 0); ?></span>
             </div>
-            <div class="acct-kpi acct-kpi--receivables">
-                <div class="acct-kpi__label">Pending / Partial</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format((float)($kpi['pending_total'] ?? 0), 0); ?></div>
-                <div class="acct-kpi__meta">
-                    <?php echo number_format((int)($kpi['pending_count'] ?? 0)); ?> awaiting ·
+            <div class="ck-kpi ck-kpi--warn">
+                <span class="ck-kpi__label">Pending / Partial</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($kpi['pending_total'] ?? 0), 0); ?></span>
+                <span class="ck-kpi__sub">                    <?php echo number_format((int)($kpi['pending_count'] ?? 0)); ?> awaiting ·
                     <a href="?status=pending" class="acct-link">view all</a>
-                </div>
+                </span>
             </div>
-            <div class="acct-kpi acct-kpi--cash">
-                <div class="acct-kpi__label">Today</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format((float)($period['today_collected'] ?? 0), 0); ?></div>
-                <div class="acct-kpi__meta">
-                    <?php echo number_format((int)($period['today_count'] ?? 0)); ?> today ·
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Today</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($period['today_collected'] ?? 0), 0); ?></span>
+                <span class="ck-kpi__sub">                    <?php echo number_format((int)($period['today_count'] ?? 0)); ?> today ·
                     <?php echo $currency_symbol . number_format((float)($period['week_collected'] ?? 0), 0); ?> last 7d
-                </div>
+                </span>
             </div>
-            <div class="acct-kpi acct-kpi--vat">
-                <div class="acct-kpi__label">Refunds (filtered)</div>
-                <div class="acct-kpi__value"><?php echo $currency_symbol . number_format((float)($kpi['refunds_total'] ?? 0), 0); ?></div>
-                <div class="acct-kpi__meta">
-                    <?php echo number_format((int)($kpi['refunds_count'] ?? 0)); ?> txns · MTD <?php echo $currency_symbol . number_format((float)($period['month_collected'] ?? 0), 0); ?>
-                </div>
+            <div class="ck-kpi ck-kpi--info">
+                <span class="ck-kpi__label">Refunds (filtered)</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($kpi['refunds_total'] ?? 0), 0); ?></span>
+                <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['refunds_count'] ?? 0)); ?> txns · MTD <?php echo $currency_symbol . number_format((float)($period['month_collected'] ?? 0), 0); ?></span>
             </div>
         </div>
 

@@ -564,39 +564,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
 
         <?php if ($payment && !$message): ?>
             <!-- Original payment + refundable position (compact KPI strip — no padded cards) -->
-            <div class="acct-kpis">
-                <div class="acct-kpi acct-kpi--revenue">
-                    <div class="acct-kpi__label">Original Payment</div>
-                    <div class="acct-kpi__value"><?php echo $currency_symbol . number_format((float)$payment['total_amount'], 0); ?></div>
-                    <div class="acct-kpi__meta">
-                        Ref <strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong> ·
+            <div class="ck-kpis ck-kpis--4">
+                <div class="ck-kpi ck-kpi--good">
+                    <span class="ck-kpi__label">Original Payment</span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)$payment['total_amount'], 0); ?></span>
+                    <span class="ck-kpi__sub">                        Ref <strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong> ·
                         <?php echo date('M j, Y', strtotime($payment['payment_date'])); ?> ·
                         <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?>
-                    </div>
+                    </span>
                 </div>
-                <div class="acct-kpi acct-kpi--receivables">
-                    <div class="acct-kpi__label">Already Refunded</div>
-                    <div class="acct-kpi__value"><?php echo $currency_symbol . number_format($alreadyRefunded, 0); ?></div>
-                    <div class="acct-kpi__meta">
-                        <?php echo $refundCount; ?> prior refund<?php echo $refundCount === 1 ? '' : 's'; ?>
-                    </div>
+                <div class="ck-kpi ck-kpi--warn">
+                    <span class="ck-kpi__label">Already Refunded</span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($alreadyRefunded, 0); ?></span>
+                    <span class="ck-kpi__sub"><?php echo $refundCount; ?> prior refund<?php echo $refundCount === 1 ? '' : 's'; ?></span>
                 </div>
-                <div class="acct-kpi acct-kpi--cash">
-                    <div class="acct-kpi__label">Refundable Balance</div>
-                    <div class="acct-kpi__value"><?php echo $currency_symbol . number_format($maxRefundable, 0); ?></div>
-                    <div class="acct-kpi__meta">
-                        Maximum amount you can refund now
-                    </div>
+                <div class="ck-kpi">
+                    <span class="ck-kpi__label">Refundable Balance</span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($maxRefundable, 0); ?></span>
+                    <span class="ck-kpi__sub">Maximum amount you can refund now</span>
                 </div>
-                <div class="acct-kpi acct-kpi--vat">
-                    <div class="acct-kpi__label">Customer</div>
-                    <div class="acct-kpi__value" style="font-size: clamp(1.05rem, 1.2vw + 0.6rem, 1.4rem); font-weight: 500;">
-                        <?php echo htmlspecialchars($payment['customer_name'] ?? 'N/A'); ?>
-                    </div>
-                    <div class="acct-kpi__meta">
-                        <?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?> ·
+                <div class="ck-kpi ck-kpi--info">
+                    <span class="ck-kpi__label">Customer</span>
+                    <span class="ck-kpi__value"><?php echo htmlspecialchars($payment['customer_name'] ?? 'N/A'); ?></span>
+                    <span class="ck-kpi__sub">                        <?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?> ·
                         <?php echo htmlspecialchars($payment['booking_reference'] ?? '—'); ?>
-                    </div>
+                    </span>
                 </div>
             </div>
 

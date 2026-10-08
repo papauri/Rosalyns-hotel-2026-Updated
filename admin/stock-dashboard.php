@@ -229,63 +229,43 @@ $csrf_token = generateCsrfToken();
         </div>
 
         <!-- ═══ TOP KPI ROW ═══ -->
-        <div class="sdash-kpi-row">
-            <a class="sdash-kpi-card" href="stock-orders.php?date=today&status=paid">
-                <div class="sdash-kpi-card__icon sdash-kpi-card__icon--blue">
-                    <i class="fas fa-cash-register"></i>
-                </div>
-                <div class="sdash-kpi-card__body">
-                    <div class="sdash-kpi-card__label">Settled Today</div>
-                    <div class="sdash-kpi-card__value"><?php echo $currency_symbol . ' ' . number_format($metrics['revenue_today'], 0); ?></div>
-                    <div class="sdash-kpi-card__sub">
-                        <?php echo number_format((int)$metrics['orders_today']); ?> paid order<?php echo (int)$metrics['orders_today'] !== 1 ? 's' : ''; ?>
-                        <?php if ((int)$metrics['orders_today'] > 0 && $metrics['revenue_today'] > 0): ?>
-                            &middot; avg <?php echo $currency_symbol . ' ' . number_format($metrics['revenue_today'] / $metrics['orders_today'], 0); ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                <span class="sdash-kpi-card__arrow"><i class="fas fa-chevron-right"></i></span>
+        <div class="ck-kpis ck-kpis--4">
+            <a class="ck-kpi ck-kpi--info" href="stock-orders.php?date=today&status=paid">
+                <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
+                <span class="ck-kpi__label">Settled Today</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['revenue_today'], 0); ?></span>
+                <span class="ck-kpi__sub">
+                    <?php echo number_format((int)$metrics['orders_today']); ?> paid order<?php echo (int)$metrics['orders_today'] !== 1 ? 's' : ''; ?>
+                    <?php if ((int)$metrics['orders_today'] > 0 && $metrics['revenue_today'] > 0): ?>
+                        &middot; avg <?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($metrics['revenue_today'] / $metrics['orders_today'], 0); ?>
+                    <?php endif; ?>
+                </span>
             </a>
 
-            <a class="sdash-kpi-card <?php echo (int)($metrics['orders_pending'] ?? 0) > 0 ? 'sdash-kpi-card--warn' : ''; ?>" href="stock-orders.php?status=placed">
-                <div class="sdash-kpi-card__icon <?php echo (int)($metrics['orders_pending'] ?? 0) > 0 ? 'sdash-kpi-card__icon--orange' : 'sdash-kpi-card__icon--green'; ?>">
-                    <i class="fas fa-hourglass-half"></i>
-                </div>
-                <div class="sdash-kpi-card__body">
-                    <div class="sdash-kpi-card__label">Open Tabs</div>
-                    <div class="sdash-kpi-card__value"><?php echo number_format((int)($metrics['orders_pending'] ?? 0)); ?></div>
-                    <div class="sdash-kpi-card__sub"><?php echo (int)($metrics['orders_pending'] ?? 0) > 0 ? 'Awaiting payment / close-out' : 'No open tabs right now'; ?></div>
-                </div>
-                <span class="sdash-kpi-card__arrow"><i class="fas fa-chevron-right"></i></span>
+            <a class="ck-kpi <?php echo (int)($metrics['orders_pending'] ?? 0) > 0 ? 'ck-kpi--warn' : 'ck-kpi--good'; ?>" href="stock-orders.php?status=placed">
+                <span class="ck-kpi__icon"><i class="fas fa-hourglass-half"></i></span>
+                <span class="ck-kpi__label">Open Tabs</span>
+                <span class="ck-kpi__value"><?php echo number_format((int)($metrics['orders_pending'] ?? 0)); ?></span>
+                <span class="ck-kpi__sub"><?php echo (int)($metrics['orders_pending'] ?? 0) > 0 ? 'Awaiting payment / close-out' : 'No open tabs right now'; ?></span>
             </a>
 
-            <a class="sdash-kpi-card" href="stock-ingredients.php">
-                <div class="sdash-kpi-card__icon sdash-kpi-card__icon--green">
-                    <i class="fas fa-warehouse"></i>
-                </div>
-                <div class="sdash-kpi-card__body">
-                    <div class="sdash-kpi-card__label">Inventory Value</div>
-                    <div class="sdash-kpi-card__value"><?php echo $currency_symbol . ' ' . number_format($metrics['total_inventory_value'], 0); ?></div>
-                    <div class="sdash-kpi-card__sub"><?php echo number_format((int)$metrics['ingredient_count']); ?> ingredients tracked</div>
-                </div>
-                <span class="sdash-kpi-card__arrow"><i class="fas fa-chevron-right"></i></span>
+            <a class="ck-kpi ck-kpi--good" href="stock-ingredients.php">
+                <span class="ck-kpi__icon"><i class="fas fa-warehouse"></i></span>
+                <span class="ck-kpi__label">Inventory Value</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['total_inventory_value'], 0); ?></span>
+                <span class="ck-kpi__sub"><?php echo number_format((int)$metrics['ingredient_count']); ?> ingredients tracked</span>
             </a>
 
-            <a class="sdash-kpi-card sdash-kpi-card--wastage" href="stock-wastage.php">
-                <div class="sdash-kpi-card__icon sdash-kpi-card__icon--orange">
-                    <i class="fas fa-trash-alt"></i>
-                </div>
-                <div class="sdash-kpi-card__body">
-                    <div class="sdash-kpi-card__label">Wastage</div>
-                    <div class="sdash-kpi-card__value"><?php echo $currency_symbol . ' ' . number_format($metrics['wastage_30d'], 0); ?></div>
-                    <div class="sdash-kpi-card__sub">
-                        30-day total
-                        <?php if (($metrics['wastage_today'] ?? 0) > 0): ?>
-                            &middot; today: <?php echo $currency_symbol . ' ' . number_format($metrics['wastage_today'], 0); ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                <span class="sdash-kpi-card__arrow"><i class="fas fa-chevron-right"></i></span>
+            <a class="ck-kpi ck-kpi--warn" href="stock-wastage.php">
+                <span class="ck-kpi__icon"><i class="fas fa-trash-alt"></i></span>
+                <span class="ck-kpi__label">Wastage</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['wastage_30d'], 0); ?></span>
+                <span class="ck-kpi__sub">
+                    30-day total
+                    <?php if (($metrics['wastage_today'] ?? 0) > 0): ?>
+                        &middot; today: <?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($metrics['wastage_today'], 0); ?>
+                    <?php endif; ?>
+                </span>
             </a>
         </div>
 

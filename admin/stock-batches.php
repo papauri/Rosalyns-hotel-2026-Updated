@@ -241,51 +241,42 @@ function expiry_tier(?string $expiry, ?int $days): array
             }
         }
         ?>
-        <div class="summary-cards">
-            <div class="summary-card critical summary-card--interactive js-stock-batches-insight-trigger"
-                role="button"
-                tabindex="0"
+        <div class="ck-kpis ck-kpis--4">
+            <button type="button" class="ck-kpi ck-kpi--alert js-stock-batches-insight-trigger"
                 data-insight-key="critical"
                 data-insight-title="Critical Expiry (3 Days or Less)"
                 aria-label="Open critical expiry insight">
-                <div class="label">Expiring ≤ 3 days</div>
-                <div class="value"><?php echo $cntCritical; ?></div>
-                <div style="font-size:12px;color:#6c757d;margin-top:4px;">Value at risk: <?php echo $currency_symbol . ' ' . number_format($valueAtRisk, 2); ?></div>
-                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
-            </div>
+                <span class="ck-kpi__label">Expiring ≤ 3 days</span>
+                <span class="ck-kpi__value"><?php echo $cntCritical; ?></span>
+                <span class="ck-kpi__sub">Value at risk: <?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($valueAtRisk, 2); ?></span>
+            </button>
 
-            <div class="summary-card soon summary-card--interactive js-stock-batches-insight-trigger"
-                role="button"
-                tabindex="0"
+            <button type="button" class="ck-kpi ck-kpi--warn js-stock-batches-insight-trigger"
                 data-insight-key="soon"
                 data-insight-title="Expiry Watchlist (4-7 Days)"
                 aria-label="Open expiry watchlist insight">
-                <div class="label">Expiring 4–7 days</div>
-                <div class="value"><?php echo $cntSoon; ?></div>
-                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
-            </div>
+                <span class="ck-kpi__label">Expiring 4–7 days</span>
+                <span class="ck-kpi__value"><?php echo $cntSoon; ?></span>
+                <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
+            </button>
 
-            <div class="summary-card upcoming summary-card--interactive js-stock-batches-insight-trigger"
-                role="button"
-                tabindex="0"
+            <button type="button" class="ck-kpi ck-kpi--info js-stock-batches-insight-trigger"
                 data-insight-key="upcoming"
                 data-insight-title="Upcoming Expiry Horizon (8-30 Days)"
                 aria-label="Open upcoming expiry horizon insight">
-                <div class="label">Expiring 8–30 days</div>
-                <div class="value"><?php echo $cntUpcoming; ?></div>
-                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
-            </div>
+                <span class="ck-kpi__label">Expiring 8–30 days</span>
+                <span class="ck-kpi__value"><?php echo $cntUpcoming; ?></span>
+                <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
+            </button>
 
-            <div class="summary-card summary-card--interactive js-stock-batches-insight-trigger"
-                role="button"
-                tabindex="0"
+            <button type="button" class="ck-kpi js-stock-batches-insight-trigger"
                 data-insight-key="active"
                 data-insight-title="Active Batch Capacity"
                 aria-label="Open active batch capacity insight">
-                <div class="label">Total active batches</div>
-                <div class="value"><?php echo $cntActive; ?></div>
-                <div class="summary-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
-            </div>
+                <span class="ck-kpi__label">Total active batches</span>
+                <span class="ck-kpi__value"><?php echo $cntActive; ?></span>
+                <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
+            </button>
         </div>
 
         <div class="modal-overlay" id="stockBatchesInsightModal" style="align-items:flex-start; padding-top:60px;">

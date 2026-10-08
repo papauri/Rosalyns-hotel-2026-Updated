@@ -275,26 +275,26 @@ foreach ($active as $bk) {
         <?php endif; ?>
 
         <!-- KPI Strip -->
-        <div class="acct-kpis">
-            <div class="acct-kpi acct-kpi--revenue">
-                <div class="acct-kpi__label">Active Holds</div>
-                <div class="acct-kpi__value"><?php echo $stat_total; ?></div>
-                <div class="acct-kpi__meta">Rooms on tentative hold</div>
+        <div class="ck-kpis ck-kpis--4">
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Active Holds</span>
+                <span class="ck-kpi__value"><?php echo $stat_total; ?></span>
+                <span class="ck-kpi__sub">Rooms on tentative hold</span>
             </div>
-            <div class="acct-kpi <?php echo $stat_expiring_today > 0 ? 'acct-kpi--receivables' : 'acct-kpi--cash'; ?>">
-                <div class="acct-kpi__label">Expiring in 24h</div>
-                <div class="acct-kpi__value"><?php echo $stat_expiring_today; ?></div>
-                <div class="acct-kpi__meta">Need urgent follow-up</div>
+            <div class="ck-kpi <?php echo $stat_expiring_today > 0 ? 'ck-kpi--warn' : ''; ?>">
+                <span class="ck-kpi__label">Expiring in 24h</span>
+                <span class="ck-kpi__value"><?php echo $stat_expiring_today; ?></span>
+                <span class="ck-kpi__sub">Need urgent follow-up</span>
             </div>
-            <div class="acct-kpi <?php echo $stat_reminder_due > 0 ? 'acct-kpi--vat' : 'acct-kpi--cash'; ?>">
-                <div class="acct-kpi__label">Reminders Overdue</div>
-                <div class="acct-kpi__value"><?php echo $stat_reminder_due; ?></div>
-                <div class="acct-kpi__meta">Guests not yet reminded</div>
+            <div class="ck-kpi <?php echo $stat_reminder_due > 0 ? 'ck-kpi--info' : ''; ?>">
+                <span class="ck-kpi__label">Reminders Overdue</span>
+                <span class="ck-kpi__value"><?php echo $stat_reminder_due; ?></span>
+                <span class="ck-kpi__sub">Guests not yet reminded</span>
             </div>
-            <div class="acct-kpi">
-                <div class="acct-kpi__label">Expired (14 days)</div>
-                <div class="acct-kpi__value"><?php echo $stat_expired_14d; ?></div>
-                <div class="acct-kpi__meta">Lapsed holds for review</div>
+            <div class="ck-kpi">
+                <span class="ck-kpi__label">Expired (14 days)</span>
+                <span class="ck-kpi__value"><?php echo $stat_expired_14d; ?></span>
+                <span class="ck-kpi__sub">Lapsed holds for review</span>
             </div>
         </div>
 
