@@ -322,6 +322,11 @@
             if ((link.pathname || '').split('/').pop() !== target) return;
             if (!link.querySelector('.fa-arrow-left') && !/^\s*back/i.test(link.textContent || '')) return;
             if (link.closest('nav, .admin-nav, table, .modal, dialog, form')) return;
+            // The shared button comes from the referrer; the page's own link knows the exact
+            // record (e.g. booking-details.php?id=517), so keep its destination.
+            if (link.search && link.search !== shared.search) {
+                shared.href = link.href;
+            }
             link.remove();
         });
     }

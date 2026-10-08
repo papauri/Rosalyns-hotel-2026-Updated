@@ -3408,7 +3408,7 @@ $today_str = $today->format('Y-m-d');
                                         id="booking-<?php echo (int)$booking['id']; ?>"
                                         data-focus="booking-<?php echo (int)$booking['id']; ?>"
                                         data-status="<?php echo htmlspecialchars($is_deleted_row ? 'deleted' : $booking['status'], ENT_QUOTES); ?>"
-                                        data-payment-status="<?php echo htmlspecialchars($booking['actual_payment_status'] ?? $booking['payment_status'], ENT_QUOTES); ?>"
+                                        data-payment-status="<?php echo htmlspecialchars((string)($booking['payment_status'] ?: ($booking['actual_payment_status'] ?? '')), ENT_QUOTES); ?>"
                                         data-check-in="<?php echo htmlspecialchars($booking['check_in_date'], ENT_QUOTES); ?>"
                                         data-check-out="<?php echo htmlspecialchars($booking['check_out_date'], ENT_QUOTES); ?>"
                                         data-created="<?php echo htmlspecialchars(date('Y-m-d', strtotime($booking['created_at'])), ENT_QUOTES); ?>"
@@ -3478,9 +3478,14 @@ $today_str = $today->format('Y-m-d');
                                             <?php endif; ?>
                                         </td>
                                         <td data-label="Payment">
-                                            <span class="badge badge-<?php echo $booking['actual_payment_status']; ?>">
+                                            <?php
+                                            // The booking's own payment status (unpaid / partial / paid / refunded) is the
+                                            // truth for the guest's bill; the latest payment record is only one transaction
+                                            // ('completed' even when it covered part of the bill), so it is shown as the reference.
+                                            $status = (string)($booking['payment_status'] ?: ($booking['actual_payment_status'] ?? ''));
+                                            ?>
+                                            <span class="badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>">
                                                 <?php
-                                                $status = $booking['actual_payment_status'];
                                                 // Map payment statuses to user-friendly labels
                                                 $status_labels = [
                                                     'paid' => 'Paid',
@@ -3534,7 +3539,7 @@ $today_str = $today->format('Y-m-d');
                                             $bk_holding = in_array($bk_status, ['pending', 'tentative', 'confirmed'], true); // reservation, not yet arrived
                                             $bk_inhouse = $bk_status === 'checked-in';
                                             $bk_closed  = in_array($bk_status, ['checked-out', 'cancelled', 'no-show', 'expired'], true);
-                                            $bk_payment_st = $booking['actual_payment_status'] ?? $booking['payment_status'];
+                                            $bk_payment_st = (string)($booking['payment_status'] ?: ($booking['actual_payment_status'] ?? ''));
 
                                             // Money owed back (overpaid / cancelled with payment) -> Refund. A no-show forfeits by
                                             // policy, but staff may still refund at their discretion while money is held.
@@ -3796,7 +3801,7 @@ $today_str = $today->format('Y-m-d');
                                         <br><small style="color: #666;"><?php echo htmlspecialchars($inquiry['phone']); ?></small>
                                     </td>
                                     <td><?php echo htmlspecialchars($inquiry['event_type']); ?></td>
-                                    <td><?php echo date('M d, Y', strtotime($inquiry['expected_date'])); ?></td>
+                                    <td><?php echo !empty($inquiry['event_date']) ? date('M d, Y', strtotime($inquiry['event_date'])) : '—'; ?></td>
                                     <td><?php echo $inquiry['number_of_attendees']; ?></td>
                                     <td>
                                         <span class="badge badge-<?php echo $inquiry['status']; ?>">
@@ -7509,7 +7514,7 @@ $today_str = $today->format('Y-m-d');
                     'Your name, the exact time and this reason are recorded in the audit log.'
                 ],
                 inputLabel: 'Why is this booking being deleted? (required)',
-                inputPlaceholder: 'e.g. Duplicate of LSH2026..., test booking, created in error',
+                inputPlaceholder: 'e.g. Duplicate of RBH2026..., test booking, created in error',
                 confirmText: 'Delete booking',
                 tone: 'danger',
                 icon: 'fa-trash-can'
