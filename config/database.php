@@ -193,6 +193,9 @@ try {
     // database.php is included more than once via require_once).
     _expireStaleTentativeBookings($pdo);
 
+    // Same idea for unpaid 'pending' bookings (site setting pending_expiry_hours, 0 = never).
+    _expireStalePendingBookings($pdo);
+
     if ($dbDebug) {
         error_log("Database Connection Successful!");
     }
@@ -242,6 +245,115 @@ function _expireStaleTentativeBookings(PDO $pdo): void
         // Non-fatal — log and continue; availability queries already filter
         // expired tentatives inline via the NOT(...) clause.
         error_log('[tentative] Auto-expire sweep failed: ' . $e->getMessage());
+    }
+}
+
+/**
+ * SQL condition (no bind params) that is true when the booking row aliased $a has ANY money
+ * against it: net paid, a paid/partial status, a paid deposit, or any non-refund payment row.
+ * Used to guarantee the automatic lapse/release jobs never touch a booking with a payment.
+ */
+function rh_booking_has_payment_sql(string $a = 'b'): string
+{
+    $a = preg_replace('/[^A-Za-z0-9_]/', '', $a);
+    $tol = (string)BALANCE_TOLERANCE;
+    return "(COALESCE({$a}.amount_paid, 0) > {$tol}
+        OR COALESCE({$a}.payment_status, '') IN ('partial', 'paid')
+        OR COALESCE({$a}.deposit_paid, 0) > 0
+        OR EXISTS (SELECT 1 FROM payments pp WHERE pp.booking_type = 'room' AND pp.booking_id = {$a}.id
+                   AND COALESCE(pp.payment_type, '') <> 'refund' AND pp.deleted_at IS NULL))";
+}
+
+/** Pay-by window in hours (unpaid_confirmed_release_hours, 0 = feature off). */
+function rh_unpaid_release_hours(): int
+{
+    return max(0, min(2160, (int)getSetting('unpaid_confirmed_release_hours', 0)));
+}
+
+/** Reminder lead time in hours (0 = no reminder step). */
+function rh_unpaid_reminder_hours(): int
+{
+    return max(0, min(720, (int)getSetting('unpaid_confirmed_reminder_hours', 24)));
+}
+
+/**
+ * Pay-by deadline for a confirmed booking row (string 'Y-m-d H:i:s'), or null when the policy is off or
+ * the booking is not eligible by state (not confirmed, in-house, check-in not in the future, has a payment).
+ * Measured from the later of creation and conversion/confirmation time. Shared by the scheduler jobs and admin/booking-details.php.
+ */
+function rh_unpaid_confirmed_deadline(array $b): ?string
+{
+    $hours = rh_unpaid_release_hours();
+    if ($hours <= 0 || ($b['status'] ?? '') !== 'confirmed') {
+        return null;
+    }
+    if (empty($b['check_in_date']) || (string)$b['check_in_date'] <= date('Y-m-d')) {
+        return null;
+    }
+    if ((float)($b['amount_paid'] ?? 0) > BALANCE_TOLERANCE || in_array((string)($b['payment_status'] ?? ''), ['partial', 'paid'], true)
+        || (int)($b['deposit_paid'] ?? 0) === 1) {
+        return null;
+    }
+    $base = max((int)strtotime((string)($b['created_at'] ?? '')), (int)strtotime((string)($b['converted_to_confirmed_at'] ?? '')));
+    return $base > 0 ? date('Y-m-d H:i:s', $base + $hours * 3600) : null;
+}
+
+/**
+ * Lapse unpaid 'pending' bookings once pending_expiry_hours (default 48, 0 = never) have passed since
+ * they were created. Never touches a booking with any payment, and ignores stays already over
+ * (check-in in the past) so old history is left alone. Status becomes 'expired' (which frees the room:
+ * availability only counts pending/tentative/confirmed/checked-in) and the guest/hotel notice is sent
+ * later by the scheduler job pending_expired_notice. Once per PHP process.
+ */
+function _expireStalePendingBookings(PDO $pdo): void
+{
+    static $ran = false;
+    if ($ran) {
+        return;
+    }
+    $ran = true;
+
+    try {
+        $st = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = 'pending_expiry_hours'");
+        $st->execute();
+        $v = $st->fetchColumn();
+        $hours = ($v === false || trim((string)$v) === '') ? 48 : (int)$v;
+        if ($hours <= 0) {
+            return;
+        }
+        $hours = min($hours, 720);
+
+        $noPay = rh_booking_has_payment_sql('b');
+        $sel = $pdo->prepare("SELECT b.id, b.booking_reference FROM bookings b
+            WHERE b.status = 'pending' AND b.created_at < (NOW() - INTERVAL ? HOUR)
+              AND b.check_in_date >= CURDATE() AND NOT {$noPay} LIMIT 100");
+        $sel->execute([$hours]);
+        $rows = $sel->fetchAll(PDO::FETCH_ASSOC);
+        if (!$rows) {
+            return;
+        }
+
+        $upd = $pdo->prepare("UPDATE bookings b SET b.status = 'expired', b.expired_at = NOW(), b.updated_at = NOW()
+            WHERE b.id = ? AND b.status = 'pending' AND NOT {$noPay}");
+        foreach ($rows as $r) {
+            $upd->execute([(int)$r['id']]);
+            if ($upd->rowCount() === 1) {
+                try {
+                    if (!function_exists('logBookingStatusChange') && is_file(__DIR__ . '/../includes/booking-timeline.php')) {
+                        require_once __DIR__ . '/../includes/booking-timeline.php';
+                    }
+                    if (function_exists('logBookingStatusChange')) {
+                        logBookingStatusChange((int)$r['id'], (string)$r['booking_reference'], 'pending', 'expired', 'system', null, 'System',
+                            'No payment or confirmation within ' . $hours . ' hours of booking - room released');
+                    }
+                } catch (Throwable $e) {
+                    error_log('[pending] timeline log failed: ' . $e->getMessage());
+                }
+                error_log('[pending] Auto-expired unpaid pending booking ' . $r['booking_reference']);
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('[pending] Auto-expire sweep failed: ' . $e->getMessage());
     }
 }
 
@@ -2702,20 +2814,31 @@ function validateCheckOut(array $booking): array
         return ['allowed' => false, 'reason' => "Booking must be CHECKED-IN to check out (current: {$booking['status']})"];
     }
 
-    // Date-based validation: check-out only allowed on or after check-out date
-    // (hotel policy may allow early checkout, but date must not be in the future beyond scheduled checkout)
-    $check_out_date = new DateTime($booking['check_out_date']);
-    $check_out_date->setTime(0, 0, 0);
-    $tomorrow = (new DateTime('today'))->modify('+1 day');
-
-    // Allow checkout if today is on or after the check-in date (early checkout is OK)
-    // but prevent checkout if check-out date is far in the future (more than 1 day ahead)
-    // This allows same-day checkout and early checkout
-    if ($check_out_date > $tomorrow) {
-        return ['allowed' => false, 'reason' => "Check-out date is too far in the future (scheduled: {$booking['check_out_date']})"];
+    // A plain checkout is for the booked departure day only. A late departure (extra nights to charge
+    // or waive) or an early one (unused nights to refund or keep) must go through the settlement
+    // window on the bookings list, so the money decision is made and recorded, never skipped.
+    $settle = rh_checkout_settlement_reason($booking);
+    if ($settle !== null) {
+        return ['allowed' => false, 'reason' => $settle, 'needs_settlement' => true];
     }
 
     return ['allowed' => true, 'reason' => ''];
+}
+
+/**
+ * Why a checkout needs the settlement step (late or early departure), or null on the booked day.
+ */
+function rh_checkout_settlement_reason(array $booking): ?string
+{
+    $out = substr((string)($booking['check_out_date'] ?? ''), 0, 10);
+    $today = date('Y-m-d');
+    if ($out === '' || $out === $today) {
+        return null;
+    }
+    $days = (int)(new DateTime($out))->diff(new DateTime($today))->days;
+    return $out < $today
+        ? "The guest is leaving {$days} night(s) after the booked departure ({$out}). Use Checkout on the bookings list to charge (or waive) the extra night(s)."
+        : "The guest is leaving {$days} night(s) before the booked departure ({$out}). Use Checkout on the bookings list to refund (or keep) the unused night(s).";
 }
 
 /**
@@ -8127,6 +8250,73 @@ function logCheckoutBalanceOverride(int $bookingId, string $bookingReference, fl
 }
 
 /**
+ * Whether today's check-out deadline (site setting check_out_time, e.g. "11:00 AM" or "13:00")
+ * has passed. Compared as real times: the old string comparison of "H:i" against "11:00 AM"
+ * was wrong for any afternoon setting (e.g. "13:30" < "1:00 PM" as text).
+ */
+function rh_checkout_time_passed_today(?int $now = null): bool
+{
+    $now = $now ?? time();
+    $deadline = strtotime(date('Y-m-d', $now) . ' ' . trim((string)getSetting('check_out_time', '11:00 AM')));
+    if ($deadline === false) {
+        $deadline = strtotime(date('Y-m-d', $now) . ' 11:00');
+    }
+    return $now >= $deadline;
+}
+
+/**
+ * Overdue state of a checked-in stay: 'overdue' when the check-out date has passed, 'late' when
+ * it is today and the check-out time has passed, '' otherwise. Non-checked-in bookings are never
+ * overdue (no-show / missed arrival are separate states).
+ */
+function rh_checkout_overdue_state(array $b, ?int $now = null): string
+{
+    if (($b['status'] ?? '') !== 'checked-in' || empty($b['check_out_date'])) {
+        return '';
+    }
+    $now = $now ?? time();
+    $today = date('Y-m-d', $now);
+    $out = substr((string)$b['check_out_date'], 0, 10);
+    if ($out < $today) {
+        return 'overdue';
+    }
+    return ($out === $today && rh_checkout_time_passed_today($now)) ? 'late' : '';
+}
+
+/**
+ * Timeline note when a guest checks out BEFORE the booked check-out date: records nights stayed vs
+ * booked. The bill is not changed here (full booked stay stays billable unless staff used
+ * "Adjust dates" first, which reprices and is audited in booking_date_adjustments); the entry makes the
+ * decision visible. The room is released by the normal checkout (status leaves the blocking set).
+ * Needs check_in_date, check_out_date, booking_reference in $bk. Never throws.
+ */
+function rh_log_early_checkout(array $bk, ?int $userId = null, ?string $userName = null): void
+{
+    try {
+        $today = new DateTime('today');
+        $out = new DateTime((string)($bk['check_out_date'] ?? 'today'));
+        $out->setTime(0, 0, 0);
+        if ($out <= $today) {
+            return;
+        }
+        $in = new DateTime((string)($bk['check_in_date'] ?? 'today'));
+        $in->setTime(0, 0, 0);
+        $stayed = max(0, (int)$in->diff($today)->days);
+        $unused = (int)$today->diff($out)->days;
+        if (!function_exists('logBookingEvent') && is_file(__DIR__ . '/../includes/booking-timeline.php')) {
+            require_once __DIR__ . '/../includes/booking-timeline.php';
+        }
+        if (function_exists('logBookingEvent')) {
+            logBookingEvent((int)($bk['id'] ?? 0), (string)($bk['booking_reference'] ?? ''), 'Early check-out', 'check_out',
+                "Left {$unused} night(s) before the booked check-out ({$bk['check_out_date']}); stayed {$stayed} night(s). Room released; the booked total is unchanged unless the stay was shortened via Adjust dates.",
+                null, null, 'admin', $userId, $userName, ['nights_stayed' => $stayed, 'nights_unused' => $unused, 'booked_check_out' => $bk['check_out_date']]);
+        }
+    } catch (Throwable $e) {
+        error_log('early checkout log failed: ' . $e->getMessage());
+    }
+}
+
+/**
  * Check a checked-in booking out through the balance gate, in one transaction:
  * booking row locked, balance re-derived, status flipped, room-type stock restored.
  * Used by every status-change path (update_status, quick modify) so none bypasses the
@@ -8143,7 +8333,7 @@ function rh_checkout_with_gate(PDO $pdo, int $bookingId, ?int $userId, bool $ove
         if ($ownTx) {
             $pdo->beginTransaction();
         }
-        $st = $pdo->prepare("SELECT id, status, room_id, booking_reference FROM bookings WHERE id = ? FOR UPDATE");
+        $st = $pdo->prepare("SELECT id, status, room_id, booking_reference, check_in_date, check_out_date FROM bookings WHERE id = ? FOR UPDATE");
         $st->execute([$bookingId]);
         $bk = $st->fetch(PDO::FETCH_ASSOC);
         if (!$bk) {
@@ -8151,6 +8341,10 @@ function rh_checkout_with_gate(PDO $pdo, int $bookingId, ?int $userId, bool $ove
         }
         if ($bk['status'] !== 'checked-in') {
             throw new RuntimeException("Cannot check out a booking that is '" . $bk['status'] . "'.");
+        }
+        $settle = rh_checkout_settlement_reason($bk);
+        if ($settle !== null) {
+            throw new RuntimeException($settle);
         }
         $gate = evaluateCheckoutBalance($pdo, $bookingId, $userId, $override);
         $out['balance'] = $gate['balance'];
@@ -8166,6 +8360,7 @@ function rh_checkout_with_gate(PDO $pdo, int $bookingId, ?int $userId, bool $ove
         if ($ownTx) {
             $pdo->commit();
         }
+        rh_log_early_checkout($bk, $userId, $userName);
         updateBookingRoomsStatus($bookingId, 'cleaning', 'Checkout completed: ' . ($bk['booking_reference'] ?: ('Booking #' . $bookingId)), $userId);
         if ($gate['override']) {
             logCheckoutBalanceOverride($bookingId, (string)$bk['booking_reference'], (float)$gate['balance'], $userId, $userName);

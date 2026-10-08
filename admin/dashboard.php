@@ -144,7 +144,7 @@ if (!$is_card_insight_ajax) {
                 FROM bookings b
                 JOIN rooms r ON b.room_id = r.id
                 LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-                WHERE b.check_in_date BETWEEN DATE_ADD(?, INTERVAL 1 DAY) AND DATE_ADD(?, INTERVAL 7 DAY)
+                WHERE b.deleted_at IS NULL AND b.check_in_date BETWEEN DATE_ADD(?, INTERVAL 1 DAY) AND DATE_ADD(?, INTERVAL 7 DAY)
                 AND b.status IN ('pending', 'confirmed')
                 ORDER BY b.check_in_date ASC
             ");
@@ -212,7 +212,7 @@ if (!$is_card_insight_ajax) {
                 $ops['room_service_reminder_pending'] = (int)$pdo->query("SELECT COUNT(*)
                     FROM bookings b
                     INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                    WHERE b.status = 'checked-in'
+                    WHERE b.deleted_at IS NULL AND b.status = 'checked-in'
                         AND b.individual_room_id IS NOT NULL
                         AND ir.is_active = 1
                         AND NOT EXISTS (
@@ -316,7 +316,7 @@ if (!$is_card_insight_ajax) {
                     SUM(check_in_date = ? AND status = 'checked-in') AS arrived,
                     SUM(check_out_date = ? AND status = 'checked-out') AS departed
                 FROM bookings
-                WHERE check_in_date = ? OR check_out_date = ?");
+                WHERE deleted_at IS NULL AND (check_in_date = ? OR check_out_date = ?)");
             $st->execute([$today, $today, $today, $today]);
             $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
             $dayProgress['arrived']  = (int)($r['arrived'] ?? 0);
@@ -332,8 +332,8 @@ if (!$is_card_insight_ajax) {
                 FROM bookings b
                 JOIN rooms r ON b.room_id = r.id
                 LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-                WHERE (b.check_out_date = ? AND b.status IN ('checked-in', 'checked-out'))
-                   OR (b.check_out_date < ? AND b.status = 'checked-in')
+                WHERE b.deleted_at IS NULL AND ((b.check_out_date = ? AND b.status IN ('checked-in', 'checked-out'))
+                      OR (b.check_out_date < ? AND b.status = 'checked-in'))
                 ORDER BY FIELD(departure_state, 'overdue', 'due', 'departed'), b.check_out_date ASC, b.amount_due DESC, b.guest_name ASC");
             $st->execute([$today, $today, $today]);
             $departureList = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -574,7 +574,7 @@ if ($is_card_insight_ajax) {
                                        FROM bookings b
                                        JOIN rooms r ON r.id = b.room_id
                                        LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                                       WHERE b.check_in_date = ? AND b.status IN ('confirmed','pending','checked-in','checked-out')
+                                       WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND b.status IN ('confirmed','pending','checked-in','checked-out')
                                        ORDER BY FIELD(b.status, 'pending', 'confirmed', 'checked-in', 'checked-out'), b.created_at ASC
                                        LIMIT 30");
                 $stmt->execute([$today]);
@@ -619,8 +619,8 @@ if ($is_card_insight_ajax) {
                                        FROM bookings b
                                        JOIN rooms r ON r.id = b.room_id
                                        LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                                       WHERE (b.check_out_date = ? AND b.status IN ('checked-in', 'checked-out'))
-                                          OR (b.check_out_date < ? AND b.status = 'checked-in')
+                                       WHERE b.deleted_at IS NULL AND ((b.check_out_date = ? AND b.status IN ('checked-in', 'checked-out'))
+                                             OR (b.check_out_date < ? AND b.status = 'checked-in'))
                                        ORDER BY (b.status = 'checked-out'), b.check_out_date ASC, b.created_at ASC
                                        LIMIT 30");
                 $stmt->execute([$today, $today]);
@@ -662,7 +662,7 @@ if ($is_card_insight_ajax) {
                 $payload['link'] = ['href' => 'bookings.php?status=pending&flash=status:pending', 'label' => 'Open pending bookings'];
                 $stmt = $pdo->query("SELECT id AS booking_id, booking_reference, guest_name, check_in_date, number_of_nights, total_amount, amount_due
                                      FROM bookings
-                                     WHERE status = 'pending'
+                                     WHERE deleted_at IS NULL AND status = 'pending'
                                      ORDER BY created_at ASC
                                      LIMIT 30");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -696,7 +696,7 @@ if ($is_card_insight_ajax) {
                                      FROM bookings b
                                      JOIN rooms r ON r.id = b.room_id
                                      LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                                     WHERE b.status = 'checked-in'
+                                     WHERE b.deleted_at IS NULL AND b.status = 'checked-in'
                                      ORDER BY b.check_out_date ASC
                                      LIMIT 30");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -798,7 +798,7 @@ if ($is_card_insight_ajax) {
                 $payload['link'] = ['href' => 'bookings.php?status=expired&flash=status:expired', 'label' => 'Open expired bookings'];
                 $stmt = $pdo->query("SELECT id AS booking_id, booking_reference, guest_name, check_in_date, expired_at, amount_due
                                      FROM bookings
-                                     WHERE status = 'expired' AND expired_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                                     WHERE deleted_at IS NULL AND status = 'expired' AND expired_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                                      ORDER BY expired_at DESC
                                      LIMIT 30");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1570,7 +1570,7 @@ if ($is_card_insight_ajax) {
                     $roomServiceReminderPending = (int)$pdo->query("SELECT COUNT(*)
                                         FROM bookings b
                                         INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                                        WHERE b.status = 'checked-in'
+                                        WHERE b.deleted_at IS NULL AND b.status = 'checked-in'
                                             AND b.individual_room_id IS NOT NULL
                                             AND ir.is_active = 1
                                             AND NOT EXISTS (
@@ -1716,7 +1716,7 @@ if ($is_card_insight_ajax) {
                                                                                                  LEFT JOIN bookings b ON b.id = (
                                                                                                         SELECT b1.id
                                                                                                         FROM bookings b1
-                                                                                                        WHERE b1.individual_room_id = ir.id
+                                                                                                        WHERE b1.deleted_at IS NULL AND b1.individual_room_id = ir.id
                                                                                                             AND b1.status = 'checked-in'
                                                                                                         ORDER BY b1.check_in_date DESC, b1.id DESC
                                                                                                         LIMIT 1
@@ -1867,7 +1867,7 @@ $currency_symbol = getSetting('currency_symbol');
                     FROM bookings b
                     JOIN rooms r ON b.room_id = r.id
                     LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-                    WHERE b.check_in_date = ? AND b.status IN ('confirmed', 'pending', 'checked-in', 'checked-out')
+                    WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND b.status IN ('confirmed', 'pending', 'checked-in', 'checked-out')
                     ORDER BY FIELD(b.status, 'pending', 'confirmed', 'checked-in', 'checked-out'), b.created_at ASC");
                 $st->execute([$today]);
                 $checkin_bookings = $st->fetchAll(PDO::FETCH_ASSOC);

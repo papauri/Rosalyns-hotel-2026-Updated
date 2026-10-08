@@ -116,7 +116,7 @@ if ($mod_bookings) {
         $rooms_oo    = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status = 'out_of_order'")->fetchColumn();
         $occStmt = $pdo->prepare("
             SELECT COUNT(*) FROM bookings
-            WHERE status IN ('checked-in','checked-out')
+            WHERE deleted_at IS NULL AND status IN ('checked-in','checked-out')
               AND check_in_date <= :d
               AND check_out_date > :d
         ");
@@ -339,7 +339,7 @@ if ($mod_bookings) {
                 COALESCE(SUM(CASE WHEN rate_plan_id IS NOT NULL THEN COALESCE(rate_plan_discount,0) * GREATEST(1, COALESCE(NULLIF(DATEDIFF(check_out_date, check_in_date), 0), 1)) ELSE 0 END),0) AS total_discount_given,
                 COALESCE(SUM(COALESCE(package_total,0)),0) AS package_revenue
             FROM bookings
-            WHERE DATE(created_at) = :d
+            WHERE deleted_at IS NULL AND DATE(created_at) = :d
               AND status NOT IN ('cancelled','no-show')
         ");
         $dpStmt->execute([':d' => $report_date]);
@@ -358,7 +358,7 @@ if ($mod_bookings) {
 
         $rpStmt = $pdo->prepare("
             SELECT rate_plan_label, COUNT(*) AS cnt FROM bookings
-            WHERE DATE(created_at) = :d AND rate_plan_id IS NOT NULL AND status NOT IN ('cancelled','no-show')
+            WHERE deleted_at IS NULL AND DATE(created_at) = :d AND rate_plan_id IS NOT NULL AND status NOT IN ('cancelled','no-show')
             GROUP BY rate_plan_label ORDER BY cnt DESC LIMIT 1
         ");
         $rpStmt->execute([':d' => $report_date]);
@@ -445,7 +445,7 @@ try {
 
         $prevOcc = $pdo->prepare("
             SELECT COUNT(*) FROM bookings
-            WHERE status IN ('checked-in','checked-out')
+            WHERE deleted_at IS NULL AND status IN ('checked-in','checked-out')
               AND check_in_date <= :d
               AND check_out_date > :d
         ");
@@ -721,7 +721,7 @@ if ($mod_bookings) {
             INNER JOIN (
                 SELECT guest_email, COUNT(*) AS total
                 FROM bookings
-                WHERE guest_email != ''
+                WHERE deleted_at IS NULL AND guest_email != ''
                   AND status NOT IN ('cancelled','no-show','expired')
                 GROUP BY guest_email
             ) bcount ON bcount.guest_email = b.guest_email
@@ -737,7 +737,7 @@ if ($mod_bookings) {
         $leadStmt = $pdo->prepare("
             SELECT ROUND(AVG(DATEDIFF(check_in_date, DATE(created_at)))) AS avg_lead
             FROM bookings
-            WHERE check_in_date = :d
+            WHERE deleted_at IS NULL AND check_in_date = :d
               AND status NOT IN ('cancelled','no-show','expired')
         ");
         $leadStmt->execute([':d' => $report_date]);

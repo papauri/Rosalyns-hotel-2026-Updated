@@ -102,6 +102,7 @@ if (!function_exists('guest_run_prearrival_reminders')) {
                        b.check_in_date, b.check_out_date, b.status
                 FROM bookings b
                 WHERE b.check_in_date = DATE_ADD(CURDATE(), INTERVAL ? DAY)
+                  AND b.deleted_at IS NULL
                   AND b.status IN ('confirmed', 'pending')
                   AND b.guest_email IS NOT NULL AND b.guest_email <> ''
                   AND NOT EXISTS (
@@ -191,6 +192,7 @@ if (!function_exists('guest_run_poststay_review_requests')) {
                 FROM bookings b
                 WHERE b.check_out_date BETWEEN DATE_SUB(CURDATE(), INTERVAL (? + 3) DAY) AND DATE_SUB(CURDATE(), INTERVAL ? DAY)
                   AND b.status = 'checked-out'
+                  AND b.deleted_at IS NULL
                   AND b.guest_email IS NOT NULL AND b.guest_email <> ''
                   AND NOT EXISTS (
                       SELECT 1 FROM guest_communication_log l

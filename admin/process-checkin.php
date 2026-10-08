@@ -33,6 +33,14 @@ if (in_array($action, $bookingScopedActions, true) && $booking_id <= 0) {
 }
 
 try {
+    if ($booking_id > 0) {
+        $delChk = $pdo->prepare("SELECT deleted_at FROM bookings WHERE id = ?");
+        $delChk->execute([$booking_id]);
+        if (!empty($delChk->fetchColumn())) {
+            echo json_encode(['success' => false, 'message' => 'This booking has been deleted. Restore it before making changes.']);
+            exit;
+        }
+    }
     if ($action === 'checkin') {
         $roomGate = evaluateCheckInRoomReady($booking_id, $admin_user_id ?: null, !empty($_POST['confirm_checkin_room_not_ready']));
         if (!$roomGate['allowed']) {

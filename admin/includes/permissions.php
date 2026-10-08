@@ -360,6 +360,15 @@ function getAllPermissions()
             'page' => 'bookings.php',
             'group' => 'bookings_write'
         ],
+        // Not in any role default: administrators have it, everyone else only when granted.
+        'delete_booking' => [
+            'label' => 'Delete & Restore Bookings',
+            'description' => 'Delete a booking (moved to the Deleted filter with who, when and why) and restore deleted bookings',
+            'icon' => 'fa-trash-can',
+            'category' => 'Reservations',
+            'page' => 'bookings.php',
+            'group' => 'bookings_write'
+        ],
         'calendar' => [
             'label' => 'Calendar View',
             'description' => 'View booking calendar',

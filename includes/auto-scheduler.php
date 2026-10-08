@@ -42,6 +42,9 @@ if (!function_exists('rh_auto_defaults')) {
             'automated_email_quotation_days'    => '2',
             'automated_email_job_tentative'     => '1',
             'automated_email_job_tentative_expired' => '1',
+            'automated_email_job_pending_expired' => '1',
+            'automated_email_job_unpaid_reminder' => '1',
+            'automated_email_job_unpaid_release' => '1',
             'automated_backup_enabled'          => '1',
             'scheduler_last_run'                => '0',
             'scheduler_last_result'             => '',
@@ -92,6 +95,19 @@ if (!function_exists('rh_auto_defaults')) {
             'tentative_expired_notice' => [
                 'label' => 'Tentative hold expired notices', 'fn' => 'rh_job_tentative_expired_notice',
                 'toggle' => 'automated_email_job_tentative_expired', 'toggle_default' => '1', 'interval' => 30, 'legacy' => false, 'bcc' => 'global',
+            ],
+            'pending_expired_notice' => [
+                'label' => 'Pending booking expired notices', 'fn' => 'rh_job_pending_expired_notice',
+                'toggle' => 'automated_email_job_pending_expired', 'toggle_default' => '1', 'interval' => 30, 'legacy' => false, 'bcc' => 'global',
+            ],
+            // Both unpaid-confirmed jobs also need unpaid_confirmed_release_hours > 0 (default 0 = off).
+            'unpaid_confirmed_reminder' => [
+                'label' => 'Confirmed-but-unpaid payment reminders', 'fn' => 'rh_job_unpaid_confirmed_reminder',
+                'toggle' => 'automated_email_job_unpaid_reminder', 'toggle_default' => '1', 'interval' => 30, 'legacy' => false, 'bcc' => 'global',
+            ],
+            'unpaid_confirmed_release' => [
+                'label' => 'Confirmed-but-unpaid room release', 'fn' => 'rh_job_unpaid_confirmed_release',
+                'toggle' => 'automated_email_job_unpaid_release', 'toggle_default' => '1', 'interval' => 30, 'legacy' => false, 'bcc' => 'global',
             ],
             'prearrival_reminders' => [
                 'label' => 'Pre-arrival reminders', 'fn' => 'rh_job_prearrival_reminders',

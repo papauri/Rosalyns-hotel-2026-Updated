@@ -40,7 +40,7 @@ try {
             MAX(b.check_out_date)                 AS last_check_out,
             (SELECT b2.booking_reference
              FROM bookings b2
-             WHERE b2.guest_email = b.guest_email
+             WHERE b2.deleted_at IS NULL AND b2.guest_email = b.guest_email
                AND b2.status NOT IN ('cancelled','no-show','expired')
                AND b2.deleted_at IS NULL
              ORDER BY b2.check_in_date DESC LIMIT 1) AS last_booking_ref,

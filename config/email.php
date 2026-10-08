@@ -4004,16 +4004,35 @@ function sendBookingRoomUpgradeEmail(array $booking)
         $old_total = (float)($booking['old_total'] ?? 0);
         $new_total = (float)($booking['new_total'] ?? 0);
         $price_difference = (float)($booking['price_difference'] ?? 0);
+        // direction: upgrade | downgrade | same ; pricing: charge | keep (set by rh_apply_room_type_change)
+        $direction = (string)($booking['change_direction'] ?? 'upgrade');
+        $pricing = (string)($booking['change_pricing'] ?? 'charge');
+        $inHouse = ($booking['status'] ?? '') === 'checked-in';
+        if ($direction === 'upgrade') {
+            $heading = $pricing === 'keep' ? 'Complimentary Room Upgrade' : 'Room Upgrade Confirmed';
+            $intro = $pricing === 'keep'
+                ? 'We are delighted to let you know that your booking has been upgraded to a better room <strong>at no extra charge</strong>.'
+                : 'Your booking has been upgraded to a better room, as arranged.';
+            $closing = 'We hope you enjoy your enhanced stay with us!';
+        } elseif ($direction === 'downgrade') {
+            $heading = 'Change to Your Room';
+            $intro = 'We have moved your booking to a different room type. We apologise for any inconvenience and thank you for your understanding.';
+            $closing = 'If anything about the new room does not suit you, please speak to reception and we will do our best to help.';
+        } else {
+            $heading = 'Room Change Confirmed';
+            $intro = 'Your booking has been moved to a different room type.';
+            $closing = 'We look forward to hosting you.';
+        }
 
         $currency_symbol = getSetting('currency_symbol');
 
         $htmlBody = '
-        <h1 style="color: #8B7355; text-align: center;">Room Upgrade Confirmed</h1>
+        <h1 style="color: #8B7355; text-align: center;">' . $heading . '</h1>
         <p>Dear ' . htmlspecialchars($booking['guest_name']) . ',</p>
-        <p>We are pleased to inform you that your booking with <strong>' . htmlspecialchars($email_site_name) . '</strong> has been upgraded to a better room!</p>
+        <p>' . $intro . ' (<strong>' . htmlspecialchars($email_site_name) . '</strong>)</p>
 
         <div style="background: #FAF6F0; border: 2px solid #8B7355; padding: 20px; margin: 20px 0; border-radius: 10px;">
-            <h2 style="color: #8B7355; margin-top: 0;;text-align:left;">Upgrade Details</h2>
+            <h2 style="color: #8B7355; margin-top: 0;;text-align:left;">Room Change Details</h2>
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Booking Reference:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($booking['booking_reference']) . '</td></tr></table>
 
@@ -4033,11 +4052,11 @@ function sendBookingRoomUpgradeEmail(array $booking)
         if ($price_difference > 0) {
             $htmlBody .= '
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;border-top:1px dashed #ccc;"><tr><td style="padding:8px 8px 6px 0;font-weight:bold;color:#dc3545;width:44%;vertical-align:top;">Additional Amount:</td><td style="padding:8px 0 6px 8px;color:#dc3545;font-weight:bold;font-size:16px;text-align:left;vertical-align:top;">+' . $currency_symbol . ' ' . number_format($price_difference, 0) . '</td></tr></table>
-                <p style="margin: 8px 0 0 0; font-size: 12px; color: #666;">* Please pay the additional amount upon check-in.</p>';
+                <p style="margin: 8px 0 0 0; font-size: 12px; color: #666;">* ' . ($inHouse ? 'This has been added to your bill and is settled at check-out.' : 'Please pay the additional amount before or at check-in.') . '</p>';
         } elseif ($price_difference < 0) {
             $htmlBody .= '
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;border-top:1px dashed #ccc;"><tr><td style="padding:8px 8px 6px 0;font-weight:bold;color:#28a745;width:44%;vertical-align:top;">Discount Applied:</td><td style="padding:8px 0 6px 8px;color:#28a745;font-weight:bold;font-size:16px;text-align:left;vertical-align:top;">-' . $currency_symbol . ' ' . number_format(abs($price_difference), 0) . '</td></tr></table>
-                <p style="margin: 8px 0 0 0; font-size: 12px; color: #666;">* A discount has been applied to your booking!</p>';
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;border-top:1px dashed #ccc;"><tr><td style="padding:8px 8px 6px 0;font-weight:bold;color:#28a745;width:44%;vertical-align:top;">Reduction:</td><td style="padding:8px 0 6px 8px;color:#28a745;font-weight:bold;font-size:16px;text-align:left;vertical-align:top;">-' . $currency_symbol . ' ' . number_format(abs($price_difference), 0) . '</td></tr></table>
+                <p style="margin: 8px 0 0 0; font-size: 12px; color: #666;">* Your total has been reduced to reflect the new room. Any amount you have overpaid will be refunded or held as credit.</p>';
         } else {
             $htmlBody .= '
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;border-top:1px dashed #ccc;"><tr><td style="padding:8px 8px 6px 0;font-weight:bold;color:#8B7355;width:44%;vertical-align:top;">Price Adjustment:</td><td style="padding:8px 0 6px 8px;color:#8B7355;text-align:left;vertical-align:top;">No change in total amount</td></tr></table>';
@@ -4048,14 +4067,13 @@ function sendBookingRoomUpgradeEmail(array $booking)
         </div>
 
         <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
-            <h3 style="color: #155724; margin-top: 0;;text-align:left;"><i class="fas fa-arrow-up"></i> Room Upgraded Successfully!</h3>
             <p style="color: #155724; margin: 0;">
-                Your room has been upgraded from <strong>' . htmlspecialchars($old_room_name) . '</strong> to <strong>' . htmlspecialchars($new_room_name) . '</strong>.
-                We hope you enjoy your enhanced stay with us!
+                Your room type is now <strong>' . htmlspecialchars($new_room_name) . '</strong> (previously ' . htmlspecialchars($old_room_name) . ').
+                ' . $closing . '
             </p>
         </div>
 
-        <p>If you have any questions about your upgrade, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
+        <p>If you have any questions about this change, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
             Warm regards &mdash; see you soon.
         </p>';
@@ -4067,7 +4085,7 @@ function sendBookingRoomUpgradeEmail(array $booking)
         $emailResult = sendEmailWithCC(
             $booking['guest_email'],
             $booking['guest_name'],
-            'Room Upgraded - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']',
+            $heading . ' - ' . $email_site_name . ' [' . $booking['booking_reference'] . ']',
             $htmlBody,
             '',
             $ccEmails
@@ -4840,6 +4858,90 @@ function sendPendingBookingExpiredEmail(array $booking, ?array $room = null)
 }
 
 /**
+ * Shared body rows for the confirmed-but-unpaid emails (reference, room, dates, amount due).
+ */
+function rh_unpaid_confirmed_details_html(array $booking, ?array $room, string $deadlineLabel = '', string $deadline = ''): string
+{
+    $e = static function ($v): string {
+        return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+    };
+    $row = static function (string $label, string $value, bool $last = false): string {
+        return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;' . ($last ? '' : 'border-bottom:1px solid #e8e0d4;') . '">' . $label . ':</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;' . ($last ? '' : 'border-bottom:1px solid #e8e0d4;') . '">' . $value . '</td></tr></table>';
+    };
+    $owed = rh_booking_owed($booking)['owed'];
+    $html = '<div style="background:#FAF6F0;border:2px solid #C8A45A;padding:20px;margin:20px 0;border-radius:10px;">'
+        . $row('Booking Reference', '<strong>' . $e($booking['booking_reference'] ?? '') . '</strong>')
+        . $row('Room', $e($room['name'] ?? ($booking['room_name'] ?? 'N/A')))
+        . $row('Check-in Date', $e(date('F j, Y', strtotime((string)$booking['check_in_date']))))
+        . $row('Check-out Date', $e(date('F j, Y', strtotime((string)$booking['check_out_date']))))
+        . $row('Amount Due', '<strong>' . $e(getSetting('currency_symbol')) . ' ' . number_format($owed, 0) . '</strong>', $deadlineLabel === '');
+    if ($deadlineLabel !== '') {
+        $html .= $row($e($deadlineLabel), '<strong>' . $e($deadline) . '</strong>', true);
+    }
+    return $html . '</div>';
+}
+
+/**
+ * Reminder: a confirmed booking has no payment yet and the room will be released at the deadline.
+ * Fragment body; sendEmail() wraps it in the branded shell.
+ */
+function sendUnpaidConfirmedReminderEmail(array $booking, string $deadline)
+{
+    global $pdo, $email_from_email, $email_site_name;
+
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
+        $stmt->execute([$booking['room_id']]);
+        $room = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        $htmlBody = '
+        <h1 style="color: #dc3545; text-align: center;">Payment Needed to Keep Your Room</h1>
+        <p>Dear ' . htmlspecialchars($booking['guest_name']) . ',</p>
+        <p>Your booking at <strong>' . htmlspecialchars($email_site_name) . '</strong> is confirmed, but we have not yet received payment.
+        To keep your room, please pay by <strong>' . htmlspecialchars($deadline) . '</strong>. After that the room is released to other guests.</p>'
+        . rh_unpaid_confirmed_details_html($booking, $room, 'Pay by', $deadline)
+        . (function_exists('rh_auto_pay_instructions') ? rh_auto_pay_instructions((string)$booking['booking_reference'], 'room') : '')
+        . '<p style="margin-top: 20px;">Already paid? Please reply with your proof of payment, or contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . htmlspecialchars((string)getSetting('phone_main')) . '.</p>
+        <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">Warm regards &mdash; we look forward to hosting you.</p>';
+
+        return sendEmail($booking['guest_email'], $booking['guest_name'], 'Payment reminder - keep your room - ' . $booking['booking_reference'], $htmlBody);
+    } catch (Exception $e) {
+        error_log("Send Unpaid Confirmed Reminder Email Error: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+/**
+ * Notice: a confirmed booking was released because no payment arrived by the deadline.
+ */
+function sendUnpaidConfirmedReleasedEmail(array $booking)
+{
+    global $pdo, $email_from_email, $email_site_name, $email_site_url;
+
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
+        $stmt->execute([$booking['room_id']]);
+        $room = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        $htmlBody = '
+        <h1 style="color: #6c757d; text-align: center;">Booking Released</h1>
+        <p>Dear ' . htmlspecialchars($booking['guest_name']) . ',</p>
+        <p>We did not receive payment for your booking at <strong>' . htmlspecialchars($email_site_name) . '</strong> by the pay-by deadline, so the room has been released and the booking cancelled. Nothing has been charged to you.</p>'
+        . rh_unpaid_confirmed_details_html($booking, $room)
+        . '<p>If you still wish to stay with us, please make a new booking and we will be glad to host you. If you believe this is a mistake or you have already paid, contact us straight away.</p>
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="' . htmlspecialchars($email_site_url) . '/booking.php" style="display: inline-block; background: #8B7355; color: #1A1A1A; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Make a New Booking</a>
+        </div>
+        <p style="margin-top: 20px;">Contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . htmlspecialchars((string)getSetting('phone_main')) . '.</p>';
+
+        return sendEmail($booking['guest_email'], $booking['guest_name'], 'Booking released - payment not received - ' . $booking['booking_reference'], $htmlBody);
+    } catch (Exception $e) {
+        error_log("Send Unpaid Confirmed Released Email Error: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+/**
  * Send admin notification for expired booking
  */
 function sendAdminBookingExpiredNotification(array $booking, string $booking_type = 'tentative')
@@ -4859,11 +4961,16 @@ function sendAdminBookingExpiredNotification(array $booking, string $booking_typ
         }
 
         // Determine reason based on booking type
-        $reason = $booking_type === 'tentative'
-            ? 'Tentative booking expired (not confirmed within time limit)'
-            : 'Pending booking expired (not confirmed within time limit)';
-
-        $type_label = $booking_type === 'tentative' ? 'Tentative' : 'Pending';
+        if ($booking_type === 'tentative') {
+            $reason = 'Tentative booking expired (not confirmed within time limit)';
+            $type_label = 'Tentative';
+        } elseif ($booking_type === 'unpaid_confirmed') {
+            $reason = 'Confirmed booking released: no payment received by the pay-by deadline (' . (int)getSetting('unpaid_confirmed_release_hours', 0) . ' hours after booking)';
+            $type_label = 'Confirmed (unpaid)';
+        } else {
+            $reason = 'Pending booking expired (no payment or confirmation within ' . (int)getSetting('pending_expiry_hours', 48) . ' hours)';
+            $type_label = 'Pending';
+        }
 
         // Prepare email content
         $htmlBody = '
@@ -4902,10 +5009,10 @@ function sendAdminBookingExpiredNotification(array $booking, string $booking_typ
         <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
             <h3 style="color: #5C4A32; margin-top: 0;;text-align:left;">Actions Taken</h3>
             <p style="color: #5C4A32; margin: 0;">
-                <strong>✓</strong> Booking status changed to "expired"<br>
+                <strong>✓</strong> Booking status changed to "' . ($booking_type === 'unpaid_confirmed' ? 'cancelled' : 'expired') . '"<br>
                 <strong>✓</strong> Room availability restored<br>
-                <strong>✓</strong> Expiration email sent to guest<br>
-                <strong>✓</strong> Logged to tentative_booking_log
+                <strong>✓</strong> ' . ($booking_type === 'unpaid_confirmed' ? 'Release' : 'Expiration') . ' email sent to guest<br>
+                <strong>✓</strong> ' . ($booking_type === 'tentative' ? 'Logged to tentative_booking_log' : 'Recorded in the booking timeline') . '
             </p>
         </div>
 

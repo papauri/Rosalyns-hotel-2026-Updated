@@ -448,6 +448,15 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
             $pdo->rollBack();
             return ['success' => false, 'message' => 'Booking not found or guest not checked in'];
         }
+        if (!empty($booking['deleted_at'])) {
+            $pdo->rollBack();
+            return ['success' => false, 'message' => 'This booking has been deleted. Restore it first.'];
+        }
+        // Late / early departures go through the settlement window (extra or unused nights).
+        if (function_exists('rh_checkout_settlement_reason') && ($settle = rh_checkout_settlement_reason($booking)) !== null) {
+            $pdo->rollBack();
+            return ['success' => false, 'message' => $settle];
+        }
 
         // Recalculate financials first so the returned balance and the final
         // invoice reflect any folio charges added right up to checkout.

@@ -384,7 +384,7 @@ try {
         SELECT status, COUNT(*) as count,
                COALESCE(SUM(total_amount), 0) as total_value
         FROM bookings
-        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status ORDER BY count DESC
     ");
     $bookingStatusStmt->execute([$start_date, $end_date]);
@@ -398,7 +398,7 @@ try {
                COALESCE(SUM(b.total_amount), 0) as total_revenue,
                COALESCE(AVG(b.number_of_nights), 0) as avg_stay
         FROM rooms r
-        LEFT JOIN bookings b ON r.id = b.room_id
+        LEFT JOIN bookings b ON r.id = b.room_id AND b.deleted_at IS NULL
             AND b.created_at >= ? AND b.created_at <= DATE_ADD(?, INTERVAL 1 DAY)
             AND b.status NOT IN ('cancelled')
         WHERE r.is_active = 1
@@ -419,7 +419,7 @@ try {
                COALESCE(SUM(COALESCE(child_guests, 0)), 0) as total_children,
                COALESCE(SUM(COALESCE(child_supplement_total, 0)), 0) as total_child_revenue
         FROM bookings
-        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         AND status NOT IN ('cancelled')
     ");
     $bookingSummaryStmt->execute([$start_date, $end_date]);
@@ -434,7 +434,7 @@ try {
             COUNT(*) as total,
             SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
         FROM bookings
-        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
     ");
     $cancelStmt->execute([$start_date, $end_date]);
     $cancelData = $cancelStmt->fetch(PDO::FETCH_ASSOC);
@@ -445,7 +445,7 @@ try {
         SELECT b.*, r.name as room_name
         FROM bookings b
         LEFT JOIN rooms r ON b.room_id = r.id
-        WHERE b.created_at >= ? AND b.created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        WHERE b.deleted_at IS NULL AND b.created_at >= ? AND b.created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         ORDER BY b.created_at DESC LIMIT 15
     ");
     $recentBookingsStmt->execute([$start_date, $end_date]);
@@ -464,7 +464,7 @@ try {
                COALESCE(SUM(COALESCE(b.adult_guests, GREATEST(b.number_of_guests - COALESCE(b.child_guests, 0), 1))), 0) as total_adults,
                COALESCE(SUM(COALESCE(b.child_guests, 0)), 0) as total_children
         FROM rooms r
-        LEFT JOIN bookings b ON r.id = b.room_id
+        LEFT JOIN bookings b ON r.id = b.room_id AND b.deleted_at IS NULL
             AND b.check_in_date <= ? AND b.check_out_date >= ?
             AND b.status IN ('confirmed', 'checked-in', 'checked-out')
         WHERE r.is_active = 1
@@ -487,7 +487,7 @@ try {
             COALESCE(SUM(COALESCE(b.child_guests, 0)), 0) as total_children,
             COALESCE(AVG(b.number_of_guests), 0) as avg_guests_per_booking
         FROM bookings b
-        WHERE b.check_in_date <= ? AND b.check_out_date >= ?
+        WHERE b.deleted_at IS NULL AND b.check_in_date <= ? AND b.check_out_date >= ?
         AND b.status IN ('confirmed', 'checked-in', 'checked-out')
     ");
     $overallOccupancyStmt->execute([$end_date, $start_date]);
@@ -514,7 +514,7 @@ try {
                COALESCE(SUM(COALESCE(adult_guests, GREATEST(number_of_guests - COALESCE(child_guests, 0), 1))), 0) as total_adults,
                COALESCE(SUM(COALESCE(child_guests, 0)), 0) as total_children
         FROM bookings
-        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         AND status NOT IN ('cancelled')
         GROUP BY country ORDER BY booking_count DESC LIMIT 15
     ");
@@ -529,11 +529,11 @@ try {
                MIN(b.check_in_date) as first_visit,
                MAX(b.check_in_date) as last_visit
         FROM bookings b
-        WHERE b.status NOT IN ('cancelled')
+        WHERE b.deleted_at IS NULL AND b.status NOT IN ('cancelled')
         AND b.created_at >= ? AND b.created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         AND b.guest_email IN (
             SELECT guest_email FROM bookings
-            WHERE status NOT IN ('cancelled')
+            WHERE deleted_at IS NULL AND status NOT IN ('cancelled')
             GROUP BY guest_email
             HAVING COUNT(*) > 1
         )
@@ -549,7 +549,7 @@ try {
                COUNT(*) as total_bookings,
                COALESCE(AVG(total_amount), 0) as avg_spend
         FROM bookings
-        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         AND status NOT IN ('cancelled')
     ");
     $guestMetricsStmt->execute([$start_date, $end_date]);
@@ -661,7 +661,7 @@ try {
         SELECT COALESCE(SUM(b.total_amount), 0) as total_room_revenue,
                COALESCE(SUM(b.number_of_nights), 0) as total_nights_sold
         FROM bookings b
-        WHERE b.status IN ('confirmed', 'checked-in', 'checked-out')
+        WHERE b.deleted_at IS NULL AND b.status IN ('confirmed', 'checked-in', 'checked-out')
         AND b.check_in_date <= ? AND b.check_out_date >= ?
     ");
     $adrStmt->execute([$end_date, $start_date]);
@@ -681,7 +681,7 @@ try {
             COUNT(*) as total_confirmed,
             SUM(CASE WHEN status = 'no-show' THEN 1 ELSE 0 END) as no_shows
         FROM bookings
-        WHERE status IN ('confirmed', 'checked-in', 'checked-out', 'no-show')
+        WHERE deleted_at IS NULL AND status IN ('confirmed', 'checked-in', 'checked-out', 'no-show')
         AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
     ");
     $noShowStmt->execute([$start_date, $end_date]);
@@ -696,7 +696,7 @@ try {
                COALESCE(SUM(total_amount), 0) as forecast_revenue,
                COALESCE(SUM(number_of_nights), 0) as upcoming_nights
         FROM bookings
-        WHERE status IN ('confirmed', 'tentative')
+        WHERE deleted_at IS NULL AND status IN ('confirmed', 'tentative')
         AND check_in_date > CURDATE()
     ");
     $forecastData = $forecastStmt->fetch(PDO::FETCH_ASSOC);
@@ -711,7 +711,7 @@ try {
                     THEN ROUND(SUM(b.total_amount) / SUM(b.number_of_nights), 0)
                     ELSE 0 END as adr
         FROM bookings b
-        WHERE b.status IN ('confirmed', 'checked-in', 'checked-out')
+        WHERE b.deleted_at IS NULL AND b.status IN ('confirmed', 'checked-in', 'checked-out')
         AND b.created_at >= ? AND b.created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY month, month_label
         ORDER BY month ASC
@@ -860,7 +860,7 @@ try {
 
     $priorBookingStmt = $pdo->prepare("
         SELECT COUNT(*) FROM bookings
-        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
           AND status NOT IN ('cancelled')
     ");
     $priorBookingStmt->execute([$priorStartDate, $priorEndDate]);
@@ -896,7 +896,7 @@ try {
             SELECT COALESCE(SUM(CASE WHEN p.payment_type = 'refund' THEN -p.total_amount ELSE p.total_amount END), 0) as deferred_revenue,
                    COUNT(DISTINCT b.id) as future_bookings
             FROM payments p
-            JOIN bookings b ON p.booking_id = b.id AND p.booking_type = 'room'
+            JOIN bookings b ON p.booking_id = b.id AND p.booking_type = 'room' AND b.deleted_at IS NULL
             WHERE ((COALESCE(p.payment_type, '') != 'refund' AND p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
                    OR (p.payment_type = 'refund' AND p.refund_status IN ('completed', 'processing')))
               AND b.check_in_date > CURDATE()
@@ -971,7 +971,7 @@ try {
                         THEN ROUND(SUM(b.total_amount) / SUM(b.number_of_nights), 0)
                         ELSE 0 END as adr
             FROM rooms r
-            LEFT JOIN bookings b ON r.id = b.room_id
+            LEFT JOIN bookings b ON r.id = b.room_id AND b.deleted_at IS NULL
                 AND b.check_in_date <= ? AND b.check_out_date >= ?
                 AND b.status IN ('confirmed','checked-in','checked-out')
             WHERE r.is_active = 1

@@ -396,9 +396,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Create new payment
                 // Lifecycle guard: block new payments on terminal / fully-settled bookings
                 if ($bookingType === 'room') {
-                    $lcStmt = $pdo->prepare("SELECT status, amount_paid, amount_due, total_amount FROM bookings WHERE id = ?");
+                    $lcStmt = $pdo->prepare("SELECT status, amount_paid, amount_due, total_amount, deleted_at FROM bookings WHERE id = ?");
                     $lcStmt->execute([$bookingId]);
                     $lcRow = $lcStmt->fetch(PDO::FETCH_ASSOC);
+                    if ($lcRow && !empty($lcRow['deleted_at'])) {
+                        throw new Exception('This booking has been deleted. Restore it before recording a payment.');
+                    }
                     if ($lcRow) {
                         $lcCheck = bookingAllowsAction($lcRow, 'record_payment');
                         if (!$lcCheck['allowed']) {

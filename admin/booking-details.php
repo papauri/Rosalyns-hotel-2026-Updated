@@ -48,7 +48,7 @@ $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP
 // before the full $booking array is populated later.
 $_early_booking = null;
 try {
-    $_eb = $pdo->prepare("SELECT id, status, amount_paid, amount_due, total_amount FROM bookings WHERE id = ?");
+    $_eb = $pdo->prepare("SELECT id, status, amount_paid, amount_due, total_amount, deleted_at FROM bookings WHERE id = ?");
     $_eb->execute([$booking_id]);
     $_early_booking = $_eb->fetch(PDO::FETCH_ASSOC) ?: null;
 } catch (PDOException $e) { /* will fail gracefully below */ }
@@ -62,6 +62,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
         $_SESSION['error_message'] = 'Security token invalid. Refresh the page.';
+        header('Location: booking-details.php?id=' . $booking_id);
+        exit;
+    }
+    // A deleted booking is read-only until restored (restore runs through bookings.php).
+    if (!empty($_early_booking['deleted_at'])) {
+        if ($isAjax) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['success' => false, 'message' => 'This booking has been deleted. Restore it before making changes.']);
+            exit;
+        }
+        $_SESSION['error_message'] = 'This booking has been deleted. Restore it before making changes.';
         header('Location: booking-details.php?id=' . $booking_id);
         exit;
     }
@@ -1167,7 +1178,8 @@ if (in_array((string) $booking['status'], ['confirmed', 'pending'], true) && $ch
 }
 
 $checkout_overdue_days = 0;
-if ((string) $booking['status'] === 'checked-in' && $checkout_due_date < $today_status_date) {
+$checkout_overdue_state = rh_checkout_overdue_state($booking); // '' | 'late' (due today, past check-out time) | 'overdue'
+if ($checkout_overdue_state === 'overdue') {
     $checkout_overdue_days = (int) $checkout_due_date->diff($today_status_date)->days;
 }
 
@@ -1178,11 +1190,40 @@ if ($checkin_overdue_days > 0) {
     $booking_alert_message = 'Late check-in pending for ' . $checkin_overdue_days . ' day(s). Action required: check in or mark no-show.';
 } elseif ($checkout_overdue_days > 0) {
     $booking_alert_tone = 'danger';
-    $booking_alert_message = 'Checkout overdue by ' . $checkout_overdue_days . ' day(s). Process checkout or extend stay.';
+    $booking_alert_message = 'Checkout overdue by ' . $checkout_overdue_days . ' day(s). Check the guest out, or extend the stay (extra nights are charged at the booked rate).';
+} elseif ($checkout_overdue_state === 'late') {
+    $booking_alert_tone = 'warning';
+    $booking_alert_message = 'Due to check out today by ' . getSetting('check_out_time', '11:00 AM') . ' and still in-house. Check out, or extend the stay if they are staying another night.';
 } elseif ((string) $booking['status'] === 'tentative' || (int)($booking['is_tentative'] ?? 0) === 1) {
     $booking_alert_tone = 'info';
     $booking_alert_message = 'Tentative booking is awaiting conversion to confirmed status.';
+} elseif (($pay_by = rh_unpaid_confirmed_deadline($booking)) !== null) {
+    $booking_alert_tone = 'info';
+    $booking_alert_message = 'Awaiting payment: unless paid by ' . date('j M Y, g:i A', strtotime($pay_by))
+        . ' this booking is automatically cancelled and the room released.';
 }
+
+// "Back" returns to the page this booking was opened from (bookings list with its filters, calendar,
+// dashboard, ...). Remembered per booking so an edit round-trip (details -> edit -> details) does not
+// turn Back into "back to the edit form". Falls back to the last bookings-list view, then the list.
+$bd_back_pages = [
+    'bookings.php' => 'Bookings', 'calendar.php' => 'Calendar', 'dashboard.php' => 'Dashboard',
+    'room-dashboard.php' => 'Room Dashboard', 'tentative-bookings.php' => 'Tentative Bookings',
+    'payments.php' => 'Payments', 'invoices.php' => 'Invoices', 'housekeeping.php' => 'Housekeeping',
+    'reports.php' => 'Reports', 'end-of-day-report.php' => 'End of Day', 'individual-rooms.php' => 'Rooms',
+];
+$bdRef = parse_url((string)($_SERVER['HTTP_REFERER'] ?? ''));
+if (!empty($bdRef['path']) && (empty($bdRef['host']) || $bdRef['host'] === ($_SERVER['HTTP_HOST'] ?? '') || strpos((string)($_SERVER['HTTP_HOST'] ?? ''), (string)$bdRef['host']) === 0)) {
+    $bdRefPage = basename((string)$bdRef['path']);
+    if (isset($bd_back_pages[$bdRefPage])) {
+        parse_str((string)($bdRef['query'] ?? ''), $bdRefQuery);
+        unset($bdRefQuery['action'], $bdRefQuery['booking_id'], $bdRefQuery['export']); // never replay a deep link / export
+        $_SESSION['bd_back'][(int)$booking_id] = $bdRefPage . ($bdRefQuery ? '?' . http_build_query($bdRefQuery) : '');
+        $_SESSION['bd_back'] = array_slice($_SESSION['bd_back'], -20, null, true);
+    }
+}
+$bd_back_url = (string)($_SESSION['bd_back'][(int)$booking_id] ?? ($_SESSION['bookings_list_return'] ?? 'bookings.php'));
+$bd_back_label = $bd_back_pages[basename((string)parse_url($bd_back_url, PHP_URL_PATH))] ?? 'Bookings';
 
 $flash_success_message = (string)($_SESSION['success_message'] ?? '');
 $flash_error_message = (string)($_SESSION['error_message'] ?? '');
@@ -1221,8 +1262,25 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
     <div class="booking-details-page">
 
         <?php
-        $can_cancel = !in_array($booking['status'], ['checked-in', 'checked-out', 'cancelled', 'no-show']);
-        $can_adjust_dates = !in_array($booking['status'], ['cancelled', 'checked-out', 'no-show']);
+        $bd_deleted = !empty($booking['deleted_at']);
+        $bd_closed = in_array($booking['status'], ['checked-out', 'cancelled', 'no-show', 'expired'], true);
+        $can_cancel = !$bd_deleted && !in_array($booking['status'], ['checked-in', 'checked-out', 'cancelled', 'no-show', 'expired'], true);
+        $can_adjust_dates = !$bd_deleted && !$bd_closed;
+        $bd_perm_delete = hasPermission((int)($user['id'] ?? 0), 'delete_booking');
+        $bd_perm_edit = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
+        // Room-type change (upgrade / downgrade): before departure, never on a missed arrival.
+        $bd_can_change_type = !$bd_deleted && $bd_perm_edit
+            && (in_array($booking['status'], ['pending', 'tentative', 'confirmed'], true) && (string)$booking['check_in_date'] >= date('Y-m-d')
+                || ($booking['status'] === 'checked-in' && (string)$booking['check_out_date'] > date('Y-m-d')));
+        // Delete: not in-house, no money on the booking (refund/void first).
+        $bd_can_delete = !$bd_deleted && $bd_perm_delete && $booking['status'] !== 'checked-in'
+            && (float)($booking['amount_paid'] ?? 0) <= BALANCE_TOLERANCE && (float)($booking['folio_charges_total'] ?? 0) <= BALANCE_TOLERANCE;
+        $bd_deleted_by = '';
+        if ($bd_deleted && !empty($booking['deleted_by'])) {
+            $dbSt = $pdo->prepare("SELECT COALESCE(NULLIF(full_name, ''), username) FROM admin_users WHERE id = ?");
+            $dbSt->execute([(int)$booking['deleted_by']]);
+            $bd_deleted_by = (string)($dbSt->fetchColumn() ?: '');
+        }
         $child_guests = (int)($booking['child_guests'] ?? 0);
         $adult_guests = (int)($booking['adult_guests'] ?? max(1, ((int) $booking['number_of_guests']) - $child_guests));
         // No individual room yet: empty fallback, so the page says "not assigned" instead of a bare "Room".
@@ -1232,7 +1290,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         $bookingRoomLabel = trim((string) getBookingRoomLabel((int) $booking['id'], $bookingRoomFallback));
         ?>
 
-        <a href="bookings.php" class="bd-back" onclick="if(history.length>1){history.back();return false;}"><i class="fas fa-arrow-left"></i> Back to Bookings</a>
+        <a href="<?php echo htmlspecialchars($bd_back_url, ENT_QUOTES); ?>" class="bd-back"><i class="fas fa-arrow-left"></i> Back to <?php echo htmlspecialchars($bd_back_label); ?></a>
 
         <!-- Header: identity on the left, actions on the right -->
         <header class="rh-page-head">
@@ -1260,6 +1318,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             </div>
 
             <div class="rh-page-head__actions booking-actions-flow">
+                <?php if ($bd_deleted): ?>
+                    <?php if ($bd_perm_delete): ?>
+                        <button type="button" class="action-btn confirm" onclick="bdRestoreBooking()"><i class="fas fa-trash-arrow-up"></i> Restore Booking</button>
+                    <?php endif; ?>
+                <?php else: ?>
                 <?php if ($booking['status'] == 'tentative' || $booking['is_tentative'] == 1): ?>
                     <form method="POST" class="booking-action-form" data-admin-confirm="Convert this tentative booking to confirmed and send the conversion email?" data-admin-confirm-title="Convert tentative booking" data-admin-confirm-ok="Convert" data-admin-confirm-icon="fa-circle-check" data-admin-submit-text="Converting...">
                         <input type="hidden" name="booking_action" value="convert">
@@ -1321,7 +1384,14 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <?php endif; ?>
                 <?php endif; ?>
 
-                <?php if ($booking['status'] == 'checked-in'):
+                <?php if ($booking['status'] == 'checked-in' && rh_checkout_settlement_reason($booking) !== null): ?>
+                    <a href="bookings.php?action=checkout&amp;booking_id=<?php echo (int)$booking_id; ?>" class="action-btn checkout" data-help="Check Out (settle)|The guest is leaving on a different day than booked. This opens the checkout settlement: charge or waive extra nights, refund or keep unused nights.">
+                        <i class="fas fa-right-from-bracket"></i> Check Out &amp; Settle
+                    </a>
+                    <p class="booking-action-inline-hint">
+                        <i class="fas fa-info-circle"></i> <?php echo htmlspecialchars(rh_checkout_settlement_reason($booking)); ?>
+                    </p>
+                <?php elseif ($booking['status'] == 'checked-in'):
                     $co_balance = round(max(0.0, (float)($folio_summary['balance_due'] ?? ($booking['amount_due'] ?? 0))), 2);
                     $co_has_balance = $co_balance > BALANCE_TOLERANCE;
                     $co_can_override = $co_has_balance && hasPermission((int)($user['id'] ?? 0), 'checkout_with_balance');
@@ -1350,7 +1420,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     </form>
                 <?php endif; ?>
 
-                <a href="edit-booking.php?id=<?php echo $booking_id; ?>" class="action-btn edit"><i class="fas fa-edit"></i> Edit Booking</a>
+                <?php if ($bd_perm_edit): ?>
+                    <a href="edit-booking.php?id=<?php echo $booking_id; ?>" class="action-btn edit"><i class="fas fa-edit"></i> <?php echo $bd_closed ? 'Correct Guest Details' : 'Edit Booking'; ?></a>
+                <?php endif; ?>
+                <?php if ($bd_can_change_type): ?>
+                    <a href="bookings.php?action=room-change&amp;booking_id=<?php echo $booking_id; ?>" class="action-btn change-room" data-help="Upgrade / Change Room Type|Move the booking to another room type: paid upgrade, complimentary upgrade, or downgrade. The bill and audit trail are updated for you."><i class="fas fa-arrow-up-right-dots"></i> Upgrade / Change Type</a>
+                <?php endif; ?>
                 <?php if ($can_adjust_dates): ?>
                     <button type="button" class="action-btn adjust-dates" onclick="openDateAdjustModal()">
                         <i class="fas fa-calendar-alt"></i> Adjust Stay Dates
@@ -1360,11 +1435,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <button type="button" class="action-btn quote" onclick="openBookingQuoteModal(<?php echo (int) $booking_id; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_email'], ENT_QUOTES); ?>')">
                         <i class="fas fa-file-invoice"></i> Send Quotation
                     </button>
-                <?php else: ?>
-                    <button type="button" class="action-btn quote action-btn--locked" disabled title="<?php echo htmlspecialchars($bPerms['can_send_quotation_reason']); ?>">
-                        <i class="fas fa-lock"></i> Send Quotation
-                    </button>
-                <?php endif; ?>
+                <?php endif; /* quotation is offered only while it is relevant */ ?>
 
                 <?php if ($can_cancel): ?>
                     <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking, release the room, and send the guest cancellation email? Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
@@ -1373,6 +1444,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         <button type="submit" class="action-btn cancel" aria-label="Cancel booking"><i class="fas fa-ban"></i> Cancel Booking</button>
                     </form>
                 <?php endif; ?>
+
+                <?php if ($bd_can_delete): ?>
+                    <button type="button" class="action-btn cancel" onclick="bdDeleteBooking()" data-help="Delete Booking|Remove this booking from the lists (kept under the Deleted filter with who, when and why; it can be restored)."><i class="fas fa-trash-can"></i> Delete Booking</button>
+                <?php endif; ?>
+                <?php endif; /* not deleted */ ?>
 
                 <?php if (!empty($booking['last_quotation_sent_at'])): ?>
                     <p class="booking-actions-meta">
@@ -1401,6 +1477,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     $statusBanner = ['class' => 'booking-status-banner--balance', 'icon' => 'fa-exclamation-triangle', 'text' => 'Guest has <strong>checked out</strong> with an outstanding balance of <strong>' . htmlspecialchars($currency_symbol) . number_format($folio_balance_due, 2) . '</strong>. A payment can still be recorded.'];
                 }
                 break;
+        }
+        if ($bd_deleted) {
+            $statusBanner = ['class' => 'booking-status-banner--cancelled', 'icon' => 'fa-trash-can', 'text' => 'This booking was <strong>deleted</strong>'
+                . ($bd_deleted_by !== '' ? ' by <strong>' . htmlspecialchars($bd_deleted_by) . '</strong>' : '')
+                . ' on <strong>' . htmlspecialchars(date('j M Y, H:i', strtotime((string)$booking['deleted_at']))) . '</strong>.'
+                . ' Reason: <em>' . htmlspecialchars((string)$booking['deleted_reason']) . '</em>. It is read-only until restored.'];
         }
         if ($statusBanner):
         ?>
@@ -2682,6 +2764,62 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 closeBookingQuoteModal();
             }
         });
+
+        // Delete / restore run through bookings.php (one implementation: includes/booking-soft-delete.php).
+        function bdBookingPost(action, extra) {
+            var fd = new FormData();
+            fd.append('action', action);
+            fd.append('booking_id', '<?php echo (int)$booking_id; ?>');
+            fd.append('csrf_token', window._rhCsrf || (document.querySelector('meta[name="csrf-token"]') || {}).content || '');
+            Object.keys(extra || {}).forEach(function(k) { fd.append(k, extra[k]); });
+            return fetch('bookings.php', { method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (!d || !d.success) throw new Error((d && d.message) || 'Action failed.');
+                    return d;
+                });
+        }
+
+        function bdDeleteBooking() {
+            if (!window.AdminConfirm) return;
+            AdminConfirm.prompt({
+                title: 'Delete booking ' + <?php echo json_encode((string)$booking['booking_reference'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>,
+                message: 'The booking moves to the Deleted filter on the bookings list. It can be restored later.',
+                details: ['Any room it holds is released. Nothing is sent to the guest.', 'Your name, the exact time and the reason are recorded.'],
+                inputLabel: 'Why is this booking being deleted? (required)',
+                inputPlaceholder: 'e.g. Duplicate booking, test booking, created in error',
+                confirmText: 'Delete booking',
+                tone: 'danger',
+                icon: 'fa-trash-can'
+            }).then(function(reason) {
+                if (reason === null) return;
+                if (reason.trim().length < 5) {
+                    Alert.show('A reason of at least 5 characters is required.', 'error');
+                    return;
+                }
+                bdBookingPost('delete_booking', { reason: reason.trim() })
+                    .then(function(d) { Alert.show(d.message, 'success'); setTimeout(function() { location.reload(); }, 900); })
+                    .catch(function(err) { Alert.show(err.message, 'error'); });
+            });
+        }
+
+        function bdRestoreBooking() {
+            if (!window.AdminConfirm) return;
+            AdminConfirm.prompt({
+                title: 'Restore booking',
+                message: 'The booking gets back the status it had before it was deleted.',
+                details: ['If it held a room, the room type must still be free for its dates.'],
+                inputLabel: 'Note (optional)',
+                confirmText: 'Restore booking',
+                tone: 'success',
+                icon: 'fa-trash-arrow-up'
+            }).then(function(note) {
+                if (note === null) return;
+                bdBookingPost('restore_booking', { note: note.trim() })
+                    .then(function(d) { Alert.show(d.message, 'success'); setTimeout(function() { location.reload(); }, 900); })
+                    .catch(function(err) { Alert.show(err.message, 'error'); });
+            });
+        }
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>

@@ -554,6 +554,248 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         return $res;
     }
 
+    /* ── jobs: unpaid pending lapse + confirmed-but-unpaid pay-by deadline ─ */
+
+    /**
+     * Guest + hotel notice once an unpaid 'pending' booking lapsed (config/database.php
+     * _expireStalePendingBookings() sets status 'expired' on every page load). Pending lapses are the
+     * expired bookings that were never tentative holds (no tentative_expires_at), expired in the last 24 h.
+     */
+    function rh_job_pending_expired_notice(PDO $pdo, array $o = []): array
+    {
+        $res = ['checked' => 0, 'sent' => 0, 'skipped' => 0, 'errors' => []];
+        if (!rh_auto_module_on('bookings')) {
+            return $res;
+        }
+        $job = 'pending_expired_notice';
+        $prefix = !empty($o['test_mode']) ? 'test:' : '';
+
+        $st = $pdo->prepare("SELECT b.id FROM bookings b WHERE b.status = 'expired' AND b.tentative_expires_at IS NULL AND COALESCE(b.is_tentative, 0) = 0
+            AND b.expired_at >= (NOW() - INTERVAL 24 HOUR) AND b.guest_email <> '' ORDER BY b.id LIMIT 100");
+        $st->execute();
+        $ids = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+
+        $get = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id = ? AND b.status = 'expired'");
+        foreach ($ids as $id) {
+            if (!rh_scheduler_budget_ok()) {
+                $res['deferred'] = true;
+                break;
+            }
+            $res['checked']++;
+            $get->execute([$id]);
+            $b = $get->fetch(PDO::FETCH_ASSOC);
+            $email = $b ? trim((string)$b['guest_email']) : '';
+            if (!$b || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $res['skipped']++;
+                continue;
+            }
+            $stage = $prefix . 'expired';
+            if (!rh_auto_log_claim($pdo, $job, 'room', $id, $stage, $email, 'Pending booking expired ' . $b['booking_reference'])) {
+                $res['skipped']++;
+                continue;
+            }
+            try {
+                rh_scheduler_budget_spend();
+                $r = sendPendingBookingExpiredEmail($b);
+                if (!empty($r['success'])) {
+                    rh_auto_log_finish($pdo, $job, 'room', $id, $stage, 'sent');
+                    $res['sent']++;
+                    try {
+                        sendAdminBookingExpiredNotification($b, 'pending');
+                    } catch (Throwable $e) {
+                        error_log('auto-email pending admin notice #' . $id . ': ' . $e->getMessage());
+                    }
+                } else {
+                    rh_auto_log_finish($pdo, $job, 'room', $id, $stage, 'failed', (string)($r['message'] ?? 'unknown'));
+                    $res['errors'][] = $b['booking_reference'] . ': ' . (string)($r['message'] ?? 'send failed');
+                }
+            } catch (Throwable $e) {
+                rh_auto_log_finish($pdo, $job, 'room', $id, $stage, 'failed', $e->getMessage());
+                $res['errors'][] = $b['booking_reference'] . ': ' . $e->getMessage();
+            }
+        }
+        return $res;
+    }
+
+    /** Candidate ids: confirmed, nothing paid, check-in in the future, confirmed at least $minAgeHours ago. */
+    function rh_auto_unpaid_candidates(PDO $pdo, int $minAgeHours): array
+    {
+        $noPay = rh_booking_has_payment_sql('b');
+        $st = $pdo->prepare("SELECT b.id FROM bookings b WHERE b.status = 'confirmed' AND b.check_in_date > CURDATE()
+            AND GREATEST(b.created_at, COALESCE(b.converted_to_confirmed_at, b.created_at)) <= (NOW() - INTERVAL ? HOUR)
+            AND NOT {$noPay} ORDER BY b.check_in_date, b.id LIMIT 100");
+        $st->execute([$minAgeHours]);
+        return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /** Remind the guest once that payment is due before the room is released. */
+    function rh_job_unpaid_confirmed_reminder(PDO $pdo, array $o = []): array
+    {
+        $res = ['checked' => 0, 'sent' => 0, 'skipped' => 0, 'errors' => []];
+        $release = rh_unpaid_release_hours();
+        $lead = rh_unpaid_reminder_hours();
+        if ($release <= 0 || $lead <= 0 || !rh_auto_module_on('bookings')) {
+            return $res;
+        }
+        if (!function_exists('logBookingEvent')) {
+            require_once __DIR__ . '/booking-timeline.php';
+        }
+        $job = 'unpaid_confirmed_reminder';
+        $prefix = !empty($o['test_mode']) ? 'test:' : '';
+
+        $ids = rh_auto_unpaid_candidates($pdo, max(1, $release - $lead));
+        $get = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id = ? AND b.status = 'confirmed'");
+        foreach ($ids as $id) {
+            if (!rh_scheduler_budget_ok()) {
+                $res['deferred'] = true;
+                break;
+            }
+            $res['checked']++;
+            $get->execute([$id]);
+            $b = $get->fetch(PDO::FETCH_ASSOC);
+            $email = $b ? trim((string)$b['guest_email']) : '';
+            $deadline = $b ? rh_unpaid_confirmed_deadline($b) : null;
+            if (!$b || $deadline === null || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $res['skipped']++;
+                continue;
+            }
+            // The deadline the guest is told: never earlier than one reminder-lead from now.
+            $told = date('Y-m-d H:i:s', max(strtotime($deadline), time() + $lead * 3600));
+            $stage = $prefix . 'reminder';
+            if (!rh_auto_log_claim($pdo, $job, 'room', $id, $stage, $email, 'Payment reminder ' . $b['booking_reference'])) {
+                $res['skipped']++;
+                continue;
+            }
+            try {
+                rh_scheduler_budget_spend();
+                $r = sendUnpaidConfirmedReminderEmail($b, date('F j, Y g:i A', strtotime($told)));
+                if (!empty($r['success'])) {
+                    rh_auto_log_finish($pdo, $job, 'room', $id, $stage, 'sent');
+                    if ($prefix === '' && function_exists('logBookingEvent')) {
+                        logBookingEvent($id, (string)$b['booking_reference'], 'Payment reminder sent', 'reminder',
+                            'Confirmed booking has no payment; guest told to pay by ' . date('j M Y H:i', strtotime($told)) . ' or the room is released.',
+                            null, null, 'system', null, 'Scheduler', ['pay_by' => $told]);
+                    }
+                    $res['sent']++;
+                } else {
+                    rh_auto_log_finish($pdo, $job, 'room', $id, $stage, 'failed', (string)($r['message'] ?? 'unknown'));
+                    $res['errors'][] = $b['booking_reference'] . ': ' . (string)($r['message'] ?? 'send failed');
+                }
+            } catch (Throwable $e) {
+                rh_auto_log_finish($pdo, $job, 'room', $id, $stage, 'failed', $e->getMessage());
+                $res['errors'][] = $b['booking_reference'] . ': ' . $e->getMessage();
+            }
+        }
+        return $res;
+    }
+
+    /**
+     * Release a confirmed booking that still has no payment: re-check under a row lock, cancel it with nothing
+     * retained (nothing was ever paid), free the room stock and any assigned unit, and write the reason to the
+     * status timeline and cancellation_log. @return bool true when this call released it.
+     */
+    function rh_release_unpaid_confirmed_booking(PDO $pdo, int $id, int $hours): bool
+    {
+        $reason = 'Auto-released: no payment received within ' . $hours . ' hours of booking (pay-by deadline passed)';
+        $noPay = rh_booking_has_payment_sql('b');
+        $pdo->beginTransaction();
+        try {
+            $lock = $pdo->prepare("SELECT b.* FROM bookings b WHERE b.id = ? FOR UPDATE");
+            $lock->execute([$id]);
+            $b = $lock->fetch(PDO::FETCH_ASSOC);
+            $still = $pdo->prepare("SELECT 1 FROM bookings b WHERE b.id = ? AND b.status = 'confirmed' AND b.check_in_date > CURDATE() AND NOT {$noPay}");
+            $still->execute([$id]);
+            if (!$b || !$still->fetchColumn()) {
+                $pdo->rollBack();
+                return false;
+            }
+            $pdo->prepare("UPDATE bookings SET status = 'cancelled', is_tentative = 0, tentative_expires_at = NULL, cancellation_retained_amount = 0, updated_at = NOW() WHERE id = ? AND status = 'confirmed'")
+                ->execute([$id]);
+            // Same stock/unit release cancelRoomBookingSettled() performs for a confirmed booking.
+            $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")->execute([$b['room_id']]);
+            updateBookingRoomsStatus($id, 'available', 'Booking auto-released (unpaid): ' . $b['booking_reference'], null);
+            if (!recalculateBookingFinancials($id)) {
+                throw new RuntimeException('could not recalculate balance');
+            }
+            if (function_exists('logBookingStatusChange')) {
+                logBookingStatusChange($id, (string)$b['booking_reference'], 'confirmed', 'cancelled', 'system', null, 'Scheduler', $reason);
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('unpaid release #' . $id . ': ' . $e->getMessage());
+            return false;
+        }
+        logCancellationToDatabase($id, (string)$b['booking_reference'], 'room', (string)($b['guest_email'] ?? ''), 0, $reason, false, 'auto-release');
+        return true;
+    }
+
+    /** Release confirmed bookings still unpaid once the pay-by deadline (and the reminder notice period) passed. */
+    function rh_job_unpaid_confirmed_release(PDO $pdo, array $o = []): array
+    {
+        $res = ['checked' => 0, 'sent' => 0, 'skipped' => 0, 'errors' => []];
+        $hours = rh_unpaid_release_hours();
+        // Test runs never change booking state.
+        if ($hours <= 0 || !empty($o['test_mode']) || !rh_auto_module_on('bookings')) {
+            return $res;
+        }
+        if (!function_exists('logBookingEvent')) {
+            require_once __DIR__ . '/booking-timeline.php';
+        }
+        $job = 'unpaid_confirmed_release';
+        $lead = rh_unpaid_reminder_hours();
+
+        $ids = rh_auto_unpaid_candidates($pdo, $hours);
+        $get = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id = ?");
+        // The guest must have had the reminder (sent or given up after 3 tries) and a full notice period.
+        $rem = $pdo->prepare("SELECT 1 FROM automated_email_log WHERE job = 'unpaid_confirmed_reminder' AND account_type = 'room' AND account_id = ? AND stage = 'reminder'
+            AND ((status = 'sent' AND updated_at <= (NOW() - INTERVAL ? HOUR)) OR (status = 'failed' AND attempts >= 3))");
+        foreach ($ids as $id) {
+            $res['checked']++;
+            $get->execute([$id]);
+            $b = $get->fetch(PDO::FETCH_ASSOC);
+            if (!$b) {
+                $res['skipped']++;
+                continue;
+            }
+            $email = trim((string)$b['guest_email']);
+            $hasEmail = filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+            if ($lead > 0 && $hasEmail) {
+                $rem->execute([$id, max(1, $lead)]);
+                if (!$rem->fetchColumn()) {
+                    $res['skipped']++;
+                    continue;
+                }
+            }
+            if (!rh_release_unpaid_confirmed_booking($pdo, $id, $hours)) {
+                $res['skipped']++;
+                continue;
+            }
+            $res['sent']++;
+            try {
+                if ($hasEmail && rh_scheduler_budget_ok()) {
+                    $stage = 'released';
+                    if (rh_auto_log_claim($pdo, $job, 'room', $id, $stage, $email, 'Booking released ' . $b['booking_reference'])) {
+                        rh_scheduler_budget_spend();
+                        $r = sendUnpaidConfirmedReleasedEmail($b);
+                        if (!empty($r['success'])) {
+                            rh_auto_log_finish($pdo, $job, 'room', $id, $stage, 'sent');
+                        } else {
+                            rh_auto_log_finish($pdo, $job, 'room', $id, $stage, 'failed', (string)($r['message'] ?? 'unknown'));
+                            $res['errors'][] = $b['booking_reference'] . ': ' . (string)($r['message'] ?? 'send failed');
+                        }
+                    }
+                }
+                sendAdminBookingExpiredNotification($b, 'unpaid_confirmed');
+            } catch (Throwable $e) {
+                $res['errors'][] = $b['booking_reference'] . ': ' . $e->getMessage();
+            }
+        }
+        return $res;
+    }
+
     /* ── migrated cron senders (same library functions the scripts/ wrappers call) ─ */
 
     function rh_auto_normalise_legacy(array $r): array

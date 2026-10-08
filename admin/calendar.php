@@ -36,6 +36,9 @@ if ($filterStatus)   $filterQs .= '&filter_status='    . urlencode($filterStatus
 if ($filterFloor)    $filterQs .= '&filter_floor='     . urlencode($filterFloor);
 if ($filterSearch)   $filterQs .= '&filter_search='    . urlencode($filterSearch);
 
+// Keep the year sane (a hand-typed ?year=0 or 99999 must not build impossible dates).
+$currentYear = max(2000, min(2100, (int)$currentYear));
+
 // Validate month
 if ($currentMonth < 1) {
     $currentMonth = 12;
@@ -135,7 +138,7 @@ try {
         FROM bookings b
         INNER JOIN rooms r ON b.room_id = r.id
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-        WHERE b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
+        WHERE b.deleted_at IS NULL AND b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
         AND (
             (b.check_in_date <= :end_date AND {$effCo} >= :start_date)
         )
@@ -144,29 +147,41 @@ try {
     $stmt->execute(['start_date' => $startDate, 'end_date' => $endDate]);
     $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Group bookings by date and individual room (or room type if no individual room assigned)
+    // Every room each booking holds (joined rooms / combinations live in booking_rooms).
+    $heldRooms = [];
+    if ($bookings) {
+        $ids = array_map('intval', array_column($bookings, 'id'));
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        try {
+            $hr = $pdo->prepare("SELECT booking_id, individual_room_id FROM booking_rooms WHERE released_at IS NULL AND booking_id IN ($in)");
+            $hr->execute($ids);
+            foreach ($hr->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $heldRooms[(int)$row['booking_id']][(int)$row['individual_room_id']] = true;
+            }
+        } catch (PDOException $e) {
+            $heldRooms = [];
+        }
+    }
+
+    // Group bookings by night and room. A booking with no room yet goes on its room type's
+    // "Unassigned" lane (rt_<type>) so demand that still needs a room is visible.
     foreach ($bookings as $booking) {
         $checkIn = new DateTime($booking['check_in_date']);
         $checkOut = new DateTime($booking['effective_check_out'] ?? $booking['check_out_date']);
+        $roomIdsHeld = $heldRooms[(int)$booking['id']] ?? [];
+        if (!empty($booking['individual_room_id'])) {
+            $roomIdsHeld[(int)$booking['individual_room_id']] = true;
+        }
+        $roomKeys = $roomIdsHeld
+            ? array_map(static fn ($rid) => 'ir_' . $rid, array_keys($roomIdsHeld))
+            : ['rt_' . $booking['room_id']];
 
         $currentDate = clone $checkIn;
         while ($currentDate < $checkOut) {
             $dateKey = $currentDate->format('Y-m-d');
-
-            // Use individual room ID if assigned, otherwise use room type ID
-            $roomKey = !empty($booking['individual_room_id'])
-                ? 'ir_' . $booking['individual_room_id']
-                : 'rt_' . $booking['room_id'];
-
-            if (!isset($bookingsByDate[$dateKey])) {
-                $bookingsByDate[$dateKey] = [];
+            foreach ($roomKeys as $roomKey) {
+                $bookingsByDate[$dateKey][$roomKey][] = $booking;
             }
-
-            if (!isset($bookingsByDate[$dateKey][$roomKey])) {
-                $bookingsByDate[$dateKey][$roomKey] = [];
-            }
-
-            $bookingsByDate[$dateKey][$roomKey][] = $booking;
             $currentDate->modify('+1 day');
         }
     }
@@ -174,39 +189,35 @@ try {
     $error = "Error fetching bookings: " . $e->getMessage();
 }
 
-// Helper function to determine timeline-aware status for a room on a specific date
+/**
+ * What a room is on a given night:
+ *  - occupied  = a checked-in guest sleeps there (an overdue guest keeps it until checked out)
+ *  - reserved  = a pending / tentative / confirmed booking holds it (incl. arrival due today and a
+ *                missed arrival that has not been resolved yet - the guest is NOT in the room)
+ *  - otherwise the night is free. The room's physical state (cleaning, inspection) only describes
+ *    today; maintenance / out of order run from today until fixed. Past free nights are history.
+ */
 function getTimelineAwareRoomStatus(array $room, string $date, array $bookingsByDate)
 {
     $today = date('Y-m-d');
-    $dateKey = $date;
-    $roomKey = 'ir_' . $room['id'];
-
-    // Check if there's a booking for this room on this date
-    if (isset($bookingsByDate[$dateKey][$roomKey])) {
-        foreach ($bookingsByDate[$dateKey][$roomKey] as $booking) {
-            $checkIn = $booking['check_in_date'];
-            // Overdue checked-in guests occupy the room until checked out (effective checkout).
-            $checkOut = $booking['effective_check_out'] ?? $booking['check_out_date'];
-            $status = $booking['status'];
-
-            // Timeline-aware status logic
-            if ($date < $checkIn) {
-                // Before check-in date - room is reserved but available
-                return 'reserved';
-            } elseif ($date >= $checkIn && $date < $checkOut) {
-                // During stay - determine status based on booking status and date
-                if ($status === 'checked-in' || ($status === 'confirmed' && $date <= $today)) {
-                    return 'occupied';
-                } else {
-                    // Future confirmed booking - reserved
-                    return 'reserved';
-                }
+    $nightBookings = $bookingsByDate[$date]['ir_' . $room['id']] ?? [];
+    if ($nightBookings) {
+        foreach ($nightBookings as $booking) {
+            if ($booking['status'] === 'checked-in') {
+                return 'occupied';
             }
         }
+        return 'reserved';
     }
 
-    // No booking - use current physical status
-    return $room['status'];
+    $physical = (string)($room['status'] ?? 'available');
+    if ($date === $today) {
+        return $physical === 'occupied' ? 'available' : $physical; // occupied with no stay = stale flag
+    }
+    if ($date > $today && in_array($physical, ['maintenance', 'out_of_order'], true)) {
+        return $physical;
+    }
+    return 'available';
 }
 
 // Get days in month
@@ -288,7 +299,8 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                                                     echo $filterQs; ?>" aria-label="View previous month">
                         <i class="fas fa-chevron-left" aria-hidden="true"></i> Previous
                     </a>
-                    <span class="current">Current month</span>
+                    <a class="current" href="?year=<?php echo (int)date('Y'); ?>&month=<?php echo (int)date('n');
+                                                                    echo $filterQs; ?>" aria-label="Back to the current month">Today</a>
                     <a href="?year=<?php echo $nextYear; ?>&month=<?php echo $nextMonth;
                                                                     echo $filterQs; ?>" aria-label="View next month">
                         Next <i class="fas fa-chevron-right" aria-hidden="true"></i>
@@ -418,6 +430,53 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
             </div>
             <!-- ══ / FILTER BAR ══ -->
 
+            <?php
+            // Bookings that still need a room, per room type (rt_<type> keys).
+            $unassignedByType = [];
+            foreach ($bookingsByDate as $dKey => $lanes) {
+                foreach ($lanes as $laneKey => $laneBookings) {
+                    if (strpos($laneKey, 'rt_') !== 0) {
+                        continue;
+                    }
+                    foreach ($laneBookings as $ub) {
+                        $unassignedByType[(int)substr($laneKey, 3)][(int)$ub['id']] = $ub;
+                    }
+                }
+            }
+            ?>
+            <?php if ($unassignedByType): ?>
+                <div class="cal-unassigned">
+                    <h3><i class="fas fa-triangle-exclamation"></i> Bookings without a room this month</h3>
+                    <p>These hold the room type but no specific room yet. Assign a room before arrival.</p>
+                    <?php foreach ($unassignedByType as $typeId => $typeBookings): ?>
+                        <?php
+                        $typeName = '';
+                        foreach ($roomTypes as $rt) {
+                            if ((int)$rt['id'] === $typeId) {
+                                $typeName = (string)$rt['name'];
+                            }
+                        }
+                        ?>
+                        <div class="cal-unassigned__type">
+                            <strong><?php echo htmlspecialchars($typeName !== '' ? $typeName : ('Room type #' . $typeId)); ?></strong>
+                            <ul>
+                                <?php foreach ($typeBookings as $ub): ?>
+                                    <li>
+                                        <a href="booking-details.php?id=<?php echo (int)$ub['id']; ?>"><?php echo htmlspecialchars($ub['booking_reference']); ?></a>
+                                        &middot; <?php echo htmlspecialchars($ub['guest_name']); ?>
+                                        &middot; <?php echo date('j M', strtotime($ub['check_in_date'])); ?> &ndash; <?php echo date('j M', strtotime($ub['check_out_date'])); ?>
+                                        &middot; <?php echo htmlspecialchars(ucfirst($ub['status'])); ?>
+                                        <?php if ($ub['status'] === 'confirmed' && (string)$ub['check_in_date'] >= $today): ?>
+                                            &middot; <a href="bookings.php?action=assign-room&amp;booking_id=<?php echo (int)$ub['id']; ?>">Assign room</a>
+                                        <?php endif; ?>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
             <?php if (!empty($individualRooms)): ?>
                 <div class="room-calendars">
                     <?php foreach ($individualRooms as $indRoom): ?>
@@ -514,11 +573,22 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                             }
                                         }
 
-                                        // Show bookings if date is not blocked and has bookings
-                                        if (!$isBlocked && isset($bookingsByDate[$dateKey][$roomKey])) {
+                                        // Bookings always show; a booking on a blocked night is a conflict and is flagged.
+                                        if (isset($bookingsByDate[$dateKey][$roomKey])) {
                                             $dayBookings = $bookingsByDate[$dateKey][$roomKey];
                                             foreach ($dayBookings as $booking) {
                                                 $statusClass = strtolower(str_replace('-', '_', $booking['status']));
+                                                $isMissedArrival = $booking['status'] === 'confirmed' && (string)$booking['check_in_date'] < $today;
+                                                $isOverdueStay = $booking['status'] === 'checked-in' && (string)$booking['check_out_date'] <= $dateKey && $dateKey <= $today;
+                                                if ($isMissedArrival) {
+                                                    $statusClass .= ' is-missed-arrival';
+                                                }
+                                                if ($isOverdueStay) {
+                                                    $statusClass .= ' is-overdue-stay';
+                                                }
+                                                if ($isBlocked) {
+                                                    $statusClass .= ' is-block-conflict';
+                                                }
                                                 $guestName = htmlspecialchars($booking['guest_name'], ENT_QUOTES, 'UTF-8');
                                                 $ref = htmlspecialchars($booking['booking_reference'], ENT_QUOTES, 'UTF-8');
                                                 $checkInDate = $booking['check_in_date'];
@@ -541,7 +611,10 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                                     : '';
 
                                                 // Status
-                                                $status = ucfirst(str_replace('-', ' ', $booking['status']));
+                                                $status = ucfirst(str_replace('-', ' ', $booking['status']))
+                                                    . ($isMissedArrival ? ' (missed arrival)' : '')
+                                                    . ($isOverdueStay ? ' (overdue departure)' : '')
+                                                    . ($isBlocked ? ' - CONFLICT: night is blocked' : '');
 
                                                 // Payment info
                                                 $paymentStatus = !empty($booking['payment_status'])
@@ -582,7 +655,7 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                                     role="button"
                                                     aria-label="Booking details for <?php echo $guestName; ?>"
                                                     onclick="window.location.href='booking-details.php?id=<?php echo intval($booking['id']); ?>'">
-                                                    <?php echo substr($guestName, 0, 12); ?>
+                                                    <?php echo htmlspecialchars(mb_substr(html_entity_decode($guestName, ENT_QUOTES, 'UTF-8'), 0, 12), ENT_QUOTES, 'UTF-8'); ?>
                                                 </div>
                                         <?php
                                             }

@@ -35,7 +35,8 @@
       <tr><td>Create a booking</td><td>Create Bookings</td></tr>
       <tr><td>Full edit page</td><td>Edit Bookings</td></tr>
       <tr><td>Quick modify (on the list)</td><td>Quick Modify Bookings (and Edit Bookings)</td></tr>
-      <tr><td>Change amounts in edit screens</td><td>Edit Booking Financials</td></tr>
+      <tr><td>Complimentary upgrade, or keep the original rate on a downgrade</td><td>Edit Booking Financials (Managers and Administrators always)</td></tr>
+      <tr><td>Delete and restore bookings</td><td>Delete &amp; Restore Bookings (administrators always; others only when granted)</td></tr>
       <tr><td>Cancel, mark no-show</td><td>Cancel Bookings</td></tr>
       <tr><td>Check in, undo check-in</td><td>Check-in Guests</td></tr>
       <tr><td>Check in to a room that is not clean</td><td>Check-in to Room Not Clean</td></tr>
@@ -61,10 +62,12 @@
       <li><a href="#folio">How to add or void folio charges</a></li>
       <li><a href="#dates">How to change the stay dates</a></li>
       <li><a href="#edit">How to edit a booking</a></li>
+      <li><a href="#upgrade">How to upgrade or downgrade a room type</a></li>
       <li><a href="#invoice">How to send an invoice or quotation</a></li>
       <li><a href="#notes">How to add a note and read the timeline</a></li>
       <li><a href="#checkout">How to check a guest out</a></li>
       <li><a href="#cancel">How to cancel a booking or mark a no-show</a></li>
+      <li><a href="#delete">How to delete and restore a booking</a></li>
       <li><a href="#tentative">Tentative bookings</a></li>
       <li><a href="#blocked">How to block dates</a></li>
       <li><a href="#rooms">Individual rooms</a></li>
@@ -78,28 +81,29 @@
   <p>The Bookings list has these parts:</p>
   <ul>
     <li><strong>Search</strong> box. Placeholder: <em>"Search ref, guest, phone, room no, payment ref..."</em>. Results update as you type.</li>
-    <li><strong>All Statuses</strong> dropdown: Pending, Tentative, Confirmed, Checked In, Checked Out, Cancelled, No-Show.</li>
+    <li><strong>All Statuses</strong> dropdown: Pending, Tentative, Confirmed, Checked In, Checked Out, Cancelled, No-Show, Deleted.</li>
     <li>Two date boxes. The first is <strong>Check-in from</strong>, the second is <strong>Check-out to</strong>.</li>
     <li><strong>Filter</strong> button, and a <strong>Clear</strong> button that appears when a filter is on.</li>
     <li><strong>Export CSV</strong> (downloads the list with your filters applied), <strong>Tentative</strong> (opens the tentative holds page, with a number badge when there are any) and <strong>New Booking</strong>.</li>
-    <li>Tabs: <strong>All</strong>, <strong>Today's Check-ins</strong>, <strong>Today's Check-outs</strong>, <strong>In-House</strong>, <strong>Pending</strong>, <strong>Tentative</strong>, <strong>Unpaid</strong>. A tab called <strong>Expiring Soon</strong> appears only while a tentative hold runs out within 24 hours. Each tab shows a count.</li>
-    <li>Red banner <strong>Missed Check-ins!</strong>: confirmed bookings whose check-in date has passed without a check-in. Amber banner <strong>Overdue Checkouts!</strong>: checked-in guests past their check-out date. Each has a <strong>View Details</strong> button.</li>
+    <li>Tabs: <strong>All</strong>, <strong>Today's Check-ins</strong>, <strong>Today's Check-outs</strong>, <strong>In-House</strong>, <strong>Pending</strong>, <strong>Tentative</strong>, <strong>Unpaid</strong>. A tab called <strong>Expiring Soon</strong> appears only while a tentative hold runs out within 24 hours, and a <strong>Deleted</strong> tab appears once any booking has been deleted. Each tab shows a count. Deleted bookings never appear in the other tabs or counts.</li>
+    <li>Red banner <strong>Missed Check-ins!</strong>: confirmed bookings whose check-in date has passed without a check-in. Amber banner <strong>Overdue Checkouts!</strong>: checked-in guests past their check-out date, or due today and still in after the check-out time (marked <em>Late checkout</em> on the row). Each has a <strong>View Details</strong> button.</li>
     <li>The table: Ref, Guest Name, Room, Check In, Check Out, Nights, Guests, Total, Status, Payment, Created, Actions. The list shows 10 bookings per page, with Prev and Next buttons.</li>
   </ul>
-  <p>Round buttons in the <strong>Actions</strong> column (what you see depends on the booking status and your permissions):</p>
+  <p>Round buttons in the <strong>Actions</strong> column. Only the actions that make sense for that booking's status, dates and money are shown (and only those your permissions allow), so a checked-out booking never offers Check-in and a pending booking never offers Checkout:</p>
   <table>
     <thead><tr><th>Button</th><th>What it does</th></tr></thead>
     <tbody>
       <tr><td><strong>View details</strong></td><td>A summary window with the guest, room, dates, total, status and special requests.</td></tr>
       <tr><td>Confirm booking / Convert to confirmed</td><td>Pending or tentative booking becomes Confirmed.</td></tr>
-      <tr><td>Check-in</td><td>Confirmed bookings only. Greyed out when it is not allowed yet.</td></tr>
-      <tr><td>Mark no-show</td><td>Shown instead of the plain check-in button when the check-in date has passed.</td></tr>
-      <tr><td>Checkout guest / Checkout now</td><td>For checked-in guests. Greyed out with the tip <em>"Check-out date is too far in the future"</em> when the check-out date is more than one day away.</td></tr>
-      <tr><td>Extend stay</td><td>Shown beside Checkout now when the guest is overdue.</td></tr>
+      <tr><td>Check-in</td><td>Confirmed bookings from their arrival date (not shown before). Greyed out until at least a part payment is recorded.</td></tr>
+      <tr><td>Mark no-show</td><td>Shown next to (late) check-in once the arrival date has passed.</td></tr>
+      <tr><td>Checkout guest / Checkout now</td><td>For checked-in guests, any day. Leaving late or early opens the Checkout Settlement window (see How to check a guest out).</td></tr>
+      <tr><td>Extend stay</td><td>For every checked-in guest.</td></tr>
       <tr><td>Record payment as paid</td><td>One-click full payment. Only shown for pending or confirmed bookings with nothing paid yet.</td></tr>
-      <tr><td>Refund payment</td><td>Shown for paid or part-paid bookings that are cancelled, no-show or checked out.</td></tr>
-      <tr><td>Cancel booking</td><td>Opens the cancel window.</td></tr>
-      <tr><td><strong>More</strong> menu</td><td>Full details, Full edit page, Quick modify, Assign room / Change room, Upgrade room, Make tentative, Undo check-in, Change checkout date (administrators, overdue guests only), Consolidation, Resend email, Send invoice, Send quotation, Send via WhatsApp (only when the guest has a phone number), Audit log.</td></tr>
+      <tr><td>Refund payment</td><td>Shown when money is owed back to the guest (overpaid / credit), or a cancelled, expired or no-show booking still holds a payment.</td></tr>
+      <tr><td>Cancel booking</td><td>Pending, tentative and confirmed bookings (needs Cancel Bookings).</td></tr>
+      <tr><td>Restore booking</td><td>Deleted bookings only (needs Delete &amp; Restore Bookings).</td></tr>
+      <tr><td><strong>More</strong> menu</td><td>Full details; Full edit page (or <em>Correct guest details</em> on a closed booking); Quick modify (before departure only); Assign room / Change room (confirmed, not a missed arrival); Upgrade / change room type (pending, tentative, confirmed or in-house); Make tentative (unpaid pending); Undo check-in; Change checkout date (administrators, overdue guests); Payments &amp; balance (open stays, or a checked-out booking with a balance or credit); Resend email; Send invoice (confirmed, in-house, checked out); Send quotation and Quotation via WhatsApp (pending and tentative only); Audit log; Delete booking (when allowed, see below).</td></tr>
     </tbody>
   </table>
 
@@ -121,6 +125,15 @@
     <li>Click a booking bar to open that booking. Click a blocked day to open Blocked Dates.</li>
   </ol>
   <p>The legend shows the room colours: Available (no booking), Reserved (future stay), Occupied (checked-in / active stay), Cleaning, Maintenance, Out of order, Blocked date (room-type or individual).</p>
+  <ul>
+    <li><strong>Occupied</strong> means a guest is checked in. A confirmed guest who has not arrived yet (including a missed arrival) shows as <strong>Reserved</strong>, and their name is underlined in red when the arrival date has passed.</li>
+    <li>A guest still in after their departure date keeps the room until checked out; those nights show the name in italics (<em>overdue departure</em>).</li>
+    <li>Cleaning and inspection only describe <strong>today</strong>. Maintenance and Out of order show from today until the room is fixed. Free nights in the past and future show as Available.</li>
+    <li>A booking on a blocked night is shown in red (<em>CONFLICT</em>): move the booking or remove the block.</li>
+    <li>A booking that holds two joined rooms shows on both rooms.</li>
+    <li>Bookings with no room assigned yet are listed in the yellow <strong>Bookings without a room this month</strong> box at the top, with an <strong>Assign room</strong> link.</li>
+    <li><strong>Today</strong> (between Previous and Next) jumps back to the current month.</li>
+  </ul>
 
   <h2 id="create">How to create a booking</h2>
   <p>Use this for walk-ins, phone bookings and agent bookings. Click <strong>New Booking</strong> on the Bookings page (<code>/admin/create-booking.php</code>, needs <strong>Create Bookings</strong>). The form has six steps along the top: Stay Details, Rooms, Guest Info, Status, Payment, Review. You can click a step to jump to it, or use the next and back buttons.</p>
@@ -152,7 +165,7 @@
     <li>If the booking has children and the room does not accept children, you must tick the override box and type a note explaining why.</li>
     <li>Save. You will see <em>"Room assigned successfully"</em>.</li>
   </ol>
-  <p>To move a guest to a different room type, use <strong>More</strong> &rarr; <strong>Upgrade room</strong> on the list (confirmed bookings that are not overdue). Pick the new room type under <strong>Select New Room Type</strong>.</p>
+  <p>To move a guest to a different room <em>type</em> (upgrade or downgrade) see <a href="#upgrade">How to upgrade or downgrade a room type</a>. An in-house guest can be moved to another room of the same type from the full edit page; their old room goes to Cleaning.</p>
 
   <h2 id="checkin">How to check a guest in</h2>
   <ol class="steps">
@@ -203,15 +216,44 @@
     <li>Type the <strong>Reason for Adjustment</strong> (required).</li>
     <li>Click <strong>Confirm Adjustment</strong>. You will see <em>"Stay dates adjusted successfully."</em> with the extra amount due or the refund or credit. The guest is emailed about the change when an email address is on file.</li>
   </ol>
-  <p>For an in-house guest who is staying longer, the list also has <strong>Extend stay</strong> (next to Checkout now when overdue). Administrators can use <strong>More</strong> &rarr; <strong>Change checkout date</strong> for an overdue guest and must type a reason.</p>
+  <p>For an in-house guest who is staying longer, the list has <strong>Extend stay</strong> for every checked-in guest. Extra nights are charged at the guest's booked rate. Administrators can use <strong>More</strong> &rarr; <strong>Change checkout date</strong> for an overdue guest and must type a reason.</p>
 
   <h2 id="edit">How to edit a booking</h2>
+  <p>What you can change depends on where the booking is in its life, exactly like at a real front desk:</p>
+  <table>
+    <thead><tr><th>Booking is</th><th>You can change</th><th>Use instead</th></tr></thead>
+    <tbody>
+      <tr><td>Pending, tentative, confirmed</td><td>Guest details, check-in and check-out dates, occupancy, number of guests, children, the specific room, special requests, admin notes</td><td>A different room type: <a href="#upgrade">Upgrade / change room type</a></td></tr>
+      <tr><td>Checked in (in-house)</td><td>Guest details, special requests, admin notes, and a move to another room of the same type</td><td>Longer or shorter stay: Extend stay / Adjust Stay Dates. Different type: Upgrade / change room type</td></tr>
+      <tr><td>Checked out, cancelled, no-show, expired</td><td>Guest contact details only (the page is called <strong>Correct Guest Details</strong>)</td><td>Money corrections: a credit note</td></tr>
+    </tbody>
+  </table>
   <ol class="steps">
     <li>On the booking page click <strong>Edit Booking</strong> (or <strong>More</strong> &rarr; <strong>Full edit page</strong>). Needs <strong>Edit Bookings</strong>.</li>
-    <li>You can change guest <strong>Full Name</strong>, <strong>Email</strong>, <strong>Phone</strong>, <strong>Country</strong>, <strong>Room</strong>, <strong>Occupancy Type</strong>, <strong>Check-in Date</strong>, <strong>Check-out Date</strong>, <strong>Number of Guests</strong>, <strong>Children (under 12)</strong>, the final price, <strong>Special Requests</strong> and <strong>Admin Notes</strong>. The price box needs the <strong>Edit Booking Financials</strong> permission.</li>
-    <li>Save. You will see <em>"Booking updated successfully."</em></li>
+    <li>Make the changes. The <strong>Price</strong> box shows the current bill, the bill after your change and the difference. You cannot type a price: date changes are charged at the guest's <strong>booked</strong> nightly rate, and occupancy or children changes add or remove the standard-rate difference on top of that rate, so a guest's discount is never lost by an edit.</li>
+    <li>Leave <strong>Email the guest</strong> ticked to tell them about date, guest, room or price changes.</li>
+    <li>Save. You go back to the booking page with <em>"Booking updated."</em> Every changed field is written to the <strong>Audit log</strong>.</li>
   </ol>
-  <p><strong>Quick modify</strong> on the list is a smaller window for fast changes and needs both Edit Bookings and Quick Modify Bookings. Every change is written to the <strong>Audit log</strong> (More menu).</p>
+  <div class="note"><p>To give a discount or correct a price, issue a <strong>credit note</strong> from the booking's Payment breakdown. It keeps the invoice, the books and the audit trail consistent, which typing over the price would not.</p></div>
+  <p><strong>Quick modify</strong> on the list is a smaller window for guest details, dates (before arrival) and the number of guests. It needs both Edit Bookings and Quick Modify Bookings. It does not change status, payment status or price: use the booking's actions (confirm, check-in, checkout, cancel), record payments, and use the full edit page when the number of children changes (it changes the price).</p>
+
+  <h2 id="upgrade">How to upgrade or downgrade a room type</h2>
+  <p>Use this when a guest moves to a different room <em>type</em>: they buy an upgrade, you upgrade them as a courtesy, or you have to move them down because their room type is unavailable (overbooking, maintenance). Works for pending, tentative and confirmed bookings before arrival, and for in-house guests (the move then applies from tonight).</p>
+  <ol class="steps">
+    <li>On the list click <strong>More</strong> &rarr; <strong>Upgrade / change room type</strong>, or on the booking page click <strong>Upgrade / Change Type</strong>. Needs <strong>Edit Bookings</strong>.</li>
+    <li>Pick the new room type. Each one is labelled <strong>Upgrade</strong>, <strong>Downgrade</strong> or <strong>Same tier</strong>. Types that are full for the stay, or too small for the party, cannot be chosen and say why.</li>
+    <li>Choose the billing:
+      <ul>
+        <li><strong>Upgrade &rarr; Paid upgrade</strong>: the guest pays the difference between the two room types' standard rates for each night, on top of the rate they booked (their discount or package is kept).</li>
+        <li><strong>Upgrade &rarr; Complimentary upgrade</strong>: the bill does not change. The value given away is recorded in the audit log and timeline. Needs a Manager or Administrator, or the <strong>Edit Booking Financials</strong> permission.</li>
+        <li><strong>Downgrade &rarr; Reduce the bill</strong> (the default): the guest pays for the lower room. If they have already paid more than the new bill, the difference shows as a credit to refund or carry forward.</li>
+        <li><strong>Downgrade &rarr; Keep the original rate</strong>: for example a non-refundable rate where the guest asked to move. Needs a Manager or Administrator, or <strong>Edit Booking Financials</strong>.</li>
+      </ul>
+    </li>
+    <li>Pick the <strong>Reason</strong> (guest request, hotel availability, loyalty / VIP, service recovery, other). A short <strong>Note</strong> (who authorised it and why) is required for complimentary upgrades, for every downgrade, and whenever the reason is Other.</li>
+    <li>Check the <strong>Current bill</strong>, <strong>New bill</strong> and <strong>Change</strong> figures, leave <strong>Email the guest</strong> ticked if they should be told, and click <strong>Apply room change</strong>.</li>
+  </ol>
+  <p>The system then picks a free room of the new type. For an in-house guest the old room goes to <strong>Cleaning</strong> and the new one is marked occupied. Nights the guest has already slept stay at the booked rate. The change, the money effect and the reason are written to the audit log and the booking timeline.</p>
 
   <h2 id="invoice">How to send an invoice or quotation</h2>
   <ol class="steps">
@@ -233,10 +275,10 @@
   <h2 id="checkout">How to check a guest out</h2>
   <ol class="steps">
     <li>Open the booking (status <strong>Checked In</strong>). Check the <strong>Balance due</strong>. Take payment first if money is owed (see above).</li>
-    <li>On the booking page click <strong>Check Out</strong>. You are asked <em>"Check out this guest and generate the final invoice where applicable?"</em> Confirm with <strong>Check out</strong>. (This page does no late or early settlement.)</li>
-    <li>On the list click the checkout button instead. Checkout is available from one day before the scheduled check-out date. If the guest leaves on the scheduled day, a window asks <em>"Check out booking [reference]?"</em> Click <strong>Check Out</strong>.</li>
+    <li>On the booked departure day, click <strong>Check Out</strong> on the booking page (you are asked <em>"Check out this guest and generate the final invoice where applicable?"</em>) or the checkout button on the list (<em>"Check out booking [reference]?"</em>).</li>
+    <li>If the guest leaves on any other day, the booking page shows <strong>Check Out &amp; Settle</strong> instead, which opens the list's settlement window. A plain checkout is refused on another day so the extra or unused nights are always dealt with.</li>
     <li>If the guest leaves late or early, the list opens the <strong>Checkout Settlement</strong> window. A late guest sees <strong>Overdue Checkout — Extra Charges</strong> with extra nights, rate and <strong>Amount to charge</strong>. An early guest sees <strong>Early Checkout — Refund</strong> with unused nights. Choose the payment or refund method (Cash, Bank Transfer, Credit Card, Debit Card, Mobile Money, Other), add optional <strong>Notes</strong> and click <strong>Charge &amp; Checkout</strong>, <strong>Refund &amp; Checkout</strong> or <strong>Checkout (no refund)</strong>. Tick <strong>Skip settlement — checkout without recording a charge or refund</strong> to check the guest out without a charge or refund. Use it only if you dealt with the money outside the system.</li>
-    <li>On success the booking becomes <strong>Checked Out</strong> and the room goes to <strong>Cleaning</strong> for housekeeping.</li>
+    <li>On success the booking becomes <strong>Checked Out</strong>, the room goes to <strong>Cleaning</strong> for housekeeping, and the final invoice is generated and emailed (from the list as well as from the booking page).</li>
   </ol>
   <div class="warn"><p>If the guest still owes money and you do not have <strong>Check-out With Balance</strong> you will see <em>"Checkout blocked: the guest still owes MWK 50,000.00. Record the payment first, or ask someone with the "Check out with balance" permission."</em> If you do have it, you are asked to confirm (on the list <em>"Check out with balance?"</em> with a <strong>Check Out with Balance</strong> button; on the booking page <em>"This guest still owes ... Check out anyway with the outstanding balance?"</em>). It is recorded in the timeline as "Checked out with outstanding balance".</p></div>
 
@@ -254,6 +296,17 @@
     <li>Confirm <em>"Mark this booking as no-show and release the assigned room?"</em></li>
   </ol>
   <p>If the check-in date has not passed you will see <em>"No-show can only be marked after the check-in date has passed."</em> Cancelled, no-show and checked-out bookings cannot be changed back.</p>
+
+  <h2 id="delete">How to delete and restore a booking</h2>
+  <p>Delete is for bookings that should not be there at all: duplicates, test bookings, bookings made in error. A cancellation is different: it is a real booking the guest called off, and it stays in the cancellation figures. Deleting needs the <strong>Delete &amp; Restore Bookings</strong> permission. Administrators always have it and can give it to others in Staff Access.</p>
+  <ol class="steps">
+    <li>On the list click <strong>More</strong> &rarr; <strong>Delete booking</strong>, or <strong>Delete Booking</strong> on the booking page.</li>
+    <li>Type why it is being deleted (required). Confirm.</li>
+    <li>The booking moves to the <strong>Deleted</strong> tab (also the <em>Deleted</em> status filter). Any room it held is released straight away. Nothing is sent to the guest.</li>
+  </ol>
+  <p>The Deleted tab shows <strong>who</strong> deleted each booking, the <strong>exact date and time</strong>, and the <strong>reason</strong>. The booking page shows the same in a banner and is read-only. The deletion is also in the audit log and timeline.</p>
+  <p>To bring it back, click <strong>Restore booking</strong> on the Deleted tab or the booking page. It returns with the status it had before. If it held a room, the room type must still be free for its dates. If not, you are told and the booking stays deleted.</p>
+  <div class="warn"><p>A booking cannot be deleted while the guest is checked in, or while money is on it (payments or folio charges). Refund or void the payments and void the charges first. This keeps the accounts complete: money is never left attached to a booking nobody can see.</p></div>
 
   <h2 id="tentative">Tentative bookings</h2>
   <p>A tentative booking holds a room without payment for a set time. The length is a hotel setting (48 hours unless changed). Open <strong>Tentative</strong> from the Bookings page toolbar (<code>/admin/tentative-bookings.php</code>).</p>
@@ -320,6 +373,10 @@
     <li>Check-in needs status Confirmed, at least a partial payment, and the check-in date to have arrived (<em>"Check-in date has not been reached yet"</em>). An unpaid booking is refused: <em>"Cannot check in: booking must have at least partial payment."</em> (list) or <em>"At least a partial payment must be recorded before check-in"</em> (booking page).</li>
     <li>Check-in is blocked while an assigned room is not marked clean, unless you hold <strong>Check-in to Room Not Clean</strong>.</li>
     <li>Check-out is blocked while money is owed unless you hold <strong>Check-out With Balance</strong>. Small rounding differences are ignored.</li>
+    <li>A plain check-out is only for the booked departure day. Leaving late or early always goes through the Checkout Settlement window, so extra nights are charged (or waived on purpose) and unused nights refunded (or kept on purpose).</li>
+    <li>A guest is <em>overdue</em> once their departure date has passed, and a <em>late checkout</em> when due today and still in after the check-out time set in Hotel Settings. An overdue guest keeps the room (it is not sold to anyone else) until checked out.</li>
+    <li>Prices are never typed in on the edit pages: changes reprice at the guest's booked rate, room-type changes go through Upgrade / change room type, and price corrections through a credit note.</li>
+    <li>Deleted bookings are hidden everywhere except the Deleted tab, hold no room, and cannot be changed until restored.</li>
     <li>After check-out the room goes to Cleaning and the folio is locked.</li>
     <li>Status options on Create Booking: <strong>Pending</strong> and <strong>Confirmed</strong> save the booking with that status. <strong>Tentative (hold)</strong> saves a hold, disables payment collection and offers a quotation. <strong>Checked In (walk-in)</strong> saves the booking as already checked in.</li>
     <li>Payment status on a new booking is worked out from the amount collected: the full total (or more) gives Paid, less gives Partial, nothing gives Unpaid.</li>
@@ -339,12 +396,15 @@
       <tr><td>Room must be assigned before check-in (booking page)</td><td>No physical room is assigned.</td><td>Click <strong>Assign Room</strong>.</td></tr>
       <tr><td>Check-in blocked: Room ... is not marked clean yet.</td><td>Housekeeping has not released the room.</td><td>Ask housekeeping, or ask someone with Check-in to Room Not Clean.</td></tr>
       <tr><td>Checkout blocked: the guest still owes ...</td><td>Balance due above zero.</td><td>Record the payment first, or ask someone with Check-out With Balance.</td></tr>
-      <tr><td>Check-out date is too far in the future</td><td>Checkout is allowed only from one day before the check-out date.</td><td>Use <strong>Adjust Stay Dates</strong> if the guest is leaving much earlier.</td></tr>
+      <tr><td>The guest is leaving N night(s) before / after the booked departure...</td><td>A plain checkout was tried on a day other than the booked departure.</td><td>Use the checkout button on the list (or <strong>Check Out &amp; Settle</strong> on the booking page) to settle the extra or unused nights.</td></tr>
+      <tr><td>A complimentary upgrade needs a manager...</td><td>Keeping the price on an upgrade or downgrade is a revenue decision.</td><td>Charge the difference, or ask a manager.</td></tr>
+      <tr><td>This booking has ... paid against it. Refund or void the payments first</td><td>Bookings with money on them cannot be deleted.</td><td>Refund / void the payments and void folio charges, or cancel the booking instead.</td></tr>
+      <tr><td>Cannot restore as confirmed: the room type is no longer free...</td><td>The room was sold while the booking was deleted.</td><td>Rebook the guest on other dates or another room type.</td></tr>
       <tr><td>Folio charges cannot be modified after check-out...</td><td>The booking is checked out.</td><td>Raise a credit note.</td></tr>
       <tr><td>Cannot confirm: No rooms available for the selected dates.</td><td>The room type is full for those dates.</td><td>Change dates or room type, or free a room.</td></tr>
       <tr><td>Only N room(s) of "..." remain available for those dates...</td><td>You asked for more rooms than are free.</td><td>Reduce the number of rooms on Create Booking.</td></tr>
       <tr><td>Selected room could not be assigned: it is unavailable...</td><td>The room overlaps another booking, a block, maintenance or a housekeeping task.</td><td>Pick another room.</td></tr>
-      <tr><td>Selected room does not match this booking room type</td><td>The room belongs to a different room type.</td><td>Use <strong>Upgrade room</strong> to change the type first.</td></tr>
+      <tr><td>Selected room does not match this booking room type</td><td>The room belongs to a different room type.</td><td>Use <strong>Upgrade / change room type</strong> first.</td></tr>
       <tr><td>At least 1 adult is required.</td><td>Children count equals or exceeds total guests.</td><td>Fix the guest numbers.</td></tr>
       <tr><td>Your role does not have permission to override room pricing.</td><td>Only administrators and managers can use Price override.</td><td>Clear the override or ask a manager.</td></tr>
       <tr><td>Check-out must be after check-in.</td><td>Dates are the same or reversed.</td><td>Correct the dates.</td></tr>

@@ -92,7 +92,7 @@ if ($can('booking-details.php') || $can('bookings.php')) {
     $items = [];
     foreach ($rows("SELECT b.id, b.booking_reference, b.guest_name, b.guest_email, b.guest_phone, b.check_in_date, b.check_out_date, b.status, r.name AS room_name
                     FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
-                    WHERE b.booking_reference LIKE ? OR b.guest_name LIKE ? OR b.guest_email LIKE ? OR b.guest_phone LIKE ?
+                    WHERE b.deleted_at IS NULL AND (b.booking_reference LIKE ? OR b.guest_name LIKE ? OR b.guest_email LIKE ? OR b.guest_phone LIKE ?)
                     ORDER BY b.id DESC", 4) as $r) {
         $items[] = [
             'title' => $r['booking_reference'] . ' · ' . $r['guest_name'],

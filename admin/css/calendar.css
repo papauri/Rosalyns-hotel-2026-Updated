@@ -746,3 +746,55 @@
         font-size: 8px;
     }
 }
+
+/* ── Booking states that need attention ─────────────────────────────────── */
+.booking-indicator.is-missed-arrival {
+    color: #b42318;
+    text-decoration: underline dotted;
+}
+
+.booking-indicator.is-overdue-stay {
+    color: #92400e;
+    font-style: italic;
+}
+
+.booking-indicator.is-block-conflict {
+    color: #fff;
+    background: #b42318;
+    border-radius: 3px;
+    padding: 0 3px;
+}
+
+/* ── Bookings still waiting for a room ─────────────────────────────────── */
+.cal-unassigned {
+    background: #fff8e6;
+    border: 1px solid #f5d38a;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin: 0 0 18px;
+    font-size: 13px;
+    color: #5c4a1a;
+}
+
+.cal-unassigned h3 {
+    font-size: 14px;
+    margin: 0 0 4px;
+}
+
+.cal-unassigned p {
+    margin: 0 0 8px;
+}
+
+.cal-unassigned__type + .cal-unassigned__type {
+    margin-top: 8px;
+}
+
+.cal-unassigned ul {
+    margin: 4px 0 0;
+    padding-left: 18px;
+}
+
+.cal-unassigned li {
+    margin: 2px 0;
+    line-height: 1.5;
+}

@@ -11,10 +11,13 @@ $_user_permissions = getUserPermissions($user['id']);
 $_is_admin_user = in_array($user['role'] ?? '', ['admin', 'manager'], true);
 $_perm_quick_modify = $_user_permissions['quick_modify_booking'] ?? false;
 $_perm_edit_financials = $_user_permissions['edit_booking_financials'] ?? false;
+$_perm_delete = $_user_permissions['delete_booking'] ?? false;
 
 require_once '../includes/modal.php';
 require_once '../includes/alert.php';
 require_once '../includes/booking-timeline.php';
+require_once '../includes/booking-soft-delete.php';
+require_once '../includes/booking-room-change.php';
 require_once '../includes/finance-sequences.php';
 $message = '';
 $error = '';
@@ -81,6 +84,26 @@ function bookings_log_status_change(PDO $pdo, int $bookingId, ?string $oldStatus
     }
 }
 
+/**
+ * Final invoice at checkout (same as the booking page does). Idempotent; never blocks the checkout.
+ * Returns a short note for the success message.
+ */
+function bookings_final_invoice_note(int $bookingId, int $userId): string
+{
+    try {
+        require_once __DIR__ . '/../config/invoice.php';
+        $inv = generateAndSendFinalInvoice($bookingId, $userId);
+        if (empty($inv['success'])) {
+            return ' Warning: the final invoice could not be generated.';
+        }
+        return (empty($inv['idempotent']) ? ' Final invoice generated.' : '')
+            . (empty($inv['email_sent']) ? ' (Final invoice email not sent.)' : '');
+    } catch (Throwable $e) {
+        error_log('Final invoice at checkout failed for booking ' . $bookingId . ': ' . $e->getMessage());
+        return ' Warning: the final invoice could not be generated.';
+    }
+}
+
 function getSignedDateDiffDays(DateTimeInterface $fromDate, DateTimeInterface $toDate): int
 {
     $diff = $fromDate->diff($toDate);
@@ -102,12 +125,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $action = $_POST['action'] ?? '';
 
+        // A deleted booking is read-only until it is restored.
+        $guardId = (int)($_POST['booking_id'] ?? ($_POST['id'] ?? 0));
+        if ($guardId > 0 && $action !== 'restore_booking' && !in_array($action, ['get_booking_details', 'get_booking_audit_log', 'get_booking_for_modify'], true)) {
+            $delSt = $pdo->prepare("SELECT deleted_at FROM bookings WHERE id = ?");
+            $delSt->execute([$guardId]);
+            if (!empty($delSt->fetchColumn())) {
+                throw new Exception('This booking has been deleted. Restore it before making changes.');
+            }
+        }
+
         // Ensure the audit table exists up front (before any transaction) so its
         // CREATE-TABLE DDL can't trigger an implicit commit mid-transaction, and
         // so the later bookings_log_status_change() calls never hit a missing table.
         ensureBookingStatusLogTable($pdo);
 
-        if ($action === 'resend_email') {
+        if ($action === 'delete_booking' || $action === 'restore_booking') {
+            // Recoverable delete / restore (permission delete_booking; see includes/booking-soft-delete.php).
+            if (!isAjaxRequest()) {
+                throw new Exception('Invalid request');
+            }
+            if (!hasPermission((int)($user['id'] ?? 0), 'delete_booking')) {
+                throw new Exception('You do not have permission to delete or restore bookings.');
+            }
+            $actorName = (string)($user['full_name'] ?? ($user['username'] ?? 'Admin'));
+            $res = $action === 'delete_booking'
+                ? rh_soft_delete_booking($pdo, (int)($_POST['booking_id'] ?? 0), (int)$user['id'], $actorName, (string)($_POST['reason'] ?? ''))
+                : rh_restore_booking($pdo, (int)($_POST['booking_id'] ?? 0), (int)$user['id'], $actorName, (string)($_POST['note'] ?? ''));
+            header('Content-Type: application/json');
+            echo json_encode($res);
+            exit;
+        } elseif ($action === 'resend_email') {
             $booking_id = (int)($_POST['booking_id'] ?? 0);
             $email_type = $_POST['email_type'] ?? '';
             $cc_emails = $_POST['cc_emails'] ?? '';
@@ -840,12 +888,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'adult_guests'      => 'int',
                 'child_guests'      => 'int',
                 'special_requests'  => 'string',
-                'status'            => 'string',
-                'payment_status'    => 'string',
                 'individual_room_id' => 'int',
             ];
-            if ($canEditBookingFinancials) {
-                $allowed['total_amount'] = 'float';
+            // Status, payment status and price are NOT quick-modify fields: status moves through the
+            // dedicated actions (confirm / check-in / checkout / cancel / no-show), payment status is
+            // always derived from the payments ledger, and price corrections go through a credit note.
+            if (!in_array((string)$current['status'], ['pending', 'tentative', 'confirmed', 'checked-in'], true)) {
+                throw new Exception('This booking is ' . $current['status'] . '. Use the full edit page to correct guest details.');
             }
             $updates = [];
             $newValues = [];
@@ -878,60 +927,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('Check-out date must be after check-in date.');
                 }
             }
-            $allowedStatuses = ['pending', 'tentative', 'confirmed', 'checked-in', 'checked-out', 'cancelled', 'no-show'];
-            if (isset($updates['status']) && !in_array($updates['status'], $allowedStatuses, true)) {
-                throw new Exception('Invalid status value.');
+            // Children change the price (child supplement): that repricing lives on the full edit page.
+            if (isset($updates['child_guests']) && (int)$updates['child_guests'] !== (int)($current['child_guests'] ?? 0)) {
+                throw new Exception('Changing the number of children changes the price. Use the full edit page for that.');
             }
-            $allowedPayment = ['unpaid', 'partial', 'paid', 'completed', 'refunded', 'partially_refunded', 'failed', 'pending'];
-            if (isset($updates['payment_status']) && !in_array($updates['payment_status'], $allowedPayment, true)) {
-                throw new Exception('Invalid payment status.');
+            // In-house: the stay length goes through Extend stay / Adjust dates (audited, booked rate).
+            if ((string)$current['status'] === 'checked-in'
+                && ((isset($updates['check_in_date']) && $updates['check_in_date'] !== $current['check_in_date'])
+                    || (isset($updates['check_out_date']) && $updates['check_out_date'] !== $current['check_out_date']))) {
+                throw new Exception('The guest is in-house: use Extend stay or Adjust stay dates to change their dates.');
             }
-
-            if (!$canEditBookingFinancials && array_key_exists('total_amount', $_POST)) {
-                throw new Exception('You do not have permission to change booking amounts.');
-            }
-
-            // The posted amount is the FINAL price (VAT + levy included). Only treat it as an
-            // override when it really differs from the stored gross, so a plain save never
-            // re-splits or strips VAT/levy.
-            if (isset($updates['total_amount'])) {
-                $storedGross = (float)($current['total_with_vat'] ?? 0);
-                if ($storedGross <= 0) {
-                    $storedGross = (float)($current['total_amount'] ?? 0) + (float)($current['vat_amount'] ?? 0);
-                }
-                if (abs((float)$updates['total_amount'] - $storedGross) <= BALANCE_TOLERANCE) {
-                    unset($updates['total_amount'], $newValues['total_amount']);
-                }
-            }
-
-            // Status changes that move money or release rooms go through the shared guarded paths.
-            if (isset($updates['status']) && $updates['status'] !== $current['status']) {
-                $mbTrans = validateBookingStatusTransition((string)$current['status'], (string)$updates['status']);
-                if (!$mbTrans['allowed']) {
-                    throw new Exception($mbTrans['reason']);
-                }
-                if ($updates['status'] === 'no-show') {
-                    throw new Exception('Use the No-show action on the booking to mark a no-show (it handles the room release and refund).');
-                }
-                if ($updates['status'] === 'cancelled') {
-                    $mbCancel = cancelRoomBookingSettled($pdo, $booking_id, $actorId, (string)($_POST['note'] ?? 'Cancelled by admin (quick modify)'));
-                    if (!$mbCancel['success']) {
-                        throw new Exception('Cancellation failed - nothing was changed. ' . $mbCancel['error']);
-                    }
-                    $newValues['status'] = 'cancelled';
-                    unset($updates['status']);
-                } elseif ($updates['status'] === 'checked-out') {
-                    $mbCo = rh_checkout_with_gate($pdo, $booking_id, $actorId, !empty($_POST['confirm_checkout_with_balance']), $user['full_name'] ?? ($user['username'] ?? null));
-                    if (!$mbCo['success']) {
-                        throw new Exception($mbCo['message'] !== '' ? $mbCo['message'] : 'Checkout failed - nothing was changed.');
-                    }
-                    $newValues['status'] = 'checked-out';
-                    unset($updates['status']);
-                } else {
-                    // Confirm / check-in / revert write room stock, availability locks, emails and
-                    // the paid-before-check-in rule - they have dedicated actions.
-                    throw new Exception('Use the Confirm / Check-in action on the booking to change to this status.');
-                }
+            if (isset($updates['check_in_date']) && $updates['check_in_date'] !== $current['check_in_date'] && $updates['check_in_date'] < date('Y-m-d')) {
+                throw new Exception('The check-in date cannot be moved into the past.');
             }
 
             // Recompute number_of_nights when dates changed
@@ -949,11 +956,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             unset($updates['amount_paid'], $updates['amount_due'], $newValues['amount_paid'], $newValues['amount_due']);
 
             if (empty($updates)) {
-                if (!empty($newValues['status'])) {
-                    $updates = null; // status handled above; nothing else to write
-                } else {
-                    throw new Exception('No fields to update.');
-                }
+                throw new Exception('No fields to update.');
             }
             $mbDatesChanged = is_array($updates) && (
                 (isset($updates['check_in_date']) && $updates['check_in_date'] !== $current['check_in_date'])
@@ -985,9 +988,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception($mbGate['error']);
                 }
             }
-            if ($updates === null) {
-                $updates = [];
-            }
             $sets = [];
             $vals = [];
             foreach ($updates as $f => $v) {
@@ -1005,22 +1005,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("UPDATE bookings SET room_combination_id = NULL WHERE id = ?")->execute([$booking_id]);
             }
 
-            // Date change without a manual price: reprice at the BOOKED nightly rate.
-            if ($mbDatesChanged && !isset($updates['total_amount']) && isset($updates['number_of_nights'])) {
+            // Date change: reprice at the BOOKED nightly rate.
+            if ($mbDatesChanged && isset($updates['number_of_nights'])) {
                 $mbRp = rh_reprice_at_booked_rate($current, (int)$updates['number_of_nights']);
                 rh_write_booking_stay_totals($pdo, $booking_id, $mbRp['totals'], null, null, null, $mbRp['new_child_supplement']);
-            }
-
-            // Manual total override = the FINAL gross the guest pays (VAT + levy extracted
-            // from it, never added on top), whatever vat_pricing_mode is. Rewrites net+levy,
-            // VAT, levy and total_with_vat consistently so recalculateBookingFinancials
-            // sees the right base.
-            if (isset($updates['total_amount'])) {
-                if (!function_exists('rh_stay_totals')) {
-                    require_once __DIR__ . '/../includes/pricing.php';
-                }
-                $reTt = rh_stay_totals(max(0.0, (float)$updates['total_amount']), 'final', rh_booking_has_levy($current));
-                rh_write_booking_stay_totals($pdo, $booking_id, $reTt);
             }
 
             // Recompute financials from the payments ledger to keep amount_paid / amount_due accurate
@@ -1392,7 +1380,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $user['id'] ?? null
                     );
 
-                    $message = 'Booking ' . htmlspecialchars($bk['booking_reference']) . ' checked out successfully. Room availability restored.';
+                    $message = 'Booking ' . htmlspecialchars($bk['booking_reference']) . ' checked out successfully. Room availability restored.'
+                        . bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0));
                     rh_log_event('bookings', 'info', 'Guest checked out', ['booking_id' => $booking_id, 'ref' => $bk['booking_reference'], 'by' => $user['username'] ?? null]);
                     logBookingAudit($booking_id, 'checked-out', ['status' => 'checked-in'], ['status' => 'checked-out'], null, $bk['booking_reference'] ?? null);
                 } else {
@@ -1799,6 +1788,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!empty($settlementPaymentReference)) {
                     $checkoutMessage .= ' Extra-night payment recorded (' . $settlementPaymentReference . ').';
                 }
+                $checkoutMessage .= bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0));
                 echo json_encode(['success' => true, 'message' => $checkoutMessage]);
                 exit;
             } catch (Throwable $e) {
@@ -2193,48 +2183,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'data' => $booking
             ]);
             exit;
-        } elseif ($action === 'get_all_room_types_for_upgrade') {
+        } elseif ($action === 'room_change_options') {
+            // Upgrade / downgrade picker: every other active room type with availability and a quote.
             if (!isAjaxRequest()) {
                 throw new Exception('Invalid request');
             }
-
-            $current_room_id = (int)($_POST['current_room_id'] ?? 0);
-            $check_in = trim($_POST['check_in'] ?? '');
-            $check_out = trim($_POST['check_out'] ?? '');
-
-            // Fetch all active room types that are more expensive than current
-            $stmt = $pdo->prepare("
-                SELECT r.*,
-                       (SELECT COUNT(*) FROM individual_rooms ir WHERE ir.room_type_id = r.id AND ir.is_active = 1 AND ir.status IN ('available', 'cleaning')) as available_count
-                FROM rooms r
-                WHERE r.is_active = 1
-                AND r.id != ?
-                AND r.price_per_night > (SELECT price_per_night FROM rooms WHERE id = ?)
-                ORDER BY r.price_per_night ASC
-            ");
-            $stmt->execute([$current_room_id, $current_room_id]);
-            $rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // Filter rooms that have availability for the dates
-            $availableRooms = [];
-            foreach ($rooms as $room) {
-                // Check if room type has availability
-                $hasAvailability = checkRoomAvailability($room['id'], $check_in, $check_out);
-                if ($hasAvailability['available']) {
-                    $availableRooms[] = [
-                        'id' => (int)$room['id'],
-                        'name' => $room['name'],
-                        'price_per_night' => (float)$room['price_per_night'],
-                        'available_count' => (int)($room['available_count'] ?? 0)
-                    ];
-                }
+            if (!hasPermission((int)($user['id'] ?? 0), 'edit_booking')) {
+                throw new Exception('You do not have permission to change a booking room type.');
             }
-
+            $opts = rh_room_change_options($pdo, (int)($_POST['booking_id'] ?? 0));
+            foreach ($opts['options'] as &$opt) {
+                $opt['reasons'] = rh_room_change_reasons($opt['quote']['direction']);
+            }
+            unset($opt);
+            $opts['can_keep_price'] = (bool)$_perm_edit_financials || $_is_admin_user;
+            $opts['currency'] = $currency_symbol;
             header('Content-Type: application/json');
-            echo json_encode([
-                'success' => true,
-                'data' => $availableRooms
-            ]);
+            echo json_encode(['success' => true, 'data' => $opts]);
             exit;
         } elseif ($action === 'extend_stay') {
             // Extend the checkout date for a checked-in booking
@@ -2456,209 +2421,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             exit;
         } elseif ($action === 'upgrade_room_type') {
+            // Paid upgrade / complimentary upgrade / downgrade (includes/booking-room-change.php).
             if (!isAjaxRequest()) {
                 throw new Exception('Invalid request');
             }
-
-            $booking_id  = (int)($_POST['booking_id'] ?? 0);
-            $new_room_id = (int)($_POST['new_room_id'] ?? 0);
-            $send_email  = isset($_POST['send_email']) && $_POST['send_email'] === '1';
-
-            if ($booking_id <= 0 || $new_room_id <= 0) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Invalid booking or room selection']);
-                exit;
+            if (!hasPermission((int)($user['id'] ?? 0), 'edit_booking')) {
+                throw new Exception('You do not have permission to change a booking room type.');
             }
-
-            // Get booking details
-            $stmt = $pdo->prepare("
-                SELECT b.*, r.name as old_room_name, r.price_per_night as old_price_per_night
-                FROM bookings b
-                LEFT JOIN rooms r ON b.room_id = r.id
-                WHERE b.id = ?
-            ");
-            $stmt->execute([$booking_id]);
-            $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$booking) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Booking not found']);
-                exit;
+            $res = rh_apply_room_type_change(
+                $pdo,
+                (int)($_POST['booking_id'] ?? 0),
+                (int)($_POST['new_room_id'] ?? 0),
+                (string)($_POST['pricing'] ?? 'charge'),
+                (string)($_POST['reason_code'] ?? ''),
+                (string)($_POST['note'] ?? ''),
+                $user,
+                (bool)$_perm_edit_financials || $_is_admin_user
+            );
+            if ($res['success'] && ($_POST['send_email'] ?? '') === '1') {
+                require_once '../config/email.php';
+                $d = $res['data'];
+                $mail = sendBookingRoomUpgradeEmail(array_merge($d['booking'], [
+                    'old_room_name' => $d['old_room_name'], 'new_room_name' => $d['new_room_name'],
+                    'old_total' => $d['old_total'], 'new_total' => $d['new_total'], 'price_difference' => $d['price_difference'],
+                    'change_direction' => $d['direction'], 'change_pricing' => $d['pricing'],
+                ]));
+                $res['message'] .= !empty($mail['success']) ? ' Guest emailed.' : ' (Email not sent: ' . ($mail['message'] ?? 'error') . ')';
             }
-
-            // Get new room details
-            $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
-            $stmt->execute([$new_room_id]);
-            $new_room = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$new_room) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'New room type not found']);
-                exit;
-            }
-
-            // Check if booking can be upgraded (only confirmed or pending bookings)
-            if (!in_array($booking['status'], ['pending', 'confirmed'])) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Only pending or confirmed bookings can be upgraded']);
-                exit;
-            }
-
-            try {
-                $pdo->beginTransaction();
-
-                // Upgrade = explicit rate change: reprice the remaining (current) nights at the
-                // NEW room's catalogue rate on the 'price' basis (honours vat_pricing_mode).
-                // Booking row locked and re-read so the old figures are current.
-                if (!function_exists('rh_stay_totals')) {
-                    require_once __DIR__ . '/../includes/pricing.php';
-                }
-                $lockUp = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
-                $lockUp->execute([$booking_id]);
-                $lockedUp = $lockUp->fetch(PDO::FETCH_ASSOC);
-                if (!$lockedUp || !in_array($lockedUp['status'], ['pending', 'confirmed'], true)) {
-                    throw new Exception('Only pending or confirmed bookings can be upgraded');
-                }
-                // The new room type must be free for the whole stay (type-level check under the
-                // booking + room-type locks) - upgrading used to move the booking with no check.
-                $upGate = rh_validate_booking_stay_change($booking_id, (string)$lockedUp['check_in_date'], (string)$lockedUp['check_out_date'], $new_room_id);
-                if (!$upGate['ok']) {
-                    throw new Exception($upGate['error']);
-                }
-                $oldSplit = rh_booked_stay_split($lockedUp);
-                $nights = max(1, (int)$lockedUp['number_of_nights']);
-
-                $occ_up = $lockedUp['occupancy_type'] ?? 'single';
-                if ($occ_up === 'double' && !empty($new_room['price_double_occupancy'])) {
-                    $new_price_per_night = (float)$new_room['price_double_occupancy'];
-                } elseif ($occ_up === 'triple' && !empty($new_room['price_triple_occupancy'])) {
-                    $new_price_per_night = (float)$new_room['price_triple_occupancy'];
-                } elseif ($occ_up === 'single' && !empty($new_room['price_single_occupancy'])) {
-                    $new_price_per_night = (float)$new_room['price_single_occupancy'];
-                } else {
-                    $new_price_per_night = (float)$new_room['price_per_night'];
-                }
-                $old_total = $oldSplit['total_with_vat'];
-                $new_total = $new_price_per_night * $nights;
-
-                // Child supplement at the new room's child multiplier
-                $child_supplement = 0.0;
-                if (!empty($booking['child_guests']) && $booking['child_guests'] > 0) {
-                    $child_multiplier = (float)($new_room['child_price_multiplier'] ?? 50);
-                    $child_supplement = ($new_price_per_night * ($child_multiplier / 100) * $booking['child_guests'] * $nights);
-                    $new_total += $child_supplement;
-                }
-
-                $upLevy = rh_booking_has_levy($lockedUp);
-                $upTt = rh_stay_totals($new_total, 'price', $upLevy);
-                if ($oldSplit['package_gross'] > 0) {
-                    // Packages are not repriced by an upgrade: keep their gross in the bill.
-                    $upTt = rh_stay_totals(round($upTt['total_with_vat'] + $oldSplit['package_gross'], 2), 'final', $upLevy);
-                }
-                $new_total = $upTt['total_with_vat'];
-                $price_difference = round($new_total - $old_total, 2);
-
-                // Update booking: room + every money column consistently
-                $pdo->prepare("
-                    UPDATE bookings
-                    SET room_id = ?,
-                        child_price_multiplier = ?
-                    WHERE id = ?
-                ")->execute([$new_room_id, $new_room['child_price_multiplier'] ?? 50, $booking_id]);
-                rh_write_booking_stay_totals($pdo, $booking_id, $upTt, null, null, null, $child_supplement);
-                if (!recalculateBookingFinancials($booking_id)) {
-                    throw new Exception('Could not recalculate the booking balance.');
-                }
-
-                // Handle individual room reassignment
-                $room_reassigned = false;
-                $assigned_room_number = '';
-                if (!empty($booking['individual_room_id'])) {
-                    // Check if current individual room is compatible with new room type
-                    $ir_stmt = $pdo->prepare("SELECT room_type_id, room_number FROM individual_rooms WHERE id = ?");
-                    $ir_stmt->execute([$booking['individual_room_id']]);
-                    $current_ir = $ir_stmt->fetch(PDO::FETCH_ASSOC);
-
-                    if ($current_ir && (int)$current_ir['room_type_id'] !== $new_room_id) {
-                        // Current individual room doesn't match new room type: release it (autoAssign
-                        // returns early while a room is still set), then pick a room of the new type.
-                        rh_release_booking_room_assignment((int)$booking_id);
-                        $autoAssignResult = autoAssignIndividualRoom($booking_id);
-                        if ($autoAssignResult['success']) {
-                            $room_reassigned = true;
-                            $assigned_room_number = $autoAssignResult['assigned_room_number'];
-                        } else {
-                            // No available room, clear individual_room_id
-                            $clear_stmt = $pdo->prepare("UPDATE bookings SET individual_room_id = NULL WHERE id = ?");
-                            $clear_stmt->execute([$booking_id]);
-
-                            // Release old individual room
-                            if ($booking['status'] === 'confirmed') {
-                                updateBookingRoomsStatus(
-                                    $booking_id,
-                                    'available',
-                                    'Room type upgraded, room released',
-                                    $user['id'] ?? null
-                                );
-                            }
-                        }
-                    }
-                }
-
-                // Log the upgrade (non-fatal — the table is ensured up front so
-                // this normally succeeds; a logging error must not roll back the
-                // upgrade that already applied within this transaction).
-                bookings_log_status_change(
-                    $pdo,
-                    $booking_id,
-                    $booking['status'],
-                    $booking['status'],
-                    $user['id'] ?? null,
-                    "Room type upgraded from {$booking['room_id']} ({$booking['old_room_name']}) to {$new_room_id} ({$new_room['name']}). Price difference: K " . number_format($price_difference, 2)
-                );
-
-                $pdo->commit();
-
-                // Send upgrade email if requested
-                $email_sent = false;
-                $email_message = '';
-                if ($send_email) {
-                    require_once '../config/email.php';
-                    $booking['old_room_name'] = $booking['old_room_name'];
-                    $booking['new_room_name'] = $new_room['name'];
-                    $booking['old_total'] = $old_total;
-                    $booking['new_total'] = $new_total;
-                    $booking['price_difference'] = $price_difference;
-                    $email_result = sendBookingRoomUpgradeEmail($booking);
-                    $email_sent = $email_result['success'];
-                    $email_message = $email_result['message'];
-                }
-
-                header('Content-Type: application/json');
-                echo json_encode([
-                    'success' => true,
-                    'message' => 'Room type upgraded successfully' .
-                        ($room_reassigned ? ". New room {$assigned_room_number} assigned." : '') .
-                        ($email_sent ? ' Upgrade email sent.' : ''),
-                    'data' => [
-                        'new_total' => $new_total,
-                        'price_difference' => $price_difference,
-                        'room_reassigned' => $room_reassigned,
-                        'assigned_room_number' => $assigned_room_number,
-                        'email_sent' => $email_sent,
-                        'email_message' => $email_message
-                    ]
-                ]);
-                exit;
-            } catch (Exception $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                error_log("Upgrade room type error: " . $e->getMessage());
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Error upgrading room type: ' . $e->getMessage()]);
-                exit;
-            }
+            unset($res['data']);
+            header('Content-Type: application/json');
+            echo json_encode($res);
+            exit;
         }
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -2684,7 +2477,28 @@ $search_query = trim($_GET['search'] ?? '');
 $filter_status = $_GET['filter_status'] ?? ($_GET['status'] ?? '');
 $filter_date_from = $_GET['date_from'] ?? '';
 $filter_date_to = $_GET['date_to'] ?? '';
+
+// Deep links from booking-details.php (?action=assign-room|room-change&booking_id=N): narrow the list to
+// that booking so its row is on screen, then the page script opens the matching modal.
+$deep_link_action = in_array(($_GET['action'] ?? ''), ['assign-room', 'room-change', 'checkout'], true) ? (string)$_GET['action'] : '';
+$deep_link_booking_id = $deep_link_action !== '' ? (int)($_GET['booking_id'] ?? 0) : 0;
+if ($deep_link_booking_id > 0 && $search_query === '') {
+    $dlSt = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ? AND deleted_at IS NULL");
+    $dlSt->execute([$deep_link_booking_id]);
+    $search_query = (string)($dlSt->fetchColumn() ?: '');
+    if ($search_query === '') {
+        $deep_link_action = '';
+        $deep_link_booking_id = 0;
+    }
+}
 $has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '';
+
+// Remember this list view (filters, tab, page) so "Back" on a booking returns to it.
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['export']) && $deep_link_action === '') {
+    $listQuery = $_GET;
+    unset($listQuery['action'], $listQuery['booking_id'], $listQuery['export']);
+    $_SESSION['bookings_list_return'] = 'bookings.php' . ($listQuery ? '?' . http_build_query($listQuery) : '');
+}
 
 // Map ?filter= shortcuts (from dashboard badge links) to JS tab names
 $_tab_map = [
@@ -2714,6 +2528,7 @@ $checked_out = $cancelled = $no_show = $paid = $unpaid = 0;
 $today_checkins = $today_checkouts = $today_bookings = 0;
 $week_bookings = $month_bookings = $expiring_soon = 0;
 $list_count = 0;
+$deleted_count = 0;
 $current_page_count = 0;
 $total_pages = 1;
 $offset      = 0;
@@ -2753,7 +2568,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $export_params = array_merge($export_params, array_fill(0, 12, $search_param));
         }
 
-        if (!empty($filter_status)) {
+        $export_where_clauses[] = $filter_status === 'deleted' ? "b.deleted_at IS NOT NULL" : "b.deleted_at IS NULL";
+        if (!empty($filter_status) && $filter_status !== 'deleted') {
             $export_where_clauses[] = "b.status = ?";
             $export_params[] = $filter_status;
         }
@@ -2903,17 +2719,22 @@ try {
         $params = array_merge($params, array_fill(0, 12, $search_param));
     }
 
+    // Deleted bookings are only ever shown under the Deleted filter; every count/insight excludes them.
+    $deleted_scope_clauses = $where_clauses;
+    $deleted_scope_params  = $params;
+    $where_clauses[] = $filter_status === 'deleted' ? "b.deleted_at IS NOT NULL" : "b.deleted_at IS NULL";
+
     // Snapshot where clauses for insights (respects search/date filters but not status filter)
     // so insight cards show filtered data matching the current search/date scope.
-    $insights_where_clauses = $where_clauses;
-    $insights_params        = $params;
+    $insights_where_clauses = array_merge($deleted_scope_clauses, ["b.deleted_at IS NULL"]);
+    $insights_params        = $deleted_scope_params;
 
     // Stats badge counts must respect search and date filters so badge counts match displayed results,
     // but exclude status filter so all tabs show accurate counts for the current filters.
-    $stats_where_clauses = $where_clauses;
-    $stats_params        = $params;
+    $stats_where_clauses = $insights_where_clauses;
+    $stats_params        = $deleted_scope_params;
 
-    if (!empty($filter_status)) {
+    if (!empty($filter_status) && $filter_status !== 'deleted') {
         $where_clauses[] = "b.status = ?";
         $params[] = $filter_status;
     }
@@ -2968,6 +2789,12 @@ try {
     ");
     $stats_stmt->execute($stats_params);
     $stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
+
+    $deleted_scope_sql = 'WHERE ' . implode(' AND ', array_merge($deleted_scope_clauses, ["b.deleted_at IS NOT NULL"]));
+    $deleted_count_stmt = $pdo->prepare("SELECT COUNT(*) FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id
+        LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id {$deleted_scope_sql}");
+    $deleted_count_stmt->execute($deleted_scope_params);
+    $deleted_count = (int)$deleted_count_stmt->fetchColumn();
 
     $total_bookings  = (int)($stats['total']          ?? 0);
     $pending         = (int)($stats['pending']         ?? 0);
@@ -3211,11 +3038,13 @@ try {
                ir.room_name as individual_room_name,
                ir.floor as individual_room_floor,
                ir.status as individual_room_status,
-               rt.name as room_type_name
+               rt.name as room_type_name,
+               COALESCE(NULLIF(du.full_name, ''), du.username) as deleted_by_name
         FROM bookings b
         LEFT JOIN rooms r ON b.room_id = r.id
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
         LEFT JOIN rooms rt ON ir.room_type_id = rt.id
+        LEFT JOIN admin_users du ON du.id = b.deleted_by
         {$list_where_sql}
         ORDER BY {$list_order_by}
         LIMIT ? OFFSET ?
@@ -3260,6 +3089,7 @@ try {
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
         WHERE b.status = 'confirmed'
           AND b.check_in_date < CURDATE()
+          AND b.deleted_at IS NULL
         ORDER BY b.check_in_date ASC
     ");
     $missed_checkins = $missed_stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -3271,9 +3101,7 @@ try {
 $overdue_checkouts = [];
 $is_past_checkout_time = false; // pre-initialised; set inside try block below
 try {
-    $checkout_time = getSetting('check_out_time', '11:00 AM'); // Assuming standard 11:00 checkout
-    $current_time = date('H:i');
-    $is_past_checkout_time = ($current_time >= $checkout_time);
+    $is_past_checkout_time = rh_checkout_time_passed_today();
 
     $date_condition = $is_past_checkout_time
         ? "b.check_out_date <= CURDATE()"
@@ -3294,6 +3122,7 @@ try {
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
         WHERE b.status = 'checked-in'
           AND {$date_condition}
+          AND b.deleted_at IS NULL
         ORDER BY b.check_out_date ASC
     ");
     $overdue_checkouts = $overdue_stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -3336,6 +3165,8 @@ $today_str = $today->format('Y-m-d');
             if (!window.__rhBkOrigFetch) window.__rhBkOrigFetch = window.fetch;
             window.fetch = function(u, o) {
                 if (o && o.body instanceof FormData && !o.body.has('csrf_token')) {
+                    o.body.append('csrf_token', window._rhCsrf || '');
+                } else if (o && o.body instanceof URLSearchParams && !o.body.has('csrf_token')) {
                     o.body.append('csrf_token', window._rhCsrf || '');
                 }
                 return window.__rhBkOrigFetch.apply(this, arguments);
@@ -3408,6 +3239,7 @@ $today_str = $today->format('Y-m-d');
                     <option value="checked-out" <?php echo $filter_status === 'checked-out' ? 'selected' : ''; ?>>Checked Out</option>
                     <option value="cancelled" <?php echo $filter_status === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
                     <option value="no-show" <?php echo $filter_status === 'no-show' ? 'selected' : ''; ?>>No-Show</option>
+                    <option value="deleted" <?php echo $filter_status === 'deleted' ? 'selected' : ''; ?>>Deleted</option>
                 </select>
                 <input type="date" name="date_from" value="<?php echo htmlspecialchars($filter_date_from); ?>"
                     placeholder="From" title="Check-in from"
@@ -3497,6 +3329,13 @@ $today_str = $today->format('Y-m-d');
                         Unpaid
                         <span class="tab-count"><?php echo $unpaid; ?></span>
                     </button>
+                    <?php if ($deleted_count > 0 || $filter_status === 'deleted'): ?>
+                    <button class="tab-button <?php echo $filter_status === 'deleted' ? 'active' : ''; ?>" data-tab="deleted" data-count="<?php echo $deleted_count; ?>" title="Deleted bookings: who deleted them, when and why. Restore from here.">
+                        <i class="fas fa-trash-can"></i>
+                        Deleted
+                        <span class="tab-count"><?php echo $deleted_count; ?></span>
+                    </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -3546,17 +3385,18 @@ $today_str = $today->format('Y-m-d');
 
                                     $is_missed_checkin = ($booking['status'] === 'confirmed' && $booking['check_in_date'] < $today_str);
 
-                                    $is_overdue_checkout = false;
-                                    if ($booking['status'] === 'checked-in') {
-                                        if ($booking['check_out_date'] < $today_str) {
-                                            $is_overdue_checkout = true;
-                                        } elseif ($booking['check_out_date'] === $today_str && $is_past_checkout_time) {
-                                            $is_overdue_checkout = true;
-                                        }
+                                    // 'overdue' = departure date passed; 'late' = due today and past check-out time.
+                                    $checkout_overdue_state = rh_checkout_overdue_state($booking);
+                                    $is_overdue_checkout = $checkout_overdue_state !== '';
+                                    $is_deleted_row = !empty($booking['deleted_at']);
+                                    if ($is_deleted_row) {
+                                        $is_missed_checkin = $is_overdue_checkout = false;
                                     }
 
                                     $row_style = '';
-                                    if ($is_missed_checkin) {
+                                    if ($is_deleted_row) {
+                                        $row_style = 'style="background: rgba(108, 117, 125, 0.07); border-left: 4px solid #6c757d;"';
+                                    } elseif ($is_missed_checkin) {
                                         $row_style = 'style="background: rgba(220, 53, 69, 0.05); border-left: 4px solid #dc3545;"';
                                     } elseif ($is_overdue_checkout) {
                                         $row_style = 'style="background: rgba(255, 193, 7, 0.05); border-left: 4px solid #ffc107;"';
@@ -3567,7 +3407,7 @@ $today_str = $today->format('Y-m-d');
                                     <tr <?php echo $row_style; ?>
                                         id="booking-<?php echo (int)$booking['id']; ?>"
                                         data-focus="booking-<?php echo (int)$booking['id']; ?>"
-                                        data-status="<?php echo htmlspecialchars($booking['status'], ENT_QUOTES); ?>"
+                                        data-status="<?php echo htmlspecialchars($is_deleted_row ? 'deleted' : $booking['status'], ENT_QUOTES); ?>"
                                         data-payment-status="<?php echo htmlspecialchars($booking['actual_payment_status'] ?? $booking['payment_status'], ENT_QUOTES); ?>"
                                         data-check-in="<?php echo htmlspecialchars($booking['check_in_date'], ENT_QUOTES); ?>"
                                         data-check-out="<?php echo htmlspecialchars($booking['check_out_date'], ENT_QUOTES); ?>"
@@ -3581,7 +3421,7 @@ $today_str = $today->format('Y-m-d');
                                             <?php elseif ($is_missed_checkin): ?>
                                                 <br><span style="color: #dc3545; font-size: 11px; font-weight: 600;"><i class="fas fa-exclamation-triangle"></i> Missed Check-in</span>
                                             <?php elseif ($is_overdue_checkout): ?>
-                                                <br><span style="color: #856404; font-size: 11px; font-weight: 600;"><i class="fas fa-clock"></i> Overdue Checkout</span>
+                                                <br><span style="color: #856404; font-size: 11px; font-weight: 600;"><i class="fas fa-clock"></i> <?php echo $checkout_overdue_state === 'late' ? 'Late checkout' : 'Overdue checkout'; ?></span>
                                             <?php endif; ?>
                                         </td>
                                         <td data-label="Guest">
@@ -3616,9 +3456,18 @@ $today_str = $today->format('Y-m-d');
                                             <?php endif; ?>
                                         </td>
                                         <td data-label="Status">
-                                            <span class="badge badge-<?php echo $booking['status']; ?>">
+                                            <?php if ($is_deleted_row): ?>
+                                                <span class="badge badge-cancelled"><i class="fas fa-trash-can"></i> Deleted</span>
+                                                <br><small style="color: #555; font-size: 11px; line-height: 1.4; display: inline-block; margin-top: 4px;">
+                                                    by <?php echo htmlspecialchars((string)($booking['deleted_by_name'] ?? 'unknown')); ?><br>
+                                                    <?php echo date('j M Y, H:i', strtotime((string)$booking['deleted_at'])); ?><br>
+                                                    <em><?php echo htmlspecialchars((string)($booking['deleted_reason'] ?? '')); ?></em>
+                                                </small>
+                                            <?php else: ?>
+                                            <span class="badge badge-<?php echo htmlspecialchars($booking['status'], ENT_QUOTES); ?>">
                                                 <?php echo ucfirst($booking['status']); ?>
                                             </span>
+                                            <?php endif; ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <br><small style="color: #666; font-size: 10px;">
                                                     <?php
@@ -3665,180 +3514,185 @@ $today_str = $today->format('Y-m-d');
                                             $_perm_cancel   = $_user_permissions['cancel_booking'] ?? false;
                                             $_perm_edit     = $_user_permissions['edit_booking']   ?? false;
                                             $_perm_pay      = $_user_permissions['payment_add']    ?? false;
+
+                                            // What this booking can still do, front-desk style: only actions valid for
+                                            // its status, dates and money position are rendered (nothing greyed-out noise).
+                                            $bk_id     = (int)$booking['id'];
+                                            $bk_ref    = htmlspecialchars($booking['booking_reference'], ENT_QUOTES);
+                                            $bk_guest  = htmlspecialchars($booking['guest_name'], ENT_QUOTES);
+                                            // Values passed into inline onclick JS: JSON-encode, THEN HTML-escape (a quote in a
+                                            // guest name must neither break the button nor run script).
+                                            $bk_js = static fn ($v): string => htmlspecialchars((string)json_encode((string)$v, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES);
+                                            $bk_ref_js = $bk_js($booking['booking_reference']);
+                                            $bk_guest_js = $bk_js($booking['guest_name']);
+                                            $bk_status = (string)$booking['status'];
+                                            $bk_deleted = !empty($booking['deleted_at']);
+                                            $bk_paid    = (float)($booking['amount_paid'] ?? 0);
+                                            $bk_due     = (float)($booking['amount_due'] ?? 0);
+                                            $bk_credit  = (float)($booking['credit_balance'] ?? 0);
+                                            $bk_folio   = (float)($booking['folio_charges_total'] ?? 0);
+                                            $bk_holding = in_array($bk_status, ['pending', 'tentative', 'confirmed'], true); // reservation, not yet arrived
+                                            $bk_inhouse = $bk_status === 'checked-in';
+                                            $bk_closed  = in_array($bk_status, ['checked-out', 'cancelled', 'no-show', 'expired'], true);
+                                            $bk_payment_st = $booking['actual_payment_status'] ?? $booking['payment_status'];
+
+                                            // Money owed back (overpaid / cancelled with payment) -> Refund. A no-show forfeits by
+                                            // policy, but staff may still refund at their discretion while money is held.
+                                            $can_refund = !$bk_deleted && $_perm_pay && (
+                                                $bk_credit > BALANCE_TOLERANCE
+                                                || (in_array($bk_status, ['cancelled', 'no-show', 'expired'], true) && $bk_paid > BALANCE_TOLERANCE)
+                                            );
+                                            // One-click "mark as paid" settles the FULL total, so only when nothing is paid yet.
+                                            $can_mark_paid = in_array($bk_status, ['pending', 'confirmed'], true)
+                                                && !in_array($booking['payment_status'], ['paid', 'partial', 'completed'], true);
+                                            $can_modify = $bk_holding || $bk_inhouse;
+                                            $can_change_room_type = ($bk_holding && !$is_missed_checkin) || $bk_inhouse;
+                                            $can_assign_room = $bk_status === 'confirmed' && !$is_missed_checkin;
+                                            $can_quote = in_array($bk_status, ['pending', 'tentative'], true);
+                                            $can_invoice = in_array($bk_status, ['confirmed', 'checked-in', 'checked-out'], true);
+                                            $can_consolidate = $_perm_pay && ($bk_holding || $bk_inhouse
+                                                || ($bk_status === 'checked-out' && ($bk_due > BALANCE_TOLERANCE || $bk_credit > BALANCE_TOLERANCE)));
+                                            $can_make_tentative = $bk_status === 'pending' && !in_array($booking['payment_status'], ['paid', 'partial'], true);
+                                            $can_delete = $_perm_delete && !$bk_inhouse && $bk_paid <= BALANCE_TOLERANCE && $bk_folio <= BALANCE_TOLERANCE;
                                             ?>
                                             <div class="actions-row">
-                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo (int)$booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format((float)($booking['total_amount'] ?? 0), 2), ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)($booking['status'] ?? ''))), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)($booking['actual_payment_status'] ?? ($booking['payment_status'] ?? '')))), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', this, typeof event !== 'undefined' ? event : null)">
+                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format((float)($booking['total_amount'] ?? 0), 2), ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars($bk_deleted ? 'Deleted' : ucwords(str_replace('-', ' ', $bk_status)), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)$bk_payment_st)), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this, typeof event !== 'undefined' ? event : null)">
                                                     <i class="fas fa-circle-info"></i>
                                                     <span class="label">View details</span>
                                                 </button>
-                                                <?php if ($is_tentative): ?>
-                                                    <button class="quick-action confirm" title="Convert to confirmed" aria-label="Convert to confirmed" onclick="convertTentativeBooking(<?php echo $booking['id']; ?>)">
-                                                        <i class="fas fa-circle-check"></i>
-                                                    </button>
-                                                    <button class="quick-action cancel" title="Cancel booking" aria-label="Cancel booking" onclick="openCancelBookingModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>')">
-                                                        <i class="fas fa-ban"></i>
-                                                    </button>
-                                                <?php elseif ($booking['status'] === 'pending'): ?>
-                                                    <?php
-                                                    // Only show "Make Tentative" button if no payment exists
-                                                    $can_make_tentative = !in_array($booking['payment_status'], ['paid', 'partial'], true);
-                                                    ?>
-                                                    <button class="quick-action confirm" title="Confirm booking" aria-label="Confirm booking" data-help="Confirm Booking|Move this pending booking to Confirmed status so it appears in the confirmed queue and can proceed to check-in." onclick="updateStatus(<?php echo $booking['id']; ?>, 'confirmed')">
-                                                        <i class="fas fa-circle-check"></i>
-                                                    </button>
-                                                    <button class="quick-action cancel" title="Cancel booking" aria-label="Cancel booking" onclick="openCancelBookingModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>')">
-                                                        <i class="fas fa-ban"></i>
-                                                    </button>
-                                                <?php endif; ?>
-                                                <?php if ($booking['status'] === 'confirmed'): ?>
-                                                    <?php
-                                                    $payment_st = $booking['actual_payment_status'] ?? $booking['payment_status'];
-                                                    $is_paid = in_array($payment_st, ['paid', 'partial', 'completed'], true);
-                                                    $room_assigned = !empty($booking['individual_room_id']);
-                                                    // Date-based validation: check-in only allowed on or after check-in date
-                                                    $checkin_date_obj = new DateTime($booking['check_in_date']);
-                                                    $checkin_date_obj->setTime(0, 0, 0);
-                                                    $today_dt = new DateTime('today');
-                                                    $checkin_date_reached = $checkin_date_obj <= $today_dt;
-                                                    // Room assignment is advisory (not a hard block) — auto-assigned bookings have no individual_room_id
-                                                    $can_checkin = $is_paid && $checkin_date_reached;
-                                                    $checkin_error = '';
-                                                    if (!$is_paid) {
-                                                        $checkin_error = 'Cannot check in: booking must have at least partial payment.';
-                                                    } elseif (!$checkin_date_reached) {
-                                                        $checkin_error = 'Cannot check in: Check-in date has not been reached yet (' . htmlspecialchars($booking['check_in_date']) . ').';
-                                                    }
-                                                    // Parameters for modal
-                                                    $guest_name = htmlspecialchars($booking['guest_name'], ENT_QUOTES);
-                                                    $check_in_date = htmlspecialchars($booking['check_in_date'], ENT_QUOTES);
-                                                    $payment_status = $booking['actual_payment_status'] ?? $booking['payment_status'];
-                                                    $room_assigned_bool = $room_assigned ? 'true' : 'false';
-                                                    $booking_status = $booking['status'];
-                                                    ?>
-                                                    <?php if ($is_missed_checkin): ?>
-                                                        <?php if ($_perm_checkin): ?>
-                                                            <button type="button" class="quick-action checkin--urgent <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" <?php if (!$can_checkin): ?> title="<?php echo htmlspecialchars($checkin_error); ?>" <?php else: ?> title="Late check-in" <?php endif; ?> aria-label="Late check-in">
-                                                                <i class="fas fa-right-to-bracket"></i>
-                                                            </button>
-                                                        <?php endif; ?>
-                                                        <?php if ($_perm_cancel): ?>
-                                                            <button type="button" class="quick-action noshow--urgent" data-action="no-show" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" title="Mark no-show" aria-label="Mark no-show">
-                                                                <i class="fas fa-user-slash"></i>
-                                                            </button>
-                                                        <?php endif; ?>
-                                                    <?php else: ?>
-                                                        <?php if ($_perm_checkin): ?>
-                                                            <button type="button" class="quick-action checkin <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-guest-name="<?php echo $guest_name; ?>" data-check-in-date="<?php echo $check_in_date; ?>" data-payment-status="<?php echo $payment_status; ?>" data-room-assigned="<?php echo $room_assigned_bool; ?>" data-booking-status="<?php echo $booking_status; ?>" data-help="Check In Guest|Check the guest into their room now. Requires at least partial payment and the check-in date to have arrived." <?php if (!$can_checkin): ?> title="<?php echo htmlspecialchars($checkin_error); ?>" <?php else: ?> title="Check in guest" <?php endif; ?> aria-label="Check in guest">
-                                                                <i class="fas fa-right-to-bracket"></i>
-                                                            </button>
-                                                        <?php endif; ?>
+
+                                                <?php if ($bk_deleted): ?>
+                                                    <?php if ($_perm_delete): ?>
+                                                        <button type="button" class="quick-action confirm" title="Restore booking" aria-label="Restore booking" data-help="Restore Booking|Bring this deleted booking back with the status it had before. If it held a room, the room type must still be free for its dates." onclick="restoreDeletedBooking(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)">
+                                                            <i class="fas fa-trash-arrow-up"></i>
+                                                        </button>
                                                     <?php endif; ?>
-                                                    <?php if ($_perm_cancel): ?>
-                                                        <button class="quick-action cancel" title="Cancel booking" aria-label="Cancel booking" onclick="openCancelBookingModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>')">
-                                                            <i class="fas fa-ban"></i>
+                                                <?php else: ?>
+
+                                                <?php /* ── Reservation stage ── */ ?>
+                                                <?php if ($is_tentative): ?>
+                                                    <button class="quick-action confirm" title="Convert to confirmed" aria-label="Convert to confirmed" onclick="convertTentativeBooking(<?php echo $bk_id; ?>)">
+                                                        <i class="fas fa-circle-check"></i>
+                                                    </button>
+                                                <?php elseif ($bk_status === 'pending'): ?>
+                                                    <button class="quick-action confirm" title="Confirm booking" aria-label="Confirm booking" data-help="Confirm Booking|Move this pending booking to Confirmed status so it appears in the confirmed queue and can proceed to check-in." onclick="updateStatus(<?php echo $bk_id; ?>, 'confirmed')">
+                                                        <i class="fas fa-circle-check"></i>
+                                                    </button>
+                                                <?php elseif ($bk_status === 'confirmed'): ?>
+                                                    <?php
+                                                    $is_paid = in_array($bk_payment_st, ['paid', 'partial', 'completed'], true);
+                                                    $checkin_date_reached = (string)$booking['check_in_date'] <= $today_str;
+                                                    $can_checkin = $is_paid && $checkin_date_reached;
+                                                    $checkin_error = !$is_paid
+                                                        ? 'Cannot check in: booking must have at least partial payment.'
+                                                        : (!$checkin_date_reached ? 'Cannot check in: arrival date is ' . $booking['check_in_date'] . '.' : '');
+                                                    $room_assigned_bool = !empty($booking['individual_room_id']) ? 'true' : 'false';
+                                                    $checkin_attrs = 'data-booking-id="' . $bk_id . '" data-booking-ref="' . $bk_ref . '" data-guest-name="' . $bk_guest
+                                                        . '" data-check-in-date="' . htmlspecialchars($booking['check_in_date'], ENT_QUOTES) . '" data-payment-status="' . htmlspecialchars((string)$bk_payment_st, ENT_QUOTES)
+                                                        . '" data-room-assigned="' . $room_assigned_bool . '" data-booking-status="confirmed"';
+                                                    ?>
+                                                    <?php if ($_perm_checkin && $checkin_date_reached): /* arrivals only from the arrival date */ ?>
+                                                        <button type="button" class="quick-action <?php echo $is_missed_checkin ? 'checkin--urgent' : 'checkin'; ?> <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" <?php echo $checkin_attrs; ?> title="<?php echo htmlspecialchars($can_checkin ? ($is_missed_checkin ? 'Late check-in' : 'Check in guest') : $checkin_error, ENT_QUOTES); ?>" aria-label="<?php echo $is_missed_checkin ? 'Late check-in' : 'Check in guest'; ?>" data-help="Check In Guest|Check the guest into their room. Requires at least partial payment and the arrival date to have come.">
+                                                            <i class="fas fa-right-to-bracket"></i>
+                                                        </button>
+                                                    <?php endif; ?>
+                                                    <?php if ($is_missed_checkin && $_perm_cancel): ?>
+                                                        <button type="button" class="quick-action noshow--urgent" data-action="no-show" <?php echo $checkin_attrs; ?> title="Mark no-show" aria-label="Mark no-show">
+                                                            <i class="fas fa-user-slash"></i>
                                                         </button>
                                                     <?php endif; ?>
                                                 <?php endif; ?>
-                                                <?php if ($booking['status'] === 'checked-in'): ?>
-                                                    <?php
-                                                    // Date-based validation for check-out (allow early checkout)
-                                                    $checkout_date_obj = new DateTime($booking['check_out_date']);
-                                                    $checkout_date_obj->setTime(0, 0, 0);
-                                                    $today_dt_checkout = new DateTime('today');
-                                                    $tomorrow_dt_checkout = (clone $today_dt_checkout)->modify('+1 day');
-                                                    // Allow checkout if check-out date is today, in the past, or max 1 day in the future (early checkout)
-                                                    $checkout_allowed = $checkout_date_obj <= $tomorrow_dt_checkout;
-                                                    ?>
-                                                    <?php if ($is_overdue_checkout): ?>
-                                                        <?php if ($_perm_checkout): ?>
-                                                            <button class="quick-action checkout--urgent" <?php if (!$checkout_allowed): ?>disabled title="Check-out date is too far in the future" <?php else: ?>title="Checkout now" <?php endif; ?> aria-label="Checkout now" onclick="checkoutBooking(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')">
-                                                                <i class="fas fa-right-from-bracket"></i>
-                                                            </button>
-                                                            <button class="quick-action extend" title="Extend stay" aria-label="Extend stay" onclick="openExtendStayModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo $booking['check_out_date']; ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>')">
-                                                                <i class="fas fa-calendar-plus"></i>
-                                                            </button>
-                                                        <?php endif; ?>
-                                                    <?php else: ?>
-                                                        <?php if ($_perm_checkout): ?>
-                                                            <button class="quick-action checkout" <?php if (!$checkout_allowed): ?>disabled title="Check-out date is too far in the future" <?php else: ?>title="Checkout guest" <?php endif; ?> aria-label="Checkout guest" data-help="Checkout Guest|Check the guest out and close their stay. Available from the check-out date up to one day early." onclick="checkoutBooking(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')">
-                                                                <i class="fas fa-right-from-bracket"></i>
-                                                            </button>
-                                                        <?php endif; ?>
-                                                        <!-- Note: Undo check-in is available via the More (⋯) menu -->
-                                                    <?php endif; ?>
-                                                    <!-- Note: Cancel button is hidden for checked-in bookings -->
+                                                <?php if ($bk_holding && $_perm_cancel): ?>
+                                                    <button class="quick-action cancel" title="Cancel booking" aria-label="Cancel booking" onclick="openCancelBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>)">
+                                                        <i class="fas fa-ban"></i>
+                                                    </button>
                                                 <?php endif; ?>
-                                                <?php
-                                                // One-click "mark as paid" records the FULL total as settled, so it is
-                                                // only valid when nothing has been paid yet. A partial booking still has
-                                                // an outstanding balance — marking it paid here would silently discard
-                                                // that balance, so those must go through Record Payment / Consolidation
-                                                // in the More menu instead. Also hide for tentative and all final states.
-                                                $can_mark_paid = in_array($booking['status'], ['pending', 'confirmed'], true)
-                                                    && !in_array($booking['payment_status'], ['paid', 'partial', 'completed'], true);
-                                                ?>
+
+                                                <?php /* ── In-house ── */ ?>
+                                                <?php if ($bk_inhouse && $_perm_checkout): ?>
+                                                    <?php
+                                                    // Checkout any day: a late or early departure opens the settlement window
+                                                    // (extra nights charged / waived, unused nights refunded / kept).
+                                                    $is_early_departure = (string)$booking['check_out_date'] > $today_str;
+                                                    ?>
+                                                    <button class="quick-action <?php echo $is_overdue_checkout ? 'checkout--urgent' : 'checkout'; ?>" title="<?php echo $is_overdue_checkout ? 'Checkout now (overdue)' : ($is_early_departure ? 'Early checkout (settles unused nights)' : 'Checkout guest'); ?>" aria-label="Checkout guest" data-help="Checkout Guest|Settle the folio and close the stay. Leaving late or early opens the settlement window for the extra or unused nights." onclick="checkoutBooking(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)">
+                                                        <i class="fas fa-right-from-bracket"></i>
+                                                    </button>
+                                                    <button class="quick-action extend" title="Extend stay" aria-label="Extend stay" onclick="openExtendStayModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_js($booking['check_out_date']); ?>, <?php echo $bk_guest_js; ?>)">
+                                                        <i class="fas fa-calendar-plus"></i>
+                                                    </button>
+                                                <?php endif; ?>
+
+                                                <?php /* ── Money ── */ ?>
                                                 <?php if ($can_mark_paid && $_perm_pay): ?>
-                                                    <button class="quick-action paid" title="Record payment as paid" aria-label="Record payment as paid" data-help="Record Payment as Paid|Mark the full outstanding balance as paid in one click. Only available before any payment has been recorded — use Record Payment in the More menu for partial payments." onclick="updatePayment(<?php echo $booking['id']; ?>, 'paid')">
+                                                    <button class="quick-action paid" title="Record payment as paid" aria-label="Record payment as paid" data-help="Record Payment as Paid|Mark the full outstanding balance as paid in one click. Only available before any payment has been recorded — use Consolidation in the More menu for partial payments." onclick="updatePayment(<?php echo $bk_id; ?>, 'paid')">
                                                         <i class="fas fa-money-bill-wave"></i>
                                                     </button>
                                                 <?php endif; ?>
-                                                <?php
-                                                // Modify (any non-final status)
-                                                $can_modify = !in_array($booking['status'], ['checked-out', 'cancelled'], true);
-                                                // Refund (paid bookings that ended without service: cancelled, no-show, or partial+refundable)
-                                                $is_paid_for_refund = in_array($booking['payment_status'], ['paid', 'partial', 'completed'], true);
-                                                $can_refund = $is_paid_for_refund && in_array($booking['status'], ['cancelled', 'no-show', 'checked-out'], true);
-                                                ?>
                                                 <?php if ($can_refund): ?>
-                                                    <button class="quick-action refund" title="Refund payment" aria-label="Refund payment" onclick="openRefundForBooking(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')">
+                                                    <button class="quick-action refund" title="Refund payment" aria-label="Refund payment" onclick="openRefundForBooking(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)">
                                                         <i class="fas fa-money-bill-transfer"></i>
                                                     </button>
                                                 <?php endif; ?>
+                                                <?php endif; /* not deleted */ ?>
+
                                                 <div class="actions-more">
                                                     <button type="button" class="quick-action actions-more-toggle" title="More actions" aria-label="More actions" onclick="toggleActionsMore(this, typeof event !== 'undefined' ? event : null)">
                                                         <i class="fas fa-ellipsis-vertical"></i>
                                                         <span class="label">More</span>
                                                     </button>
                                                     <div class="actions-more-menu">
-                                                        <a href="booking-details.php?id=<?php echo $booking['id']; ?>"><i class="fas fa-circle-info"></i> Full details</a>
-                                                        <?php if ($_perm_edit): ?>
-                                                            <a href="edit-booking.php?id=<?php echo $booking['id']; ?>"><i class="fas fa-pen-to-square"></i> Full edit page</a>
-                                                        <?php endif; ?>
-                                                        <?php if ($can_modify && $_perm_edit && $_perm_quick_modify): ?>
-                                                            <button type="button" data-action="open-modify" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>"><i class="fas fa-sliders"></i> Quick modify</button>
-                                                        <?php endif; ?>
-                                                        <hr class="menu-divider">
-                                                        <?php if ($booking['status'] === 'confirmed'): ?>
-                                                            <?php if (!$booking['individual_room_id']): ?>
-                                                                <button type="button" data-action="assign-room" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-check-in="<?php echo htmlspecialchars($booking['check_in_date']); ?>" data-check-out="<?php echo htmlspecialchars($booking['check_out_date']); ?>" data-room-id="<?php echo $booking['room_id']; ?>"><i class="fas fa-key"></i> Assign room</button>
-                                                            <?php else: ?>
-                                                                <button type="button" data-action="assign-room" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-check-in="<?php echo htmlspecialchars($booking['check_in_date']); ?>" data-check-out="<?php echo htmlspecialchars($booking['check_out_date']); ?>" data-room-id="<?php echo $booking['room_id']; ?>"><i class="fas fa-right-left"></i> Change room</button>
+                                                        <a href="booking-details.php?id=<?php echo $bk_id; ?>"><i class="fas fa-circle-info"></i> Full details</a>
+                                                        <?php if (!$bk_deleted): ?>
+                                                            <?php if ($_perm_edit): ?>
+                                                                <a href="edit-booking.php?id=<?php echo $bk_id; ?>"><i class="fas fa-pen-to-square"></i> <?php echo $bk_closed ? 'Correct guest details' : 'Full edit page'; ?></a>
                                                             <?php endif; ?>
-                                                            <?php if (!$is_missed_checkin): ?>
-                                                                <button type="button" data-action="upgrade-room" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-current-room-id="<?php echo $booking['room_id']; ?>" data-current-room-name="<?php echo htmlspecialchars($booking['room_name'], ENT_QUOTES); ?>" data-guest-name="<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>" data-check-in="<?php echo htmlspecialchars($booking['check_in_date'], ENT_QUOTES); ?>" data-check-out="<?php echo htmlspecialchars($booking['check_out_date'], ENT_QUOTES); ?>" data-total-amount="<?php echo $booking['total_amount']; ?>" data-payment-status="<?php echo $booking['payment_status']; ?>"><i class="fas fa-arrow-up-right-dots"></i> Upgrade room</button>
+                                                            <?php if ($can_modify && $_perm_edit && $_perm_quick_modify): ?>
+                                                                <button type="button" data-action="open-modify" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>"><i class="fas fa-sliders"></i> Quick modify</button>
                                                             <?php endif; ?>
-                                                        <?php endif; ?>
-                                                        <?php if ($booking['status'] === 'pending' && isset($can_make_tentative) && $can_make_tentative): ?>
-                                                            <button type="button" data-action="make-tentative" data-booking-id="<?php echo $booking['id']; ?>" data-booking-ref="<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>" data-tentative-type="make_tentative"><i class="fas fa-hourglass-half"></i> Make tentative</button>
-                                                        <?php endif; ?>
-                                                        <?php if ($booking['status'] === 'checked-in' && !$is_overdue_checkout && $_perm_checkin): ?>
-                                                            <button type="button" onclick="updateStatus(<?php echo $booking['id']; ?>, 'cancel-checkin')"><i class="fas fa-rotate-left"></i> Undo check-in</button>
-                                                        <?php endif; ?>
-                                                        <?php if ($booking['status'] === 'checked-in' && $is_overdue_checkout && $_is_admin_user): ?>
-                                                            <button type="button" onclick="openAdminChangeDateModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo $booking['check_out_date']; ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>')"><i class="fas fa-calendar-pen"></i> Change checkout date</button>
-                                                        <?php endif; ?>
-                                                        <?php if ($_perm_pay && !in_array($booking['status'], ['cancelled', 'no-show'], true)): ?>
-                                                            <button type="button" onclick="openConsolidationModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')"><i class="fas fa-scale-balanced"></i> Consolidation</button>
-                                                        <?php endif; ?>
+
+                                                            <?php if ($can_assign_room || $can_change_room_type || $can_make_tentative || ($bk_inhouse && ($_perm_checkin || $_is_admin_user))): ?>
+                                                                <hr class="menu-divider">
+                                                            <?php endif; ?>
+                                                            <?php if ($can_assign_room && $_perm_edit): ?>
+                                                                <button type="button" data-action="assign-room" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-check-in="<?php echo htmlspecialchars($booking['check_in_date'], ENT_QUOTES); ?>" data-check-out="<?php echo htmlspecialchars($booking['check_out_date'], ENT_QUOTES); ?>" data-room-id="<?php echo (int)$booking['room_id']; ?>"><i class="fas <?php echo empty($booking['individual_room_id']) ? 'fa-key' : 'fa-right-left'; ?>"></i> <?php echo empty($booking['individual_room_id']) ? 'Assign room' : 'Change room'; ?></button>
+                                                            <?php endif; ?>
+                                                            <?php if ($can_change_room_type && $_perm_edit): ?>
+                                                                <button type="button" data-action="upgrade-room" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-booking-status="<?php echo htmlspecialchars($bk_status, ENT_QUOTES); ?>"><i class="fas fa-arrow-up-right-dots"></i> Upgrade / change room type</button>
+                                                            <?php endif; ?>
+                                                            <?php if ($can_make_tentative): ?>
+                                                                <button type="button" data-action="make-tentative" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-tentative-type="make_tentative"><i class="fas fa-hourglass-half"></i> Make tentative</button>
+                                                            <?php endif; ?>
+                                                            <?php if ($bk_inhouse && !$is_overdue_checkout && $_perm_checkin): ?>
+                                                                <button type="button" onclick="updateStatus(<?php echo $bk_id; ?>, 'cancel-checkin')"><i class="fas fa-rotate-left"></i> Undo check-in</button>
+                                                            <?php endif; ?>
+                                                            <?php if ($bk_inhouse && $is_overdue_checkout && $_is_admin_user): ?>
+                                                                <button type="button" onclick="openAdminChangeDateModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_js($booking['check_out_date']); ?>, <?php echo $bk_guest_js; ?>)"><i class="fas fa-calendar-pen"></i> Change checkout date</button>
+                                                            <?php endif; ?>
+                                                            <?php if ($can_consolidate): ?>
+                                                                <button type="button" onclick="openConsolidationModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)"><i class="fas fa-scale-balanced"></i> Payments &amp; balance</button>
+                                                            <?php endif; ?>
+
+                                                            <hr class="menu-divider">
+                                                            <button type="button" onclick="openResendEmailModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_js($bk_status); ?>, <?php echo ($is_missed_checkin || $is_overdue_checkout) ? 'true' : 'false'; ?>)"><i class="fas fa-envelope"></i> Resend email</button>
+                                                            <?php if ($can_invoice): ?>
+                                                                <button type="button" onclick="sendInvoiceEmail(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this)"><i class="fas fa-file-invoice"></i> Send invoice</button>
+                                                            <?php endif; ?>
+                                                            <?php if ($can_quote): ?>
+                                                                <button type="button" onclick="openBookingListQuoteModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo $bk_js($booking['guest_email'] ?? ''); ?>)"><i class="fas fa-file-invoice-dollar"></i> Send quotation</button>
+                                                                <?php if (!empty($booking['guest_phone'])): ?>
+                                                                    <button type="button" onclick="openBookingListQuotationWhatsApp(<?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo $bk_js($booking['guest_phone']); ?>)"><i class="fab fa-whatsapp"></i> Quotation via WhatsApp</button>
+                                                                <?php endif; ?>
+                                                            <?php endif; ?>
+                                                        <?php endif; /* not deleted */ ?>
+
                                                         <hr class="menu-divider">
-                                                        <button type="button" onclick="openResendEmailModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['status']); ?>', <?php echo ($is_missed_checkin || $is_overdue_checkout) ? 'true' : 'false'; ?>)"><i class="fas fa-envelope"></i> Resend email</button>
-                                                        <button type="button" onclick="sendInvoiceEmail(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', this)"><i class="fas fa-file-invoice"></i> Send invoice</button>
-                                                        <button type="button" onclick="openBookingListQuoteModal(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_email'] ?? '', ENT_QUOTES); ?>')"><i class="fas fa-file-invoice-dollar"></i> Send quotation</button>
-                                                        <?php if (!empty($booking['guest_phone'])): ?>
-                                                            <button type="button" onclick="openBookingListQuotationWhatsApp('<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_phone'], ENT_QUOTES); ?>')"><i class="fab fa-whatsapp"></i> Send via WhatsApp</button>
+                                                        <button type="button" onclick="viewBookingAuditLog(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)"><i class="fas fa-clock-rotate-left"></i> Audit log</button>
+                                                        <?php if ($bk_deleted && $_perm_delete): ?>
+                                                            <button type="button" onclick="restoreDeletedBooking(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)"><i class="fas fa-trash-arrow-up"></i> Restore booking</button>
+                                                        <?php elseif ($can_delete): ?>
+                                                            <button type="button" class="menu-item--danger" onclick="deleteBookingRecord(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo $bk_js($bk_status); ?>)"><i class="fas fa-trash-can"></i> Delete booking</button>
                                                         <?php endif; ?>
-                                                        <hr class="menu-divider">
-                                                        <button type="button" onclick="viewBookingAuditLog(<?php echo $booking['id']; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>')"><i class="fas fa-clock-rotate-left"></i> Audit log</button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -4415,6 +4269,7 @@ $today_str = $today->format('Y-m-d');
                 'checked-out': 'Checked Out Bookings',
                 'cancelled': 'Cancelled Bookings',
                 'no-show': 'No-Show Bookings',
+                'deleted': 'Deleted Bookings',
                 'paid': 'Paid Bookings',
                 'unpaid': 'Unpaid Bookings',
                 'today-bookings': "Today's Bookings",
@@ -4438,6 +4293,7 @@ $today_str = $today->format('Y-m-d');
             if (tabName === 'checked-out') newIcon = 'fa-sign-out-alt';
             if (tabName === 'cancelled') newIcon = 'fa-times-circle';
             if (tabName === 'no-show') newIcon = 'fa-user-slash';
+            if (tabName === 'deleted') newIcon = 'fa-trash-can';
             if (tabName === 'paid') newIcon = 'fa-dollar-sign';
             if (tabName === 'unpaid') newIcon = 'fa-exclamation-circle';
             if (tabName === 'today-bookings') newIcon = 'fa-calendar-day';
@@ -4484,6 +4340,9 @@ $today_str = $today->format('Y-m-d');
             },
             'no-show': {
                 filter_status: 'no-show'
+            },
+            'deleted': {
+                filter_status: 'deleted'
             },
             'paid': {
                 filter: 'paid'
@@ -6046,73 +5905,87 @@ $today_str = $today->format('Y-m-d');
         </div>
     </div>
 
-    <!-- Upgrade Room Type Modal -->
-    <div id="upgradeRoomModal" class="modal-overlay" aria-hidden="true">
-        <div class="modal-content" style="max-width: 600px;">
+    <!-- Room type change (upgrade / downgrade) modal -->
+    <div id="upgradeRoomModal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="upgradeRoomTitle">
+        <div class="modal-content" style="max-width: 640px;">
             <div class="modal-header">
-                <h3><i class="fas fa-arrow-up"></i> Upgrade Room Type</h3>
+                <h3 id="upgradeRoomTitle"><i class="fas fa-arrow-up-right-dots"></i> Upgrade / change room type</h3>
                 <button type="button" class="close-modal" onclick="closeUpgradeRoomModal()" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body">
+                <div id="rc_summary" class="rc-summary">Loading booking&hellip;</div>
+
                 <div class="form-group">
-                    <label><i class="fas fa-hashtag"></i> Booking Reference:</label>
-                    <input type="text" id="upgrade_booking_ref" class="form-control" readonly style="background: #f5f5f5;">
-                </div>
-                <div class="form-group">
-                    <label><i class="fas fa-user"></i> Guest Name:</label>
-                    <input type="text" id="upgrade_guest_name" class="form-control" readonly style="background: #f5f5f5;">
-                </div>
-                <div class="form-group">
-                    <label><i class="fas fa-bed"></i> Current Room Type:</label>
-                    <input type="text" id="upgrade_current_room" class="form-control" readonly style="background: #f5f5f5;">
-                </div>
-                <div class="form-group">
-                    <label><i class="fas fa-calendar"></i> Dates:</label>
-                    <input type="text" id="upgrade_dates" class="form-control" readonly style="background: #f5f5f5;">
-                </div>
-                <div class="form-group">
-                    <label><i class="fas fa-dollar-sign"></i> Current Total:</label>
-                    <input type="text" id="upgrade_current_total" class="form-control" readonly style="background: #f5f5f5;">
-                </div>
-                <div class="form-group">
-                    <label for="upgrade_new_room"><i class="fas fa-arrow-up"></i> Select New Room Type:</label>
+                    <label for="upgrade_new_room"><i class="fas fa-bed"></i> Move to room type</label>
                     <select id="upgrade_new_room" class="form-control" required>
-                        <option value="">-- Select Room Type --</option>
+                        <option value="">Loading room types&hellip;</option>
                     </select>
-                    <small style="color: #666;">Choose a higher-tier room type to upgrade the booking</small>
+                    <small id="rc_type_hint" class="rc-hint">Rooms that are full for these dates, or too small for the party, cannot be chosen.</small>
                 </div>
-                <div id="upgrade_price_preview" style="background: #e7f3ff; padding: 12px; border-radius: 6px; margin: 16px 0; display: none;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span style="font-weight: bold; color: #666;">New Total:</span>
-                        <span id="upgrade_new_total" style="color: #333; font-weight: bold;">-</span>
+
+                <div id="rc_detail" hidden>
+                    <div id="rc_direction" class="rc-direction"></div>
+
+                    <fieldset class="rc-pricing">
+                        <legend>Billing</legend>
+                        <label class="rc-option">
+                            <input type="radio" name="rc_pricing" value="charge" checked>
+                            <span><strong id="rc_charge_label">Charge the difference</strong><br><small id="rc_charge_hint"></small></span>
+                        </label>
+                        <label class="rc-option" id="rc_keep_wrap">
+                            <input type="radio" name="rc_pricing" value="keep">
+                            <span><strong id="rc_keep_label">No charge</strong><br><small id="rc_keep_hint"></small></span>
+                        </label>
+                    </fieldset>
+
+                    <div class="form-group">
+                        <label for="rc_reason"><i class="fas fa-circle-question"></i> Reason</label>
+                        <select id="rc_reason" class="form-control" required></select>
                     </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: bold; color: #666;">Price Difference:</span>
-                        <span id="upgrade_price_diff" style="color: #666;">-</span>
+                    <div class="form-group">
+                        <label for="rc_note"><i class="fas fa-comment"></i> Note <span id="rc_note_req" class="rc-req">(required)</span></label>
+                        <textarea id="rc_note" class="form-control" rows="2" maxlength="500" placeholder="Who authorised it and why, e.g. 'Room 12 out of order - moved by duty manager'"></textarea>
                     </div>
-                </div>
-                <div class="form-group">
-                    <label style="display: flex; align-items: center; gap: 8px;">
+
+                    <div class="rc-totals">
+                        <div><span>Current bill (room)</span><strong id="rc_current_total">-</strong></div>
+                        <div><span>New bill (room)</span><strong id="rc_new_total">-</strong></div>
+                        <div><span>Change</span><strong id="rc_delta">-</strong></div>
+                    </div>
+                    <p id="rc_accounting_note" class="rc-hint"></p>
+
+                    <label class="rc-option rc-option--inline">
                         <input type="checkbox" id="upgrade_send_email" value="1" checked>
-                        <span><i class="fas fa-envelope"></i> Send upgrade confirmation email to guest</span>
+                        <span><i class="fas fa-envelope"></i> Email the guest about the change</span>
                     </label>
                 </div>
-                <div class="form-group" style="background: #fff8e1; padding: 12px; border-radius: 8px;">
-                    <p style="margin: 0; color: #7E684B; font-size: 13px;">
-                        <i class="fas fa-info-circle"></i>
-                        Upgrading will recalculate the booking total based on the new room type price.
-                        If the price increases, the guest will need to pay the difference upon check-in.
-                    </p>
-                </div>
                 <input type="hidden" id="upgrade_booking_id">
-                <input type="hidden" id="upgrade_current_room_id">
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeUpgradeRoomModal()">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="submitUpgradeRoom()"><i class="fas fa-arrow-up"></i> Upgrade Room</button>
+                <button type="button" class="btn btn-primary" id="rc_submit" onclick="submitUpgradeRoom()" disabled><i class="fas fa-check"></i> Apply room change</button>
             </div>
         </div>
     </div>
+    <style>
+        #upgradeRoomModal .rc-summary { background: var(--admin-surface-muted, #f6f4f0); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 13px; line-height: 1.55; }
+        #upgradeRoomModal .rc-hint { color: #666; font-size: 12px; display: block; margin-top: 4px; }
+        #upgradeRoomModal .rc-direction { border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; font-weight: 600; }
+        #upgradeRoomModal .rc-direction--upgrade { background: #e8f5e9; color: #1b5e20; }
+        #upgradeRoomModal .rc-direction--downgrade { background: #fff4e5; color: #8a4b00; }
+        #upgradeRoomModal .rc-direction--same { background: #eef3ff; color: #1f2d6b; }
+        #upgradeRoomModal .rc-pricing { border: 1px solid #e3ddd3; border-radius: 8px; padding: 8px 12px 4px; margin: 0 0 12px; }
+        #upgradeRoomModal .rc-pricing legend { font-size: 12px; font-weight: 600; padding: 0 4px; }
+        #upgradeRoomModal .rc-option { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; font-size: 13px; cursor: pointer; }
+        #upgradeRoomModal .rc-option input { margin-top: 3px; }
+        #upgradeRoomModal .rc-option--inline { align-items: center; margin-top: 10px; }
+        #upgradeRoomModal .rc-option.is-disabled { opacity: .55; cursor: not-allowed; }
+        #upgradeRoomModal .rc-req { color: #b42318; font-weight: 400; font-size: 12px; }
+        #upgradeRoomModal .rc-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; background: #faf8f4; border-radius: 8px; padding: 10px 12px; }
+        #upgradeRoomModal .rc-totals div { display: flex; flex-direction: column; font-size: 12px; color: #666; }
+        #upgradeRoomModal .rc-totals strong { font-size: 15px; color: #222; }
+        @media (max-width: 520px) { #upgradeRoomModal .rc-totals { grid-template-columns: 1fr; } }
+    </style>
 
     <script>
         // Ensure setBookingPageModalOpen is available early (full definition also lives in
@@ -7422,177 +7295,259 @@ $today_str = $today->format('Y-m-d');
             if (modal) setBookingPageModalOpen(modal, false);
         }
 
-        // Upgrade Room Type Modal Functions
-        let availableRoomsForUpgrade = [];
+        // ── Room type change (upgrade / downgrade) ───────────────────────────────
+        // Options, quotes and the accounting effect come from the server (room_change_options), so the
+        // modal never re-derives prices client-side. Requests go through postBookingAction(), which adds
+        // the CSRF token (the old picker posted without it, the server rejected it and the stale-token
+        // guard reloaded the page: that was the "modal closes by itself" bug).
+        let roomChangeData = null;
 
-        function openUpgradeRoomModal(bookingId, bookingRef, currentRoomId, currentRoomName, guestName, checkIn, checkOut, totalAmount, paymentStatus) {
+        function rcMoney(v) {
+            const cur = (roomChangeData && roomChangeData.currency) || 'MWK';
+            const n = Number(v || 0);
+            return cur + ' ' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function rcEsc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+        }
+
+        function openUpgradeRoomModal(bookingId) {
             const modal = document.getElementById('upgradeRoomModal');
-            setBookingPageModalOpen(modal, true);
+            roomChangeData = null;
             document.getElementById('upgrade_booking_id').value = bookingId;
-            document.getElementById('upgrade_booking_ref').value = bookingRef;
-            document.getElementById('upgrade_guest_name').value = guestName;
-            document.getElementById('upgrade_current_room').value = currentRoomName;
-            document.getElementById('upgrade_current_room_id').value = currentRoomId;
-            document.getElementById('upgrade_current_total').value = 'K ' + parseFloat(totalAmount).toLocaleString();
+            document.getElementById('rc_summary').textContent = 'Loading booking…';
+            document.getElementById('rc_detail').hidden = true;
+            document.getElementById('rc_submit').disabled = true;
+            document.getElementById('rc_note').value = '';
+            const select = document.getElementById('upgrade_new_room');
+            select.innerHTML = '<option value="">Loading room types…</option>';
+            setBookingPageModalOpen(modal, true);
 
-            const checkInDate = new Date(checkIn);
-            const checkOutDate = new Date(checkOut);
-            document.getElementById('upgrade_dates').value =
-                checkInDate.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric'
-                }) +
-                ' - ' +
-                checkOutDate.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric'
+            const fd = new FormData();
+            fd.append('action', 'room_change_options');
+            fd.append('booking_id', bookingId);
+            postBookingAction(fd, 'Could not load room types.')
+                .then(res => {
+                    roomChangeData = res.data;
+                    const b = roomChangeData.booking;
+                    const inHouse = b.status === 'checked-in';
+                    document.getElementById('rc_summary').innerHTML =
+                        '<strong>' + rcEsc(b.reference) + '</strong> &middot; ' + rcEsc(b.guest_name) + '<br>' +
+                        'Now: <strong>' + rcEsc(b.room_name) + '</strong> &middot; ' + rcEsc(b.check_in) + ' to ' + rcEsc(b.check_out) +
+                        ' (' + b.nights + ' night' + (b.nights === 1 ? '' : 's') + ', ' + b.guests + ' guest' + (b.guests === 1 ? '' : 's') + ')' +
+                        (inHouse ? '<br><em>Guest is in-house: the move applies from tonight (' + rcEsc(b.from) + '); nights already stayed keep the booked rate.</em>' : '');
+                    select.innerHTML = '<option value="">-- Choose a room type --</option>';
+                    let any = false;
+                    roomChangeData.options.forEach(o => {
+                        const q = o.quote;
+                        const tag = q.direction === 'upgrade' ? 'Upgrade' : (q.direction === 'downgrade' ? 'Downgrade' : 'Same tier');
+                        const opt = document.createElement('option');
+                        opt.value = o.id;
+                        opt.disabled = !o.available;
+                        opt.textContent = o.name + ' — ' + tag + (o.available ? '' : ' (' + o.unavailable_reason + ')');
+                        select.appendChild(opt);
+                        if (o.available) any = true;
+                    });
+                    if (!any) {
+                        document.getElementById('rc_type_hint').textContent = 'No other room type is free for this stay.';
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('rc_summary').textContent = err.message || 'Could not load room types.';
+                    select.innerHTML = '<option value="">Unavailable</option>';
                 });
-
-            // Load available room types for upgrade
-            loadRoomTypesForUpgrade(currentRoomId, checkIn, checkOut);
         }
 
         function closeUpgradeRoomModal() {
-            const modal = document.getElementById('upgradeRoomModal');
-            setBookingPageModalOpen(modal, false);
-            document.getElementById('upgrade_new_room').innerHTML = '<option value="">-- Select Room Type --</option>';
-            document.getElementById('upgrade_price_preview').style.display = 'none';
-            availableRoomsForUpgrade = [];
+            setBookingPageModalOpen(document.getElementById('upgradeRoomModal'), false);
+            roomChangeData = null;
         }
 
-        function loadRoomTypesForUpgrade(currentRoomId, checkIn, checkOut) {
-            const roomSelect = document.getElementById('upgrade_new_room');
-            roomSelect.innerHTML = '<option value="">Loading room types...</option>';
-
-            // Fetch all active room types
-            fetch(window.location.href, {
-                    method: 'POST',
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: new URLSearchParams({
-                        'action': 'get_all_room_types_for_upgrade',
-                        'current_room_id': currentRoomId,
-                        'check_in': checkIn,
-                        'check_out': checkOut
-                    })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success && data.data && data.data.length > 0) {
-                        availableRoomsForUpgrade = data.data;
-                        roomSelect.innerHTML = '<option value="">-- Select Room Type --</option>';
-                        data.data.forEach(room => {
-                            const option = document.createElement('option');
-                            option.value = room.id;
-                            option.textContent = room.name + ' (K ' + parseFloat(room.price_per_night).toLocaleString() + '/night)';
-                            option.dataset.price = room.price_per_night;
-                            option.dataset.name = room.name;
-                            roomSelect.appendChild(option);
-                        });
-                    } else {
-                        roomSelect.innerHTML = '<option value="">No upgrade options available</option>';
-                    }
-                })
-                .catch(() => {
-                    roomSelect.innerHTML = '<option value="">Error loading room types</option>';
-                });
-
-            // Add change event listener for price preview
-            roomSelect.onchange = function() {
-                updateUpgradePricePreview();
-            };
+        function rcSelectedOption() {
+            if (!roomChangeData) return null;
+            const id = parseInt(document.getElementById('upgrade_new_room').value, 10);
+            return roomChangeData.options.find(o => o.id === id) || null;
         }
 
-        function updateUpgradePricePreview() {
-            const roomSelect = document.getElementById('upgrade_new_room');
-            const selectedOption = roomSelect.options[roomSelect.selectedIndex];
-            const previewDiv = document.getElementById('upgrade_price_preview');
-
-            if (!selectedOption || !selectedOption.value) {
-                previewDiv.style.display = 'none';
+        function rcRender() {
+            const o = rcSelectedOption();
+            const detail = document.getElementById('rc_detail');
+            const submit = document.getElementById('rc_submit');
+            if (!o || !o.available) {
+                detail.hidden = true;
+                submit.disabled = true;
                 return;
             }
+            const q = o.quote;
+            const b = roomChangeData.booking;
+            const canKeep = !!roomChangeData.can_keep_price;
+            const dir = q.direction;
+            const perNight = Math.abs(q.new_rack - q.old_rack);
+            const nightsTxt = q.affected + ' night' + (q.affected === 1 ? '' : 's');
 
-            const currentTotal = parseFloat(document.getElementById('upgrade_current_total').value.replace(/[^0-9.-]+/g, ''));
-            const newPricePerNight = parseFloat(selectedOption.dataset.price);
+            const dirEl = document.getElementById('rc_direction');
+            dirEl.className = 'rc-direction rc-direction--' + dir;
+            dirEl.textContent = dir === 'upgrade'
+                ? 'Upgrade: ' + o.name + ' is ' + rcMoney(perNight) + ' a night more than ' + b.room_name + ' (standard rate).'
+                : (dir === 'downgrade'
+                    ? 'Downgrade: ' + o.name + ' is ' + rcMoney(perNight) + ' a night less than ' + b.room_name + ' (standard rate).'
+                    : 'Same tier: ' + o.name + ' has the same standard rate. The bill does not change.');
 
-            // Calculate nights from dates
-            const datesText = document.getElementById('upgrade_dates').value;
-            const dateParts = datesText.split(' - ');
-            if (dateParts.length === 2) {
-                const checkIn = new Date(dateParts[0]);
-                const checkOut = new Date(dateParts[1]);
-                const nights = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
-                const newTotal = newPricePerNight * nights;
-                const priceDiff = newTotal - currentTotal;
-
-                document.getElementById('upgrade_new_total').textContent = 'K ' + newTotal.toLocaleString();
-                const diffText = priceDiff >= 0 ? '+K ' + priceDiff.toLocaleString() : '-K ' + Math.abs(priceDiff).toLocaleString();
-                document.getElementById('upgrade_price_diff').textContent = diffText;
-                document.getElementById('upgrade_price_diff').style.color = priceDiff >= 0 ? '#dc3545' : '#28a745';
-                previewDiv.style.display = 'block';
+            const keepWrap = document.getElementById('rc_keep_wrap');
+            const keepInput = keepWrap.querySelector('input');
+            const chargeInput = document.querySelector('input[name="rc_pricing"][value="charge"]');
+            if (dir === 'upgrade') {
+                document.getElementById('rc_charge_label').textContent = 'Paid upgrade — charge the difference';
+                document.getElementById('rc_charge_hint').textContent = '+' + rcMoney(q.charge_delta) + ' for ' + nightsTxt + ', added on top of the guest\'s booked rate (their discount is kept).';
+                document.getElementById('rc_keep_label').textContent = 'Complimentary upgrade — no charge';
+                document.getElementById('rc_keep_hint').textContent = 'Bill unchanged. ' + rcMoney(q.rack_value_delta) + ' of upgrade value is recorded as a comp.' + (canKeep ? '' : ' Needs a manager (Edit Booking Financials).');
+            } else if (dir === 'downgrade') {
+                document.getElementById('rc_charge_label').textContent = 'Reduce the bill to the new room';
+                document.getElementById('rc_charge_hint').textContent = rcMoney(q.charge_delta) + ' for ' + nightsTxt + '. Anything already overpaid becomes a credit to refund or carry forward.';
+                document.getElementById('rc_keep_label').textContent = 'Keep the original rate';
+                document.getElementById('rc_keep_hint').textContent = 'Bill unchanged (e.g. non-refundable rate, guest asked to move).' + (canKeep ? '' : ' Needs a manager (Edit Booking Financials).');
             }
+            document.querySelector('.rc-pricing').hidden = dir === 'same';
+            keepInput.disabled = dir !== 'same' && !canKeep;
+            keepWrap.classList.toggle('is-disabled', keepInput.disabled);
+            if (keepInput.disabled && keepInput.checked) chargeInput.checked = true;
+            if (dir === 'same') chargeInput.checked = true;
+
+            const reasonSel = document.getElementById('rc_reason');
+            const prevReason = reasonSel.value;
+            reasonSel.innerHTML = '<option value="">-- Choose a reason --</option>';
+            Object.keys(o.reasons || {}).forEach(code => {
+                const opt = document.createElement('option');
+                opt.value = code;
+                opt.textContent = o.reasons[code];
+                reasonSel.appendChild(opt);
+            });
+            if (prevReason && o.reasons && o.reasons[prevReason]) reasonSel.value = prevReason;
+
+            rcUpdateTotals();
+            detail.hidden = false;
         }
+
+        function rcUpdateTotals() {
+            const o = rcSelectedOption();
+            if (!o) return;
+            const q = o.quote;
+            const pricing = (document.querySelector('input[name="rc_pricing"]:checked') || {}).value || 'charge';
+            const keep = pricing === 'keep' || q.direction === 'same';
+            const newTotal = keep ? q.current_total : q.charge_total;
+            const delta = newTotal - q.current_total;
+            document.getElementById('rc_current_total').textContent = rcMoney(q.current_total);
+            document.getElementById('rc_new_total').textContent = rcMoney(newTotal);
+            const deltaEl = document.getElementById('rc_delta');
+            deltaEl.textContent = (delta > 0 ? '+' : '') + rcMoney(delta);
+            deltaEl.style.color = delta > 0 ? '#b42318' : (delta < 0 ? '#1b5e20' : '#222');
+
+            const reason = document.getElementById('rc_reason').value;
+            const noteRequired = (keep && q.direction !== 'same') || q.direction === 'downgrade' || /_other$/.test(reason);
+            document.getElementById('rc_note_req').hidden = !noteRequired;
+
+            const paid = Number(roomChangeData.booking.amount_paid || 0);
+            let acc = '';
+            if (delta > 0) acc = 'The extra amount is added to the guest\'s balance due.';
+            else if (delta < 0 && paid > newTotal) acc = 'The guest has paid ' + rcMoney(paid) + ', more than the new bill: the difference shows as a credit (refund it or issue a credit note).';
+            else if (delta < 0) acc = 'The balance due goes down by ' + rcMoney(-delta) + '.';
+            else if (keep && q.direction === 'upgrade') acc = 'No money moves. The comp value is written to the audit log and timeline.';
+            document.getElementById('rc_accounting_note').textContent = acc;
+
+            const note = document.getElementById('rc_note').value.trim();
+            document.getElementById('rc_submit').disabled = !reason || (noteRequired && note.length < 5);
+        }
+
+        document.getElementById('upgrade_new_room').addEventListener('change', rcRender);
+        document.getElementById('rc_reason').addEventListener('change', rcUpdateTotals);
+        document.getElementById('rc_note').addEventListener('input', rcUpdateTotals);
+        document.querySelectorAll('input[name="rc_pricing"]').forEach(r => r.addEventListener('change', rcUpdateTotals));
 
         function submitUpgradeRoom() {
-            const bookingId = document.getElementById('upgrade_booking_id').value;
-            const newRoomId = document.getElementById('upgrade_new_room').value;
-            const sendEmail = document.getElementById('upgrade_send_email').checked ? '1' : '0';
-
-            if (!newRoomId) {
-                Alert.show('Please select a new room type.', 'error');
+            const o = rcSelectedOption();
+            if (!o) {
+                Alert.show('Choose the new room type.', 'error');
                 return;
             }
-
-            const submitBtn = document.querySelector('#upgradeRoomModal button[onclick="submitUpgradeRoom()"]');
-            if (submitBtn) setButtonLoading(submitBtn, true);
-            showLoadingOverlay('Upgrading room type...');
-
-            const formData = new FormData();
-            formData.append('action', 'upgrade_room_type');
-            formData.append('booking_id', bookingId);
-            formData.append('new_room_id', newRoomId);
-            formData.append('send_email', sendEmail);
-
-            fetch(window.location.href, {
-                    method: 'POST',
-                    body: formData,
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                })
-                .then(response => response.json())
+            const submitBtn = document.getElementById('rc_submit');
+            setButtonLoading(submitBtn, true);
+            const fd = new FormData();
+            fd.append('action', 'upgrade_room_type');
+            fd.append('booking_id', document.getElementById('upgrade_booking_id').value);
+            fd.append('new_room_id', o.id);
+            fd.append('pricing', (document.querySelector('input[name="rc_pricing"]:checked') || {}).value || 'charge');
+            fd.append('reason_code', document.getElementById('rc_reason').value);
+            fd.append('note', document.getElementById('rc_note').value.trim());
+            fd.append('send_email', document.getElementById('upgrade_send_email').checked ? '1' : '0');
+            postBookingAction(fd, 'Could not change the room type.')
                 .then(data => {
-                    if (data.success) {
-                        const successMessage = data.message || 'Room type upgraded successfully!';
-                        showBookingActionMessage(successMessage, 'success');
-                        queueBookingActionMessage(successMessage, 'success');
-                        closeUpgradeRoomModal();
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1500);
-                    } else {
-                        hideLoadingOverlay();
-                        if (submitBtn) setButtonLoading(submitBtn, false);
-                        Alert.show(data.message || 'Failed to upgrade room type.', 'error');
-                    }
+                    closeUpgradeRoomModal();
+                    reloadWithBookingActionMessage(data, 'Room type changed.');
                 })
-                .catch(() => {
-                    hideLoadingOverlay();
-                    if (submitBtn) setButtonLoading(submitBtn, false);
-                    Alert.show('Error upgrading room type.', 'error');
+                .catch(err => {
+                    setButtonLoading(submitBtn, false);
+                    Alert.show(err.message || 'Could not change the room type.', 'error');
                 });
         }
 
-        // Close modal when clicking outside
+        // Close modal when clicking the backdrop
         document.getElementById('upgradeRoomModal').addEventListener('click', function(event) {
             if (event.target === this) {
                 closeUpgradeRoomModal();
             }
         });
+
+        // ── Delete / restore (recoverable; permission delete_booking) ────────────
+        async function deleteBookingRecord(bookingId, bookingRef, guestName, status) {
+            const reason = await promptAdminAction({
+                title: 'Delete booking ' + bookingRef,
+                message: 'The booking moves to the Deleted filter. It can be restored later.',
+                details: [
+                    'Guest: ' + guestName + ' (status: ' + status + ')',
+                    ['pending', 'tentative', 'confirmed'].includes(status) ? 'The room it holds is released straight away. No email is sent to the guest.' : 'Nothing is sent to the guest.',
+                    'Your name, the exact time and this reason are recorded in the audit log.'
+                ],
+                inputLabel: 'Why is this booking being deleted? (required)',
+                inputPlaceholder: 'e.g. Duplicate of LSH2026..., test booking, created in error',
+                confirmText: 'Delete booking',
+                tone: 'danger',
+                icon: 'fa-trash-can'
+            });
+            if (reason === null) return;
+            if (reason.trim().length < 5) {
+                Alert.show('A reason of at least 5 characters is required to delete a booking.', 'error');
+                return;
+            }
+            const fd = new FormData();
+            fd.append('action', 'delete_booking');
+            fd.append('booking_id', bookingId);
+            fd.append('reason', reason.trim());
+            postBookingAction(fd, 'Could not delete the booking.')
+                .then(data => reloadWithBookingActionMessage(data, 'Booking deleted.'))
+                .catch(err => Alert.show(err.message || 'Could not delete the booking.', 'error'));
+        }
+
+        async function restoreDeletedBooking(bookingId, bookingRef) {
+            const note = await promptAdminAction({
+                title: 'Restore booking ' + bookingRef,
+                message: 'The booking gets back the status it had before it was deleted.',
+                details: ['If it held a room, the room type must still be free for its dates.'],
+                inputLabel: 'Note (optional)',
+                inputPlaceholder: 'Why is it being restored?',
+                confirmText: 'Restore booking',
+                tone: 'success',
+                icon: 'fa-trash-arrow-up'
+            });
+            if (note === null) return;
+            const fd = new FormData();
+            fd.append('action', 'restore_booking');
+            fd.append('booking_id', bookingId);
+            fd.append('note', note.trim());
+            postBookingAction(fd, 'Could not restore the booking.')
+                .then(data => reloadWithBookingActionMessage(data, 'Booking restored.'))
+                .catch(err => Alert.show(err.message || 'Could not restore the booking.', 'error'));
+        }
 
         // Delegated event listeners for action buttons
         function bindBookingsActionDelegates() {
@@ -7670,16 +7625,11 @@ $today_str = $today->format('Y-m-d');
                             openCheckInModal(bookingId, bookingRef, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, 'noshow');
                         }
                     } else if (action === 'upgrade-room') {
-                        const currentRoomId = button.dataset.currentRoomId;
-                        const currentRoomName = button.dataset.currentRoomName;
-                        const guestName = button.dataset.guestName;
-                        const checkIn = button.dataset.checkIn;
-                        const checkOut = button.dataset.checkOut;
-                        const totalAmount = button.dataset.totalAmount;
-                        const paymentStatus = button.dataset.paymentStatus;
-
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (typeof _closeAllActionMenus === 'function') _closeAllActionMenus(null);
                         if (typeof openUpgradeRoomModal === 'function') {
-                            openUpgradeRoomModal(bookingId, bookingRef, currentRoomId, currentRoomName, guestName, checkIn, checkOut, totalAmount, paymentStatus);
+                            openUpgradeRoomModal(bookingId);
                         }
                     }
                 } catch (error) {
@@ -7695,6 +7645,41 @@ $today_str = $today->format('Y-m-d');
         } else {
             bindBookingsActionDelegates();
         }
+
+        // Deep link from booking-details.php: open the requested modal for that booking.
+        (function() {
+            const deepAction = <?php echo json_encode($deep_link_action); ?>;
+            const deepId = <?php echo (int)$deep_link_booking_id; ?>;
+            if (!deepAction || !deepId) return;
+            const run = function() {
+                if (deepAction === 'room-change') {
+                    if (document.querySelector('[data-action="upgrade-room"][data-booking-id="' + deepId + '"]')) {
+                        openUpgradeRoomModal(deepId);
+                    } else {
+                        Alert.show('The room type of this booking cannot be changed in its current state.', 'warning');
+                    }
+                } else if (deepAction === 'checkout') {
+                    const row = document.getElementById('booking-' + deepId);
+                    if (row && row.dataset.status === 'checked-in') {
+                        checkoutBooking(deepId, row.querySelector('td strong') ? row.querySelector('td strong').textContent.trim() : '');
+                    } else {
+                        Alert.show('Only an in-house (checked-in) guest can be checked out.', 'warning');
+                    }
+                } else if (deepAction === 'assign-room') {
+                    const btn = document.querySelector('[data-action="assign-room"][data-booking-id="' + deepId + '"]');
+                    if (btn) {
+                        btn.click();
+                    } else {
+                        Alert.show('A room can only be assigned to a confirmed booking before its arrival date has passed.', 'warning');
+                    }
+                }
+            };
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => setTimeout(run, 50), { once: true });
+            } else {
+                setTimeout(run, 50);
+            }
+        })();
     </script>
     <script src="js/admin-components.js"></script>
 
@@ -7760,45 +7745,8 @@ $today_str = $today->format('Y-m-d');
                         </div>
                     </div>
 
-                    <div class="form-section-title">Status &amp; payment</div>
-                    <div class="grid-2">
-                        <div class="form-group">
-                            <label>Status</label>
-                            <select name="status" id="mb_status" class="form-control">
-                                <option value="pending">Pending</option>
-                                <option value="tentative">Tentative</option>
-                                <option value="confirmed">Confirmed</option>
-                                <option value="checked-in">Checked in</option>
-                                <option value="checked-out">Checked out</option>
-                                <option value="cancelled">Cancelled</option>
-                                <option value="no-show">No-show</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Payment status</label>
-                            <select name="payment_status" id="mb_payment_status" class="form-control">
-                                <option value="unpaid">Unpaid</option>
-                                <option value="partial">Partial</option>
-                                <option value="paid">Paid</option>
-                                <option value="completed">Completed</option>
-                                <option value="refunded">Refunded</option>
-                                <option value="partially_refunded">Partially refunded</option>
-                                <option value="failed">Failed</option>
-                                <option value="pending">Pending</option>
-                            </select>
-                        </div>
-                        <div class="form-group <?php echo $_perm_edit_financials ? '' : 'is-financial-locked'; ?>">
-                            <label>Final price (incl. VAT &amp; levy)</label>
-                            <input type="number" step="0.01" name="total_amount" id="mb_total" class="form-control" <?php echo $_perm_edit_financials ? '' : 'readonly disabled aria-disabled="true"'; ?>>
-                            <?php if (!$_perm_edit_financials): ?>
-                                <small class="field-lock-hint">Only admin users or users with the Edit Booking Financials permission can change booking amounts.</small>
-                            <?php endif; ?>
-                        </div>
-                        <div class="form-group is-financial-locked">
-                            <label>Amount paid</label>
-                            <input type="number" step="0.01" name="amount_paid" id="mb_paid" class="form-control" readonly disabled aria-disabled="true">
-                            <small class="field-lock-hint">Amount paid is calculated from payment records and cannot be edited here.</small>
-                        </div>
+                    <div class="form-group is-financial-locked">
+                        <small class="field-lock-hint"><i class="fas fa-lock"></i> Status, payment status and price are not edited here: use the booking's actions (confirm, check-in, checkout, cancel), record payments, and issue a credit note to correct a price. Date changes reprice at the guest's booked rate.</small>
                     </div>
 
                     <div class="form-group">
@@ -7812,7 +7760,7 @@ $today_str = $today->format('Y-m-d');
 
                     <div style="background:#fff8e1;padding:10px 12px;border-radius:8px;color:#7E684B;font-size:13px;">
                         <i class="fas fa-info-circle"></i>
-                        Changes are recorded in the booking audit log. Use <a href="#" id="mb_full_edit_link">the full edit page</a> for advanced fields (room type, occupancy pricing).
+                        Changes are recorded in the booking audit log. Use <a href="#" id="mb_full_edit_link">the full edit page</a> for occupancy or children (they change the price) and Upgrade / change room type for a different room type.
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -7895,10 +7843,11 @@ $today_str = $today->format('Y-m-d');
                     set('mb_adults', b.adult_guests);
                     set('mb_children', b.child_guests);
                     set('mb_guests', b.number_of_guests);
-                    set('mb_status', b.status);
-                    set('mb_payment_status', b.payment_status);
-                    set('mb_total', (parseFloat(b.total_with_vat) > 0) ? b.total_with_vat : ((parseFloat(b.total_amount) || 0) + (parseFloat(b.vat_amount) || 0)).toFixed(2));
-                    set('mb_paid', b.amount_paid);
+                    const inHouse = b.status === 'checked-in';
+                    ['mb_check_in', 'mb_check_out', 'mb_children'].forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.disabled = inHouse;
+                    });
                     set('mb_special', b.special_requests);
                     set('mb_note', '');
                 })
@@ -7933,10 +7882,7 @@ $today_str = $today->format('Y-m-d');
                 details: [
                     'Stay: ' + (fd.get('check_in_date') || '-') + ' to ' + (fd.get('check_out_date') || '-'),
                     'Guests: ' + (fd.get('number_of_guests') || '-') + ' total, ' + (fd.get('adult_guests') || '-') + ' adult(s), ' + (fd.get('child_guests') || '0') + ' child guest(s)',
-                    'Status: ' + (fd.get('status') || '-'),
-                    'Payment status: ' + (fd.get('payment_status') || '-'),
-                    'Final price (incl. VAT & levy): ' + getFieldValue('total_amount', 'mb_total', '0'),
-                    'Amount paid: ' + getFieldValue('amount_paid', 'mb_paid', '0')
+                    'Date changes reprice the stay at the booked rate.'
                 ],
                 confirmText: 'Save Changes',
                 icon: 'fa-pen-to-square'
