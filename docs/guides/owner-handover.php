@@ -185,7 +185,7 @@ $notify = $s('booking_notification_email') ?: ($s('admin_notification_email') ?:
     <li>Check room prices and rate plans for the coming season.</li>
   </ul>
   <?php if ($backupAgeH === null || $backupAgeH > 36): ?>
-  <div class="warn"><p>No recent backup is recorded. Ask your system administrator to confirm the scheduled backup is running, and take a manual backup from Settings &rarr; Backups now.</p></div>
+  <div class="warn"><p>No recent backup is recorded. Backups run by themselves once a day (no cron job is needed), so open Settings &rarr; Automated Emails to see why the last one failed, and take a manual backup from Settings &rarr; Backups now.</p></div>
   <?php endif; ?>
 
   <h2 id="go-live">Before go-live checklist</h2>
@@ -197,7 +197,7 @@ $notify = $s('booking_notification_email') ?: ($s('admin_notification_email') ?:
     <li>Room prices and occupancy prices checked (Settings &rarr; Rooms).</li>
     <li>Every staff member invited with the right role and permissions; test accounts deleted.</li>
     <li>All test bookings and payments removed.</li>
-    <li>A backup taken and the scheduled backup confirmed.</li>
+    <li>A backup taken, and the automatic daily backup confirmed (Settings &rarr; Automated Emails shows the last backup time).</li>
   </ol>
 
   <footer>Updated October 2026. Values on this page are read live each time it opens.</footer>

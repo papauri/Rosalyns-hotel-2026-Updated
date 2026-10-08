@@ -114,12 +114,12 @@
   <h2 id="flow">What happens to a room after check-out</h2>
   <p>You do not have to create the clean by hand. This is the normal flow:</p>
   <ol class="steps">
-    <li>Reception checks the guest out (see the Reception and Bookings guide). The room status changes to <strong>Cleaning</strong>.</li>
+    <li>Reception checks the guest out (see the Reception and Bookings guide). The room status changes to <strong>Cleaning</strong>. If the room has an active maintenance job (in progress, planned with a start date that has arrived, or completed but not yet verified), it goes to <strong>Maintenance</strong> instead. The cleaning task is still created and waits until maintenance releases the room.</li>
     <li>At the same moment a cleaning task is created for the room. It is <strong>Pending</strong>, due today, with the note <em>"Room turnover cleaning"</em>.</li>
     <li>Open <strong>Housekeeping</strong>. The task is in the <strong>All Assignments</strong> table. Assign it to a cleaner by clicking <strong>Edit</strong> and choosing a name in <strong>Assigned To</strong>.</li>
     <li>The cleaner starts the job. Click <strong>Mark as started</strong>. The status becomes <strong>In Progress</strong>.</li>
-    <li>When the room is clean, click <strong>Mark done</strong>. The status becomes <strong>Completed</strong>. As soon as the room has no other open cleaning task, the room status changes from <strong>Cleaning</strong> to <strong>Available</strong> and the room can be sold or checked in.</li>
-    <li>A supervisor looks at the room and clicks <strong>Verify</strong>. The task becomes <strong>Verified</strong> and is locked. Verifying does not change the room status. It only records who checked the room and when.</li>
+    <li>When the room is clean, click <strong>Mark done</strong>. The status becomes <strong>Completed</strong>. As soon as the room has no other open cleaning task, the room status changes from <strong>Cleaning</strong> to <strong>Available</strong> and the room can be sold or checked in. A room that is occupied, under maintenance or out of order is never made Available by cleaning (see the rules below).</li>
+    <li>A supervisor looks at the room and clicks <strong>Verify</strong>. The task becomes <strong>Verified</strong> and is locked. Verifying does not change the room status. It only records who checked the room and when. On a maintenance request, the person who verifies is the one recorded as the verifier.</li>
   </ol>
   <div class="note"><p>A room is ready for the next guest as soon as its cleaning task is <strong>Completed</strong>. You do not have to wait for <strong>Verify</strong>.</p></div>
   <h2 id="room-board">The Room board (room status at a glance)</h2>
@@ -128,7 +128,7 @@
     <li>A red banner appears when confirmed bookings have passed their arrival date without checking in. Click <strong>Review arrivals</strong> and mark them no-show to free the rooms (see <a href="07-reception-bookings.html#cancel">Cancel or no-show</a>).</li>
     <li>Four counts: <strong>Check-outs Today</strong>, <strong>Check-ins Today</strong>, <strong>Rooms to Clean</strong> and <strong>Available Now</strong>.</li>
     <li>A card per room status (<strong>Available</strong>, <strong>Occupied</strong>, <strong>Cleaning</strong>, <strong>Inspection</strong>, <strong>Maintenance</strong>, <strong>Out of Order</strong>) with how many rooms are in it, and a <strong>Room Occupancy</strong> bar showing the mix.</li>
-    <li><strong>Cleaning Queue</strong>: every room that needs cleaning, with the last guest, when they checked out, the cleaning task and its status (for example <em>Pending</em>). <strong>Mark Clean</strong> (after <em>"Mark this room as clean?"</em>) finishes the open cleaning task and makes the room <strong>Available</strong> straight away. When the queue is empty it says <em>"All rooms are clean!"</em></li>
+    <li><strong>Cleaning Queue</strong>: every room that needs cleaning, with the last guest, when they checked out, the cleaning task and its status (for example <em>Pending</em>). <strong>Mark Clean</strong> (after <em>"Mark this room as clean?"</em>) finishes the open cleaning task and makes the room <strong>Available</strong> straight away. It is refused for a room that is occupied, under maintenance or out of order, with <em>"Room 12 cannot be marked clean because it is occupied (a guest is in the room)."</em>, <em>"... because it is under maintenance."</em> or <em>"... because it is out of order."</em> When the queue is empty it says <em>"All rooms are clean!"</em></li>
     <li><strong>Inspection Queue</strong>: on this system rooms go straight from cleaning to Available, so this list normally says <em>"No rooms awaiting inspection"</em>. If a room ever appears here, <strong>Pass</strong> makes it Available and <strong>Fail</strong> asks for a <strong>Reason for Failure</strong> and sends it back to cleaning as urgent (<strong>Fail &amp; Send to Reclean</strong>).</li>
   </ul>
   <p>For full cleaning tasks with who did what and when, use <strong>Housekeeping</strong> as described below. The Room board is the quick overview.</p>
@@ -219,15 +219,16 @@
     <li><strong>Start Date</strong> and <strong>End Date</strong>: the window the work covers. The window opens with now and tomorrow filled in. The end must be after the start.</li>
     <li>Optional: <strong>Started At</strong> (leave blank to stamp automatically), <strong>Assigned To</strong>, <strong>Linked Booking</strong> (pick the booking of the guest who reported it, or leave <strong>None</strong>; the list shows the 100 most recent pending, confirmed and checked-in bookings as reference - guest name (room)).</li>
     <li><strong>Estimated Duration (minutes)</strong> starts at 60 (minimum 5). <strong>Actual Duration (minutes)</strong> is for when the work is done.</li>
-    <li><strong>Block room during maintenance</strong> is ticked by default. While it is ticked and the request is not Completed, Verified or Cancelled, the room cannot be booked for any night between the Start Date and the End Date. Untick it if guests can still use the room.</li>
-    <li>Tick <strong>Recurring Task</strong> to record a repeat pattern, then choose <strong>Daily</strong>, <strong>Weekly</strong> or <strong>Monthly</strong> and an optional <strong>Recurring End Date</strong>. The screen does not create the repeat requests for you.</li>
+    <li><strong>Block room during maintenance</strong> is ticked by default. While it is ticked and the request is not Completed, Verified or Cancelled, the room cannot be booked for any night between the Start Date and the End Date. A planned request only puts the room into Maintenance from its start date, not before. Untick it if guests can still use the room.</li>
+    <li>Tick <strong>Recurring Task</strong> to record a repeat pattern, then choose <strong>Daily</strong>, <strong>Weekly</strong> or <strong>Monthly</strong> and an optional <strong>Recurring End Date</strong>. The repeat requests are created for you by the automatic scheduler, not by this screen.</li>
     <li>Type any <strong>Notes</strong> and click <strong>Save</strong>. You will see <em>"Maintenance schedule created successfully."</em></li>
   </ol>
   <p>When a request is open (Pending, In progress or Completed), the room's status is set to <strong>Maintenance</strong>, unless the room is Occupied or Out of Order. The change is recorded in the <strong>Maintenance Log</strong>.</p>
 
   <h3>Requests the system creates for you</h3>
   <ul>
-    <li>Nothing is created when you open the Room Maintenance screen. Tasks are only created when you click <strong>Auto-Create Tasks</strong>.</li>
+    <li>Nothing is created, and no room is released, when you open the Room Maintenance screen. Tasks are only created when you click <strong>Auto-Create Tasks</strong>.</li>
+    <li>Recurring requests (see <strong>Recurring Task</strong> above) are created for you by the automatic scheduler, which runs every few hours. The next one falls due by calendar date after the last one (a real calendar month for Monthly). A new one is never made while an earlier request in the same series (same room and title) is still open, so you will not get duplicates. A manager can switch this off in Admin &rarr; <strong>Automated Emails</strong> with the <strong>Recurring maintenance</strong> toggle.</li>
     <li>Click <strong>Auto-Create Tasks</strong>, then click <strong>Auto-Create</strong> in the box <em>"Create a maintenance task for every room currently in Maintenance / Out of order that has no open task? Rooms with a guest checked in are skipped."</em>. You will see <em>"Auto-created 2 maintenance tasks."</em></li>
     <li>Each task is titled <em>"Auto-generated maintenance task"</em>. Out of Order gets <strong>Repair</strong> and <strong>High</strong>; Maintenance gets <strong>Repair</strong> and <strong>Urgent</strong>. A room with a guest checked in never gets an automatic task.</li>
   </ul>
@@ -257,7 +258,7 @@
     <li>To see who changed what: click <strong>View History</strong> to open <strong>Audit History</strong>.</li>
   </ol>
   <div class="note"><p>On a maintenance request, <strong>Save</strong> also checks the <strong>Due Date</strong> is not in the past. If you need to edit an old request, move the due date to today first.</p></div>
-  <p>If the room has no open request left (all are Verified, Cancelled or deleted) and its status is <strong>Maintenance</strong>, the room goes back to <strong>Available</strong>.</p>
+  <p>If the room has no open request left (all are Verified, Cancelled or deleted) and its status is <strong>Maintenance</strong>, the room goes to <strong>Cleaning</strong> and a housekeeping task <em>"Post-maintenance cleaning"</em> is created. It becomes Available only when that clean is done. This only happens for rooms the maintenance request put into Maintenance. A room that staff set to Maintenance by hand stays there until staff change its status.</p>
 
   <h2 id="checkin">Checking a guest in to a room that is not clean</h2>
   <p>Reception cannot check a guest in while the room is not ready. A room is not ready when its status is anything other than <strong>Available</strong>, or when its cleaning is <strong>Pending</strong> or <strong>In progress</strong>.</p>
@@ -277,7 +278,10 @@
     <li>A room is never given two open checkout cleanings, and the same room is never given a second checkout cleanup by <strong>Auto-Create Checkout Cleanup</strong>.</li>
     <li>While a room has an open cleaning task, an Available room is moved to <strong>Cleaning</strong>. When the room has no open cleaning task (everything is Completed, Verified or deleted), a room in <strong>Cleaning</strong> is moved to <strong>Available</strong>. This check runs each time you open the Housekeeping screen and after every change you make on it.</li>
     <li>If a room's status is set to Maintenance or Out of Order, its Pending and In progress cleaning tasks become <strong>Blocked</strong>.</li>
-    <li>Open maintenance requests move the room to <strong>Maintenance</strong>, except Occupied and Out of Order rooms, which are left as they are. Pending, In progress and Completed requests all count as open for this, so a Completed request keeps the room in Maintenance until it is Verified. Verifying, cancelling or deleting them releases the room.</li>
+    <li>Open maintenance requests move the room to <strong>Maintenance</strong>, except Occupied and Out of Order rooms, which are left as they are. Pending, In progress and Completed requests all count as open for this, so a Completed request keeps the room in Maintenance until it is Verified. Planned requests only count once their start date has arrived. Verifying, cancelling or deleting them releases the room, but only if the request put it in Maintenance (never a room staff set by hand), and the room goes to <strong>Cleaning</strong> with a housekeeping task, not straight to Available.</li>
+    <li>Mark Clean never releases a room that is Occupied, in Maintenance or Out of Order.</li>
+    <li>A room left in <strong>Cleaning</strong> for several hours with no open task gets a high-priority cleaning task created for it. It is not made Available by a timer.</li>
+    <li>The checkout-cleanings button lists a room again after its next check-out, and skips a room that already has an open task.</li>
     <li>A maintenance request with <strong>Block room during maintenance</strong> ticked stops bookings for the room between its Start Date and End Date until the request is Completed, Verified or Cancelled.</li>
     <li>Checking a guest in to a room that is not clean is blocked unless you have the <strong>Check-in to Room Not Clean</strong> permission and confirm.</li>
     <li>Every change to a cleaning task or maintenance request is saved in its history.</li>
@@ -293,6 +297,8 @@
       <tr><td><em>"Due date cannot be in the past. Please select today or a future date."</em></td><td>The due date is before today.</td><td>Pick today or a later date.</td></tr>
       <tr><td><em>"Selected room is invalid or inactive."</em></td><td>The room has been switched off or removed.</td><td>Choose another room, or ask a manager to check the room in Settings &rarr; Rooms.</td></tr>
       <tr><td><em>"Assigned user is invalid."</em></td><td>The staff member is no longer active.</td><td>Choose another staff member or leave Unassigned.</td></tr>
+      <tr><td><em>"Room 12 cannot be marked clean because it is occupied (a guest is in the room)."</em> / <em>"... because it is under maintenance."</em> / <em>"... because it is out of order."</em></td><td>Mark Clean will not release a room that is in use or out of service.</td><td>Occupied: wait for check-out. Maintenance: finish and verify the maintenance request, then clean the room. Out of Order: ask a manager to return the room to service first.</td></tr>
+      <tr><td>A room stays in Maintenance after the job is done</td><td>The request is only Completed (it needs Verify), or staff set the room to Maintenance by hand.</td><td>Verify the request. For a hand-set room, change its status yourself.</td></tr>
       <tr><td><em>"Invalid recurring pattern."</em></td><td>Recurring ticked without a valid pattern.</td><td>Choose Daily, Weekly or Monthly, or untick Recurring Task.</td></tr>
       <tr><td><em>"Invalid date format."</em> / <em>"End date must be after start date."</em></td><td>The maintenance Start Date and End Date are missing, wrong or the wrong way round.</td><td>Set an End Date later than the Start Date.</td></tr>
       <tr><td><em>"Verified assignments are locked and cannot be edited."</em></td><td>The cleaning task is already Verified.</td><td>It cannot be changed. If it was wrong, delete it and add a new task.</td></tr>

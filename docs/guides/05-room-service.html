@@ -85,6 +85,7 @@
   <ul>
     <li><strong>Before any station has started it:</strong> the Kitchen, Bar or Coffee Bar can use <strong>Cancel before prep</strong>, or someone with the till can cancel it from the Tabs tray. The folio charges are cancelled (voided) and stock is put back.</li>
     <li><strong>After work has started:</strong> a manager voids the order (<a href="01-pos-till.html#cancel-void">POS guide</a>). The folio charges are voided and the booking balance is recalculated.</li>
+    <li><strong>After it has been delivered:</strong> someone with <strong>POS Void Tabs</strong> (the same people who can void today) can still void a delivered order, but only while the guest is still checked in and the final invoice has not been made. The charges come off the bill and the stock goes back. Once the guest has checked out you cannot void it: issue a credit on the booking instead (see the <a href="13-finance-payments.html">Finance guide</a>).</li>
     <li><strong>One item cannot be made:</strong> the station uses <strong>86 this item</strong> on the line. That line's charge is removed from the folio.</li>
   </ul>
 
@@ -104,6 +105,10 @@
     <li>A room that already has an active room service order cannot get another through the till until the first is finished.</li>
     <li>Only people with <strong>Manage Room Service</strong> can place orders or mark them delivered.</li>
     <li>An order that is already delivered or cancelled cannot be marked delivered again.</li>
+    <li>Each order form can be sent only once. Pressing the button twice, or reloading and resending, does not make a second order.</li>
+    <li>The room must still belong to the booking you chose. If the guest was moved, the order is refused until you pick the guest again.</li>
+    <li>Items not switched on for room service cannot be rung through the till for a room, even if they are on the till menu.</li>
+    <li>A delivered order can be voided only while the guest is checked in and before the final invoice. After that, use a credit on the booking.</li>
   </ul>
 
   <h2 id="problems">Problems and fixes</h2>
@@ -118,6 +123,10 @@
       <tr><td><em>"Quantity cap: 100 per line."</em></td><td>Quantity too high.</td><td>Lower it.</td></tr>
       <tr><td><em>"You do not have permission to perform this action."</em></td><td>No <strong>Manage Room Service</strong> permission.</td><td>Ask a manager.</td></tr>
       <tr><td><em>"Order is already finalized and cannot be marked delivered."</em></td><td>It was already delivered or cancelled.</td><td>Nothing to do.</td></tr>
+      <tr><td><em>"This order was already submitted, or the form has expired. Reload the page and check the active queue before sending it again."</em></td><td>The order was already sent (double click or resend), or the page is old.</td><td>Reload and look in <strong>Active queue</strong>. Only send again if the order is not there.</td></tr>
+      <tr><td><em>"That room now belongs to a different booking. Reload the page and pick the guest again."</em></td><td>The guest moved rooms or the room was given to someone else.</td><td>Reload and choose the guest again.</td></tr>
+      <tr><td><em>"Menu item not found, unavailable, or not offered for room service."</em></td><td>At the till, the item is not switched on for room service.</td><td>Choose another item, or tick <strong>Room Service</strong> on the item in the Menu page.</td></tr>
+      <tr><td><em>"Order ... was delivered and the guest has checked out (or the folio is closed) - it can no longer be voided here. Issue a credit on the booking instead."</em></td><td>The guest has left or the final invoice is made.</td><td>Issue a credit on the booking.</td></tr>
       <tr><td><em>"Security token invalid. Refresh and try again."</em></td><td>The page is out of date.</td><td>Reload and repeat.</td></tr>
     </tbody>
   </table>

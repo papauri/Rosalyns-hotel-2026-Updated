@@ -76,6 +76,7 @@
     <li><strong>Which batch:</strong> the oldest batch is used first. The ingredient's total and its average cost update.</li>
     <li><strong>If there is not enough:</strong> the station action is refused with <em>"Stock check stopped this action: (ingredient) short by (amount) ..."</em></li>
     <li><strong>Put back:</strong> cancelling before work starts, voiding an order, and 86 of an item that was not started all put the stock back. A refund does <em>not</em> put stock back.</li>
+    <li><strong>Voided or 86'd after cooking started:</strong> the ingredients are already gone, so the dish is counted as <strong>wastage</strong> once. It is not also counted as usage in Stock Reports. Waste is only recorded when stock actually came off the shelf.</li>
     <li><strong>Other ways stock goes down:</strong> wastage, expired or recalled batches, approved stock count shortages, and manual adjustments by a manager.</li>
   </ul>
 
@@ -115,25 +116,26 @@
   <h2 id="stockin">How to receive stock by hand (Stock In)</h2>
   <ol class="steps">
     <li>On the Ingredients page click <strong>Stock In</strong> on the row.</li>
-    <li>Type <strong>Quantity received</strong>. Fill in <strong>Cost per unit</strong>, choose the <strong>Supplier</strong> (or <strong>&mdash; Other / one-off &mdash;</strong>), and set <strong>Expiry date</strong> and <strong>Alert me ___ days before expiry</strong> if the goods expire.</li>
+    <li>Type <strong>Quantity received</strong>. Fill in <strong>Cost per unit</strong> (if you leave it blank or 0, the ingredient's current average cost is used), choose the <strong>Supplier</strong> (or <strong>&mdash; Other / one-off &mdash;</strong>), and set <strong>Expiry date</strong> and <strong>Alert me ___ days before expiry</strong> if the goods expire.</li>
     <li>Click <strong>Receive Stock</strong>. If the quantity is more than 5 times what you hold, or the expiry date is in the past, the page asks you to confirm.</li>
     <li>You will see <em>"Stock received: 5.000 units. New avg cost: MWK 120.00/unit."</em></li>
   </ol>
-  <p>A new batch is created with the next batch number, and the ingredient's average cost is recalculated from the old stock and the new delivery.</p>
+  <p>A new batch is created with the next batch number, and the ingredient's average cost is recalculated from the old stock and the new delivery. If the ingredient's stock had gone negative (for example it was sold before the delivery was entered), the delivery settles that shortfall first, and the batch holds only what is left over. The batch notes say how much was settled.</p>
+  <div class="note"><p>A blank or zero cost works only when the ingredient already has an average cost. A brand-new ingredient needs a real cost the first time.</p></div>
 
   <h2 id="scan">How to receive a delivery with Receive Stock</h2>
-  <p>Open Admin menu &rarr; Stock &rarr; <strong>Receive Stock</strong>. This page is built for phones and tablets and works with a camera or a USB barcode scanner.</p>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Receive Stock</strong>. It is a normal admin page with three cards: <strong>Scanner</strong> (scanner on or off, the camera and the barcode box), <strong>Delivery details</strong> (the supplier and the date received) and <strong>Scanned items</strong> (what you have scanned, with the <strong>Receive into Stock</strong> button). It works with a camera or a USB barcode scanner, on a computer, tablet or phone. On a narrow screen the cards stack one under the other.</p>
   <ol class="steps">
-    <li>Click the <strong>Scanner: OFF</strong> button so it reads <strong>Scanner: ON</strong>. The <strong>Camera</strong> button and the box <strong>Type or scan barcode here&hellip;</strong> appear. The camera needs a secure (https) connection and your permission.</li>
-    <li>Optionally type the supplier in <strong>Supplier name (optional)</strong> and check the date field (it starts as today).</li>
-    <li>Scan each product. Each scan adds one pack to <strong>Scanned Items</strong>. Scan again to add another pack, or use the plus and minus buttons. Type the <strong>Cost</strong> per unit on each line (if you leave it blank the current average cost is used).</li>
+    <li>In the <strong>Scanner</strong> card, click the <strong>Scanner: OFF</strong> button so it reads <strong>Scanner: ON</strong>. The <strong>Camera</strong> button and the box <strong>Type or scan barcode here&hellip;</strong> appear. The camera needs a secure (https) connection and your permission.</li>
+    <li>In the <strong>Delivery details</strong> card, optionally type the supplier in <strong>Supplier name (optional)</strong> and check <strong>Date received</strong> (it starts as today).</li>
+    <li>Scan each product. Each scan adds one pack to the <strong>Scanned items</strong> card. Scan again to add another pack, or use the plus and minus buttons. Type the <strong>Cost</strong> per unit on each line (if you leave it blank or 0 the current average cost is used; an ingredient with no average cost yet needs a real cost).</li>
     <li>If a barcode is not known, <strong>Unknown Barcode</strong> opens and asks <strong>What is this barcode for?</strong>:
       <ul>
         <li><strong>Ingredient</strong> &mdash; choose the <strong>Ingredient</strong>, the <strong>Pack Size</strong> and a <strong>Pack Label</strong>, and click <strong>Save &amp; Add to Batch</strong>.</li>
         <li><strong>Item for Sale</strong> &mdash; type the <strong>Item Name</strong>, the <strong>Sale Price</strong> and optionally a <strong>Category</strong> (blank uses "Retail Items"), and click <strong>Register on POS</strong>.</li>
       </ul>
     </li>
-    <li>Click <strong>Receive into Stock</strong>. You will see a message that the batches were received into stock. A line that could not be saved is listed: <em>"2 received &mdash; not saved: (names)"</em>.</li>
+    <li>Click <strong>Receive into Stock</strong> (at the bottom of the <strong>Scanned items</strong> card). You will see a message that the batches were received into stock. A line that could not be saved is listed: <em>"2 received &mdash; not saved: (names)"</em>.</li>
   </ol>
   <p>Each line becomes a new batch, like Stock In by hand. A barcode already linked to another item is refused: <em>"This barcode is already registered to another ingredient."</em></p>
 
@@ -175,42 +177,61 @@
     <li>The order becomes partly received until every line is complete, then received. A line cannot receive more than is outstanding.</li>
     <li>Click <strong>Close</strong> when finished (outstanding lines will not be received) or <strong>Cancel</strong> for a draft or sent order. <strong>Print</strong> prints the order.</li>
   </ol>
-  <p>Receiving creates stock batches linked to the supplier and the order. Lines for custom or non-stock items are recorded but add no stock. Once an order is received, closed or cancelled its lines cannot be changed.</p>
+  <p>A draft order has not gone to the supplier yet, so it cannot be received and it does not count as <strong>On order</strong> in Buying. Only <strong>Sent</strong> and <strong>Partially received</strong> orders count as on order and accept stock. Receiving creates stock batches linked to the supplier and the order. Lines for custom or non-stock items are recorded but add no stock. Once an order is received, closed or cancelled its lines cannot be changed.</p>
 
   <h2 id="count">How to do a stock count</h2>
-  <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Count</strong>. Every shortage must be explained and approved by a manager.</p>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Count</strong>. Every shortage must be explained, and a big shortage must be approved by a manager other than the person who counted. Service can carry on while you count: sales, deliveries and wastage recorded during the count are taken into account.</p>
   <ol class="steps">
     <li>Under <strong>Start a Count</strong> choose the <strong>Scope</strong>: <strong>Full count (every ingredient)</strong>, <strong>By category</strong> (then pick a <strong>Category</strong>) or <strong>Spot check (specific items)</strong> (pick ingredients with Ctrl/Cmd-click). Optionally add a <strong>Shift label</strong> and <strong>Notes</strong>.</li>
     <li>Click <strong>Start count</strong>. The system saves the quantity it expects for each ingredient at that moment. <em>"Count ... started. Enter your physical readings."</em></li>
-    <li>Enter the <strong>Actual Qty</strong> you counted for each line. The page shows <strong>Variance</strong> and <strong>Cost Impact</strong> as you type. For every shortage choose a <strong>Reason</strong>: <strong>Spillage</strong>, <strong>Expired</strong>, <strong>Staff meal</strong>, <strong>Sampling</strong>, <strong>Prep waste</strong>, <strong>Theft suspected</strong>, <strong>Correction</strong> or <strong>Other</strong>, and add <strong>Notes</strong> if useful.</li>
-    <li>Click <strong>Save readings</strong> (<em>"Count readings saved."</em>). Use the filters to find shortage-only rows.</li>
-    <li>Click <strong>Submit for approval</strong> (<em>"Submit count for approval? Once submitted you cannot edit it."</em>). <em>"Count submitted for approval. Shortage cost: MWK ..."</em></li>
+    <li>Every <strong>Actual Qty</strong> box starts blank and the line is <strong>Not counted</strong>. Enter what you physically counted for every line. <strong>0 is a valid count</strong> when the shelf really is empty, but a blank box is never read as 0. The <strong>Expected at count time</strong> column shows what the system believed you should have at the moment you counted that line (the starting figure plus anything sold, delivered or wasted since). <strong>Variance</strong> and <strong>Cost Impact</strong> are measured against it.</li>
+    <li>For every shortage choose a <strong>Reason</strong>: <strong>Spillage</strong>, <strong>Expired</strong>, <strong>Staff meal</strong>, <strong>Sampling</strong>, <strong>Prep waste</strong>, <strong>Theft suspected</strong>, <strong>Correction</strong> or <strong>Other</strong>, and add <strong>Notes</strong> if useful. The filter <strong>Not counted only</strong> finds lines you have missed.</li>
+    <li>Click <strong>Save readings</strong> (<em>"Count readings saved."</em>).</li>
+    <li>Click <strong>Submit for approval</strong> (<em>"Submit count for approval? Once submitted you cannot edit it. Every line must have a reading."</em>). It is refused while any line is not counted. <em>"Count submitted for approval. Shortage cost: MWK ..."</em></li>
     <li>A manager or admin opens the count and clicks <strong>Approve &amp; post variances</strong> (<em>"Approve count and post variances to stock? This cannot be undone."</em>) or <strong>Reject &amp; send back</strong> (type a reason of at least 8 characters).</li>
     <li>On approval the differences are applied to stock, with the approver's name and time kept. <em>"Count ... approved. Variances applied to stock."</em> A rejected count shows the reason and can be reopened with <strong>Reopen for re-count</strong>.</li>
   </ol>
-  <p>The page also shows <strong>Theft Radar (last 30d)</strong>, the ingredients losing stock to shortages or manual adjustments that no sale or wastage explains, and <strong>Recent Counts</strong>. Only the person who started a count, or a manager, can change its readings. Surpluses need no reason.</p>
+  <h3>Rules for counts</h3>
+  <ul>
+    <li><strong>A different approver for big shortages:</strong> a shortage that is over both the cost limit and the percentage limit (set in the stock variance settings) cannot be approved by the person who counted. The page shows <em>"This count has shortages over the approval threshold, so it must be approved by a different manager or admin than the person who counted it."</em></li>
+    <li><strong>Only the counter or a manager</strong> can save readings, submit or reopen a count.</li>
+    <li><strong>Reopening starts again:</strong> <strong>Reopen for re-count</strong> takes a fresh snapshot of the stock and every line goes back to <strong>Not counted</strong>, so enter every reading again.</li>
+    <li><strong>A shortage that appears at approval:</strong> if sales or waste recorded while you counted turn a line into a shortage with no reason, nothing is posted. The count goes back to draft with a box <strong>Returned for reasons</strong> naming the lines, and your readings are kept. Add the reasons and submit again.</li>
+    <li><strong>Write-offs are capped:</strong> if a shortage is bigger than the stock still on the shelf, only what is there is written off, and the note on the stock record says how much was uncovered.</li>
+  </ul>
+  <p>The page also shows <strong>Theft Radar (last 30d)</strong>, the ingredients losing stock to shortages or manual adjustments that no sale or wastage explains, and <strong>Recent Counts</strong>. Surpluses need no reason.</p>
 
   <h2 id="wastage">How to record wastage</h2>
   <ol class="steps">
     <li>Open Admin menu &rarr; Stock &rarr; <strong>Wastage</strong>.</li>
-    <li>Under <strong>Record wastage</strong> check the <strong>Date</strong> (today or earlier). On each row choose the ingredient (<strong>Select ingredient...</strong>), type the <strong>Quantity</strong>, and choose a reason: Spoiled, Breakage, Over-prepared, Customer return, Trim/peel waste, Burnt, Spilled or Other. Click <strong>Add row</strong> for more.</li>
+    <li>Under <strong>Record wastage</strong> check the <strong>Date</strong> (today or earlier; see the note below if a stock count is open). On each row choose the ingredient (<strong>Select ingredient...</strong>), type the <strong>Quantity</strong>, and choose a reason: Spoiled, Breakage, Over-prepared, Customer return, Trim/peel waste, Burnt, Spilled or Other. Click <strong>Add row</strong> for more.</li>
     <li>Click <strong>Save wastage</strong>. You will see <em>"3 wastage entry(ies) recorded."</em></li>
   </ol>
+  <p>If you record wastage with a past date while a stock count is open for that ingredient, the entry keeps its date for reports but is booked today in the stock records, so the count does not take it off twice. You see <em>"Some entries were dated for reports but booked now in the stock ledger because a stock count is open for those ingredients."</em></p>
+  <p>Not all wastage is typed in by hand. These also appear in the log and the Wastage report:</p>
+  <ul>
+    <li><strong>Expired batches</strong>, with the reason <em>"Expired batch ..."</em>, at the batch's own cost.</li>
+    <li><strong>Recalled batches</strong>, with a reason starting <em>"Recall:"</em>.</li>
+    <li><strong>Dishes voided or 86'd after the kitchen started them</strong>, counted once as wastage and not also as usage.</li>
+    <li><strong>Mark Wasted</strong> and <strong>Discard</strong> on a batch, at the batch's cost.</li>
+  </ul>
   <p>The stock comes off at once at the real cost of the batches used. <strong>Recent entries</strong> lists date, ingredient, quantity, cost, reason and who recorded it. The cards at the top (<strong>This month wastage</strong>, <strong>Last month</strong>, <strong>Days since last entry</strong>) open a detail window. A banner reminds you if no wastage has been logged for some days.</p>
 
   <h2 id="batches">How to deal with expiring and recalled batches</h2>
   <p>Open Admin menu &rarr; Stock &rarr; <strong>Batch Tracker</strong>. Each time the page opens, active batches past their expiry date are removed from stock automatically: <em>"3 batch(es) automatically marked as expired."</em></p>
   <ol class="steps">
     <li>Use the cards <strong>Expiring &le; 3 days</strong> (with <strong>Value at risk</strong>), <strong>Expiring 4&ndash;7 days</strong>, <strong>Expiring 8&ndash;30 days</strong> and <strong>Total active batches</strong>, or the filters (ingredient, status <strong>Active</strong>, <strong>Depleted</strong>, <strong>Expired</strong>, <strong>Wasted</strong>, <strong>Recalled</strong>, <strong>All</strong>, and expiry range).</li>
-    <li>For spoiled or damaged stock click <strong>Mark Wasted</strong>, give a <strong>Reason</strong>, and click <strong>Confirm Wastage</strong>. <em>"Batch marked as wasted."</em> It is logged as wastage.</li>
+    <li>For spoiled or damaged stock click <strong>Mark Wasted</strong>, give a <strong>Reason</strong>, and click <strong>Confirm Wastage</strong>. <em>"Batch marked as wasted."</em> It is logged as wastage at the batch's own cost.</li>
     <li>For a supplier problem click <strong>Recall</strong>, give the <strong>Recall reason</strong>, and click <strong>Confirm Recall</strong>. <em>"Batch recalled and removed from stock."</em></li>
     <li><strong>Receive Stock</strong> at the top takes you to the delivery page.</li>
   </ol>
+  <p>Discarding a batch from the Ingredients page (<strong>Batches</strong> &rarr; <strong>Discard</strong>) is for the Admin and Manager roles only and needs a reason of at least 8 characters. Batches that expire and are removed automatically also appear in Wastage.</p>
 
   <h2 id="reports">How to read Stock Reports</h2>
   <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Reports</strong>. Tabs: <strong>Inventory</strong>, <strong>Stock-In</strong>, <strong>Usage</strong>, <strong>Wastage</strong>, <strong>Yield</strong>, <strong>Adjustments</strong>, <strong>Expiry</strong>.</p>
   <ul>
     <li>Inventory and Expiry are a snapshot of now. The other tabs cover a date range (the last 30 days to start with): set <strong>From</strong> and <strong>To</strong> and click <strong>Apply</strong>.</li>
+    <li><strong>Usage</strong> and <strong>Yield</strong> follow the same rule as the rest of the system: a dish voided or 86'd after cooking started counts as wastage, not usage. The <strong>Wastage</strong> tab includes expired batches and recalls.</li>
     <li>Every tab has a <strong>CSV</strong> download and a "how to read this report" hint with an example.</li>
     <li>Columns: Inventory (Ingredient, Category, Current qty, Cost / unit, Stock value, Active batches); Stock-In (Date, Ingredient, Batch, Qty, Unit cost, Total, Supplier, By); Usage (Ingredient, Quantity used, Cost); Wastage (Date, Ingredient, Qty, Cost, Reason, By); Yield (Ingredient, Used, Wasted, Expired, Yield %, Loss cost); Adjustments (When, Ingredient, Source, change in quantity, Reason, By); Expiry (Batch, Ingredient, Expiry date, Days left, Remaining, Status).</li>
   </ul>
@@ -242,6 +263,12 @@
     <li>A purchase order's lines can only change while it is a draft. Receiving is only for sent or partly received orders. You cannot receive more than is outstanding.</li>
     <li>Supplier names must be different from each other.</li>
     <li>Wastage cannot be dated in the future.</li>
+    <li>A stock count cannot be submitted or approved until every line has a reading. 0 counts as a reading, blank does not.</li>
+    <li>A big shortage on a count needs an approver other than the person who counted.</li>
+    <li>A zero or blank delivery cost uses the average cost, and is refused when there is none.</li>
+    <li>A delivery fills any negative stock first.</li>
+    <li>Draft purchase orders cannot be received and are not counted as on order.</li>
+    <li>Discarding a batch needs the Admin or Manager role and a reason of at least 8 characters.</li>
     <li>A paid order's totals cannot be changed. Use refund or void.</li>
   </ul>
 
@@ -258,12 +285,22 @@
       <tr><td><em>"Wastage quantity exceeds current stock for ingredient #12."</em></td><td>More wasted than held.</td><td>Count the stock or lower the quantity.</td></tr>
       <tr><td><em>"Enter a valid wastage date (not in the future)."</em></td><td>Bad date.</td><td>Use today or an earlier date.</td></tr>
       <tr><td><em>"No valid wastage rows submitted."</em></td><td>No row had an ingredient and quantity.</td><td>Fill in at least one row.</td></tr>
-      <tr><td><em>"Batch already empty."</em></td><td>Nothing remains in the batch.</td><td>Nothing to do.</td></tr>
+      <tr><td><em>"Batch is already empty or closed."</em></td><td>Nothing remains in the batch, or it was already closed.</td><td>Nothing to do.</td></tr>
       <tr><td><em>"Every shortage line must have a reason. Save your readings, pick a reason for each negative variance, then submit."</em></td><td>A shortage has no reason.</td><td>Pick reasons, save readings, submit again.</td></tr>
       <tr><td><em>"Only the original counter or a manager can edit this count."</em></td><td>Another person started the count.</td><td>Ask them or a manager.</td></tr>
       <tr><td><em>"Only admin/manager can approve counts."</em> / <em>"... reject counts."</em></td><td>Wrong role.</td><td>Ask a manager.</td></tr>
       <tr><td><em>"Provide a rejection reason (min 8 characters)."</em></td><td>Reason too short.</td><td>Write more.</td></tr>
-      <tr><td><em>"Variance exceeds current live stock for ingredient #12. Reopen and recount."</em></td><td>Stock changed after the count started.</td><td>Reject, reopen and recount.</td></tr>
+      <tr><td><em>"3 lines are not counted yet (Rice, Flour, Oil). Enter a reading for every line (type 0 if there is none) before continuing."</em></td><td>A line was left blank. Blank is never counted as 0.</td><td>Count it and type the number, or type 0 if the shelf is truly empty. Use the <strong>Not counted only</strong> filter, then save and submit again.</td></tr>
+      <tr><td><em>"Only the person who started this count or a manager can submit it."</em> / <em>"... can reopen it."</em></td><td>Another person started the count.</td><td>Ask them or a manager.</td></tr>
+      <tr><td><em>"This count has shortages over the approval threshold (MWK 5,000.00 and 10%). It must be approved by a different manager or admin than the person who counted it."</em></td><td>You counted, and a shortage is over the limits.</td><td>Ask another manager or admin to approve.</td></tr>
+      <tr><td><em>"Not approved: 2 line(s) became shortages after allowing for stock movements and need a reason (...). Count returned to draft with readings kept - add the reasons and resubmit; nothing was posted to stock."</em></td><td>Sales or waste during the count turned a line into a shortage.</td><td>Open the count (the box <strong>Returned for reasons</strong> lists the lines), pick a reason for each, save and submit again.</td></tr>
+      <tr><td><em>"Only a rejected count can be reopened."</em></td><td>The count is draft, submitted or approved.</td><td>Nothing to reopen.</td></tr>
+      <tr><td><em>"Count reopened with a fresh stock snapshot - re-enter every reading and resubmit."</em></td><td>Not an error: reopening starts the readings again.</td><td>Count every line again.</td></tr>
+      <tr><td><em>"Enter a unit cost - this ingredient has no average cost yet, so a zero-cost receipt cannot be recorded."</em></td><td>Cost was blank or 0 and the ingredient has no average cost.</td><td>Type the real cost per unit.</td></tr>
+      <tr><td><em>"Stock can only be received against a sent or partially-received purchase order (current status: draft)."</em></td><td>The order is still a draft, or is finished.</td><td>Click <strong>Mark as sent</strong> first, or raise a new order.</td></tr>
+      <tr><td><em>"Discarding a batch is restricted to managers and admins."</em></td><td>Wrong role.</td><td>Ask a manager.</td></tr>
+      <tr><td><em>"A reason of at least 8 characters is required to discard a batch."</em></td><td>Reason too short.</td><td>Write a fuller reason.</td></tr>
+      <tr><td><em>"Some entries were dated for reports but booked now in the stock ledger because a stock count is open for those ingredients."</em></td><td>Backdated wastage while a count is open.</td><td>Nothing to do. This stops it being taken off twice.</td></tr>
       <tr><td><em>"Supplier name is required."</em> / <em>"A supplier called "…" already exists. Use a different name or edit the existing one."</em> / <em>"Enter a valid email address."</em></td><td>Supplier form rules.</td><td>Correct the field.</td></tr>
       <tr><td><em>"Add at least one line before sending."</em></td><td>Empty purchase order.</td><td>Add a line.</td></tr>
       <tr><td><em>"This purchase order is received - its lines can no longer be changed."</em> (or closed, cancelled)</td><td>The order is finished.</td><td>Raise a new order.</td></tr>

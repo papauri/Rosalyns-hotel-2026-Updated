@@ -71,7 +71,7 @@ function rh_kb_synonym_groups(): array
     return [
         ['signin', 'login', 'logon'], ['signout', 'logout'], ['password', 'pwd', 'passcode'],
         ['pos', 'till', 'cashier', 'register'], ['folio', 'bill', 'charges'], ['vat', 'tax'],
-        ['booking', 'reservation', 'reservations', 'bookings'], ['guest', 'customer', 'client', 'visitor'],
+        ['booking', 'reservation', 'reservations', 'bookings', 'rsvp', 'rsvps'], ['guest', 'customer', 'client', 'visitor'],
         ['housekeeping', 'cleaning', 'clean', 'dirty', 'housekeeper', 'cleaner'],
         ['maintenance', 'repair', 'broken', 'fault', 'faulty'],
         ['kds', 'kitchen', 'chef', 'cook'], ['bds', 'bar', 'drinks', 'bartender'], ['cds', 'coffee', 'barista'],

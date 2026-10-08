@@ -153,6 +153,7 @@
   <p>The box has <strong>Backups</strong> and <strong>System Logs</strong> buttons.</p>
 
   <h3>The figures across the top</h3>
+  <p>Figure cards are the same standard card on every admin page: a label, one large value and a short note.</p>
   <table>
     <thead><tr><th>Card</th><th>What it counts</th></tr></thead>
     <tbody>
@@ -358,6 +359,8 @@
     <li><strong>Run Backup Now</strong> takes a backup (5 to 30 seconds; the page reloads). Success: <em>"Backup completed via ..."</em>. Failure: <em>"Backup failed (exit N, via ...): ..."</em>.</li>
     <li><strong>Available Backups</strong> lists the files, the newest marked <strong>Latest</strong>. <strong>Download</strong> and <strong>Restore</strong> are for users with the <strong>admin</strong> role only; everyone else sees <em>Admin only</em>.</li>
     <li><strong>Restore</strong> asks <em>"This will OVERWRITE the live database with the selected backup. This cannot be undone."</em> Click <strong>Yes, restore this backup</strong> or <strong>Cancel</strong>. Success: <em>"Restore completed successfully via ..."</em>.</li>
+    <li><strong>Backups run by themselves.</strong> The system takes one backup a day, the first time anyone opens the website or admin after 01:00. No cron job or server set-up is needed, and it still runs when the automated emails are switched off (the backup has its own switch under <strong>Automated Emails</strong>).</li>
+    <li><strong>Warning if a backup is missed:</strong> people with the <strong>Hotel Settings</strong> permission see an orange dashboard banner, <em>"No database backup in the last 36 hours"</em>, with a link to Admin &rarr; Automated Emails. That page shows <strong>Last database backup</strong> with its time and size, and an <em>overdue</em> tag when it is late.</li>
     <li>The system keeps 14 daily, 8 weekly and 12 monthly backups; older ones are removed automatically. The page also shows a backup log and server checks.</li>
   </ul>
   <div class="warn"><p>A restore replaces everything in the live system with the older copy. Anything done since that backup is lost. Download a copy of a backup and keep it away from the server every week.</p></div>

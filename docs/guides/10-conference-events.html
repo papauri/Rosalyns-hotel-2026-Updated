@@ -48,6 +48,7 @@
       <li><a href="#edit-room">How to edit, switch off or delete a conference room</a></li>
       <li><a href="#conf-confirm">How to confirm a conference enquiry</a></li>
       <li><a href="#conf-amount">How to set the price and send a quotation</a></li>
+      <li><a href="#conf-amount">How to change a conference date or time</a></li>
       <li><a href="#conf-paid">How to record payment and send the invoice</a></li>
       <li><a href="#conf-finish">How to complete or cancel a conference enquiry</a></li>
       <li><a href="#add-event">How to add or edit an event</a></li>
@@ -97,11 +98,11 @@
   <p>Guests use the Conference page on the website (<code>/conference.php</code>). It lists every room that is switched on. If the Conference service is switched off, the guest sees <em>"Our corporate booking service is temporarily unavailable"</em> and is asked to contact the hotel directly.</p>
   <ol class="steps">
     <li>The guest clicks <strong>Send Inquiry</strong> on a room card. The window <strong>Conference Room Inquiry</strong> opens.</li>
-    <li>They fill in: <strong>Company Name *</strong>, <strong>Contact Person *</strong>, <strong>Email *</strong>, <strong>Phone *</strong>, <strong>Event Date *</strong>, <strong>Start Time *</strong>, <strong>End Time *</strong>, <strong>Number of Attendees *</strong>. Optional: <strong>Event Type</strong> (Meeting, Conference, Workshop, Seminar, Training, Other), <strong>AV Equipment Requirements</strong>, <strong>Catering Required</strong> (tick box), <strong>Special Requirements</strong>.</li>
+    <li>They fill in: <strong>Company Name *</strong>, <strong>Contact Person *</strong>, <strong>Email *</strong>, <strong>Phone *</strong>, <strong>Event Date *</strong>, <strong>Start Time *</strong>, <strong>End Time *</strong>, <strong>End Date (optional, for events over several days, up to 14 days)</strong>, <strong>Number of Attendees *</strong>. Optional: <strong>Event Type</strong> (Meeting, Conference, Workshop, Seminar, Training, Other), <strong>AV Equipment Requirements</strong>, <strong>Catering Required</strong> (tick box), <strong>Special Requirements</strong>.</li>
     <li>They tick <strong>I agree to be contacted about this enquiry request.</strong> The <strong>Submit Inquiry</strong> button stays greyed out until this is ticked.</li>
     <li>They click <strong>Submit Inquiry</strong>. They are taken to a page headed <em>"Conference Enquiry Received"</em> showing their reference (for example <em>CONF-2026-04127</em>). It says the events team will confirm availability within 24 hours.</li>
   </ol>
-  <p>The enquiry arrives on the Conference page as <strong>Pending</strong>. Its amount is set automatically to the room's full day rate. The guest and the hotel both get an email.</p>
+  <p>The enquiry arrives on the Conference page as <strong>Pending</strong>. Its amount is set automatically: the room's <strong>half-day rate</strong> if the room has one and the event is a single day of 5 hours or less, otherwise the full day rate times the number of days. The guest sees this on the confirmation page as an <strong>estimate</strong> that our team confirms. If the Conference service is switched off, the enquiry form is closed and nothing is saved. The guest and the hotel both get an email.</p>
 
   <h3>Messages the guest can see</h3>
   <p>If something is wrong, the guest sees a window headed <em>"Enquiry Submission Failed"</em>. Several problems are joined together with semicolons, each starting with the field name, for example <em>"Contact person: Name contains invalid characters; Phone: Phone number is too short (minimum 8 digits)"</em>.</p>
@@ -158,6 +159,7 @@
     <li>Click <strong>Add New Room</strong>. The window <strong>Add New Conference Room</strong> opens.</li>
     <li>Under Room Information fill in <strong>Name *</strong> and <strong>Description *</strong>. Optionally choose a <strong>Featured Image</strong> (JPG, PNG or WebP).</li>
     <li>Under Room Details fill in <strong>Capacity *</strong> (a whole number, at least 1), <strong>Size (sqm)</strong> (optional), <strong>Full Day Rate *</strong> (0 or more, for example 350000) and <strong>Display Order</strong> (lowest shows first on the website, 0 if blank). In <strong>Amenities (comma separated)</strong> type for example <em>Projector, Whiteboard, WiFi, Catering</em>.</li>
+    <li>Optionally fill in <strong>Half Day Rate (up to 5 hours, optional)</strong>. A single-day event of 5 hours or less is then priced at this rate. Leave it blank if the room has no half-day price.</li>
     <li>Leave <strong>Active</strong> ticked if the room should show on the website now.</li>
     <li>Click <strong>Add Room</strong>. A green message <em>"Conference room added successfully!"</em> shows inside the window and the cards behind it refresh. Click <strong>Close</strong>.</li>
   </ol>
@@ -202,7 +204,17 @@
     <li>In <strong>Update Total Amount:</strong> type the new amount (for example 450000).</li>
     <li>Click <strong>Update Amount</strong>. You will see <em>"Total amount updated successfully!"</em>.</li>
   </ol>
-  <p>The amount starts as the room's full day rate. Change it here if you agreed a different price. You cannot change the amount of a cancelled enquiry.</p>
+  <p>The amount starts from the room's rates: the half-day rate for a single day of 5 hours or less (when the room has one), otherwise the full day rate times the number of days. Change it here if you agreed a different price. You cannot change the amount of a cancelled enquiry.</p>
+  <h3>Change the dates or times (reschedule)</h3>
+  <ol class="steps">
+    <li>Click <strong>Details</strong> on a <strong>Pending</strong> or <strong>Confirmed</strong> enquiry.</li>
+    <li>Change <strong>Event Date:</strong>, <strong>End date (multi-day):</strong> (leave empty for a single day, at most 14 days), <strong>Start Time:</strong> and <strong>End Time:</strong>.</li>
+    <li>Click <strong>Update Dates</strong>. You will see <em>"Event dates updated (Half day)."</em> (or the number of days).</li>
+  </ol>
+  <ul>
+    <li>Dates cannot be moved into the past. The room is checked for clashes: a multi-day booking holds the room for every day in its date range.</li>
+    <li>The amount is replaced with the new price only if you have <strong>Conference Invoicing &amp; Pricing</strong>. If the amount was set by hand, it is kept and the message tells you the suggested price. Tick <strong>Replace the amount with the suggested price even if it was set manually</strong> to replace it anyway.</li>
+  </ul>
   <h3>Send a quotation</h3>
   <ol class="steps">
     <li>On a <strong>Pending</strong> or <strong>Confirmed</strong> enquiry click <strong>Quote</strong>.</li>
@@ -230,6 +242,7 @@
     <li>A window asks <em>"Mark this conference as completed?"</em>. Click <strong>Complete</strong>.</li>
     <li>You will see <em>"Conference marked as completed!"</em>.</li>
   </ol>
+  <p>You cannot complete a conference before its last day. For a multi-day event that is the end date. If money is still owed, the window asks <em>"This conference still has an outstanding balance of MWK ... Mark it completed anyway?"</em> Click to confirm only if you really want to close it with the balance open. The balance is then logged.</p>
   <h3>Cancel</h3>
   <ol class="steps">
     <li>On a <strong>Pending</strong> or <strong>Confirmed</strong> enquiry click <strong>Cancel</strong>.</li>
@@ -249,7 +262,7 @@
     <li>Open <strong>Conference &amp; Events</strong> &rarr; <strong>Events</strong>.</li>
     <li>Click <strong>Add New Event</strong>. To change an existing event click <strong>Edit</strong> on its card.</li>
     <li>Fill in: <strong>Event Title *</strong>, <strong>Description *</strong>, <strong>Event Date *</strong>, <strong>Start Time</strong>, <strong>End Time</strong>, <strong>Location</strong> (for example <em>Grand Conference Hall</em>), <strong>Ticket Price (MWK)</strong> (enter 0 for a free event), <strong>Capacity</strong> and <strong>Display Order</strong>.</li>
-    <li><strong>Capacity</strong> is the number of seats. Leave it blank or enter 0 for unlimited. When the seats are used up, new guests go on the waitlist.</li>
+    <li><strong>Capacity</strong> is the number of seats. Leave it blank or enter 0 for unlimited. When the seats are used up, new guests go on the waitlist. You cannot set it lower than the seats already held by pending or confirmed bookings.</li>
     <li>Optionally add an <strong>Event Image</strong> (JPG, PNG or WebP). For <strong>Event Video (Optional)</strong>, paste a YouTube, Vimeo, Dailymotion or direct video link, or upload a video file. When editing an event that has a video, <strong>Remove Video</strong> takes it off.</li>
     <li>Tick the boxes you want: <strong>Feature this event</strong>, <strong>Show in Upcoming Events section (homepage)</strong>, <strong>Active (visible on website)</strong>. Active is ticked by default.</li>
     <li>Click <strong>Save</strong>. You will see <em>"Event added successfully!"</em> or <em>"Event updated successfully!"</em> inside the window, and the cards refresh. Click <strong>Close</strong>.</li>
@@ -303,6 +316,7 @@
   <ol class="steps">
     <li>Seats must be free. Either another booking was cancelled, or you raised the event's <strong>Capacity</strong> on the Events page.</li>
     <li>On the Event Bookings page click the <strong>Waitlisted</strong> tab, then <strong>View</strong> on the booking.</li>
+    <li>The Waitlisted tab lists the oldest request first. Promote in that order. If you pick a booking while earlier guests are still waiting, the window warns <em>"WARNING: 2 guest(s) joined this waitlist before this booking and are still waiting. Promoting this one skips them."</em></li>
     <li>Click <strong>Promote from waitlist</strong>. A window asks <em>"Move this booking off the waitlist? The guest will be emailed that a place is available."</em> Click OK.</li>
     <li>You will see <em>"Booking moved off the waitlist (now pending). The guest has been emailed."</em> The booking is now <strong>Pending</strong>. Confirm it as usual.</li>
   </ol>
@@ -339,7 +353,12 @@
     <li>A conference room cannot be confirmed for a date and time when another confirmed or completed enquiry already holds the same room with overlapping times. If the enquiry has no times, any confirmed booking that day blocks it.</li>
     <li>A conference room with pending or confirmed enquiries cannot be deleted. An event with pending, confirmed or waitlisted bookings cannot be deleted.</li>
     <li>Event seats: pending, confirmed and completed bookings use up seats, counting every guest. Waitlisted and cancelled bookings do not. A guest whose party does not fit goes on the waitlist automatically.</li>
-    <li>Past events and inactive events cannot be booked on the website.</li>
+    <li>Past events and inactive events cannot be booked on the website. A same-day event stops taking bookings when its start time arrives.</li>
+    <li>One booking per email address per event (pending, confirmed or waitlisted). Capitals and spaces in the email are ignored when checking.</li>
+    <li>Event capacity cannot be set lower than the seats already held.</li>
+    <li>A conference cannot be marked completed before its last day, and completing with money outstanding needs a confirmation.</li>
+    <li>Conference prices: a single day of 5 hours or less uses the room's half-day rate when it has one; otherwise daily rate times days. Multi-day events run up to 14 days. The guest sees only an estimate.</li>
+    <li>The conference enquiry form is closed while the Conference module is switched off.</li>
     <li>A booking with payments recorded cannot be deleted from Event Bookings. Cancel it.</li>
     <li>Cancelling voids the bill but never removes payments. Paid money is shown as credit owed back until it is refunded.</li>
     <li>Prices, invoices and quotations need the Invoicing &amp; Pricing permission. Without it, the buttons are missing from the event booking window. On the Conference page the buttons are still visible, but pressing them shows <em>"Error: You do not have permission to handle conference invoicing or pricing."</em></li>
@@ -351,6 +370,14 @@
   <table>
     <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
     <tbody>
+      <tr><td><em>"You already have a booking for this event with that email address. Check your inbox for the confirmation, or contact us if you need to change it."</em></td><td>A guest tried to book (RSVP) the same event twice: there is already a booking for this event with the same email, so the duplicate is refused.</td><td>Look for the first booking in Event Bookings. Cancel it first if the guest needs to rebook.</td></tr>
+      <tr><td><em>"Capacity cannot be set to 20: 25 seat(s) are already held by pending or confirmed bookings. Cancel or move some bookings first, or choose a capacity of at least 25."</em></td><td>The new capacity is lower than the seats already taken.</td><td>Cancel some bookings, or enter at least the number of seats shown.</td></tr>
+      <tr><td><em>"This conference is on Oct 20, 2026 and has not taken place yet - it cannot be marked completed."</em> / <em>"This conference runs until ... and has not taken place yet - it cannot be marked completed."</em></td><td>Complete was pressed before the event's last day.</td><td>Wait until the event has taken place, then complete it.</td></tr>
+      <tr><td><em>"This conference still has an outstanding balance of ... Confirm the completion explicitly to proceed."</em></td><td>Money is still owed on the enquiry.</td><td>Record the payment first, or confirm the window to complete with the balance open.</td></tr>
+      <tr><td><em>"An event cannot be rescheduled to a date in the past."</em> / <em>"The end date cannot be before the event date."</em> / <em>"Multi-day events can span at most 14 days."</em> / <em>"End time must be after start time."</em></td><td>The new dates or times are not valid.</td><td>Correct the dates or times and click Update Dates again.</td></tr>
+      <tr><td><em>"This room is already confirmed for those dates under CONF-... Choose different dates or times."</em></td><td>Another confirmed enquiry holds the room on those days.</td><td>Pick other dates or times.</td></tr>
+      <tr><td><em>"Only pending or confirmed enquiries can be rescheduled."</em></td><td>The enquiry is cancelled or completed.</td><td>Nothing to do.</td></tr>
+      <tr><td><em>"Half day rate must be a number (0 or more), or left blank."</em></td><td>The half-day rate was not a number.</td><td>Enter a number or leave it blank.</td></tr>
       <tr><td><em>Room name and description are required.</em></td><td>Name or description left empty when saving a room.</td><td>Fill in both and save again.</td></tr>
       <tr><td><em>Capacity must be a whole number of at least 1.</em></td><td>Capacity is empty, zero, negative or has decimals.</td><td>Enter a whole number such as 40.</td></tr>
       <tr><td><em>Full day rate must be a number (0 or more).</em></td><td>Rate is empty or not a number.</td><td>Enter a number such as 350000.</td></tr>

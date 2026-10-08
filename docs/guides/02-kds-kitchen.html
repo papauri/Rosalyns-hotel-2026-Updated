@@ -132,7 +132,7 @@
   <p>What the system does:</p>
   <ul>
     <li>The line is cancelled and the order total comes down by that line (including its share of any discount and tax).</li>
-    <li>If the line had not been started, its stock is put back. If it had been started or was ready, the loss is recorded as wastage.</li>
+    <li>If the line had not been started, its stock is put back. If it had been started or was ready, the loss is recorded as wastage, counted once (not also as usage in Stock Reports).</li>
     <li>If the order was already paid, a pending refund is raised for the cashier to complete.</li>
     <li>For a room-service order the matching room charge is removed.</li>
     <li>If every line on an unpaid tab is 86'd, the tab is cancelled.</li>
