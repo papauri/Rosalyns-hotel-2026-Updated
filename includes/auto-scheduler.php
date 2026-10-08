@@ -259,6 +259,12 @@ if (!function_exists('rh_auto_defaults')) {
                     return ['status' => 'skipped', 'reason' => 'already_checked'];
                 }
                 $handled = true;
+                // A local copy talks to the live database: a page load on the PHP dev server or
+                // localhost must never send live emails or move the live scheduler clock.
+                $host = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+                if (PHP_SAPI === 'cli-server' || preg_match('/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/', $host)) {
+                    return ['status' => 'skipped', 'reason' => 'local_copy'];
+                }
                 if (!isset($GLOBALS['pdo']) || !function_exists('getSetting')) {
                     return ['status' => 'skipped', 'reason' => 'no_db'];
                 }
