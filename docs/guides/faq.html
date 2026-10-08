@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FAQ — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
+
+  <h1>Frequently asked questions</h1>
+  <p>Quick answers for when you are stuck. The questions at the top are the ones staff ask most. Below them is every "How to…" and every error message from all the guides, so you can type what you see on the screen and find the fix.</p>
+
+  <div class="kb-filter" role="search">
+    <label for="kb-faq-filter" class="kb-sr">Filter questions</label>
+    <input type="search" id="kb-faq-filter" class="kb-input" placeholder="Type a question or paste an error message…" autocomplete="off" spellcheck="false">
+    <p class="kb-filter__count" id="kb-faq-count" aria-live="polite"></p>
+  </div>
+
+  <div id="kb-curated">
+
+  <h2 id="lost">If you are lost</h2>
+
+  <details class="faq" id="faq-search">
+    <summary>How do I find something quickly?</summary>
+    <p>In the admin, press <kbd>Ctrl</kbd> + <kbd>K</kbd> (<kbd>Cmd</kbd> + <kbd>K</kbd> on a Mac), or <kbd>/</kbd> when you are not typing in a box, or click <strong>Search</strong> in the top bar. Type a booking reference, guest name, phone number, receipt number, room, menu item, setting or a question such as <em>"how to refund"</em>. Records, pages and the matching parts of these guides all appear. Use the arrows and <kbd>Enter</kbd> to open one.</p>
+    <p>In the guides, use the search box at the top of every page (press <kbd>/</kbd> to jump to it).</p>
+  </details>
+
+  <details class="faq" id="faq-which-guide">
+    <summary>Which guide should I read first?</summary>
+    <p>Read the guide for your job on the <a href="index.html">guides home page</a>: Reception &amp; bookings for the front desk, POS till for restaurant and bar staff, the Kitchen, Bar or Coffee screen guide for the stations, Housekeeping for room cleaning, and Payments or Reports for money. Everyone should skim the <a href="99-admin-dashboard-full-guide.html">Admin reference</a> once.</p>
+  </details>
+
+  <details class="faq" id="faq-menu-missing">
+    <summary>A page I need is missing from my menu. Why?</summary>
+    <p>You only see the pages your permissions allow, and pages for parts of the system that are switched off are hidden for everyone. Ask an administrator to tick the permission in <a href="18-staff-access.html#perms">Staff &amp; access</a>, or to check <a href="16-business-presets.html#toggle">Settings &rarr; Modules</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-token">
+    <summary>It says "Security token invalid" or "Invalid form token". What do I do?</summary>
+    <p>The page was open too long. Reload the page and do the action again. Nothing was saved by the failed attempt.</p>
+  </details>
+
+  <details class="faq" id="faq-duplicate">
+    <summary>It says something "already exists" and will not save.</summary>
+    <p>The system refuses duplicates, such as a second supplier, room or menu item with the same name (capital letters and extra spaces do not count as different). Find the existing record and edit it instead. See <a href="99-admin-dashboard-full-guide.html#duplicates">Duplicates and required fields</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-double-click">
+    <summary>I clicked Save twice. Is it saved twice?</summary>
+    <p>No. Save buttons lock while saving, and a booking or payment sent twice is recorded once; the second click says <em>"already created"</em> or <em>"already recorded"</em>.</p>
+  </details>
+
+  <details class="faq" id="faq-attention">
+    <summary>The dashboard shows a red "System needs attention" box.</summary>
+    <p>A backup is old, disk space is low, a background job has stopped or the database is down. Open <strong>Backups</strong> or <strong>System Logs</strong> from the box and tell the administrator.</p>
+  </details>
+
+  <h2 id="signing-in">Signing in and passwords</h2>
+
+  <details class="faq" id="faq-forgot-password">
+    <summary>I forgot my password.</summary>
+    <p>On the sign-in page click <strong>Forgot Password?</strong>, enter the email address on your account, then open the email and click the link within 1 hour to choose a new password (at least 8 characters). See <a href="99-admin-dashboard-full-guide.html#signin">Signing in</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-locked">
+    <summary>My account is locked.</summary>
+    <p>After 5 wrong passwords an account is locked for 15 minutes. Wait for the minutes shown, or use <strong>Forgot Password?</strong>. If it says the account has been <em>deactivated</em>, an administrator must tick <strong>Active Account</strong> again in Staff &amp; access.</p>
+  </details>
+
+  <details class="faq" id="faq-signed-out">
+    <summary>Why was I signed out?</summary>
+    <p>You are signed out after 8 hours without activity. Sign in again; you go back to the page you asked for.</p>
+  </details>
+
+  <details class="faq" id="faq-change-password">
+    <summary>How do I change my password?</summary>
+    <p>Click the key button in the top bar, enter your current password and the new one twice, then click <strong>Email Me a Verification Code</strong>. Type the 6-digit code from the email within 10 minutes and confirm. The new password works from your next sign-in.</p>
+  </details>
+
+  <details class="faq" id="faq-invite-expired">
+    <summary>A new staff member's invitation link says it is invalid or expired.</summary>
+    <p>Invitation links last 72 hours and stop working once used or when a newer invitation is sent. Send a new one with the envelope button in <a href="18-staff-access.html#resend">Staff &amp; access</a>.</p>
+  </details>
+
+  <h2 id="front-desk">Front desk</h2>
+
+  <details class="faq" id="faq-checkin-early">
+    <summary>The guest arrived early and I cannot check them in.</summary>
+    <p>Check-in is refused before the booked arrival date. Use <strong>Adjust Stay Dates</strong> on the booking first, then check in. See <a href="07-reception-bookings.html#dates">How to change the stay dates</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-checkin-payment">
+    <summary>Check-in is greyed out or says a payment is needed.</summary>
+    <p>At least a part payment must be recorded before check-in. Record the deposit or payment, then check in. A physical room must also be assigned. See <a href="07-reception-bookings.html#checkin">How to check a guest in</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-room-not-clean">
+    <summary>Check-in says the room is not clean yet.</summary>
+    <p>Housekeeping has not released the room. Ask housekeeping to finish and verify the cleaning, or ask someone with the <strong>Check-in to Room Not Clean</strong> permission. See <a href="06-housekeeping.html#checkin">Checking a guest in to a room that is not clean</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-checkout-other-day">
+    <summary>The guest is leaving early or late. How do I check them out?</summary>
+    <p>A plain checkout only works on the booked departure day. On any other day use <strong>Check Out &amp; Settle</strong> on the booking page (or the checkout button on the list). The settlement window charges the extra nights or refunds the unused ones before checking the guest out. See <a href="07-reception-bookings.html#checkout">How to check a guest out</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-checkout-owes">
+    <summary>Checkout is blocked because the guest still owes money.</summary>
+    <p>Record the payment first. Only someone with the <strong>Check-out With Balance</strong> permission can check out a guest who still owes; it is recorded on the booking's timeline.</p>
+  </details>
+
+  <details class="faq" id="faq-upgrade">
+    <summary>How do I upgrade a guest to a better room?</summary>
+    <p>Open the booking's <strong>More</strong> menu and choose <strong>Upgrade / change room type</strong>. Charge the difference, or give it free (a complimentary upgrade needs a manager or the Edit Booking Financials permission). See <a href="07-reception-bookings.html#upgrade">How to upgrade or downgrade a room type</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-delete-booking">
+    <summary>I cannot delete a booking.</summary>
+    <p>Bookings with money on them, and guests who are in-house, cannot be deleted. Refund or void the payments first, or cancel the booking instead. Deleted bookings can be restored from the <strong>Deleted</strong> tab. See <a href="07-reception-bookings.html#delete">How to delete and restore a booking</a>.</p>
+  </details>
+
+  <h2 id="restaurant-money">Restaurant, bar and money</h2>
+
+  <details class="faq" id="faq-offline-till">
+    <summary>The internet dropped while I was using the till.</summary>
+    <p>Only orders paid straight away with <strong>Pay</strong> are saved on the device and sent automatically when the connection returns; they can never be charged twice. Everything else (Fire, tabs, refunds, closing the shift) needs the connection. If you see a network error, do not assume it went through; check <strong>Tabs</strong> once you are back online. See <a href="01-pos-till.html#offline">What happens when the internet drops</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-room-charge">
+    <summary>How do I charge food or drinks to a guest's room?</summary>
+    <p>On the till choose <strong>Room Service</strong> (or the Room order type), pick the checked-in room, add the items and click <strong>Fire</strong>. Each item goes on the guest's bill straight away. Do not use Pay for a room order. See <a href="01-pos-till.html#room">How to charge an order to a guest's room</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-refund">
+    <summary>How do I give a guest money back?</summary>
+    <p>Open the payment and click <strong>Refund</strong>. Choose the amount, the reason and the status (use <strong>Pending</strong> until the money has actually gone out, then settle it). Mobile money refunds must start as Pending or Processing. See <a href="13-finance-payments.html#refund">How to refund a payment</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-end-of-day">
+    <summary>Where do I see today's takings and what still needs doing?</summary>
+    <p><strong>Money &rarr; End of Day</strong> shows the day's net takings, cash to bank, what is still owed and a close score with the items that need attention. See <a href="14-reports-eod.html#eod">End of Day report</a>.</p>
+  </details>
+
+  </div>
+
+  <div id="kb-all" hidden>
+    <h2 id="all">Every how-to and error message</h2>
+    <div class="kb-chips" id="kb-faq-guides" role="group" aria-label="Show questions from one guide"></div>
+    <div id="kb-faq-list"></div>
+  </div>
+  <p id="kb-faq-none" class="kb-empty" hidden>Nothing matches. Try fewer words, or the search box at the top of the page.</p>
+
+  <footer>Updated October 2026. Questions marked with a guide name come straight from that guide.</footer>
+</div>
+</body>
+</html>

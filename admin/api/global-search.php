@@ -325,4 +325,33 @@ if ($can('user-management.php')) {
     $add('staff', 'Staff', 'fa-users-cog', $items);
 }
 
+// ---- Help & guides: the staff guides knowledge base (open to every signed-in user) ----
+try {
+    require_once __DIR__ . '/../../includes/guide-knowledge-base.php';
+    $kb = rh_kb_search($q, 5);
+    $items = [];
+    $kbLabel = ['problem' => 'Problem & fix', 'faq' => 'FAQ', 'section' => 'Guide'];
+    foreach ($kb['partial'] ? [] : $kb['results'] as $e) {
+        $items[] = [
+            'title' => $e['type'] === 'problem' ? '“' . mb_strimwidth($e['title'], 0, 90, '…') . '”' : $e['title'],
+            'sub' => ($kbLabel[$e['type']] ?? 'Guide') . ' · ' . $e['guide'] . (!empty($e['parent']) ? ' › ' . $e['parent'] : ''),
+            'url' => '../docs/guides/' . $e['url'],
+            'icon' => $e['type'] === 'problem' ? 'fas fa-triangle-exclamation' : ($e['type'] === 'faq' ? 'fas fa-circle-question' : 'fas fa-book-open'),
+            'newTab' => true,
+        ];
+    }
+    if ($items) {
+        $items[] = [
+            'title' => 'Search all guides for “' . $q . '”',
+            'sub' => 'Staff guides & FAQ',
+            'url' => '../docs/guides/index.html?q=' . rawurlencode($q),
+            'icon' => 'fas fa-magnifying-glass',
+            'newTab' => true,
+        ];
+    }
+    $add('help', 'Help & guides', 'fa-life-ring', $items);
+} catch (Throwable $e) {
+    error_log('global-search guides: ' . $e->getMessage());
+}
+
 echo json_encode(['success' => true, 'q' => $q, 'groups' => $groups], JSON_UNESCAPED_UNICODE);

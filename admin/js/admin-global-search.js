@@ -6,7 +6,8 @@
  *     module), matched instantly in the browser.
  *   - Records and settings: api/global-search.php (bookings, guests, payments, receipts,
  *     enquiries, quotations, credit notes, rooms, menu, stock, suppliers, reviews, staff,
- *     Hotel Settings sections, email templates), gated server-side the same way.
+ *     Hotel Settings sections, email templates), gated server-side the same way, plus
+ *     "Help & guides" answers from the staff guides knowledge base (open in a new tab).
  * Enter or click goes straight there. Results that land on a list page carry ?rh_hl=,
  * which this file uses to scroll to and flash the matching row (see highlightFromUrl).
  *
@@ -94,7 +95,7 @@
         activeIndex = flat.length ? 0 : -1;
         paintActive();
         if (!q) {
-            status.textContent = 'Search bookings, guests, phone numbers, receipts, rooms, menu items, staff, settings, pages…';
+            status.textContent = 'Search bookings, guests, phone numbers, receipts, rooms, menu items, staff, settings, pages — or ask “how do I…” to search the guides.';
         } else if (loading) {
             status.textContent = flat.length ? 'Searching records…' : 'Searching…';
         } else {
@@ -120,6 +121,10 @@
         if (!it || !it.url) return;
         close();
         var target = new URL(it.url, window.location.href);
+        if (it.newTab) { // guides open beside the admin, like the sidebar's guide links
+            window.open(target.href, '_blank', 'noopener');
+            return;
+        }
         if (target.pathname === window.location.pathname && target.search === window.location.search && target.hash) {
             window.location.hash = target.hash; // same page, new section: let the deep-link script flash it
             return;

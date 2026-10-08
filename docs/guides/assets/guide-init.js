@@ -5,9 +5,16 @@
  *
  *   .brand, .g-site-name  -> hotel name
  *   document.title        -> "Liwonde Sun Hotel" replaced with the hotel name
+ *
+ * Also loads kb-search.js, which turns the guides into a searchable knowledge base.
  */
 (function () {
     'use strict';
+    var kb = document.createElement('script');
+    kb.src = 'assets/kb-search.js';
+    kb.defer = true;
+    document.head.appendChild(kb);
+
     fetch('assets/site-info.php')
         .then(function (r) { return r.json(); })
         .then(function (d) {
