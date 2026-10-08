@@ -45,7 +45,7 @@
       <li><a href="#services">Service Modules &amp; Dedicated Notification Emails</a></li>
       <li><a href="#pwa">PWA Install Banner</a></li>
       <li><a href="#elsewhere">Where the wording and other hotel details live</a></li>
-      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#automated-emails">Automated Emails (reminders that send themselves)</a></li><li><a href="#rules">Rules the system enforces</a></li>
       <li><a href="#problems">Problems and fixes</a></li>
       <li><a href="#related">Related guides</a></li>
     </ol>
@@ -400,8 +400,46 @@
   <h2 id="elsewhere">Where the wording and other hotel details live</h2>
   <ul>
     <li><strong>Email and PDF wording</strong> (subject lines, body text, invoice and quotation layouts) is on Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Email Templates</strong>, and needs the permission <strong>Edit message templates</strong>. The list of tags you can put in a template is in <a href="12-email-templates.php">Email template tags</a>. This page, Hotel Settings, does not edit any wording.</li>
-    <li><strong>Automated Emails</strong> (Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Automated Emails</strong>, <code>/admin/automated-emails.php</code>, permission <strong>Hotel Settings</strong>): the master switch for automatic jobs, the overdue payment reminder stages, the run interval, a test-recipient box and a <strong>Send test to me</strong> button. If the <strong>Test recipient</strong> box has an address in it, every automatic email goes to that address instead of to real guests, and a yellow <strong>TEST MODE</strong> bar shows at the top. Leave it empty in normal use.</li>
+    <li><strong>Automated Emails</strong> (Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Automated Emails</strong>, <code>/admin/automated-emails.php</code>, permission <strong>Hotel Settings</strong>): the master switch for automatic jobs, the overdue payment reminder stages, the run interval, a test-recipient box and a <strong>Send test to me</strong> button (see <a href="#automated-emails">Automated Emails</a>). If the <strong>Test recipient</strong> box has an address in it, every automatic email goes to that address instead of to real guests, and a yellow <strong>TEST MODE</strong> bar shows at the top. Leave it empty in normal use.</li>
     <li><strong>Footer</strong> (Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Footer</strong>, <code>/admin/footer-management.php</code>, permission <strong>Footer Management</strong>, needs the Website &amp; CMS module): this is where the hotel name (<strong>Site Name</strong>), tagline, logo, main <strong>Phone Number</strong>, <strong>Email Address</strong>, <strong>Address</strong>, <strong>Working Hours</strong>, the social media links (<strong>Facebook URL</strong>, <strong>Instagram URL</strong>, <strong>Twitter / X URL</strong>, <strong>LinkedIn URL</strong>) and the copyright text are set. Saving shows <em>"Site and footer settings saved."</em> The site name cannot be empty: <em>"Site name is required."</em></li>
+  </ul>
+
+  <h2 id="automated-emails">Automated Emails (reminders that send themselves)</h2>
+  <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Automated Emails</strong> (<code>/admin/automated-emails.php</code>), permission <strong>Hotel Settings</strong>. Reminders go out by themselves while people use the website or the admin. No cron job is needed. At most once every <strong>Run interval</strong> minutes (15 by default), the next page someone opens starts a run in the background after their page has loaded, so nobody waits for it.</p>
+  <h3>The Status box</h3>
+  <ul>
+    <li><strong>Master switch</strong> turns ALL automatic jobs on or off, the nightly backup included. <strong>Last run</strong> shows when the jobs last ran (or <em>never</em>).</li>
+    <li><strong>Run now</strong> runs every switched-on job straight away and reports per job, for example <em>"Run complete. Overdue payment reminders: sent 2, checked 14 · …"</em>. <em>"Nothing ran (…)"</em> gives the reason, for example the master switch is off.</li>
+    <li>A yellow <strong>TEST MODE</strong> bar means the <strong>Test recipient</strong> box is filled in: every automatic email goes to that address and real guests are not contacted. Clear the box to go live.</li>
+  </ul>
+  <h3>The jobs</h3>
+  <table>
+    <thead><tr><th>Job</th><th>What it sends or does</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Overdue payment reminders</td><td>Chases money owed after the due date, at each reminder stage.</td><td>Stages and limits are set below.</td></tr>
+      <tr><td>Quotation expiry reminders</td><td>Reminds a client before a quotation expires.</td><td><strong>Quotation reminder (days before expiry)</strong>, default 2.</td></tr>
+      <tr><td>Tentative hold reminders / Tentative hold expired notices</td><td>Warns the guest before a tentative hold runs out, and tells them when it has.</td><td>Use the reminder hours in <a href="#tentative">Tentative Bookings</a>.</td></tr>
+      <tr><td>Pending booking expired notices</td><td>Tells the guest when an unconfirmed (pending) booking has expired.</td><td></td></tr>
+      <tr><td>Confirmed-but-unpaid payment reminders / room release</td><td>Reminds guests whose confirmed booking has no payment, then releases the room when the pay-by time passes.</td><td>Only work when <strong>Confirmed bookings with no payment are released after (hours since booked, 0 = never)</strong> in <a href="#details">Hotel details</a> is above 0. It is 0 (off) by default.</td></tr>
+      <tr><td>Pre-arrival reminders / Post-stay review requests</td><td>An email before arrival, and a review request after check-out.</td><td>Off by default. They share their switches and day settings with <a href="#notify">Booking Notification Email</a>.</td></tr>
+      <tr><td>Gym membership renewal reminders</td><td>Reminds members before their membership ends.</td><td>Shares its switch with Gym Members (see the <a href="17-gym-management.html#reminders">Gym guide</a>).</td></tr>
+      <tr><td>Nightly database backup</td><td>Makes the daily backup.</td><td>Runs last, after the emails. See Backups in the <a href="99-admin-dashboard-full-guide.html#backups">Admin reference</a>.</td></tr>
+    </tbody>
+  </table>
+  <h3>Settings</h3>
+  <ul>
+    <li><strong>Reminder stages (days overdue, up to 3)</strong>: default <strong>1, 3, 7</strong>, a reminder 1, 3 and 7 days after the due date.</li>
+    <li><strong>Payment terms for events / gym / conference (days)</strong>: default 7. How long after the invoice money counts as due.</li>
+    <li><strong>Stop chasing after (days overdue)</strong>: default 30.</li>
+    <li><strong>Run interval (minutes)</strong>: 5 to 1440, default 15.</li>
+    <li><strong>Test recipient (leave EMPTY in production)</strong>: see TEST MODE above. An address that is not valid is cleared when you save.</li>
+    <li>Tick or untick each job, then click <strong>Save settings</strong> (<em>"Automated email settings saved."</em>).</li>
+  </ul>
+  <h3>Testing and the activity log</h3>
+  <ul>
+    <li><strong>Send test to me</strong>: pick a template under <strong>Email Template Test</strong>. It sends that email with sample data to your own admin email address only, and records nothing. If your account has no email address you see <em>"Your admin account has no valid email address to send the test to."</em></li>
+    <li><strong>Recent activity (last 100)</strong> lists every automatic email: When, Job, Account, Stage, Recipient and Status. Each reminder stage is sent once per booking or account, never twice.</li>
+    <li>The wording of each email is edited in <a href="12-email-templates.php">Email Templates</a>.</li>
   </ul>
 
   <h2 id="rules">Rules the system enforces</h2>

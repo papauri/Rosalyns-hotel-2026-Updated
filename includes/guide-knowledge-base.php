@@ -57,34 +57,179 @@ function rh_kb_normalize(string $s): string
     $s = preg_replace('/\b(log|sign)[\s-]?(in|on)\b/u', 'signin', $s) ?? $s;
     $s = preg_replace('/\b(log|sign)[\s-]?(out|off)\b/u', 'signout', $s) ?? $s;
     $s = preg_replace('/\b(e-?mail)s?\b/u', 'email', $s) ?? $s;
+    $s = preg_replace('/\bset-?up\b/u', 'set up', $s) ?? $s;
+    $s = preg_replace('/\bwalk[\s-]in(s?)\b/u', 'walkin$1', $s) ?? $s;
+    $s = preg_replace('/\bno[\s-]shows?\b/u', 'noshow', $s) ?? $s;
+    $s = preg_replace('/\bz[\s-]?reports?\b/u', 'zreport', $s) ?? $s;
     $s = preg_replace("/[^\p{L}\p{N}]+/u", ' ', $s) ?? $s;
     return ' ' . trim(preg_replace('/\s+/u', ' ', $s) ?? $s) . ' ';
 }
 
-/** Words of a search query with filler removed and a light stem applied. */
-function rh_kb_query_terms(string $q): array
+/** Words staff use for the same thing. Any word in a group also finds the others. */
+function rh_kb_synonym_groups(): array
+{
+    return [
+        ['signin', 'login', 'logon'], ['signout', 'logout'], ['password', 'pwd', 'passcode'],
+        ['pos', 'till', 'cashier', 'register'], ['folio', 'bill', 'charges'], ['vat', 'tax'],
+        ['booking', 'reservation', 'reservations', 'bookings'], ['guest', 'customer', 'client', 'visitor'],
+        ['housekeeping', 'cleaning', 'clean', 'dirty', 'housekeeper', 'cleaner'],
+        ['maintenance', 'repair', 'broken', 'fault', 'faulty'],
+        ['kds', 'kitchen', 'chef', 'cook'], ['bds', 'bar', 'drinks', 'bartender'], ['cds', 'coffee', 'barista'],
+        ['staff', 'user', 'users', 'employee', 'employees', 'worker'],
+        ['permission', 'permissions', 'access', 'rights', 'allow', 'privilege'],
+        ['module', 'modules', 'feature', 'features'],
+        ['refund', 'reimburse', 'reimbursement', 'repay'],
+        ['quotation', 'quote', 'estimate', 'proforma'],
+        ['deal', 'promo', 'promotion', 'coupon', 'offer'],
+        ['ingredient', 'stock', 'inventory'], ['supplier', 'vendor'],
+        ['wastage', 'waste', 'spoil', 'spoilage', 'spoiled', 'expired'],
+        ['takings', 'revenue', 'sales', 'income', 'earnings'],
+        ['price', 'rate', 'tariff', 'cost', 'pricing'],
+        ['cancel', 'cancellation', 'cancelled'], ['delete', 'remove', 'erase'],
+        ['edit', 'change', 'modify', 'update', 'amend'],
+        ['print', 'printer', 'reprint'], ['offline', 'internet', 'connection', 'network', 'wifi'],
+        ['email', 'mail'], ['backup', 'backups', 'restore'], ['member', 'membership', 'members'],
+        ['conference', 'meeting', 'boardroom'], ['event', 'events', 'function', 'wedding', 'party'],
+        ['checkin', 'arrival', 'arrive', 'arriving', 'arrivals'], ['checkout', 'departure', 'depart', 'leaving', 'departures'],
+        ['photo', 'image', 'picture', 'gallery', 'media', 'video'], ['website', 'site', 'web'],
+        ['invoice', 'invoices'], ['receipt', 'receipts'], ['payment', 'pay', 'paid', 'deposit'],
+        ['discount', 'reduction'], ['debt', 'owe', 'owes', 'owing', 'outstanding', 'balance'],
+        ['report', 'reports', 'summary', 'analytics'], ['role', 'roles', 'position', 'job'],
+        ['create', 'make', 'new', 'add'], ['ticket', 'tickets', 'order', 'orders'],
+        ['86', 'unavailable'], ['offline', 'online'], ['assign', 'allocate'],
+        ['join', 'joined', 'merge', 'combine', 'adjoining', 'connecting'],
+    ];
+}
+
+/** Everyday phrases rewritten to the words the guides use (query side only). */
+function rh_kb_expand_phrases(string $q): string
+{
+    $map = [
+        '/\b(sold out|out of stock|run out|ran out|finished)\b/i' => ' unavailable 86 ',
+        '/\bmoney back\b/i' => ' refund ',
+        '/\b(no internet|internet (is )?(down|off|gone|dropped|not working)|connection (lost|down|dropped)|wi-?fi (is )?down)\b/i' => ' offline ',
+        '/\bwalk[\s-]?ins?\b/i' => ' walkin create booking ',
+        '/\b(sign(ed)? me out|kicked out|logged out)\b/i' => ' signed out ',
+        '/\b(room number|physical room)\b/i' => ' assign room ',
+        '/\b(not working|doesn\'?t work|won\'?t work|broken|error)\b/i' => ' problem ',
+    ];
+    foreach ($map as $re => $add) {
+        if (preg_match($re, $q)) {
+            $q .= $add;
+        }
+    }
+    return $q;
+}
+
+/**
+ * Words of a search query with filler removed and a light stem applied.
+ * Each term: ['stem' => stem, 'alts' => [synonym stems and a spelling correction]].
+ */
+function rh_kb_query_terms(string $q, ?array $vocab = null, array &$corrected = []): array
 {
     static $stop = ['a', 'an', 'the', 'to', 'do', 'i', 'how', 'what', 'is', 'are', 'can', 'my', 'of', 'for', 'in', 'on',
-        'and', 'or', 'does', 'why', 'when', 'where', 'it', 'me', 'you', 'with', 'be', 'we', 'our', 'this', 'that', 'at', 'from', 'there', 'should', 'need', 'want'];
-    static $synonyms = [
-        'login' => 'signin', 'logon' => 'signin', 'logout' => 'signout', 'pwd' => 'password', 'pw' => 'password',
-        'till' => 'pos', 'bill' => 'folio', 'tax' => 'vat', 'reservation' => 'booking', 'reservations' => 'booking',
-        'reception' => 'booking', 'cleaning' => 'housekeeping', 'clean' => 'housekeeping', 'kitchen' => 'kds',
-        'staff' => 'staff', 'user' => 'staff', 'users' => 'staff', 'employee' => 'staff',
-    ];
-    $words = array_values(array_filter(explode(' ', trim(rh_kb_normalize($q))), 'strlen'));
+        'and', 'or', 'does', 'why', 'when', 'where', 'it', 'me', 'you', 'with', 'be', 'we', 'our', 'this', 'that', 'at',
+        'from', 'there', 'should', 'need', 'want', 'which', 'who', 'please', 'help', 'get', 'go', 'find', 'see', 'its', 'am', 'was', 'has', 'have', 'did',
+        // words that say what kind of answer is wanted (see $want in rh_kb_search), not what it is about
+        'cannot', 'cant', 't', 'not', 'dont', 'doesnt', 'isnt', 'wont', 'missing', 'hidden', 'appear', 'appears', 'show', 'shows', 'showing', 'locate', 'where', 'page', 'screen', 'down'];
+    static $syn = null;
+    if ($syn === null) {
+        $syn = [];
+        foreach (rh_kb_synonym_groups() as $group) {
+            foreach ($group as $w) {
+                foreach ($group as $other) {
+                    if ($other !== $w) {
+                        $syn[$w][] = rh_kb_stem($other);
+                    }
+                }
+            }
+        }
+    }
+    $split = static function (string $s): array {
+        return array_values(array_unique(array_filter(explode(' ', trim(rh_kb_normalize($s))), 'strlen')));
+    };
+    $words = $split($q);
+    // Words added by rh_kb_expand_phrases() only raise a result; they are never required.
+    $extra = array_diff($split(rh_kb_expand_phrases($q)), $words);
     $kept = array_values(array_filter($words, static function ($w) use ($stop) {
         return !in_array($w, $stop, true);
     }));
     if (!$kept) {
         $kept = $words;
     }
+    $optional = array_flip(array_diff($extra, $stop));
     $terms = [];
-    foreach ($kept as $w) {
-        $alt = $synonyms[$w] ?? null;
-        $terms[] = ['stem' => rh_kb_stem($w), 'alt' => $alt !== null && $alt !== $w ? rh_kb_stem($alt) : null];
+    foreach (array_map('strval', array_merge($kept, array_keys($optional))) as $w) { // "86" must stay a string
+        $stem = rh_kb_stem($w);
+        $alts = $syn[$w] ?? ($syn[$stem] ?? []);
+        if ($vocab !== null && mb_strlen($w) >= 4 && !preg_match('/\d/', $w)) {
+            foreach (rh_kb_correct($stem, $vocab) as $fix) {
+                $alts[] = $fix;
+                $corrected[$w][] = $fix;
+                foreach ($syn[$fix] ?? [] as $s) {
+                    $alts[] = $s;
+                }
+            }
+        }
+        $alts = array_values(array_unique(array_diff($alts, [$stem])));
+        $terms[] = ['stem' => $stem, 'alts' => $alts, 'optional' => isset($optional[$w])];
     }
-    return array_slice($terms, 0, 8);
+    return array_slice($terms, 0, 12);
+}
+
+/**
+ * Closest words in the knowledge base for a misspelt word ("recieve" -> "receive").
+ * Empty when the word is already known (some indexed word starts with it) or nothing is close.
+ * Every candidate at the best distance is returned (at most 3), and the ranking decides.
+ */
+function rh_kb_correct(string $stem, array $vocab): array
+{
+    $len = strlen($stem);
+    foreach ($vocab as $v) {
+        if (strncmp($v, $stem, $len) === 0) {
+            return [];
+        }
+    }
+    $max = $len >= 7 ? 2 : 1;
+    $best = [];
+    $bestD = $max + 1;
+    foreach ($vocab as $v) {
+        if (abs(strlen($v) - $len) > $max) {
+            continue;
+        }
+        $d = rh_kb_distance($stem, $v);
+        if ($d < $bestD) {
+            $bestD = $d;
+            $best = [$v];
+        } elseif ($d === $bestD) {
+            $best[] = $v;
+        }
+    }
+    return array_slice($best, 0, 3);
+}
+
+/** Edit distance where swapping two neighbouring letters ("ie" / "ei") counts as one mistake. */
+function rh_kb_distance(string $a, string $b): int
+{
+    $la = strlen($a);
+    $lb = strlen($b);
+    $d = [];
+    for ($i = 0; $i <= $la; $i++) {
+        $d[$i][0] = $i;
+    }
+    for ($j = 0; $j <= $lb; $j++) {
+        $d[0][$j] = $j;
+    }
+    for ($i = 1; $i <= $la; $i++) {
+        for ($j = 1; $j <= $lb; $j++) {
+            $cost = $a[$i - 1] === $b[$j - 1] ? 0 : 1;
+            $d[$i][$j] = min($d[$i - 1][$j] + 1, $d[$i][$j - 1] + 1, $d[$i - 1][$j - 1] + $cost);
+            if ($i > 1 && $j > 1 && $a[$i - 1] === $b[$j - 2] && $a[$i - 2] === $b[$j - 1]) {
+                $d[$i][$j] = min($d[$i][$j], $d[$i - 2][$j - 2] + 1);
+            }
+        }
+    }
+    return $d[$la][$lb];
 }
 
 function rh_kb_stem(string $w): string
@@ -94,7 +239,11 @@ function rh_kb_stem(string $w): string
     }
     $s = preg_replace('/(ies)$/u', 'y', $w) ?? $w;
     if ($s === $w) {
-        $s = preg_replace('/(ing|ed|es|s)$/u', '', $w) ?? $w;
+        // "batches" -> "batch", "taxes" -> "tax", but "recipes" -> "recipe" (not "recip")
+        $s = preg_replace('/((?:ss|x|z|ch|sh)es|ing|ed|(?<!s)s)$/u', '', $w) ?? $w;
+        if ($s !== $w && preg_match('/(ss|x|z|ch|sh)es$/u', $w)) {
+            $s = substr($w, 0, -2);
+        }
     }
     return mb_strlen($s) >= 3 ? $s : $w;
 }
@@ -122,9 +271,13 @@ function rh_kb_index(): array
     }
     $dir = rh_kb_dir();
     $files = rh_kb_guide_files();
+    require_once __DIR__ . '/guide-system-knowledge.php';
     $sigParts = [RH_KB_VERSION, (int)@filemtime(__FILE__)]; // a parser change rebuilds the cache too
     foreach ($files as $f) {
         $sigParts[] = $f . ':' . (int)@filesize($dir . '/' . $f) . ':' . (int)@filemtime($dir . '/' . $f);
+    }
+    foreach (rh_kb_sys_sources() as $f) { // the menu, permissions and modules the system knowledge reads
+        $sigParts[] = basename($f) . ':' . (int)@filesize($f) . ':' . (int)@filemtime($f);
     }
     $sig = substr(md5(implode('|', $sigParts)), 0, 12);
 
@@ -150,7 +303,26 @@ function rh_kb_index(): array
             $entries[] = $e;
         }
     }
-    $memo = ['v' => $sig, 'guides' => $guides, 'entries' => $entries];
+    try {
+        foreach (rh_kb_sys_entries() as $e) {
+            $e['id'] = count($entries);
+            $entries[] = $e;
+        }
+        $guides[] = ['file' => 'system-map.php', 'title' => 'System map', 'intro' => 'Every menu page, permission, role and module, read from the system itself.', 'who' => 'Everyone'];
+    } catch (Throwable $e) {
+        error_log('guide kb: system knowledge unavailable: ' . $e->getMessage());
+    }
+
+    // Every indexed word of 4+ letters, for spelling correction.
+    $vocab = [];
+    foreach ($entries as $e) {
+        foreach (explode(' ', rh_kb_normalize($e['title'] . ' ' . $e['text'])) as $w) {
+            if (strlen($w) >= 4 && !ctype_digit($w)) {
+                $vocab[rh_kb_stem($w)] = true;
+            }
+        }
+    }
+    $memo = ['v' => $sig, 'guides' => $guides, 'entries' => $entries, 'vocab' => array_keys($vocab)];
 
     if (is_dir($cacheDir) && is_writable($cacheDir)) {
         $tmp = $cacheFile . '.' . getmypid() . '.tmp';
@@ -236,8 +408,10 @@ function rh_kb_parse_file(string $path, string $file): ?array
     }
 
     // The guide itself, so a search for its subject finds the guide's front page.
+    // Its facts box (who uses it, where to find it, permission, module) says which pages it covers.
+    $facts = rh_kb_text($xp->query('//div[contains(@class,"facts")]')->item(0));
     $entries[] = ['type' => 'section', 'file' => $file, 'guide' => $title, 'anchor' => '', 'title' => $title,
-        'text' => trim($intro . ' ' . $who)];
+        'text' => trim($intro . ' ' . ($facts !== '' ? $facts : $who))];
 
     $h2 = null;          // current section entry
     $h3 = null;          // current sub-section entry
@@ -349,13 +523,24 @@ function rh_kb_list_items(DOMXPath $xp, DOMElement $ol): array
  */
 function rh_kb_search(string $q, int $limit = 10): array
 {
-    $terms = rh_kb_query_terms($q);
-    if (!$terms) {
-        return ['results' => [], 'partial' => false];
-    }
-    $phrase = trim(rh_kb_normalize($q));
-    $howTo = (bool)preg_match('/^(how|where|can i|what do i)\b/i', trim($q));
     $index = rh_kb_index();
+    $corrected = [];
+    $terms = rh_kb_query_terms($q, $index['vocab'] ?? null, $corrected);
+    if (!$terms) {
+        return ['results' => [], 'partial' => false, 'corrected' => []];
+    }
+    $required = count(array_filter($terms, static function ($t) {
+        return empty($t['optional']);
+    })) ?: 1;
+    $phrase = trim(rh_kb_normalize($q));
+    $howTo = (bool)preg_match('/^(how|can i|what do i|steps)\b/i', trim($q));
+    // What kind of answer the question is after.
+    $want = [
+        'page' => (bool)preg_match('/\b(where|find|locate|menu|page|screen|open|get to|navigate)\b/i', $q),
+        'permission' => (bool)preg_match("/\b(permission|access|allow|allowed|rights|grant|who can|can'?t see|cannot see|missing|not see|hidden|greyed)\b/i", $q),
+        'role' => (bool)preg_match('/\b(role|roles|what can an?)\b/i', $q),
+        'module' => (bool)preg_match('/\b(module|modules|switch(ed)? (on|off)|turn (on|off)|enable|disable|feature)\b/i', $q),
+    ];
     $full = [];
     $part = [];
     foreach ($index['entries'] as $e) {
@@ -368,11 +553,18 @@ function rh_kb_search(string $q, int $limit = 10): array
         foreach ($terms as $term) {
             $best = 0;
             $titleHit = false;
-            foreach (array_filter([$term['stem'], $term['alt']]) as $stem) {
+            $candidates = array_merge([[$term['stem'], 1.0]], array_map(static function ($a) {
+                return [$a, 0.7]; // a synonym or spelling fix counts, but less than the word typed
+            }, $term['alts']));
+            foreach ($candidates as [$stem, $weight]) {
                 $th = min(2, rh_kb_hits($t, $stem)); // a word repeated in a long error message is no stronger
                 $titleHit = $titleHit || $th > 0;
                 $whole = strpos($t, ' ' . $stem . ' ') !== false ? 6 : 0; // "tab" the word, not "table"
-                $best = max($best, $th * 12 + $whole + min(1, rh_kb_hits($g, $stem)) * 4 + rh_kb_hits($x, $stem) * 2);
+                $best = max($best, $weight * ($th * 12 + $whole + min(1, rh_kb_hits($g, $stem)) * 4 + rh_kb_hits($x, $stem) * 2));
+            }
+            if (!empty($term['optional'])) {
+                $score += $best * 0.6; // a word the question implied, not one it said
+                continue;
             }
             if ($best > 0) {
                 $matched++;
@@ -380,34 +572,40 @@ function rh_kb_search(string $q, int $limit = 10): array
             }
             $inTitle += $titleHit ? 1 : 0;
         }
-        if ($inTitle === count($terms)) {
+        if ($matched === 0) {
+            continue;
+        }
+        if ($inTitle === $required) {
             $score += 20; // every word is in the heading itself
             if ($e['type'] === 'section' && stripos($e['title'], 'how to') === 0) {
                 $score += 10; // the step-by-step section beats an error message mentioning the same word
             }
         }
+        if (trim($t) === $phrase || trim(rh_kb_normalize($e['title'])) === $phrase) {
+            $score += 30; // typed the exact name of a page, permission or section
+        }
         if ($e['type'] === 'problem' && $howTo) {
             $score -= 12; // "how do I…" wants the steps, not an error message
-        }
-        if ($matched === 0) {
-            continue;
         }
         if (mb_strlen($phrase) > 3 && strpos($t, ' ' . $phrase) !== false) {
             $score += 25;
         } elseif (mb_strlen($phrase) > 3 && strpos($x, ' ' . $phrase) !== false) {
             $score += 8;
         }
-        if ($e['type'] === 'faq') {
+        if (isset($want[$e['type']])) {
+            // Generated system answers lead only when the question asks for them.
+            $score = $want[$e['type']] ? $score + 35 : $score * 0.5 - 10;
+        } elseif ($e['type'] === 'faq') {
             $score += 4;
         } elseif ($e['type'] === 'problem' && mb_strlen($q) > 18) {
             $score += 6; // a pasted error message
         } elseif ($e['anchor'] === '') {
             $score -= 4; // whole-guide entry only when nothing more specific
         }
-        if ($matched === count($terms)) {
+        if ($matched === $required) {
             $full[] = [$score, $e];
         } else {
-            $part[] = [$score * $matched / count($terms), $e];
+            $part[] = [$score * $matched / $required, $e];
         }
     }
     $partial = !$full;
@@ -422,7 +620,7 @@ function rh_kb_search(string $q, int $limit = 10): array
         $e['url'] = rh_kb_entry_url($e, $q);
         $out[] = $e;
     }
-    return ['results' => $out, 'partial' => $partial];
+    return ['results' => $out, 'partial' => $partial, 'corrected' => $corrected];
 }
 
 /** Short plain-text excerpt around the first query word found. */
@@ -430,6 +628,11 @@ function rh_kb_snippet(array $e, array $terms): string
 {
     if ($e['type'] === 'problem') {
         return trim(($e['fix'] ?? '') !== '' ? 'Fix: ' . $e['fix'] : ($e['why'] ?? ''));
+    }
+    if (in_array($e['type'], ['page', 'permission', 'role', 'module'], true)) {
+        // Generated answers: drop the question phrasings they carry for matching, keep the answer.
+        $a = preg_replace('/^(Where is .*?\? Where do I find .*?\? |What can an? .*?\? )/u', '', (string)$e['text']) ?? $e['text'];
+        return mb_strlen($a) > 260 ? rtrim(mb_substr($a, 0, 258)) . '…' : $a;
     }
     $text = (string)$e['text'];
     $lower = mb_strtolower($text);

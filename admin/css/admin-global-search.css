@@ -15,6 +15,7 @@
     cursor: pointer;
     transition: background 0.2s ease, border-color 0.2s ease;
 }
+.admin-header .admin-help-btn { text-decoration: none; }
 .admin-header .admin-gsearch-btn:hover,
 .admin-header .admin-gsearch-btn:focus-visible {
     background: rgba(255, 255, 255, 0.16);

@@ -330,13 +330,14 @@ try {
     require_once __DIR__ . '/../../includes/guide-knowledge-base.php';
     $kb = rh_kb_search($q, 5);
     $items = [];
-    $kbLabel = ['problem' => 'Problem & fix', 'faq' => 'FAQ', 'section' => 'Guide'];
+    $kbLabel = ['problem' => 'Problem & fix', 'faq' => 'FAQ', 'section' => 'Guide', 'page' => 'Where to find', 'permission' => 'Permission', 'role' => 'Role', 'module' => 'Module'];
+    $kbIcon = ['problem' => 'fas fa-triangle-exclamation', 'faq' => 'fas fa-circle-question', 'page' => 'fas fa-map-signs', 'permission' => 'fas fa-user-lock', 'role' => 'fas fa-id-badge', 'module' => 'fas fa-puzzle-piece'];
     foreach ($kb['partial'] ? [] : $kb['results'] as $e) {
         $items[] = [
             'title' => $e['type'] === 'problem' ? '“' . mb_strimwidth($e['title'], 0, 90, '…') . '”' : $e['title'],
             'sub' => ($kbLabel[$e['type']] ?? 'Guide') . ' · ' . $e['guide'] . (!empty($e['parent']) ? ' › ' . $e['parent'] : ''),
             'url' => '../docs/guides/' . $e['url'],
-            'icon' => $e['type'] === 'problem' ? 'fas fa-triangle-exclamation' : ($e['type'] === 'faq' ? 'fas fa-circle-question' : 'fas fa-book-open'),
+            'icon' => $kbIcon[$e['type']] ?? 'fas fa-book-open',
             'newTab' => true,
         ];
     }

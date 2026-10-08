@@ -33,9 +33,13 @@ try {
             return [
                 'type' => $e['type'], 'guide' => $e['guide'], 'file' => $e['file'],
                 'title' => $e['title'], 'parent' => $e['parent'] ?? '', 'snippet' => $e['snippet'], 'url' => $e['url'],
+                // The full answer, so the best result can be shown on the spot.
+                'steps' => $e['steps'] ?? [], 'why' => $e['why'] ?? '', 'fix' => $e['fix'] ?? '',
+                'answer' => $e['type'] === 'faq' ? mb_substr($e['text'], 0, 700)
+                    : (in_array($e['type'], ['page', 'permission', 'role', 'module'], true) ? rh_kb_snippet($e, []) : ''),
             ];
         }, $found['results']);
-        echo json_encode(['success' => true, 'q' => $q, 'partial' => $found['partial'], 'results' => $results], $flags);
+        echo json_encode(['success' => true, 'q' => $q, 'partial' => $found['partial'], 'corrected' => $found['corrected'], 'results' => $results], $flags);
         exit;
     }
 
@@ -52,8 +56,8 @@ try {
     $faq = [];
     foreach ($index['entries'] as $e) {
         $isHowTo = $e['type'] === 'section' && preg_match('/^(how to|what (happens|to do)|checking)\b/i', $e['title']);
-        if (!$isHowTo && $e['type'] === 'section') {
-            continue;
+        if (($e['type'] === 'section' && !$isHowTo) || !in_array($e['type'], ['section', 'problem', 'faq'], true)) {
+            continue; // the FAQ lists how-tos, problems and curated questions; the system map has the rest
         }
         $faq[] = [
             'type' => $isHowTo ? 'howto' : $e['type'],

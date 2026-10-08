@@ -41,7 +41,7 @@
       <li><a href="#apikeys">API Keys</a></li>
       <li><a href="#analytics">Visitor Analytics</a></li>
       <li><a href="#pages">Pages</a></li>
-      <li><a href="#gallery">Gallery</a></li>
+      <li><a href="#gallery">Gallery</a></li><li><a href="#media">Media Portal</a></li>
       <li><a href="#reviews">Reviews</a></li>
       <li><a href="#contact">Contact Inquiries</a></li>
       <li><a href="#headers">Section Headers</a></li>
@@ -84,6 +84,7 @@
     <tbody>
       <tr><td><strong>Online</strong> pill</td><td>Shows the connection. Green <strong>Online</strong>; red <strong>Offline</strong> when there is no internet; amber <strong>Syncing N...</strong> while saved actions are being sent after the connection returns. See <a href="15-pwa-install-guide.html#offline">Installing the admin as an app</a>.</td></tr>
       <tr><td><strong>Search</strong> button (<kbd>Ctrl K</kbd>)</td><td>Opens the search window. You can also press <kbd>Ctrl</kbd>+<kbd>K</kbd> (<kbd>Cmd</kbd>+<kbd>K</kbd> on a Mac), or press <kbd>/</kbd> when you are not typing in a box. Type a booking reference, guest name, email or phone and the results appear. Use the up and down arrows and <kbd>Enter</kbd> to open a result, and <kbd>Esc</kbd> to close.</td></tr>
+      <tr><td><strong>Help</strong> button</td><td>Opens help for the page you are on, in a new tab: where it is in the menu, the permission it needs and who has it, and the guide sections and common problems for that page. See the <a href="system-map.php">System map</a>.</td></tr>
       <tr><td><strong>Display size</strong></td><td>Minus and plus buttons with a percentage. Steps are 50%, 60%, 70%, 80%, 90% and 100%. The setting is remembered on that device and applies to the admin, POS and station screens. A touch tablet starts at 60%; everything else starts at 100%.</td></tr>
       <tr><td>Your name and role</td><td>Shows who is signed in.</td></tr>
       <tr><td>Menu button (three lines)</td><td>Opens and closes the sidebar on small screens.</td></tr>
@@ -303,7 +304,7 @@
       <tr><td>Reviews</td><td>Moderate and answer guest reviews.</td><td>Reviews (Website &amp; CMS)</td><td><a href="#reviews">Reviews, below</a></td></tr>
       <tr><td>Contact Inquiries</td><td>Messages from the website contact form.</td><td>Contact Inquiries (Website &amp; CMS)</td><td><a href="#contact">Contact Inquiries, below</a></td></tr>
       <tr><td>Gallery</td><td>Photos and videos in the website gallery.</td><td>Gallery (Website &amp; CMS)</td><td><a href="#gallery">Gallery, below</a></td></tr>
-      <tr><td>Media Portal</td><td>The central place for images and videos used on the website.</td><td>Media Portal (Website &amp; CMS)</td><td>This page (no separate guide)</td></tr>
+      <tr><td>Media Portal</td><td>The central place for images and videos used on the website.</td><td>Media Portal (Website &amp; CMS)</td><td><a href="#media">Media Portal, below</a></td></tr>
       <tr><td>Pages</td><td>Switch website pages on or off and set their order.</td><td>Page Management (Website &amp; CMS)</td><td><a href="#pages">Pages, below</a></td></tr>
       <tr><td>Section Headers</td><td>Headings and hero text on website pages.</td><td>Section Headers (Website &amp; CMS)</td><td><a href="#headers">Section Headers, below</a></td></tr>
       <tr><td>Footer</td><td>Hotel name, logo, phone, email, address, social links and footer links.</td><td>Footer Management (Website &amp; CMS)</td><td><a href="#footer">Footer, below</a></td></tr>
@@ -426,6 +427,23 @@
   <ul>
     <li>The buttons on the category bar (<strong>All</strong> and the categories) filter the list.</li>
     <li>On each item: edit (<em>"Gallery item updated successfully!"</em>), switch active or hidden (<em>"Gallery item status updated!"</em>) and <strong>Delete</strong> (asks <em>"Delete gallery item?"</em>; <em>"Gallery item deleted successfully!"</em>). A missing title gives <em>"Title is required."</em></li>
+  </ul>
+
+  <h2 id="media">Media Portal</h2>
+  <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Media Portal</strong> (<code>/admin/media-management.php</code>). Permission: <strong>Media Portal</strong>; needs the Website &amp; CMS module. It is one list of every image and video the website uses: page banners (heroes), gallery photos, room pictures, conference and gym images. Page banners are added to the list automatically.</p>
+  <h3>How to add an image or video</h3>
+  <ol class="steps">
+    <li>Click <strong>Add New Media Item</strong>.</li>
+    <li>Type a <strong>Title</strong> (required, for example <em>Homepage Hero Background</em>). Choose the <strong>Page</strong> that shows it and the <strong>Section</strong> on that page, the <strong>Media Type</strong> (<strong>Image</strong> or <strong>Video</strong>) and a <strong>Display Order</strong>.</li>
+    <li>Either <strong>Upload File — from your computer</strong> or paste an <strong>External URL</strong>. Images: JPG, PNG, WebP or GIF, at most 4 MB (under 1.5 MB is best for page speed). Videos: MP4, WebM, OGG or MOV, at most 100 MB.</li>
+    <li>Fill in <strong>Alt Text</strong> (read out by screen readers and used by search engines) and, if you want, a <strong>Caption</strong>.</li>
+    <li>To put the file straight onto a record, choose its <strong>Source Table</strong>, the <strong>Column</strong> to update and the <strong>Record ID</strong>. You then see <em>"Media item created and pushed to … → …."</em> Otherwise you see <em>"Media item created."</em></li>
+  </ol>
+  <ul>
+    <li><strong>Filter by page or type</strong>: <strong>All Pages</strong> or one page, and <strong>All Types</strong>, <strong>Images</strong> or <strong>Videos</strong>. Click a picture to open it full size in a new tab.</li>
+    <li><strong>Edit</strong> changes the title, description, alt text and placement, or replaces the file (<strong>Replace with new file</strong> or <strong>Or replace with URL</strong>): <em>"Media item updated."</em> Delete asks first: <em>"Media item deleted."</em></li>
+    <li>Upload messages: <em>"Uploaded file type is not allowed (JPG, PNG, WebP, GIF)."</em>, <em>"Image is too large (…). Maximum is …"</em>, <em>"File is too large (max 100 MB)."</em>, <em>"Title is required."</em></li>
+    <li>To use a logo or picture elsewhere (for example the document logo in Hotel Settings), upload it here first, then paste its path.</li>
   </ul>
 
   <h2 id="reviews">Reviews</h2>

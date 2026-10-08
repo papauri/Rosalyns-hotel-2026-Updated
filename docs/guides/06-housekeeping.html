@@ -33,7 +33,7 @@
       <li><a href="#screen">What is on the screen</a></li>
       <li><a href="#statuses">Room statuses and task statuses</a></li>
       <li><a href="#flow">What happens to a room after check-out</a></li>
-      <li><a href="#hk-work">How to work through a cleaning task (start, finish, verify)</a></li>
+      <li><a href="#room-board">The Room board (room status at a glance)</a></li><li><a href="#hk-work">How to work through a cleaning task (start, finish, verify)</a></li>
       <li><a href="#hk-add">How to add a cleaning task</a></li>
       <li><a href="#hk-auto">How to create the checkout cleanings in one click</a></li>
       <li><a href="#hk-bulk">How to assign cleaning to occupied rooms</a></li>
@@ -122,6 +122,16 @@
     <li>A supervisor looks at the room and clicks <strong>Verify</strong>. The task becomes <strong>Verified</strong> and is locked. Verifying does not change the room status. It only records who checked the room and when.</li>
   </ol>
   <div class="note"><p>A room is ready for the next guest as soon as its cleaning task is <strong>Completed</strong>. You do not have to wait for <strong>Verify</strong>.</p></div>
+  <h2 id="room-board">The Room board (room status at a glance)</h2>
+  <p>The Room board shows every room's status and the rooms waiting for cleaning. Open it from the <strong>Dashboard</strong>: in the <strong>Rooms</strong> card click <strong>Room board</strong> (<code>/admin/room-dashboard.php</code>, page title <strong>Room Management Dashboard</strong>). It needs the <strong>Room Dashboard</strong> permission and the Bookings module.</p>
+  <ul>
+    <li>A red banner appears when confirmed bookings have passed their arrival date without checking in. Click <strong>Review arrivals</strong> and mark them no-show to free the rooms (see <a href="07-reception-bookings.html#cancel">Cancel or no-show</a>).</li>
+    <li>Four counts: <strong>Check-outs Today</strong>, <strong>Check-ins Today</strong>, <strong>Rooms to Clean</strong> and <strong>Available Now</strong>.</li>
+    <li>A card per room status (<strong>Available</strong>, <strong>Occupied</strong>, <strong>Cleaning</strong>, <strong>Maintenance</strong>, <strong>Out of order</strong>) with how many rooms are in it, and a coloured bar showing the mix.</li>
+    <li><strong>Cleaning Queue</strong>: every room that needs cleaning, with its housekeeping status. <strong>Mark Clean</strong> (after <em>"Mark this room as clean?"</em>) finishes the open cleaning task and makes the room <strong>Available</strong> straight away. When the queue is empty it says <em>"All rooms are clean!"</em></li>
+    <li><strong>Inspection Queue</strong>: on this system rooms go straight from cleaning to Available, so this list normally says <em>"No rooms awaiting inspection"</em>. If a room ever appears here, <strong>Pass</strong> makes it Available and <strong>Fail</strong> asks for a <strong>Reason for Failure</strong> and sends it back to cleaning as urgent (<strong>Fail &amp; Send to Reclean</strong>).</li>
+  </ul>
+  <p>For full cleaning tasks with who did what and when, use <strong>Housekeeping</strong> as described below. The Room board is the quick overview.</p>
 
   <h2 id="hk-work">How to work through a cleaning task (start, finish, verify)</h2>
   <ol class="steps">

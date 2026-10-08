@@ -22,7 +22,7 @@
     }());
     var API = base + 'kb-index.php';
     var STOP = ' a an the to do i how what is are can my of for in on and or does why when where it me you with be we our this that at from there should need want ';
-    var TYPE_LABEL = { section: 'Guide', problem: 'Error / problem', faq: 'FAQ', howto: 'How to' };
+    var TYPE_LABEL = { section: 'Guide', problem: 'Error / problem', faq: 'FAQ', howto: 'How to', page: 'Where to find', permission: 'Permission', role: 'Role', module: 'Module' };
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -37,12 +37,17 @@
             .replace(/\b(log|sign)[\s-]?(in|on)\b/g, 'signin')
             .replace(/\b(log|sign)[\s-]?(out|off)\b/g, 'signout')
             .replace(/\b(e-?mail)s?\b/g, 'email')
+            .replace(/\bset-?up\b/g, 'set up')
+            .replace(/\bwalk[\s-]in(s?)\b/g, 'walkin$1')
+            .replace(/\bno[\s-]shows?\b/g, 'noshow')
+            .replace(/\bz[\s-]?reports?\b/g, 'zreport')
             .replace(/[^a-z0-9À-￿]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
     }
     function stem(w) {
         if (w.length <= 4) return w;
+        // Same as rh_kb_stem(): "batches" -> "batch", "recipes" -> "recipe".
         var s = w.replace(/ies$/, 'y');
-        if (s === w) s = w.replace(/(ing|ed|es|s)$/, '');
+        if (s === w) s = /(ss|x|z|ch|sh)es$/.test(w) ? w.slice(0, -2) : w.replace(/(ing|ed|([^s])s)$/, '$2');
         return s.length >= 3 ? s : w;
     }
     function terms(q) {
@@ -99,21 +104,46 @@
             });
             if (active < 0) input.removeAttribute('aria-activedescendant');
         }
+        /** The full answer for the best result: its steps, or why + what to do, or the answer text. */
+        function answer(r, ts, maxSteps) {
+            var h = '';
+            if (r.type === 'problem' && (r.why || r.fix)) {
+                if (r.why) h += '<span class="kb-answer__line"><strong>Why:</strong> ' + markup(r.why, ts) + '</span>';
+                if (r.fix) h += '<span class="kb-answer__line"><strong>What to do:</strong> ' + markup(r.fix, ts) + '</span>';
+            } else if (r.steps && r.steps.length) {
+                h += '<span class="kb-answer__steps">' + r.steps.slice(0, maxSteps).map(function (s, i) {
+                    return '<span class="kb-answer__step"><b>' + (i + 1) + '.</b> ' + markup(s, ts) + '</span>';
+                }).join('') + (r.steps.length > maxSteps ? '<span class="kb-answer__more">…more steps in the guide</span>' : '') + '</span>';
+            } else if (r.answer) {
+                h += '<span class="kb-answer__line">' + markup(r.answer, ts) + '</span>';
+            } else {
+                return '';
+            }
+            return '<span class="kb-answer">' + h + '<span class="kb-answer__open">Open the full answer →</span></span>';
+        }
         function render(q, data) {
             var ts = terms(q);
             items = (data && data.results) || [];
             active = items.length ? 0 : -1;
             var html = '';
+            var fixed = data && data.corrected ? Object.keys(data.corrected) : [];
+            if (fixed.length && items.length) {
+                html += '<p class="kb-results__note">Also searched for: ' + fixed.map(function (w) {
+                    return '<strong>' + esc(data.corrected[w].join(' / ')) + '</strong> (for “' + esc(w) + '”)';
+                }).join(', ') + '</p>';
+            }
             if (data && data.partial && items.length) {
                 html += '<p class="kb-results__note">No exact match. Closest answers:</p>';
             }
             items.forEach(function (r, i) {
                 var where = r.guide + (r.parent ? ' › ' + r.parent : '');
-                html += '<a class="kb-result" role="option" id="' + box.id + '-' + i + '" href="' + esc(r.url) + '" aria-selected="false">'
+                var best = i === 0 && !(data && data.partial) ? answer(r, ts, inline ? 12 : 5) : '';
+                html += '<a class="kb-result' + (best ? ' kb-result--best' : '') + '" role="option" id="' + box.id + '-' + i + '" href="' + esc(r.url) + '" aria-selected="false">'
+                    + (best ? '<span class="kb-best-label">Best answer</span>' : '')
                     + '<span class="kb-badge kb-badge--' + esc(r.type) + '">' + esc(TYPE_LABEL[r.type] || 'Guide') + '</span>'
                     + '<span class="kb-result__title">' + markup(r.title, ts) + '</span>'
                     + '<span class="kb-result__where">' + esc(where) + '</span>'
-                    + (r.snippet ? '<span class="kb-result__snip">' + markup(r.snippet, ts) + '</span>' : '')
+                    + (best || (!r.snippet) ? best : '<span class="kb-result__snip">' + markup(r.snippet, ts) + '</span>')
                     + '</a>';
             });
             if (!items.length) {
@@ -175,9 +205,10 @@
     // -----------------------------------------------------------------------------------------
     function sectionNodes(start) {
         // The nodes from a heading (or details) up to the next h2.
-        if (start.tagName === 'DETAILS') return [start];
+        if (start.tagName === 'DETAILS' || start.tagName === 'TR') return [start];
+        var stopAt = start.tagName === 'H3' ? /^H[23]$/ : /^H2$/;
         var out = [start], n = start.nextElementSibling;
-        while (n && n.tagName !== 'H2') { out.push(n); n = n.nextElementSibling; }
+        while (n && !stopAt.test(n.tagName)) { out.push(n); n = n.nextElementSibling; }
         return out;
     }
     function highlight(nodes, ts) {

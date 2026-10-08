@@ -37,7 +37,7 @@
       <li><a href="#tab">How to open a tab (send now, pay later)</a></li>
       <li><a href="#add-round">How to add another round to a tab</a></li>
       <li><a href="#settle">How to settle a tab (split bill, tip, discount)</a></li>
-      <li><a href="#room">How to charge an order to a guest's room</a></li>
+      <li><a href="#deals">How to set up deals and promotions</a></li><li><a href="#room">How to charge an order to a guest's room</a></li>
       <li><a href="#cancel-void">How to cancel or void an order</a></li>
       <li><a href="#refund">How to refund a paid order</a></li>
       <li><a href="#86">How to 86 an item (mark it unavailable)</a></li>
@@ -46,7 +46,7 @@
       <li><a href="#receipts">How to print a kitchen ticket or send a receipt</a></li>
       <li><a href="#close">How to close your shift (Z-report)</a></li>
       <li><a href="#zreport">How to read the shift close report</a></li>
-      <li><a href="#offline">What happens when the internet drops</a></li>
+      <li><a href="#offline">What happens when the internet drops</a> (and the <a href="#offline-log">Offline Log</a>)</li>
       <li><a href="#menu">How to add or change a menu item</a></li>
       <li><a href="#tables">How to set up the dine-in tables</a></li>
       <li><a href="#table-pay">How to take payment for a table from the Tables page</a></li>
@@ -183,6 +183,59 @@
   </ul>
   <p>If you do not have the permission and a discount is sent anyway, you see <em>"You do not have permission to apply discounts."</em></p>
 
+  <h2 id="deals">How to set up deals and promotions (Deals &amp; Promos)</h2>
+  <p>Deals are discounts the till applies by itself. Nobody has to remember them: every time the cart changes, the till checks the active deals and takes the discount off. Staff need no permission for a deal discount.</p>
+  <p>Open Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Deals &amp; Promos</strong> (<code>/admin/deals.php</code>, page title <strong>Deals &amp; Promotions</strong>). It needs the <strong>Ingredients &amp; Recipes</strong> permission (managers and administrators by default) and the POS &amp; Stations module.</p>
+  <table>
+    <thead><tr><th>Deal type</th><th>What it does</th><th>You fill in</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Happy Hour</strong></td><td>A percentage off during set hours.</td><td>Discount percentage, Start time and End time.</td></tr>
+      <tr><td><strong>Percentage Off</strong></td><td>An always-on percentage discount.</td><td>Discount percentage.</td></tr>
+      <tr><td><strong>Fixed Amount Off</strong></td><td>A set amount off, for example 500 off.</td><td>Amount to knock off.</td></tr>
+      <tr><td><strong>Buy X Get Y Free</strong> (Multi-Buy)</td><td>For example buy 3, pay for 2. The cheapest qualifying items are the free ones.</td><td><strong>Customer buys this many</strong>, <strong>But only pays for this many</strong> (must be less), and optionally <strong>Limit — max times this deal fires per order</strong> (set 1 so a customer gets only one free item even if they buy 9).</td></tr>
+      <tr><td><strong>Spend &amp; Save</strong></td><td>A reward when the cart reaches a minimum total.</td><td><strong>Minimum cart total to qualify</strong>, then <strong>Reward type</strong>: a percentage off or a fixed amount off.</td></tr>
+      <tr><td><strong>Combo Deal</strong></td><td>A percentage off when items from different categories are bought together, for example 1 food + 1 drink.</td><td>At least two groups (categories and a minimum quantity each). All groups must be in the cart. Then <strong>Discount % to give when all groups are met</strong>.</td></tr>
+    </tbody>
+  </table>
+  <h3>How to add a deal</h3>
+  <ol class="steps">
+    <li>Click <strong>Add Deal</strong>.</li>
+    <li>Pick the deal type card.</li>
+    <li>Type the <strong>Deal Name</strong> (required, up to 100 characters, must be unique) and, if you want, a <strong>Short Description</strong>. The description is shown on the receipt.</li>
+    <li>Fill in the amounts for that type (see the table).</li>
+    <li>Under <strong>Which items does this deal cover?</strong> choose <strong>Everything</strong>, <strong>By Category</strong> (tick one or more categories, for example only Drinks) or <strong>Specific Items</strong> (pick a category, then an item, then add it; repeat for more).</li>
+    <li>If you want, limit it to some <strong>days of the week</strong> (none ticked = every day), a <strong>Start time</strong> and <strong>End time</strong> (both or neither), and a <strong>Start date</strong> and <strong>End date</strong>.</li>
+    <li>Tick <strong>This deal is active</strong> to start it straight away. Tick <strong>Exclusive deal</strong> if it must not combine with other deals on the same order. <strong>Evaluation order</strong> (lower number first) only matters when several deals could apply.</li>
+    <li>Click <strong>Save Deal</strong>. You see <em>"Deal created."</em> (or <em>"Deal updated."</em> after an edit).</li>
+  </ol>
+  <h3>Switching off, editing and deleting</h3>
+  <ul>
+    <li>Each deal is a card. A pulsing green dot means it is running right now (active, inside its dates, days and hours).</li>
+    <li>The <strong>ON</strong> / <strong>OFF</strong> button switches a deal on or off at once, without deleting it.</li>
+    <li><strong>Edit</strong> opens the same form. The bin button deletes the deal after <em>"Delete this deal? It will stop applying immediately on the POS."</em> Switch it off instead if you may want it again.</li>
+  </ul>
+  <h3>What the cashier sees</h3>
+  <ul>
+    <li>When a deal applies, a green line with a tag icon appears in the cart and in the payment window: the deal name, what it gave and the saving.</li>
+    <li>Deals are worked out when the order is created. Settling a tab later does not add new deal discounts.</li>
+    <li>A deal discount and a manual discount (see <a href="#discounts">Discounts</a>) can both apply; the order records both reasons together (for example <em>Happy Hour + Staff discount</em>).</li>
+    <li>The server checks every deal again before saving, so a deal that has ended or does not match the order is refused. Deals together can never take more than 90% off an order. Each deal discount is written to the order's audit log.</li>
+  </ul>
+  <h3>Messages you may see when saving</h3>
+  <table>
+    <thead><tr><th>Message</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>Name is required.</em> / <em>A deal called "…" already exists.</em></td><td>Give the deal a name that is not used yet, or edit the existing deal.</td></tr>
+      <tr><td><em>Set both a start and an end time, or neither.</em></td><td>Fill in both times, or clear both for all day.</td></tr>
+      <tr><td><em>The end time must be after the start time (windows cannot cross midnight - create two deals instead).</em></td><td>For 22:00 to 02:00, make one deal 22:00–23:59 and another 00:00–02:00.</td></tr>
+      <tr><td><em>"Valid to" cannot be before "valid from".</em></td><td>Fix the dates.</td></tr>
+      <tr><td><em>"Pay for" must be less than "Buy" qty.</em></td><td>For buy 3 get 1 free, Buy 3, Pay for 2.</td></tr>
+      <tr><td><em>Enter a discount percentage above 0.</em> / <em>Enter a fixed discount amount above 0.</em> / <em>Discount percentage cannot exceed 100.</em></td><td>Enter a sensible amount for the deal type.</td></tr>
+      <tr><td><em>Choose at least one item category for this deal.</em> / <em>Choose at least one item for this deal.</em></td><td>Add a category or item, or choose Everything.</td></tr>
+      <tr><td><em>A combo deal needs its required item groups.</em> / <em>Combo requires at least 2 groups in valid JSON.</em></td><td>Add at least two groups, each with a category and a minimum quantity of 1 or more.</td></tr>
+    </tbody>
+  </table>
+
   <h2 id="room">How to charge an order to a guest's room</h2>
   <p>Room orders are never paid at the till. They are added to the guest's room bill (folio) and paid at check-out or through Payments.</p>
   <ol class="steps">
@@ -304,6 +357,15 @@
     <li>Everything else (<strong>Fire</strong>, adding to a tab, settling a tab, refunds, close shift, notes) needs the connection. The till says <em>"Network error &mdash; could not reach the server. Please retry."</em> Do not assume it went through; check <strong>Tabs</strong> once you are back online.</li>
   </ul>
   <p>Managers can see what was queued and when it synced: Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Offline Log</strong> (page title <strong>Offline Activity Log</strong>), which needs the <strong>Offline Activity Log</strong> permission.</p>
+
+  <h3 id="offline-log">How to check the Offline Log</h3>
+  <p>Managers can see exactly what the till saved while offline and when it reached the server. Open Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Offline Log</strong> (<code>/admin/offline-log.php</code>, page title <strong>Offline Activity Log</strong>). It needs the <strong>Offline Activity Log</strong> permission.</p>
+  <ul>
+    <li>The top shows <strong>Replayed actions</strong>, <strong>Unique submissions</strong>, <strong>Distinct users</strong>, <strong>Avg sync lag</strong> and <strong>Max sync lag</strong> (the time between saving on the device and reaching the server).</li>
+    <li>Filter by <strong>From</strong> / <strong>To</strong> date, <strong>User</strong> and <strong>Endpoint contains</strong>, then click <strong>Filter</strong> (<strong>Reset</strong> clears it). <strong>Most replayed endpoints</strong> shows which actions were queued most.</li>
+    <li>Each row shows who, <strong>When queued</strong>, <strong>When synced</strong>, the <strong>Lag</strong> (amber over 1 minute, red over 10 minutes), the action, a link to the order or record, and the <strong>Result</strong>. <strong>HTTP 200</strong> means the server accepted it; anything else needs checking on that order.</li>
+    <li>"Unique submissions" lower than "Replayed actions" means the same order was sent more than once. The till recorded it once (see the duplicate message above), so nothing was charged twice.</li>
+  </ul>
 
   <h2 id="menu">How to add or change a menu item</h2>
   <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong> (<code>/admin/menu-management.php</code>). Permission: <strong>Menu</strong>. Only shown when the <strong>POS &amp; Stations</strong> module is on.</p>

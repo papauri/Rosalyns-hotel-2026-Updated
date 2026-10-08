@@ -108,6 +108,13 @@ th { background: var(--soft); }
 .kb-result__where { display: block; font-size: 13px; color: var(--muted); }
 .kb-result__snip { display: block; font-size: 14px; margin-top: 2px; }
 .kb-result mark, .kb-hit { background: var(--note); color: inherit; border-radius: 2px; padding: 0 1px; }
+.kb-result--best { background: #f6fbff; border-left: 4px solid var(--link); }
+.kb-best-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--link); margin-bottom: 4px; }
+.kb-answer { display: block; margin-top: 8px; font-size: 15px; color: var(--text); }
+.kb-answer__line, .kb-answer__step { display: block; margin: 0 0 5px; }
+.kb-answer__step b { color: var(--muted); margin-right: 2px; }
+.kb-answer__more { display: block; font-size: 13px; color: var(--muted); }
+.kb-answer__open { display: block; margin-top: 6px; font-size: 14px; font-weight: 650; color: var(--link); }
 .kb-results__note { margin: 0; padding: 10px 12px; font-size: 14px; color: var(--muted); }
 .kb-results__more { display: block; padding: 9px 12px; font-size: 14px; border-top: 1px solid var(--line); }
 .kb-badge {

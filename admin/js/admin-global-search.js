@@ -275,5 +275,19 @@
     else highlightFromUrl();
     document.addEventListener('rh:content-updated', highlightFromUrl);
 
+    // ---- Help button: always opens help for the page now on screen (the SPA swaps pages
+    // without reloading the header, so the server-rendered link would go stale). ----
+    function syncPageHelp() {
+        var a = document.querySelector('[data-rh-page-help]');
+        if (!a) return;
+        var page = (window.location.pathname.split('/').pop() || 'dashboard.php');
+        if (!/\.php$/.test(page)) page = 'dashboard.php';
+        a.setAttribute('href', '../docs/guides/system-map.php?page=' + encodeURIComponent(page));
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', syncPageHelp);
+    else syncPageHelp();
+    document.addEventListener('rh:content-updated', syncPageHelp);
+    window.addEventListener('popstate', syncPageHelp);
+
     window.rhOpenGlobalSearch = open;
 })();
