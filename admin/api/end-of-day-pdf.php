@@ -17,7 +17,7 @@ require_once __DIR__ . '/../includes/pos-shift-totals.php';
 
 requireApiPermission('reports');
 
-$site_name       = getSetting('site_name') ?: "Rosalyn's Beach Hotel";
+$site_name       = getSetting('site_name') ?: 'Hotel';
 $currency_symbol = getSetting('currency_symbol') ?: 'K ';
 
 // ---- Auth & CSRF -----------------------------------------------------------
@@ -403,7 +403,7 @@ if (!class_exists('JapandiTCPDF')) {
     }
 }
 $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
-$pdf->SetCreator('Rosalyn\'s Hotel System');
+$pdf->SetCreator($site_name . ' System');
 $pdf->SetAuthor($site_name);
 $pdf->SetTitle('End of Day Report — ' . $dateLabel);
 $pdf->SetSubject('EOD Report');

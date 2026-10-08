@@ -261,7 +261,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_hotel_details'])
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_booking_reference_prefix'])) {
     $newPrefix = strtoupper(trim((string)($_POST['booking_reference_prefix'] ?? '')));
     if (!preg_match('/^[A-Z0-9]{2,6}$/', $newPrefix)) {
-        $error = 'The booking reference prefix must be 2 to 6 letters or digits (for example RBH).';
+        $error = 'The booking reference prefix must be 2 to 6 letters or digits (for example HTL).';
     } else {
         $oldPrefix = rh_booking_reference_prefix();
         updateSetting('booking_reference_prefix', $newPrefix);

@@ -217,7 +217,7 @@ if (!$dumpedOk) {
             throw new RuntimeException('cannot open gz output');
         }
 
-        gzwrite($gz, "-- Rosalyns Hotel database backup\n-- Generated: " . date('c') . "\n");
+        gzwrite($gz, "-- " . (function_exists('getSetting') ? ((string)getSetting('site_name') ?: 'Hotel') : 'Hotel') . " database backup\n-- Generated: " . date('c') . "\n");
         gzwrite($gz, "-- Database: $db_name\n\n");
         gzwrite($gz, "SET FOREIGN_KEY_CHECKS=0;\nSET NAMES utf8mb4;\n\n");
 

@@ -1767,7 +1767,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                 var countEl = document.getElementById('fbAllConfRoomCount');
                 if (countEl) countEl.textContent = selected.length + ' room' + (selected.length !== 1 ? 's' : '') + ' selected';
 
-                var hotelName = (d.pageName && d.pageName !== '') ? d.pageName : "Rosalyn's Beach Hotel";
+                var hotelName = (d.pageName && d.pageName !== '') ? d.pageName : <?php echo json_encode((string)(getSetting('site_name') ?: 'Hotel'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
                 var lines = ['\uD83C\uDFE2 ' + hotelName + ' \u2014 Conference Facilities', ''];
                 selected.forEach(function(r) {
                     lines.push('\uD83D\uDC65 ' + r.name);

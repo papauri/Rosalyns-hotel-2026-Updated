@@ -219,7 +219,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <label for="facebook_page_name"><strong>Page Display Name</strong> <small>(optional label)</small></label>
                     <input type="text" id="facebook_page_name" name="facebook_page_name" class="form-control"
                         value="<?php echo htmlspecialchars($fb_page_name, ENT_QUOTES, 'UTF-8'); ?>"
-                        placeholder="e.g. Rosalyn's Hotel"
+                        placeholder="e.g. <?php echo htmlspecialchars((string)(getSetting('site_name') ?: 'Hotel name'), ENT_QUOTES, 'UTF-8'); ?>"
                         autocomplete="off">
                     <p class="help-text">Used only as a label in the admin panel — not sent to Facebook.</p>
                 </div>

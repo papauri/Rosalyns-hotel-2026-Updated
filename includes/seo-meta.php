@@ -245,4 +245,4 @@ if (!empty($seo['breadcrumbs'])):
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="<?php echo htmlspecialchars(getSetting('site_short_name') ?: 'Rosalyns', ENT_QUOTES, 'UTF-8'); ?>">
+<meta name="apple-mobile-web-app-title" content="<?php echo htmlspecialchars(getSetting('site_short_name') ?: (getSetting('site_name') ?: 'Hotel'), ENT_QUOTES, 'UTF-8'); ?>">

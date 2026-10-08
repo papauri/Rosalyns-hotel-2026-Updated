@@ -25,7 +25,7 @@ $user = [
     'full_name' => $_SESSION['admin_full_name'] ?? '',
 ];
 
-$site_name       = getSetting('site_name') ?: "Rosalyn's Beach Hotel";
+$site_name       = getSetting('site_name') ?: 'Hotel';
 $currency_symbol = getSetting('currency_symbol') ?: 'K ';
 $vatEnabled      = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
 

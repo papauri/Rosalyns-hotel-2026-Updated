@@ -17,7 +17,7 @@ require_once __DIR__ . '/includes/pos-shift-totals.php';
 /** @var string $csrf_token */
 /** @var PDO $pdo */
 
-$siteName       = getSetting('site_name') ?: "Rosalyn's Beach Hotel";
+$siteName       = getSetting('site_name') ?: 'Hotel';
 $currencySymbol = getSetting('currency_symbol') ?: 'K ';
 
 $fmt = function (float $n) use ($currencySymbol): string {

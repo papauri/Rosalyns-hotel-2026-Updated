@@ -679,7 +679,7 @@ $active_tab = $_GET['tab'] ?? 'links';
                 <div class="settings-grid">
                     <div class="form-group">
                         <label>Site Name</label>
-                        <input type="text" name="site_name" required value="<?php echo htmlspecialchars($fs['site_name']); ?>" placeholder="Rosalyn's Beach Hotel">
+                        <input type="text" name="site_name" required value="<?php echo htmlspecialchars($fs['site_name']); ?>" placeholder="Your hotel's name">
                         <p class="help-text">Header brand, the badge above every page hero, the loading screen and the browser/SEO title.</p>
                     </div>
                     <div class="form-group">

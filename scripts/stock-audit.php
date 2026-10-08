@@ -27,7 +27,7 @@ function ok(string $msg): void { global $pass; $pass++; echo "\033[32m  ✔ PASS
 function warn(string $msg): void { global $warn; $warn++; echo "\033[33m  ⚠ WARN\033[0m  $msg\n"; }
 function fail(string $msg): void { global $fail; $fail++; echo "\033[31m  ✘ FAIL\033[0m  $msg\n"; }
 
-echo "\n\033[1m==== Rosalyn's Hotel — Stock Audit (" . date('Y-m-d H:i') . ") ====\033[0m\n\n";
+echo "\n\033[1m==== " . ((string)getSetting('site_name') ?: 'Hotel') . " — Stock Audit (" . date('Y-m-d H:i') . ") ====\033[0m\n\n";
 
 // ── 1. Recipe coverage ────────────────────────────────────────────────────────
 echo "\033[1m[1] Recipe Coverage\033[0m\n";

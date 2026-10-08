@@ -62,7 +62,7 @@ foreach (preg_split('/[,;\s]+/', $cc_raw) as $em) {
     }
 }
 
-$site_name       = getSetting('site_name') ?: "Rosalyn's Beach Hotel";
+$site_name       = getSetting('site_name') ?: 'Hotel';
 $currency_symbol = getSetting('currency_symbol') ?: 'K ';
 
 // -----------------------------------------------------------------------------

@@ -2094,7 +2094,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                 var countEl = document.getElementById('fbAllRoomCount');
                 if (countEl) countEl.textContent = selected.length + ' room' + (selected.length !== 1 ? 's' : '') + ' selected';
 
-                var hotelName = (d.pageName && d.pageName !== '') ? d.pageName : "Rosalyn's Beach Hotel";
+                var hotelName = (d.pageName && d.pageName !== '') ? d.pageName : <?php echo json_encode((string)(getSetting('site_name') ?: 'Hotel'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
                 var lines = ['🏨 ' + hotelName + ' — Our Rooms', ''];
                 selected.forEach(function(r) {
                     lines.push('🛏 ' + r.name);

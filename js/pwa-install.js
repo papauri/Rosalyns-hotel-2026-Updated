@@ -65,7 +65,7 @@
         bannerEl.setAttribute('role', 'region');
         bannerEl.setAttribute('aria-label', 'Install app');
 
-        const siteName = window._siteName || "Rosalyn's Hotel";
+        const siteName = window._siteName || 'Hotel';
 
         bannerEl.innerHTML = [
             '<div class="pwa-banner__content">',
