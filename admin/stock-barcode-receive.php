@@ -534,8 +534,12 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 
 /* Wide screens: the page sits in a flex column (#rh-admin-page), so it needs an explicit
    width; then scanner controls on the left and the scanned delivery on the right. */
+/* The scanner sits outside .content, so it adds the page's own 32px side gutter itself. */
+@media (min-width:900px){
+.scan-app{width:calc(100% - 64px)}
+}
 @media (min-width:1200px){
-.scan-app{max-width:1360px;display:grid;grid-template-columns:minmax(340px,440px) minmax(0,1fr);column-gap:24px;align-items:start;padding:0 24px 96px}
+.scan-app{max-width:1360px;display:grid;grid-template-columns:minmax(320px,400px) minmax(0,1fr);column-gap:24px;align-items:start;padding:0 0 96px}
 .scan-app>.scan-head{grid-column:1/-1;border-radius:14px 14px 0 0;margin-bottom:16px}
 .scan-app>.camera-zone,.scan-app>#scannerStrip,.scan-app>.manual-row,.scan-app>.meta-strip{grid-column:1}
 .scan-app>.manual-row,.scan-app>.meta-strip{border:1px solid var(--border);border-radius:12px;margin-bottom:12px}
