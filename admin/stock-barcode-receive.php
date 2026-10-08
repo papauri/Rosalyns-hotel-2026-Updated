@@ -401,232 +401,238 @@ import { BarcodeDetectorPolyfill } from './js/barcode-detector-polyfill.js';
 if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPolyfill; }
 </script>
 <style>
-*,*::before,*::after{box-sizing:border-box}
-.scan-app,.scan-app *{margin:0;padding:0}
-/* Scoped to .scan-app so they never shadow the admin theme tokens
-   (--navy/--gold) that the shared header and navbar are painted with. */
-.scan-app{
-  --bg:#f4f2ef;--surface:#fffdfb;--surface2:#ede9e3;--border:#d7dde6;
-  --primary:#766550;--success:#3f8f5a;--warn:#9a7c53;--danger:#956a5b;
-  --text:#1f2a37;--muted:#5f6b7c;--radius:12px;
-  --navy:#111827;--gold:#8F6A35;
+/* Receive Stock - normal admin page. Colours come from the admin tokens
+   (admin-styles.css :root and the --ck-* set in admin-kpi.css). */
+.sbr-subtitle{margin:6px 0 0;color:var(--ck-muted);font-size:14px}
+.sbr-kpis{max-width:520px}
+.sbr-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--ck-gap);align-items:start}
+.sbr-col{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--ck-gap);min-width:0}
+@media (min-width:1100px){
+.sbr-grid{grid-template-columns:minmax(300px,420px) minmax(0,1fr)}
 }
-.scan-app{background:var(--bg);color:var(--text);font-family:'Jost',sans-serif;font-size:15px;width:100%;max-width:820px;margin:0 auto;padding-bottom:88px;box-sizing:border-box}
-.scan-app a{color:var(--primary);text-decoration:none}
 
-/* ── Page header (sits under the shared admin navbar) ── */
-.scan-head{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--navy);border-bottom:3px solid var(--gold)}
-.scan-head-title{flex:1;min-width:0;font-size:16px;font-weight:600;color:#fff}
-.scan-head-stats{font-size:12px;color:rgba(255,255,255,.72);text-align:right;line-height:1.4;flex-shrink:0}
+/* Cards */
+.sbr-card{min-width:0;background:var(--ck-surface);border:1px solid var(--ck-line);border-radius:var(--ck-radius-sm);box-shadow:var(--ck-shadow);overflow:clip}
+.sbr-card__head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;background:var(--ck-softer);border-bottom:1px solid var(--ck-line)}
+.sbr-card__title{margin:0;font-family:'Cormorant Garamond',Georgia,serif;font-size:1.3rem;font-weight:600;color:var(--ck-ink)}
+.sbr-card__meta{font-size:13px;font-weight:600;color:var(--ck-muted)}
+.sbr-card__body{padding:16px 18px;min-width:0}
 
-/* ── Camera zone ── */
-.camera-zone{position:relative;background:#000;width:100%;max-height:240px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+/* Camera zone */
+.camera-zone{position:relative;background:#000;width:100%;max-height:240px;overflow:hidden;display:flex;align-items:center;justify-content:center;border-radius:var(--ck-radius-sm);margin-top:12px}
 .camera-zone video{width:100%;max-height:240px;object-fit:cover;display:block}
 .scan-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
-.scan-frame{width:200px;height:100px;border:2px solid var(--gold);border-radius:8px;box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
-.scan-line{position:absolute;width:180px;height:2px;background:var(--gold);opacity:.8;animation:scanline 1.8s ease-in-out infinite}
+.scan-frame{width:200px;max-width:70%;height:100px;border:2px solid var(--ck-gold-on-dark);border-radius:8px;box-shadow:0 0 0 9999px rgba(0,0,0,.45)}
+.scan-line{position:absolute;width:180px;max-width:62%;height:2px;background:var(--ck-gold-on-dark);opacity:.8;animation:scanline 1.8s ease-in-out infinite}
 @keyframes scanline{0%{top:calc(50% - 45px)}100%{top:calc(50% + 43px)}}
 .scan-status{position:absolute;bottom:10px;background:rgba(0,0,0,.7);border-radius:20px;padding:4px 14px;font-size:12px;color:#fff}
 .cam-error-msg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;text-align:center;background:rgba(0,0,0,.88)}
 .cam-error-msg i{font-size:28px;opacity:.5;margin-bottom:12px;color:#fff}
 .cam-error-msg .cam-err-title{font-size:13px;font-weight:700;color:#fff;margin-bottom:6px}
 .cam-error-msg .cam-err-hint{font-size:12px;color:rgba(255,255,255,.65);line-height:1.6}
-.cam-error-msg .cam-err-retry{margin-top:14px;padding:8px 20px;background:var(--gold);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+.cam-error-msg .cam-err-retry{margin-top:14px;padding:10px 20px;min-height:44px;background:var(--ck-gold);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
 
-/* ── Manual / fallback input ── */
-.manual-row{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border)}
-.manual-row input{flex:1 1 180px;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:14px;font-family:inherit;outline:none}
-.manual-row input:focus{border-color:var(--primary)}
-.manual-row button{padding:10px 16px;background:var(--primary);border:none;border-radius:8px;color:#fff;font-weight:600;cursor:pointer;font-size:14px;white-space:nowrap}
+/* Controls row */
+.manual-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.manual-row input{flex:1 1 180px;min-width:0;min-height:44px;background:var(--ck-surface);border:1px solid var(--ck-line-strong);border-radius:8px;padding:10px 14px;color:var(--ck-text);font-size:14px;font-family:inherit;outline:none}
+.manual-row input:focus,.meta-field input:focus,.batch-field input:focus{border-color:var(--ck-primary);box-shadow:0 0 0 3px rgba(118,101,80,.15)}
+.manual-row #manualSubmitBtn{min-width:44px;min-height:44px;padding:10px 16px;background:var(--ck-primary);border:none;border-radius:8px;color:#fff;font-weight:600;cursor:pointer;font-size:14px;white-space:nowrap}
 
-/* ── Delivery meta ── */
-.meta-strip{padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap}
-.meta-strip input{flex:1;min-width:120px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:13px;font-family:inherit;outline:none}
-.meta-strip input:focus{border-color:var(--primary)}
+/* Delivery meta */
+.meta-strip{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+.meta-field{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:12px;font-weight:600;color:var(--ck-muted);text-transform:uppercase;letter-spacing:.05em}
+.meta-field input{width:100%;min-width:0;min-height:44px;background:var(--ck-surface);border:1px solid var(--ck-line-strong);border-radius:8px;padding:10px 12px;color:var(--ck-text);font-size:14px;font-family:inherit;text-transform:none;letter-spacing:normal;font-weight:400;outline:none}
 
-/* ── Toggle buttons ── */
-.cam-btn{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap}
-.cam-btn.active{background:#e8f5ee;border-color:var(--success);color:var(--success)}
-.scanner-toggle-btn{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .2s}
-.scanner-toggle-btn.active{background:#f0ede8;border-color:var(--primary);color:var(--primary)}
-
-/* ── Scanner status strip ── */
-#scannerStrip{display:none;align-items:center;justify-content:center;gap:8px;padding:8px 16px;background:#e8f5ee;border-bottom:1px solid #b5dcc4;font-size:12px;color:var(--success)}
-#scannerStrip.off{display:flex;background:#f5ede8;border-color:#d7c0b0;color:var(--warn)}
-
-/* ── Batch list ── */
-.section-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 6px;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-.batch-list{padding:0 16px 120px}
-.batch-empty{text-align:center;padding:40px 20px;color:var(--muted)}
-.batch-empty i{font-size:36px;display:block;margin-bottom:12px;opacity:.3;color:var(--primary)}
-.batch-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05)}
-.batch-item-head{display:flex;align-items:center;gap:10px;padding:12px 14px}
-.batch-item-icon{width:36px;height:36px;background:var(--surface2);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--primary);font-size:14px;flex-shrink:0}
-.batch-item-name{flex:1;font-weight:600;font-size:14px;line-height:1.3}
-.batch-item-sub{font-size:11px;color:var(--muted);margin-top:2px}
-.batch-item-remove{width:32px;height:32px;background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:6px}
-.batch-item-remove:hover{color:var(--danger);background:#f5e8e8}
-.batch-item-body{padding:0 14px 12px;display:flex;gap:8px;flex-wrap:wrap}
-.batch-field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:90px}
-.batch-field label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-.batch-field input{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;font-family:inherit;outline:none;width:100%}
-.batch-field input:focus{border-color:var(--primary)}
-.batch-scan-count{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border-radius:20px;padding:3px 10px;font-size:12px;color:var(--muted);margin-top:4px;border:1px solid var(--border)}
-.batch-scan-count button{background:none;border:none;color:var(--text);font-size:16px;cursor:pointer;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:50%}
-.batch-scan-count button:hover{background:var(--border)}
-.batch-scan-count .qty-val{min-width:32px;text-align:center;font-weight:700;color:var(--text);font-size:15px}
-
-/* ── Submit bar ── */
-.submit-bar{position:fixed;bottom:0;left:0;right:0;padding:12px 16px;background:var(--surface);border-top:1px solid var(--border);z-index:100;display:flex;gap:10px;align-items:center;box-shadow:0 -2px 12px rgba(0,0,0,.06)}
-.submit-btn{flex:1;padding:14px;background:#2f7a4a;border:none;border-radius:var(--radius);color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
-.submit-btn:disabled{opacity:.4;cursor:not-allowed}
-.submit-count{font-size:13px;color:var(--muted);white-space:nowrap}
-
-/* ── Flash ── */
-.scan-flash{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--success);color:#fff;padding:14px 28px;border-radius:12px;font-size:15px;font-weight:700;z-index:9999;pointer-events:none;transition:opacity .3s;opacity:0}
-.scan-flash.show{opacity:1}
-.scan-flash.error{background:var(--danger)}
-
-/* ── Modal overlay ── */
-.scanmodal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:flex-end;justify-content:center}
-.scanmodal-sheet{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;padding:20px 16px 32px}
-.scanmodal-handle{width:40px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px}
-.scanmodal-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
-.scanmodal-title{font-size:16px;font-weight:700;color:var(--text)}
-.scanmodal-close{flex:0 0 auto;width:44px;height:44px;margin-right:-8px;border:none;background:transparent;color:var(--muted);font-size:26px;line-height:1;cursor:pointer;border-radius:10px}
-.scanmodal-close:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
-.scanmodal-sub{font-size:13px;color:var(--muted);margin-bottom:16px}
-.scanmodal-field{margin-bottom:14px}
-.scanmodal-field label{display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
-.scanmodal-field input,.scanmodal-field select{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:11px 14px;color:var(--text);font-size:15px;font-family:inherit;outline:none}
-.scanmodal-field input:focus,.scanmodal-field select:focus{border-color:var(--primary)}
-.ing-results{background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:180px;overflow-y:auto;display:none;box-shadow:0 4px 12px rgba(0,0,0,.08)}
-.ing-result-item{padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-.ing-result-item:last-child{border-bottom:none}
-.ing-result-item:hover{background:var(--surface2)}
-.ing-result-item .ing-name{font-weight:600;font-size:14px}
-.ing-result-item .ing-meta{font-size:12px;color:var(--muted)}
-.scanmodal-actions{display:flex;gap:10px;margin-top:20px}
-.scanmodal-btn{flex:1;padding:13px;border-radius:10px;border:none;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
-.scanmodal-btn-primary{background:var(--primary);color:#fff}
-.scanmodal-btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
-.scanmodal-btn:disabled{opacity:.4;cursor:not-allowed}
-.scanmodal-err{color:var(--danger);font-size:13px;margin-top:8px;display:none}
-
-/* ── Type picker cards ── */
-.reg-type-card{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:18px 12px;background:var(--surface2);border:2px solid var(--border);border-radius:12px;cursor:pointer;text-align:center;font-family:inherit;transition:border-color .15s,background .15s}
-.reg-type-card:hover{border-color:var(--primary);background:#f5f2ed}
-.reg-type-card strong{font-size:14px;font-weight:700;color:var(--text)}
-.reg-type-card span{font-size:11px;color:var(--muted);line-height:1.4;margin-top:2px}
-.reg-type-card.selected{border-color:var(--primary);background:#f0ece6}
-
-/* ── Torch button ── */
-.torch-btn{display:none;align-items:center;gap:6px;padding:9px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap}
-.torch-btn.active{background:#fef9e7;border-color:#d4a017;color:#a07800}
+/* Toggle buttons */
+.cam-btn,.scanner-toggle-btn,.torch-btn{display:flex;align-items:center;gap:8px;min-height:44px;padding:9px 14px;background:var(--ck-soft);border:1px solid var(--ck-line-strong);border-radius:8px;color:var(--ck-muted);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit}
+.cam-btn{color:var(--ck-text)}
+.cam-btn.active{background:var(--ck-good-soft);border-color:var(--ck-good);color:var(--ck-good)}
+.scanner-toggle-btn.active{background:var(--ck-gold-soft);border-color:var(--ck-primary);color:var(--ck-primary)}
+.torch-btn{display:none}
+.torch-btn.active{background:var(--ck-warn-soft);border-color:var(--ck-warn);color:var(--ck-warn)}
 .torch-btn.visible{display:flex}
 
-/* ── Batch item pulse on re-scan ── */
-@keyframes pulse-scan{0%{box-shadow:0 0 0 0 rgba(138,119,95,.5)}70%{box-shadow:0 0 0 8px rgba(138,119,95,0)}100%{box-shadow:0 0 0 0 rgba(138,119,95,0)}}
+/* Scanner status strip */
+#scannerStrip{display:none;align-items:center;justify-content:center;gap:8px;margin-top:12px;padding:8px 12px;border-radius:8px;background:var(--ck-good-soft);border:1px solid var(--ck-good);font-size:12px;color:var(--ck-good);text-align:center}
+#scannerStrip.off{display:flex;background:var(--ck-warn-soft);border-color:var(--ck-warn);color:var(--ck-warn)}
+
+/* Batch list */
+.batch-list{padding:16px 18px;min-width:0}
+.batch-empty{text-align:center;padding:40px 20px;color:var(--ck-muted)}
+.batch-empty i{font-size:36px;display:block;margin-bottom:12px;opacity:.3;color:var(--ck-primary)}
+.batch-item{background:var(--ck-surface);border:1px solid var(--ck-line);border-radius:var(--ck-radius-sm);margin-bottom:10px;overflow:hidden}
+.batch-item-head{display:flex;align-items:center;gap:10px;padding:12px 14px;min-width:0}
+.batch-item-head>div:nth-child(2){flex:1;min-width:0}
+.batch-item-icon{width:36px;height:36px;background:var(--ck-soft);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--ck-primary);font-size:14px;flex-shrink:0}
+.batch-item-name{font-weight:600;font-size:14px;line-height:1.3;overflow-wrap:anywhere}
+.batch-item-sub{font-size:12px;color:var(--ck-muted);margin-top:2px}
+.batch-item-remove{width:44px;height:44px;flex-shrink:0;background:none;border:none;color:var(--ck-muted);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:8px}
+.batch-item-remove:hover{color:var(--ck-bad);background:var(--ck-bad-soft)}
+.batch-item-body{padding:0 14px 12px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.batch-field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:110px}
+.batch-field label{font-size:11px;color:var(--ck-muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.batch-field input{min-height:44px;background:var(--ck-surface);border:1px solid var(--ck-line-strong);border-radius:8px;padding:8px 10px;color:var(--ck-text);font-size:14px;font-family:inherit;outline:none;width:100%}
+.batch-scan-count{display:inline-flex;align-items:center;gap:6px;background:var(--ck-soft);border-radius:22px;padding:2px 6px;font-size:12px;color:var(--ck-muted);border:1px solid var(--ck-line-strong)}
+.batch-scan-count button{background:none;border:none;color:var(--ck-text);font-size:18px;cursor:pointer;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%}
+.batch-scan-count button:hover{background:var(--ck-line)}
+.batch-scan-count .qty-val{min-width:36px;text-align:center;font-weight:700;color:var(--ck-text);font-size:15px}
+@keyframes pulse-scan{0%{box-shadow:0 0 0 0 rgba(118,101,80,.5)}70%{box-shadow:0 0 0 8px rgba(118,101,80,0)}100%{box-shadow:0 0 0 0 rgba(118,101,80,0)}}
 .batch-item.pulse{animation:pulse-scan .4s ease-out}
+.scan-badge{display:inline-flex;align-items:center;gap:3px;background:var(--ck-primary);color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;margin-left:6px;vertical-align:middle}
 
-/* ── Scan count badge ── */
-.scan-badge{display:inline-flex;align-items:center;gap:3px;background:var(--primary);color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;margin-left:6px;vertical-align:middle}
+/* Submit bar: sticks to the bottom of the viewport inside the Scanned items card */
+.submit-bar{position:sticky;bottom:0;z-index:5;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;padding:12px 18px;background:var(--ck-softer);border-top:1px solid var(--ck-line)}
+.submit-count{font-size:13px;color:var(--ck-muted);min-width:0}
+.submit-btn{flex:0 1 260px;min-height:48px;padding:12px 20px;background:var(--ck-good);border:none;border-radius:var(--ck-radius-sm);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.submit-btn:disabled{opacity:.4;cursor:not-allowed}
+@media (max-width:480px){.submit-btn{flex:1 1 100%}}
 
-/* Wide screens: the page sits in a flex column (#rh-admin-page), so it needs an explicit
-   width; then scanner controls on the left and the scanned delivery on the right. */
-/* The scanner sits outside .content, so it adds the page's own 32px side gutter itself. */
-@media (min-width:900px){
-.scan-app{width:calc(100% - 64px)}
-}
-@media (min-width:1200px){
-.scan-app{max-width:1360px;display:grid;grid-template-columns:minmax(320px,400px) minmax(0,1fr);column-gap:24px;align-items:start;padding:0 0 96px}
-.scan-app>.scan-head{grid-column:1/-1;border-radius:14px 14px 0 0;margin-bottom:16px}
-.scan-app>.camera-zone,.scan-app>#scannerStrip,.scan-app>.manual-row,.scan-app>.meta-strip{grid-column:1}
-.scan-app>.manual-row,.scan-app>.meta-strip{border:1px solid var(--border);border-radius:12px;margin-bottom:12px}
-.scan-app>.camera-zone{border-radius:12px;margin-bottom:12px}
-.scan-app>#scannerStrip{border:1px solid #b5dcc4;border-radius:12px;margin-bottom:12px}
-.scan-app>#scannerStrip.off{border-color:#d7c0b0}
-.scan-app>.section-head{grid-column:2;grid-row:2}
-.scan-app>.batch-list{grid-column:2;grid-row:3/span 20;padding:0 0 120px}
+/* Flash */
+.scan-flash{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);max-width:calc(100vw - 32px);text-align:center;background:var(--ck-good);color:#fff;padding:14px 28px;border-radius:12px;font-size:15px;font-weight:700;z-index:9999;pointer-events:none;transition:opacity .3s;opacity:0}
+.scan-flash.show{opacity:1}
+.scan-flash.error{background:var(--ck-bad)}
+
+/* Register-barcode bottom sheet */
+.scanmodal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:flex-end;justify-content:center}
+.scanmodal-sheet{background:var(--ck-surface);border-radius:20px 20px 0 0;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;padding:20px 16px 32px;box-sizing:border-box}
+.scanmodal-sheet *{box-sizing:border-box}
+.scanmodal-handle{width:40px;height:4px;background:var(--ck-line-strong);border-radius:2px;margin:0 auto 16px}
+.scanmodal-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
+.scanmodal-title{font-size:16px;font-weight:700;color:var(--ck-text)}
+.scanmodal-close{flex:0 0 auto;width:44px;height:44px;margin-right:-8px;border:none;background:transparent;color:var(--ck-muted);font-size:26px;line-height:1;cursor:pointer;border-radius:10px}
+.scanmodal-close:focus-visible{outline:2px solid var(--ck-primary);outline-offset:1px}
+.scanmodal-sub{font-size:13px;color:var(--ck-muted);margin-bottom:16px}
+.scanmodal-field{margin-bottom:14px}
+.scanmodal-field label{display:block;font-size:12px;color:var(--ck-muted);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
+.scanmodal-field input,.scanmodal-field select{width:100%;min-height:44px;background:var(--ck-surface);border:1px solid var(--ck-line-strong);border-radius:8px;padding:11px 14px;color:var(--ck-text);font-size:15px;font-family:inherit;outline:none}
+.scanmodal-field input:focus,.scanmodal-field select:focus{border-color:var(--ck-primary);box-shadow:0 0 0 3px rgba(118,101,80,.15)}
+.ing-results{background:var(--ck-surface);border:1px solid var(--ck-line-strong);border-radius:8px;margin-top:4px;max-height:180px;overflow-y:auto;display:none;box-shadow:var(--ck-shadow)}
+.ing-result-item{padding:10px 14px;min-height:44px;cursor:pointer;border-bottom:1px solid var(--ck-line);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ing-result-item:last-child{border-bottom:none}
+.ing-result-item:hover{background:var(--ck-soft)}
+.ing-result-item .ing-name{font-weight:600;font-size:14px}
+.ing-result-item .ing-meta{font-size:12px;color:var(--ck-muted)}
+.scanmodal-actions{display:flex;gap:10px;margin-top:20px}
+.scanmodal-btn{flex:1;min-height:48px;padding:13px;border-radius:10px;border:none;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.scanmodal-btn-primary{background:var(--ck-primary);color:#fff}
+.scanmodal-btn-secondary{background:var(--ck-soft);color:var(--ck-text);border:1px solid var(--ck-line-strong)}
+.scanmodal-btn:disabled{opacity:.4;cursor:not-allowed}
+.scanmodal-err{color:var(--ck-bad);font-size:13px;margin-top:8px;display:none}
+.reg-type-card{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:18px 12px;background:var(--ck-soft);border:2px solid var(--ck-line-strong);border-radius:12px;cursor:pointer;text-align:center;font-family:inherit;transition:border-color .15s,background .15s}
+.reg-type-card:hover{border-color:var(--ck-primary);background:var(--ck-gold-soft)}
+.reg-type-card strong{font-size:14px;font-weight:700;color:var(--ck-text)}
+.reg-type-card span{font-size:11px;color:var(--ck-muted);line-height:1.4;margin-top:2px}
+.reg-type-card.selected{border-color:var(--ck-primary);background:var(--ck-gold-soft)}
+
+@media (prefers-reduced-motion:reduce){
+.scan-line,.batch-item.pulse{animation:none}
+.scan-flash,.reg-type-card{transition:none}
 }
 </style>
 </head>
 <body>
 <?php require_once 'includes/admin-header.php'; ?>
 
-<div class="scan-app">
+<div class="content sbr-page">
 
 <!-- Page header -->
-<div class="scan-head">
-    <div class="scan-head-title"><i class="fas fa-barcode" style="color:var(--gold);margin-right:8px"></i>Receive Stock</div>
-    <div class="scan-head-stats"><?php echo $barcodeCount; ?> barcodes<br><?php echo $ingredientCount; ?> ingredients</div>
-</div>
-
-
-<!-- Camera zone -->
-<div class="camera-zone" id="cameraZone" style="display:none">
-    <video id="camVideo" autoplay playsinline muted></video>
-    <div class="scan-overlay" id="scanOverlay" style="display:none">
-        <div class="scan-frame"></div>
-        <div class="scan-line"></div>
-        <div class="scan-status" id="scanStatus">Point camera at barcode</div>
-    </div>
-    <div class="cam-error-msg" id="camErrorMsg" style="display:none"></div>
-</div>
-
-<!-- Scanner status strip -->
-<div id="scannerStrip"></div>
-
-<!-- Controls row -->
-<div class="manual-row">
-    <button class="scanner-toggle-btn" id="scannerToggleBtn" onclick="toggleScanner()" title="Enable / disable barcode scanner">
-        <i class="fas fa-barcode"></i> <span id="scannerToggleLbl">Scanner: OFF</span>
-    </button>
-    <button class="cam-btn" id="camToggle" onclick="toggleCamera()" style="display:none">
-        <i class="fas fa-camera"></i> Camera
-    </button>
-    <button class="torch-btn" id="torchBtn" onclick="toggleTorch()" title="Toggle flashlight">
-        <i class="fas fa-bolt"></i>
-    </button>
-    <input type="text" id="manualInput" placeholder="Type or scan barcode here…"
-        autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" style="display:none">
-    <button id="manualSubmitBtn" onclick="handleManualInput()" style="display:none"><i class="fas fa-search"></i></button>
-</div>
-
-<!-- Delivery meta -->
-<div class="meta-strip">
-    <input type="text" id="supplierInput" placeholder="Supplier name (optional)" list="supplierOptions" autocomplete="off">
-    <datalist id="supplierOptions">
-        <?php
-        try {
-            foreach ($pdo->query("SELECT name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_COLUMN) as $supOpt) {
-                echo '<option value="' . htmlspecialchars((string)$supOpt) . '"></option>';
-            }
-        } catch (Throwable $e) { /* supplier master not set up yet */ }
-        ?>
-    </datalist>
-    <input type="date" id="receivedDate" value="<?php echo date('Y-m-d'); ?>">
-</div>
-
-<!-- Batch list -->
-<div class="section-head">
-    <span>Scanned Items</span>
-    <span id="batchTally" style="color:var(--text)">0 items</span>
-</div>
-<div class="batch-list" id="batchList">
-    <div class="batch-empty" id="emptyState">
-        <i class="fas fa-barcode"></i>
-        Scan a product barcode to start building the delivery.
+<div class="page-header">
+    <div>
+        <h2 class="page-title"><i class="fas fa-barcode" style="color:#7E684B;"></i> Receive Stock</h2>
+        <p class="sbr-subtitle">Scan or type barcodes to build a delivery, then receive it into stock.</p>
     </div>
 </div>
 
-<!-- Submit bar -->
-<div class="submit-bar">
-    <div class="submit-count" id="submitCount">Nothing scanned yet</div>
-    <button class="submit-btn" id="submitBtn" onclick="submitBatch()" disabled>
-        <i class="fas fa-check"></i> Receive into Stock
-    </button>
+<div class="ck-kpis ck-kpis--2 sbr-kpis">
+    <div class="ck-kpi"><span class="ck-kpi__label">Barcodes on file</span><span class="ck-kpi__value"><?php echo $barcodeCount; ?></span></div>
+    <div class="ck-kpi"><span class="ck-kpi__label">Ingredients</span><span class="ck-kpi__value"><?php echo $ingredientCount; ?></span></div>
 </div>
+
+<div class="sbr-grid">
+<div class="sbr-col">
+
+<!-- Scanner card -->
+<section class="sbr-card">
+    <header class="sbr-card__head"><h3 class="sbr-card__title">Scanner</h3></header>
+    <div class="sbr-card__body">
+        <div class="manual-row">
+            <button type="button" class="scanner-toggle-btn" id="scannerToggleBtn" onclick="toggleScanner()" title="Enable / disable barcode scanner">
+                <i class="fas fa-barcode"></i> <span id="scannerToggleLbl">Scanner: OFF</span>
+            </button>
+            <button type="button" class="cam-btn" id="camToggle" onclick="toggleCamera()" style="display:none">
+                <i class="fas fa-camera"></i> Camera
+            </button>
+            <button type="button" class="torch-btn" id="torchBtn" onclick="toggleTorch()" title="Toggle flashlight">
+                <i class="fas fa-bolt"></i>
+            </button>
+            <input type="text" id="manualInput" placeholder="Type or scan barcode here…"
+                autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" style="display:none">
+            <button type="button" id="manualSubmitBtn" onclick="handleManualInput()" style="display:none" aria-label="Look up barcode"><i class="fas fa-search"></i></button>
+        </div>
+
+        <!-- Scanner status strip -->
+        <div id="scannerStrip"></div>
+
+        <!-- Camera zone -->
+        <div class="camera-zone" id="cameraZone" style="display:none">
+            <video id="camVideo" autoplay playsinline muted></video>
+            <div class="scan-overlay" id="scanOverlay" style="display:none">
+                <div class="scan-frame"></div>
+                <div class="scan-line"></div>
+                <div class="scan-status" id="scanStatus">Point camera at barcode</div>
+            </div>
+            <div class="cam-error-msg" id="camErrorMsg" style="display:none"></div>
+        </div>
+    </div>
+</section>
+
+<!-- Delivery details card -->
+<section class="sbr-card">
+    <header class="sbr-card__head"><h3 class="sbr-card__title">Delivery details</h3></header>
+    <div class="sbr-card__body">
+        <div class="meta-strip">
+            <label class="meta-field"><span>Supplier</span>
+                <input type="text" id="supplierInput" placeholder="Supplier name (optional)" list="supplierOptions" autocomplete="off">
+            </label>
+            <datalist id="supplierOptions">
+                <?php
+                try {
+                    foreach ($pdo->query("SELECT name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_COLUMN) as $supOpt) {
+                        echo '<option value="' . htmlspecialchars((string)$supOpt) . '"></option>';
+                    }
+                } catch (Throwable $e) { /* supplier master not set up yet */ }
+                ?>
+            </datalist>
+            <label class="meta-field"><span>Date received</span>
+                <input type="date" id="receivedDate" value="<?php echo date('Y-m-d'); ?>">
+            </label>
+        </div>
+    </div>
+</section>
+
+</div><!-- /.sbr-col -->
+
+<!-- Scanned items card -->
+<section class="sbr-card sbr-card--items">
+    <header class="sbr-card__head">
+        <h3 class="sbr-card__title">Scanned items</h3>
+        <span class="sbr-card__meta" id="batchTally">0 items</span>
+    </header>
+    <div class="batch-list" id="batchList">
+        <div class="batch-empty" id="emptyState">
+            <i class="fas fa-barcode"></i>
+            Scan a product barcode to start building the delivery.
+        </div>
+    </div>
+    <!-- Submit bar -->
+    <div class="submit-bar">
+        <div class="submit-count" id="submitCount">Nothing scanned yet</div>
+        <button type="button" class="submit-btn" id="submitBtn" onclick="submitBatch()" disabled>
+            <i class="fas fa-check"></i> Receive into Stock
+        </button>
+    </div>
+</section>
+</div><!-- /.sbr-grid -->
 
 <!-- Flash message -->
 <div class="scan-flash" id="scanFlash"></div>
@@ -639,19 +645,19 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
             <div class="scanmodal-title">Unknown Barcode</div>
             <button type="button" class="scanmodal-close" aria-label="Close" onclick="closeRegisterModal()">&times;</button>
         </div>
-        <div class="scanmodal-sub" id="registerModalSub" style="font-family:monospace;font-size:12px;background:var(--surface2);padding:6px 10px;border-radius:6px;color:var(--muted)"></div>
+        <div class="scanmodal-sub" id="registerModalSub" style="font-family:monospace;font-size:12px;background:var(--ck-soft);padding:6px 10px;border-radius:6px;color:var(--ck-muted)"></div>
 
         <!-- Step 1: type picker -->
         <div id="regTypePicker" style="margin-top:16px">
-            <p style="font-size:13px;color:var(--muted);margin-bottom:12px">What is this barcode for?</p>
+            <p style="font-size:13px;color:var(--ck-muted);margin-bottom:12px">What is this barcode for?</p>
             <div style="display:flex;gap:10px">
                 <button class="reg-type-card" id="regTypeIngBtn" onclick="selectRegType('ingredient')">
-                    <i class="fas fa-boxes" style="font-size:22px;color:var(--primary);margin-bottom:8px"></i>
+                    <i class="fas fa-boxes" style="font-size:22px;color:var(--ck-primary);margin-bottom:8px"></i>
                     <strong>Ingredient</strong>
                     <span>Used in recipes &amp; stock management</span>
                 </button>
                 <button class="reg-type-card" id="regTypeItemBtn" onclick="selectRegType('item')">
-                    <i class="fas fa-tag" style="font-size:22px;color:var(--success);margin-bottom:8px"></i>
+                    <i class="fas fa-tag" style="font-size:22px;color:var(--ck-good);margin-bottom:8px"></i>
                     <strong>Item for Sale</strong>
                     <span>Scanned at POS for payment (drinks, snacks…)</span>
                 </button>
@@ -661,8 +667,8 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
         <!-- Step 2a: Ingredient form -->
         <div id="regIngForm" style="display:none;margin-top:16px">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-                <button onclick="selectRegType(null)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0"><i class="fas fa-arrow-left"></i> Back</button>
-                <span style="font-size:13px;font-weight:600;color:var(--text)">Link to Ingredient</span>
+                <button onclick="selectRegType(null)" style="background:none;border:none;color:var(--ck-muted);cursor:pointer;font-size:13px;padding:0"><i class="fas fa-arrow-left"></i> Back</button>
+                <span style="font-size:13px;font-weight:600;color:var(--ck-text)">Link to Ingredient</span>
             </div>
             <div class="scanmodal-field">
                 <label>Ingredient</label>
@@ -690,8 +696,8 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
         <!-- Step 2b: POS Item form -->
         <div id="regItemForm" style="display:none;margin-top:16px">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-                <button onclick="selectRegType(null)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0"><i class="fas fa-arrow-left"></i> Back</button>
-                <span style="font-size:13px;font-weight:600;color:var(--text)">Register POS Item</span>
+                <button onclick="selectRegType(null)" style="background:none;border:none;color:var(--ck-muted);cursor:pointer;font-size:13px;padding:0"><i class="fas fa-arrow-left"></i> Back</button>
+                <span style="font-size:13px;font-weight:600;color:var(--ck-text)">Register POS Item</span>
             </div>
             <div class="scanmodal-field">
                 <label>Item Name</label>
@@ -709,7 +715,7 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
                     <input type="hidden" id="regCatId">
                 </div>
             </div>
-            <p style="font-size:11px;color:var(--muted);margin-top:-6px">Leave category blank to use "Retail Items" automatically.</p>
+            <p style="font-size:11px;color:var(--ck-muted);margin-top:-6px">Leave category blank to use "Retail Items" automatically.</p>
             <div class="scanmodal-err" id="registerItemErr"></div>
             <div class="scanmodal-actions">
                 <button class="scanmodal-btn scanmodal-btn-secondary" onclick="closeRegisterModal()">Cancel</button>
@@ -719,7 +725,7 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
     </div>
 </div>
 
-</div><!-- /.scan-app -->
+</div><!-- /.content -->
 
 <?php require_once 'includes/admin-footer.php'; ?>
 
@@ -1272,7 +1278,7 @@ function searchIngredients(q) {
         const r = await fetch(PAGE + '?ajax=search_ingredients&q=' + encodeURIComponent(q));
         const items = await r.json();
         if (!items.length) {
-            res.innerHTML = '<div style="padding:12px 14px;color:var(--muted);font-size:13px;">No ingredients found</div>';
+            res.innerHTML = '<div style="padding:12px 14px;color:var(--ck-muted);font-size:13px;">No ingredients found</div>';
         } else {
             res.innerHTML = items.map(i =>
                 `<div class="ing-result-item" data-id="${i.id}" data-name="${esc(i.name)}" data-unit="${esc(i.unit)}" data-category="${esc(i.category || '')}">
@@ -1306,7 +1312,7 @@ function searchCategories(q) {
         const r = await fetch(PAGE + '?ajax=search_categories&q=' + encodeURIComponent(q));
         const items = await r.json();
         if (!items.length) {
-            res.innerHTML = '<div style="padding:12px 14px;color:var(--muted);font-size:13px;">No categories found</div>';
+            res.innerHTML = '<div style="padding:12px 14px;color:var(--ck-muted);font-size:13px;">No categories found</div>';
         } else {
             res.innerHTML = items.map(i =>
                 `<div class="ing-result-item" data-id="${i.id}" data-name="${esc(i.name)}">
