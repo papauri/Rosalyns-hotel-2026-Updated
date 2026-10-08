@@ -307,3 +307,8 @@ body .content .sdash-section table tbody td {
     .admin-header .user-meta { display: none; }                     /* name/role is in the nav */
     .admin-header .btn-logout span { display: none; }               /* icon-only Logout */
 }
+
+/* Back-link row from admin-header.php: it reuses .content for its padding, but must not
+   take .content's flex-grow, or on short pages it soaks up the spare height and pushes
+   the page body down the screen. */
+#rh-admin-page > .content.admin-back-row { flex: 0 0 auto; min-height: 0; }

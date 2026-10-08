@@ -452,7 +452,7 @@ if ($_admin_back_target !== null) {
 <?php /** @var string $csrf_token */ ?>
 <div id="rh-admin-page">
     <?php if ($_admin_back_target !== null && $_admin_back_label !== ''): ?>
-        <div class="content">
+        <div class="content admin-back-row">
             <a href="<?php echo htmlspecialchars((string)$_admin_back_target['href']); ?>" class="btn btn-secondary btn-sm" aria-label="<?php echo htmlspecialchars($_admin_back_label); ?>">
                 <i class="fas fa-arrow-left" aria-hidden="true"></i>
                 <span><?php echo htmlspecialchars($_admin_back_label); ?></span>

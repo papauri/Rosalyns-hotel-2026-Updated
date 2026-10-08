@@ -411,7 +411,7 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
   --text:#1f2a37;--muted:#5f6b7c;--radius:12px;
   --navy:#111827;--gold:#8F6A35;
 }
-.scan-app{background:var(--bg);color:var(--text);font-family:'Jost',sans-serif;font-size:15px;max-width:820px;margin:0 auto;padding-bottom:88px}
+.scan-app{background:var(--bg);color:var(--text);font-family:'Jost',sans-serif;font-size:15px;width:100%;max-width:820px;margin:0 auto;padding-bottom:88px;box-sizing:border-box}
 .scan-app a{color:var(--primary);text-decoration:none}
 
 /* ── Page header (sits under the shared admin navbar) ── */
@@ -531,6 +531,18 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 
 /* ── Scan count badge ── */
 .scan-badge{display:inline-flex;align-items:center;gap:3px;background:var(--primary);color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:2px 7px;margin-left:6px;vertical-align:middle}
+
+/* Wide screens: the page sits in a flex column (#rh-admin-page), so it needs an explicit
+   width; then scanner controls on the left and the scanned delivery on the right. */
+@media (min-width:1200px){
+.scan-app{max-width:1360px;display:grid;grid-template-columns:minmax(340px,440px) minmax(0,1fr);column-gap:24px;align-items:start;padding:0 24px 96px}
+.scan-app>.scan-head{grid-column:1/-1;border-radius:14px 14px 0 0;margin-bottom:16px}
+.scan-app>.camera-zone,.scan-app>#scannerStrip,.scan-app>.manual-row,.scan-app>.meta-strip{grid-column:1}
+.scan-app>.manual-row,.scan-app>.meta-strip{border:1px solid var(--border);border-radius:12px;margin-bottom:12px}
+.scan-app>.camera-zone{border-radius:12px;margin-bottom:12px}
+.scan-app>.section-head{grid-column:2;grid-row:2}
+.scan-app>.batch-list{grid-column:2;grid-row:3/span 20;padding:0 0 120px}
+}
 </style>
 </head>
 <body>
