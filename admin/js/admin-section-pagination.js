@@ -357,6 +357,10 @@
         var tables = Array.prototype.slice.call(root.querySelectorAll('table'));
         tables.forEach(function (table) {
             if (table.closest('[data-disable-auto-pagination], .no-auto-pagination')) return;
+            // A table inside another table's row (e.g. a visitor's pages-viewed list in an
+            // expandable row) is a detail list: paginating it put its pager under the outer
+            // table's wrapper, stacking several stray pagers there.
+            if (table.parentElement && table.parentElement.closest('table')) return;
             // POS log table has its own user-filter pagination logic.
             if (table.classList.contains('log-table') && table.querySelector('.pos-user-cell')) return;
             mountPagination(table);
