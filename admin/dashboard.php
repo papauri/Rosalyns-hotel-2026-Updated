@@ -1828,6 +1828,16 @@ $currency_symbol = getSetting('currency_symbol');
                 <i class="fas fa-puzzle-piece"></i> That page belongs to a module that's disabled for this installation. Enable it from Module Settings if you need access.
             </div>
         <?php endif; ?>
+        <?php
+        // Backup freshness warning for whoever can open Admin -> Automated Emails.
+        if (hasPermission((int)$user['id'], 'booking_settings')) {
+            $bkTs = (int)strtotime((string)getSetting('last_backup_at', ''));
+            if ($bkTs <= 0 || (time() - $bkTs) > 36 * 3600): ?>
+            <div style="background:#fff3e0; border:1px solid #ffe0b2; border-radius:8px; padding:14px 20px; margin-bottom:20px; color:#e65100; display:flex; align-items:center; gap:10px; font-size:14px;">
+                <i class="fas fa-database"></i> No database backup in the last 36 hours &mdash; check <a href="automated-emails.php" style="color:inherit;text-decoration:underline;">Admin &rarr; Automated Emails</a>.
+            </div>
+        <?php endif;
+        } ?>
 
         <?php
         /* =====================================================================

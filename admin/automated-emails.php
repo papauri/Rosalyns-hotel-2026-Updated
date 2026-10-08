@@ -167,6 +167,17 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                 &nbsp;·&nbsp; Last run: <strong><?php echo $lastRun > 0 ? $esc(date('Y-m-d H:i:s', $lastRun)) : 'never'; ?></strong>
                 &nbsp;·&nbsp; Runs at most every <strong><?php echo (int)$cfg['automated_email_interval_minutes']; ?></strong> min, when someone loads a page.
             </p>
+            <?php
+            $bkAt = (string)getSetting('last_backup_at', '');
+            $bkSize = (int)getSetting('last_backup_size', 0);
+            $bkTs = $bkAt !== '' ? (int)strtotime($bkAt) : 0;
+            ?>
+            <p style="margin:0 0 6px;">
+                Last database backup: <strong><?php echo $bkTs > 0 ? $esc($bkAt) : 'never'; ?></strong>
+                <?php if ($bkTs > 0 && $bkSize > 0): ?>(<?php echo $esc(number_format($bkSize / 1048576, 2)); ?> MB)<?php endif; ?>
+                <?php if ($bkTs === 0 || (time() - $bkTs) > 36 * 3600): ?><span class="ae-badge ae-failed">overdue</span><?php endif; ?>
+                &nbsp;·&nbsp; The backup runs on its own switch and does not depend on the master switch.
+            </p>
             <?php if (is_array($lastResult) && !empty($lastResult['jobs'])): ?>
                 <p style="margin:0;font-size:0.85rem;color:#6d6455;">
                     <?php foreach ($lastResult['jobs'] as $jn => $jr): ?>
@@ -191,7 +202,7 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
 
             <div class="form-group">
                 <label class="ae-check"><input type="checkbox" name="automated_email_master" value="1" <?php echo $cfg['automated_email_master'] === '1' ? 'checked' : ''; ?>>
-                    <span><strong>Master switch</strong> &mdash; turn ALL automated jobs (emails and the nightly backup) on/off</span></label>
+                    <span><strong>Master switch</strong> &mdash; turn all automated EMAIL jobs on/off (the nightly backup is controlled by its own job switch below)</span></label>
             </div>
 
             <h3>Jobs</h3>

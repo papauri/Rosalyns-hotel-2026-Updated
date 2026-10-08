@@ -852,14 +852,17 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
     /** Run a project PHP script in a child process. @return array{ok:bool,exit:int,output:string} */
     function rh_auto_run_php_script(string $script, array $args = []): array
     {
+        $disabled = array_map('trim', explode(',', strtolower((string)ini_get('disable_functions'))));
+        $can = static function (string $f) use ($disabled): bool {
+            return function_exists($f) && !in_array($f, $disabled, true);
+        };
+        if (!$can('escapeshellarg') || (!$can('proc_open') && !$can('exec'))) {
+            return ['ok' => false, 'exit' => 127, 'output' => 'proc_open and exec are disabled on this server'];
+        }
         $cmd = escapeshellarg(rh_auto_php_cli()) . ' ' . escapeshellarg($script);
         foreach ($args as $a) {
             $cmd .= ' ' . escapeshellarg((string)$a);
         }
-        $disabled = array_map('trim', explode(',', (string)ini_get('disable_functions')));
-        $can = static function (string $f) use ($disabled): bool {
-            return function_exists($f) && !in_array($f, $disabled, true);
-        };
         if ($can('proc_open')) {
             $proc = @proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, dirname($script, 2));
             if (is_resource($proc)) {
@@ -881,8 +884,8 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
 
     /**
      * One backup a day: at the first scheduler run after 01:00 once the last backup
-     * (last_backup_at, written by scripts/backup_database.php) is over 20 hours old.
-     * The script keeps its own lock, rotation (14 daily / 8 weekly / 12 monthly) and log.
+     * (last_backup_at, written by includes/db-backup.php) is over 20 hours old.
+     * The engine keeps its own lock, rotation (14 daily / 8 weekly / 12 monthly) and log.
      */
     function rh_job_nightly_backup(PDO $pdo, array $o = []): array
     {
@@ -900,12 +903,15 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             return $res;
         }
         @set_time_limit(900);
-        $r = rh_auto_run_php_script(dirname(__DIR__) . '/scripts/backup_database.php', ['--quiet']);
+        @ignore_user_abort(true);
+        // In-process: no child process, so it works where shell functions are disabled.
+        require_once __DIR__ . '/db-backup.php';
+        $r = rh_db_backup_run($pdo, dirname(__DIR__));
         if ($r['ok']) {
             $res['sent'] = 1; // shown as "1 of 1" on Admin -> Automated Emails
         } else {
-            $res['errors'][] = 'backup failed (exit ' . $r['exit'] . '): ' . mb_substr($r['output'], 0, 300);
-            error_log('auto-scheduler nightly backup: ' . $r['output']);
+            $res['errors'][] = 'backup failed: ' . mb_substr((string)$r['error'], 0, 300);
+            error_log('auto-scheduler nightly backup: ' . $r['error']);
         }
         rh_auto_log_run_summary($pdo, 'nightly_backup', $res);
         return $res;

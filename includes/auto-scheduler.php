@@ -13,7 +13,7 @@
  * the same code.
  *
  * Settings (site_settings; defaults in rh_auto_defaults()):
- *   automated_email_master            '1'   master switch for everything here (emails and the nightly backup)
+ *   automated_email_master            '1'   master switch for the emails; the nightly backup ignores it (own toggle automated_backup_enabled)
  *   automated_email_interval_minutes  '15'  minimum minutes between scheduler runs
  *   automated_email_test_recipient    ''    when set, EVERY automated email goes there ([TEST])
  *   scheduler_last_run                unix time of the last run start (cached read)
@@ -263,7 +263,11 @@ if (!function_exists('rh_auto_defaults')) {
                     return ['status' => 'skipped', 'reason' => 'no_db'];
                 }
                 if (rh_auto_setting('automated_email_master') !== '1') {
-                    return ['status' => 'skipped', 'reason' => 'master_off'];
+                    // Emails are off, but the nightly backup has its own toggle and must still run.
+                    if (rh_auto_setting('automated_backup_enabled') !== '1') {
+                        return ['status' => 'skipped', 'reason' => 'master_off'];
+                    }
+                    $opts['only_jobs'] = ['nightly_backup'];
                 }
                 $interval = max(1, (int)rh_auto_setting('automated_email_interval_minutes'));
                 $last = (int)rh_auto_setting('scheduler_last_run');
@@ -334,7 +338,11 @@ if (!function_exists('rh_auto_defaults')) {
 
             if (!$force) {
                 if (rh_auto_setting_fresh($pdo, 'automated_email_master') !== '1') {
-                    return ['status' => 'skipped', 'reason' => 'master_off'];
+                    // Master switch is for emails; the backup job only needs its own toggle.
+                    if (rh_auto_setting_fresh($pdo, 'automated_backup_enabled') !== '1') {
+                        return ['status' => 'skipped', 'reason' => 'master_off'];
+                    }
+                    $opts['only_jobs'] = ['nightly_backup'];
                 }
                 $interval = max(1, (int)rh_auto_setting_fresh($pdo, 'automated_email_interval_minutes'));
                 if ((time() - (int)rh_auto_setting_fresh($pdo, 'scheduler_last_run')) < $interval * 60) {
@@ -353,6 +361,9 @@ if (!function_exists('rh_auto_defaults')) {
             $testMode = trim(rh_auto_setting('automated_email_test_recipient')) !== '';
 
             foreach (rh_scheduler_jobs() as $name => $job) {
+                if (!empty($opts['only_jobs']) && !in_array($name, $opts['only_jobs'], true)) {
+                    continue; // master switch off: only the backup job runs
+                }
                 if (!rh_scheduler_budget_ok()) {
                     $out['jobs'][$name] = ['status' => 'deferred', 'reason' => 'budget'];
                     continue;
