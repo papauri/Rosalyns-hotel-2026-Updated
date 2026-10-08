@@ -657,73 +657,115 @@ if (!function_exists('hotel_email_logo_url')) {
  * @param string    $html  The fully-wrapped HTML body.
  * @return string          HTML with logo src replaced to cid: when successful.
  */
-if (!function_exists('hotel_embed_logo_cid')) {
-    function hotel_embed_logo_cid(PHPMailer $mail, string $html): string
+if (!function_exists('rh_email_logo_host_blocks_images')) {
+    /**
+     * True when the logo's public address is on a host that refuses image requests from email
+     * clients. cPanel temporary domains (*.cpanel.site) answer browsers and Gmail's image proxy
+     * with HTTP 428, so a linked logo shows as broken there.
+     */
+    function rh_email_logo_host_blocks_images(string $url): bool
     {
-        // CID embedding disabled (2026-07-08): Gmail/Outlook list CID-embedded
-        // images in the attachment strip, so the logo showed up as a downloadable
-        // "logo.png" on every email. The templates already reference the public
-        // HTTPS logo URL, which renders inline without any attachment — so this
-        // helper now returns the HTML unchanged.
-        return $html;
+        $host = strtolower((string)parse_url($url, PHP_URL_HOST));
+        return $host !== '' && substr($host, -12) === '.cpanel.site';
+    }
+}
 
-        /* Legacy CID-embedding path (disabled — kept for reference):
-        $candidates = [
-            (string)getSetting('site_logo', ''),
-            (string)getSetting('logo_url', ''),
-            (string)getSetting('hotel_logo', ''),
-            'images/logo/logo.png',
-        ];
-
-        foreach ($candidates as $candidate) {
+if (!function_exists('rh_email_logo_small_png')) {
+    /**
+     * A small PNG of the hotel logo for embedding in emails (220px wide: sharp at the 110px the
+     * templates display it). Made from the site's own logo file and cached in cache/; null when
+     * there is no local logo file or GD cannot read it.
+     */
+    function rh_email_logo_small_png(): ?string
+    {
+        static $memo = false;
+        if ($memo !== false) {
+            return $memo;
+        }
+        $memo = null;
+        $source = '';
+        foreach ([(string)getSetting('site_logo', ''), (string)getSetting('logo_url', ''), (string)getSetting('hotel_logo', ''), 'images/logo/logo.png'] as $candidate) {
             $candidate = trim($candidate);
             if ($candidate === '' || preg_match('#^https?://#i', $candidate)) {
                 continue;
             }
-            $relative  = ltrim($candidate, '/');
-            $localPath = __DIR__ . '/../' . $relative;
-            if (!is_file($localPath)) {
-                continue;
+            $path = __DIR__ . '/../' . ltrim($candidate, '/');
+            if (is_file($path)) {
+                $source = $path;
+                break;
             }
-
-            $ext  = strtolower(pathinfo($localPath, PATHINFO_EXTENSION));
-            $mime = match ($ext) {
-                'jpg', 'jpeg' => 'image/jpeg',
-                'gif'         => 'image/gif',
-                'webp'        => 'image/webp',
-                default       => 'image/png',
-            };
-
-            try {
-                // Only embed when the logo URL is actually present in the HTML.
-                // Embedding without a matching cid: reference causes the image to appear
-                // as a spurious file attachment in Outlook, Gmail, and Apple Mail.
-                $pubUrl      = hotel_email_logo_url();
-                $escapedUrl  = $pubUrl !== '' ? htmlspecialchars($pubUrl, ENT_QUOTES, 'UTF-8') : '';
-                $urlInHtml   = $pubUrl !== ''
-                    && (strpos($html, $pubUrl) !== false || ($escapedUrl !== '' && strpos($html, $escapedUrl) !== false));
-
-                if (!$urlInHtml) {
-                    // Logo URL not in HTML — skip embedding to avoid spurious attachment
-                    return $html;
-                }
-
-                $mail->addEmbeddedImage($localPath, 'hotel_logo_cid', 'logo.' . $ext, 'base64', $mime);
-                // Replace public URL (both raw and HTML-escaped) with the CID reference
-                $html = str_replace(
-                    [$escapedUrl, $pubUrl],
-                    ['cid:hotel_logo_cid', 'cid:hotel_logo_cid'],
-                    $html
-                );
-            } catch (Exception $e) {
-                error_log('hotel_embed_logo_cid: ' . $e->getMessage());
+        }
+        if ($source === '' || !function_exists('imagecreatefromstring')) {
+            return null;
+        }
+        $cacheDir = __DIR__ . '/../cache';
+        $cacheFile = $cacheDir . '/email-logo-' . md5($source . '|' . (int)@filemtime($source) . '|220') . '.png';
+        if (is_file($cacheFile)) {
+            $cached = @file_get_contents($cacheFile);
+            if ($cached !== false && $cached !== '') {
+                return $memo = $cached;
             }
+        }
+        $img = @imagecreatefromstring((string)@file_get_contents($source));
+        if (!$img) {
+            return null;
+        }
+        $w = imagesx($img);
+        $h = imagesy($img);
+        $newW = min(220, $w);
+        $newH = max(1, (int)round($h * $newW / max(1, $w)));
+        $small = imagecreatetruecolor($newW, $newH);
+        imagealphablending($small, false);
+        imagesavealpha($small, true);
+        imagefill($small, 0, 0, imagecolorallocatealpha($small, 0, 0, 0, 127));
+        imagecopyresampled($small, $img, 0, 0, 0, 0, $newW, $newH, $w, $h);
+        ob_start();
+        imagepng($small, null, 9);
+        $png = (string)ob_get_clean();
+        imagedestroy($img);
+        imagedestroy($small);
+        if ($png === '') {
+            return null;
+        }
+        if (is_dir($cacheDir) && is_writable($cacheDir)) {
+            @file_put_contents($cacheFile, $png);
+        }
+        return $memo = $png;
+    }
+}
 
+if (!function_exists('hotel_embed_logo_cid')) {
+    /**
+     * Every outgoing email passes through here (sendEmail, invoices, receipts, credit notes,
+     * reports, reminders). The logo is normally linked by its public HTTPS address, which renders
+     * inline with no attachment. CID embedding was switched off on 2026-07-08 because some mail
+     * apps also list an embedded logo as an attachment.
+     *
+     * Exception: while the Website address is a cPanel temporary domain, that address refuses
+     * Gmail's image proxy (HTTP 428) and the logo shows broken. Only then is a small copy embedded
+     * instead. Setting the real domain as the Website address switches this off by itself.
+     */
+    function hotel_embed_logo_cid(PHPMailer $mail, string $html): string
+    {
+        $pubUrl = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
+        if ($pubUrl === '' || !rh_email_logo_host_blocks_images($pubUrl)) {
             return $html;
         }
-
-        return $html;
-        */
+        $escapedUrl = htmlspecialchars($pubUrl, ENT_QUOTES, 'UTF-8');
+        if (strpos($html, $pubUrl) === false && strpos($html, $escapedUrl) === false) {
+            return $html; // no logo in this email: embedding would only add a stray attachment
+        }
+        $png = rh_email_logo_small_png();
+        if ($png === null) {
+            return $html;
+        }
+        try {
+            $mail->addStringEmbeddedImage($png, 'hotel_logo_cid', 'logo.png', 'base64', 'image/png', 'inline');
+        } catch (Throwable $e) {
+            error_log('hotel_embed_logo_cid: ' . $e->getMessage());
+            return $html;
+        }
+        return str_replace([$escapedUrl, $pubUrl], 'cid:hotel_logo_cid', $html);
     }
 }
 
