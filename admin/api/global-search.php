@@ -330,8 +330,8 @@ try {
     require_once __DIR__ . '/../../includes/guide-knowledge-base.php';
     $kb = rh_kb_search($q, 5);
     $items = [];
-    $kbLabel = ['problem' => 'Problem & fix', 'faq' => 'FAQ', 'section' => 'Guide', 'page' => 'Where to find', 'permission' => 'Permission', 'role' => 'Role', 'module' => 'Module'];
-    $kbIcon = ['problem' => 'fas fa-triangle-exclamation', 'faq' => 'fas fa-circle-question', 'page' => 'fas fa-map-signs', 'permission' => 'fas fa-user-lock', 'role' => 'fas fa-id-badge', 'module' => 'fas fa-puzzle-piece'];
+    $kbLabel = ['problem' => 'Problem & fix', 'faq' => 'FAQ', 'section' => 'Guide', 'page' => 'Where to find', 'permission' => 'Permission', 'role' => 'Role', 'module' => 'Module', 'hint' => 'On-screen help'];
+    $kbIcon = ['problem' => 'fas fa-triangle-exclamation', 'faq' => 'fas fa-circle-question', 'page' => 'fas fa-map-signs', 'permission' => 'fas fa-user-lock', 'role' => 'fas fa-id-badge', 'module' => 'fas fa-puzzle-piece', 'hint' => 'fas fa-hand-pointer'];
     foreach ($kb['partial'] ? [] : $kb['results'] as $e) {
         $items[] = [
             'title' => $e['type'] === 'problem' ? '“' . mb_strimwidth($e['title'], 0, 90, '…') . '”' : $e['title'],

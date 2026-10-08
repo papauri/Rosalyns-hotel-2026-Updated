@@ -125,23 +125,7 @@ foreach ($_nav_groups as $_group_items) {
     }
 }
 
-$_admin_parent_fallback_map = [
-    'booking-details.php' => 'bookings.php',
-    'edit-booking.php' => 'bookings.php',
-    'create-booking.php' => 'bookings.php',
-    'process-checkin.php' => 'bookings.php',
-    'tentative-bookings.php' => 'bookings.php',
-    'payment-details.php' => 'payments.php',
-    'payment-refund.php' => 'payments.php',
-    'payment-add.php' => 'payments.php',
-    'stock-receipt.php' => 'stock-orders.php',
-    'stock-barcode-receive.php' => 'stock-dashboard.php',
-    'order-lifecycle.php' => 'stock-orders.php',
-    'gym-checkin.php' => 'gym-members.php',
-    'pos-drift-report.php' => 'pos-accounting.php',
-    'room-dashboard.php' => 'dashboard.php',
-    'change-password.php' => 'dashboard.php',
-];
+$_admin_parent_fallback_map = rh_admin_parent_pages(); // shared with the knowledge base (admin-nav-items.php)
 
 $_admin_parse_parent_target = static function (string $candidate, string $currentPage): ?array {
     $candidate = trim($candidate);

@@ -35,7 +35,7 @@ try {
                 'title' => $e['title'], 'parent' => $e['parent'] ?? '', 'snippet' => $e['snippet'], 'url' => $e['url'],
                 // The full answer, so the best result can be shown on the spot.
                 'steps' => $e['steps'] ?? [], 'why' => $e['why'] ?? '', 'fix' => $e['fix'] ?? '',
-                'answer' => $e['type'] === 'faq' ? mb_substr($e['text'], 0, 700)
+                'answer' => in_array($e['type'], ['faq', 'hint'], true) ? mb_substr($e['text'], 0, 700)
                     : (in_array($e['type'], ['page', 'permission', 'role', 'module'], true) ? rh_kb_snippet($e, []) : ''),
             ];
         }, $found['results']);

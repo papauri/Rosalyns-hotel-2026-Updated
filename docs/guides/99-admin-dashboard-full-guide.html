@@ -430,18 +430,18 @@
   </ul>
 
   <h2 id="media">Media Portal</h2>
-  <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Media Portal</strong> (<code>/admin/media-management.php</code>). Permission: <strong>Media Portal</strong>; needs the Website &amp; CMS module. It is one list of every image and video the website uses: page banners (heroes), gallery photos, room pictures, conference and gym images. Page banners are added to the list automatically.</p>
+  <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Media Portal</strong> (<code>/admin/media-management.php</code>). Permission: <strong>Media Portal</strong>; needs the Website &amp; CMS module. It is one list of every image and video the website uses: page banners (heroes), gallery photos, room pictures, conference and gym images. Each item is tagged to a page (for example <em>index</em>) and a section (for example <em>hero</em>), and saving it updates that place on the live website. Page banners set in <a href="#headers">Section Headers</a> appear here automatically.</p>
   <h3>How to add an image or video</h3>
   <ol class="steps">
-    <li>Click <strong>Add New Media Item</strong>.</li>
+    <li>Click <strong>Add Media</strong>. The <strong>Add New Media Item</strong> form opens.</li>
     <li>Type a <strong>Title</strong> (required, for example <em>Homepage Hero Background</em>). Choose the <strong>Page</strong> that shows it and the <strong>Section</strong> on that page, the <strong>Media Type</strong> (<strong>Image</strong> or <strong>Video</strong>) and a <strong>Display Order</strong>.</li>
     <li>Either <strong>Upload File — from your computer</strong> or paste an <strong>External URL</strong>. Images: JPG, PNG, WebP or GIF, at most 4 MB (under 1.5 MB is best for page speed). Videos: MP4, WebM, OGG or MOV, at most 100 MB.</li>
     <li>Fill in <strong>Alt Text</strong> (read out by screen readers and used by search engines) and, if you want, a <strong>Caption</strong>.</li>
-    <li>To put the file straight onto a record, choose its <strong>Source Table</strong>, the <strong>Column</strong> to update and the <strong>Record ID</strong>. You then see <em>"Media item created and pushed to … → …."</em> Otherwise you see <em>"Media item created."</em></li>
+    <li>To put the file straight onto a record, choose its <strong>Source Table</strong>, the <strong>Column</strong> to update and the <strong>Record ID</strong>. You then see <em>"Media item created and pushed to … → …."</em> Otherwise you see <em>"Media item created."</em> Click <strong>Add Item</strong> to save.</li>
   </ol>
   <ul>
     <li><strong>Filter by page or type</strong>: <strong>All Pages</strong> or one page, and <strong>All Types</strong>, <strong>Images</strong> or <strong>Videos</strong>. Click a picture to open it full size in a new tab.</li>
-    <li><strong>Edit</strong> changes the title, description, alt text and placement, or replaces the file (<strong>Replace with new file</strong> or <strong>Or replace with URL</strong>): <em>"Media item updated."</em> Delete asks first: <em>"Media item deleted."</em></li>
+    <li><strong>Edit</strong> changes the title, description, alt text and placement, or replaces the file (<strong>Replace with new file</strong> or <strong>Or replace with URL</strong>), then <strong>Save Changes</strong>: <em>"Media item updated."</em> <strong>Delete</strong> is in the same Edit window and asks first: <em>"Media item deleted."</em> Each card shows its page, section, file and <strong>Display order</strong>, and the list shows a count such as <em>"12 of 12 items"</em>.</li>
     <li>Upload messages: <em>"Uploaded file type is not allowed (JPG, PNG, WebP, GIF)."</em>, <em>"Image is too large (…). Maximum is …"</em>, <em>"File is too large (max 100 MB)."</em>, <em>"Title is required."</em></li>
     <li>To use a logo or picture elsewhere (for example the document logo in Hotel Settings), upload it here first, then paste its path.</li>
   </ul>

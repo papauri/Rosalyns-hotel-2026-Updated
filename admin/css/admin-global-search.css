@@ -16,6 +16,11 @@
     transition: background 0.2s ease, border-color 0.2s ease;
 }
 .admin-header .admin-help-btn { text-decoration: none; }
+/* Icon only on laptop widths, so the hotel name in the header keeps its room. */
+@media (max-width: 1500px) {
+    .admin-header .admin-help-btn span { display: none; }
+    .admin-header .admin-help-btn { padding: 0 10px; }
+}
 .admin-header .admin-gsearch-btn:hover,
 .admin-header .admin-gsearch-btn:focus-visible {
     background: rgba(255, 255, 255, 0.16);

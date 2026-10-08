@@ -540,6 +540,7 @@ function rh_kb_search(string $q, int $limit = 10): array
         'permission' => (bool)preg_match("/\b(permission|access|allow|allowed|rights|grant|who can|can'?t see|cannot see|missing|not see|hidden|greyed)\b/i", $q),
         'role' => (bool)preg_match('/\b(role|roles|what can an?)\b/i', $q),
         'module' => (bool)preg_match('/\b(module|modules|switch(ed)? (on|off)|turn (on|off)|enable|disable|feature)\b/i', $q),
+        'hint' => (bool)preg_match('/\b(what (does|is|are)|button|field|tick ?box|toggle|mean|means|for\?)\b/i', $q),
     ];
     $full = [];
     $part = [];
@@ -594,7 +595,11 @@ function rh_kb_search(string $q, int $limit = 10): array
         }
         if (isset($want[$e['type']])) {
             // Generated system answers lead only when the question asks for them.
-            $score = $want[$e['type']] ? $score + 35 : $score * 0.5 - 10;
+            if ($e['type'] === 'hint') {
+                $score = $want['hint'] ? $score + 20 : $score * 0.7; // one-line hints lead only for "what does X do"
+            } else {
+                $score = $want[$e['type']] ? $score + 35 : $score * 0.5 - 10;
+            }
         } elseif ($e['type'] === 'faq') {
             $score += 4;
         } elseif ($e['type'] === 'problem' && mb_strlen($q) > 18) {
@@ -628,6 +633,9 @@ function rh_kb_snippet(array $e, array $terms): string
 {
     if ($e['type'] === 'problem') {
         return trim(($e['fix'] ?? '') !== '' ? 'Fix: ' . $e['fix'] : ($e['why'] ?? ''));
+    }
+    if ($e['type'] === 'hint') {
+        return (string)$e['text'];
     }
     if (in_array($e['type'], ['page', 'permission', 'role', 'module'], true)) {
         // Generated answers: drop the question phrasings they carry for matching, keep the answer.
@@ -663,6 +671,6 @@ function rh_kb_entry_url(array $e, string $q = ''): string
     if ($e['type'] === 'problem') {
         $params['kbh'] = $e['title'];
     }
-    return $e['file'] . ($params ? '?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986) : '')
+    return $e['file'] . ($params ? (strpos($e['file'], '?') === false ? '?' : '&') . http_build_query($params, '', '&', PHP_QUERY_RFC3986) : '')
         . ($e['anchor'] !== '' ? '#' . rawurlencode($e['anchor']) : '');
 }

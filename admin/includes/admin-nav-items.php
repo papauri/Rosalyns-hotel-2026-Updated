@@ -109,3 +109,29 @@ function rh_admin_nav_groups(): array
         ],
     ];
 }
+
+/**
+ * Pages opened from another page rather than the menu, and the menu page they belong to.
+ * Used by admin-header.php (the Back target) and the knowledge base (help for a sub-page
+ * falls back to its parent page's guide sections).
+ */
+function rh_admin_parent_pages(): array
+{
+    return [
+        'booking-details.php' => 'bookings.php',
+        'edit-booking.php' => 'bookings.php',
+        'create-booking.php' => 'bookings.php',
+        'process-checkin.php' => 'bookings.php',
+        'tentative-bookings.php' => 'bookings.php',
+        'payment-details.php' => 'payments.php',
+        'payment-refund.php' => 'payments.php',
+        'payment-add.php' => 'payments.php',
+        'stock-receipt.php' => 'stock-orders.php',
+        'stock-barcode-receive.php' => 'stock-dashboard.php',
+        'order-lifecycle.php' => 'stock-orders.php',
+        'gym-checkin.php' => 'gym-members.php',
+        'pos-drift-report.php' => 'pos-accounting.php',
+        'room-dashboard.php' => 'dashboard.php',
+        'change-password.php' => 'dashboard.php',
+    ];
+}

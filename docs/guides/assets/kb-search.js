@@ -22,7 +22,7 @@
     }());
     var API = base + 'kb-index.php';
     var STOP = ' a an the to do i how what is are can my of for in on and or does why when where it me you with be we our this that at from there should need want ';
-    var TYPE_LABEL = { section: 'Guide', problem: 'Error / problem', faq: 'FAQ', howto: 'How to', page: 'Where to find', permission: 'Permission', role: 'Role', module: 'Module' };
+    var TYPE_LABEL = { section: 'Guide', problem: 'Error / problem', faq: 'FAQ', howto: 'How to', page: 'Where to find', permission: 'Permission', role: 'Role', module: 'Module', hint: 'On screen' };
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {

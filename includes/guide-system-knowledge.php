@@ -20,12 +20,56 @@ declare(strict_types=1);
 function rh_kb_sys_sources(): array
 {
     $root = dirname(__DIR__);
-    return [
+    return array_merge([
         __FILE__,
         $root . '/admin/includes/admin-nav-items.php',
         $root . '/admin/includes/permissions.php',
         $root . '/admin/module-settings.php',
-    ];
+    ], rh_kb_sys_hint_files());
+}
+
+/** Admin pages that carry on-screen hints (data-help="Title|What it does"). */
+function rh_kb_sys_hint_files(): array
+{
+    static $memo = null;
+    if ($memo === null) {
+        $memo = [];
+        foreach (glob(dirname(__DIR__) . '/admin/*.php') ?: [] as $f) {
+            if (strpos((string)@file_get_contents($f), 'data-help="') !== false) {
+                $memo[] = $f;
+            }
+        }
+    }
+    return $memo;
+}
+
+/**
+ * The on-screen hints written into the admin pages: page => [[title, text], ...].
+ * Only static hints are taken; one built by PHP at run time is skipped.
+ */
+function rh_kb_sys_hints(): array
+{
+    $out = [];
+    foreach (rh_kb_sys_hint_files() as $f) {
+        $page = basename($f);
+        if ($page === 'help-tooltips.php') {
+            continue; // the hints switch itself
+        }
+        if (!preg_match_all('/data-help="([^"<>]+)"/', (string)@file_get_contents($f), $m)) {
+            continue;
+        }
+        foreach ($m[1] as $raw) {
+            $raw = html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if (strpos($raw, '|') === false || strpos($raw, '...') !== false || strpos($raw, '<?') !== false) {
+                continue;
+            }
+            [$title, $text] = array_map('trim', explode('|', $raw, 2));
+            if ($title !== '' && $text !== '') {
+                $out[$page][$title . '|' . $text] = [$title, $text];
+            }
+        }
+    }
+    return array_map('array_values', $out);
 }
 
 function rh_kb_sys_load(): bool
@@ -149,6 +193,17 @@ function rh_kb_sys_menu(): array
     return $memo;
 }
 
+/** The menu page a sub-page belongs to (from admin-nav-items.php), or null. */
+function rh_kb_sys_parent_page(string $page): ?string
+{
+    if (!function_exists('rh_admin_parent_pages')) {
+        require_once dirname(__DIR__) . '/admin/includes/admin-nav-items.php';
+    }
+    $map = function_exists('rh_admin_parent_pages') ? rh_admin_parent_pages() : [];
+    $parent = $map[$page] ?? null;
+    return $parent !== null && $parent !== $page ? $parent : null;
+}
+
 function rh_kb_sys_anchor(string $kind, string $key): string
 {
     return $kind . '-' . preg_replace('/[^a-z0-9]+/', '-', strtolower(preg_replace('/\.php$/', '', $key)));
@@ -223,6 +278,26 @@ function rh_kb_sys_entries(): array
         ];
     }
 
+    // On-screen hints: what a button or field on a page does, in the words of the page itself.
+    $pageLabels = [];
+    foreach (rh_kb_sys_menu() as $p) {
+        $pageLabels[$p['page']] = $p['label'];
+    }
+    foreach ($perms as $info) {
+        if (!empty($info['page']) && !isset($pageLabels[$info['page']])) {
+            $pageLabels[$info['page']] = $info['label'];
+        }
+    }
+    foreach (rh_kb_sys_hints() as $page => $hints) {
+        $where = $pageLabels[$page] ?? ucwords(str_replace(['-', '.php'], [' ', ''], $page));
+        foreach ($hints as [$title, $text]) {
+            $entries[] = [
+                'type' => 'hint', 'file' => $file . '?page=' . $page, 'guide' => 'On-screen help', 'anchor' => 'hints',
+                'title' => $title, 'parent' => $where . ' page', 'text' => $text, 'page' => $page,
+            ];
+        }
+    }
+
     $menu = rh_kb_sys_menu();
     foreach (rh_kb_sys_modules() as $key => $mod) {
         if (in_array($key, ['events', 'billing', 'advance_booking'], true)) {
@@ -276,6 +351,20 @@ function rh_kb_sys_help_for_page(string $page, array $index, int $limit = 10): a
             $out[] = $e;
         }
     };
+    // 0. A page outside the menu (Edit Booking, Gym Check-In) has no menu label to match on:
+    //    lead with the knowledge base's own best sections for the page's name.
+    if ($label === '' && function_exists('rh_kb_search')) {
+        $name = str_replace(['-', '.php'], [' ', ''], $page);
+        $hits = rh_kb_search($name, 6)['results'];
+        $top = $hits ? (float)$hits[0]['score'] : 0.0;
+        foreach ($hits as $hit) {
+            // Only answers about as good as the best one: synonyms ("edit" ~ "change") drift fast.
+            if ($hit['type'] === 'section' && $hit['anchor'] !== '' && count($out) < 3 && (float)$hit['score'] >= 0.6 * $top) {
+                unset($hit['score'], $hit['snippet'], $hit['url']);
+                $take($hit);
+            }
+        }
+    }
     // Its sections (not the reference lists at the end): first those about this exact page (a guide
     // can cover several, e.g. Bookings and Calendar), then the rest in reading order.
     $labelRe = $label !== '' ? '/\b' . preg_quote($label, '/') . '\b/i' : null;
@@ -307,7 +396,10 @@ function rh_kb_sys_help_for_page(string $page, array $index, int $limit = 10): a
         }
         $score = 0;
         if ($labelRe && preg_match($labelRe, $e['title'])) {
-            $score += 4;
+            // "Check-In" (Gym) must not pull in the room check-in sections: the guide has to belong
+            // to the page's menu group, unless the section also names the page's path or file.
+            $groupWord = strtolower((string)strtok($group, ' &'));
+            $score += ($groupWord === '' || stripos($e['guide'] . ' ' . $e['text'], $groupWord) !== false) ? 4 : 1;
         }
         if ($pathRe && preg_match($pathRe, $e['text'])) {
             $score += 3;
@@ -324,6 +416,16 @@ function rh_kb_sys_help_for_page(string $page, array $index, int $limit = 10): a
     });
     foreach ($candidates as $c) {
         $take($c[2]);
+    }
+    // 4. A page opened from another one (Booking Details from Bookings) is explained in its
+    //    parent's guide: add the parent's sections when the page has few of its own.
+    $parent = rh_kb_sys_parent_page($page);
+    if ($parent !== null && count($out) < 3) {
+        foreach (rh_kb_sys_help_for_page($parent, $index, $limit) as $pe) {
+            if ($pe['type'] !== 'problem') {
+                $take($pe);
+            }
+        }
     }
     $sections = array_slice($out, 0, $limit);
 

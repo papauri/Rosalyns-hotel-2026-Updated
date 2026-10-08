@@ -106,7 +106,8 @@ if ($page !== '') {
       <?php if ($mp): ?>
       <dt>Where to find it</dt><dd>Admin menu &rarr; <strong><?= $e($mp['group']) ?></strong> &rarr; <strong><?= $e($mp['label']) ?></strong> (<code>/admin/<?= $e($page) ?></code>)<?= $mp['alias'] !== '' ? ', called <strong>' . $e($mp['alias']) . '</strong> when the restaurant is switched off' : '' ?></dd>
       <?php else: ?>
-      <dt>Page</dt><dd><code>/admin/<?= $e($page) ?></code> (opened from another page, not from the menu)</dd>
+      <?php $parentPage = rh_kb_sys_parent_page($page); $pp = $parentPage !== null ? ($menuByPage[$parentPage] ?? null) : null; ?>
+      <dt>Page</dt><dd><code>/admin/<?= $e($page) ?></code>, opened from another page rather than the menu<?php if ($pp): ?>: it belongs to <a href="system-map.php?page=<?= $e(rawurlencode($pp['page'])) ?>"><strong><?= $e($pp['label']) ?></strong></a> (Admin menu &rarr; <?= $e($pp['group']) ?> &rarr; <?= $e($pp['label']) ?>)<?php endif; ?></dd>
       <?php endif; ?>
       <?php if ($pk !== null && isset($perms[$pk])): ?>
       <dt>Permission needed</dt><dd><a href="system-map.php#<?= $e(rh_kb_sys_anchor('perm', $pk)) ?>"><strong><?= $e($perms[$pk]['label']) ?></strong></a> — <?= $e($perms[$pk]['description']) ?></dd>
@@ -131,6 +132,19 @@ if ($page !== '') {
   </ul>
   <?php else: ?>
   <p>No guide covers this page in detail yet. Use the search box above, or the <a href="index.html">guides home page</a>.</p>
+  <?php endif; ?>
+
+  <?php $hints = rh_kb_sys_hints()[$page] ?? []; if ($hints): ?>
+  <h2 id="hints">Buttons on this page</h2>
+  <table>
+    <thead><tr><th>Button or field</th><th>What it does</th></tr></thead>
+    <tbody>
+      <?php foreach ($hints as [$ht, $hx]): ?>
+      <tr><td><strong><?= $e($ht) ?></strong></td><td><?= $e($hx) ?></td></tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
+  <p><small>In the admin, the round <strong>?</strong> button at the bottom right of the screen switches these hints on and off.</small></p>
   <?php endif; ?>
 
   <?php if ($problems): ?>

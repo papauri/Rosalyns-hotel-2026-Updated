@@ -408,7 +408,7 @@
   <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Automated Emails</strong> (<code>/admin/automated-emails.php</code>), permission <strong>Hotel Settings</strong>. Reminders go out by themselves while people use the website or the admin. No cron job is needed. At most once every <strong>Run interval</strong> minutes (15 by default), the next page someone opens starts a run in the background after their page has loaded, so nobody waits for it.</p>
   <h3>The Status box</h3>
   <ul>
-    <li><strong>Master switch</strong> turns ALL automatic jobs on or off, the nightly backup included. <strong>Last run</strong> shows when the jobs last ran (or <em>never</em>).</li>
+    <li>The Status box shows whether the <strong>Master switch</strong> is ON, the <strong>Last run</strong> time, and each job's state: <em>not_due</em> (nothing to send yet), <em>off</em> (switched off), or what it sent, for example <em>"sent 0 of 1 due"</em>. The master switch itself (under <strong>Settings</strong>) turns ALL automatic jobs on or off, the nightly backup included.</li>
     <li><strong>Run now</strong> runs every switched-on job straight away and reports per job, for example <em>"Run complete. Overdue payment reminders: sent 2, checked 14 · …"</em>. <em>"Nothing ran (…)"</em> gives the reason, for example the master switch is off.</li>
     <li>A yellow <strong>TEST MODE</strong> bar means the <strong>Test recipient</strong> box is filled in: every automatic email goes to that address and real guests are not contacted. Clear the box to go live.</li>
   </ul>
@@ -433,12 +433,13 @@
     <li><strong>Stop chasing after (days overdue)</strong>: default 30.</li>
     <li><strong>Run interval (minutes)</strong>: 5 to 1440, default 15.</li>
     <li><strong>Test recipient (leave EMPTY in production)</strong>: see TEST MODE above. An address that is not valid is cleared when you save.</li>
+    <li><strong>BCC the hotel (admin notification address) on payment and quotation reminders</strong>: a hidden copy of those reminders goes to the hotel.</li>
     <li>Tick or untick each job, then click <strong>Save settings</strong> (<em>"Automated email settings saved."</em>).</li>
   </ul>
   <h3>Testing and the activity log</h3>
   <ul>
-    <li><strong>Send test to me</strong>: pick a template under <strong>Email Template Test</strong>. It sends that email with sample data to your own admin email address only, and records nothing. If your account has no email address you see <em>"Your admin account has no valid email address to send the test to."</em></li>
-    <li><strong>Recent activity (last 100)</strong> lists every automatic email: When, Job, Account, Stage, Recipient and Status. Each reminder stage is sent once per booking or account, never twice.</li>
+    <li><strong>Email templates</strong> lists each automatic email (Payment reminder 1 friendly, 2 firm, 3 final; Quotation expiry reminder; Tentative hold reminder and expired; Pre-arrival reminder; Post-stay review request; Gym membership renewal) and whether it uses a template you can edit in Email Templates or <em>Built-in wording</em>. Click <strong>Send test to me</strong> on a row: that email is sent with sample data to your own admin email address only, and nothing is recorded. If your account has no email address you see <em>"Your admin account has no valid email address to send the test to."</em></li>
+    <li><strong>Recent activity (last 100)</strong> lists every automatic email: When, Job, Account, Stage, Recipient and Status (<em>sent</em>, <em>failed</em> with the reason underneath, or <em>skipped</em>, for example demo bookings). Each reminder stage is sent once per booking or account, never twice. A <em>failed</em> line such as <em>"Invalid address: (From)"</em> means the sending address in <a href="#email-config">Email Configuration</a> is missing or wrong.</li>
     <li>The wording of each email is edited in <a href="12-email-templates.php">Email Templates</a>.</li>
   </ul>
 
