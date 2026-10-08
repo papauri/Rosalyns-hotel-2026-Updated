@@ -841,10 +841,12 @@ function getRoomsRequiringHousekeeping(string $status = 'all'): array
             LEFT JOIN admin_users au ON ha.assigned_to = au.id
             LEFT JOIN bookings b ON ir.id = b.individual_room_id
                 AND b.status = 'checked-out'
+                AND b.deleted_at IS NULL
                 AND b.checkout_completed_at = (
                     SELECT MAX(checkout_completed_at)
                     FROM bookings b2
                     WHERE b2.individual_room_id = ir.id
+                      AND b2.deleted_at IS NULL
                 )
             WHERE ir.is_active = 1
         ";
@@ -900,10 +902,12 @@ function getRoomsRequiringInspection(): array
             LEFT JOIN housekeeping_assignments ha ON ir.id = ha.individual_room_id AND ha.status = 'completed'
             LEFT JOIN bookings b ON ir.id = b.individual_room_id
                 AND b.status = 'checked-out'
+                AND b.deleted_at IS NULL
                 AND b.checkout_completed_at = (
                     SELECT MAX(checkout_completed_at)
                     FROM bookings b2
                     WHERE b2.individual_room_id = ir.id
+                      AND b2.deleted_at IS NULL
                 )
             WHERE ir.status = 'inspection' AND ir.is_active = 1
             ORDER BY ri.created_at ASC
@@ -971,7 +975,7 @@ function getRoomDashboardSummary(): array
         $checkoutStmt = $pdo->query("
             SELECT COUNT(*) as count
             FROM bookings
-            WHERE status = 'checked-in' AND check_out_date = CURDATE()
+            WHERE status = 'checked-in' AND check_out_date = CURDATE() AND deleted_at IS NULL
         ");
         $checkoutsToday = (int)$checkoutStmt->fetchColumn();
 
@@ -979,7 +983,7 @@ function getRoomDashboardSummary(): array
         $checkinStmt = $pdo->query("
             SELECT COUNT(*) as count
             FROM bookings
-            WHERE status IN ('confirmed', 'pending') AND check_in_date = CURDATE()
+            WHERE status IN ('confirmed', 'pending') AND check_in_date = CURDATE() AND deleted_at IS NULL
         ");
         $checkinsToday = (int)$checkinStmt->fetchColumn();
 
@@ -999,6 +1003,7 @@ function getRoomDashboardSummary(): array
             FROM bookings
             WHERE status IN ('confirmed', 'pending')
               AND check_in_date < CURDATE()
+              AND deleted_at IS NULL
         ");
         $noShowCandidates = (int)$noShowStmt->fetchColumn();
 

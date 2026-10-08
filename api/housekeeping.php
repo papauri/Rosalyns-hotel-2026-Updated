@@ -158,9 +158,10 @@ function getOccupiedRooms(): array {
         FROM individual_rooms ir
         INNER JOIN bookings b ON b.individual_room_id = ir.id
         WHERE b.status = 'checked-in'
+          AND b.deleted_at IS NULL
           AND b.check_in_date <= CURDATE()
           AND ir.is_active = 1
-        ORDER BY 
+        ORDER BY
             CASE 
                 WHEN b.check_out_date = CURDATE() THEN 1
                 ELSE 2
@@ -187,6 +188,7 @@ function getCheckoutCleanupRooms(): array {
         FROM individual_rooms ir
         INNER JOIN bookings b ON b.individual_room_id = ir.id
         WHERE b.status IN ('checked-out', 'checked-in')
+          AND b.deleted_at IS NULL
           AND b.check_out_date <= CURDATE()
           AND ir.is_active = 1
           AND NOT EXISTS (

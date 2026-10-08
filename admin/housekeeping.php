@@ -149,6 +149,7 @@ function getOccupiedRooms(PDO $pdo): array
         FROM individual_rooms ir
         INNER JOIN bookings b ON b.individual_room_id = ir.id
         WHERE b.status = 'checked-in'
+          AND b.deleted_at IS NULL
           AND b.check_in_date <= CURDATE()
           AND ir.is_active = 1
         ORDER BY
@@ -220,6 +221,7 @@ function getCheckoutCleanupRooms(PDO $pdo): array
         FROM individual_rooms ir
         INNER JOIN bookings b ON b.individual_room_id = ir.id
         WHERE b.status IN ('checked-out', 'checked-in')
+          AND b.deleted_at IS NULL
           AND b.check_out_date <= CURDATE()
           AND ir.is_active = 1
           AND b.id = (
@@ -227,6 +229,7 @@ function getCheckoutCleanupRooms(PDO $pdo): array
               FROM bookings b2
               WHERE b2.individual_room_id = ir.id
                 AND b2.status IN ('checked-out', 'checked-in')
+                AND b2.deleted_at IS NULL
                 AND b2.check_out_date <= CURDATE()
               ORDER BY b2.check_out_date DESC, b2.id DESC
               LIMIT 1

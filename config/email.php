@@ -33,6 +33,15 @@ if (file_exists(__DIR__ . '/../PHPMailer/src/PHPMailer.php')) {
     require_once __DIR__ . '/../vendor/autoload.php';
 }
 
+// The mail functions below read these settings with `global`. This file is sometimes loaded
+// for the first time from inside a function (the automated-email scheduler, reminder libraries),
+// where plain assignments would stay local and every send would fail with an empty From
+// ("Invalid address: (From)"). Declaring them global first makes both cases work; at file
+// scope the declaration changes nothing.
+global $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url,
+    $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug,
+    $email_bcc_admin, $email_development_mode, $email_log_enabled, $email_preview_enabled, $development_mode;
+
 // Get email settings from database - NO HARCODED DEFAULTS
 $email_from_name = getEmailSetting('email_from_name', '');
 $email_from_email = getEmailSetting('email_from_email', '');
