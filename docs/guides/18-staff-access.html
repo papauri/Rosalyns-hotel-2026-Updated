@@ -66,17 +66,17 @@
     <tbody>
       <tr><td><strong>Administrator</strong></td><td>Full access to all features and settings. Permissions cannot be narrowed.</td></tr>
       <tr><td><strong>Manager</strong></td><td>Operations, bookings and staff activities.</td></tr>
-      <tr><td><strong>Receptionist</strong></td><td>Front desk: bookings, check-ins and check-outs.</td></tr>
+      <tr data-module="bookings"><td><strong>Receptionist</strong></td><td>Front desk: bookings, check-ins and check-outs.</td></tr>
       <tr><td><strong>Accountant</strong></td><td>Payments, invoices and financial records.</td></tr>
-      <tr><td><strong>Housekeeping</strong></td><td>Room cleaning and maintenance.</td></tr>
+      <tr data-module="housekeeping"><td><strong>Housekeeping</strong></td><td>Room cleaning and maintenance.</td></tr>
       <tr><td><strong>Viewer</strong></td><td>Read-only access to bookings and reports.</td></tr>
-      <tr><td><strong>Restaurant Staff</strong></td><td>POS till: place orders, take payments, print or email receipts.</td></tr>
-      <tr><td><strong>Chef / Kitchen</strong></td><td>Kitchen screen: see tickets, mark items ready or served.</td></tr>
-      <tr><td><strong>Bar Staff</strong></td><td>Bar screen: drink tickets.</td></tr>
-      <tr><td><strong>Coffee Bar Staff</strong></td><td>Coffee bar screen: coffee and tea tickets.</td></tr>
-      <tr><td><strong>Room Service</strong></td><td>Room-service orders, charge to the guest's bill, confirm delivery.</td></tr>
-      <tr><td><strong>Gym Staff</strong></td><td>Gym front desk: membership enquiries. Cannot change package prices.</td></tr>
-      <tr><td><strong>Conference Staff</strong></td><td>Conference bookings: confirm, cancel, complete. Cannot edit rooms or invoicing.</td></tr>
+      <tr data-module="pos"><td><strong>Restaurant Staff</strong></td><td>POS till: place orders, take payments, print or email receipts.</td></tr>
+      <tr data-module="station_kds"><td><strong>Chef / Kitchen</strong></td><td>Kitchen screen: see tickets, mark items ready or served.</td></tr>
+      <tr data-module="station_bds"><td><strong>Bar Staff</strong></td><td>Bar screen: drink tickets.</td></tr>
+      <tr data-module="station_cds"><td><strong>Coffee Bar Staff</strong></td><td>Coffee bar screen: coffee and tea tickets.</td></tr>
+      <tr data-module="station_room_service"><td><strong>Room Service</strong></td><td>Room-service orders, charge to the guest's bill, confirm delivery.</td></tr>
+      <tr data-module="gym"><td><strong>Gym Staff</strong></td><td>Gym front desk: membership enquiries. Cannot change package prices.</td></tr>
+      <tr data-module="conference"><td><strong>Conference Staff</strong></td><td>Conference bookings: confirm, cancel, complete. Cannot edit rooms or invoicing.</td></tr>
     </tbody>
   </table>
   <p>Only roles that match the parts of the system switched on for this hotel appear in the list.</p>

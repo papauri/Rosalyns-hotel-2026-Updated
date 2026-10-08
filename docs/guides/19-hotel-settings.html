@@ -79,7 +79,7 @@
   </ul>
   <div class="warn"><p>Ticking the box takes the whole guest website offline straight away. Untick it as soon as you are finished.</p></div>
 
-  <h2 id="booking-status">Booking System Status</h2>
+  <h2 id="booking-status" data-module="bookings">Booking System Status</h2>
   <p>Only shown when the Bookings &amp; Reservations module is on. The card shows <strong>Booking System is Enabled</strong> (<em>Active</em>) or <strong>Booking System is Disabled</strong> (<em>Inactive</em>).</p>
   <h3>Fields</h3>
   <ul>
@@ -102,7 +102,7 @@
   </ul>
   <p>Errors: <em>"Redirect URL is too long (500 characters maximum)."</em> and <em>"Redirect URL must start with http://, https:// or a single /."</em></p>
 
-  <h2 id="advance">Advance Booking Configuration</h2>
+  <h2 id="advance" data-module="bookings|conference">Advance Booking Configuration</h2>
   <p>Only shown when the Bookings &amp; Reservations module is on.</p>
   <h3>Fields</h3>
   <ul>
@@ -116,7 +116,7 @@
     <li>Below 1: <em>"Error: Maximum advance booking days must be at least 1"</em>. Above 365: <em>"Error: Maximum advance booking days cannot exceed 365 (one year)"</em>.</li>
   </ul>
 
-  <h2 id="refunds">Refunds &amp; cancellations</h2>
+  <h2 id="refunds" data-module="bookings">Refunds &amp; cancellations</h2>
   <p>Only shown when the Bookings &amp; Reservations module is on. It shows <strong>Current handling</strong> and four groups of choices. Everyone with Hotel Settings can see them. <strong>Only people with Change VAT &amp; refund settings can change them</strong>; for everyone else the choices are greyed out, there is no save button, and the card says <em>"You can view these rules. Only users with the "Change VAT &amp; refund settings" permission can change them."</em></p>
   <h3>Fields (choose one in each group)</h3>
   <table>
@@ -167,7 +167,7 @@
     </tbody>
   </table>
 
-  <h3>Group: Stay policies</h3>
+  <h3 data-module="bookings">Group: Stay policies</h3>
   <table>
     <thead><tr><th>Field</th><th>Allowed values</th><th>What it affects</th></tr></thead>
     <tbody>
@@ -199,7 +199,7 @@
     </tbody>
   </table>
 
-  <h3>Group: Restaurant &amp; stock</h3>
+  <h3 data-module="pos|stock">Group: Restaurant &amp; stock</h3>
   <table>
     <thead><tr><th>Field</th><th>Allowed values</th><th>What it affects</th></tr></thead>
     <tbody>
@@ -223,7 +223,7 @@
   <p>If any field is wrong, <strong>nothing at all is saved</strong>. You see the problem field with its rule, then <em>"Nothing was saved."</em> Fix it and save again. Examples of the rule text: <em>"Check-in from: a time such as 2:00 PM or 14:00."</em>, <em>"Star rating (0 = not rated): a whole number from 0 to 5."</em>, <em>"Website address (used in emails, documents and password-reset links): the full address of the site, e.g. https://www.yourhotel.com (no ? or #)."</em>, <em>"Account number: letters, digits, spaces and dashes only."</em></p>
   <p>Every change is written to the system log, with the old and new value.</p>
 
-  <h2 id="references">Booking references</h2>
+  <h2 id="references" data-module="bookings">Booking references</h2>
   <p>Only shown when the Bookings &amp; Reservations module is on.</p>
   <h3>Fields</h3>
   <ul>
@@ -259,7 +259,7 @@
   </ul>
   <p>Documents already sent are not changed. Only new PDFs use the new look.</p>
 
-  <h2 id="tentative">Tentative Bookings</h2>
+  <h2 id="tentative" data-module="bookings">Tentative Bookings</h2>
   <p>Only shown when the Bookings &amp; Reservations module is on. The card shows <strong>Tentative Bookings are Enabled</strong> or <strong>Disabled</strong>. A tentative booking is a hold on a room with no payment up front.</p>
   <h3>Fields</h3>
   <ul>
@@ -280,7 +280,7 @@
   </ol>
   <p>When nothing has been changed the button reads <strong>Save — Keep Enabled</strong> or <strong>Save — Keep Disabled</strong>.</p>
 
-  <h2 id="levy">Tourism Levy / City Tax</h2>
+  <h2 id="levy" data-module="bookings">Tourism Levy / City Tax</h2>
   <p>Only shown when the Bookings &amp; Reservations module is on. It needs <strong>Change VAT &amp; refund settings</strong> to change. Without it, saving shows <em>"You do not have permission to change the tourism levy."</em> The page does not grey the fields out, so the message only appears after you click save.</p>
   <h3>Fields</h3>
   <ul>
@@ -348,7 +348,7 @@
   <p>The Automated Emails page also has a <strong>Send test to me</strong> button that sends sample emails to your own admin email address (see <a href="#elsewhere">below</a>).</p>
   <div class="warn"><p>If <strong>Development Mode (Preview Only)</strong> is ticked, no guest gets any email, and the test email will not arrive. Untick it when the hotel is ready to send real email, and save.</p></div>
 
-  <h2 id="notify">Booking Notification Email</h2>
+  <h2 id="notify" data-module="bookings">Booking Notification Email</h2>
   <p>Only shown when the Bookings &amp; Reservations module is on. It says who inside the hotel is told about new bookings, and sets the reminder and review emails to guests. Save with <strong>Save Notification Email</strong>.</p>
   <h3>Fields</h3>
   <ul>
@@ -369,9 +369,9 @@
   <table>
     <thead><tr><th>Row (needs this module)</th><th>Fields</th></tr></thead>
     <tbody>
-      <tr><td>Conference</td><td><strong>Enable Conference page &amp; conference enquiry functionality</strong> (tick box); <strong>Conference Notification Email</strong> (valid address or empty).</td></tr>
-      <tr><td>Gym</td><td><strong>Enable Gym page &amp; gym booking/enquiry functionality</strong> (tick box); <strong>Gym Notification Email</strong>.</td></tr>
-      <tr><td>POS &amp; Stations</td><td><strong>Enable Restaurant page and related restaurant functionality</strong> (tick box); <strong>Restaurant Notification Email</strong>.</td></tr>
+      <tr data-module="conference"><td>Conference</td><td><strong>Enable Conference page &amp; conference enquiry functionality</strong> (tick box); <strong>Conference Notification Email</strong> (valid address or empty).</td></tr>
+      <tr data-module="gym"><td>Gym</td><td><strong>Enable Gym page &amp; gym booking/enquiry functionality</strong> (tick box); <strong>Gym Notification Email</strong>.</td></tr>
+      <tr data-module="pos"><td>POS &amp; Stations</td><td><strong>Enable Restaurant page and related restaurant functionality</strong> (tick box); <strong>Restaurant Notification Email</strong>.</td></tr>
     </tbody>
   </table>
   <p>The notification email is where enquiries for that service are sent. A row for a module that is off is hidden, and its stored values are kept as they are.</p>
@@ -404,7 +404,7 @@
     <li><strong>Footer</strong> (Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Footer</strong>, <code>/admin/footer-management.php</code>, permission <strong>Footer Management</strong>, needs the Website &amp; CMS module): this is where the hotel name (<strong>Site Name</strong>), tagline, logo, main <strong>Phone Number</strong>, <strong>Email Address</strong>, <strong>Address</strong>, <strong>Working Hours</strong>, the social media links (<strong>Facebook URL</strong>, <strong>Instagram URL</strong>, <strong>Twitter / X URL</strong>, <strong>LinkedIn URL</strong>) and the copyright text are set. Saving shows <em>"Site and footer settings saved."</em> The site name cannot be empty: <em>"Site name is required."</em></li>
   </ul>
 
-  <h2 id="automated-emails">Automated Emails (reminders that send themselves)</h2>
+  <h2 id="automated-emails" data-module="bookings">Automated Emails (reminders that send themselves)</h2>
   <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Automated Emails</strong> (<code>/admin/automated-emails.php</code>), permission <strong>Hotel Settings</strong>. Reminders go out by themselves while people use the website or the admin. No cron job is needed. At most once every <strong>Run interval</strong> minutes (15 by default), the next page someone opens starts a run in the background after their page has loaded, so nobody waits for it.</p>
   <h3>The Status box</h3>
   <ul>

@@ -101,7 +101,7 @@
   </ol>
   <p>If sending fails you will see <em>"Could Not Send"</em> and the reason, for example <em>"No admin recipient configured. Add an email to site setting "eod_report_recipients" or "email_admin_email"."</em> or <em>"No WhatsApp recipient number configured..."</em>.</p>
 
-  <h2 id="posacc">POS Accounting: closing cashier shifts</h2>
+  <h2 id="posacc" data-module="pos">POS Accounting: closing cashier shifts</h2>
   <p>Use this to check each cashier's till against the system and close their shift. Open <strong>Money</strong> &rarr; <strong>POS Accounting</strong>. Pick the <strong>Business date</strong> and click <strong>Apply</strong>.</p>
   <p>The top shows <strong>Paid POS sales</strong>, <strong>Cash collected</strong>, <strong>Mobile / card</strong> and <strong>Voids</strong> for the day. Below that, <strong>Cashier close matching</strong> lists every cashier who took sales that day.</p>
   <ol class="steps">
@@ -115,11 +115,11 @@
   <p>Expected cash is the opening float plus cash sales minus cash refunds. Example: float MWK 20,000 plus net cash sales MWK 230,000 means the system expects MWK 250,000 cash and you count MWK 248,000. The variance is -2,000.00. Write the reason in the note.</p>
   <p>Further down are the <strong>POS sales log</strong> and the <strong>POS audit logs</strong> for the day.</p>
 
-  <h2 id="z">Z-report (shift close report)</h2>
+  <h2 id="z" data-module="pos">Z-report (shift close report)</h2>
   <p>Click <strong>Z-report</strong> on POS Accounting to see all the shift closes for the chosen date. Managers and admins only; anyone else gets <em>"Access denied."</em> It shows total revenue, orders, voids and net variance. A red banner warns of a <em>total shortfall across all cashiers</em> to investigate before sign-off. The table lists each cashier with their cash, mobile and card variance, an <strong>OVERRIDE</strong> tag where the close was approved despite a difference, and a <strong>View</strong> link.</p>
   <p>The single report for one close shows the cashier, date and time, record number, then <strong>Tender Reconciliation</strong> with a <strong>Cash:</strong> line showing <em>Float + Cash sales &minus; Cash refunds = Expected cash</em> (closes made before the float was included say the float was not part of their expected cash) (System (Expected), Counted (Declared), Variance, and BALANCED, SHORTFALL or OVERAGE for each of cash, mobile and card), notes, top items, the paid orders, refund and void payouts, and voided orders. Click <strong>Print / Save PDF</strong> to keep a copy. A cashier who is not a manager can open only their own closes. With no date given, the page shows the last 30 closes.</p>
 
-  <h2 id="drift">Drift report</h2>
+  <h2 id="drift" data-module="bookings">Drift report</h2>
   <p>Click <strong>Drift report</strong> on POS Accounting. It is read-only and changes nothing. It measures how far older till figures were out because of two faults that have since been fixed: tips counted inside revenue and VAT, and split payments. It looks at the last 90 days; change <strong>Start</strong> and <strong>End</strong> and click <strong>Apply</strong>, or click <strong>All time</strong>. A cash difference that is only the opening float is not shown as drift.</p>
   <ul>
     <li><strong>Tip/VAT overstatement register</strong>: each affected sale with the recorded total, the correct total, and how much revenue and VAT were overstated. Refunded sales are marked.</li>

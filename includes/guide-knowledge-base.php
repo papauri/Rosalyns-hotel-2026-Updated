@@ -22,7 +22,7 @@
 
 declare(strict_types=1);
 
-const RH_KB_VERSION = 3;
+const RH_KB_VERSION = 4;
 
 /** Guide files that make up the knowledge base, in reading order. */
 function rh_kb_guide_files(): array
@@ -333,6 +333,16 @@ function rh_kb_index(): array
     return $memo;
 }
 
+/** The data-module requirement on an element ("a" or "a|b" = any of), or '' when untagged. */
+function rh_kb_mod_attr(?DOMNode $n): string
+{
+    if (!($n instanceof DOMElement)) {
+        return '';
+    }
+    $v = strtolower(trim($n->getAttribute('data-module')));
+    return preg_match('/^[a-z_:|]+$/', $v) ? $v : '';
+}
+
 function rh_kb_text(?DOMNode $n): string
 {
     if ($n === null) {
@@ -393,10 +403,11 @@ function rh_kb_parse_file(string $path, string $file): ?array
                 $d->removeChild($summary);
             }
             $groupEl = $xp->query('preceding::h2[1]', $d)->item(0);
+            $fmods = array_values(array_filter([rh_kb_mod_attr($groupEl), rh_kb_mod_attr($d)]));
             $entries[] = [
                 'type' => 'faq', 'file' => $file, 'guide' => $title, 'anchor' => $d->getAttribute('id'),
                 'title' => $q, 'group' => rh_kb_text($groupEl), 'text' => rh_kb_text($d),
-            ];
+            ] + ($fmods ? ['mods' => $fmods] : []);
         }
         return ['guide' => $guide, 'entries' => $entries];
     }
@@ -438,6 +449,9 @@ function rh_kb_parse_file(string $path, string $file): ?array
                 continue;
             }
             $h2 = ['type' => 'section', 'file' => $file, 'guide' => $title, 'anchor' => $id, 'title' => rh_kb_text($n), 'text' => ''];
+            if (rh_kb_mod_attr($n) !== '') {
+                $h2['mods'] = [rh_kb_mod_attr($n)];
+            }
             continue;
         }
         if ($h2 === null || in_array($tag, ['nav', 'footer', 'script', 'style'], true)) {
@@ -447,7 +461,14 @@ function rh_kb_parse_file(string $path, string $file): ?array
             $flush($h3);
             $h3 = ['type' => 'section', 'file' => $file, 'guide' => $title, 'anchor' => $h2['anchor'],
                 'parent' => $h2['title'], 'heading' => rh_kb_text($n), 'title' => rh_kb_text($n), 'text' => ''];
-            $h2['text'] .= ' ' . $h3['title'] . '.';
+            if ($h2['mods'] ?? []) {
+                $h3['mods'] = $h2['mods'];
+            }
+            if (rh_kb_mod_attr($n) !== '') {
+                $h3['mods'][] = rh_kb_mod_attr($n); // its text stays out of the parent section's entry
+            } else {
+                $h2['text'] .= ' ' . $h3['title'] . '.';
+            }
             continue;
         }
 
@@ -463,18 +484,42 @@ function rh_kb_parse_file(string $path, string $file): ?array
                 $see = preg_replace('/["“”]\s*(\/|or)\s*["“”]/u', ' $1 ', $see) ?? $see;
                 $why = $cells->length >= 3 ? rh_kb_text($cells->item(1)) : '';
                 $fix = rh_kb_text($cells->item($cells->length - 1));
+                $rowMod = rh_kb_mod_attr($tr);
+                $rowMods = array_merge($h2['mods'] ?? [], $rowMod !== '' ? [$rowMod] : []);
                 $entries[] = ['type' => 'problem', 'file' => $file, 'guide' => $title, 'anchor' => 'problems',
-                    'title' => preg_replace('/^[\s"“”]+|[\s"“”]+$/u', '', $see) ?? $see, 'why' => $why, 'fix' => $fix, 'text' => $why . ' ' . $fix];
-                $h2['text'] .= ' ' . $see . '.';
+                    'title' => preg_replace('/^[\s"“”]+|[\s"“”]+$/u', '', $see) ?? $see, 'why' => $why, 'fix' => $fix, 'text' => $why . ' ' . $fix]
+                    + ($rowMods ? ['mods' => $rowMods] : []);
+                if ($rowMod === '') {
+                    $h2['text'] .= ' ' . $see . '.';
+                }
             }
             continue;
         }
 
         $target = $h3 !== null ? 'h3' : 'h2';
         $text = rh_kb_text($n);
+        $ctxMods = $h3 !== null ? ($h3['mods'] ?? []) : ($h2['mods'] ?? []);
+        if ($tag === 'table' && $xp->query('.//tr[@data-module]', $n)->length) {
+            // Rows tagged for a module become their own entries, so they vanish with the module.
+            $kept = [];
+            foreach ($xp->query('.//tr', $n) as $tr) {
+                if (rh_kb_mod_attr($tr) === '') {
+                    $kept[] = rh_kb_text($tr);
+                    continue;
+                }
+                $cell = $xp->query('./td|./th', $tr)->item(0);
+                $entries[] = ['type' => 'section', 'file' => $file, 'guide' => $title, 'anchor' => $h2['anchor'],
+                    'parent' => $h2['title'], 'title' => rh_kb_text($cell), 'text' => rh_kb_text($tr),
+                    'mods' => array_merge($ctxMods, [rh_kb_mod_attr($tr)])];
+            }
+            $text = implode(' ', $kept);
+        }
+        $h3Own = $h3 !== null && ($h3['mods'] ?? []) !== ($h2['mods'] ?? []); // tagged sub-section: stays out of its parent's text
         if ($target === 'h3') {
             $h3['text'] .= ' ' . $text;
-            $h2['text'] .= ' ' . $text;
+            if (!$h3Own) {
+                $h2['text'] .= ' ' . $text;
+            }
             if ($tag === 'ol' && empty($h3['steps'])) {
                 $h3['steps'] = rh_kb_list_items($xp, $n);
             }
@@ -512,6 +557,229 @@ function rh_kb_list_items(DOMXPath $xp, DOMElement $ol): array
 }
 
 // ---------------------------------------------------------------------------------------------
+// Which guides this business should see (follows the Business Preset / Modules)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The one source of truth: guide file => what it needs.
+ *   'label' what the banner calls it ("This guide is for <label>")
+ *   'all'   every one of these must be on
+ *   'any'   at least one of these must be on
+ * Keys are enabled_modules keys, plus 'flag:events' and 'flag:restaurant' (the site_settings
+ * flags events_system_enabled / restaurant_system_enabled). Guides not listed are always shown.
+ */
+function rh_kb_guide_requirements(): array
+{
+    return [
+        '01-pos-till.html'                => ['label' => 'Point of Sale',                 'all' => ['pos']],
+        '02-kds-kitchen.html'             => ['label' => 'the Kitchen Display (KDS)',     'all' => ['pos', 'station_kds']],
+        '03-bds-bar.html'                 => ['label' => 'the Bar Display (BDS)',         'all' => ['pos', 'station_bds']],
+        '04-cds-coffee.html'              => ['label' => 'the Coffee Bar Display (CDS)',  'all' => ['pos', 'station_cds']],
+        '05-room-service.html'            => ['label' => 'Room Service',                  'all' => ['pos', 'station_room_service', 'bookings']],
+        '06-housekeeping.html'            => ['label' => 'Housekeeping',                  'all' => ['housekeeping']],
+        '07-reception-bookings.html'      => ['label' => 'Bookings & Reservations',       'all' => ['bookings']],
+        '08-stock-orders.html'            => ['label' => 'Stock & Inventory',             'all' => ['stock']],
+        '09-packages-rates.html'          => ['label' => 'Bookings & Reservations',       'all' => ['bookings']],
+        '10-conference-events.html'       => ['label' => 'Conference & Events',           'any' => ['conference', 'flag:events']],
+        '11-social-facebook-sharing.html' => ['label' => 'Website & CMS',                'all' => ['website_cms']],
+        '17-gym-management.html'          => ['label' => 'Gym & Fitness',                 'all' => ['gym']],
+    ];
+}
+
+/**
+ * Module state: ['modules' => [key => bool], 'events' => bool, 'restaurant' => bool],
+ * read-only, cached per request. Null (= show everything) when it cannot be read.
+ */
+function rh_kb_module_state(): ?array
+{
+    static $memo = false;
+    if ($memo !== false) {
+        return $memo;
+    }
+    $memo = null;
+    try {
+        $pdo = $GLOBALS['pdo'] ?? null;
+        if (!($pdo instanceof PDO)) {
+            $pdo = rh_kb_connect(); // guide endpoints do not load the whole app
+        }
+        if (!($pdo instanceof PDO)) {
+            return $memo; // database not reachable: fail open
+        }
+        $rows = $pdo->query('SELECT module_key, is_enabled FROM enabled_modules')->fetchAll(PDO::FETCH_KEY_PAIR);
+        if (!$rows) {
+            return $memo;
+        }
+        $modules = [];
+        foreach ($rows as $k => $v) {
+            $modules[(string)$k] = (int)$v === 1;
+        }
+        $flags = [];
+        $stmt = $pdo->prepare("SELECT setting_key, setting_value FROM site_settings WHERE setting_key IN ('events_system_enabled', 'restaurant_system_enabled')");
+        $stmt->execute();
+        foreach ($stmt->fetchAll(PDO::FETCH_KEY_PAIR) as $k => $v) {
+            $flags[(string)$k] = (string)$v === '1';
+        }
+        $memo = [
+            'modules' => $modules,
+            'events' => $flags['events_system_enabled'] ?? true,
+            'restaurant' => $flags['restaurant_system_enabled'] ?? true,
+        ];
+    } catch (Throwable $e) {
+        error_log('guide kb: module state unavailable: ' . $e->getMessage());
+        $memo = null;
+    }
+    return $memo;
+}
+
+/**
+ * A small read-only connection from the project's .env (same keys as config/database.php), used
+ * only when the app's own connection is not loaded. Returns null on any problem.
+ */
+function rh_kb_connect(): ?PDO
+{
+    try {
+        $env = [];
+        $file = dirname(__DIR__) . '/.env';
+        if (is_readable($file)) {
+            foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                $line = trim($line);
+                if ($line === '' || $line[0] === '#' || strpos($line, '=') === false) {
+                    continue;
+                }
+                [$k, $v] = explode('=', $line, 2);
+                $k = trim((string)preg_replace("/^\\xEF\\xBB\\xBF/", '', $k));
+                $v = trim($v);
+                if (strlen($v) >= 2 && ($v[0] === '"' || $v[0] === "'") && substr($v, -1) === $v[0]) {
+                    $v = substr($v, 1, -1);
+                }
+                $env[$k] = $v;
+            }
+        }
+        $get = static function (string $k) use ($env): string {
+            return (string)($env[$k] ?? (getenv($k) ?: ''));
+        };
+        if ($get('DB_HOST') === '' || $get('DB_NAME') === '' || $get('DB_USER') === '') {
+            return null;
+        }
+        return new PDO(
+            'mysql:host=' . $get('DB_HOST') . ';port=' . ($get('DB_PORT') ?: '3306') . ';dbname=' . $get('DB_NAME') . ';charset=utf8mb4',
+            $get('DB_USER'),
+            $get('DB_PASS'),
+            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 3, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
+        );
+    } catch (Throwable $e) {
+        error_log('guide kb: database not reachable, showing every guide');
+        return null;
+    }
+}
+
+/** Is one requirement key on? Unknown module keys count as on. */
+function rh_kb_key_on(string $key, ?array $state): bool
+{
+    if ($state === null) {
+        return true;
+    }
+    if ($key === 'flag:events' || $key === 'events') {
+        return !empty($state['events']);
+    }
+    if ($key === 'flag:restaurant' || $key === 'restaurant' || $key === 'restaurant_page') {
+        return !empty($state['restaurant']);
+    }
+    $m = $state['modules'] ?? [];
+    if ($key === 'billing') {
+        return ($m['bookings'] ?? true) || ($m['conference'] ?? true) || ($m['gym'] ?? true);
+    }
+    if ($key === 'advance_booking') {
+        return ($m['bookings'] ?? true) || ($m['conference'] ?? true);
+    }
+    return $m[$key] ?? true;
+}
+
+/** Is a guide file allowed for this business? Unlisted guides always are. */
+function rh_kb_guide_is_allowed(string $file, ?array $state): bool
+{
+    $file = basename((string)preg_replace('/[?#].*$/', '', $file));
+    $req = rh_kb_guide_requirements()[$file] ?? null;
+    if ($req === null || $state === null) {
+        return true;
+    }
+    foreach ($req['all'] ?? [] as $k) {
+        if (!rh_kb_key_on($k, $state)) {
+            return false;
+        }
+    }
+    if (!empty($req['any'])) {
+        foreach ($req['any'] as $k) {
+            if (rh_kb_key_on($k, $state)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Guide files this business should see (every guide in the knowledge base minus the ones for
+ * switched-off modules). $state overrides the live module state (for tests); omit it normally.
+ * Fails open: when the state cannot be read, every guide is allowed.
+ */
+function rh_kb_allowed_guides(?array $state = null): array
+{
+    $state = $state ?? rh_kb_module_state();
+    $files = array_merge(rh_kb_guide_files(), array_keys(rh_kb_guide_requirements()), ['index.html', 'system-map.php', 'owner-handover.html', 'owner-handover.php']);
+    return array_values(array_filter(array_unique($files), static function (string $f) use ($state): bool {
+        return rh_kb_guide_is_allowed($f, $state);
+    }));
+}
+
+/** Guides hidden for this business: file => module label (for the "switched off" banner). */
+function rh_kb_blocked_guides(?array $state = null): array
+{
+    $state = $state ?? rh_kb_module_state();
+    $out = [];
+    foreach (rh_kb_guide_requirements() as $file => $req) {
+        if (!rh_kb_guide_is_allowed($file, $state)) {
+            $out[$file] = $req['label'];
+        }
+    }
+    return $out;
+}
+
+/** A data-module tag: "a" or "a|b" (any of). */
+function rh_kb_spec_on(string $spec, ?array $state): bool
+{
+    foreach (explode('|', $spec) as $k) {
+        if ($k !== '' && rh_kb_key_on($k, $state)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** Should a knowledge-base entry be shown? Guide entries follow their guide; menu-page answers follow their module. */
+function rh_kb_entry_allowed(array $e, ?array $state): bool
+{
+    if ($state === null) {
+        return true;
+    }
+    if (!rh_kb_guide_is_allowed((string)($e['file'] ?? ''), $state)) {
+        return false;
+    }
+    foreach ((array)($e['module'] ?? []) as $k) {
+        if (!rh_kb_key_on((string)$k, $state)) {
+            return false;
+        }
+    }
+    foreach ((array)($e['mods'] ?? []) as $spec) { // data-module tags: each is any-of "a|b"; all tags must hold
+        if (!rh_kb_spec_on((string)$spec, $state)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Searching
 // ---------------------------------------------------------------------------------------------
 
@@ -521,8 +789,9 @@ function rh_kb_list_items(DOMXPath $xp, DOMElement $ol): array
  *
  * @return array{results: array, partial: bool}
  */
-function rh_kb_search(string $q, int $limit = 10): array
+function rh_kb_search(string $q, int $limit = 10, ?array $state = null): array
 {
+    $state = $state ?? rh_kb_module_state();
     $index = rh_kb_index();
     $corrected = [];
     $terms = rh_kb_query_terms($q, $index['vocab'] ?? null, $corrected);
@@ -545,6 +814,9 @@ function rh_kb_search(string $q, int $limit = 10): array
     $full = [];
     $part = [];
     foreach ($index['entries'] as $e) {
+        if (!rh_kb_entry_allowed($e, $state)) {
+            continue; // a guide or page for a module this business has switched off
+        }
         $t = rh_kb_normalize($e['title'] . ' ' . ($e['parent'] ?? ''));
         $g = rh_kb_normalize($e['guide']);
         $x = rh_kb_normalize($e['text']);

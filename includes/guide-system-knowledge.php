@@ -193,6 +193,33 @@ function rh_kb_sys_menu(): array
     return $memo;
 }
 
+/**
+ * The module a page needs: its own menu entry, else its parent page's, else its file-name family
+ * (gym-*, stock-*). Null when the page is not module-gated.
+ */
+function rh_kb_sys_page_module(string $page, array $menuModules)
+{
+    if (!empty($menuModules[$page])) {
+        return $menuModules[$page];
+    }
+    $parent = rh_kb_sys_parent_page($page);
+    if ($parent !== null && !empty($menuModules[$parent])) {
+        return $menuModules[$parent];
+    }
+    static $byPage = ['room-management.php' => 'bookings', 'room-dashboard.php' => 'bookings', 'restaurant-tables.php' => 'pos',
+        'kds.php' => ['pos', 'station_kds'], 'kds-report.php' => ['pos', 'station_kds'], 'bds.php' => ['pos', 'station_bds'],
+        'cds.php' => ['pos', 'station_cds'], 'room-service-dashboard.php' => ['pos', 'station_room_service']];
+    if (isset($byPage[$page])) {
+        return $byPage[$page];
+    }
+    foreach (['gym-' => 'gym', 'stock-' => 'stock', 'conference-' => 'conference', 'housekeeping' => 'housekeeping'] as $prefix => $mod) {
+        if (strpos($page, $prefix) === 0) {
+            return $mod;
+        }
+    }
+    return null;
+}
+
 /** The menu page a sub-page belongs to (from admin-nav-items.php), or null. */
 function rh_kb_sys_parent_page(string $page): ?string
 {
@@ -238,13 +265,17 @@ function rh_kb_sys_entries(): array
     $file = 'system-map.php';
     $guide = 'System map';
     $entries = [];
+    $pageModules = [];
+    foreach (rh_kb_sys_menu() as $p) {
+        $pageModules[$p['page']] = $p['module'];
+    }
 
     foreach (rh_kb_sys_menu() as $p) {
         $entries[] = [
             'type' => 'page', 'file' => $file, 'guide' => $guide, 'anchor' => rh_kb_sys_anchor('page', $p['page']),
             'title' => $p['label'], 'parent' => $p['group'] . ' menu',
             'text' => 'Where is ' . $p['label'] . '? Where do I find ' . $p['label'] . '? ' . rh_kb_sys_page_answer($p),
-            'page' => $p['page'],
+            'page' => $p['page'], 'module' => $p['module'],
         ];
     }
 
@@ -259,6 +290,7 @@ function rh_kb_sys_entries(): array
         $entries[] = [
             'type' => 'permission', 'file' => $file, 'guide' => $guide, 'anchor' => rh_kb_sys_anchor('perm', $key),
             'title' => $info['label'], 'parent' => 'Permission · ' . ($info['category'] ?? ''),
+            'module' => rh_kb_sys_page_module((string)($info['page'] ?? ''), $pageModules),
             'text' => 'Permission "' . $info['label'] . '": ' . rtrim((string)($info['description'] ?? ''), '.') . '.' . $where
                 . ' Who has it by default: ' . implode(', ', $roles) . '. Administrators always have every permission.'
                 . ' To give or take it away: Settings → Staff & Access → the person\'s Permissions (access, rights, allow, grant).',
@@ -273,6 +305,9 @@ function rh_kb_sys_entries(): array
         $entries[] = [
             'type' => 'role', 'file' => $file, 'guide' => $guide, 'anchor' => rh_kb_sys_anchor('role', $key),
             'title' => $role['label'] . ' role', 'parent' => 'Role',
+            'module' => ['receptionist' => 'bookings', 'housekeeping' => 'housekeeping', 'restaurant_staff' => 'pos', 'chef' => 'station_kds',
+                'bar_staff' => 'station_bds', 'coffee_staff' => 'station_cds', 'room_service' => 'station_room_service',
+                'gym_staff' => 'gym', 'conference_staff' => 'conference'][$key] ?? null,
             'text' => 'What can a ' . $role['label'] . ' do? ' . rtrim((string)$role['description'], '.') . '. Starts with: '
                 . implode(', ', $list) . '. An administrator can add or remove single permissions for one person in Staff & Access.',
         ];
@@ -293,7 +328,7 @@ function rh_kb_sys_entries(): array
         foreach ($hints as [$title, $text]) {
             $entries[] = [
                 'type' => 'hint', 'file' => $file . '?page=' . $page, 'guide' => 'On-screen help', 'anchor' => 'hints',
-                'title' => $title, 'parent' => $where . ' page', 'text' => $text, 'page' => $page,
+                'title' => $title, 'parent' => $where . ' page', 'text' => $text, 'page' => $page, 'module' => rh_kb_sys_page_module($page, $pageModules),
             ];
         }
     }
@@ -334,6 +369,12 @@ function rh_kb_sys_help_for_page(string $page, array $index, int $limit = 10): a
     }
     $fileRe = '/(^|[^\w-])' . preg_quote($page, '/') . '\b/i';
     $entries = $index['entries'];
+    if (function_exists('rh_kb_module_state')) { // guides for switched-off modules are not offered
+        $kbState = rh_kb_module_state();
+        $entries = array_filter($entries, static function (array $e) use ($kbState): bool {
+            return rh_kb_entry_allowed($e, $kbState);
+        });
+    }
 
     // 1. The guide(s) written for this page: their facts box ("Where to find it") names the file.
     $primary = [];

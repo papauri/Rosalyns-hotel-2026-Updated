@@ -168,7 +168,7 @@
     </tbody>
   </table>
 
-  <h3>Today's movements</h3>
+  <h3 data-module="bookings">Today's movements</h3>
   <p>The front desk worklist. Tabs, each with a count. Only the tabs for modules that are on appear:</p>
   <ul>
     <li><strong>Arrivals</strong>: today's arrivals still to come. Each row shows the guest, reference, room type, night count, room, status and either <em>Due</em> (an amount) or <em>Paid</em>. The <strong>Check in</strong> button works only when the booking is confirmed and paid; otherwise it says <em>"Cannot check in: booking must be CONFIRMED and PAID."</em></li>
@@ -206,7 +206,7 @@
   <h2 id="menu-table">Every menu item</h2>
   <p>The permission column gives the name of the permission in Staff &amp; Access that shows the item. Where an item also needs a module switched on, the module is named in brackets (Settings &rarr; Modules). An administrator sees every item that its module allows.</p>
 
-  <h3>Front Desk</h3>
+  <h3 data-module="bookings">Front Desk</h3>
   <table>
     <thead><tr><th>Item</th><th>What it is for</th><th>Permission</th><th>Guide</th></tr></thead>
     <tbody>
@@ -220,7 +220,7 @@
     </tbody>
   </table>
 
-  <h3>Conference &amp; Events</h3>
+  <h3 data-module="conference|events">Conference &amp; Events</h3>
   <table>
     <thead><tr><th>Item</th><th>What it is for</th><th>Permission</th><th>Guide</th></tr></thead>
     <tbody>
@@ -230,7 +230,7 @@
     </tbody>
   </table>
 
-  <h3>Restaurant &amp; Bar</h3>
+  <h3 data-module="pos">Restaurant &amp; Bar</h3>
   <table>
     <thead><tr><th>Item</th><th>What it is for</th><th>Permission</th><th>Guide</th></tr></thead>
     <tbody>
@@ -249,7 +249,7 @@
     </tbody>
   </table>
 
-  <h3>Stock</h3>
+  <h3 data-module="stock">Stock</h3>
   <table>
     <thead><tr><th>Item</th><th>What it is for</th><th>Permission</th><th>Guide</th></tr></thead>
     <tbody>
@@ -284,7 +284,7 @@
     </tbody>
   </table>
 
-  <h3>Gym</h3>
+  <h3 data-module="gym">Gym</h3>
   <table>
     <thead><tr><th>Item</th><th>What it is for</th><th>Permission</th><th>Guide</th></tr></thead>
     <tbody>
@@ -298,7 +298,7 @@
     </tbody>
   </table>
 
-  <h3>Website</h3>
+  <h3 data-module="website_cms">Website</h3>
   <table>
     <thead><tr><th>Item</th><th>What it is for</th><th>Permission</th><th>Guide</th></tr></thead>
     <tbody>
@@ -410,7 +410,7 @@
     <li><strong>Cleanup older than</strong> (30, 60, 90, 180 or 365 days) and <strong>Cleanup</strong> delete old visitor records after you confirm <em>"Cleanup old visitor analytics data now?"</em>. Result: <em>"Visitor analytics cleaned successfully. Removed N visitor rows and N session rows older than N days."</em> Only visitor statistics are removed.</li>
   </ul>
 
-  <h2 id="pages">Pages</h2>
+  <h2 id="pages" data-module="website_cms">Pages</h2>
   <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Pages</strong> (<code>/admin/page-management.php</code>). Permission: <strong>Page Management</strong>. Page title: <strong>Page Management</strong>: <em>"Enable, disable, and reorder public website pages"</em>.</p>
   <ul>
     <li>Each page has a button to disable or enable it, a button to show or hide it in the website menu, and an edit button for its title, icon and description.</li>
@@ -419,7 +419,7 @@
     <li><strong>Add New Page</strong>: fill in the page key, title and file name (a root-level file such as <code>spa.php</code>), optionally an icon, description and heading, then <strong>Add Page</strong>. Message: <em>"Page "x" added successfully."</em> Errors include <em>"Page key, title, and file path are required."</em> <em>"A page with the key "…" already exists."</em>, <em>"A page with the file path "…" already exists."</em> and <em>"A page called "…" already exists. Use a different name or edit the existing one."</em></li>
   </ul>
 
-  <h2 id="gallery">Gallery</h2>
+  <h2 id="gallery" data-module="website_cms">Gallery</h2>
   <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Gallery</strong> (<code>/admin/gallery-management.php</code>). Permission: <strong>Gallery</strong>. Page title: <strong>Gallery Management</strong>.</p>
   <ol class="steps">
     <li>Click <strong>Add Gallery Item</strong>.</li>
@@ -432,7 +432,7 @@
     <li>On each item: edit (<em>"Gallery item updated successfully!"</em>), switch active or hidden (<em>"Gallery item status updated!"</em>) and <strong>Delete</strong> (asks <em>"Delete gallery item?"</em>; <em>"Gallery item deleted successfully!"</em>). A missing title gives <em>"Title is required."</em></li>
   </ul>
 
-  <h2 id="media">Media Portal</h2>
+  <h2 id="media" data-module="website_cms">Media Portal</h2>
   <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Media Portal</strong> (<code>/admin/media-management.php</code>). Permission: <strong>Media Portal</strong>; needs the Website &amp; CMS module. It is one list of every image and video the website uses: page banners (heroes), gallery photos, room pictures, conference and gym images. Each item is tagged to a page (for example <em>index</em>) and a section (for example <em>hero</em>), and saving it updates that place on the live website. Page banners set in <a href="#headers">Section Headers</a> appear here automatically.</p>
   <h3>How to add an image or video</h3>
   <ol class="steps">
@@ -449,7 +449,7 @@
     <li>To use a logo or picture elsewhere (for example the document logo in Hotel Settings), upload it here first, then paste its path.</li>
   </ul>
 
-  <h2 id="reviews">Reviews</h2>
+  <h2 id="reviews" data-module="website_cms">Reviews</h2>
   <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Reviews</strong> (<code>/admin/reviews.php</code>). Permission: <strong>Reviews</strong>. Guests' reviews wait here until you publish them.</p>
   <ul>
     <li>Summary cards: average rating and number published, <strong>Awaiting moderation</strong>, <strong>Published, no reply yet</strong> and <strong>Published 1–2★ reviews</strong>. Click one to filter.</li>
@@ -459,7 +459,7 @@
     <li>The page can also search for reviews elsewhere; <strong>Import as pending</strong> brings one in as a pending review for you to check and approve.</li>
   </ul>
 
-  <h2 id="contact">Contact Inquiries</h2>
+  <h2 id="contact" data-module="website_cms">Contact Inquiries</h2>
   <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Contact Inquiries</strong> (<code>/admin/contact-inquiries.php</code>). Permission: <strong>Contact Inquiries</strong>. Messages sent from the website contact form.</p>
   <ul>
     <li>Counts at the top: <strong>New / Unread</strong>, <strong>Read</strong> and more. Search with <strong>Search</strong>; <strong>Clear</strong> resets. <strong>Mark All Read</strong> (asks <em>"Mark all new inquiries as read?"</em>) clears the unread count.</li>
@@ -469,14 +469,14 @@
     <li>If the hotel's sender address is missing, the reply cannot be sent: <em>"Hotel sender email is not configured. Set the Email From Address in email settings first."</em> Fix it in <a href="19-hotel-settings.html#email-config">Hotel Settings &rarr; Email Configuration</a>.</li>
   </ul>
 
-  <h2 id="headers">Section Headers</h2>
+  <h2 id="headers" data-module="website_cms">Section Headers</h2>
   <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Section Headers</strong> (<code>/admin/section-headers-management.php</code>). Permission: <strong>Section Headers</strong>. Page title: <strong>Section Headers Management</strong>. It edits the headings on the guest website. Two tabs:</p>
   <ul>
     <li><strong>Page Hero Text</strong>: the big heading and text at the top of each page (<strong>Save Hero Text</strong>), and <strong>Add Hero for New Page</strong> (<strong>Create Hero Entry</strong>). Saving: <em>"Page hero text updated successfully!"</em></li>
     <li><strong>Section Headers</strong>: the headings above sections within pages. Saving: <em>"Section header updated successfully!"</em> You can switch a header on or off (<em>"Section header status updated!"</em>) and reset one to its default (<em>"Section header reset to default successfully!"</em>). A reset-all option restores every header to factory defaults: <em>"All section headers have been reset to factory defaults!"</em></li>
   </ul>
 
-  <h2 id="footer">Footer</h2>
+  <h2 id="footer" data-module="website_cms">Footer</h2>
   <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Footer</strong> (<code>/admin/footer-management.php</code>). Permission: <strong>Footer Management</strong>. Page title: <strong>Footer Management</strong>. This is also where the hotel's name, logo, main phone, email, address, working hours and social links are set.</p>
   <ul>
     <li><strong>Footer Link Columns</strong> and <strong>Add New Footer Link</strong>: link columns in the website footer. Messages: <em>"Footer link added."</em>, <em>"Footer link updated."</em>, <em>"Footer link deleted."</em>, <em>"Footer link visibility toggled."</em></li>

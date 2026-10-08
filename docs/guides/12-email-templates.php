@@ -156,57 +156,57 @@ $base = ['site_name','site_url','contact_email','contact_phone','phone_main','cu
 
 $groups = [
     [
-        'title' => 'Shared booking tags',
+        'title' => 'Shared booking tags', 'module' => 'bookings',
         'applies' => 'Received, Confirmed, Reminder, Cancelled, the four Tentative emails, Room Invoice Email, Room Quote Email, Refund Email, Reminder 1, 2 and 3, and Quote Expiry. On the last five, booking details are blank because they are not built from a full booking: Refund and the reminders carry the guest name, email and reference only, and Quote Expiry carries the quotation fields.',
         'tags' => $base,
     ],
     [
-        'title' => 'Extra tags: Reminder Email (check-in reminder)',
+        'title' => 'Extra tags: Reminder Email (check-in reminder)', 'module' => 'bookings',
         'applies' => 'Reminder Email only.',
         'tags' => ['days_overdue', 'urgency_notice'],
     ],
     [
-        'title' => 'Extra tags: Tentative emails',
+        'title' => 'Extra tags: Tentative emails', 'module' => 'bookings',
         'applies' => 'Tentative New: tentative_duration_hours, hours_until_expiry, whatsapp_link. Tentative Reminder: whatsapp_link. Tentative Confirmed: conversion_status. Tentative Expired: no extras. All also use tentative_expires_at_formatted from the shared tags.',
         'tags' => ['tentative_duration_hours', 'hours_until_expiry', 'whatsapp_link', 'conversion_status'],
     ],
     [
-        'title' => 'Extra tags: Room Quote Email',
+        'title' => 'Extra tags: Room Quote Email', 'module' => 'bookings',
         'applies' => 'Room Quote Email only. It also replaces total_amount, total_amount_formatted, vat_amount, vat_rate, payment_policy and the date and guest tags with quotation values.',
         'tags' => ['quotation_reference', 'quote_reference', 'check_in_date', 'check_out_date', 'nights', 'guests', 'rate_per_night', 'room_subtotal', 'child_supplement', 'deposit_amount', 'balance_due', 'valid_until', 'quotation_notes'],
     ],
     [
-        'title' => 'Extra tags: Room Invoice Email',
+        'title' => 'Extra tags: Room Invoice Email', 'module' => 'bookings',
         'applies' => 'Room Invoice Email only.',
         'tags' => ['invoice_number', 'check_out', 'invoice_link'],
     ],
     [
-        'title' => 'Extra tags: Refund Email',
+        'title' => 'Extra tags: Refund Email', 'module' => 'bookings',
         'applies' => 'Refund Email only.',
         'tags' => ['refund_reference', 'refund_amount_formatted', 'refund_reason_display', 'refund_date_formatted', 'booking_type_label'],
     ],
     [
-        'title' => 'Extra tags: Reminder 1, 2 and 3 (payment reminders)',
+        'title' => 'Extra tags: Reminder 1, 2 and 3 (payment reminders)', 'module' => 'bookings',
         'applies' => 'The three payment reminder emails. If one is switched off (Active unticked), that reminder is not sent.',
         'tags' => ['amount_due', 'due_date', 'days_overdue', 'invoice_number', 'account_reference', 'pay_instructions'],
     ],
     [
-        'title' => 'Extra tags: Quote Expiry',
+        'title' => 'Extra tags: Quote Expiry', 'module' => 'bookings',
         'applies' => 'Quote Expiry email only.',
         'tags' => ['quote_reference', 'valid_until', 'days_left', 'quote_total'],
     ],
     [
-        'title' => 'Conference Quote Email',
+        'title' => 'Conference Quote Email', 'module' => 'conference',
         'applies' => 'This email has its own list. Nothing from the shared set works here except the tags below.',
         'tags' => ['site_name', 'guest_name', 'contact_person', 'company_name', 'inquiry_reference', 'quotation_reference', 'quote_reference', 'conference_room', 'event_type', 'event_date', 'event_time', 'attendees', 'total_amount', 'total_amount_formatted', 'currency_symbol', 'valid_until', 'quotation_notes', 'contact_phone', 'contact_email'],
     ],
     [
-        'title' => 'Event Quote Email',
+        'title' => 'Event Quote Email', 'module' => 'conference|events',
         'applies' => 'Its own list.',
         'tags' => ['site_name', 'recipient_name', 'quotation_reference', 'quote_reference', 'event_title', 'event_date', 'event_time', 'event_location', 'attendee_count', 'total_amount', 'total_amount_formatted', 'currency_symbol', 'valid_until', 'quotation_notes', 'contact_phone', 'contact_email'],
     ],
     [
-        'title' => 'Conference Invoice Email',
+        'title' => 'Conference Invoice Email', 'module' => 'conference',
         'applies' => 'Its own list.',
         'tags' => ['site_name', 'logo_html', 'address', 'inquiry_reference', 'company_name', 'contact_person', 'conference_room', 'event_date', 'event_time', 'attendees', 'subtotal_amount', 'vat_rate', 'vat_amount', 'total_amount', 'vat_number', 'vat_number_html', 'contact_email', 'contact_phone'],
     ],
@@ -221,27 +221,27 @@ $groups = [
         'tags' => ['site_name', 'guest_name', 'guest_email', 'guest_phone', 'receipt_number', 'booking_type', 'payment_reference', 'booking_reference', 'payment_date', 'payment_method', 'payment_type', 'payment_status', 'payment_amount', 'vat_amount', 'total_amount', 'description', 'contact_email', 'contact_phone', 'address', 'hotel_address', 'vat_number', 'vat_rate', 'vat_number_html', 'logo_html'],
     ],
     [
-        'title' => 'Room Invoice PDF',
+        'title' => 'Room Invoice PDF', 'module' => 'bookings',
         'applies' => 'Its own list.',
         'tags' => ['invoice_number', 'issued_date', 'guest_name', 'guest_email', 'guest_phone', 'booking_reference', 'room_icon_html', 'room_name', 'check_in', 'check_out', 'nights', 'guests', 'status_text', 'status_bg', 'status_fg', 'total_due', 'amount_paid', 'balance_due', 'site_name', 'address', 'contact_email', 'contact_phone', 'vat_number_html', 'logo_html', 'currency_symbol', 'charges_table_rows', 'totals_rows', 'payment_history_section', 'bank_details', 'invoice_terms'],
     ],
     [
-        'title' => 'Conference Invoice PDF',
+        'title' => 'Conference Invoice PDF', 'module' => 'conference',
         'applies' => 'Its own list.',
         'tags' => ['logo_html', 'site_name', 'address', 'contact_email', 'contact_phone', 'invoice_number', 'issued_date', 'status_text', 'inquiry_reference', 'company_name', 'contact_person', 'client_email', 'client_phone', 'conference_room', 'event_date', 'event_time', 'attendees', 'event_type', 'total_amount', 'amount_paid', 'balance_due'],
     ],
     [
-        'title' => 'Room Quote PDF',
+        'title' => 'Room Quote PDF', 'module' => 'bookings',
         'applies' => 'Its own list.',
         'tags' => ['logo_html', 'site_name', 'address', 'contact_phone', 'contact_email', 'quotation_reference', 'valid_until', 'guest_name', 'booking_reference', 'room_name', 'check_in_date', 'check_out_date', 'nights', 'guests', 'rate_per_night', 'room_subtotal', 'vat_amount', 'deposit_amount', 'total_amount', 'balance_due', 'payment_policy', 'quotation_notes'],
     ],
     [
-        'title' => 'Conference Quote PDF',
+        'title' => 'Conference Quote PDF', 'module' => 'conference',
         'applies' => 'Its own list.',
         'tags' => ['logo_html', 'site_name', 'address', 'contact_email', 'contact_phone', 'inquiry_reference', 'quotation_reference', 'company_name', 'contact_person', 'conference_room', 'event_date', 'event_time', 'attendees', 'deposit_amount', 'vat_amount', 'total_amount', 'valid_until', 'payment_policy', 'quotation_notes'],
     ],
     [
-        'title' => 'Event Quote PDF',
+        'title' => 'Event Quote PDF', 'module' => 'conference|events',
         'applies' => 'Its own list.',
         'tags' => ['logo_html', 'site_name', 'address', 'contact_email', 'contact_phone', 'quotation_reference', 'recipient_name', 'event_title', 'event_date', 'event_time', 'event_location', 'attendee_count', 'rate_per_attendee', 'total_amount', 'valid_until', 'quotation_notes'],
     ],
@@ -338,7 +338,7 @@ $totalShown = 0;
     }
     $totalShown += count($rows);
 ?>
-  <h3><?= h($g['title']) ?></h3>
+  <h3<?= !empty($g['module']) ? ' data-module="' . h($g['module']) . '"' : '' ?>><?= h($g['title']) ?></h3>
   <p><?= h($g['applies']) ?></p>
   <table>
     <thead><tr><th>Tag</th><th>What it fills in</th></tr></thead>

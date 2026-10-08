@@ -236,7 +236,7 @@
     </tbody>
   </table>
 
-  <h2 id="room">How to charge an order to a guest's room</h2>
+  <h2 id="room" data-module="bookings">How to charge an order to a guest's room</h2>
   <p>Room orders are never paid at the till. They are added to the guest's room bill (folio) and paid at check-out or through Payments.</p>
   <ol class="steps">
     <li>Click the <strong>Room Service</strong> button above the menu (or click <strong>Room</strong> as the order type). The menu shows only items that are switched on for room service.</li>
@@ -432,7 +432,7 @@
       <tr><td><em>"Enter a table number before sending the order."</em> / <em>"Enter a room number before sending the order."</em></td><td>Dine-in or Room chosen but no table or room picked.</td><td>Pick one from <strong>Select table...</strong> or <strong>Select checked-in room...</strong>.</td></tr>
       <tr><td><em>"No active restaurant tables are configured. Ask an admin to set Restaurant Tables first."</em></td><td>The Tables page has no active tables.</td><td>Set up tables (see <a href="#tables">above</a>).</td></tr>
       <tr><td><em>"Table 5 already has active order ORD-... (...). Settle, serve, cancel, or use the existing order before opening another."</em></td><td>The table or room is in use.</td><td>Use <strong>Add items</strong> on the existing tab, or settle or cancel it first.</td></tr>
-      <tr><td><em>"Room 12 has no checked-in guest booking."</em></td><td>No checked-in guest in that room.</td><td>Check the guest in first.</td></tr>
+      <tr data-module="bookings"><td><em>"Room 12 has no checked-in guest booking."</em></td><td>No checked-in guest in that room.</td><td>Check the guest in first.</td></tr>
       <tr><td><em>"Menu item not found or unavailable."</em></td><td>The item was switched off or 86'd after the till page loaded.</td><td>Refresh the till and choose another item.</td></tr>
       <tr><td><em>"Tendered 5,000.00 &lt; amount due 6,500.00"</em></td><td>Cash handed over is less than the total plus tip.</td><td>Enter the right amount.</td></tr>
       <tr><td><em>"Mobile money requires provider + transaction reference."</em></td><td>A field is empty.</td><td>Choose the provider and type the reference.</td></tr>
@@ -444,8 +444,8 @@
       <tr><td><em>"This tab still has N food item(s) not yet served ..."</em></td><td>The Kitchen has not marked the food served.</td><td>Ask the Kitchen to bump it, or use the manager force-serve step.</td></tr>
       <tr><td><em>"Stock check stopped this action: Chicken short by 2.500 kg ..."</em></td><td>Not enough ingredient in stock for the recipe.</td><td>Receive stock or fix the recipe, or 86 the item.</td></tr>
       <tr><td><em>"This tab is mid split-payment - only the next split leg can be paid."</em> / <em>"This bill is split 3 ways (1 paid) &mdash; continue with leg 2 of 3. Refresh the page."</em></td><td>A split has started.</td><td>Refresh the till and pay the next leg.</td></tr>
-      <tr><td><em>"Room-service orders are settled via the guest folio at check-out &mdash; they cannot be paid directly at the till."</em></td><td>You tried to pay a room order.</td><td>The room bill is paid at check-out or in Payments.</td></tr>
-      <tr><td><em>"Could not post the room-service charge to the guest folio ... the order was not placed."</em></td><td>The charge failed, so the order was stopped.</td><td>Check the booking is checked in and try again.</td></tr>
+      <tr data-module="bookings"><td><em>"Room-service orders are settled via the guest folio at check-out &mdash; they cannot be paid directly at the till."</em></td><td>You tried to pay a room order.</td><td>The room bill is paid at check-out or in Payments.</td></tr>
+      <tr data-module="bookings"><td><em>"Could not post the room-service charge to the guest folio ... the order was not placed."</em></td><td>The charge failed, so the order was stopped.</td><td>Check the booking is checked in and try again.</td></tr>
       <tr><td><em>"Cannot close shift: 2 open tab(s) from this shift still need to be settled or cancelled &mdash; ORD-..."</em></td><td>You still have open tabs.</td><td>Open <strong>Tabs</strong> and settle or cancel them.</td></tr>
       <tr><td><em>"Enter the counted cash amount (0 if none) before closing the shift."</em></td><td>A close amount is empty.</td><td>Fill in cash, mobile and card; use 0 if none.</td></tr>
       <tr><td><em>"Shift does not balance (variance ...)."</em></td><td>Your count differs from the system by more than 1.00.</td><td>Recount (remember to count the float too) or ask for an override.</td></tr>
