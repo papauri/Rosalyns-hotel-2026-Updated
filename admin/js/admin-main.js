@@ -1993,3 +1993,63 @@
         }, 5000);
     });
 }());
+
+/* ── Fit-text safety net ─────────────────────────────────────────────────────
+   Money figures in KPI cards are sized with CSS container units; this only
+   steps the font down (min 12px) for extreme values that still overflow.
+   Targets: [data-fit], .ck-kpi__value--money and the nowrap stat values from admin-uniform.css. Batched read/write passes so
+   many cards cause one reflow per step, not one per element.
+   ─────────────────────────────────────────────────────────────────────────── */
+(function () {
+    'use strict';
+    if (window.__adminFitTextInit) { return; }
+    window.__adminFitTextInit = true;
+
+    var SELECTOR = '[data-fit], .ck-kpi__value--money, .acct-kpi__value, .sdash-kpi-card__value, .eod-kpi__value, .hk-stat-card__value, .rm-stat-card__value, .booking-kpi-card__value, .qt-stat__value, .stat-money__amount';
+    var MIN_SIZE = 12;
+    var timer = null;
+
+    function fitAll(root) {
+        var els = Array.prototype.slice.call((root || document).querySelectorAll(SELECTOR));
+        if (!els.length) { return; }
+        // Reset previous inline sizing so growth is possible after a resize.
+        els.forEach(function (el) { if (el.style.fontSize) { el.style.fontSize = ''; } });
+        for (var pass = 0; pass < 12 && els.length; pass++) {
+            var over = els.filter(function (el) {
+                return el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1;
+            });
+            var sizes = over.map(function (el) { return parseFloat(window.getComputedStyle(el).fontSize) || 0; });
+            els = [];
+            over.forEach(function (el, i) {
+                if (sizes[i] > MIN_SIZE) {
+                    el.style.fontSize = Math.max(MIN_SIZE, sizes[i] - 1) + 'px';
+                    els.push(el);
+                }
+            });
+        }
+    }
+
+    function schedule() {
+        clearTimeout(timer);
+        timer = setTimeout(function () { fitAll(); }, 120);
+    }
+
+    function init() {
+        fitAll();
+        if (typeof ResizeObserver === 'function') {
+            var ro = new ResizeObserver(schedule);
+            Array.prototype.forEach.call(document.querySelectorAll(SELECTOR), function (el) {
+                ro.observe(el.parentElement || el);
+            });
+        } else {
+            window.addEventListener('resize', schedule);
+        }
+        document.addEventListener('rh:content-updated', schedule);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+        init();
+    }
+})();

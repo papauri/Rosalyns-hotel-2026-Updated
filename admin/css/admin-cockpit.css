@@ -204,6 +204,7 @@
     flex-direction: column;
     gap: 6px;
     min-width: 0;
+    container-type: inline-size;
     padding: 18px 18px 16px;
     border-radius: var(--ck-radius);
     background: var(--ck-surface);
@@ -238,13 +239,15 @@
 .ck-kpi__value {
     font-family: 'Jost', system-ui, sans-serif;
     font-weight: 600;
-    font-size: clamp(26px, 2.4vw, 32px);
+    /* Sized to the card (container query units), not the viewport */
+    font-size: clamp(22px, 15cqi, 32px);
     line-height: 1.1;
     color: var(--ck-ink);
+    min-width: 0;
     overflow-wrap: anywhere;
 }
 .ck-kpi__value small { font-size: .55em; font-weight: 500; color: var(--ck-muted); margin-left: 2px; }
-.ck-kpi__value--money { font-size: clamp(20px, 1.9vw, 26px); white-space: nowrap; overflow-wrap: normal; }
+.ck-kpi__value--money { font-size: clamp(15px, 11cqi, 26px); white-space: nowrap; overflow-wrap: normal; }
 .ck-kpi__sub { font-size: 13px; color: var(--ck-muted); margin-top: auto; }
 
 .ck-kpi--dark { background: var(--ck-ink); border-color: var(--ck-ink); color: #f3ece4; }
@@ -754,7 +757,6 @@
     .ck-kpi__icon { width: 28px; height: 28px; top: 12px; right: 12px; font-size: 12px; }
     .ck-kpi__label { font-size: 11px; padding-right: 32px; }
     .ck-kpi__sub { font-size: 12px; }
-    .ck-kpi__value--money { font-size: 17px; }
     .ck-panel { padding: 16px 14px; border-radius: 16px; }
     .ck-panel__head { flex-direction: column; }
     .ck-panel__head .ck-tabs { width: 100%; }
