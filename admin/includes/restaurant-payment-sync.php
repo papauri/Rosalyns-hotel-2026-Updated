@@ -274,15 +274,26 @@ function rh_stamp_order_paid_by(PDO $pdo, int $orderId, int $userId): void
 }
 
 /**
- * Record an order line's ingredients as WASTAGE (stock_wastage row, plus a 'wastage' FIFO
- * deduction when $deductNow - i.e. the stock had not been taken off the shelf yet). With
- * $deductNow false (stock already deducted at ready/serve) only the wastage log row is written.
- * Best-effort per ingredient. Returns the number of ingredient lines recorded.
+ * Record an order line's ingredients as WASTAGE.
+ *  - $deductNow true (stock not yet taken off the shelf): the 'wastage' FIFO deduction is taken
+ *    FIRST; the stock_wastage row is written only if it succeeded, costed from the actual FIFO
+ *    adjustment (cost_at_time), and the adjustment's source_id is then pointed at the wastage id.
+ *    A failed deduction records nothing and raises a system-log warning.
+ *  - $deductNow false (stock already deducted as usage): the usage is RECLASSIFIED rather than
+ *    duplicated - the wastage row is written at the usage's own cost and that line's usage
+ *    adjustments are annotated 'Voided to wastage ...' (reports exclude those from Usage and count
+ *    them as wasted), so the cost is counted once. Pass $usageSourceType/$usageSourceId (the line the
+ *    usage was booked against) for this; without an id only the log row is written.
+ * Runs inside the caller's transaction when there is one, else its own. Best-effort per ingredient.
+ * Returns the number of ingredient lines recorded.
  */
-function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, float $quantity, bool $deductNow, int $userId, string $reasonText): int
+function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, float $quantity, bool $deductNow, int $userId, string $reasonText, string $usageSourceType = 'pos_order', ?int $usageSourceId = null): int
 {
     if ($quantity <= 0 || $menuType === '') {
         return 0;
+    }
+    if (!in_array($usageSourceType, ['pos_order', 'room_service'], true)) {
+        $usageSourceType = 'pos_order';
     }
     $rq = $pdo->prepare("SELECT sri.ingredient_id,
                                 ((sri.quantity_per_portion * ?) / (GREATEST(sri.yield_percent, 0.1) / 100)) AS required_qty
@@ -294,8 +305,27 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
     if (!$reqs) {
         return 0;
     }
+    $ownTx = !$pdo->inTransaction();
+    if ($ownTx) {
+        $pdo->beginTransaction();
+    }
+    $warn = static function (int $iid, string $why) use ($menuItemId, $menuType): void {
+        error_log('rh_record_item_wastage: ingredient ' . $iid . ' - ' . $why);
+        if (function_exists('rh_log_event')) {
+            rh_log_event('stock', 'warning', 'Wastage not recorded for ingredient #' . $iid . ' (' . $why . ') - stock needs reconciliation.', ['ingredient_id' => $iid, 'menu_item_id' => $menuItemId, 'menu_type' => $menuType]);
+        }
+    };
+    $today = date('Y-m-d'); // hotel date (PHP default tz = RH_TIMEZONE)
     $costSel = $pdo->prepare("SELECT cost_per_unit FROM stock_ingredients WHERE id = ?");
-    $wIns = $pdo->prepare("INSERT INTO stock_wastage (ingredient_id, batch_id, quantity, cost_per_unit, wastage_cost, reason, recorded_date, recorded_by) VALUES (?, NULL, ?, ?, ?, ?, CURDATE(), ?)");
+    $adjCostSel = $pdo->prepare("SELECT cost_at_time FROM stock_adjustments WHERE id = ?");
+    $wIns = $pdo->prepare("INSERT INTO stock_wastage (ingredient_id, batch_id, quantity, cost_per_unit, wastage_cost, reason, recorded_date, recorded_by) VALUES (?, NULL, ?, ?, ?, ?, ?, ?)");
+    $usageSel = $pdo->prepare("SELECT COALESCE(SUM(ABS(quantity_change)), 0) AS q, COALESCE(SUM(ABS(quantity_change) * cost_at_time), 0) AS c
+                                 FROM stock_adjustments
+                                WHERE source_type = ? AND source_id = ? AND ingredient_id = ? AND quantity_change < 0
+                                  AND COALESCE(reason, '') NOT LIKE 'Voided to wastage%'");
+    $usageMark = $pdo->prepare("UPDATE stock_adjustments SET reason = ?
+                                 WHERE source_type = ? AND source_id = ? AND ingredient_id = ? AND quantity_change < 0
+                                   AND COALESCE(reason, '') NOT LIKE 'Voided to wastage%'");
     $recorded = 0;
     foreach ($reqs as $r) {
         $iid = (int)$r['ingredient_id'];
@@ -303,24 +333,69 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
         if ($iid <= 0 || $q <= 0) {
             continue;
         }
+        // Each ingredient is atomic: SAVEPOINT inside the (caller's or own) transaction.
+        $sp = 'rh_wst_' . $iid;
+        $pdo->exec('SAVEPOINT ' . $sp);
         try {
             $costSel->execute([$iid]);
             $cost = (float)($costSel->fetchColumn() ?: 0);
-            $wIns->execute([$iid, $q, $cost, round($q * $cost, 4), mb_substr($reasonText, 0, 250), $userId]);
-            $wastageId = (int)$pdo->lastInsertId();
-            if ($deductNow && function_exists('deductStockBatchFIFO')) {
+            $reasonShort = mb_substr($reasonText, 0, 250);
+            if ($deductNow) {
+                if (!function_exists('deductStockBatchFIFO')) {
+                    throw new RuntimeException('stock engine unavailable');
+                }
                 if (function_exists('ensureStockBatchCoverageForDeduction')) {
-                    ensureStockBatchCoverageForDeduction($iid, $q, $cost, $userId, 'Auto batch sync before wastage ' . $wastageId);
+                    ensureStockBatchCoverageForDeduction($iid, $q, $cost, $userId, 'Auto batch sync before item wastage');
                 }
-                $adjId = (int)(deductStockBatchFIFO($iid, $q, 'wastage', $wastageId, $userId) ?? 0);
-                if ($adjId > 0) {
-                    $pdo->prepare('UPDATE stock_adjustments SET reason = ? WHERE id = ?')->execute([mb_substr($reasonText, 0, 255), $adjId]);
+                // Deduct FIRST; only a successful deduction produces a wastage row.
+                $adjId = (int)(deductStockBatchFIFO($iid, $q, 'wastage', null, $userId) ?? 0);
+                if ($adjId <= 0) {
+                    throw new RuntimeException('FIFO deduction failed');
                 }
+                $adjCostSel->execute([$adjId]);
+                $actual = $adjCostSel->fetchColumn();
+                $cost = ($actual !== false && $actual !== null) ? (float)$actual : $cost;
+                $wIns->execute([$iid, $q, $cost, round($q * $cost, 4), $reasonShort, $today, $userId]);
+                $wastageId = (int)$pdo->lastInsertId();
+                $pdo->prepare('UPDATE stock_adjustments SET source_id = ?, reason = ? WHERE id = ?')
+                    ->execute([$wastageId, mb_substr($reasonText, 0, 255), $adjId]);
+            } else {
+                // Stock already left the shelf as usage: reclassify it as wastage at its own cost.
+                $hasUsage = false;
+                if ($usageSourceId !== null && $usageSourceId > 0) {
+                    $usageSel->execute([$usageSourceType, $usageSourceId, $iid]);
+                    $u = $usageSel->fetch(PDO::FETCH_ASSOC);
+                    if ($u && (float)$u['q'] > 0.0001) {
+                        $hasUsage = true;
+                        $cost = round((float)$u['c'] / (float)$u['q'], 4);
+                    }
+                }
+                if (!$hasUsage) {
+                    // Legacy line flagged stock_deducted with no usage rows to reclassify: a log-only
+                    // wastage row would double count, so record an event for reconciliation instead.
+                    $pdo->exec('RELEASE SAVEPOINT ' . $sp);
+                    if (function_exists('rh_log_event')) {
+                        rh_log_event('stock', 'warning', 'Voided started line has no usage adjustment to reclassify for ingredient #' . $iid . ' - wastage not recorded.', ['ingredient_id' => $iid, 'menu_item_id' => $menuItemId, 'menu_type' => $menuType, 'usage_source' => $usageSourceType . ':' . (int)$usageSourceId]);
+                    }
+                    continue;
+                }
+                $wIns->execute([$iid, $q, $cost, round($q * $cost, 4), $reasonShort, $today, $userId]);
+                $wastageId = (int)$pdo->lastInsertId();
+                $usageMark->execute([mb_substr('Voided to wastage #' . $wastageId . ' - ' . $reasonText, 0, 255), $usageSourceType, $usageSourceId, $iid]);
             }
+            $pdo->exec('RELEASE SAVEPOINT ' . $sp);
             $recorded++;
         } catch (Throwable $e) {
-            error_log('rh_record_item_wastage: ' . $e->getMessage());
+            try {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $sp);
+            } catch (Throwable $e2) {
+                error_log('rh_record_item_wastage rollback: ' . $e2->getMessage());
+            }
+            $warn($iid, $e->getMessage());
         }
+    }
+    if ($ownTx && $pdo->inTransaction()) {
+        $pdo->commit();
     }
     return $recorded;
 }
@@ -453,7 +528,7 @@ function rh_restore_pos_order_stock(PDO $pdo, int $orderId, ?int $doneBy, string
             continue;
         }
         $alreadyOff = ((int)$line['stock_deducted'] === 1);
-        rh_record_item_wastage($pdo, (int)$line['menu_item_id'], (string)$line['menu_type'], (float)$line['quantity'], !$alreadyOff, (int)$doneBy, $reason . ' - wastage (' . $line['item_name'] . ', ' . $line['kds_status'] . ')');
+        rh_record_item_wastage($pdo, (int)$line['menu_item_id'], (string)$line['menu_type'], (float)$line['quantity'], !$alreadyOff, (int)$doneBy, $reason . ' - wastage (' . $line['item_name'] . ', ' . $line['kds_status'] . ')', 'pos_order', $lineId);
         $flag->execute([$lineId]);
         $done++;
     }

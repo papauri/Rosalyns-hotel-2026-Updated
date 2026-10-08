@@ -42,7 +42,7 @@ if (!$error) {
                 SELECT poi.ingredient_id, SUM(GREATEST(0, poi.ordered_qty - poi.received_qty)) AS qty
                 FROM stock_purchase_order_items poi
                 INNER JOIN stock_purchase_orders po ON po.id = poi.purchase_order_id
-                WHERE po.status IN ('draft','sent','partial') AND poi.ingredient_id IS NOT NULL
+                WHERE po.status IN ('sent','partial') AND poi.ingredient_id IS NOT NULL
                 GROUP BY poi.ingredient_id
             ")->fetchAll(PDO::FETCH_ASSOC);
             foreach ($rows as $r) $onOrder[(int)$r['ingredient_id']] = (float)$r['qty'];

@@ -457,7 +457,7 @@ function buildStockHealthReport(): array
     /* Stock value snapshot */
     $val = $pdo->query(
         "SELECT i.id, i.name, i.unit, i.current_quantity, i.cost_per_unit,
-                ROUND(i.current_quantity * i.cost_per_unit, 2) AS value
+                ROUND(GREATEST(0, i.current_quantity) * i.cost_per_unit, 2) AS value
          FROM stock_ingredients i
          WHERE i.is_archived = 0
          ORDER BY value DESC"

@@ -9859,6 +9859,18 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                 $hadDeductionTrail = true;
             }
 
+            // Partial void: the trace covers the whole original line, so scale the restore to the
+            // voided share (portions / original line quantity). Only POS lines expose that quantity.
+            $traceScale = 1.0;
+            if ($hits && $sourceType === 'pos_order') {
+                $oq = $pdo->prepare("SELECT quantity FROM stock_order_items WHERE id = ?");
+                $oq->execute([$originalChargeId]);
+                $origQty = (float)($oq->fetchColumn() ?: 0);
+                if ($origQty > 0.0001 && $portions < $origQty - 0.0001) {
+                    $traceScale = $portions / $origQty;
+                }
+            }
+
             $seenAdj = [];
             foreach ($hits as $h) {
                 $adjId = (int)$h['adjustment_id'];
@@ -9870,11 +9882,11 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                 // Add quantity_change once per adjustment to avoid over-restoring the ingredient total.
                 if (!isset($seenAdj[$adjId])) {
                     $seenAdj[$adjId] = true;
-                    $byIngredient[$ingId] = ($byIngredient[$ingId] ?? 0) + abs((float)$h['quantity_change']);
+                    $byIngredient[$ingId] = ($byIngredient[$ingId] ?? 0) + abs((float)$h['quantity_change']) * $traceScale;
                 }
                 if (!empty($h['batch_id'])) {
                     $bid = (int)$h['batch_id'];
-                    $byBatch[$bid] = ($byBatch[$bid] ?? 0) + (float)$h['quantity_deducted'];
+                    $byBatch[$bid] = ($byBatch[$bid] ?? 0) + (float)$h['quantity_deducted'] * $traceScale;
                 }
             }
         }
@@ -9947,8 +9959,34 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                     updated_at = NOW()
                 WHERE id = ?
             ");
+            $bInfo = $pdo->prepare("SELECT ingredient_id, status, expiry_date, cost_per_unit FROM stock_batches WHERE id = ? FOR UPDATE");
+            $bNew = $pdo->prepare("
+                INSERT INTO stock_batches
+                    (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,
+                     received_date, expiry_date, expiry_alert_days, status, notes, created_by)
+                VALUES (?, '', ?, ?, ?, ?, ?, 7, 'active', ?, ?)
+            ");
             foreach ($byBatch as $batchId => $q) {
-                $bUpd->execute([$q, $batchId]);
+                $bInfo->execute([$batchId]);
+                $info = $bInfo->fetch(PDO::FETCH_ASSOC);
+                if ($info && in_array((string)$info['status'], ['active', 'depleted'], true)) {
+                    $bUpd->execute([$q, $batchId]);
+                    continue;
+                }
+                // Original batch is expired / wasted / recalled (or gone): restoring into it would be
+                // phantom stock nobody can use. Put the quantity into a fresh active batch at the same
+                // cost (original expiry kept only if still in the future) so batch sum == ingredient total.
+                if (!$info) {
+                    continue; // batch row deleted; the ingredient total below still restores
+                }
+                $expKeep = (!empty($info['expiry_date']) && (string)$info['expiry_date'] >= date('Y-m-d')) ? $info['expiry_date'] : null;
+                $bNew->execute([
+                    (int)$info['ingredient_id'], $q, $q, (float)$info['cost_per_unit'], date('Y-m-d'), $expKeep,
+                    mb_substr('Restored from voided charge (original batch #' . $batchId . ' is ' . $info['status'] . ')', 0, 500), $doneBy,
+                ]);
+                $newBid = (int)$pdo->lastInsertId();
+                $pdo->prepare("UPDATE stock_batches SET batch_number = ? WHERE id = ?")
+                    ->execute(['R' . str_pad((string)$newBid, 6, '0', STR_PAD_LEFT), $newBid]);
             }
         }
 
@@ -9996,14 +10034,14 @@ function runStockExpiryCheck(): int
         if ($ownTx) $pdo->beginTransaction();
 
         $sel = $pdo->prepare("
-            SELECT id, ingredient_id, quantity_remaining, cost_per_unit
+            SELECT id, ingredient_id, batch_number, quantity_remaining, cost_per_unit
             FROM stock_batches
             WHERE status = 'active'
               AND expiry_date IS NOT NULL
-              AND expiry_date < CURDATE()
+              AND expiry_date < ?
             FOR UPDATE
         ");
-        $sel->execute();
+        $sel->execute([date('Y-m-d')]); // hotel date (PHP default tz = RH_TIMEZONE)
         $batches = $sel->fetchAll(PDO::FETCH_ASSOC);
 
         $ingUpd = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity - ?, updated_at = NOW() WHERE id = ?");
@@ -10018,6 +10056,8 @@ function runStockExpiryCheck(): int
             if ($quantity > 0.0001) {
                 $ingUpd->execute([$quantity, (int)$batch['ingredient_id']]);
                 $adjIns->execute([(int)$batch['ingredient_id'], -$quantity, (int)$batch['id'], (float)$batch['cost_per_unit']]);
+                // Mirror the write-off into stock_wastage so wastage totals/dashboards include it.
+                rh_insert_batch_wastage_row($pdo, (int)$batch['ingredient_id'], (int)$batch['id'], $quantity, (float)$batch['cost_per_unit'], 'Expired batch ' . (string)($batch['batch_number'] ?? ('#' . $batch['id'])), null);
             }
             $batchUpd->execute([(int)$batch['id']]);
         }
@@ -10029,6 +10069,63 @@ function runStockExpiryCheck(): int
         error_log('runStockExpiryCheck error: ' . $e->getMessage());
         return 0;
     }
+}
+
+/**
+ * Insert a stock_wastage row for a batch write-off (expiry / recall / wasted) using the
+ * batch's own cost. recorded_date is the hotel date. Caller owns the transaction and writes
+ * the stock_adjustments / stock_batches / stock_ingredients side. Returns the wastage id.
+ */
+function rh_insert_batch_wastage_row(PDO $pdo, int $ingredientId, int $batchId, float $qty, float $costPerUnit, string $reason, ?int $userId): int
+{
+    $pdo->prepare("
+        INSERT INTO stock_wastage (ingredient_id, batch_id, quantity, cost_per_unit, wastage_cost, reason, recorded_date, recorded_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ")->execute([$ingredientId, $batchId, $qty, $costPerUnit, round($qty * $costPerUnit, 4), mb_substr($reason, 0, 255), date('Y-m-d'), $userId]);
+    return (int)$pdo->lastInsertId();
+}
+
+/**
+ * Batch/total reconcile for receiving. Sales beyond the batches go 'unallocated' (the ingredient
+ * total goes negative while batches stop at 0), so a plain receipt would leave batch sum above
+ * current_quantity. Given the ingredient's quantity BEFORE the receipt (row already locked by the
+ * caller), returns how much of the received quantity must settle that deficit so that
+ * batch sum == current_quantity afterwards.
+ *
+ * @return array{remaining: float, settled: float} remaining = quantity_remaining for the new batch.
+ */
+function rh_stock_receipt_settlement(PDO $pdo, int $ingredientId, float $oldQty, float $receivedQty): array
+{
+    $st = $pdo->prepare("SELECT COALESCE(SUM(quantity_remaining), 0) FROM stock_batches WHERE ingredient_id = ? AND status = 'active' FOR UPDATE");
+    $st->execute([$ingredientId]);
+    $deficit = (float)$st->fetchColumn() - $oldQty;
+    if ($deficit <= 0.0001) {
+        return ['remaining' => $receivedQty, 'settled' => 0.0];
+    }
+    $settled = min($deficit, $receivedQty);
+    return ['remaining' => max(0.0, round($receivedQty - $settled, 4)), 'settled' => round($settled, 4)];
+}
+
+/**
+ * SQL fragment matching stock_adjustments usage rows that were reclassified to wastage by a void/86
+ * of a started line (reason tagged 'Voided to wastage ...'). Static text, no user input. Reports
+ * exclude these from usage (NOT <fragment>) and count them as wastage. Alias optional ('sa').
+ */
+function rh_voided_wastage_sql(string $alias = 'sa'): string
+{
+    $col = $alias !== '' ? preg_replace('/[^A-Za-z0-9_]/', '', $alias) . '.reason' : 'reason';
+    return "(COALESCE({$col}, '') LIKE 'Voided to wastage%')";
+}
+
+/**
+ * Cost for a receipt: a blank/0 cost falls back to the ingredient's current average cost so a
+ * zero never dilutes the weighted average. Throws when both are zero.
+ */
+function rh_stock_receipt_cost(float $enteredCost, float $currentAvg): float
+{
+    if ($enteredCost > 0.00001) return $enteredCost;
+    if ($currentAvg > 0.00001) return $currentAvg;
+    throw new RuntimeException('Enter a unit cost - this ingredient has no average cost yet, so a zero-cost receipt cannot be recorded.');
 }
 
 /**

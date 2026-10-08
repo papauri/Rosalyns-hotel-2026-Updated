@@ -53,22 +53,19 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $batch = $sel->fetch(PDO::FETCH_ASSOC);
                 if (!$batch) throw new RuntimeException('Batch not found.');
                 $remaining = (float)$batch['quantity_remaining'];
-                if ($remaining <= 0) throw new RuntimeException('Batch already empty.');
+                if ($remaining <= 0.0001 || ($batch['status'] ?? '') !== 'active') throw new RuntimeException('Batch is already empty or closed.');
 
-                // Wastage row
-                $wIns = $pdo->prepare("
-                    INSERT INTO stock_wastage (ingredient_id, batch_id, quantity, cost_per_unit, wastage_cost, reason, recorded_date, recorded_by)
-                    VALUES (?, ?, ?, ?, ?, ?, CURDATE(), ?)
-                ");
+                // Whole batch is written off at its own cost: the same quantity leaves the batch,
+                // the ingredient total and the ledger (no clamp), so all three stay equal.
                 $cost = (float)$batch['cost_per_unit'];
-                $wIns->execute([$batch['ingredient_id'], $batchId, $remaining, $cost, $remaining * $cost, $reason, $user['id']]);
+                $wastageId = rh_insert_batch_wastage_row($pdo, (int)$batch['ingredient_id'], $batchId, $remaining, $cost, $reason, (int)$user['id']);
 
-                // Adjustment + zero out batch
+                // Adjustment (source_id = the stock_wastage id) + zero out batch
                 $adj = $pdo->prepare("
                     INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by)
                     VALUES (?, ?, ?, 'wastage', ?, ?, ?)
                 ");
-                $adj->execute([$batch['ingredient_id'], -$remaining, $reason, $batchId, $cost, $user['id']]);
+                $adj->execute([$batch['ingredient_id'], -$remaining, $reason, $wastageId, $cost, $user['id']]);
 
                 $upd = $pdo->prepare("UPDATE stock_batches SET quantity_remaining = 0, status = 'wasted', updated_at = NOW() WHERE id = ?");
                 $upd->execute([$batchId]);
@@ -93,8 +90,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (($batch['status'] ?? '') === 'recalled') throw new RuntimeException('This batch has already been recalled.');
                 $remaining = (float)$batch['quantity_remaining'];
 
-                if ($remaining > 0) {
+                if ($remaining > 0.0001) {
                     $cost = (float)$batch['cost_per_unit'];
+                    // Recall write-offs are included in wastage reports, labelled with the 'Recall:' prefix.
+                    rh_insert_batch_wastage_row($pdo, (int)$batch['ingredient_id'], $batchId, $remaining, $cost, 'Recall: ' . $reason . ' (batch ' . (string)($batch['batch_number'] ?? ('#' . $batchId)) . ')', (int)$user['id']);
                     $adj = $pdo->prepare("
                         INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by)
                         VALUES (?, ?, ?, 'recall', ?, ?, ?)

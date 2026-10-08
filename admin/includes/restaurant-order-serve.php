@@ -119,7 +119,7 @@ function rh_stock_shortages_for_items(PDO $pdo, array $items): array
     $shortages = [];
     foreach ($requirements as $requirement) {
         $requiredQty = (float)$requirement['required_qty'];
-        $currentQty = (float)$requirement['current_quantity'];
+        $currentQty = max(0.0, (float)$requirement['current_quantity']); // negative/inconsistent totals count as nothing on hand
         if ($currentQty + 0.0001 < $requiredQty) {
             $requirement['short_qty'] = round($requiredQty - $currentQty, 3);
             $shortages[] = $requirement;

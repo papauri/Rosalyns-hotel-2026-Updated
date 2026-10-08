@@ -1097,7 +1097,7 @@ try {
             }
         } else {
             $alreadyDeducted = (int)$it['stock_deducted'] === 1 || ($rsCharge && !empty($rsCharge['stock_tracked']));
-            $nWaste = rh_record_item_wastage($pdo, (int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], !$alreadyDeducted, $userId, '86 wastage - ' . $it['item_name'] . ' (' . $ordRow['reference'] . ', ' . $from . ')');
+            $nWaste = rh_record_item_wastage($pdo, (int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], !$alreadyDeducted, $userId, '86 wastage - ' . $it['item_name'] . ' (' . $ordRow['reference'] . ', ' . $from . ')', $rsCharge ? 'room_service' : 'pos_order', $rsCharge ? (int)$rsCharge['id'] : (int)$itemId);
             $stockOutcome = $nWaste > 0 ? 'wastage' : 'none';
         }
 

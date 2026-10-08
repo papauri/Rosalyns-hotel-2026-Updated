@@ -44,6 +44,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $count = count($ingIds);
             $saved = 0;
+            $bookedNow = false;
 
             // Validate every filled row before anything is written.
             for ($k = 0; $k < $count; $k++) {
@@ -120,6 +121,19 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('Failed to apply wastage deduction for ingredient #' . $iid . '.');
                 }
                 $adjReasonUpd->execute([mb_substr($rs, 0, 255), $adjId]);
+                // Backdated entry: stamp the ledger row with the recorded date (time stays "now") so the
+                // Yield / Usage tabs, which filter stock_adjustments.created_at, agree with this page.
+                if ($date < date('Y-m-d')) {
+                    // Do not backdate into an open stock count's window (its approval would deduct it again).
+                    $openCnt = $pdo->prepare("SELECT COUNT(*) FROM stock_counts sc INNER JOIN stock_count_lines scl ON scl.count_id = sc.id
+                                              WHERE sc.status IN ('draft','submitted') AND scl.ingredient_id = ?");
+                    $openCnt->execute([$iid]);
+                    if ((int)$openCnt->fetchColumn() > 0) {
+                        $bookedNow = true;
+                    } else {
+                        $pdo->prepare('UPDATE stock_adjustments SET created_at = ? WHERE id = ?')->execute([$date . ' ' . date('H:i:s'), $adjId]);
+                    }
+                }
                 // Backfill wastage record with actual FIFO weighted cost (more accurate than ingredient average)
                 $actualCostStmt = $pdo->prepare('SELECT cost_at_time FROM stock_adjustments WHERE id = ? LIMIT 1');
                 $actualCostStmt->execute([$adjId]);
@@ -133,6 +147,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['wastage_last_at'] = time();
 
             $message = "{$saved} wastage entry(ies) recorded.";
+            if ($bookedNow) {
+                $message .= ' Some entries were dated for reports but booked now in the stock ledger because a stock count is open for those ingredients.';
+            }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             $error = $e->getMessage();

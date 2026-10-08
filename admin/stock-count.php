@@ -13,9 +13,11 @@
  *   3. On submit, the system computes variance vs the running system quantity.
  *      Surpluses are always allowed (good news). Shortages above thresholds
  *      require a reason code AND admin/manager approval.
- *   4. On approval, stock_adjustments rows of source_type='variance' are
- *      written and the LIVE quantity is adjusted by the saved variance delta
- *      (so post-count movements are preserved).
+ *   4. On approval, variance is recomputed against expected stock AT COUNT TIME
+ *      (snapshot + stock_adjustments movements up to the line's counted_at), then
+ *      stock_adjustments rows of source_type='variance' are written and the LIVE
+ *      quantity is adjusted by that delta (so post-count movements are preserved).
+ *      Shortages over the thresholds need an approver other than the counter.
  *      Approver name and time are recorded forever.
  */
 require_once 'admin-init.php';
@@ -57,6 +59,88 @@ function displayCountReference(?string $reference): string
     return (string)preg_replace('/^SC-/i', '', $ref);
 }
 
+/* Feature-detect stock_count_lines.counted_at / counted_by (migration 062). Cached per request. */
+function scHasLineCol(PDO $pdo, string $col): bool
+{
+    static $cache = [];
+    if (!array_key_exists($col, $cache)) {
+        $q = $pdo->prepare("SHOW COLUMNS FROM stock_count_lines LIKE ?");
+        $q->execute([$col]);
+        $cache[$col] = $q->rowCount() > 0;
+    }
+    return $cache[$col];
+}
+
+/* stock_counts.snapshot_at (migration 062) cached per request; falls back to created_at when absent. */
+function scHasSnapshotCol(PDO $pdo): bool
+{
+    static $has = null;
+    if ($has === null) {
+        $has = $pdo->query("SHOW COLUMNS FROM stock_counts LIKE 'snapshot_at'")->rowCount() > 0;
+    }
+    return $has;
+}
+
+function scSnapshotStart(array $count): string
+{
+    return (string)(!empty($count['snapshot_at']) ? $count['snapshot_at'] : $count['created_at']);
+}
+
+/* A line is "counted" when it has counted_at (after migration). Before the migration an untouched
+ * line is stored as actual 0 / variance 0 against a non-zero snapshot, so that shape = not counted. */
+function scLineIsCounted(array $ln, bool $hasCol): bool
+{
+    if ($hasCol) {
+        return !empty($ln['counted_at']);
+    }
+    return abs((float)$ln['actual_quantity']) >= 0.00005
+        || abs((float)$ln['variance']) >= 0.00005
+        || abs((float)$ln['system_quantity']) < 0.00005;
+}
+
+/* SQL fragment (static) selecting lines not yet counted. */
+function scUncountedSql(bool $hasCol): string
+{
+    return $hasCol
+        ? 'scl.counted_at IS NULL'
+        : '(ABS(scl.actual_quantity) < 0.00005 AND ABS(scl.variance) < 0.00005 AND ABS(scl.system_quantity) >= 0.00005)';
+}
+
+/* @return array{0:int,1:string[]} number of uncounted lines + first few ingredient names */
+function scUncountedLines(PDO $pdo, int $countId, bool $hasCol): array
+{
+    $q = $pdo->prepare("SELECT i.name FROM stock_count_lines scl INNER JOIN stock_ingredients i ON i.id = scl.ingredient_id WHERE scl.count_id = ? AND " . scUncountedSql($hasCol) . " ORDER BY i.name");
+    $q->execute([$countId]);
+    $names = $q->fetchAll(PDO::FETCH_COLUMN);
+    return [count($names), array_slice($names, 0, 6)];
+}
+
+function scUncountedMessage(int $n, array $names): string
+{
+    return $n . ' line' . ($n === 1 ? ' is' : 's are') . ' not counted yet (' . implode(', ', $names) . ($n > count($names) ? ', …' : '') . '). Enter a reading for every line (type 0 if there is none) before continuing.';
+}
+
+/* Net stock movement for an ingredient inside (from, to] - sales, receipts, wastage, other counts. */
+function scMovementsBetween(PDO $pdo, int $ingredientId, string $from, string $to): float
+{
+    static $q = null;
+    if ($q === null) {
+        $q = $pdo->prepare("SELECT COALESCE(SUM(quantity_change), 0) FROM stock_adjustments WHERE ingredient_id = ? AND created_at > ? AND created_at <= ?");
+    }
+    $q->execute([$ingredientId, $from, $to]);
+    return (float)$q->fetchColumn();
+}
+
+/* A shortage that needs a second pair of eyes: cost AND percentage over the configured thresholds. */
+function scOverThreshold(float $variance, float $varCost, float $base, float $blockPct, float $minCost): bool
+{
+    if ($variance >= 0 || abs($varCost) < $minCost) {
+        return false;
+    }
+    $pct = $base > 0 ? abs($variance) / $base * 100 : 100;
+    return $pct >= $blockPct;
+}
+
 /* ============== POST handlers ============== */
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
@@ -92,7 +176,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $ref = generateCountReference();
-                $ins = $pdo->prepare("INSERT INTO stock_counts (reference, count_date, shift, scope, scope_value, status, counted_by, notes) VALUES (?, CURDATE(), ?, ?, ?, 'draft', ?, ?)");
+                $ins = $pdo->prepare("INSERT INTO stock_counts (reference, count_date, shift, scope, scope_value, status, counted_by, notes" . (scHasSnapshotCol($pdo) ? ', snapshot_at' : '') . ") VALUES (?, CURDATE(), ?, ?, ?, 'draft', ?, ?" . (scHasSnapshotCol($pdo) ? ', NOW()' : '') . ")");
                 $ins->execute([$ref, $shift ?: null, $scope, $scopeValue ?: null, $user['id'], $notes ?: null]);
                 $countId = (int)$pdo->lastInsertId();
 
@@ -133,19 +217,23 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('Only the original counter or a manager can edit this count.');
                 }
 
+                $hasCol = scHasLineCol($pdo, 'counted_at');
+                $hasBy  = scHasLineCol($pdo, 'counted_by');
+                $nowTs  = (string)$pdo->query("SELECT NOW()")->fetchColumn();
                 $lines = $_POST['line'] ?? [];
-                $upd = $pdo->prepare("UPDATE stock_count_lines SET actual_quantity = ?, variance = ?, variance_cost = ?, reason_code = ?, reason_notes = ? WHERE id = ? AND count_id = ?");
                 /* The system quantity and cost are the SNAPSHOT taken when the count started (stored on the
                  * line). They are read back from the database, never from the posted form: a tampered or
                  * stale hidden field would otherwise set the variance - and, once approved, the stock
                  * adjustment - to any figure. */
-                $snapSel = $pdo->prepare("SELECT system_quantity, cost_per_unit FROM stock_count_lines WHERE id = ? AND count_id = ?");
+                $snapSel = $pdo->prepare("SELECT ingredient_id, system_quantity, cost_per_unit, actual_quantity, variance" . ($hasCol ? ', counted_at' : '') . " FROM stock_count_lines WHERE id = ? AND count_id = ?");
                 foreach ($lines as $lineId => $payload) {
                     $lineId = (int)$lineId;
                     $actualRaw = trim((string)($payload['actual'] ?? ''));
                     if ($actualRaw !== '' && !is_numeric($actualRaw)) {
                         throw new RuntimeException('Actual quantity must be a number.');
                     }
+                    $isBlank = ($actualRaw === '');
+                    $touched = !empty($payload['touched']);
                     $actual = (float)$actualRaw;
                     if ($actual > 99999999) {
                         throw new RuntimeException('Actual quantity is too large.');
@@ -168,9 +256,42 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!in_array($reason, ['', 'spillage', 'expired', 'staff_meal', 'sampling', 'prep_waste', 'theft_suspected', 'correction', 'other'], true)) {
                         $reason = '';
                     }
-                    $variance = round($actual - $sys, 4);
-                    $varCost  = round($variance * $cost, 4);
-                    $upd->execute([$actual, $variance, $varCost, $reason, $notes ?: null, $lineId, $countId]);
+
+                    $sql = "UPDATE stock_count_lines SET reason_code = ?, reason_notes = ?";
+                    $params = [$reason, $notes ?: null];
+                    $wasCounted = scLineIsCounted($snap, $hasCol);
+
+                    if ($isBlank) {
+                        /* Blank = "not counted". With the counted_at column that is always recorded; without
+                         * it a blank is only acted on if the user actually cleared the box (touched flag),
+                         * otherwise the stored reading is left alone - never silently stored as 0. */
+                        if ($hasCol || $touched) {
+                            $sql .= ", actual_quantity = 0, variance = 0, variance_cost = 0";
+                            if ($hasCol) {
+                                $sql .= ", counted_at = NULL";
+                                if ($hasBy) $sql .= ", counted_by = NULL";
+                            }
+                        }
+                    } elseif (!$wasCounted || abs($actual - (float)$snap['actual_quantity']) > 0.00005) {
+                        // New or changed reading: variance is against what stock SHOULD have been at this moment
+                        // (snapshot + sales/receipts since the count started), not the stale snapshot alone.
+                        $expected = $sys + scMovementsBetween($pdo, (int)$snap['ingredient_id'], scSnapshotStart($count), $nowTs);
+                        $variance = round($actual - $expected, 4);
+                        $varCost  = round($variance * $cost, 4);
+                        $sql .= ", actual_quantity = ?, variance = ?, variance_cost = ?";
+                        array_push($params, $actual, $variance, $varCost);
+                        if ($hasCol) {
+                            $sql .= ", counted_at = ?";
+                            $params[] = $nowTs;
+                            if ($hasBy) {
+                                $sql .= ", counted_by = ?";
+                                $params[] = (int)$user['id'];
+                            }
+                        }
+                    }
+                    $sql .= " WHERE id = ? AND count_id = ?";
+                    array_push($params, $lineId, $countId);
+                    $pdo->prepare($sql)->execute($params);
                 }
 
                 $_SESSION['stock_msg'] = 'Count readings saved.';
@@ -185,6 +306,15 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $hdr->execute([$countId]);
                 $count = $hdr->fetch(PDO::FETCH_ASSOC);
                 if (!$count) throw new RuntimeException('Count not found.');
+                if ((int)$count['counted_by'] !== (int)$user['id'] && !$canApprove) {
+                    throw new RuntimeException('Only the person who started this count or a manager can submit it.');
+                }
+
+                // Every line in scope must have been counted - blanks are never converted to zero.
+                [$uncN, $uncNames] = scUncountedLines($pdo, $countId, scHasLineCol($pdo, 'counted_at'));
+                if ($uncN > 0) {
+                    throw new RuntimeException(scUncountedMessage($uncN, $uncNames));
+                }
 
                 // Validate every shortage line has a reason code
                 $missing = $pdo->prepare("SELECT COUNT(*) FROM stock_count_lines WHERE count_id = ? AND variance < 0 AND (reason_code = '' OR reason_code IS NULL)");
@@ -198,7 +328,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tots->execute([$countId]);
                 $t = $tots->fetch(PDO::FETCH_ASSOC);
 
-                $pdo->prepare("UPDATE stock_counts SET status='submitted', total_variance_cost=?, shortage_cost=?, surplus_cost=?, updated_at=NOW() WHERE id=?")
+                $pdo->prepare("UPDATE stock_counts SET status='submitted', rejection_reason=NULL, total_variance_cost=?, shortage_cost=?, surplus_cost=?, updated_at=NOW() WHERE id=?")
                     ->execute([(float)$t['total'], (float)$t['shortage'], (float)$t['surplus'], $countId]);
                 $pdo->commit();
 
@@ -222,6 +352,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lineSel = $pdo->prepare("SELECT * FROM stock_count_lines WHERE count_id = ?");
                 $lineSel->execute([$countId]);
                 $lines = $lineSel->fetchAll(PDO::FETCH_ASSOC);
+                $hasCol = scHasLineCol($pdo, 'counted_at');
+
+                // Nothing is approved while any line is uncounted - blanks are never read as zero.
+                [$uncN, $uncNames] = scUncountedLines($pdo, $countId, $hasCol);
+                if ($uncN > 0) {
+                    throw new RuntimeException(scUncountedMessage($uncN, $uncNames));
+                }
 
                 if (!function_exists('deductStockBatchFIFO') || !function_exists('ensureStockBatchCoverageForDeduction')) {
                     throw new RuntimeException('Stock engine helpers missing.');
@@ -234,9 +371,76 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $adjInsPositive = $pdo->prepare("INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by) VALUES (?, ?, ?, 'variance', ?, ?, ?)");
                 $adjReasonUpd = $pdo->prepare('UPDATE stock_adjustments SET reason = ?, cost_at_time = ? WHERE id = ?');
                 $lineUpd = $pdo->prepare("UPDATE stock_count_lines SET adjustment_id = ? WHERE id = ?");
+                $lineVarUpd = $pdo->prepare("UPDATE stock_count_lines SET variance = ?, variance_cost = ? WHERE id = ?");
+                $ingCostUpd = $pdo->prepare("UPDATE stock_ingredients SET cost_per_unit = ? WHERE id = ?");
 
+                /* PHASE 1 - movement-aware variance. The line's system_quantity is a snapshot from when the
+                 * count started; sales/receipts/wastage between then and the moment the line was counted are
+                 * already reflected in the physical reading. expected_at_count = snapshot + those movements,
+                 * variance = actual - expected_at_count, and THAT delta is what is posted to live stock, so
+                 * final stock = physical reading + movements after the count (nothing double-counted).
+                 * Lines without counted_at (migration 062 not run) use the approval moment as the count time. */
+                $approvalTs = (string)$pdo->query("SELECT NOW()")->fetchColumn();
+                $needsOtherApprover = false;
+                $plan = [];
+                $needReason = [];
+                $totShort = 0.0;
+                $totSurplus = 0.0;
                 foreach ($lines as $ln) {
-                    $variance = round((float)$ln['variance'], 4);
+                    $ingredientId = (int)$ln['ingredient_id'];
+                    $liveSel->execute([$ingredientId]);
+                    $live = $liveSel->fetch(PDO::FETCH_ASSOC);
+                    if (!$live) {
+                        throw new RuntimeException('Ingredient not found during count approval.');
+                    }
+                    $costAtTime = (float)$ln['cost_per_unit'];
+                    if ($costAtTime <= 0) {
+                        $costAtTime = (float)$live['cost_per_unit'];
+                    }
+                    $countedAt = ($hasCol && !empty($ln['counted_at'])) ? (string)$ln['counted_at'] : $approvalTs;
+                    if ($countedAt > $approvalTs) $countedAt = $approvalTs;
+                    $expected = (float)$ln['system_quantity'] + scMovementsBetween($pdo, $ingredientId, scSnapshotStart($count), $countedAt);
+                    $variance = round((float)$ln['actual_quantity'] - $expected, 4);
+                    $varCost = round($variance * $costAtTime, 4);
+                    $lineVarUpd->execute([$variance, $varCost, (int)$ln['id']]);
+                    if ($varCost < 0) $totShort += $varCost; else $totSurplus += $varCost;
+                    if (scOverThreshold($variance, $varCost, $expected, $blockPct, $minCost)) {
+                        $needsOtherApprover = true;
+                    }
+                    if ($variance < -0.0001 && trim((string)($ln['reason_code'] ?? '')) === '') {
+                        $nm = $pdo->prepare("SELECT name FROM stock_ingredients WHERE id = ?");
+                        $nm->execute([$ingredientId]);
+                        $needReason[] = (string)$nm->fetchColumn();
+                    }
+                    $plan[] = ['ln' => $ln, 'variance' => $variance, 'live' => $live, 'cost' => $costAtTime];
+                }
+
+                /* Movement-aware variance can turn a line into a shortage that had no reason when it was
+                 * submitted. Post nothing: keep the recomputed variances, send the count back to the counter. */
+                if (!empty($needReason)) {
+                    $list = mb_substr(implode(', ', $needReason), 0, 380);
+                    $pdo->prepare("UPDATE stock_counts SET status='draft', rejection_reason=?, total_variance_cost=?, shortage_cost=?, surplus_cost=?, updated_at=NOW() WHERE id=? AND status='submitted'")
+                        ->execute(['Recounted against stock movements during the count: these lines are now shortages and need a reason: ' . $list, round($totShort + $totSurplus, 4), round($totShort, 4), round($totSurplus, 4), $countId]);
+                    $pdo->commit();
+                    $_SESSION['stock_msg'] = 'Not approved: ' . count($needReason) . ' line(s) became shortages after allowing for stock movements and need a reason (' . $list . '). Count returned to draft with readings kept - add the reasons and resubmit; nothing was posted to stock.';
+                    header('Location: stock-count.php?id=' . $countId);
+                    exit;
+                }
+
+                // Shortages over the configured thresholds need an approver who is not the counter.
+                if ($needsOtherApprover && (int)$count['counted_by'] === (int)$user['id']) {
+                    throw new RuntimeException('This count has shortages over the approval threshold (' . $currency . ' ' . number_format($minCost, 2) . ' and ' . rtrim(rtrim(number_format($blockPct, 2), '0'), '.') . '%). It must be approved by a different manager or admin than the person who counted it.');
+                }
+
+                $pdo->prepare("UPDATE stock_counts SET total_variance_cost=?, shortage_cost=?, surplus_cost=? WHERE id = ?")
+                    ->execute([round($totShort + $totSurplus, 4), round($totShort, 4), round($totSurplus, 4), $countId]);
+
+                // PHASE 2 - post each line's variance to live stock.
+                foreach ($plan as $item) {
+                    $ln = $item['ln'];
+                    $variance = $item['variance'];
+                    $live = $item['live'];
+                    $costAtTime = $item['cost'];
                     if (abs($variance) < 0.0001) continue;
 
                     $ingredientId = (int)$ln['ingredient_id'];
@@ -246,15 +450,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $liveSel->execute([$ingredientId]);
                     $live = $liveSel->fetch(PDO::FETCH_ASSOC);
-                    if (!$live) {
-                        throw new RuntimeException('Ingredient not found during count approval.');
-                    }
-
                     $liveQty = (float)$live['current_quantity'];
-                    $costAtTime = (float)$ln['cost_per_unit'];
-                    if ($costAtTime <= 0) {
-                        $costAtTime = (float)$live['cost_per_unit'];
-                    }
 
                     if ($variance > 0) {
                         // Count surplus becomes a real active batch so FIFO stays correct.
@@ -272,13 +468,27 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         $batchNumber = 'C' . date('Ymd') . '-' . str_pad((string)$batchId, 6, '0', STR_PAD_LEFT);
                         $batchNumUpd->execute([$batchNumber, $batchId]);
 
+                        // Keep the ingredient's weighted-average cost in step with the new surplus batch.
+                        if ($costAtTime > 0 && function_exists('calculateWeightedAvgCost')) {
+                            $newAvg = calculateWeightedAvgCost($liveQty, (float)$live['cost_per_unit'], $variance, $costAtTime);
+                            $ingCostUpd->execute([round($newAvg, 4), $ingredientId]);
+                        }
                         $ingAdd->execute([$variance, $ingredientId]);
                         $adjInsPositive->execute([$ingredientId, $variance, $reasonShort, $countId, $costAtTime, $user['id']]);
                         $adjId = (int)$pdo->lastInsertId();
                     } else {
                         $deductQty = abs($variance);
                         if ($deductQty > $liveQty + 0.0001) {
-                            throw new RuntimeException('Variance exceeds current live stock for ingredient #' . $ingredientId . '. Reopen and recount.');
+                            // Never fail the whole count: write off what is there and record the remainder.
+                            $uncovered = round($deductQty - max(0.0, $liveQty), 4);
+                            $deductQty = max(0.0, $liveQty);
+                            $reasonShort = mb_substr($reason . ' [uncovered shortage ' . $uncovered . ' - live stock was only ' . round(max(0.0, $liveQty), 4) . ']', 0, 255);
+                        }
+                        if ($deductQty < 0.0001) {
+                            // Nothing left to deduct: keep an audit row so the shortfall is still on record.
+                            $adjInsPositive->execute([$ingredientId, 0, $reasonShort, $countId, $costAtTime, $user['id']]);
+                            $lineUpd->execute([(int)$pdo->lastInsertId(), $lineId]);
+                            continue;
                         }
 
                         ensureStockBatchCoverageForDeduction(
@@ -323,9 +533,32 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($action === 'reopen_count') {
                 $countId = (int)($_POST['count_id'] ?? 0);
-                $pdo->prepare("UPDATE stock_counts SET status='draft', updated_at=NOW() WHERE id=? AND status='rejected'")
+                $pdo->beginTransaction();
+                $hdr = $pdo->prepare("SELECT * FROM stock_counts WHERE id = ? AND status = 'rejected' FOR UPDATE");
+                $hdr->execute([$countId]);
+                $count = $hdr->fetch(PDO::FETCH_ASSOC);
+                if (!$count) throw new RuntimeException('Only a rejected count can be reopened.');
+                if ((int)$count['counted_by'] !== (int)$user['id'] && !$canApprove) {
+                    throw new RuntimeException('Only the person who started this count or a manager can reopen it.');
+                }
+
+                /* Re-snapshot: every line takes the CURRENT live quantity/cost and goes back to "not counted",
+                 * so stale readings cannot be re-submitted against old stock. The snapshot time of a count is
+                 * stock_counts.snapshot_at (start of the movement window at approval), set to now on reopen;
+                 * created_at keeps the true start. Without the column the fallback is to move created_at. */
+                $reset = "UPDATE stock_count_lines scl INNER JOIN stock_ingredients i ON i.id = scl.ingredient_id
+                          SET scl.system_quantity = i.current_quantity, scl.cost_per_unit = i.cost_per_unit,
+                              scl.actual_quantity = 0, scl.variance = 0, scl.variance_cost = 0,
+                              scl.reason_code = ''";
+                if (scHasLineCol($pdo, 'counted_at')) {
+                    $reset .= ", scl.counted_at = NULL";
+                    if (scHasLineCol($pdo, 'counted_by')) $reset .= ", scl.counted_by = NULL";
+                }
+                $pdo->prepare($reset . " WHERE scl.count_id = ?")->execute([$countId]);
+                $pdo->prepare("UPDATE stock_counts SET status='draft', rejection_reason=NULL, " . (scHasSnapshotCol($pdo) ? 'snapshot_at=NOW()' : 'created_at=NOW()') . ", updated_at=NOW(), total_variance_cost=0, shortage_cost=0, surplus_cost=0 WHERE id=? AND status='rejected'")
                     ->execute([$countId]);
-                $_SESSION['stock_msg'] = 'Count reopened — fix the readings and resubmit.';
+                $pdo->commit();
+                $_SESSION['stock_msg'] = 'Count reopened with a fresh stock snapshot — re-enter every reading and resubmit.';
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
             }
@@ -443,13 +676,39 @@ $csrf_token = generateCsrfToken();
             $totalLines = count($activeLines);
             $pendingShort = 0;
             $pendingSurplus = 0;
-            foreach ($activeLines as $ln) {
+            $hasCountedAt = scHasLineCol($pdo, 'counted_at');
+            $uncountedTotal = 0;
+            $anyOverThreshold = false;
+            $pageNow = (string)$pdo->query("SELECT NOW()")->fetchColumn();
+            foreach ($activeLines as $i => $ln) {
                 $vc = (float)$ln['variance_cost'];
                 if ($vc < 0) $pendingShort += $vc;
                 else $pendingSurplus += $vc;
+                $isCounted = scLineIsCounted($ln, $hasCountedAt);
+                $activeLines[$i]['_counted'] = $isCounted;
+                if (!$isCounted) $uncountedTotal++;
+                // Expected stock at the moment of counting = snapshot + movements since the count started.
+                $activeLines[$i]['_preview'] = (float)$ln['system_quantity'];
+                if (!$isCounted) {
+                    $activeLines[$i]['_expected'] = null;
+                    if ($activeCount['status'] === 'draft') {
+                        $activeLines[$i]['_preview'] += scMovementsBetween($pdo, (int)$ln['ingredient_id'], scSnapshotStart($activeCount), $pageNow);
+                    }
+                } elseif ($activeCount['status'] === 'approved') {
+                    $activeLines[$i]['_expected'] = (float)$ln['actual_quantity'] - (float)$ln['variance'];
+                } else {
+                    $to = ($hasCountedAt && !empty($ln['counted_at'])) ? (string)$ln['counted_at'] : $pageNow;
+                    $activeLines[$i]['_expected'] = (float)$ln['system_quantity'] + scMovementsBetween($pdo, (int)$ln['ingredient_id'], scSnapshotStart($activeCount), $to);
+                }
+                if ($isCounted && scOverThreshold((float)$ln['variance'], $vc, (float)($activeLines[$i]['_expected'] ?? $ln['system_quantity']), $blockPct, $minCost)) {
+                    $anyOverThreshold = true;
+                }
             }
             $editable = $activeCount['status'] === 'draft';
             $isSubmitted = $activeCount['status'] === 'submitted';
+            $isOwnCount = (int)$activeCount['counted_by'] === (int)$user['id'];
+            $canWorkCount = $isOwnCount || $canApprove;
+            $blockSelfApprove = $isSubmitted && $anyOverThreshold && $isOwnCount;
             ?>
             <div class="count-header">
                 <a href="stock-count.php" class="btn-secondary"><i class="fas fa-arrow-left"></i> Back to all counts</a>
@@ -479,9 +738,20 @@ $csrf_token = generateCsrfToken();
                     <div class="lbl">Net</div>
                     <div class="val"><?php echo $currency . ' ' . number_format($pendingSurplus + $pendingShort, 2); ?></div>
                 </div>
+                <div class="sum-card<?php echo ($uncountedTotal > 0 && $activeCount['status'] === 'draft') ? ' bad' : ''; ?>">
+                    <div class="lbl">Not counted</div>
+                    <div class="val"><?php echo (int)$uncountedTotal; ?></div>
+                </div>
             </div>
+            <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;">Variance is measured against <strong>expected stock at count time</strong> (the starting snapshot plus any sales, receipts or wastage recorded while the count was open), so movements during the count are not counted twice.</p>
 
-            <?php if ($activeCount['status'] === 'rejected'): ?>
+            <?php if ($activeCount['status'] === 'draft' && trim((string)($activeCount['rejection_reason'] ?? '')) !== ''): ?>
+                <div style="background:#fff3cd; border:1px solid #ffe69c; padding:10px 14px; border-radius:8px; margin-bottom:14px;">
+                    <strong>Returned for reasons:</strong> <?php echo htmlspecialchars($activeCount['rejection_reason']); ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($activeCount['status'] === 'rejected' && $canWorkCount): ?>
                 <div style="background:#f8d7da; border:1px solid #f1b0b7; padding:10px 14px; border-radius:8px; margin-bottom:14px;">
                     <strong>Rejected:</strong> <?php echo htmlspecialchars($activeCount['rejection_reason'] ?? ''); ?>
                     <form method="POST" style="display:inline; margin-left:14px;">
@@ -509,6 +779,7 @@ $csrf_token = generateCsrfToken();
                             <option value="shortage">Shortage only</option>
                             <option value="surplus">Surplus only</option>
                             <option value="balanced">Balanced only</option>
+                            <option value="uncounted">Not counted only</option>
                         </select>
                     </label>
                     <label style="display:flex;flex-direction:column;gap:0.28rem;">
@@ -530,7 +801,8 @@ $csrf_token = generateCsrfToken();
                         <thead>
                             <tr>
                                 <th>Ingredient</th>
-                                <th style="text-align:right;">System Qty</th>
+                                <th style="text-align:right;">System Qty (at start)</th>
+                                <th style="text-align:right;">Expected at count time</th>
                                 <th style="text-align:right;">Actual Qty</th>
                                 <th style="text-align:right;">Variance</th>
                                 <th style="text-align:right;">Cost Impact</th>
@@ -544,16 +816,18 @@ $csrf_token = generateCsrfToken();
                                 $act = (float)$ln['actual_quantity'];
                                 $var = (float)$ln['variance'];
                                 $varCost = (float)$ln['variance_cost'];
-                                $absVarPct = $sys > 0 ? abs($var) / $sys * 100 : 0;
+                                $lineCounted = !empty($ln['_counted']);
+                                $expectedAt = $ln['_expected'];
+                                $absVarPct = ($expectedAt !== null && $expectedAt > 0) ? abs($var) / $expectedAt * 100 : ($sys > 0 ? abs($var) / $sys * 100 : 0);
                                 $rowClass = '';
-                                if ($var < 0 && abs($varCost) >= $minCost) {
+                                if ($lineCounted && $var < 0 && abs($varCost) >= $minCost) {
                                     $rowClass = $absVarPct >= $blockPct ? 'row-block' : 'row-flag';
                                 }
-                                $varClass = abs($var) < 0.0001 ? 'var-zero' : ($var > 0 ? 'var-pos' : 'var-neg');
+                                $varClass = (!$lineCounted || abs($var) < 0.0001) ? 'var-zero' : ($var > 0 ? 'var-pos' : 'var-neg');
                             ?>
                                 <?php
                                 $reasonCode = trim((string)($ln['reason_code'] ?? ''));
-                                $varianceBand = abs($var) < 0.0001 ? 'balanced' : ($var > 0 ? 'surplus' : 'shortage');
+                                $varianceBand = !$lineCounted ? 'uncounted' : (abs($var) < 0.0001 ? 'balanced' : ($var > 0 ? 'surplus' : 'shortage'));
                                 $searchBlob = mb_strtolower(trim((string)$ln['ingredient_name'] . ' ' . (string)$ln['category'] . ' ' . (string)$ln['unit']));
                                 ?>
                                 <tr class="<?php echo $rowClass; ?>"
@@ -565,22 +839,23 @@ $csrf_token = generateCsrfToken();
                                         <div style="font-size:10px; color:#6c757d;"><?php echo htmlspecialchars($ln['category']); ?> · <?php echo htmlspecialchars($ln['unit']); ?> · <?php echo $currency; ?> <?php echo number_format((float)$ln['cost_per_unit'], 2); ?>/<?php echo htmlspecialchars($ln['unit']); ?></div>
                                     </td>
                                     <td data-label="System Qty" style="text-align:right;"><?php echo number_format($sys, 4); ?></td>
+                                    <td data-label="Expected at count time" style="text-align:right;"><?php echo $expectedAt === null ? '—' : number_format($expectedAt, 4); ?></td>
                                     <td data-label="Actual Qty" style="text-align:right;">
                                         <?php if ($editable): ?>
                                             <input class="qty" type="number" step="0.0001" min="0"
                                                 name="line[<?php echo (int)$ln['id']; ?>][actual]"
-                                                value="<?php echo number_format($act, 4, '.', ''); ?>"
-                                                data-system="<?php echo number_format($sys, 4, '.', ''); ?>"
+                                                value="<?php echo $lineCounted ? number_format($act, 4, '.', '') : ''; ?>"
+                                                placeholder="not counted"
+                                                data-system="<?php echo number_format((float)($expectedAt ?? $ln['_preview']), 4, '.', ''); ?>"
                                                 data-cost="<?php echo number_format((float)$ln['cost_per_unit'], 4, '.', ''); ?>"
                                                 oninput="recalcRow(this)">
-                                            <input type="hidden" name="line[<?php echo (int)$ln['id']; ?>][system]" value="<?php echo number_format($sys, 4, '.', ''); ?>">
-                                            <input type="hidden" name="line[<?php echo (int)$ln['id']; ?>][cost]" value="<?php echo number_format((float)$ln['cost_per_unit'], 4, '.', ''); ?>">
+                                            <input type="hidden" class="touched" name="line[<?php echo (int)$ln['id']; ?>][touched]" value="0">
                                         <?php else: ?>
-                                            <?php echo number_format($act, 4); ?>
+                                            <?php echo $lineCounted ? number_format($act, 4) : '<span style="color:#6c757d;">not counted</span>'; ?>
                                         <?php endif; ?>
                                     </td>
-                                    <td data-label="Variance" style="text-align:right;" class="var <?php echo $varClass; ?>"><?php echo number_format($var, 4); ?></td>
-                                    <td data-label="Cost Impact" style="text-align:right;" class="varCost <?php echo $varClass; ?>"><?php echo $currency . ' ' . number_format($varCost, 2); ?></td>
+                                    <td data-label="Variance" style="text-align:right;" class="var <?php echo $varClass; ?>"><?php echo $lineCounted ? number_format($var, 4) : '—'; ?></td>
+                                    <td data-label="Cost Impact" style="text-align:right;" class="varCost <?php echo $varClass; ?>"><?php echo $lineCounted ? $currency . ' ' . number_format($varCost, 2) : '—'; ?></td>
                                     <td data-label="Reason">
                                         <?php if ($editable): ?>
                                             <select class="reason" name="line[<?php echo (int)$ln['id']; ?>][reason]">
@@ -607,9 +882,14 @@ $csrf_token = generateCsrfToken();
                 </div>
 
                 <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
-                    <?php if ($editable): ?>
+                    <?php if ($editable && $canWorkCount): ?>
                         <button type="submit" name="action" value="save_lines" class="btn-secondary"><i class="fas fa-save"></i> Save readings</button>
-                        <button type="button" class="btn-primary" onclick="scConfirm(this.form,'submit_count','Submit count for approval? Once submitted you cannot edit it.')"><i class="fas fa-paper-plane"></i> Submit for approval</button>
+                        <button type="button" class="btn-primary" onclick="scConfirm(this.form,'submit_count','Submit count for approval? Once submitted you cannot edit it. Every line must have a reading.')"><i class="fas fa-paper-plane"></i> Submit for approval</button>
+                    <?php elseif ($isSubmitted && $canApprove && $blockSelfApprove): ?>
+                        <span style="color:#856404;background:#fff3cd;border:1px solid #ffe69c;padding:8px 12px;border-radius:8px;"><i class="fas fa-user-lock"></i> This count has shortages over the approval threshold, so it must be approved by a different manager or admin than the person who counted it.</span>
+                        <button type="button" class="btn-danger" onclick="rejectPrompt(this.form)"><i class="fas fa-times"></i> Reject &amp; send back</button>
+                        <input type="hidden" name="rejection_reason" id="rejection_reason" value="">
+                        <span id="reject_err" style="color:#c82333;font-size:13px;display:none;"></span>
                     <?php elseif ($isSubmitted && $canApprove): ?>
                         <button type="button" class="btn-success" onclick="scConfirm(this.form,'approve_count','Approve count and post variances to stock? This cannot be undone.')"><i class="fas fa-check"></i> Approve &amp; post variances</button>
                         <button type="button" class="btn-danger" onclick="rejectPrompt(this.form)"><i class="fas fa-times"></i> Reject &amp; send back</button>
@@ -657,7 +937,11 @@ $csrf_token = generateCsrfToken();
                     const tr = input.closest('tr');
                     if (!tr) return;
                     const sys = parseFloat(input.dataset.system || '0') || 0;
-                    const act = parseFloat(input.value || '0') || 0;
+                    if (input.value.trim() === '') {
+                        tr.dataset.filterVariance = 'uncounted';
+                        return;
+                    }
+                    const act = parseFloat(input.value) || 0;
                     const variance = act - sys;
                     tr.dataset.filterVariance = Math.abs(variance) < 0.0001 ? 'balanced' : (variance > 0 ? 'surplus' : 'shortage');
                 }
@@ -666,10 +950,21 @@ $csrf_token = generateCsrfToken();
                     const tr = input.closest('tr');
                     const sys = parseFloat(input.dataset.system) || 0;
                     const cost = parseFloat(input.dataset.cost) || 0;
+                    const touchedEl = tr.querySelector('.touched');
+                    if (touchedEl) touchedEl.value = '1';
+                    const cells = tr.querySelectorAll('.var, .varCost');
+                    if (input.value.trim() === '') {
+                        cells[0].textContent = '—';
+                        cells[1].textContent = '—';
+                        cells[0].className = 'var var-zero';
+                        cells[1].className = 'varCost var-zero';
+                        tr.dataset.filterVariance = 'uncounted';
+                        applyStockLineFilters();
+                        return;
+                    }
                     const act = parseFloat(input.value) || 0;
                     const variance = act - sys;
                     const varCost = variance * cost;
-                    const cells = tr.querySelectorAll('.var, .varCost');
                     cells[0].textContent = variance.toFixed(4);
                     cells[1].textContent = currency + ' ' + Number(varCost || 0).toLocaleString('en-US', {
                         minimumFractionDigits: 2,

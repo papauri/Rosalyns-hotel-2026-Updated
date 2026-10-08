@@ -179,25 +179,34 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $oldQty = (float)$ing['current_quantity'];
                 $oldAvg = (float)$ing['cost_per_unit'];
+                // Blank / 0 cost falls back to the current average; refuse when there is none.
+                $cost = rh_stock_receipt_cost($cost, $oldAvg);
                 $newAvg = calculateWeightedAvgCost($oldQty, $oldAvg, $qty, $cost);
+                // Settle any unallocated deficit so batch sum stays equal to current_quantity.
+                $settle = rh_stock_receipt_settlement($pdo, $id, $oldQty, $qty);
+                $settledTxt = rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.');
+                if ($settle['settled'] > 0) {
+                    $batchNotes = trim(($batchNotes !== '' ? $batchNotes . ' | ' : '') . 'Settled ' . $settledTxt . ' unallocated deficit');
+                }
 
                 // Insert batch
                 $bIns = $pdo->prepare("
                     INSERT INTO stock_batches
                         (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,
                          supplier_id, supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by)
-                    VALUES (?, '', ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?, 'active', ?, ?)
+                    VALUES (?, '', ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?)
                 ");
                 $bIns->execute([
                     $id,
                     $qty,
-                    $qty,
+                    $settle['remaining'],
                     $cost,
                     $supplierId ?: null,
                     $supplier ?: null,
                     $supplierContact ?: null,
                     $expiry !== '' ? $expiry : null,
                     $alertDays,
+                    $settle['remaining'] < 0.0001 ? 'depleted' : 'active',
                     $batchNotes ?: null,
                     $user['id']
                 ]);
@@ -236,7 +245,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by)
                     VALUES (?, ?, ?, 'stock_in', ?, ?, ?)
                 ");
-                $adj->execute([$id, $qty, 'Stock received (batch)', $batchId, $cost, $user['id']]);
+                $adj->execute([$id, $qty, $settle['settled'] > 0 ? 'Stock received (batch; ' . $settledTxt . ' settled unallocated deficit)' : 'Stock received (batch)', $batchId, $cost, $user['id']]);
 
                 $pdo->commit();
                 $message = sprintf('Stock received: %s units. New avg cost: %s %s/unit.', number_format($qty, 3), $currency_symbol, number_format($newAvg, 2));
@@ -346,15 +355,19 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = 'Batch updated.';
             } elseif ($action === 'discard_batch') {
                 // Mark a batch as wasted/expired/recalled and remove its remaining qty from stock.
+                // Same gate as manual adjust: admin/manager only, reason of at least 8 characters.
+                if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+                    throw new RuntimeException('Discarding a batch is restricted to managers and admins.');
+                }
                 $batchId = (int)($_POST['batch_id'] ?? 0);
-                $reason  = mb_substr(trim($_POST['reason'] ?? 'Discarded'), 0, 200);
-                if ($reason === '') $reason = 'Discarded';
+                $reason  = mb_substr(trim($_POST['reason'] ?? ''), 0, 200);
+                if (mb_strlen($reason) < 8) throw new RuntimeException('A reason of at least 8 characters is required to discard a batch.');
                 $newStatus = $_POST['status'] ?? 'wasted';
                 $allowed = ['expired', 'recalled', 'wasted'];
                 if (!in_array($newStatus, $allowed, true)) $newStatus = 'wasted';
 
                 $pdo->beginTransaction();
-                $sel = $pdo->prepare("SELECT ingredient_id, quantity_remaining, cost_per_unit FROM stock_batches WHERE id = ? FOR UPDATE");
+                $sel = $pdo->prepare("SELECT ingredient_id, batch_number, quantity_remaining, cost_per_unit FROM stock_batches WHERE id = ? FOR UPDATE");
                 $sel->execute([$batchId]);
                 $b = $sel->fetch(PDO::FETCH_ASSOC);
                 if (!$b) throw new RuntimeException('Batch not found.');
@@ -362,19 +375,25 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ingredId = (int)$b['ingredient_id'];
                 $cost = (float)$b['cost_per_unit'];
 
-                if ($remaining > 0) {
-                    // Subtract from ingredient stock
-                    $pdo->prepare("UPDATE stock_ingredients SET current_quantity = GREATEST(0, current_quantity - ?), updated_at = NOW() WHERE id = ?")
+                if ($remaining > 0.0001) {
+                    // Subtract exactly what the batch held (no silent clamp) so ledger == totals.
+                    $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity - ?, updated_at = NOW() WHERE id = ?")
                         ->execute([$remaining, $ingredId]);
                     // Zero out the batch
                     $pdo->prepare("UPDATE stock_batches SET quantity_remaining = 0, status = ?, notes = CONCAT(COALESCE(notes,''), CASE WHEN COALESCE(notes,'')='' THEN '' ELSE '\n' END, ?), updated_at = NOW() WHERE id = ?")
                         ->execute([$newStatus, '[' . date('Y-m-d') . '] ' . $newStatus . ': ' . $reason, $batchId]);
                     // Record adjustment under the appropriate enum so Theft Radar isn't polluted.
                     $adjType = $newStatus === 'expired' ? 'expiry' : ($newStatus === 'recalled' ? 'recall' : 'wastage');
+                    // Mirror into stock_wastage (expired / wasted / recalled with a 'Recall:' prefix) so wastage
+                    // reports include the write-off; 'wastage' adjustments key source_id to the wastage id.
+                    $bn = (string)($b['batch_number'] ?? ('#' . $batchId));
+                    $wReason = $newStatus === 'recalled' ? "Recall: {$reason} (batch {$bn})"
+                        : ($newStatus === 'expired' ? "Expired batch {$bn}: {$reason}" : "{$reason} (batch {$bn})");
+                    $wastageId = rh_insert_batch_wastage_row($pdo, $ingredId, $batchId, $remaining, $cost, $wReason, (int)$user['id']);
                     $pdo->prepare("
                         INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ")->execute([$ingredId, -$remaining, "Batch {$newStatus}: {$reason}", $adjType, $batchId, $cost, $user['id']]);
+                    ")->execute([$ingredId, -$remaining, mb_substr("Batch {$newStatus}: {$reason}", 0, 255), $adjType, $adjType === 'wastage' ? $wastageId : $batchId, $cost, $user['id']]);
                 } else {
                     $pdo->prepare("UPDATE stock_batches SET status = ?, updated_at = NOW() WHERE id = ?")
                         ->execute([$newStatus, $batchId]);

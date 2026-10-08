@@ -119,6 +119,8 @@ $page = max(1, (int)($_GET['page'] ?? 1));
 $perPage = 50;
 $offset = ($page - 1) * $perPage;
 
+$vwSa = rh_voided_wastage_sql('sa');
+$vwPlain = rh_voided_wastage_sql('');
 $rows = [];
 $totalCount = 0;
 $summary = [];
@@ -198,8 +200,8 @@ try {
     } elseif ($tab === 'usage') {
         $st = $pdo->prepare("
             SELECT i.id, i.name, i.unit,
-                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS total_used,
-                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') THEN ABS(sa.quantity_change) * sa.cost_at_time ELSE 0 END), 0) AS total_cost
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS total_used,
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) * sa.cost_at_time ELSE 0 END), 0) AS total_cost
             FROM stock_ingredients i
             LEFT JOIN stock_adjustments sa ON sa.ingredient_id = i.id AND DATE(sa.created_at) BETWEEN ? AND ?
             WHERE i.is_archived = 0
@@ -250,7 +252,7 @@ try {
         $summary['total_cost'] = (float)$r[0];
         $summary['ingredient_count'] = (int)$r[1];
         $usageCompareStmt = $pdo->prepare("
-            SELECT COALESCE(SUM(CASE WHEN source_type IN ('pos_order','room_service') THEN ABS(quantity_change) * cost_at_time ELSE 0 END), 0)
+            SELECT COALESCE(SUM(CASE WHEN source_type IN ('pos_order','room_service') AND NOT {$vwPlain} THEN ABS(quantity_change) * cost_at_time ELSE 0 END), 0)
             FROM stock_adjustments
             WHERE DATE(created_at) BETWEEN ? AND ?
         ");
@@ -279,8 +281,8 @@ try {
     } elseif ($tab === 'yield') {
         $st = $pdo->prepare("
             SELECT i.id, i.name, i.unit, i.cost_per_unit,
-                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS used,
-                   COALESCE(SUM(CASE WHEN sa.source_type = 'wastage' THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS wasted,
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS used,
+                   COALESCE(SUM(CASE WHEN sa.source_type = 'wastage' OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS wasted,
                    COALESCE(SUM(CASE WHEN sa.source_type = 'expiry' THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS expired
             FROM stock_ingredients i
             LEFT JOIN stock_adjustments sa ON sa.ingredient_id = i.id AND DATE(sa.created_at) BETWEEN ? AND ?

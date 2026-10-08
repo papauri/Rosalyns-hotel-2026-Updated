@@ -224,6 +224,16 @@ if (!function_exists('rh_receive_stock_line')) {
 
         $oldQty = (float)$ing['current_quantity'];
         $oldAvg = (float)$ing['cost_per_unit'];
+        // Blank / 0 cost falls back to the current average (never dilutes the weighted average);
+        // refuses when there is no cost at all.
+        $cost = rh_stock_receipt_cost($cost, $oldAvg);
+        // Settle any unallocated deficit (sales beyond batches) so batch sum == current_quantity.
+        $settle = rh_stock_receipt_settlement($pdo, $ingredientId, $oldQty, $qty);
+        $batchRemaining = $settle['remaining'];
+        $batchStatus = $batchRemaining < 0.0001 ? 'depleted' : 'active';
+        if ($settle['settled'] > 0) {
+            $notes = trim(($notes ? $notes . ' | ' : '') . 'Settled ' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' unallocated deficit');
+        }
         $newAvg = function_exists('calculateWeightedAvgCost')
             ? calculateWeightedAvgCost($oldQty, $oldAvg, $qty, $cost)
             : (($oldQty + $qty) > 0 ? (($oldQty * $oldAvg) + ($qty * $cost)) / ($oldQty + $qty) : $cost);
@@ -237,23 +247,23 @@ if (!function_exists('rh_receive_stock_line')) {
                 INSERT INTO stock_batches
                     (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,
                      supplier_id, purchase_order_id, supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by)
-                VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?, 'active', ?, ?)
+                VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?)
             ");
             $bIns->execute([
-                $ingredientId, $qty, $qty, $cost, $supplierId ?: null, $purchaseOrderId ?: null,
+                $ingredientId, $qty, $batchRemaining, $cost, $supplierId ?: null, $purchaseOrderId ?: null,
                 $supplierName ?: null, $supplierContact ?: null,
-                ($expiry !== null && $expiry !== '') ? $expiry : null, $alertDays, $notes ?: null, $doneBy,
+                ($expiry !== null && $expiry !== '') ? $expiry : null, $alertDays, $batchStatus, $notes ?: null, $doneBy,
             ]);
         } else {
             $bIns = $pdo->prepare("
                 INSERT INTO stock_batches
                     (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,
                      supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by)
-                VALUES (?, '', ?, ?, ?, ?, ?, CURDATE(), ?, ?, 'active', ?, ?)
+                VALUES (?, '', ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?)
             ");
             $bIns->execute([
-                $ingredientId, $qty, $qty, $cost, $supplierName ?: null, $supplierContact ?: null,
-                ($expiry !== null && $expiry !== '') ? $expiry : null, $alertDays, $notes ?: null, $doneBy,
+                $ingredientId, $qty, $batchRemaining, $cost, $supplierName ?: null, $supplierContact ?: null,
+                ($expiry !== null && $expiry !== '') ? $expiry : null, $alertDays, $batchStatus, $notes ?: null, $doneBy,
             ]);
         }
         $batchId = (int)$pdo->lastInsertId();
@@ -293,7 +303,9 @@ if (!function_exists('rh_receive_stock_line')) {
         $pdo->prepare("
             INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by)
             VALUES (?, ?, ?, 'stock_in', ?, ?, ?)
-        ")->execute([$ingredientId, $qty, 'Received against purchase order', $batchId, $cost, $doneBy]);
+        ")->execute([$ingredientId, $qty, $settle['settled'] > 0
+            ? 'Received against purchase order (' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' settled unallocated deficit)'
+            : 'Received against purchase order', $batchId, $cost, $doneBy]);
 
         return $batchId;
     }

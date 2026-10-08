@@ -305,6 +305,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $pdo->beginTransaction();
+                // Re-read the status under the row lock: only sent / confirmed / partially-received POs
+                // accept stock (a draft has not gone to the supplier; cancelled/closed/received are done).
+                $stLock = $pdo->prepare("SELECT status FROM stock_purchase_orders WHERE id = ? FOR UPDATE");
+                $stLock->execute([$poId]);
+                $lockedStatus = (string)$stLock->fetchColumn();
+                if (!in_array($lockedStatus, ['sent', 'partial'], true)) {
+                    throw new RuntimeException('Stock can only be received against a sent or partially-received purchase order (current status: ' . ($lockedStatus !== '' ? $lockedStatus : 'unknown') . ').');
+                }
                 $lineSel = $pdo->prepare("SELECT * FROM stock_purchase_order_items WHERE id = ? AND purchase_order_id = ? FOR UPDATE");
                 $received = 0;
                 $n = is_array($lineIds) ? count($lineIds) : 0;

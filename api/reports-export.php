@@ -812,6 +812,7 @@ function exportStockReport($output, string $start_date, string $end_date, string
          FROM stock_adjustments sa JOIN stock_ingredients i ON i.id = sa.ingredient_id
          WHERE sa.created_at BETWEEN ? AND ? AND sa.quantity_change < 0
            AND sa.source_type IN ('pos_order','sale','consumption','recipe','room_service')
+           AND NOT " . rh_voided_wastage_sql('sa') . "
          GROUP BY i.id ORDER BY cost DESC LIMIT 20", $p,
         function ($r) use ($cs) { return [$r['name'], $r['qty'], $cs . ' ' . number_format((float)$r['cost'], 2)]; });
 }

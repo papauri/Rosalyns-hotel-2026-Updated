@@ -455,6 +455,17 @@ try {
         foreach ($shrStmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $stock_shrinkage[$r['source_type']] = (float)$r['loss'];
         }
+        // Started lines voided/86'd were reclassified from usage to wastage (tagged usage rows).
+        $vwStmt = $pdo->prepare("
+            SELECT COALESCE(SUM(ABS(quantity_change) * cost_at_time), 0)
+            FROM stock_adjustments
+            WHERE quantity_change < 0
+              AND source_type IN ('pos_order','room_service')
+              AND " . rh_voided_wastage_sql('') . "
+              AND created_at BETWEEN ? AND ?
+        ");
+        $vwStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+        $stock_shrinkage['wastage'] += (float)$vwStmt->fetchColumn();
         $stock_shrinkage['total'] = $stock_shrinkage['wastage'] + $stock_shrinkage['variance']
             + $stock_shrinkage['expiry'] + $stock_shrinkage['recall'];
     } catch (Throwable $e) {

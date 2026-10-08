@@ -103,39 +103,40 @@ $fnb = [
 /* ---------------- Stock / Inventory ---------------- */
 $stock = [
     'low_stock' => rp_safe(function() use ($pdo) {
-        $st = $pdo->query("SELECT name, current_stock, min_stock_level, unit FROM stock_ingredients
-            WHERE is_active=1 AND current_stock <= min_stock_level
-            ORDER BY (current_stock / NULLIF(min_stock_level,0)) ASC LIMIT 30");
+        $st = $pdo->query("SELECT name, current_quantity AS current_stock, min_quantity AS min_stock_level, unit FROM stock_ingredients
+            WHERE is_archived=0 AND current_quantity <= min_quantity
+            ORDER BY (current_quantity / NULLIF(min_quantity,0)) ASC LIMIT 30");
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }),
     'stock_value' => rp_safe(function() use ($pdo) {
         $st = $pdo->query("SELECT
-                SUM(current_stock * COALESCE(unit_cost, 0)) AS total_value,
+                SUM(current_quantity * COALESCE(cost_per_unit, 0)) AS total_value,
                 COUNT(*) AS active_items,
-                SUM(CASE WHEN current_stock <= min_stock_level THEN 1 ELSE 0 END) AS low_count,
-                SUM(CASE WHEN current_stock = 0 THEN 1 ELSE 0 END) AS oos_count
-            FROM stock_ingredients WHERE is_active=1");
+                SUM(CASE WHEN current_quantity <= min_quantity THEN 1 ELSE 0 END) AS low_count,
+                SUM(CASE WHEN current_quantity = 0 THEN 1 ELSE 0 END) AS oos_count
+            FROM stock_ingredients WHERE is_archived=0");
         return $st->fetch(PDO::FETCH_ASSOC) ?: [];
     }, []),
     'wastage' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
-        // stock_adjustments may carry waste/spoilage entries with reason='wastage' or adjustment_type='waste'
+        // stock_adjustments may carry waste/spoilage entries with reason='wastage' or source_type='waste'/'wastage'
         $st = $pdo->prepare("SELECT i.name AS ingredient, ABS(SUM(sa.quantity_change)) AS qty,
-                ABS(SUM(sa.quantity_change * COALESCE(i.unit_cost, 0))) AS value
+                ABS(SUM(sa.quantity_change * COALESCE(i.cost_per_unit, 0))) AS value
             FROM stock_adjustments sa
             JOIN stock_ingredients i ON i.id = sa.ingredient_id
             WHERE sa.created_at BETWEEN ? AND ?
-              AND (sa.adjustment_type='waste' OR sa.reason LIKE '%wast%' OR sa.reason LIKE '%spoil%')
+              AND (sa.source_type IN ('waste','wastage') OR sa.reason LIKE '%wast%' OR sa.reason LIKE '%spoil%')
             GROUP BY i.id ORDER BY value DESC LIMIT 20");
         $st->execute([$rp_from, $rp_to]);
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }),
     'top_used' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
         $st = $pdo->prepare("SELECT i.name, ABS(SUM(sa.quantity_change)) AS qty,
-                ABS(SUM(sa.quantity_change * COALESCE(i.unit_cost, 0))) AS cost
+                ABS(SUM(sa.quantity_change * COALESCE(i.cost_per_unit, 0))) AS cost
             FROM stock_adjustments sa
             JOIN stock_ingredients i ON i.id = sa.ingredient_id
             WHERE sa.created_at BETWEEN ? AND ? AND sa.quantity_change < 0
-              AND sa.adjustment_type IN ('pos_order','sale','consumption','recipe')
+              AND sa.source_type IN ('pos_order','sale','consumption','recipe','room_service')
+              AND NOT " . rh_voided_wastage_sql('sa') . "
             GROUP BY i.id ORDER BY cost DESC LIMIT 20");
         $st->execute([$rp_from, $rp_to]);
         return $st->fetchAll(PDO::FETCH_ASSOC);
@@ -177,11 +178,11 @@ $staff = [
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }),
     'logins' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
-        // Best-effort: works if admin_audit_log or admin_users.last_login_at exists
-        $st = $pdo->prepare("SELECT u.username, u.full_name, u.role, u.last_login_at
+        // Best-effort: works if admin_audit_log or admin_users.last_login exists
+        $st = $pdo->prepare("SELECT u.username, u.full_name, u.role, u.last_login AS last_login_at
             FROM admin_users u
-            WHERE u.is_active=1 AND u.last_login_at BETWEEN ? AND ?
-            ORDER BY u.last_login_at DESC LIMIT 50");
+            WHERE u.is_active=1 AND u.last_login BETWEEN ? AND ?
+            ORDER BY u.last_login DESC LIMIT 50");
         $st->execute([$rp_from, $rp_to]);
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }),
