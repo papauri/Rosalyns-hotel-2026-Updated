@@ -160,7 +160,7 @@ function detectBaseUrl() {
 
 /**
  * Get the base path from the current script location
- * This handles installations in subdirectories like /rosalyns/
+ * This handles installations in subdirectories like //hotel//
  *
  * @return string The base path without leading/trailing slashes
  */

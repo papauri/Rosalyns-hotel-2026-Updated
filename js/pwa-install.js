@@ -1,5 +1,5 @@
 /**
- * pwa-install.js — PWA install-prompt handler for Rosalyn's Hotel public website.
+ * pwa-install.js — PWA install-prompt handler for the hotel's public website.
  *
  * Shows a compact floating pill when the browser fires `beforeinstallprompt`.
  * Includes macOS-style minimize animation that scales the banner down to a small

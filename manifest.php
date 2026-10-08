@@ -1,7 +1,7 @@
 <?php
 
 /**
- * manifest.php — Dynamic Web App Manifest for Rosalyn's Hotel public website.
+ * manifest.php — Dynamic Web App Manifest for the hotel's public website.
  * Served as application/manifest+json, pulling site_name + logo from site_settings.
  */
 require_once 'config/database.php';

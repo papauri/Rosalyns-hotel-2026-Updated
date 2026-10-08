@@ -1,7 +1,7 @@
 <?php
 /**
  * docs/contract.php
- * Service Agreement Terms & Equipment Specifications for Rosalyn's Hotel
+ * Service Agreement Terms & Equipment Specifications for the client hotel
  * Fetches live settings from database and displays contract information.
  */
 declare(strict_types=1);

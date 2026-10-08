@@ -413,7 +413,7 @@
     <li>Each page has a button to disable or enable it, a button to show or hide it in the website menu, and an edit button for its title, icon and description.</li>
     <li>Drag the rows into a new order, then click <strong>Save Order</strong>. Message: <em>"Navigation order saved."</em></li>
     <li>Switching a page: <em>"Page "x" disabled."</em> or <em>"Page "x" enabled."</em> The home page and the booking confirmation and review pages cannot be disabled: <em>"This page is required by the system and cannot be disabled."</em></li>
-    <li><strong>Add New Page</strong>: fill in the page key, title and file name (a root-level file such as <code>spa.php</code>), optionally an icon, description and heading, then <strong>Add Page</strong>. Message: <em>"Page "x" added successfully."</em> Errors include <em>"Page key, title, and file path are required."</em> and <em>"A page with that key already exists."</em></li>
+    <li><strong>Add New Page</strong>: fill in the page key, title and file name (a root-level file such as <code>spa.php</code>), optionally an icon, description and heading, then <strong>Add Page</strong>. Message: <em>"Page "x" added successfully."</em> Errors include <em>"Page key, title, and file path are required."</em> <em>"A page with the key "…" already exists."</em>, <em>"A page with the file path "…" already exists."</em> and <em>"A page called "…" already exists. Use a different name or edit the existing one."</em></li>
   </ul>
 
   <h2 id="gallery">Gallery</h2>
@@ -467,11 +467,10 @@
   </ul>
 
   <h2 id="headers">Section Headers</h2>
-  <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Section Headers</strong> (<code>/admin/section-headers-management.php</code>). Permission: <strong>Section Headers</strong>. Page title: <strong>Section Headers Management</strong>. It edits the headings on the guest website. Three tabs:</p>
+  <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Section Headers</strong> (<code>/admin/section-headers-management.php</code>). Permission: <strong>Section Headers</strong>. Page title: <strong>Section Headers Management</strong>. It edits the headings on the guest website. Two tabs:</p>
   <ul>
-    <li><strong>Page Hero Text</strong>: the big heading and text at the top of each page; the badges on the home page (<strong>Save Badges</strong>, <em>"Home hero badges updated!"</em>); <strong>Add Hero for New Page</strong>. Saving: <em>"Page hero text updated successfully!"</em></li>
+    <li><strong>Page Hero Text</strong>: the big heading and text at the top of each page (<strong>Save Hero Text</strong>), and <strong>Add Hero for New Page</strong> (<strong>Create Hero Entry</strong>). Saving: <em>"Page hero text updated successfully!"</em></li>
     <li><strong>Section Headers</strong>: the headings above sections within pages. Saving: <em>"Section header updated successfully!"</em> You can switch a header on or off (<em>"Section header status updated!"</em>) and reset one to its default (<em>"Section header reset to default successfully!"</em>). A reset-all option restores every header to factory defaults: <em>"All section headers have been reset to factory defaults!"</em></li>
-    <li><strong>Loading Screens</strong>: the text on the screen shown while a page loads. Saving: <em>"Loading screen updated!"</em></li>
   </ul>
 
   <h2 id="footer">Footer</h2>

@@ -1,6 +1,6 @@
 /**
  * Page Transitions & Scroll Animations
- * Rosalyn's Hotel 2026
+ * Hotel website
  * Passalacqua-inspired smooth page loading and scroll animations
  * 
  * Features:

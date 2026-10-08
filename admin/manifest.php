@@ -1,7 +1,7 @@
 <?php
 
 /**
- * admin/manifest.php — Dynamic Web App Manifest for Rosalyn's Hotel Admin.
+ * admin/manifest.php — Dynamic Web App Manifest for the hotel admin.
  * Served as application/manifest+json, pulling site_name + logo from site_settings.
  */
 require_once __DIR__ . '/../config/database.php';

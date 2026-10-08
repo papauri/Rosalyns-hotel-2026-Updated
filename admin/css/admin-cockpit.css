@@ -2,7 +2,7 @@
    Admin Cockpit — shared layout system for the Dashboard, Accounting
    Dashboard and End-of-Day report. Bento panels, KPI tiles with meters,
    tabbed worklists and lightweight CSS charts. Built on the admin brand
-   tokens (admin-styles.css :root) so the look stays Rosalyn's/Liwonde.
+   tokens (admin-styles.css :root) so the look stays the platform's own.
    Prefix: .ck-
    ========================================================================== */
 

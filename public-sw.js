@@ -1,5 +1,5 @@
 /**
- * public-sw.js — Rosalyn's Hotel public-facing Service Worker.
+ * public-sw.js — Public-facing service worker for the hotel website.
  *
  * Strategy:
  *  - Static assets (fonts, images): cache-first
@@ -18,7 +18,7 @@ const MAX_PAGE_CACHE_ENTRIES  = 40;
 const MAX_ASSET_CACHE_ENTRIES = 80;
 
 // Derive base path from this SW's own URL so the worker is subdirectory-install-safe.
-// e.g. if SW is at /rosalyns-hotel/public-sw.js → SW_BASE = '/rosalyns-hotel/'
+// e.g. if SW is at //hotel-site//public-sw.js → SW_BASE = '//hotel-site//'
 const SW_BASE = self.location.pathname.replace(/\/[^/]*$/, '/');
 
 const OFFLINE_FALLBACK = SW_BASE + 'offline.php';

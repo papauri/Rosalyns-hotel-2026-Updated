@@ -1,5 +1,5 @@
 /**
- * sw.js — Rosalyn's Hotel Admin Service Worker.
+ * sw.js — Hotel admin service worker.
  *
  *   Caching strategies:
  *   1. Immutable assets (fonts, images, icons): cache-first — truly static, no version churn.

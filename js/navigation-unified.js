@@ -1,6 +1,6 @@
 /**
  * Unified Navigation System
- * Rosalyn's Hotel 2026
+ * Hotel website
  *
  * Full SPA routing: clicks on internal nav links swap only
  * content between <header> and <footer> — The header
@@ -51,7 +51,7 @@
         'robots',
     ];
 
-    // ── Base path (supports subdirectory installs, e.g. /rosalyns-hotel/) ───
+    // ── Base path (supports subdirectory installs, e.g. //hotel-site//) ───
     // Derives the path prefix from this script's absolute src URL so that API
     // calls and relative-path fixes work whether the site is at / or /subdir/.
     const _BASE_PATH = (() => {
@@ -329,7 +329,7 @@
             let url;
             try {
                 // Resolve relative hrefs against the current page URL (not just origin)
-                // so subdirectory installs like /rosalyns-hotel/ are preserved.
+                // so subdirectory installs like //hotel-site// are preserved.
                 url = new URL(href, window.location.href).href;
                 // Strip /api/ prefix if accidentally present (e.g., /api/events.php → /events.php)
                 url = url.replace(/\/api\/([a-z0-9_-]+\.php)/i, `${_BASE_PATH}$1`);

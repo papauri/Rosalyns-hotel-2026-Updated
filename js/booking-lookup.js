@@ -1,6 +1,6 @@
 /**
  * Booking Lookup — JS
- * Rosalyn's Beach Hotel 2026
+ * Hotel website
  * Intercepts cancel form submit and shows a Modal confirmation instead of window.confirm()
  */
 

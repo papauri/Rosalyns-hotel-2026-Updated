@@ -1,6 +1,6 @@
 <?php
 /**
- * Stock Audit Script — Rosalyn's Hotel
+ * Stock Audit Script
  * Read-only diagnostic checks against the live DB.
  * Run: php scripts/stock-audit.php
  *

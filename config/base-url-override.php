@@ -5,7 +5,7 @@
  * This file sets a manual override for BASE_URL to prevent issues with
  * auto-detection. If your site is at:
  * - https://example.com/ → set to 'https://example.com/'
- * - https://example.com/rosalyns/ → set to 'https://example.com/rosalyns/'
+ * - https://example.com//hotel// → set to 'https://example.com//hotel//'
  * 
  * IMPORTANT: Do NOT include /admin/ in the BASE_URL.
  * The BASE_URL should point to the ROOT of your website, not the admin directory.

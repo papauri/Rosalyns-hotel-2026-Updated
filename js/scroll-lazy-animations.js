@@ -1,5 +1,5 @@
 /**
- * Scroll Reveal Animations — Rosalyn's Hotel 2026
+ * Scroll Reveal Animations
  *
  * Fancy, staggered section + card reveal on desktop (≥1024px).
  * Simple opacity fade on mobile/tablet.

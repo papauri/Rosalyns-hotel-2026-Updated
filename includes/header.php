@@ -1,7 +1,7 @@
 <?php
 /**
  * Header Component
- * Rosalyn's Hotel 2026
+ * Hotel website
  * Clean, modern header with mobile-first navigation
  */
 

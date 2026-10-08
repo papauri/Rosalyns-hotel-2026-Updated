@@ -4,7 +4,7 @@
  * same guide files serve every hotel on this platform. Fails silently: the static name stays.
  *
  *   .brand, .g-site-name  -> hotel name
- *   document.title        -> "Liwonde Sun Hotel" replaced with the hotel name
+ *   document.title        -> the hotel name written into the page replaced with the live one
  *
  * Also loads kb-search.js, which turns the guides into a searchable knowledge base.
  */

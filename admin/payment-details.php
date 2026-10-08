@@ -809,7 +809,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
             ).trim();
             if (!recipient) {
                 const sid = isEmail ? 'pdReceiptEmailStatus' : 'pdReceiptWhatsAppStatus';
-                document.getElementById(sid).innerHTML = '<span style="color:#dc2626;">Enter a ' + (isEmail ? 'email address' : 'phone number') + '.</span>';
+                document.getElementById(sid).innerHTML = '<span style="color:#dc2626;">Enter ' + (isEmail ? 'an email address' : 'a phone number') + '.</span>';
                 return;
             }
 

@@ -487,8 +487,8 @@ function extract_hotel_terms(string $hotelName): array
 
 /**
  * The distinctive part of the hotel's name: normalised, with generic trailing
- * words dropped ("Liwonde Sun Hotel" -> "liwonde sun", "Rosalyn's Beach Hotel"
- * -> "rosalyns").
+ * words dropped ("Sunset Bay Hotel" -> "sunset bay", "Mary's Beach Hotel"
+ * -> "/hotel/").
  */
 function hotel_core_phrase(string $hotelName): string
 {
@@ -506,16 +506,16 @@ function hotel_core_phrase(string $hotelName): string
 function is_relevant_to_hotel(string $title, string $snippet, string $url, string $hotelName): bool
 {
     // The result must name THIS hotel. Matching any single word of the name let
-    // through every page about the town ("Best hotels in Liwonde") and other
+    // through every page about the town ("Best hotels in <town>") and other
     // hotels that share a word ("Sun Village Hotel").
     $core = hotel_core_phrase($hotelName);
     if ($core === '') {
         return true;
     }
 
-    // Find the name in the original text (apostrophes optional: "Rosalyn's" =
-    // "Rosalyns"). A match that runs straight into another capitalised word is
-    // part of a different name ("Liwonde Sun Village") and doesn't count.
+    // Find the name in the original text (apostrophes optional: "Mary's" =
+    // "Marys"). A match that runs straight into another capitalised word is
+    // part of a different name ("Sunset Bay Village") and doesn't count.
     $wordPatterns = [];
     foreach (explode(' ', $core) as $w) {
         $wordPatterns[] = implode("['’`]?", array_map(static fn($ch) => preg_quote($ch, '/'), mb_str_split($w)));
@@ -534,7 +534,7 @@ function is_relevant_to_hotel(string $title, string $snippet, string $url, strin
         }
     }
 
-    // Page/handle URLs often run the name together: facebook.com/liwondesunhotel
+    // Page/handle URLs often run the name together: facebook.com/sunsetbayhotel
     $compact = str_replace(' ', '', $core);
     $urlCompact = preg_replace('/[^a-z0-9]+/', '', strtolower(rawurldecode($url)));
     return mb_strlen($compact) >= 6 && strpos((string)$urlCompact, $compact) !== false;

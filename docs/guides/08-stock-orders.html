@@ -154,7 +154,7 @@
     <li>Fill in <strong>Supplier name</strong> (required, must be unique), <strong>Contact person</strong>, <strong>Phone</strong>, <strong>Email</strong>, <strong>Lead time (days)</strong>, <strong>Payment terms</strong>, <strong>Account ref</strong>, <strong>Address</strong>, <strong>Notes</strong>, and tick <strong>Active</strong>.</li>
     <li>Click <strong>Save Supplier</strong>. You will see <em>"Supplier added."</em> or <em>"Supplier updated."</em></li>
   </ol>
-  <p>The list shows <strong>Items</strong> (ingredients that name this supplier as preferred) and <strong>Total purchased</strong>. The pencil icon edits a supplier. The power icon switches it on or off (<em>"Toggle this supplier's status?"</em>, then <em>"Supplier status updated."</em>).</p>
+  <p>The list shows <strong>Items</strong> (ingredients that name this supplier as preferred) and <strong>Total purchased</strong>. The pencil icon edits a supplier. The power icon deactivates or reactivates it after a confirmation (<em>"Deactivate this supplier? It will be hidden from purchase orders and stock-in pickers. Its history stays."</em> or <em>"Reactivate this supplier so it can be picked again?"</em>), then <em>"Supplier status updated."</em> Deactivating is usually better than deleting: the supplier's history stays.</p>
 
   <h2 id="buying">How to see what to buy (Buying)</h2>
   <p>Open Admin menu &rarr; Stock &rarr; <strong>Buying</strong>. It lists every ingredient at or below its reorder point (or its minimum quantity if no reorder point is set). Ingredients with neither set are not listed.</p>
@@ -264,7 +264,7 @@
       <tr><td><em>"Only admin/manager can approve counts."</em> / <em>"... reject counts."</em></td><td>Wrong role.</td><td>Ask a manager.</td></tr>
       <tr><td><em>"Provide a rejection reason (min 8 characters)."</em></td><td>Reason too short.</td><td>Write more.</td></tr>
       <tr><td><em>"Variance exceeds current live stock for ingredient #12. Reopen and recount."</em></td><td>Stock changed after the count started.</td><td>Reject, reopen and recount.</td></tr>
-      <tr><td><em>"Supplier name is required."</em> / <em>"A supplier with that name already exists."</em> / <em>"Enter a valid email address."</em></td><td>Supplier form rules.</td><td>Correct the field.</td></tr>
+      <tr><td><em>"Supplier name is required."</em> / <em>"A supplier called "…" already exists. Use a different name or edit the existing one."</em> / <em>"Enter a valid email address."</em></td><td>Supplier form rules.</td><td>Correct the field.</td></tr>
       <tr><td><em>"Add at least one line before sending."</em></td><td>Empty purchase order.</td><td>Add a line.</td></tr>
       <tr><td><em>"This purchase order is received - its lines can no longer be changed."</em> (or closed, cancelled)</td><td>The order is finished.</td><td>Raise a new order.</td></tr>
       <tr><td><em>"Stock has already been received against this line - it cannot be removed."</em> / <em>"Quantity cannot be lower than the ... already received."</em></td><td>The line is part received.</td><td>Leave it, or close the order.</td></tr>

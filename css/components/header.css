@@ -1,6 +1,6 @@
 /**
  * Header Component
- * Rosalyn's Hotel 2026
+ * Hotel website
  * Luxury African-Japandi redesign (minimal, premium, accessible)
  */
 
@@ -930,8 +930,8 @@
     }
 
     /* The brand shrinks here so the toggle is never pushed out, but on a
-       390px screen that left "Rosalyns Beach Hotel" clipped to
-       "Rosalyns Bea…" — 135px of text in a 91px box. Wrap to a second
+       390px screen that left a long hotel name clipped to
+       "Long Hotel Na…" — 135px of text in a 91px box. Wrap to a second
        line instead of truncating, so the full hotel name always reads.
        The clamp still caps it at two lines, so a longer name can never
        grow the header unbounded. */
