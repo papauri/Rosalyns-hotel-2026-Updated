@@ -94,6 +94,10 @@ try {
 
     $pdo->commit();
 
+    // Remember which preset was chosen so the page can highlight it even if
+    // individual switches are changed afterwards.
+    updateSetting('business_preset', $preset_key);
+
     if (function_exists('rh_log_event')) {
         rh_log_event('admin/module-settings', 'info',
             'Business preset applied: ' . $preset_key,

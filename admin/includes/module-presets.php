@@ -111,3 +111,61 @@ if (!function_exists('getBusinessPresets')) {
         ];
     }
 }
+
+/**
+ * Work out which business preset the installation is on.
+ *
+ * $moduleState  module_key => 0/1 (every module + station switch)
+ * $frontEndState front-end flag key => 0/1/bool (e.g. events_page)
+ * $storedKey    the preset key last applied (site_settings.business_preset), or null
+ * $labels       optional key => human label map used for the diff labels
+ *
+ * Returns ['key' => string|null, 'exact' => bool, 'diffs' => [['module','label','preset','now'], ...]]
+ * Rules: exact match wins (stored key preferred among several); else the stored
+ * preset (customised); else the preset with the fewest differing switches.
+ */
+if (!function_exists('rh_detect_active_preset')) {
+    function rh_detect_active_preset(array $moduleState, array $frontEndState, ?string $storedKey, array $labels = []): array
+    {
+        $presets = getBusinessPresets();
+        $diffsFor = static function (array $preset) use ($moduleState, $frontEndState, $labels): array {
+            $diffs = [];
+            foreach ($preset['modules'] as $mk => $val) {
+                $now = !empty($moduleState[$mk]) ? 1 : 0;
+                if ($now !== (int)!empty($val)) {
+                    $diffs[] = ['module' => (string)$mk, 'label' => (string)($labels[$mk] ?? $mk), 'preset' => (int)!empty($val), 'now' => $now];
+                }
+            }
+            foreach (($preset['front_end'] ?? []) as $fk => $val) {
+                if (!array_key_exists($fk, $frontEndState)) {
+                    continue;
+                }
+                $now = !empty($frontEndState[$fk]) ? 1 : 0;
+                if ($now !== (int)!empty($val)) {
+                    $diffs[] = ['module' => (string)$fk, 'label' => (string)($labels[$fk] ?? $fk), 'preset' => (int)!empty($val), 'now' => $now];
+                }
+            }
+            return $diffs;
+        };
+
+        $all = [];
+        foreach ($presets as $k => $p) {
+            $all[$k] = $diffsFor($p);
+        }
+        $exactKeys = array_keys(array_filter($all, static function ($d) { return !$d; }));
+        if ($exactKeys) {
+            $key = ($storedKey !== null && in_array($storedKey, $exactKeys, true)) ? $storedKey : $exactKeys[0];
+            return ['key' => $key, 'exact' => true, 'diffs' => []];
+        }
+        if ($storedKey !== null && isset($presets[$storedKey])) {
+            return ['key' => $storedKey, 'exact' => false, 'diffs' => $all[$storedKey]];
+        }
+        $best = null;
+        foreach ($all as $k => $d) {
+            if ($best === null || count($d) < count($all[$best])) {
+                $best = $k;
+            }
+        }
+        return ['key' => $best, 'exact' => false, 'diffs' => $best !== null ? $all[$best] : []];
+    }
+}

@@ -143,22 +143,27 @@ $current_module_snapshot = [];
 foreach (array_merge(array_keys($modules_meta), array_keys($station_meta)) as $mk) {
     $current_module_snapshot[$mk] = ($module_state[$mk] ?? true) ? 1 : 0;
 }
-$active_preset_key = null;
-foreach ($presets as $preset_key => $preset) {
-    if (empty(array_diff_assoc($preset['modules'], $current_module_snapshot))
-        && empty(array_diff_assoc($current_module_snapshot, $preset['modules']))) {
-        $fe_match = true;
-        foreach (($preset['front_end'] ?? []) as $fe_key => $fe_val) {
-            if (isset($front_end_state[$fe_key]) && ((int)$front_end_state[$fe_key]) !== (int)$fe_val) {
-                $fe_match = false;
-                break;
-            }
-        }
-        if ($fe_match) {
-            $active_preset_key = $preset_key;
-            break;
-        }
-    }
+$switch_labels = [];
+foreach ($modules_meta as $mk => $mm) { $switch_labels[$mk] = $mm['label']; }
+foreach ($station_meta as $mk => $mm) { $switch_labels[$mk] = $mm['label']; }
+foreach ($front_end_meta as $mk => $mm) { $switch_labels[$mk] = $mm['label']; }
+
+$stored_preset_key = (string)getSetting('business_preset', '');
+$detected = rh_detect_active_preset($current_module_snapshot, $front_end_state, $stored_preset_key !== '' ? $stored_preset_key : null, $switch_labels);
+$active_preset_key   = $detected['key'];
+$active_preset_exact = $detected['exact'];
+$active_preset_diffs = $detected['diffs'];
+
+// Client-side data for re-deriving the "customised" state after a toggle.
+$presets_js = [];
+foreach ($presets as $pk => $pdef) {
+    $presets_js[$pk] = array_merge($pdef['modules'], $pdef['front_end'] ?? []);
+}
+$customised_note = '';
+if ($active_preset_key !== null && !$active_preset_exact) {
+    $bits = [];
+    foreach ($active_preset_diffs as $d) { $bits[] = $d['label'] . ($d['now'] ? ' on' : ' off'); }
+    $customised_note = 'Based on ' . $presets[$active_preset_key]['label'] . ', with changes: ' . implode(', ', $bits);
 }
 ?>
 <!DOCTYPE html>
@@ -228,6 +233,11 @@ foreach ($presets as $preset_key => $preset) {
             letter-spacing: .05em; text-transform: uppercase;
             padding: 1px 6px; margin-left: 6px;
         }
+        .ms-preset-btn.is-active-preset.is-customised { border-color: #C8A45A; background: #fdf3e3; }
+        .ms-preset-btn.is-active-preset.is-customised:hover { border-color: #C8A45A; background: #faebd0; }
+        .ms-preset-active-badge.is-customised { background: #fdf3e3; color: #7a5a2a; border: 1px solid #e8c98a; }
+        .ms-preset-note { margin: 12px 0 0; font-size: .8rem; color: #7a5a2a; }
+        .ms-preset-note[hidden] { display: none; }
         .ms-preset-btn:active { background: #ede5d6; }
         .ms-preset-btn i { color: #7E684B; font-size: .9rem; }
         .ms-preset-btn .ms-preset-desc {
@@ -446,19 +456,20 @@ foreach ($presets as $preset_key => $preset) {
                     $is_active_preset = ($preset_key === $active_preset_key);
                 ?>
                 <button type="button"
-                        class="ms-preset-btn<?php echo $is_active_preset ? ' is-active-preset' : ''; ?>"
+                        class="ms-preset-btn<?php echo $is_active_preset ? ' is-active-preset' . ($active_preset_exact ? '' : ' is-customised') : ''; ?>"
                         data-preset="<?php echo htmlspecialchars($preset_key); ?>"
                         data-preset-label="<?php echo htmlspecialchars($preset['label']); ?>"
                         data-modules="<?php echo htmlspecialchars(json_encode($preset['modules'])); ?>"
                         title="<?php echo htmlspecialchars($preset['desc']); ?>">
                     <i class="<?php echo htmlspecialchars($preset['icon']); ?>"></i>
                     <span class="ms-preset-btn-inner">
-                        <span><?php echo htmlspecialchars($preset['label']); ?><?php if ($is_active_preset): ?><span class="ms-preset-active-badge"><i class="fas fa-check"></i> Active</span><?php endif; ?></span>
+                        <span><?php echo htmlspecialchars($preset['label']); ?><?php if ($is_active_preset): ?><span class="ms-preset-active-badge<?php echo $active_preset_exact ? '' : ' is-customised'; ?>"><i class="fas fa-check"></i> <?php echo $active_preset_exact ? 'Active' : 'Active &middot; customised'; ?></span><?php endif; ?></span>
                         <span class="ms-preset-desc"><?php echo htmlspecialchars($preset['desc']); ?></span>
                     </span>
                 </button>
                 <?php endforeach; ?>
             </div>
+            <p class="ms-preset-note" id="msPresetNote"<?php echo $customised_note === '' ? ' hidden' : ''; ?>><?php echo htmlspecialchars($customised_note); ?></p>
         </div>
 
         <div class="ms-reload-banner">
@@ -638,6 +649,9 @@ foreach ($presets as $preset_key => $preset) {
         window.__msState = window.__msState || {};
         window.__msState.csrf = <?php echo json_encode($csrf_token); ?>;
         window.__msState.moduleLabels = <?php echo json_encode(array_combine(array_keys($modules_meta), array_column($modules_meta, 'label'))); ?>;
+        window.__msState.presets = <?php echo json_encode($presets_js); ?>;
+        window.__msState.presetLabels = <?php echo json_encode(array_map(function ($p) { return $p['label']; }, $presets)); ?>;
+        window.__msState.switchLabels = <?php echo json_encode($switch_labels); ?>;
         window.__msState.pendingToggle = null;
         window.__msState.pendingPreset = null;
 
@@ -680,8 +694,53 @@ foreach ($presets as $preset_key => $preset) {
             document.querySelectorAll('.ms-preset-btn').forEach(function (other) {
                 var badge = other.querySelector('.ms-preset-active-badge');
                 if (badge) { badge.remove(); }
-                other.classList.remove('is-active-preset');
+                other.classList.remove('is-active-preset', 'is-customised');
             });
+            var note = document.getElementById('msPresetNote');
+            if (note) { note.hidden = true; note.textContent = ''; }
+        }
+
+        // Mark a preset button as the active one: exact ("Active") or customised.
+        function markActivePreset(btn, diffs) {
+            clearActivePresetHighlight();
+            var exact = !diffs.length;
+            btn.classList.add('is-active-preset');
+            btn.classList.toggle('is-customised', !exact);
+            var nameSpan = btn.querySelector('.ms-preset-btn-inner > span:first-child');
+            if (nameSpan) {
+                var badge = document.createElement('span');
+                badge.className = 'ms-preset-active-badge' + (exact ? '' : ' is-customised');
+                badge.innerHTML = '<i class="fas fa-check"></i> ' + (exact ? 'Active' : 'Active &middot; customised');
+                nameSpan.appendChild(badge);
+            }
+            var note = document.getElementById('msPresetNote');
+            if (note) {
+                if (exact) {
+                    note.hidden = true; note.textContent = '';
+                } else {
+                    note.textContent = 'Based on ' + (S.presetLabels[btn.getAttribute('data-preset')] || '') +
+                        ', with changes: ' + diffs.join(', ');
+                    note.hidden = false;
+                }
+            }
+        }
+
+        // After an individual toggle: keep the highlighted preset, but show how the
+        // live switches now differ from it.
+        function refreshPresetAfterToggle() {
+            var btn = document.querySelector('.ms-preset-btn.is-active-preset');
+            if (!btn) { return; }
+            var def = S.presets[btn.getAttribute('data-preset')] || {};
+            var diffs = [];
+            Object.keys(def).forEach(function (key) {
+                var cb = document.getElementById('ms-toggle-' + key);
+                if (!cb) { return; }
+                var now = cb.checked ? 1 : 0;
+                if (now !== (def[key] ? 1 : 0)) {
+                    diffs.push((S.switchLabels[key] || key) + (now ? ' on' : ' off'));
+                }
+            });
+            markActivePreset(btn, diffs);
         }
 
         function doToggle(checkbox, moduleKey, enable, silent) {
@@ -701,7 +760,7 @@ foreach ($presets as $preset_key => $preset) {
                         return false;
                     }
                     updateCard(moduleKey, enable);
-                    clearActivePresetHighlight();
+                    refreshPresetAfterToggle();
                     if (!silent) {
                         showToast((enable ? 'Enabled' : 'Disabled') + ': ' + (checkbox ? checkbox.getAttribute('data-label') : moduleKey) + ' — refreshing admin view...', enable ? 'success' : 'info');
                         // Same reasoning as the preset-apply flow: the sidebar nav is
@@ -771,15 +830,7 @@ foreach ($presets as $preset_key => $preset) {
                         updateCard(key, !!(data.applied_modules ? data.applied_modules[key] : config[key]));
                     });
 
-                    clearActivePresetHighlight();
-                    btn.classList.add('is-active-preset');
-                    var nameSpan = btn.querySelector('.ms-preset-btn-inner > span:first-child');
-                    if (nameSpan) {
-                        var newBadge = document.createElement('span');
-                        newBadge.className = 'ms-preset-active-badge';
-                        newBadge.innerHTML = '<i class="fas fa-check"></i> Active';
-                        nameSpan.appendChild(newBadge);
-                    }
+                    markActivePreset(btn, []);
                     showToast('Preset applied: ' + label + ' — refreshing admin view...', 'success');
                     // The sidebar nav (admin-header.php) and any other module-gated
                     // chrome on this page were rendered server-side at page load and
