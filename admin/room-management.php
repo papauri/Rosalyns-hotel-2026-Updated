@@ -1210,6 +1210,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
         <div class="modal-overlay" id="videoModal">
             <div class="modal-content">
                 <form method="POST" enctype="multipart/form-data" id="videoForm">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                     <input type="hidden" name="action" value="update_video">
                     <input type="hidden" name="room_id" id="videoRoomId">
                     <div class="modal-header">

@@ -254,6 +254,7 @@ $roomStatuses = getRoomStatuses();
                 <?php endif; ?>
                 <div class="room-actions">
                     <form method="POST" style="display: inline;">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                         <input type="hidden" name="action" value="mark_clean">
                         <input type="hidden" name="room_id" value="<?php echo $room['id']; ?>">
                         <button type="submit" class="btn-success" onclick="return confirm('Mark this room as clean?')">
@@ -300,6 +301,7 @@ $roomStatuses = getRoomStatuses();
                 <span class="badge badge-inspection">Inspection Pending</span>
                 <div class="room-actions">
                     <form method="POST" style="display: inline;" onsubmit="return confirmPass(this)">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                         <input type="hidden" name="action" value="pass_inspection">
                         <input type="hidden" name="room_id" value="<?php echo $room['id']; ?>">
                         <input type="hidden" name="notes" value="">
@@ -322,6 +324,7 @@ $roomStatuses = getRoomStatuses();
 <div class="modal-overlay" id="failModal">
     <div class="modal-content">
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
             <input type="hidden" name="action" value="fail_inspection">
             <input type="hidden" name="room_id" id="failRoomId">
             <div class="modal-header">

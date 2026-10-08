@@ -200,7 +200,7 @@ foreach ($widget_rooms as $room) {
             })
             .catch(error => {
                 console.error('Availability check failed for room', roomId, error);
-                showHint('<i class="fas fa-exclamation-circle"></i> Could not check availability. Please try again or <a href="contact.php">contact us</a>.', 'error');
+                showHint('<i class="fas fa-exclamation-circle"></i> Could not check availability. Please try again or <a href="contact-us.php">contact us</a>.', 'error');
             });
     }
     

@@ -468,7 +468,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
         $ajaxVars = [
             '{{site_name}}'                => (string)getSetting('site_name', 'Hotel'),
             '{{site_url}}'                 => (string)getSetting('site_url', ''),
-            '{{booking_reference}}'        => 'LSH2026423468',
+            '{{booking_reference}}'        => 'RBH2026423468',
             '{{inquiry_reference}}'        => 'CONF-2026-PREVIEW-001',
             '{{guest_name}}'               => 'Jane Doe',
             '{{guest_email}}'              => 'jane.doe@example.com',
