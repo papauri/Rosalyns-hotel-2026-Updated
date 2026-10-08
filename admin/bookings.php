@@ -3801,7 +3801,7 @@ $today_str = $today->format('Y-m-d');
                                         <br><small style="color: #666;"><?php echo htmlspecialchars($inquiry['phone']); ?></small>
                                     </td>
                                     <td><?php echo htmlspecialchars($inquiry['event_type']); ?></td>
-                                    <td><?php echo !empty($inquiry['event_date']) ? date('M d, Y', strtotime($inquiry['event_date'])) : '—'; ?></td>
+                                    <td><?php echo !empty($inquiry['event_date']) ? htmlspecialchars((!empty($inquiry['end_date']) && $inquiry['end_date'] > $inquiry['event_date']) ? date('M d, Y', strtotime($inquiry['event_date'])) . ' – ' . date('M d, Y', strtotime($inquiry['end_date'])) : date('M d, Y', strtotime($inquiry['event_date']))) : '—'; ?></td>
                                     <td><?php echo $inquiry['number_of_attendees']; ?></td>
                                     <td>
                                         <span class="badge badge-<?php echo $inquiry['status']; ?>">

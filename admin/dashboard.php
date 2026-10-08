@@ -8,6 +8,7 @@ require_once '../includes/modal.php';
 require_once '../includes/alert.php';
 require_once '../includes/room-management.php';
 require_once '../includes/station-hours.php';
+require_once '../includes/conference-pricing.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -156,18 +157,23 @@ if (!$is_card_insight_ajax) {
             $pending_conf_stmt = $pdo->query("SELECT COUNT(*) as count FROM conference_inquiries WHERE status = 'pending'");
             $pending_conference = $pending_conf_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-            $today_conf_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM conference_inquiries WHERE event_date = ? AND status IN ('confirmed', 'pending')");
-            $today_conf_stmt->execute([$today]);
+            // Multi-day events (end_date, migration 061) count on every day of their range.
+            $confTodayCond = rh_conf_has_end_date($pdo)
+                ? "(event_date <= ? AND COALESCE(end_date, event_date) >= ?)"
+                : "event_date = ?";
+            $confTodayParams = rh_conf_has_end_date($pdo) ? [$today, $today] : [$today];
+            $today_conf_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM conference_inquiries WHERE {$confTodayCond} AND status IN ('confirmed', 'pending')");
+            $today_conf_stmt->execute($confTodayParams);
             $today_conferences = $today_conf_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
             $today_conf_events_stmt = $pdo->prepare("
                 SELECT ci.*, cr.name as room_name
                 FROM conference_inquiries ci
                 LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
-                WHERE ci.event_date = ? AND ci.status IN ('confirmed', 'pending')
+                WHERE " . (rh_conf_has_end_date($pdo) ? "(ci.event_date <= ? AND COALESCE(ci.end_date, ci.event_date) >= ?)" : "ci.event_date = ?") . " AND ci.status IN ('confirmed', 'pending')
                 ORDER BY ci.start_time ASC
             ");
-            $today_conf_events_stmt->execute([$today]);
+            $today_conf_events_stmt->execute($confTodayParams);
             $today_conference_events = $today_conf_events_stmt->fetchAll(PDO::FETCH_ASSOC);
 
             $upcoming_conf_stmt = $pdo->prepare("
@@ -767,10 +773,10 @@ if ($is_card_insight_ajax) {
                                               cr.name AS room_name
                                        FROM conference_inquiries ci
                                        LEFT JOIN conference_rooms cr ON cr.id = ci.conference_room_id
-                                       WHERE ci.event_date = ? AND ci.status IN ('confirmed','pending')
+                                       WHERE " . (rh_conf_has_end_date($pdo) ? "(ci.event_date <= ? AND COALESCE(ci.end_date, ci.event_date) >= ?)" : "ci.event_date = ?") . " AND ci.status IN ('confirmed','pending')
                                        ORDER BY ci.start_time ASC
                                        LIMIT 30");
-                $stmt->execute([$today]);
+                $stmt->execute(rh_conf_has_end_date($pdo) ? [$today, $today] : [$today]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($rows as $row) {
                     $iid = (int)($row['inquiry_id'] ?? 0);

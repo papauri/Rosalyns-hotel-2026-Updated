@@ -418,6 +418,7 @@ function buildWhatsAppBookingVars(array $booking, array $room = []): array
  */
 function buildConferenceWhatsAppVars(array $enquiry, array $room = [], array $extra = []): array
 {
+    require_once __DIR__ . '/conference-pricing.php';
     $currency = getSetting('currency_symbol');
     $siteName = getSetting('site_name');
 
@@ -445,7 +446,7 @@ function buildConferenceWhatsAppVars(array $enquiry, array $room = [], array $ex
         'quotation_reference' => (string)($extra['quote_reference'] ?? ''),
         'conference_room' => (string)($room['name'] ?? ($enquiry['room_name'] ?? 'Conference Room')),
         'event_type' => (string)($enquiry['event_type'] ?? 'Conference Event'),
-        'event_date' => !empty($enquiry['event_date']) ? date('D, d M Y', strtotime((string)$enquiry['event_date'])) : 'To be confirmed',
+        'event_date' => !empty($enquiry['event_date']) ? rh_conf_format_range((string)$enquiry['event_date'], $enquiry['end_date'] ?? null, 'D, d M Y') : 'To be confirmed',
         'event_time' => $eventTime,
         'attendees' => (string)max(1, (int)($enquiry['number_of_attendees'] ?? 1)),
         'total_amount' => $currency . ' ' . number_format($total, 0),

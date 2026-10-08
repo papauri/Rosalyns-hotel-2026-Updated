@@ -260,8 +260,9 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
     $roomName = (string)($room['name'] ?? 'Conference Room');
     $eventType = (string)($enquiry['event_type'] ?? 'Conference Event');
     $attendees = max(1, (int)($enquiry['number_of_attendees'] ?? 1));
+    require_once __DIR__ . '/conference-pricing.php';
     $eventDate = !empty($enquiry['event_date'])
-        ? date('l, F j, Y', strtotime((string)$enquiry['event_date']))
+        ? rh_conf_format_range((string)$enquiry['event_date'], $enquiry['end_date'] ?? null, 'l, F j, Y')
         : 'To be confirmed';
     $startTime = !empty($enquiry['start_time']) ? date('H:i', strtotime((string)$enquiry['start_time'])) : '';
     $endTime = !empty($enquiry['end_time']) ? date('H:i', strtotime((string)$enquiry['end_time'])) : '';

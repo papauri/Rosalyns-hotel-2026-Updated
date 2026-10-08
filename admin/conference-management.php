@@ -15,6 +15,7 @@ require_once '../config/invoice.php';
 require_once '../includes/alert.php';
 require_once '../includes/finance-sequences.php';
 require_once '../includes/form-validation.php';
+require_once '../includes/conference-pricing.php';
 
 finance_ensure_sequence_tables($pdo);
 
@@ -47,6 +48,52 @@ function syncConferenceRoomManagedMedia(array $room): void
 
 $message = '';
 $error = '';
+
+$confHasEndDate = rh_conf_has_end_date($pdo);
+$confHasHalfDayRate = rh_conf_has_half_day_rate($pdo);
+
+/**
+ * Find a confirmed/completed enquiry that clashes with the given room and dates.
+ * Bookings are date ranges event_date..COALESCE(end_date, event_date): any shared day between a
+ * multi-day booking and another booking is a clash; two single-day bookings keep the time-overlap rule.
+ * Without the end_date column this is exactly the original single-day check.
+ */
+function conferenceFindClash(PDO $pdo, int $roomId, int $excludeId, string $eventDate, ?string $endDate, string $startTime, string $endTime): ?array
+{
+    $hasTimes = ($startTime !== '' && $endTime !== '');
+    if (!rh_conf_has_end_date($pdo)) {
+        $sql = "SELECT inquiry_reference, start_time, end_time FROM conference_inquiries
+                WHERE conference_room_id = ? AND event_date = ? AND id <> ?
+                  AND status IN ('confirmed', 'completed')";
+        $params = [$roomId, $eventDate, $excludeId];
+        if ($hasTimes) {
+            // Standard half-open overlap: other.start < this.end AND other.end > this.start.
+            $sql .= " AND start_time < ? AND end_time > ?";
+            $params[] = $endTime;
+            $params[] = $startTime;
+        }
+        $stmt = $pdo->prepare($sql . " LIMIT 1");
+        $stmt->execute($params);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    $thisLast = ($endDate !== null && $endDate !== '' && $endDate > $eventDate) ? $endDate : $eventDate;
+    $thisMulti = $thisLast > $eventDate;
+    $sql = "SELECT inquiry_reference, start_time, end_time FROM conference_inquiries
+            WHERE conference_room_id = ? AND id <> ?
+              AND status IN ('confirmed', 'completed')
+              AND event_date <= ? AND COALESCE(end_date, event_date) >= ?";
+    $params = [$roomId, $excludeId, $thisLast, $eventDate];
+    if (!$thisMulti && $hasTimes) {
+        // Single-day vs single-day on the same day: time overlap. Against a multi-day booking: any shared day clashes.
+        $sql .= " AND (COALESCE(end_date, event_date) > event_date OR (start_time < ? AND end_time > ?))";
+        $params[] = $endTime;
+        $params[] = $startTime;
+    }
+    $stmt = $pdo->prepare($sql . " LIMIT 1");
+    $stmt->execute($params);
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+}
 
 function uploadConferenceImage(array $fileInput): ?string
 {
@@ -133,6 +180,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!isset($_POST['daily_rate']) || !is_numeric($_POST['daily_rate']) || (float)$_POST['daily_rate'] < 0 || (float)$_POST['daily_rate'] > 99999999.99) {
                 throw new Exception('Full day rate must be a number (0 or more).');
             }
+            // Optional half-day rate (blank = none); only handled when the column exists (migration 061)
+            $halfDayRate = null;
+            if ($confHasHalfDayRate) {
+                $halfRaw = trim((string)($_POST['half_day_rate'] ?? ''));
+                if ($halfRaw !== '') {
+                    if (!is_numeric($halfRaw) || (float)$halfRaw < 0 || (float)$halfRaw > 99999999.99) {
+                        throw new Exception('Half day rate must be a number (0 or more), or left blank.');
+                    }
+                    $halfDayRate = round((float)$halfRaw, 2);
+                }
+            }
             $cfDup = rh_find_duplicate($pdo, 'conference_rooms', 'name', $_POST['name'], [], $action === 'update' ? (int)$_POST['id'] : null);
             if ($cfDup) {
                 throw new Exception(rh_duplicate_message('conference room', (string)$cfDup['value']));
@@ -173,6 +231,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 $newConferenceRoomId = (int)$pdo->lastInsertId();
             });
+            if ($newConferenceRoomId > 0 && $confHasHalfDayRate && $halfDayRate !== null) {
+                $pdo->prepare("UPDATE conference_rooms SET half_day_rate = ? WHERE id = ?")->execute([$halfDayRate, $newConferenceRoomId]);
+            }
             if ($newConferenceRoomId > 0) {
                 syncConferenceRoomManagedMedia([
                     'id' => $newConferenceRoomId,
@@ -232,6 +293,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $roomId = (int)($_POST['id'] ?? 0);
+            if ($roomId > 0 && $confHasHalfDayRate) {
+                $pdo->prepare("UPDATE conference_rooms SET half_day_rate = ? WHERE id = ?")->execute([$halfDayRate, $roomId]);
+            }
             if ($roomId > 0) {
                 $mediaStmt = $pdo->prepare("SELECT id, name, description, display_order, image_path FROM conference_rooms WHERE id = ? LIMIT 1");
                 $mediaStmt->execute([$roomId]);
@@ -377,32 +441,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 throw new Exception('Only pending enquiries can be confirmed.');
             }
             if ($roomId > 0 && $eventDate !== '') {
-                if ($startTime !== '' && $endTime !== '') {
-                    // Standard half-open overlap: other.start < this.end AND other.end > this.start.
-                    $clashStmt = $pdo->prepare("
-                        SELECT inquiry_reference, start_time, end_time
-                        FROM conference_inquiries
-                        WHERE conference_room_id = ? AND event_date = ? AND id <> ?
-                          AND status IN ('confirmed', 'completed')
-                          AND start_time < ? AND end_time > ?
-                        LIMIT 1
-                    ");
-                    $clashStmt->execute([$roomId, $eventDate, $enquiry_id, $endTime, $startTime]);
-                } else {
-                    // Missing times → treat any confirmed booking that day as a clash.
-                    $clashStmt = $pdo->prepare("
-                        SELECT inquiry_reference, start_time, end_time
-                        FROM conference_inquiries
-                        WHERE conference_room_id = ? AND event_date = ? AND id <> ?
-                          AND status IN ('confirmed', 'completed')
-                        LIMIT 1
-                    ");
-                    $clashStmt->execute([$roomId, $eventDate, $enquiry_id]);
-                }
-                if ($clash = $clashStmt->fetch(PDO::FETCH_ASSOC)) {
+                if ($clash = conferenceFindClash($pdo, $roomId, $enquiry_id, $eventDate, $confHasEndDate ? ($enquiry['end_date'] ?? null) : null, $startTime, $endTime)) {
                     throw new Exception(sprintf(
                         'This room is already confirmed for %s (%s–%s) under %s. Choose a different room or time before confirming.',
-                        date('M j, Y', strtotime($eventDate)),
+                        rh_conf_format_range($eventDate, $confHasEndDate ? ($enquiry['end_date'] ?? null) : null, 'M j, Y'),
                         $clash['start_time'] ? date('H:i', strtotime($clash['start_time'])) : '—',
                         $clash['end_time'] ? date('H:i', strtotime($clash['end_time'])) : '—',
                         $clash['inquiry_reference'] ?: 'another confirmed enquiry'
@@ -522,8 +564,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 throw new Exception('Only confirmed enquiries can be marked completed.');
             }
             // An event that has not happened yet cannot be completed.
-            if (!empty($enquiry['event_date']) && (string)$enquiry['event_date'] > date('Y-m-d')) {
-                throw new Exception('This conference is on ' . date('M j, Y', strtotime((string)$enquiry['event_date'])) . ' and has not taken place yet - it cannot be marked completed.');
+            if (!empty($enquiry['event_date']) && rh_conf_last_date($enquiry) > date('Y-m-d')) {
+                throw new Exception('This conference runs until ' . date('M j, Y', strtotime(rh_conf_last_date($enquiry))) . ' and has not taken place yet - it cannot be marked completed.');
             }
             // Money still owed: require an explicit confirmation (the Complete button's dialog sets the flag) and log it.
             $outstandingAtComplete = (float)($paymentSnapshot['amount_due'] ?? $enquiry['amount_due'] ?? 0);
@@ -659,6 +701,97 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             } else {
                 $error = 'Failed to send quotation: ' . ($quoteResult['message'] ?? 'Unknown error');
             }
+        } elseif ($action === 'update_schedule') {
+            if (!$confHasEndDate) {
+                throw new Exception('Multi-day scheduling is not available yet.');
+            }
+            if (!in_array((string)($enquiry['status'] ?? ''), ['pending', 'confirmed'], true)) {
+                throw new Exception('Only pending or confirmed enquiries can be rescheduled.');
+            }
+            $newStart = trim((string)($_POST['event_date'] ?? ''));
+            $newEndRaw = trim((string)($_POST['end_date'] ?? ''));
+            $newFrom = substr(trim((string)($_POST['start_time'] ?? '')), 0, 5);
+            $newTo = substr(trim((string)($_POST['end_time'] ?? '')), 0, 5);
+            $dtS = DateTime::createFromFormat('Y-m-d', $newStart);
+            if (!$dtS || $dtS->format('Y-m-d') !== $newStart) {
+                throw new Exception('Please enter a valid event date.');
+            }
+            if ($newStart < date('Y-m-d')) {
+                throw new Exception('An event cannot be rescheduled to a date in the past.');
+            }
+            $newEnd = null;
+            if ($newEndRaw !== '') {
+                $dtE = DateTime::createFromFormat('Y-m-d', $newEndRaw);
+                if (!$dtE || $dtE->format('Y-m-d') !== $newEndRaw) {
+                    throw new Exception('Please enter a valid end date.');
+                }
+                if ($newEndRaw < $newStart) {
+                    throw new Exception('The end date cannot be before the event date.');
+                }
+                if (rh_conf_days($newStart, $newEndRaw) > 14) {
+                    throw new Exception('Multi-day events can span at most 14 days.');
+                }
+                if ($newEndRaw > $newStart) {
+                    $newEnd = $newEndRaw;
+                }
+            }
+            $tFrom = DateTime::createFromFormat('H:i', $newFrom);
+            $tTo = DateTime::createFromFormat('H:i', $newTo);
+            if (!$tFrom || $tFrom->format('H:i') !== $newFrom || !$tTo || $tTo->format('H:i') !== $newTo) {
+                throw new Exception('Please enter valid start and end times.');
+            }
+            if ($newTo <= $newFrom) {
+                throw new Exception('End time must be after start time.');
+            }
+
+            $schedRoomId = (int)($enquiry['conference_room_id'] ?? 0);
+            $schedRoomStmt = $pdo->prepare("SELECT * FROM conference_rooms WHERE id = ?");
+            $schedRoomStmt->execute([$schedRoomId]);
+            $schedRoom = $schedRoomStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+            // Suggested price on the old and new schedule; a manual amount (differs from the old suggestion) is kept
+            // unless staff tick "replace" - and only users with pricing permission can change the amount at all.
+            $oldSuggest = rh_conf_price($schedRoom, (string)$enquiry['event_date'], $enquiry['end_date'] ?? null, (string)$enquiry['start_time'], (string)$enquiry['end_time']);
+            $newSuggest = rh_conf_price($schedRoom, $newStart, $newEnd, $newFrom, $newTo);
+            $oldTotal = (float)($enquiry['total_amount'] ?? 0);
+            $wasManual = $oldTotal > BALANCE_TOLERANCE && abs($oldTotal - $oldSuggest['amount']) > BALANCE_TOLERANCE;
+            $canPrice = hasPermission((int)($user['id'] ?? 0), 'conference_financials');
+            $replaceAmount = $canPrice && (!$wasManual || !empty($_POST['recalculate_amount']))
+                && abs($newSuggest['amount'] - $oldTotal) > BALANCE_TOLERANCE && $newSuggest['amount'] > 0;
+
+            require_once __DIR__ . '/includes/finance-account-sync.php';
+            $pdo->beginTransaction();
+            try {
+                if ($schedRoomId > 0) {
+                    $pdo->prepare("SELECT id FROM conference_rooms WHERE id = ? FOR UPDATE")->execute([$schedRoomId]);
+                }
+                if ((string)($enquiry['status'] ?? '') === 'confirmed' && $schedRoomId > 0) {
+                    if ($clash = conferenceFindClash($pdo, $schedRoomId, $enquiry_id, $newStart, $newEnd, $newFrom, $newTo)) {
+                        throw new Exception('This room is already confirmed for those dates under ' . ($clash['inquiry_reference'] ?: 'another enquiry') . '. Choose different dates or times.');
+                    }
+                }
+                $pdo->prepare("UPDATE conference_inquiries SET event_date = ?, end_date = ?, start_time = ?, end_time = ?, updated_at = NOW() WHERE id = ?")
+                    ->execute([$newStart, $newEnd, $newFrom, $newTo, $enquiry_id]);
+                if ($replaceAmount) {
+                    $schedAmount = round($newSuggest['amount'], 2);
+                    $schedVat = vat_components($schedAmount);
+                    $pdo->prepare("UPDATE conference_inquiries SET total_amount = ?, vat_rate = ?, vat_amount = ?, total_with_vat = ? WHERE id = ?")
+                        ->execute([$schedAmount, $schedVat['rate'], $schedVat['vat'], $schedVat['total'], $enquiry_id]);
+                    syncConferenceEnquiryPaymentSnapshot($pdo, $enquiry_id);
+                }
+                $pdo->commit();
+            } catch (Throwable $schedEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $schedEx;
+            }
+            $message = 'Event dates updated (' . $newSuggest['label'] . ').';
+            if ($replaceAmount) {
+                $message .= ' Amount recalculated to ' . getSetting('currency_symbol') . number_format($newSuggest['amount'], 2) . '.';
+            } elseif ($wasManual && abs($newSuggest['amount'] - $oldTotal) > BALANCE_TOLERANCE) {
+                $message .= ' The manually set amount was kept (suggested price for these dates: ' . getSetting('currency_symbol') . number_format($newSuggest['amount'], 2) . ').';
+            }
         } elseif ($action === 'update_amount') {
             $amountRaw = $_POST['total_amount'] ?? '';
             if (!is_numeric($amountRaw) || (float)$amountRaw < 0 || (float)$amountRaw > 99999999) {
@@ -706,6 +839,21 @@ try {
         ORDER BY ci.event_date DESC, ci.created_at DESC
     ");
     $conference_enquiries = $enquiries_stmt->fetchAll(PDO::FETCH_ASSOC);
+    // Date range + suggested price (half day / N days) for display and the details modal
+    $confRoomsById = [];
+    foreach ($conference_rooms as $confRoomRow) {
+        $confRoomsById[(int)$confRoomRow['id']] = $confRoomRow;
+    }
+    foreach ($conference_enquiries as &$confEnqRow) {
+        $confEnqRow['date_range_label'] = rh_conf_format_range($confEnqRow['event_date'] ?? null, $confEnqRow['end_date'] ?? null, 'M j, Y');
+        $confRoomForPrice = $confRoomsById[(int)($confEnqRow['conference_room_id'] ?? 0)] ?? null;
+        if (($confHasEndDate || $confHasHalfDayRate) && $confRoomForPrice && !empty($confEnqRow['event_date'])) {
+            $confSuggest = rh_conf_price($confRoomForPrice, (string)$confEnqRow['event_date'], $confEnqRow['end_date'] ?? null, (string)$confEnqRow['start_time'], (string)$confEnqRow['end_time']);
+            $confEnqRow['suggested_amount'] = $confSuggest['amount'];
+            $confEnqRow['price_label'] = $confSuggest['label'];
+        }
+    }
+    unset($confEnqRow);
 } catch (PDOException $e) {
     $conference_enquiries = [];
 }
@@ -809,6 +957,9 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
 
                             <div class="conference-card-details">
                                 <div class="detail-item detail-item-price"><i class="fas fa-tag"></i> <?php echo $currency; ?> <?php echo number_format($room['daily_rate'], 2); ?>/day</div>
+                                <?php if (isset($room['half_day_rate']) && (float)$room['half_day_rate'] > 0): ?>
+                                    <div class="detail-item detail-item-price"><i class="fas fa-tag"></i> <?php echo $currency; ?> <?php echo number_format((float)$room['half_day_rate'], 2); ?>/half day</div>
+                                <?php endif; ?>
                                 <div class="detail-item"><i class="fas fa-users"></i> <?php echo $room['capacity']; ?> guests</div>
                                 <div class="detail-item"><i class="fas fa-expand-arrows-alt"></i> <?php echo number_format($room['size_sqm'] ?? 0, 0); ?> sqm</div>
                             </div>
@@ -905,7 +1056,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                         <small><?php echo htmlspecialchars($enquiry['email']); ?></small><br>
                                         <small><?php echo htmlspecialchars($enquiry['phone']); ?></small>
                                     </td>
-                                    <td><?php echo date('M j, Y', strtotime($enquiry['event_date'])); ?></td>
+                                    <td><?php echo htmlspecialchars(rh_conf_format_range($enquiry['event_date'], $enquiry['end_date'] ?? null, 'M j, Y')); ?></td>
                                     <td>
                                         <?php echo date('H:i', strtotime($enquiry['start_time'])); ?> -
                                         <?php echo date('H:i', strtotime($enquiry['end_time'])); ?>
@@ -1069,6 +1220,12 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                 <label>Full Day Rate *</label>
                                 <input type="number" step="0.01" name="daily_rate" required data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
                             </div>
+                            <?php if ($confHasHalfDayRate): ?>
+                            <div class="form-group">
+                                <label>Half Day Rate (up to 5 hours, optional)</label>
+                                <input type="number" step="0.01" min="0" name="half_day_rate" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                            </div>
+                            <?php endif; ?>
                             <div class="form-group">
                                 <label>Display Order</label>
                                 <input type="number" name="display_order" value="0">
@@ -1149,6 +1306,12 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                 <label>Full Day Rate *</label>
                                 <input type="number" step="0.01" name="daily_rate" id="editRate" required data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
                             </div>
+                            <?php if ($confHasHalfDayRate): ?>
+                            <div class="form-group">
+                                <label>Half Day Rate (up to 5 hours, optional)</label>
+                                <input type="number" step="0.01" min="0" name="half_day_rate" id="editHalfDayRate" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                            </div>
+                            <?php endif; ?>
                             <div class="form-group">
                                 <label>Display Order</label>
                                 <input type="number" name="display_order" id="editOrder" value="0">
@@ -1202,6 +1365,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
 
     <script>
         const CONFERENCE_CSRF_TOKEN = <?php echo json_encode($csrf_token); ?>;
+        const CONF_HAS_END_DATE = <?php echo $confHasEndDate ? 'true' : 'false'; ?>;
 
         function setConferenceLoader(visible, label) {
             const loader = document.getElementById('admin-page-loader');
@@ -1316,6 +1480,10 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             document.getElementById('editCapacity').value = room.capacity || '';
             document.getElementById('editSize').value = room.size_sqm || '';
             document.getElementById('editRate').value = room.daily_rate || '';
+            var editHalfRate = document.getElementById('editHalfDayRate');
+            if (editHalfRate) {
+                editHalfRate.value = (room.half_day_rate !== null && room.half_day_rate !== undefined) ? room.half_day_rate : '';
+            }
             document.getElementById('editOrder').value = room.display_order || 0;
             document.getElementById('editAmenities').value = room.amenities || '';
             document.getElementById('editIsActive').checked = room.is_active == 1;
@@ -1450,12 +1618,16 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                 </div>
                 <div class="detail-row">
                     <strong>Event Date:</strong>
-                    <span>${new Date(enquiry.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    <span>${escapeHtml(enquiry.date_range_label || enquiry.event_date)}</span>
                 </div>
                 <div class="detail-row">
                     <strong>Time:</strong>
                     <span>${enquiry.start_time} - ${enquiry.end_time}</span>
                 </div>
+                ${enquiry.price_label ? `<div class="detail-row">
+                    <strong>Pricing basis:</strong>
+                    <span>${escapeHtml(enquiry.price_label)} &middot; suggested <?php echo $currency; ?> ${Number(enquiry.suggested_amount || 0).toLocaleString()}</span>
+                </div>` : ''}
                 <div class="detail-row">
                     <strong>Conference Room:</strong>
                     <span>${escapeHtml(enquiry.room_name || 'N/A')}</span>
@@ -1494,6 +1666,36 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                 </div>
 
                 <div class="modal-actions">
+                    ${(CONF_HAS_END_DATE && (enquiry.status === 'pending' || enquiry.status === 'confirmed')) ? `
+                    <form method="POST" style="display:block;margin-bottom:12px;">
+                        <input type="hidden" name="csrf_token" value="${escapeHtml(CONFERENCE_CSRF_TOKEN || '')}">
+                        <input type="hidden" name="enquiry_action" value="update_schedule">
+                        <input type="hidden" name="enquiry_id" value="${enquiry.id}">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Event Date:</label>
+                                <input type="date" name="event_date" value="${escapeHtml(enquiry.event_date || '')}" required>
+                            </div>
+                            <div class="form-group">
+                                <label>End date (multi-day):</label>
+                                <input type="date" name="end_date" value="${escapeHtml(enquiry.end_date || '')}">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Start Time:</label>
+                                <input type="time" name="start_time" value="${escapeHtml((enquiry.start_time || '').substring(0, 5))}" required>
+                            </div>
+                            <div class="form-group">
+                                <label>End Time:</label>
+                                <input type="time" name="end_time" value="${escapeHtml((enquiry.end_time || '').substring(0, 5))}" required>
+                            </div>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label><input type="checkbox" name="recalculate_amount" value="1"> Replace the amount with the suggested price even if it was set manually</label>
+                        </div>
+                        <button type="submit" class="btn">Update Dates</button>
+                    </form>` : ''}
                     <form method="POST" style="display:inline;">
                         <input type="hidden" name="csrf_token" value="${escapeHtml(CONFERENCE_CSRF_TOKEN || '')}">
                         <input type="hidden" name="enquiry_action" value="update_amount">

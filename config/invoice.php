@@ -2061,7 +2061,7 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
 {
     global $pdo;
 
-    $event_date = date('j F Y', strtotime($enquiry['event_date']));
+    $event_date = rh_conf_format_range($enquiry['event_date'], $enquiry['end_date'] ?? null, 'j F Y');
 
     // VAT settings
     $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
@@ -2360,7 +2360,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
             'company_name' => htmlspecialchars((string)($enquiry['company_name'] ?? ''), ENT_QUOTES, 'UTF-8'),
             'contact_person' => htmlspecialchars((string)($enquiry['contact_person'] ?? ''), ENT_QUOTES, 'UTF-8'),
             'conference_room' => htmlspecialchars((string)($room['name'] ?? ''), ENT_QUOTES, 'UTF-8'),
-            'event_date' => htmlspecialchars(date('F j, Y', strtotime((string)$enquiry['event_date'])), ENT_QUOTES, 'UTF-8'),
+            'event_date' => htmlspecialchars(rh_conf_format_range((string)$enquiry['event_date'], $enquiry['end_date'] ?? null, 'F j, Y'), ENT_QUOTES, 'UTF-8'),
             'event_time' => htmlspecialchars(date('H:i', strtotime((string)$enquiry['start_time'])) . ' - ' . date('H:i', strtotime((string)$enquiry['end_time'])), ENT_QUOTES, 'UTF-8'),
             'attendees' => (string)((int)($enquiry['number_of_attendees'] ?? 0)),
             'subtotal_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($ciSubtotal, 2), ENT_QUOTES, 'UTF-8'),
@@ -2400,7 +2400,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
 
                     <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
                         <span style="font-weight: bold; color: #333;">Event Date:</span>
-                        <span style="color: #666;">' . date('F j, Y', strtotime($enquiry['event_date'])) . '</span>
+                        <span style="color: #666;">' . rh_conf_format_range($enquiry['event_date'], $enquiry['end_date'] ?? null, 'F j, Y') . '</span>
                     </div>
 
                     <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">

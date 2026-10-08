@@ -21,7 +21,9 @@ require_once 'includes/modal.php';
 require_once 'includes/validation.php';
 require_once 'includes/section-headers.php';
 require_once 'includes/public-csrf.php';
+require_once 'includes/conference-pricing.php';
 
+$confHasEndDate = rh_conf_has_end_date($pdo);
 $conferenceEnabled = isConferenceEnabled();
 
 // Fetch policies for footer modals
@@ -145,6 +147,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sanitized_data['start_time'] = $datetime_validation['datetime']->format('H:i');
         }
 
+        // Optional end date for multi-day events (only when the column exists)
+        $sanitized_data['end_date'] = null;
+        $endDateRaw = trim((string)($_POST['end_date'] ?? ''));
+        if ($confHasEndDate && $endDateRaw !== '') {
+            $endDt = DateTime::createFromFormat('Y-m-d', $endDateRaw);
+            if (!$endDt || $endDt->format('Y-m-d') !== $endDateRaw) {
+                $validation_errors['end_date'] = 'Please enter a valid end date.';
+            } elseif (!empty($sanitized_data['event_date'])) {
+                if ($endDateRaw < $sanitized_data['event_date']) {
+                    $validation_errors['end_date'] = 'The end date cannot be before the event date.';
+                } elseif (rh_conf_days($sanitized_data['event_date'], $endDateRaw) > 14) {
+                    $validation_errors['end_date'] = 'Multi-day events can span at most 14 days.';
+                } elseif ($endDateRaw > $sanitized_data['event_date']) {
+                    $sanitized_data['end_date'] = $endDateRaw;
+                }
+            }
+        }
+
         // Validate end_time separately
         $end_time_validation = validateTime($_POST['end_time'] ?? '');
         if (!$end_time_validation['valid']) {
@@ -262,8 +282,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception('Selected conference room is not available.');
         }
 
-        // Use full day rate for pricing
-        $total_amount = $room['daily_rate'];
+        // Server-side price: half-day rate for short single-day events, else daily rate x days
+        $conf_price = rh_conf_price($room, $event_date, $sanitized_data['end_date'], $start_time, $end_time);
+        $total_amount = $conf_price['amount'];
 
         // Quoted rates are VAT-inclusive, so record the split without inflating the
         // quote — otherwise the enquiry lands in admin with vat_amount = 0 and the
@@ -311,6 +332,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $conference_total_wv
         ]);
 
+        // Multi-day events: store the last day (column is optional - migration 061)
+        $new_inquiry_id = $pdo->lastInsertId();
+        if ($confHasEndDate && !empty($sanitized_data['end_date'])) {
+            $pdo->prepare("UPDATE conference_inquiries SET end_date = ? WHERE id = ?")
+                ->execute([$sanitized_data['end_date'], $new_inquiry_id]);
+        }
+
         // Set success and generate reference after validation passes
         $inquiry_success = true;
         $success_reference = $inquiry_reference;
@@ -325,6 +353,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'email' => $email,
             'phone' => $phone,
             'event_date' => $event_date,
+            'end_date' => $sanitized_data['end_date'],
             'start_time' => $start_time,
             'end_time' => $end_time,
             'number_of_attendees' => $attendees,
@@ -499,6 +528,10 @@ function resolveConferenceImage(?string $imagePath): string
                                         <div class="editorial-event-price editorial-conference-price">
                                             <span class="editorial-price-label">Full Day Rate</span>
                                             <span class="editorial-price-value"><?php echo $currency_symbol . number_format($room['daily_rate'], 0); ?>/day</span>
+                                            <?php if (isset($room['half_day_rate']) && (float)$room['half_day_rate'] > 0): ?>
+                                                <span class="editorial-price-label">Half Day Rate (up to 5 hours)</span>
+                                                <span class="editorial-price-value"><?php echo $currency_symbol . number_format((float)$room['half_day_rate'], 0); ?>/half day</span>
+                                            <?php endif; ?>
                                         </div>
                                         <button class="editorial-btn-primary editorial-conference-inquire" onclick="openInquiryModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['name']); ?>')">
                                             <i class="fas fa-envelope"></i> Send Inquiry
@@ -546,10 +579,17 @@ function resolveConferenceImage(?string $imagePath): string
                 </div>
             </div>
 
-            <div class="form-group">
-                <label>Event Date *</label>
-                <input type="date" name="event_date" id="event_date" value="' . $confOld('event_date') . '" min="' . date('Y-m-d') . '" required>
-                <small class="field-error" id="event_date_error"></small>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Event Date *</label>
+                    <input type="date" name="event_date" id="event_date" value="' . $confOld('event_date') . '" min="' . date('Y-m-d') . '" required>
+                    <small class="field-error" id="event_date_error"></small>
+                </div>
+                ' . ($confHasEndDate ? '<div class="form-group">
+                    <label>End date (multi-day events)</label>
+                    <input type="date" name="end_date" id="end_date" value="' . $confOld('end_date') . '" min="' . date('Y-m-d') . '">
+                    <small class="field-error" id="end_date_error"></small>
+                </div>' : '') . '
             </div>
 
             <div class="form-row">

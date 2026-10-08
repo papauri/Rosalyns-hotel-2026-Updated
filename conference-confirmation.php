@@ -3,6 +3,7 @@ require_once 'config/database.php';
 require_once 'includes/public-csrf.php';
 require_once 'config/base-url.php';
 require_once 'includes/booking-functions.php';
+require_once 'includes/conference-pricing.php';
 
 $ref = trim(strip_tags($_GET['ref'] ?? ''));
 
@@ -15,7 +16,8 @@ if ($ref === '') {
 } else {
     try {
         $stmt = $pdo->prepare("
-            SELECT ci.*, cr.name AS room_name, cr.capacity AS room_capacity
+            SELECT ci.*, cr.name AS room_name, cr.capacity AS room_capacity, cr.daily_rate AS room_daily_rate"
+            . (rh_conf_has_half_day_rate($pdo) ? ", cr.half_day_rate AS room_half_day_rate" : "") . "
             FROM conference_inquiries ci
             LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
             WHERE ci.inquiry_reference = ?
@@ -94,7 +96,15 @@ try {
                 </div>
             </div>
         <?php else:
-            $event_date_fmt  = !empty($enquiry['event_date']) ? date('D, M j, Y', strtotime($enquiry['event_date'])) : '—';
+            $event_date_fmt  = rh_conf_format_range($enquiry['event_date'] ?? null, $enquiry['end_date'] ?? null);
+            $conf_price_info = rh_conf_price(
+                ['daily_rate' => $enquiry['room_daily_rate'] ?? 0, 'half_day_rate' => $enquiry['room_half_day_rate'] ?? null],
+                (string)($enquiry['event_date'] ?? ''),
+                $enquiry['end_date'] ?? null,
+                (string)($enquiry['start_time'] ?? ''),
+                (string)($enquiry['end_time'] ?? '')
+            );
+            $conf_price_label = $conf_price_info['label'];
             $start_fmt       = !empty($enquiry['start_time']) ? date('g:i A', strtotime($enquiry['start_time'])) : '—';
             $end_fmt         = !empty($enquiry['end_time'])   ? date('g:i A', strtotime($enquiry['end_time']))   : '—';
             $attendees       = (int)($enquiry['number_of_attendees'] ?? 0);
@@ -152,7 +162,7 @@ try {
                                 </div>
                                 <?php if ($total > 0): ?>
                                 <div class="conf-total-block">
-                                    <div class="conf-total-label">Estimated</div>
+                                    <div class="conf-total-label">Estimated &middot; <?php echo htmlspecialchars($conf_price_label); ?></div>
                                     <div class="conf-total-amount"><?php echo $currency_symbol . number_format($total, 0); ?></div>
                                 </div>
                                 <?php endif; ?>
