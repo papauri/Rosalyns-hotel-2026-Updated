@@ -84,15 +84,24 @@ $page_title = $seo['title'] === $site_name
     ? $site_name . ' - ' . $site_tagline
     : $seo['title'] . ' | ' . $site_name;
 
+// Turn a stored path into an absolute URL. Settings hold either a full URL, a
+// rooted path ("/images/x.png") or a bare relative path ("images/x.png"); the
+// last must not be glued onto the host without a slash.
+if (!function_exists('seoAbsoluteUrl')) {
+    function seoAbsoluteUrl($path, string $base_url): string
+    {
+        $path = trim((string) $path);
+        if ($path === '') return '';
+        if (preg_match('#^(https?:)?//#i', $path)) return $path;
+        return rtrim($base_url, '/') . '/' . ltrim($path, '/');
+    }
+}
+
 // Build absolute image URL
-$seo_image = strpos($seo['image'], 'http') === 0
-    ? $seo['image']
-    : $base_url . $seo['image'];
+$seo_image = seoAbsoluteUrl($seo['image'], $base_url);
 
 // Build absolute logo URL
-$logo_abs = strpos($site_logo, 'http') === 0
-    ? $site_logo
-    : $base_url . $site_logo;
+$logo_abs = seoAbsoluteUrl($site_logo, $base_url);
 
 // Versioning for SEO assets (favicons, touch icons) to force cache refresh on purge
 // Uses a dedicated setting that we can bump from admin tools

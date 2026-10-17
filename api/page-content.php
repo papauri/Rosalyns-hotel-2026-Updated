@@ -6,6 +6,9 @@
 
 // Set JSON header first
 header('Content-Type: application/json');
+// .htaccess gives application/json a 1-month Expires, which would otherwise pin
+// SPA navigations to markup from before the last front-end deploy.
+header('Cache-Control: no-store, no-cache, must-revalidate');
 
 // Error handling
 error_reporting(E_ALL);

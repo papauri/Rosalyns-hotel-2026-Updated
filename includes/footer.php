@@ -148,7 +148,7 @@ if (!function_exists('footer_parse_tags')) {
                                     $normalizedHref = 'contact-us.php' . ($hasHashAnywhere ? '' : '#contact-info');
                                 } elseif (!$startsHash && !$isAbsolute && !$isRooted && !$hasPhp && preg_match('/^[A-Za-z][A-Za-z0-9_\-:.]*$/', $rawHref)) {
                                     $normalizedHref = $is_index_page ? ('#' . $rawHref) : ('index.php#' . $rawHref);
-                                } elseif ($normalizedHref === $rawHref && !$hasPhp) {
+                                } elseif ($normalizedHref === $rawHref && !$hasPhp && !$startsHash) {
                                     // If URL has a hash, insert .php before the #, not at the end
                                     if ($hasHashAnywhere) {
                                         $parts = explode('#', $rawHref, 2);

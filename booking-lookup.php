@@ -175,9 +175,16 @@ try {
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
-    <meta name="theme-color" content="#1A1A1A">
-    <title>Check Booking Status | <?php echo htmlspecialchars($site_name); ?></title>
+    <?php
+    // Private, per-guest page: gets the favicon/meta set but is kept out of search results.
+    $seo_data = [
+        'title' => 'Check Booking Status',
+        'description' => 'Look up your booking with your reference number and email address.',
+        'type' => 'website',
+        'noindex' => true,
+    ];
+    require_once 'includes/seo-meta.php';
+    ?>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -269,7 +276,14 @@ try {
                         </div>
                         <div class="result-item">
                             <label>Total Amount</label>
-                            <div class="value" style="color: var(--gold);"><?php echo $currency_symbol; ?><?php echo number_format($booking['total_amount'], 0); ?></div>
+                            <div class="value" style="color: var(--gold);"><?php echo $currency_symbol; ?><?php
+                                // What the guest owes (VAT-inclusive); older rows without it fall back to total_amount.
+                                $lookup_owed = (float)($booking['total_with_vat'] ?? 0);
+                                if ($lookup_owed <= 0) {
+                                    $lookup_owed = (float)($booking['total_amount'] ?? 0);
+                                }
+                                echo number_format($lookup_owed, 0);
+                            ?></div>
                         </div>
                         <div class="result-item">
                             <label>Booking Status</label>

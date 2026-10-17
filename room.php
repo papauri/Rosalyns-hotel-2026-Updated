@@ -484,140 +484,168 @@ try {
 
         <?php $room_reviews_js_v = file_exists(__DIR__ . '/js/room-reviews.js') ? filemtime(__DIR__ . '/js/room-reviews.js') : 1; ?>
         <script src="js/room-reviews.js?v=<?php echo $room_reviews_js_v; ?>" defer></script>
+        <!-- Page scripts live inside <main>: in-site navigation keeps only <main>, so anything
+             after it (and any DOMContentLoaded hook) would never run after a client-side visit. -->
+        <script>
+        (function () {
+            // Scroll reveal for elements with .rh-reveal
+            function initReveal() {
+                const revealElements = document.querySelectorAll('.rh-reveal');
+
+                if (revealElements.length === 0) return;
+
+                const revealObserver = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            entry.target.classList.add('is-revealed');
+                            // Optionally stop observing after reveal
+                            // revealObserver.unobserve(entry.target);
+                        }
+                    });
+                }, {
+                    root: null,
+                    rootMargin: '0px 0px -80px 0px',
+                    threshold: 0.1
+                });
+
+                revealElements.forEach(el => {
+                    revealObserver.observe(el);
+                });
+
+                // Fallback: reveal all elements after page load if IntersectionObserver not triggered
+                setTimeout(() => {
+                    revealElements.forEach(el => {
+                        const rect = el.getBoundingClientRect();
+                        if (rect.top < window.innerHeight && rect.bottom > 0) {
+                            el.classList.add('is-revealed');
+                        }
+                    });
+                }, 500);
+            }
+
+            // Room gallery carousel (Swiper)
+            function initGallery() {
+                const galleryCarousel = document.querySelector('.room-gallery-swiper');
+                // Already initialised (guards against double-running after in-site navigation)
+                if (!galleryCarousel || galleryCarousel.swiper || typeof Swiper === 'undefined') {
+                    return;
+                }
+
+                const thumbsCarousel = document.querySelector('.room-gallery-thumbs');
+                const currentSlideEl = document.querySelector('.current-slide');
+                const totalSlidesEl = document.querySelector('.total-slides');
+                const nextButton = galleryCarousel.querySelector('.swiper-button-next');
+                const prevButton = galleryCarousel.querySelector('.swiper-button-prev');
+
+                function updateGalleryCounter(swiperInstance) {
+                    if (!swiperInstance) {
+                        return;
+                    }
+
+                    if (currentSlideEl) {
+                        currentSlideEl.textContent = String((swiperInstance.activeIndex || 0) + 1);
+                    }
+
+                    if (totalSlidesEl) {
+                        totalSlidesEl.textContent = String(swiperInstance.slides ? swiperInstance.slides.length : 0);
+                    }
+
+                    const currentSlide = swiperInstance.slides && swiperInstance.slides[swiperInstance.activeIndex];
+                    if (currentSlide) {
+                        const image = currentSlide.querySelector('img[loading="lazy"]');
+                        if (image) {
+                            image.loading = 'eager';
+                        }
+                    }
+                }
+
+                let thumbsSwiper = null;
+                if (thumbsCarousel) {
+                    thumbsSwiper = new Swiper(thumbsCarousel, {
+                        spaceBetween: 8,
+                        slidesPerView: 'auto',
+                        freeMode: true,
+                        watchSlidesProgress: true,
+                        centerInsufficientSlides: true,
+                        slideToClickedSlide: true,
+                        watchOverflow: true
+                    });
+                }
+
+                const mainSwiper = new Swiper(galleryCarousel, {
+                    spaceBetween: 0,
+                    slidesPerView: 1,
+                    navigation: {
+                        nextEl: nextButton,
+                        prevEl: prevButton
+                    },
+                    thumbs: thumbsSwiper ? {
+                        swiper: thumbsSwiper
+                    } : undefined,
+                    effect: 'fade',
+                    fadeEffect: {
+                        crossFade: true
+                    },
+                    speed: 600,
+                    loop: false,
+                    grabCursor: true,
+                    watchOverflow: true,
+                    keyboard: {
+                        enabled: true,
+                        onlyInViewport: true
+                    },
+                    a11y: {
+                        prevSlideMessage: 'Previous slide',
+                        nextSlideMessage: 'Next slide'
+                    },
+                    on: {
+                        init: function() {
+                            updateGalleryCounter(this);
+                        },
+                        slideChange: function() {
+                            updateGalleryCounter(this);
+                        }
+                    }
+                });
+
+                updateGalleryCounter(mainSwiper);
+            }
+
+            // Swiper CSS/JS are only in <head> on a direct load; after in-site navigation they
+            // must be added here. Each is added once; the CSS goes before main.css so the
+            // site's .room-gallery-* overrides still win the cascade.
+            if (!document.querySelector('link[href*="swiper-bundle"]')) {
+                var swCss = document.createElement('link');
+                swCss.rel = 'stylesheet';
+                swCss.href = 'https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css';
+                var mainCss = document.querySelector('link[rel="stylesheet"][href*="css/main.css"]');
+                if (mainCss && mainCss.parentNode) {
+                    mainCss.parentNode.insertBefore(swCss, mainCss);
+                } else {
+                    document.head.appendChild(swCss);
+                }
+            }
+
+            function withSwiper(cb) {
+                if (window.Swiper) { cb(); return; }
+                var el = document.getElementById('swiper-bundle-js');
+                if (!el) {
+                    el = document.createElement('script');
+                    el.id = 'swiper-bundle-js';
+                    el.src = 'https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js';
+                    document.head.appendChild(el);
+                }
+                el.addEventListener('load', cb);
+            }
+
+            initReveal();
+            withSwiper(initGallery);
+        })();
+        </script>
     </main>
 
     <!-- Scripts -->
     <script src="js/main.js" defer></script>
-
-    <!-- Scroll Reveal Animation Handler -->
-    <script>
-        // Scroll Reveal for elements with .rh-reveal class
-        document.addEventListener('DOMContentLoaded', function() {
-            const revealElements = document.querySelectorAll('.rh-reveal');
-
-            if (revealElements.length === 0) return;
-
-            const revealObserver = new IntersectionObserver((entries) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        entry.target.classList.add('is-revealed');
-                        // Optionally stop observing after reveal
-                        // revealObserver.unobserve(entry.target);
-                    }
-                });
-            }, {
-                root: null,
-                rootMargin: '0px 0px -80px 0px',
-                threshold: 0.1
-            });
-
-            revealElements.forEach(el => {
-                revealObserver.observe(el);
-            });
-
-            // Fallback: reveal all elements after page load if IntersectionObserver not triggered
-            setTimeout(() => {
-                revealElements.forEach(el => {
-                    const rect = el.getBoundingClientRect();
-                    if (rect.top < window.innerHeight && rect.bottom > 0) {
-                        el.classList.add('is-revealed');
-                    }
-                });
-            }, 500);
-        });
-    </script>
-
-    <!-- Swiper JS for Carousel -->
-    <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js" defer></script>
-
-    <script>
-        // Initialize Room Gallery Carousel
-        document.addEventListener('DOMContentLoaded', function() {
-            const galleryCarousel = document.querySelector('.room-gallery-swiper');
-            if (!galleryCarousel || typeof Swiper === 'undefined') {
-                return;
-            }
-
-            const thumbsCarousel = document.querySelector('.room-gallery-thumbs');
-            const currentSlideEl = document.querySelector('.current-slide');
-            const totalSlidesEl = document.querySelector('.total-slides');
-            const nextButton = galleryCarousel.querySelector('.swiper-button-next');
-            const prevButton = galleryCarousel.querySelector('.swiper-button-prev');
-
-            function updateGalleryCounter(swiperInstance) {
-                if (!swiperInstance) {
-                    return;
-                }
-
-                if (currentSlideEl) {
-                    currentSlideEl.textContent = String((swiperInstance.activeIndex || 0) + 1);
-                }
-
-                if (totalSlidesEl) {
-                    totalSlidesEl.textContent = String(swiperInstance.slides ? swiperInstance.slides.length : 0);
-                }
-
-                const currentSlide = swiperInstance.slides && swiperInstance.slides[swiperInstance.activeIndex];
-                if (currentSlide) {
-                    const image = currentSlide.querySelector('img[loading="lazy"]');
-                    if (image) {
-                        image.loading = 'eager';
-                    }
-                }
-            }
-
-            let thumbsSwiper = null;
-            if (thumbsCarousel) {
-                thumbsSwiper = new Swiper(thumbsCarousel, {
-                    spaceBetween: 8,
-                    slidesPerView: 'auto',
-                    freeMode: true,
-                    watchSlidesProgress: true,
-                    centerInsufficientSlides: true,
-                    slideToClickedSlide: true,
-                    watchOverflow: true
-                });
-            }
-
-            const mainSwiper = new Swiper(galleryCarousel, {
-                spaceBetween: 0,
-                slidesPerView: 1,
-                navigation: {
-                    nextEl: nextButton,
-                    prevEl: prevButton
-                },
-                thumbs: thumbsSwiper ? {
-                    swiper: thumbsSwiper
-                } : undefined,
-                effect: 'fade',
-                fadeEffect: {
-                    crossFade: true
-                },
-                speed: 600,
-                loop: false,
-                grabCursor: true,
-                watchOverflow: true,
-                keyboard: {
-                    enabled: true,
-                    onlyInViewport: true
-                },
-                a11y: {
-                    prevSlideMessage: 'Previous slide',
-                    nextSlideMessage: 'Next slide'
-                },
-                on: {
-                    init: function() {
-                        updateGalleryCounter(this);
-                    },
-                    slideChange: function() {
-                        updateGalleryCounter(this);
-                    }
-                }
-            });
-
-            updateGalleryCounter(mainSwiper);
-        });
-    </script>
 
     <!-- Footer -->
     <?php include 'includes/footer.php'; ?>

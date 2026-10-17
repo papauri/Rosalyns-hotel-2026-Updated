@@ -380,9 +380,14 @@ $old_room = $is_repost ? (int)($_POST['room_id'] ?? 0) : $selected_room_id;
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Submit a Review | <?php echo htmlspecialchars(getSetting('site_name')); ?></title>
-    <meta name="description" content="Share your experience at <?php echo htmlspecialchars(getSetting('site_name')); ?>. Submit your review and help us improve our services.">
+    <?php
+    $seo_data = [
+        'title' => 'Submit a Review',
+        'description' => 'Share your experience at ' . (string)getSetting('site_name') . '. Submit your review and help us improve our services.',
+        'type' => 'website',
+    ];
+    require_once 'includes/seo-meta.php';
+    ?>
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">

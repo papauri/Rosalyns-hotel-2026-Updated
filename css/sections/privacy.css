@@ -83,7 +83,7 @@
     padding: 0;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px 24px;
+    gap: 0 24px; /* rows get their spacing from the 44px tap targets below */
 }
 
 @media (max-width: 520px) {
@@ -101,6 +101,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    min-height: 44px; /* touch target */
     transition: color 0.2s ease;
 }
 

@@ -154,7 +154,14 @@ if (function_exists('getPageLoader')) {
     
     // Handle browser back/forward (bfcache)
     window.addEventListener('pageshow', function(e) {
-        if (e.persisted) {
+        if (e.persisted || !window._pageLoaderNavigating) {
+            hideLoader();
+        }
+    });
+
+    // A same-page #hash move never leaves the page, so the loader must not stay up.
+    window.addEventListener('hashchange', function() {
+        if (!window._pageLoaderNavigating) {
             hideLoader();
         }
     });

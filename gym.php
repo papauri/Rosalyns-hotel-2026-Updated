@@ -604,7 +604,7 @@ try {
 
                 <div class="schedule-cta text-center">
                     <button class="btn btn-primary" data-open-booking><i class="fas fa-calendar-plus"></i> Book a Class</button>
-                    <a href="#" onclick="alert('Full schedule download will be available soon. Please contact us for the complete class schedule.'); return false;" class="btn btn-outline"><i class="fas fa-download"></i> Download Full Schedule</a>
+                    <a href="gym-schedule.php" class="btn btn-outline"><i class="fas fa-calendar-alt"></i> View Full Schedule</a>
                 </div>
             </div>
         </section>

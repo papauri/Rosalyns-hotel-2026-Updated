@@ -701,7 +701,12 @@ function resolveConferenceImage(?string $imagePath): string
             const inquiryModal = document.getElementById('inquiryModal');
             const inquiryModalBackdrop = inquiryModal?.querySelector('.modal__backdrop');
 
-            function openInquiryModal(roomId, roomName) {
+            // Exposed on window (not a bare declaration) so the inline
+            // onclick="openInquiryModal(...)" still resolves after SPA navigation
+            // re-runs this script inside an IIFE, where a plain function
+            // declaration would be scoped to that IIFE and the button would be
+            // dead until a full reload.
+            window.openInquiryModal = function openInquiryModal(roomId, roomName) {
                 document.getElementById('selectedRoomId').value = roomId;
                 document.getElementById('selectedRoomName').value = roomName;
 
@@ -709,7 +714,7 @@ function resolveConferenceImage(?string $imagePath): string
                     inquiryModal.classList.add('modal--active');
                     document.body.classList.add('modal-open');
                 }
-            }
+            };
 
             function closeInquiryModal() {
                 if (inquiryModal) {

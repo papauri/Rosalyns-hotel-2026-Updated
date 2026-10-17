@@ -1523,31 +1523,33 @@ try {
 
     <script>
         // Site settings
-        const emailReservations = '<?php echo $email_reservations_esc; ?>';
-        const currencySymbol = '<?php echo htmlspecialchars($currency_symbol); ?>';
-        const childPriceMultiplier = <?php echo json_encode((float)getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50))); ?>;
+        // Every PHP value placed in JS goes through json_encode with the HEX flags so
+        // a quote, backslash or closing script tag in a setting or query string cannot break out.
+        const emailReservations = <?php echo json_encode((string)$email_reservations, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const currencySymbol = <?php echo json_encode((string)$currency_symbol, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const childPriceMultiplier = <?php echo json_encode((float)getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50)), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
         // Tourism levy settings
-        const tourismLevyEnabled = <?php echo json_encode(in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true)); ?>;
-        const tourismLevyPercent = <?php echo json_encode((float)getSetting('tourism_levy_percent', 0)); ?>;
+        const tourismLevyEnabled = <?php echo json_encode(in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const tourismLevyPercent = <?php echo json_encode((float)getSetting('tourism_levy_percent', 0), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         // VAT settings (levy sits outside the VAT base; see rh_stay_totals in includes/pricing.php)
-        const siteVatMode = <?php echo json_encode(vat_mode()); ?>;
-        const siteVatRate = <?php echo json_encode(vat_mode() === 'off' ? 0.0 : (float)getSetting('vat_rate', 0)); ?>;
+        const siteVatMode = <?php echo json_encode(vat_mode(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const siteVatRate = <?php echo json_encode(vat_mode() === 'off' ? 0.0 : (float)getSetting('vat_rate', 0), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
         // Blocked dates from server (global + per room)
-        const globalBlockedDates = <?php echo json_encode(array_values($global_blocked_dates)); ?>;
-        const blockedDatesByRoom = <?php echo json_encode($blocked_dates_by_room); ?>;
-        const preselectedRoomId = <?php echo $preselected_room_id ? $preselected_room_id : 'null'; ?>;
-        const preselectedRoomPrice = <?php echo $preselected_room ? $preselected_room['price_per_night'] : 'null'; ?>;
-        const preselectedRoomName = <?php echo $preselected_room ? '"' . addslashes($preselected_room['name']) . '"' : 'null'; ?>;
-        const preselectedRoomMaxGuests = <?php echo $preselected_room ? $preselected_room['max_guests'] : 'null'; ?>;
+        const globalBlockedDates = <?php echo json_encode(array_values($global_blocked_dates), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const blockedDatesByRoom = <?php echo json_encode($blocked_dates_by_room, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const preselectedRoomId = <?php echo $preselected_room_id ? (int)$preselected_room_id : 'null'; ?>;
+        const preselectedRoomPrice = <?php echo $preselected_room ? json_encode((float)$preselected_room['price_per_night']) : 'null'; ?>;
+        const preselectedRoomName = <?php echo $preselected_room ? json_encode((string)$preselected_room['name'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) : 'null'; ?>;
+        const preselectedRoomMaxGuests = <?php echo $preselected_room ? (int)$preselected_room['max_guests'] : 'null'; ?>;
 
         // Hero widget parameters
-        const heroCheckIn = <?php echo $hero_check_in ? '"' . $hero_check_in . '"' : 'null'; ?>;
-        const heroCheckOut = <?php echo $hero_check_out ? '"' . $hero_check_out . '"' : 'null'; ?>;
-        const heroGuests = <?php echo $hero_guests ? $hero_guests : 'null'; ?>;
-        const heroChildren = <?php echo $hero_children ? $hero_children : 'null'; ?>;
-        const heroRoomType = <?php echo $hero_room_type ? '"' . $hero_room_type . '"' : 'null'; ?>;
+        const heroCheckIn = <?php echo $hero_check_in ? json_encode((string)$hero_check_in, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) : 'null'; ?>;
+        const heroCheckOut = <?php echo $hero_check_out ? json_encode((string)$hero_check_out, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) : 'null'; ?>;
+        const heroGuests = <?php echo $hero_guests ? (int)$hero_guests : 'null'; ?>;
+        const heroChildren = <?php echo $hero_children ? (int)$hero_children : 'null'; ?>;
+        const heroRoomType = <?php echo $hero_room_type ? json_encode((string)$hero_room_type, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) : 'null'; ?>;
 
         // Restored after a rejected submission (null/empty on a fresh page load)
         const postedBooking = <?php echo json_encode([
@@ -1557,7 +1559,7 @@ try {
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
         // Rooms data for dynamic validation
-        const roomsData = <?php echo json_encode($rooms_data); ?>;
+        const roomsData = <?php echo json_encode($rooms_data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
         // Maximum advance booking window (days)
         const maxAdvanceDays = <?php echo (int)$max_advance_days; ?>;
@@ -1577,7 +1579,7 @@ try {
 
         // Track booked dates per room (dates that are fully booked/unavailable)
         // Pre-loaded with booked dates from database (includes tentative bookings)
-        const bookedDatesByRoom = <?php echo json_encode($booked_dates_by_room); ?>;
+        const bookedDatesByRoom = <?php echo json_encode($booked_dates_by_room, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         // Track the date range that was checked for availability
         let lastCheckedDateRange = {
             checkIn: null,

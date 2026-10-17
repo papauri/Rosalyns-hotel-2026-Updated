@@ -88,8 +88,15 @@
             this._setupGlobalMobileMenu();
             this._attachLinkListeners();
 
+            // Path+query of the page currently on screen. A popstate whose path+query
+            // is unchanged is a hash-only move (#section links, back from an anchor):
+            // the browser scrolls natively and nothing must reload or show the loader.
+            this._loadedKey = window.location.pathname + window.location.search;
+
             window.addEventListener('popstate', e => this._onPopState(e));
-            window.addEventListener('pageshow', e => { if (e.persisted) this._hideLoader(); });
+            // Never leave the loader up for a same-page hash move.
+            window.addEventListener('hashchange', () => { if (!this.isLoading) this._hideLoader(); });
+            window.addEventListener('pageshow', () => { if (!this.isLoading) this._hideLoader(); });
 
             history.replaceState({ page: this.currentPage }, '', window.location.href);
         }
@@ -295,8 +302,12 @@
             // Capture phase so we get the click before any other handler
             document.addEventListener('click', e => this._onLinkClick(e), true);
 
-            // Add non-SPA loader trigger for internal links
-            document.addEventListener('click', e => this._onNonSPALinkClick(e), true);
+            // NOTE: the former "non-SPA loader trigger" click listener was removed.
+            // It switched #page-loader on for clicks that never left the page
+            // (same-page #hash links, ctrl/cmd/shift/middle clicks, target=_blank,
+            // handlers that preventDefault later) and left it covering the site,
+            // so the main buttons looked dead. The destination page shows its own
+            // loader on load. (_onNonSPALinkClick is retained but no longer wired.)
         }
 
         _onLinkClick(e) {
@@ -428,6 +439,7 @@
                 // Update browser history
                 history.pushState({ page: pageName }, data.title || '', url);
                 this.currentPage = pageName;
+                this._loadedKey = window.location.pathname + window.location.search;
 
                 this._updateActiveNav(url);
                 this._reinit();
@@ -610,6 +622,11 @@
         ================================================================ */
 
         _onPopState() {
+            // Hash-only change on the same document: leave it to the browser.
+            if (this._loadedKey === window.location.pathname + window.location.search) {
+                if (!this.isLoading) this._hideLoader();
+                return;
+            }
             const url = window.location.href;
             const pageName = this._pageName(url);
             if (this._isSPA(pageName)) {
