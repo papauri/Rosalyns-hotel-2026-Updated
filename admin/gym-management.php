@@ -444,7 +444,6 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
         </div><!-- .admin-container -->
     </div><!-- .admin-content -->
 
-    <?php require_once 'includes/admin-footer.php'; ?>
 
     <!-- ── Add Package Modal ────────────────────────────────────────────────────── -->
     <div class="modal-overlay" id="addGymPackageModal" style="display:none;" onclick="if(event.target===this)closeAddGymPackageModal()">
@@ -731,6 +730,10 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
             </div>
         </div>
     <?php endif; ?>
+
+    <?php /* Modals sit before the footer: admin-footer.php closes #rh-admin-page, and the admin SPA
+       only swaps that container, so markup printed after it is lost on in-place navigation. */ ?>
+    <?php require_once 'includes/admin-footer.php'; ?>
 
     <script>
         // ── Package data injected from PHP ──────────────────────────────────────────

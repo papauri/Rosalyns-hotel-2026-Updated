@@ -2688,7 +2688,6 @@ $csrf_token = generateCsrfToken();
         </template>
     </div>
 
-    <?php require_once 'includes/admin-footer.php'; ?>
     <div id="soVoidModal" class="modal-overlay" data-modal role="dialog" aria-modal="true" aria-labelledby="soVoidTitle">
         <div class="modal-content" style="max-width:min(96vw,26rem); width:min(96vw,26rem);">
             <div class="modal-header">
@@ -2756,6 +2755,9 @@ $csrf_token = generateCsrfToken();
             </div>
         </div>
     </div>
+    <?php /* Modals sit before the footer: admin-footer.php closes #rh-admin-page, and the admin SPA
+       only swaps that container, so markup printed after it is lost on in-place navigation. */ ?>
+    <?php require_once 'includes/admin-footer.php'; ?>
     <script>
         var _soVoidForm = null;
 

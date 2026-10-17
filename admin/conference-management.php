@@ -1869,6 +1869,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     fb.innerHTML = '';
 
                     var fd = new FormData();
+                    fd.append('csrf_token', CONFERENCE_CSRF_TOKEN || '');
                     fd.append('type', 'conference');
                     fd.append('id', String(_fbConfId));
                     fd.append('message', caption);
@@ -2084,6 +2085,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     fb.innerHTML = '';
 
                     var formData = new FormData();
+                    formData.append('csrf_token', CONFERENCE_CSRF_TOKEN || '');
                     formData.append('type', 'conferences_all');
                     formData.append('room_ids', JSON.stringify(checkedIds));
                     formData.append('message', caption);
@@ -2124,8 +2126,8 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         <?php endif; ?>
     </script>
 
-    <?php require_once 'includes/admin-footer.php'; ?>
-
+    <?php /* Modals sit before the footer: admin-footer.php closes #rh-admin-page, and the admin SPA
+       only swaps that container, so markup printed after it is lost on in-place navigation. */ ?>
     <?php if ($fb_conference_posting_on): ?>
         <!-- Facebook Conference Share Modal (two-column with live preview) -->
         <div class="modal-overlay" id="fbConferenceModal" style="display:none;" onclick="if(event.target===this)closeFbConferenceModal()">
@@ -2321,6 +2323,9 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             </div>
         </div>
     <?php endif; ?>
+
+    <?php require_once 'includes/admin-footer.php'; ?>
+
 </body>
 
 </html>

@@ -1492,8 +1492,8 @@ if ($stockReady) {
         }
     </script>
 
-    <?php require_once 'includes/admin-footer.php'; ?>
-
+    <?php /* Modals sit before the footer: admin-footer.php closes #rh-admin-page, and the admin SPA
+       only swaps that container, so markup printed after it is lost on in-place navigation. */ ?>
     <?php if ($fb_menu_posting_on): ?>
         <!-- Facebook Menu Item Share Modal — two-column with live preview -->
         <div class="modal-overlay" id="fbMenuModal" style="display:none;" onclick="if(event.target===this)closeFbMenuModal()">
@@ -1820,4 +1820,7 @@ if ($stockReady) {
             }());
         </script>
     <?php endif; ?>
+
+    <?php require_once 'includes/admin-footer.php'; ?>
+
 

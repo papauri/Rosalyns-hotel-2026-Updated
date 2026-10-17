@@ -1967,6 +1967,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                     fb.innerHTML = '';
 
                     var formData = new FormData();
+                    formData.append('csrf_token', <?php echo json_encode($csrf_token); ?>);
                     formData.append('type', 'room');
                     formData.append('id', String(_fbRoomId));
                     formData.append('message', caption);
@@ -2189,6 +2190,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                     fb.innerHTML = '';
 
                     var formData = new FormData();
+                    formData.append('csrf_token', <?php echo json_encode($csrf_token); ?>);
                     formData.append('type', 'rooms_all');
                     formData.append('room_ids', JSON.stringify(checkedIds));
                     formData.append('message', caption);
