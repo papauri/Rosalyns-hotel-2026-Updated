@@ -103,7 +103,7 @@
       <tr><td>Refund payment</td><td>Shown when money is owed back to the guest (overpaid / credit), or a cancelled, expired or no-show booking still holds a payment.</td></tr>
       <tr><td>Cancel booking</td><td>Pending, tentative and confirmed bookings (needs Cancel Bookings).</td></tr>
       <tr><td>Restore booking</td><td>Deleted bookings only (needs Delete &amp; Restore Bookings).</td></tr>
-      <tr><td><strong>More</strong> menu</td><td>Full details; Full edit page (or <em>Correct guest details</em> on a closed booking); Quick modify (before departure only); Assign room / Change room (confirmed, not a missed arrival); Upgrade / change room type (pending, tentative, confirmed or in-house); Make tentative (unpaid pending); Undo check-in; Change checkout date (administrators, overdue guests); Payments &amp; balance (open stays, or a checked-out booking with a balance or credit); Resend email; Send invoice (confirmed, in-house, checked out); Send quotation and Quotation via WhatsApp (pending and tentative only); Audit log; Delete booking (when allowed, see below).</td></tr>
+      <tr><td><strong>More</strong> menu</td><td>Full details; Full edit page (or <em>Correct guest details</em> on a closed booking); Quick modify (before departure only); Assign room / Change room (confirmed bookings, including late arrivals whose arrival date has passed); Upgrade / change room type (pending, tentative, confirmed or in-house); Make tentative (unpaid pending); Undo check-in; Change checkout date (administrators, overdue guests); Payments &amp; balance (open stays, or a checked-out booking with a balance or credit); Resend email; Send invoice (confirmed, in-house, checked out); Send quotation and Quotation via WhatsApp (pending and tentative only); Audit log; Delete booking (when allowed, see below).</td></tr>
     </tbody>
   </table>
 
@@ -158,14 +158,20 @@
   <p>A tentative booking has a <strong>Convert to Confirmed</strong> button instead. It asks <em>"Convert this tentative booking to confirmed and send the conversion email?"</em> and then shows <em>"Tentative booking converted to confirmed!"</em></p>
 
   <h2 id="assign">How to assign or change a room</h2>
-  <p>Assigning a physical room works only for <strong>Confirmed</strong> bookings.</p>
+  <p>Assigning a physical room works only for <strong>Confirmed</strong> bookings. A late arrival (confirmed, but the arrival date has passed) can be given a room too, because it needs one before it can be checked in.</p>
   <ol class="steps">
     <li>Open the booking page and click <strong>Assign Room</strong> (or <strong>Change Room</strong> if one is already assigned). On the list use <strong>More</strong> &rarr; <strong>Assign room</strong> or <strong>Change room</strong>.</li>
-    <li>In the <strong>Assign Room</strong> window pick the room under <strong>Select Individual Room</strong>. Only rooms of the booked room type that are free for those dates are offered.</li>
-    <li>If the booking has children and the room does not accept children, you must tick the override box and type a note explaining why.</li>
-    <li>Save. You will see <em>"Room assigned successfully"</em>.</li>
+    <li>The <strong>Assign Room</strong> window shows the booking reference and dates, and lists <strong>every</strong> room of the booked room type under <strong>Select Individual Room</strong>, not only the free ones. A line at the top says how many can take the stay (for example <em>"3 of 8 rooms can take this stay."</em>). Rooms you can use come first.</li>
+    <li>Each room has a badge. <strong>Available</strong>: free and ready. <strong>Turnover</strong>: free for the stay, but housekeeping is not finished with it. The note says <em>"Being cleaned"</em> or <em>"Previous guest still in the room"</em> and <em>"it must be marked clean before check-in"</em>. <strong>Needs note</strong>: the booking has children and the room does not accept them (see the next step). <strong>Current</strong>: the room the booking already holds. <strong>Unavailable</strong>: greyed out, with the reason underneath, for example the booking that holds it (<em>"Booked: [booking reference] (12 Oct - 14 Oct)"</em>), a blocked date, or maintenance. Some rooms are also marked <em>"Held for a joined-room booking that has no rooms yet"</em>.</li>
+    <li>Click a room that is not greyed out. If the booking has children and the room does not accept children, tick the override box and type a note explaining why.</li>
+    <li>Click <strong>Assign Room</strong> and confirm. You will see <em>"Room assigned successfully"</em>.</li>
   </ol>
-  <p>To move a guest to a different room <em>type</em> (upgrade or downgrade) see <a href="#upgrade">How to upgrade or downgrade a room type</a>. An in-house guest can be moved to another room of the same type from the full edit page; their old room goes to Cleaning.</p>
+  <p>A room that housekeeping is still turning over is never hidden: it stays on sale, and you can assign it. Only the check-in itself waits for a clean room (see <a href="#checkin">How to check a guest in</a>).</p>
+  <h3>Joined-room bookings</h3>
+  <p>When the booked room type is a joined room (two adjoining rooms sold together, for example a family suite), the window lists the pairs instead, for example <em>"Rooms 101 + 102"</em>, and you assign both rooms in one go. The button reads <strong>Assign Rooms</strong> and the confirmation is titled <em>Confirm joined-room assignment</em>. You will see <em>"Joined rooms 101 + 102 assigned"</em>. A pair is greyed out with a reason if either room is booked, blocked or under maintenance, or if the room type of either room is blocked (<em>"The room type of one of these rooms is blocked on these dates"</em>). A joined-room booking always holds a whole pair: it is never given a single room (<em>"This is a joined-room booking ..."</em>), and the full edit page never splits the pair: it shows <em>Joined room</em> with a link to <strong>Change rooms</strong> (or <strong>Assign rooms</strong>).</p>
+  <h3>Moving an in-house guest</h3>
+  <p>To move a guest to a different room <em>type</em> (upgrade or downgrade) see <a href="#upgrade">How to upgrade or downgrade a room type</a>. An in-house guest can be moved to another room of the same type from the full edit page; their old room goes to Cleaning. Because the guest moves in now, the new room must be clean. An unclean room is listed as <em>Not clean yet</em>, or you will see <em>"Room 12 is not clean yet, so the guest cannot move in now. Open Housekeeping and mark the cleanup as completed, or pick a clean room."</em></p>
+  <div class="note"><p>Assign Room, Change Room, Upgrade / Change Type and Check Out &amp; Settle open on the Bookings list. When you start them from a booking page, you return to that booking when the action is done or you close the window. You do not have to find the booking again.</p></div>
 
   <h2 id="checkin">How to check a guest in</h2>
   <ol class="steps">
@@ -174,7 +180,7 @@
     <li>Click <strong>Check In</strong> (on the booking page you are asked to confirm). On the list a window opens with <strong>Prerequisites</strong> and an <strong>Optional Note</strong>.</li>
     <li>You will see <em>"Guest checked in successfully."</em> on the booking page, with <em>"Room marked as occupied."</em> and, for a late arrival, <em>"Note: late check-in (N day(s) overdue)."</em></li>
   </ol>
-  <div class="warn"><p>If housekeeping has not marked the room clean, check-in is blocked: <em>"Check-in blocked: Room 101 (cleaning pending) is not marked clean yet. Ask housekeeping to finish the room, or ask someone with the "Check-in to Room Not Clean" permission."</em> A person who has that permission sees <em>"... Confirm to check the guest in anyway (recorded in the booking timeline)."</em> and can go ahead. The check-in is then recorded in the timeline as "Checked in to a room not marked clean".</p></div>
+  <div class="warn"><p>Check-in is the one step that waits for housekeeping: a room being turned over can be assigned, but the guest cannot be checked in until it is clean. If housekeeping has not marked the room clean, check-in is blocked: <em>"Check-in blocked: Room 101 (cleaning pending) is not marked clean yet. Ask housekeeping to finish the room, or ask someone with the "Check-in to Room Not Clean" permission."</em> A person who has that permission sees <em>"... Confirm to check the guest in anyway (recorded in the booking timeline)."</em> and can go ahead. The check-in is then recorded in the timeline as "Checked in to a room not marked clean".</p></div>
   <p>To undo a check-in, use <strong>More</strong> &rarr; <strong>Undo check-in</strong> on the list (needs Check-in Guests; not shown once the guest is overdue for check-out). The booking goes back to Confirmed. A room that is still Occupied is freed and sent to <strong>Cleaning</strong> (the guest was in it), not straight to Available. A room that is in Maintenance or Out of Order is left as it is: <em>"Check-in cancelled (reverted to confirmed)."</em></p>
 
   <h2 id="payment">How to take a payment</h2>
@@ -335,6 +341,12 @@
     <li>Save. You will see <em>"Room type date blocked successfully."</em>, <em>"Individual room date blocked successfully."</em> or <em>"Successfully blocked N date(s)."</em></li>
   </ol>
   <p>The list shows Date, Scope, Room, Block Type, Reason, Created By, Created At. Filter by Room Type, Individual Room, Start Date and End Date. Click <strong>Unblock</strong> on a row to free the date: <em>"Date unblocked successfully"</em>.</p>
+  <p>In the room lists, individual rooms are grouped under their room type. Room types that are sold as joined pairs are labelled <em>"- joined pairs"</em>, and a room that belongs to a pair is labelled <em>"Room 101 - part of joined room Family Suite (with 102)"</em>. What a block does to joined rooms:</p>
+  <ul>
+    <li>Blocking a <strong>room type</strong> also stops the joined pairs that use rooms of that type.</li>
+    <li>Blocking a <strong>joined-pairs room type</strong> stops only the pairs. The two rooms can still be sold on their own.</li>
+    <li>Blocking a <strong>single room</strong> that is part of a pair also takes that pair off sale on those nights. Its row in the list says <em>"Also blocks joined room ..."</em>.</li>
+  </ul>
   <div class="warn"><p>A block does not cancel or move existing bookings. If bookings already sleep on the blocked nights you will see <em>"Note: N existing booking(s) already sleep on these nights (...). Blocks do not cancel or move bookings; reassign or contact those guests."</em> Only today or later dates can be blocked.</p></div>
 
   <h2 id="rooms">Individual rooms</h2>
@@ -344,8 +356,23 @@
     <li>Each row has <strong>Details</strong>, <strong>Edit</strong>, <strong>Assign</strong> and <strong>Status</strong>. Tick several rooms and use <strong>Change status to...</strong> to change them together.</li>
     <li><strong>Add Individual Room</strong>: <strong>Room Type</strong> and <strong>Room Number</strong> are required (room numbers must be unique: <em>"Room number already exists. Please use a unique room number."</em>). Optional: Room Name, Floor, Guest Capacity Override, Status, Display Order, Child Supplement Override (%), occupancy overrides, Children Allowed Override, Notes.</li>
     <li>A room with a current or future pending, confirmed or checked-in booking cannot be deleted: <em>"Cannot delete room with active bookings."</em></li>
-    <li><strong>Joined Room Combinations</strong>: two rooms that can be sold together as one room type, for example a family suite. Needs a name, a room type to book as, and two different active rooms.</li>
+    <li>A room that belongs to a joined pair shows a blue badge under its room type: <em>"Also joined: Family Suite with 102"</em> (the room is still sold on its own) or <em>"Joined only: ..."</em> (sold only as the pair). A pairing that is switched off is greyed and ends with <em>(inactive)</em>.</li>
   </ul>
+  <h3>Joined room combinations</h3>
+  <p>Two adjoining rooms can be sold together as one room type, for example a family suite. Click <strong>Room Combinations</strong> at the top of Individual Rooms (the badge shows how many pairings exist) to open <strong>Joined Room Combinations</strong>.</p>
+  <ol class="steps">
+    <li>Under <strong>Add / Edit Combination</strong> fill in <strong>Combination Name</strong>, <strong>Book As Room Type</strong>, <strong>First Room</strong> and <strong>Second Room</strong> (two different active rooms). Optional: <strong>Rate Override</strong>, <strong>Max Guests</strong>, <strong>Notes</strong> and the <strong>Active</strong> tick.</li>
+    <li>Under <strong>How are these two rooms sold?</strong> choose <strong>On their own and as the joined room</strong> (each room keeps its own room type; booking the pair takes both rooms, and booking either room makes the pair unavailable) or <strong>Only as the joined room</strong> (both rooms move to the Book As room type and are no longer sold on their own). The second choice is refused while a booking of another room type holds either room: <em>"These rooms cannot be sold only as the joined room yet: ..."</em> Move those bookings first.</li>
+    <li>Click <strong>Save Combination</strong>. You will see <em>"Joined-room combination added successfully!"</em> or <em>"Joined-room combination updated successfully!"</em>. <strong>Clear</strong> empties the form.</li>
+  </ol>
+  <p><strong>Existing Combinations</strong> lists Name, Book As, Rooms, Sold (<em>Alone and as the pair</em> or <em>Only as the pair</em>), Capacity, Rate and Status (with the number of bookings that used it). The buttons on each row:</p>
+  <ul>
+    <li><strong>Edit</strong>: loads the pairing into the form.</li>
+    <li><strong>Deactivate</strong>: stops selling the pair (<em>"Stop selling ...?"</em>). Bookings that already hold the rooms keep them. An inactive pairing shows <strong>Reactivate</strong> instead.</li>
+    <li><strong>Reactivate</strong>: sells the pair again (<em>"Joined-room combination reactivated."</em>).</li>
+    <li><strong>Delete</strong>: removes a pairing that no booking has ever used. Only the pairing goes; the two rooms stay as they are. A pairing that bookings used cannot be deleted (the button is greyed out, <em>"Used by bookings - kept for their history. Deactivate it instead."</em>).</li>
+  </ul>
+  <p>A room can belong to only one <em>active</em> pair: <em>"One of these rooms is already part of the active joined room ... Deactivate or delete that combination first."</em> The same two rooms cannot be joined twice: <em>"These two rooms are already joined as ..."</em>.</p>
   <p>Room cleaning and repairs are covered in the <a href="06-housekeeping.html">Housekeeping guide</a>. Prices are covered in the <a href="09-packages-rates.html">Packages and Rates guide</a>.</p>
 
   <h2 id="guest">The guest's side: booking form and look-up</h2>
@@ -378,6 +405,8 @@
     <li>Prices are never typed in on the edit pages: changes reprice at the guest's booked rate, room-type changes go through Upgrade / change room type, and price corrections through a credit note.</li>
     <li>Deleted bookings are hidden everywhere except the Deleted tab, hold no room, and cannot be changed until restored.</li>
     <li>After check-out the room goes to Cleaning and the folio is locked.</li>
+    <li>Housekeeping never takes a room off sale and never removes it from the Assign Room list: a room being turned over still shows, marked <em>Turnover</em>. Only check-in waits for a clean room (an in-house room move also needs a clean room).</li>
+    <li>A joined pair is sold only when both rooms are free and neither room's own room type is blocked for those dates. A room can be in only one active pair.</li>
     <li>Status options on Create Booking: <strong>Pending</strong> and <strong>Confirmed</strong> save the booking with that status. <strong>Tentative (hold)</strong> saves a hold, disables payment collection and offers a quotation. <strong>Checked In (walk-in)</strong> saves the booking as already checked in.</li>
     <li>Payment status on a new booking is worked out from the amount collected: the full total (or more) gives Paid, less gives Partial, nothing gives Unpaid.</li>
     <li>When you adjust stay dates, the new stay must be at least one night (<em>"Booking must be for at least one night."</em>) and no more than 30 nights (<em>"Booking cannot exceed 30 nights. Please contact management for extended stays."</em>).</li>
@@ -403,7 +432,11 @@
       <tr><td>Folio charges cannot be modified after check-out...</td><td>The booking is checked out.</td><td>Raise a credit note.</td></tr>
       <tr><td>Cannot confirm: No rooms available for the selected dates.</td><td>The room type is full for those dates.</td><td>Change dates or room type, or free a room.</td></tr>
       <tr><td>Only N room(s) of "..." remain available for those dates...</td><td>You asked for more rooms than are free.</td><td>Reduce the number of rooms on Create Booking.</td></tr>
-      <tr><td>Selected room could not be assigned: it is unavailable...</td><td>The room overlaps another booking, a block, maintenance or a housekeeping task.</td><td>Pick another room.</td></tr>
+      <tr><td>Selected room could not be assigned: it is unavailable...</td><td>The room overlaps another booking, a block or a maintenance window. The Assign Room list shows the reason under each greyed-out room.</td><td>Pick another room.</td></tr>
+      <tr><td>This is a joined-room booking ...</td><td>The booked room type is a joined room, which is always assigned as a pair, never as one room.</td><td>Open the booking and use <strong>Assign Room</strong>, then pick a pair (<strong>Rooms 101 + 102</strong>) in the window.</td></tr>
+      <tr><td>Those joined rooms could not be assigned: ...</td><td>One of the two rooms is booked, blocked or under maintenance, or its room type is blocked.</td><td>Pick another pair, or remove the block.</td></tr>
+      <tr><td>A room can only be assigned to a confirmed booking (this one is ...).</td><td>The booking is pending, tentative, checked in or closed.</td><td>Confirm the booking first.</td></tr>
+      <tr><td>Room ... is not clean yet, so the guest cannot move in now.</td><td>An in-house guest is being moved to a room housekeeping has not finished.</td><td>Mark the cleaning done in Housekeeping, or pick a clean room.</td></tr>
       <tr><td>Selected room does not match this booking room type</td><td>The room belongs to a different room type.</td><td>Use <strong>Upgrade / change room type</strong> first.</td></tr>
       <tr><td>At least 1 adult is required.</td><td>Children count equals or exceeds total guests.</td><td>Fix the guest numbers.</td></tr>
       <tr><td>Your role does not have permission to override room pricing.</td><td>Only administrators and managers can use Price override.</td><td>Clear the override or ask a manager.</td></tr>

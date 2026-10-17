@@ -118,10 +118,11 @@
     <li>At the same moment a cleaning task is created for the room. It is <strong>Pending</strong>, due today, with the note <em>"Room turnover cleaning"</em>.</li>
     <li>Open <strong>Housekeeping</strong>. The task is in the <strong>All Assignments</strong> table. Assign it to a cleaner by clicking <strong>Edit</strong> and choosing a name in <strong>Assigned To</strong>.</li>
     <li>The cleaner starts the job. Click <strong>Mark as started</strong>. The status becomes <strong>In Progress</strong>.</li>
-    <li>When the room is clean, click <strong>Mark done</strong>. The status becomes <strong>Completed</strong>. As soon as the room has no other open cleaning task, the room status changes from <strong>Cleaning</strong> to <strong>Available</strong> and the room can be sold or checked in. A room that is occupied, under maintenance or out of order is never made Available by cleaning (see the rules below).</li>
+    <li>When the room is clean, click <strong>Mark done</strong>. The status becomes <strong>Completed</strong>. As soon as the room has no other open cleaning task, the room status changes from <strong>Cleaning</strong> to <strong>Available</strong> and a guest can be checked in to it. A room that is occupied, under maintenance or out of order is never made Available by cleaning (see the rules below).</li>
     <li>A supervisor looks at the room and clicks <strong>Verify</strong>. The task becomes <strong>Verified</strong> and is locked. Verifying does not change the room status. It only records who checked the room and when. On a maintenance request, the person who verifies is the one recorded as the verifier.</li>
   </ol>
   <div class="note"><p>A room is ready for the next guest as soon as its cleaning task is <strong>Completed</strong>. You do not have to wait for <strong>Verify</strong>.</p></div>
+  <div class="note"><p>A cleaning task never takes a room off sale. A room that is being turned over (a Pending or In progress clean, or the previous guest still in it) stays bookable on the website and in the <strong>Assign Room</strong> list, where it is marked <strong>Turnover</strong> with the note <em>"Being cleaned"</em> or <em>"Previous guest still in the room"</em>. Reception can assign it to tonight's guest. Only the check-in waits until the room is clean (see <a href="#checkin">Checking a guest in to a room that is not clean</a>).</p></div>
   <h2 id="room-board">The Room board (room status at a glance)</h2>
   <p>The Room board shows every room's status and the rooms waiting for cleaning. Open it from the <strong>Dashboard</strong>: in the <strong>Occupancy</strong> card (for example <em>"1 of 15 rooms occupied"</em>) click <strong>Room board</strong> (<code>/admin/room-dashboard.php</code>, page title <strong>Room Management Dashboard</strong>). It needs the <strong>Room Dashboard</strong> permission and the Bookings module.</p>
   <ul>
@@ -265,6 +266,7 @@
   <ul>
     <li>Without the permission <strong>Check-in to Room Not Clean</strong> you will see <em>"Check-in blocked: Room 12 (cleaning pending) is not marked clean yet. Ask housekeeping to finish the room, or ask someone with the "Check-in to Room Not Clean" permission."</em> Ask housekeeping to click <strong>Mark done</strong> on the task, then check the guest in again.</li>
     <li>With that permission, a box titled <strong>Room not marked clean</strong> asks you to confirm. Click <strong>Check in anyway</strong> to go ahead. The check-in is recorded in the booking timeline as <em>"Checked in to a room not marked clean"</em>, with your name.</li>
+    <li>Moving a guest who is already in the hotel to another room is stricter: the new room must be clean, because the guest moves in now. Reception sees <em>"Room 12 is not clean yet, so the guest cannot move in now. Open Housekeeping and mark the cleanup as completed, or pick a clean room."</em> The <strong>Check-in to Room Not Clean</strong> permission applies to check-in only.</li>
   </ul>
 
   <h2 id="rules">Rules the system enforces</h2>
@@ -284,6 +286,7 @@
     <li>The checkout-cleanings button lists a room again after its next check-out, and skips a room that already has an open task.</li>
     <li>A maintenance request with <strong>Block room during maintenance</strong> ticked stops bookings for the room between its Start Date and End Date until the request is Completed, Verified or Cancelled.</li>
     <li>Checking a guest in to a room that is not clean is blocked unless you have the <strong>Check-in to Room Not Clean</strong> permission and confirm.</li>
+    <li>Housekeeping never hides a room from sale or from the Assign Room list. A room being turned over is shown as <strong>Turnover</strong> and can be assigned. Only check-in, and moving an in-house guest into another room, wait for a clean room.</li>
     <li>Every change to a cleaning task or maintenance request is saved in its history.</li>
   </ul>
 

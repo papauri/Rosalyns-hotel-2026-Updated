@@ -42,7 +42,7 @@
       <li><a href="#refund">How to refund a paid order</a></li>
       <li><a href="#86">How to 86 an item (mark it unavailable)</a></li>
       <li><a href="#force-serve">How to settle a tab whose food was never served</a></li>
-      <li><a href="#notes">How to send a note to a station and read replies</a></li>
+      <li><a href="#notes">How to chat with the stations and send them a note</a></li>
       <li><a href="#receipts">How to print a kitchen ticket or send a receipt</a></li>
       <li><a href="#close">How to close your shift (Z-report)</a></li>
       <li><a href="#zreport">How to read the shift close report</a></li>
@@ -63,7 +63,7 @@
     <li><strong>Tabs</strong> &mdash; the open (unpaid) tabs. The number on the button is how many are open.</li>
     <li><strong>Note</strong> &mdash; send a short note to the Kitchen, Bar or Coffee Bar.</li>
     <li><strong>My orders</strong> &mdash; every order you rang up today, with kitchen and payment status.</li>
-    <li><strong>Messages</strong> &mdash; notes from the stations and their replies to yours.</li>
+    <li><strong>Messages</strong> &mdash; the chat with the Kitchen, Bar and Coffee Bar. A number on the button shows how many station notes are waiting for you. It opens the <strong>Service</strong> window on the <strong>Messages</strong> tab (see <a href="#notes">the chat with the stations</a>).</li>
     <li><strong>More</strong> &mdash; a menu with: <strong>Close shift (Z-report)</strong>; <strong>Opening float</strong> (only if you have <strong>POS Opening Float</strong>); <strong>Stations</strong> (only with <strong>POS Station Overview</strong>); <strong>86 mode</strong> (only with <strong>POS Quick-86 Items</strong>); <strong>All orders</strong> (opens Orders &amp; Tabs, only if you can open that page); <strong>Help mode</strong>; <strong>Sound settings</strong>; <strong>POS guide</strong> (opens this guide); <strong>Admin dashboard</strong> (only if you have the Dashboard permission).</li>
     <li><strong>Sign out</strong>.</li>
   </ul>
@@ -296,14 +296,24 @@
   </ol>
   <p>The manager approval works once and lasts 5 minutes. You cannot approve your own action. After 5 wrong attempts in 10 minutes the till says <em>"Too many attempts, wait N minute(s) before trying again."</em> If the food's ingredients are not in stock, force-serve is refused with a stock message; receive stock first.</p>
 
-  <h2 id="notes">How to send a note to a station and read replies</h2>
+  <h2 id="notes">How to chat with the stations and send them a note</h2>
+  <h3>Chat with the stations (Messages)</h3>
+  <p>Click <strong>Messages</strong> in the top bar. The <strong>Service</strong> window opens on its <strong>Messages</strong> tab (the other tab is <strong>My orders</strong>). It is the counterpart of the <strong>FOH chat</strong> on the Kitchen, Bar and Coffee Bar screens: today's whole conversation, oldest at the top and newest at the bottom.</p>
+  <ol class="steps">
+    <li>Pick who you are talking to with the tabs along the top: <strong>All</strong>, <strong>Kitchen</strong>, <strong>Bar</strong> or <strong>Coffee Bar</strong>. A number on a tab is how many notes from that station are waiting for you.</li>
+    <li>Read the bubbles. A station's note shows the station name, the order reference (if it is about an order), the time, and <em>urgent</em> when it is urgent. Your own messages are marked <strong>You</strong> (on the <strong>All</strong> tab: <em>"You &middot; to Kitchen"</em>). Small status lines show what happened to a note, such as <em>"Seen by Kitchen"</em>, <em>"Kitchen acknowledged"</em> or <em>"You marked this as seen"</em>.</li>
+    <li>When a station is waiting for you, a strip appears under the chat: <strong>Needs you</strong> and <em>"N notes waiting"</em>. Click <strong>Got it</strong> (with the number when several are waiting) to say you have seen them. You see <em>"FOH action recorded."</em> The alert and the number clear, but the notes stay in the conversation. You can also click a <strong>quick reply</strong> (<em>On my way</em>, <em>Coming now</em>, <em>2 minutes</em>, <em>Noted, thanks</em>) to answer the station in one tap.</li>
+    <li>To write your own message, use the box at the bottom. On the <strong>All</strong> tab choose the station in the box to its left (<strong>Kitchen</strong>, <strong>Bar</strong> or <strong>Coffee Bar</strong>); on a station's tab it goes to that station. The box says <em>"Reply to Kitchen&hellip;"</em> when that station has a note waiting, otherwise <em>"Message Kitchen&hellip;"</em>. Type up to 255 characters and click <strong>Send</strong> (or press Enter). You see <em>"Sent to Kitchen."</em></li>
+  </ol>
+  <p>If the station has a note waiting, what you type is sent as the answer to it and that note counts as dealt with. If nothing is waiting, it starts a new note. Notes you have acknowledged are not removed: they stay in today's conversation as history. When a new note arrives while the chat is closed, a pop-up appears with an <strong>Open chat</strong> button that takes you straight to that station's tab. The pop-up does not appear while the chat is already open. Click <strong>Note about an order</strong> at the bottom of the chat to attach a note to a particular order (see below). With no messages yet you see <em>"No messages yet today"</em>.</p>
+  <h3>Send a note about an order</h3>
   <ol class="steps">
     <li>Click <strong>Note</strong>.</li>
     <li>Type the <strong>Message</strong> (up to 255 characters). Under <strong>Send to</strong> choose <strong>Kitchen</strong>, <strong>Bar</strong> or <strong>Coffee Bar</strong>. Tick <strong>Urgent</strong> only if it cannot wait.</li>
     <li>Optionally open <strong>Attach to an order &amp; see its thread</strong> and pick an order.</li>
     <li>Click <strong>Send note</strong>. You see <em>"Kitchen note sent."</em> (or <em>"[URGENT]"</em> added for urgent notes). If the message is empty you see <em>"Type a station note first."</em></li>
   </ol>
-  <p>Replies and notes from the stations appear under <strong>Messages</strong> and as alert cards. A station's "ready for collection" message appears as <strong>Ready for collection</strong> with the order reference. An alert from the station about an 86'd item tells you to inform the guest and offer an alternative.</p>
+  <p>Replies and notes from the stations appear in the <strong>Messages</strong> chat and as alert cards. A station's "ready for collection" message appears as <strong>Ready for collection</strong> with the order reference. An alert from the station about an 86'd item tells you to inform the guest and offer an alternative.</p>
 
   <h2 id="receipts">How to print a kitchen ticket or send a receipt</h2>
   <ul>
@@ -396,8 +406,9 @@
     <li>Under <strong>Table Range</strong> fill in <strong>From</strong> and <strong>To</strong> (table numbers) and, if you wish, a default <strong>Capacity</strong> (seats).</li>
     <li>Tick <strong>Deactivate numeric tables outside this range</strong> if tables outside the range should be switched off.</li>
     <li>Click <strong>Generate / Update Range</strong>. You will see <em>"Restaurant table range saved."</em></li>
-    <li>In the table list, set each table's <strong>Capacity</strong> (optional), <strong>Notes</strong> (for example Window, patio, VIP) and the <strong>Active</strong> tick, then click <strong>Save Table Details</strong>. You will see <em>"Table capacities and active flags saved."</em></li>
+    <li>In the table list, change each table's name if you wish (the box in the <strong>Table</strong> column, 1 to 50 characters, for example <em>Patio 1</em>), set its <strong>Capacity</strong> (optional), <strong>Notes</strong> (for example Window, patio, VIP) and the <strong>Active</strong> tick, then click <strong>Save Table Details</strong>. You will see <em>"Table capacities and active flags saved."</em></li>
   </ol>
+  <p>Two tables cannot have the same name (<em>"A table called ... already exists. Use a different name or edit the existing one."</em>). A table that has an open order cannot be renamed or switched off until the order is settled or cancelled (<em>"Cannot rename Table 5 while order ... is still active."</em> / <em>"Cannot deactivate Table 5 while order ... is still active."</em>). The open-order check for switching off applies only to a table that is active and being switched off now; a table that is already inactive does not stop the rest of the list from saving.</p>
   <p>The list shows each table's <strong>Live Status</strong> (Available, or Pending, Preparing, Ready, Collecting, Served, Awaiting Payment, Recalled, Active), its <strong>Current Order</strong> and its <strong>Last Payment</strong>. A summary shows total rows, active tables and total capacity. <strong>Open POS</strong> takes you to the till.</p>
 
   <h2 id="table-pay">How to take payment for a table from the Tables page</h2>
@@ -431,6 +442,8 @@
     <tbody>
       <tr><td><em>"Enter a table number before sending the order."</em> / <em>"Enter a room number before sending the order."</em></td><td>Dine-in or Room chosen but no table or room picked.</td><td>Pick one from <strong>Select table...</strong> or <strong>Select checked-in room...</strong>.</td></tr>
       <tr><td><em>"No active restaurant tables are configured. Ask an admin to set Restaurant Tables first."</em></td><td>The Tables page has no active tables.</td><td>Set up tables (see <a href="#tables">above</a>).</td></tr>
+      <tr><td><em>"Cannot rename Table 5 while order ... is still active."</em> / <em>"Cannot deactivate Table 5 while order ... is still active."</em></td><td>The table has an open order.</td><td>Settle or cancel the order, then save the table list again.</td></tr>
+      <tr><td><em>"A table called ... already exists. Use a different name or edit the existing one."</em> / <em>"Table name must be between 1 and 50 characters."</em></td><td>Two tables share a name, or a name is empty or too long.</td><td>Give each table its own name of 1 to 50 characters.</td></tr>
       <tr><td><em>"Table 5 already has active order ORD-... (...). Settle, serve, cancel, or use the existing order before opening another."</em></td><td>The table or room is in use.</td><td>Use <strong>Add items</strong> on the existing tab, or settle or cancel it first.</td></tr>
       <tr data-module="bookings"><td><em>"Room 12 has no checked-in guest booking."</em></td><td>No checked-in guest in that room.</td><td>Check the guest in first.</td></tr>
       <tr><td><em>"Menu item not found or unavailable."</em></td><td>The item was switched off or 86'd after the till page loaded.</td><td>Refresh the till and choose another item.</td></tr>
