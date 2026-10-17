@@ -533,7 +533,7 @@ function resolveConferenceImage(?string $imagePath): string
                                                 <span class="editorial-price-value"><?php echo $currency_symbol . number_format((float)$room['half_day_rate'], 0); ?>/half day</span>
                                             <?php endif; ?>
                                         </div>
-                                        <button class="editorial-btn-primary editorial-conference-inquire" onclick="openInquiryModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['name']); ?>')">
+                                        <button class="editorial-btn-primary editorial-conference-inquire" onclick="openInquiryModal(<?php echo (int)$room['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$room['name'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8'); ?>)">
                                             <i class="fas fa-envelope"></i> Send Inquiry
                                         </button>
                                     </div>

@@ -409,7 +409,7 @@
            SPA navigation
         ================================================================ */
 
-        async _navigate(url, pageName) {
+        async _navigate(url, pageName, fromPopState = false) {
             if (this.isLoading) return;
             this.isLoading = true;
 
@@ -437,7 +437,13 @@
                 await this._swap(data);
 
                 // Update browser history
-                history.pushState({ page: pageName }, data.title || '', url);
+                // Back/Forward already moved the history entry; pushing again would
+                // truncate forward history and trap the Back button.
+                if (fromPopState) {
+                    history.replaceState({ page: pageName }, data.title || '', url);
+                } else {
+                    history.pushState({ page: pageName }, data.title || '', url);
+                }
                 this.currentPage = pageName;
                 this._loadedKey = window.location.pathname + window.location.search;
 
@@ -474,6 +480,10 @@
             } finally {
                 this.isLoading = false;
                 setTimeout(() => document.body.classList.remove('page-loading'), 500);
+                if (this._pendingPop) {
+                    this._pendingPop = false;
+                    this._onPopState();
+                }
             }
         }
 
@@ -622,6 +632,12 @@
         ================================================================ */
 
         _onPopState() {
+            // A navigation is still in flight: replay this Back/Forward once it ends,
+            // otherwise the URL moves but the page content stays on the old page.
+            if (this.isLoading) {
+                this._pendingPop = true;
+                return;
+            }
             // Hash-only change on the same document: leave it to the browser.
             if (this._loadedKey === window.location.pathname + window.location.search) {
                 if (!this.isLoading) this._hideLoader();
@@ -630,7 +646,7 @@
             const url = window.location.href;
             const pageName = this._pageName(url);
             if (this._isSPA(pageName)) {
-                this._navigate(url, pageName);
+                this._navigate(url, pageName, true);
             } else {
                 // For non-SPA pages on back/forward, show loader with destination subtext
                 this._showLoader(pageName);
