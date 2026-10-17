@@ -89,14 +89,15 @@
   <table>
     <thead><tr><th>Task</th><th>Permission needed</th></tr></thead>
     <tbody>
-      <tr><td>Use the till, fire orders, take payment</td><td><strong>POS Till (Touch)</strong></td></tr>
+      <tr><td>Use the till and fire orders and tabs</td><td><strong>POS Till (Touch)</strong></td></tr>
+      <tr><td>Take payment on the till: <strong>Pay</strong>, <strong>Settle</strong> a tab, split bills</td><td><strong>POS Take Payment &amp; Settle</strong> (Managers, Restaurant Staff and Room Service have it by default). Without it the till only fires orders and tabs, there is no <strong>Pay</strong> or <strong>Settle</strong> button, and the bill is settled in <strong>Orders &amp; Tabs</strong> by someone who has it. Use this for FOH staff and waiters who should not handle money.</td></tr>
       <tr><td>Record the opening float</td><td><strong>POS Opening Float</strong></td></tr>
       <tr><td>Give a discount</td><td><strong>POS Discounts</strong></td></tr>
       <tr><td>86 or re-enable a menu item from the till</td><td><strong>POS Quick-86 Items</strong></td></tr>
       <tr><td>Refund a paid order</td><td><strong>POS Refunds</strong></td></tr>
       <tr><td>Void a tab or order (single or bulk)</td><td><strong>POS Void Tabs</strong> and <strong>Restaurant Orders (POS)</strong></td></tr>
       <tr><td>Settle a tab whose food was never served without asking a manager</td><td><strong>POS Force-Serve Tab</strong></td></tr>
-      <tr><td>See, add to and settle other cashiers' tabs</td><td><strong>POS All Cashiers' Tabs</strong>. Without it you only see and work on tabs you opened.</td></tr>
+      <tr><td>See, add to and settle other cashiers' tabs</td><td><strong>POS All Cashiers' Tabs</strong> (Managers and admins). Without it you only see and work on tabs you opened. "Ready" alerts always go only to the person who placed the order, whatever their permissions.</td></tr>
       <tr><td>See the live Kitchen, Bar and Coffee boards, today's order list and order timelines from the till</td><td><strong>POS Station Overview</strong></td></tr>
       <tr><td>Close a shift that does not balance (with a reason)</td><td><strong>POS Shift Override</strong></td></tr>
       <tr><td>See revenue, cash, mobile and card figures on the top bar; open the shift close report</td><td><strong>POS Accounting</strong></td></tr>
@@ -305,7 +306,10 @@
     <li>When a station is waiting for you, a strip appears under the chat: <strong>Needs you</strong> and <em>"N notes waiting"</em>. Click <strong>Got it</strong> (with the number when several are waiting) to say you have seen them. You see <em>"FOH action recorded."</em> The alert and the number clear, but the notes stay in the conversation. You can also click a <strong>quick reply</strong> (<em>On my way</em>, <em>Coming now</em>, <em>2 minutes</em>, <em>Noted, thanks</em>) to answer the station in one tap.</li>
     <li>To write your own message, use the box at the bottom. On the <strong>All</strong> tab choose the station in the box to its left (<strong>Kitchen</strong>, <strong>Bar</strong> or <strong>Coffee Bar</strong>); on a station's tab it goes to that station. The box says <em>"Reply to Kitchen&hellip;"</em> when that station has a note waiting, otherwise <em>"Message Kitchen&hellip;"</em>. Type up to 255 characters and click <strong>Send</strong> (or press Enter). You see <em>"Sent to Kitchen."</em></li>
   </ol>
+  <p>A reply or note that is already on your screen, or was already there when you opened the till, counts as read and never pops up again later.</p>
   <p>If the station has a note waiting, what you type is sent as the answer to it and that note counts as dealt with. If nothing is waiting, it starts a new note. Notes you have acknowledged are not removed: they stay in today's conversation as history. When a new note arrives while the chat is closed, a pop-up appears with an <strong>Open chat</strong> button that takes you straight to that station's tab. The pop-up does not appear while the chat is already open. Click <strong>Note about an order</strong> at the bottom of the chat to attach a note to a particular order (see below). With no messages yet you see <em>"No messages yet today"</em>.</p>
+  <h3>Chat with the station about one order</h3>
+  <p>Every order in <strong>My orders</strong> has a <strong>Chat</strong> button next to its reference, and the order's <strong>Tab details</strong> window has <strong>Message station</strong>. Both open the note window already set to that order and to the station still working on it, with the order's whole thread underneath. Write your message and click <strong>Send note</strong>.</p>
   <h3>Send a note about an order</h3>
   <ol class="steps">
     <li>Click <strong>Note</strong>.</li>

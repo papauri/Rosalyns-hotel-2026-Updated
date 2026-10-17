@@ -93,6 +93,7 @@ function rh_kb_synonym_groups(): array
         ['checkin', 'arrival', 'arrive', 'arriving', 'arrivals'], ['checkout', 'departure', 'depart', 'leaving', 'departures'],
         ['photo', 'image', 'picture', 'gallery', 'media', 'video'], ['website', 'site', 'web'],
         ['invoice', 'invoices'], ['receipt', 'receipts'], ['payment', 'pay', 'paid', 'deposit'],
+        ['bulk', 'select all', 'selected', 'many at once'], ['settle', 'settlement', 'close the bill', 'take payment'],
         ['discount', 'reduction'], ['debt', 'owe', 'owes', 'owing', 'outstanding', 'balance'],
         ['report', 'reports', 'summary', 'analytics'], ['role', 'roles', 'position', 'job'],
         ['create', 'make', 'new', 'add'], ['ticket', 'tickets', 'order', 'orders'],
