@@ -125,9 +125,13 @@ $gr_hours_out_max = max(1, max($gr_hours_out));
 // ── Revenue strip (display only) ─────────────────────────────────────────────
 $gr_rev = ['count' => 0, 'total' => 0.0];
 try {
-    $s = $pdo->prepare("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) t FROM payments
-                        WHERE booking_type='gym' AND payment_status IN ('completed','paid','refunded','partially_refunded')
-                          AND COALESCE(payment_type,'') <> 'refund' AND deleted_at IS NULL
+    // Net of refunds: money collected minus refunds paid out (completed/processing), the canonical net-paid rule.
+    $s = $pdo->prepare("SELECT SUM(CASE WHEN COALESCE(payment_type,'') <> 'refund' THEN 1 ELSE 0 END) c,
+                               COALESCE(SUM(CASE WHEN COALESCE(payment_type,'') <> 'refund' THEN total_amount
+                                                 ELSE -COALESCE(refund_amount, total_amount) END),0) t FROM payments
+                        WHERE booking_type='gym' AND deleted_at IS NULL
+                          AND ((COALESCE(payment_type,'') <> 'refund' AND payment_status IN ('completed','paid','refunded','partially_refunded'))
+                               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
                           AND payment_date BETWEEN ? AND ?");
     $s->execute([$gr_start, $gr_end]);
     $row = $s->fetch(PDO::FETCH_ASSOC) ?: [];

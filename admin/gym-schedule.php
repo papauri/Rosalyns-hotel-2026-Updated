@@ -80,12 +80,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gs_action'])) {
             if ($newStatus === '') { $gs_json(false, 'Invalid status.'); }
             // A cancelled reservation has released its place: it must not be revived here (that would bypass
             // the slot capacity check). The guest has to book again.
-            $msUpd = $pdo->prepare("UPDATE gym_slot_reservations SET status=? WHERE id=? AND status <> 'cancelled'");
-            $msUpd->execute([$newStatus, $id]);
-            $msChk = $pdo->prepare("SELECT status FROM gym_slot_reservations WHERE id=?");
-            $msChk->execute([$id]);
-            if ((string)$msChk->fetchColumn() === 'cancelled') {
-                $gs_json(false, 'This reservation is cancelled and cannot be changed.');
+            // A no-show released its place. Putting it back to booked/attended takes the place again, so the
+            // slot capacity is re-checked under a lock (otherwise a revert can push a slot past its capacity).
+            $pdo->beginTransaction();
+            try {
+                $msRow = $pdo->prepare("SELECT status, slot_date, slot_time, party_size FROM gym_slot_reservations WHERE id=? FOR UPDATE");
+                $msRow->execute([$id]);
+                $cur = $msRow->fetch(PDO::FETCH_ASSOC);
+                if (!$cur) {
+                    $pdo->rollBack();
+                    $gs_json(false, 'Reservation not found.');
+                }
+                if ((string)$cur['status'] === 'cancelled') {
+                    $pdo->rollBack();
+                    $gs_json(false, 'This reservation is cancelled and cannot be changed.');
+                }
+                if ((string)$cur['status'] === 'no_show' && in_array($newStatus, ['booked', 'attended'], true)) {
+                    $capCfg = gymScheduleSettings();
+                    $heldSt = $pdo->prepare("SELECT COALESCE(SUM(party_size),0) FROM gym_slot_reservations
+                        WHERE slot_date = ? AND slot_time = ? AND status IN ('booked','attended') AND id <> ? FOR UPDATE");
+                    $heldSt->execute([$cur['slot_date'], $cur['slot_time'], $id]);
+                    $held = (int)$heldSt->fetchColumn();
+                    if ($held + (int)$cur['party_size'] > (int)$capCfg['capacity']) {
+                        $pdo->rollBack();
+                        $left = max(0, (int)$capCfg['capacity'] - $held);
+                        $gs_json(false, 'That slot has since been filled (' . $left . ' place' . ($left === 1 ? '' : 's') . ' left, this reservation needs ' . (int)$cur['party_size'] . '), so the no-show cannot be put back.');
+                    }
+                }
+                $pdo->prepare("UPDATE gym_slot_reservations SET status=? WHERE id=?")->execute([$newStatus, $id]);
+                $pdo->commit();
+            } catch (Throwable $msEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $msEx;
             }
             $gs_json(true, 'Marked ' . str_replace('_', ' ', $newStatus) . '.');
         }

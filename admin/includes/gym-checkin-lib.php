@@ -87,7 +87,7 @@ if (!function_exists('gym_checkin_process')) {
         }
     }
 
-    function gym_checkin_process(PDO $pdo, string $code, int $adminId, string $method = 'barcode'): array
+    function gym_checkin_process(PDO $pdo, string $code, int $adminId, string $method = 'barcode', bool $overrideDailyLimit = false): array
     {
         $code = strtoupper(trim($code));
         if ($code === '') {
@@ -181,13 +181,19 @@ if (!function_exists('gym_checkin_process')) {
             $todayCount = $pdo->prepare("SELECT COUNT(*) FROM gym_attendance WHERE member_id = ? AND checked_in_at >= CURDATE()");
             $todayCount->execute([(int)$member['id']]);
             $visitsToday = (int)$todayCount->fetchColumn();
-            if ($visitsToday >= $maxDaily) {
+            if ($visitsToday >= $maxDaily && $overrideDailyLimit) {
+                // A manager checked the person's identity and let them in: allowed, and always on the record.
+                if (function_exists('logActivity')) {
+                    try { logActivity($adminId ?: 0, 'gym_checkin_override', 'Manager override of the daily visit limit: ' . $member['member_number'] . ' (' . $member['full_name'] . ') visit #' . ($visitsToday + 1) . ' today (limit ' . $maxDaily . ')'); } catch (Throwable $e) { /* fine */ }
+                }
+            } elseif ($visitsToday >= $maxDaily) {
                 if ($ownTx) { $pdo->rollBack(); }
                 if (function_exists('logActivity')) {
                     try { logActivity($adminId ?: 0, 'gym_checkin_blocked', 'Possible pass sharing: ' . $member['member_number'] . ' (' . $member['full_name'] . ') attempted visit #' . ($visitsToday + 1) . ' today'); } catch (Throwable $e) { /* fine */ }
                 }
                 return [
                     'outcome' => 'blocked',
+                    'reason'  => 'daily_limit',
                     'message' => $member['full_name'] . ' has already visited ' . $visitsToday . '× today — possible pass sharing. Verify the person matches the membership before letting them in.',
                     'member'  => $memberPublic,
                 ];

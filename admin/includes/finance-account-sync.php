@@ -87,6 +87,42 @@ if (!function_exists('rh_last_account_payment_date')) {
     }
 }
 
+if (!function_exists('rh_account_derive_payment_status')) {
+    /**
+     * payment_status label for a gym / event account, derived from the LEDGER (same rule as the
+     * conference sync) so part-payments and refunds show truthfully: fully covered = 'full_paid',
+     * some money held = 'deposit_paid' (the enum has no 'partial'), nothing held = 'pending', and
+     * money that came in and was entirely refunded = 'refunded'. A cancelled account keeps its stored
+     * label (its bill is void) unless every payment has been refunded.
+     */
+    function rh_account_derive_payment_status(PDO $pdo, string $bookingType, int $bookingId, array $row, float $gross, float $paid, float $due): string
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $stored = (string)($row['payment_status'] ?? '');
+        if ($paid <= $tol) {
+            $st = $pdo->prepare(
+                "SELECT COUNT(*) FROM payments
+                  WHERE booking_type = ? AND booking_id = ? AND deleted_at IS NULL AND COALESCE(payment_type,'') <> 'refund'
+                    AND payment_status IN ('completed','paid','refunded','partially_refunded')"
+            );
+            $st->execute([$bookingType, $bookingId]);
+            if ((int)$st->fetchColumn() > 0) {
+                return 'refunded';
+            }
+        }
+        if ((string)($row['status'] ?? '') === 'cancelled' && $stored !== '') {
+            return $stored;
+        }
+        if ($gross > $tol && $due <= $tol) {
+            return 'full_paid';
+        }
+        if ($paid > $tol) {
+            return 'deposit_paid';
+        }
+        return 'pending';
+    }
+}
+
 if (!function_exists('syncGymInquiryPaymentSnapshot')) {
     /**
      * Recompute a gym inquiry's amount_paid / amount_due / deposit_paid from the
@@ -94,7 +130,7 @@ if (!function_exists('syncGymInquiryPaymentSnapshot')) {
      */
     function syncGymInquiryPaymentSnapshot(PDO $pdo, int $inquiryId): ?array
     {
-        $stmt = $pdo->prepare("SELECT id, status, total_amount, total_with_vat, deposit_required, deposit_amount FROM gym_inquiries WHERE id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id, status, payment_status, total_amount, total_with_vat, deposit_required, deposit_amount FROM gym_inquiries WHERE id = ? LIMIT 1");
         $stmt->execute([$inquiryId]);
         $inquiry = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$inquiry) {
@@ -110,13 +146,14 @@ if (!function_exists('syncGymInquiryPaymentSnapshot')) {
         $depositPaid = min($amountPaid, $depositRequired);
         $depositFlag = ($depositRequired > 0 && $depositPaid + (defined('BALANCE_TOLERANCE') ? BALANCE_TOLERANCE : 0.01) >= $depositRequired) ? 1 : 0;
         $lastPaymentDate = rh_last_account_payment_date($pdo, 'gym', $inquiryId);
+        $paymentStatus = rh_account_derive_payment_status($pdo, 'gym', $inquiryId, $inquiry, $grossTotal, $amountPaid, $amountDue);
 
         $upd = $pdo->prepare(
             "UPDATE gym_inquiries
-                SET amount_paid = ?, amount_due = ?, deposit_paid = ?, last_payment_date = ?, updated_at = NOW()
+                SET amount_paid = ?, amount_due = ?, deposit_paid = ?, last_payment_date = ?, payment_status = ?, updated_at = NOW()
               WHERE id = ?"
         );
-        $upd->execute([$amountPaid, $amountDue, $depositFlag, $lastPaymentDate, $inquiryId]);
+        $upd->execute([$amountPaid, $amountDue, $depositFlag, $lastPaymentDate, $paymentStatus, $inquiryId]);
 
         return [
             'total_amount'     => (float)($inquiry['total_amount'] ?? 0),
@@ -136,7 +173,7 @@ if (!function_exists('syncEventInquiryPaymentSnapshot')) {
      */
     function syncEventInquiryPaymentSnapshot(PDO $pdo, int $inquiryId): ?array
     {
-        $stmt = $pdo->prepare("SELECT id, status, total_amount, total_with_vat, deposit_required, deposit_amount FROM event_inquiries WHERE id = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id, status, payment_status, total_amount, total_with_vat, deposit_required, deposit_amount FROM event_inquiries WHERE id = ? LIMIT 1");
         $stmt->execute([$inquiryId]);
         $inquiry = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$inquiry) {
@@ -152,13 +189,14 @@ if (!function_exists('syncEventInquiryPaymentSnapshot')) {
         $depositPaid = min($amountPaid, $depositRequired);
         $depositFlag = ($depositRequired > 0 && $depositPaid + (defined('BALANCE_TOLERANCE') ? BALANCE_TOLERANCE : 0.01) >= $depositRequired) ? 1 : 0;
         $lastPaymentDate = rh_last_account_payment_date($pdo, 'event', $inquiryId);
+        $paymentStatus = rh_account_derive_payment_status($pdo, 'event', $inquiryId, $inquiry, $grossTotal, $amountPaid, $amountDue);
 
         $upd = $pdo->prepare(
             "UPDATE event_inquiries
-                SET amount_paid = ?, amount_due = ?, deposit_paid = ?, last_payment_date = ?, updated_at = NOW()
+                SET amount_paid = ?, amount_due = ?, deposit_paid = ?, last_payment_date = ?, payment_status = ?, updated_at = NOW()
               WHERE id = ?"
         );
-        $upd->execute([$amountPaid, $amountDue, $depositFlag, $lastPaymentDate, $inquiryId]);
+        $upd->execute([$amountPaid, $amountDue, $depositFlag, $lastPaymentDate, $paymentStatus, $inquiryId]);
 
         return [
             'total_amount'     => (float)($inquiry['total_amount'] ?? 0),

@@ -15,6 +15,7 @@ require_once 'config/invoice.php';
 require_once 'includes/validation.php';
 require_once 'includes/modal.php';
 require_once 'includes/public-csrf.php';
+require_once __DIR__ . '/includes/event-capacity.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -303,6 +304,11 @@ $site_logo = getSetting('site_logo');
                             $start_time = !empty($event['start_time']) ? date('g:i A', strtotime($event['start_time'])) : '';
                             $end_time = !empty($event['end_time']) ? date('g:i A', strtotime($event['end_time'])) : '';
                             $event_image = proxyImageUrl(resolveEventImagePath($event['image_path'] ?? ''));
+                            // Full event -> the button becomes "Join waitlist" (the server waitlists the extra RSVPs anyway);
+                            // a same-day event that has already started takes no more bookings (the server refuses them too).
+                            $evStarted = ($event['event_date'] === date('Y-m-d') && !empty($event['start_time']) && date('H:i:s') >= date('H:i:s', strtotime((string)$event['start_time'])));
+                            $evCap = rh_event_capacity_info($pdo, (int)$event['id']);
+                            $evFull = ($evCap['capacity'] > 0 && $evCap['left'] !== null && $evCap['left'] <= 0);
                             ?>
                             <article id="event-<?php echo (int)$event['id']; ?>" class="editorial-event-card events-showcase__card <?php echo $event['is_featured'] ? 'featured' : ''; ?>" data-event-status="upcoming">
                                 <div class="editorial-event-image-container events-showcase__media">
@@ -370,9 +376,17 @@ $site_logo = getSetting('site_logo');
                                                 <span class="editorial-price-value"><?php echo $currency_symbol . number_format($event['ticket_price'], 0); ?></span>
                                             <?php endif; ?>
                                         </div>
-                                        <button type="button" class="btn btn-primary btn-sm" data-open-event-booking data-event-id="<?php echo (int)$event['id']; ?>" data-event-title="<?php echo htmlspecialchars($event['title'], ENT_QUOTES); ?>">
-                                            <i class="fas fa-calendar-check"></i> Book This Event
-                                        </button>
+                                        <?php if ($evStarted): ?>
+                                            <span class="editorial-event-closed" role="status" style="font-size:.85rem;opacity:.75;"><i class="fas fa-clock"></i> Event under way &ndash; booking closed</span>
+                                        <?php elseif ($evFull): ?>
+                                            <button type="button" class="btn btn-primary btn-sm" data-open-event-booking data-event-full="1" data-event-id="<?php echo (int)$event['id']; ?>" data-event-title="<?php echo htmlspecialchars($event['title'], ENT_QUOTES); ?>">
+                                                <i class="fas fa-hourglass-half"></i> Join waitlist
+                                            </button>
+                                        <?php else: ?>
+                                            <button type="button" class="btn btn-primary btn-sm" data-open-event-booking data-event-id="<?php echo (int)$event['id']; ?>" data-event-title="<?php echo htmlspecialchars($event['title'], ENT_QUOTES); ?>">
+                                                <i class="fas fa-calendar-check"></i> Book This Event
+                                            </button>
+                                        <?php endif; ?>
                                         <a href="contact-us.php?subject=Events&event=<?php echo rawurlencode($event['title']); ?>" class="btn btn-outline btn-sm">
                                             <i class="fas fa-envelope"></i> Enquire
                                         </a>
@@ -477,7 +491,7 @@ $site_logo = getSetting('site_logo');
                     <div class="modal__header">
                         <div class="modal__header-content">
                             <span class="booking-pill">Event Booking</span>
-                            <h3 class="modal__title" id="eventBookingModal-title">Book <span id="eventBookingModalEventName">This Event</span></h3>
+                            <h3 class="modal__title" id="eventBookingModal-title"><span id="eventBookingModalVerb">Book</span> <span id="eventBookingModalEventName">This Event</span></h3>
                             <p>Complete the form and our team will confirm your booking via email.</p>
                         </div>
                     </div>
@@ -533,10 +547,15 @@ $site_logo = getSetting('site_logo');
                 const openButtons = document.querySelectorAll('[data-open-event-booking]');
                 const closeButtons = document.querySelectorAll('[data-close-event-booking]');
 
-                function openModal(eventId, eventTitle) {
+                const verbLabel = document.getElementById('eventBookingModalVerb');
+                const submitLabelBtn = document.getElementById('eventBookingSubmitBtn');
+
+                function openModal(eventId, eventTitle, isFull) {
                     if (!bookingModal) return;
                     if (eventIdField) eventIdField.value = eventId || '';
                     if (eventNameLabel) eventNameLabel.textContent = eventTitle || 'This Event';
+                    if (verbLabel) verbLabel.textContent = isFull ? 'Join the waitlist for' : 'Book';
+                    if (submitLabelBtn && !submitLabelBtn.querySelector('.fa-spinner')) submitLabelBtn.textContent = isFull ? 'Join Waitlist' : 'Send Booking Request';
                     bookingModal.classList.add('modal--active');
                     document.body.classList.add('modal-open');
                 }
@@ -549,7 +568,7 @@ $site_logo = getSetting('site_logo');
 
                 openButtons.forEach(function (btn) {
                     btn.addEventListener('click', function () {
-                        openModal(btn.getAttribute('data-event-id'), btn.getAttribute('data-event-title'));
+                        openModal(btn.getAttribute('data-event-id'), btn.getAttribute('data-event-title'), btn.getAttribute('data-event-full') === '1');
                     });
                 });
                 closeButtons.forEach(function (btn) { btn.addEventListener('click', closeModal); });

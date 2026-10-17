@@ -26,6 +26,7 @@ $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
 // amount_due is derived from the LOCKED invoiced gross (total_with_vat) — rate-safe.
 require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/../includes/event-capacity.php';
+require_once __DIR__ . '/includes/account-record-payment.php';
 
 // Handle status updates, deletions and financial actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
@@ -78,13 +79,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
             $stmt = $pdo->prepare("DELETE FROM event_inquiries WHERE id = ?");
             $stmt->execute([$inquiry_id]);
             $message = 'Event booking deleted successfully!';
-        } elseif (in_array($action, ['confirm', 'promote', 'cancel', 'complete', 'send_invoice', 'send_quotation', 'update_amount', 'update_notes'], true)) {
+        } elseif (in_array($action, ['confirm', 'promote', 'cancel', 'complete', 'record_payment', 'resend_invoice', 'send_quotation', 'update_amount', 'update_notes'], true)) {
             $inquiry_id = (int)$inquiry_id;
             if ($inquiry_id <= 0) {
                 throw new Exception('Invalid booking selected.');
             }
 
-            if (in_array($action, ['send_invoice', 'send_quotation', 'update_amount'], true) && !hasPermission((int)($user['id'] ?? 0), 'events_financials')) {
+            if (in_array($action, ['record_payment', 'resend_invoice', 'send_quotation', 'update_amount'], true) && !hasPermission((int)($user['id'] ?? 0), 'events_financials')) {
                 throw new Exception('You do not have permission to handle event invoicing or pricing.');
             }
 
@@ -202,98 +203,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 $stmt = $pdo->prepare("UPDATE event_inquiries SET status = 'completed', updated_at = NOW() WHERE id = ?");
                 $stmt->execute([$inquiry_id]);
                 $message = 'Event booking marked as completed!';
-            } elseif ($action === 'send_invoice') {
-                try {
-                    $totalAmount = (float)$inquiry['total_amount'];
-                    // VAT per installation mode (exclusive on top / inclusive extracted / off).
-                    $vatParts = vat_components($totalAmount);
-                    $vatRate = $vatParts['rate'];
-                    $vatAmount = $vatParts['vat'];
-                    $totalWithVat = $vatParts['total'];
-
-                    // Idempotency guard — if already fully paid just resend the invoice
-                    if (in_array((string)($inquiry['status'] ?? ''), ['cancelled', 'waitlisted'], true)) {
-                        throw new Exception('Payment cannot be recorded for a ' . $inquiry['status'] . ' booking.');
-                    }
-                    if ($totalAmount <= BALANCE_TOLERANCE) {
-                        throw new Exception('Set a total amount before recording payment.');
-                    }
-                    $alreadyPaid = (float)($paymentSnapshot['amount_paid'] ?? 0);
-                    // Only the outstanding balance is collected: a part-paid account must not be paid in full again.
-                    $remainingGross = round($totalWithVat - $alreadyPaid, 2);
-                    $payParts = ['net' => $vatParts['net'], 'rate' => $vatRate, 'vat' => $vatAmount, 'total' => $totalWithVat];
-                    if ($alreadyPaid > BALANCE_TOLERANCE && $remainingGross > BALANCE_TOLERANCE) {
-                        $balSplit = rh_account_vat_split($pdo, 'event', $inquiry_id, $remainingGross, (float)$vatRate);
-                        $payParts = ['net' => $balSplit['net'], 'rate' => $balSplit['rate'], 'vat' => $balSplit['vat'], 'total' => $remainingGross];
-                    }
-                    if ($alreadyPaid >= $totalWithVat - BALANCE_TOLERANCE && $totalWithVat > 0) {
-                        $invoice_result = sendEventInvoiceEmail($inquiry_id);
-                        $message = 'Payment already recorded. Invoice resent to ' . htmlspecialchars($inquiry['email'] ?? '');
-                        $message .= $invoice_result['success'] ? '' : ' (Invoice email failed: ' . $invoice_result['message'] . ')';
-                    } else {
-                        do {
-                            $payment_reference = 'PAY' . date('Ym') . strtoupper(substr(uniqid(), -6));
-                            $refChk = $pdo->prepare('SELECT COUNT(*) FROM payments WHERE payment_reference = ? LIMIT 1');
-                            $refChk->execute([$payment_reference]);
-                        } while ((int)$refChk->fetchColumn() > 0);
-
-                        $pdo->beginTransaction();
-                        $receipt_number = finance_next_receipt_number($pdo, date('Y-m-d'));
-
-                        $insert_payment = $pdo->prepare("
-                                INSERT INTO payments (
-                                    payment_reference, booking_type, booking_id, booking_reference,
-                                    payment_date, payment_amount, vat_rate, vat_amount, total_amount,
-                                    payment_method, payment_type, payment_status, invoice_generated,
-                                    receipt_number, status, recorded_by
-                                ) VALUES (?, 'event', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'full_payment', 'completed', 1, ?, 'completed', ?)
-                            ");
-                        $insert_payment->execute([
-                            $payment_reference,
-                            $inquiry_id,
-                            $inquiry['reference_number'],
-                            $payParts['net'], // payment_amount is always the ex-VAT figure
-                            $payParts['rate'],
-                            $payParts['vat'],
-                            $payParts['total'],
-                            $receipt_number,
-                            $user['id']
-                        ]);
-                        $event_payment_id = (int)$pdo->lastInsertId();
-
-                        // Lock the invoiced VAT figures, then derive paid/due from the ledger (never hard-code
-                        // them: refunds and earlier part-payments must net out).
-                        $update_amounts = $pdo->prepare("
-                                UPDATE event_inquiries
-                                SET vat_rate = ?, vat_amount = ?, total_with_vat = ?, payment_status = 'full_paid'
-                                WHERE id = ?
-                            ");
-                        $update_amounts->execute([$vatRate, $vatAmount, $totalWithVat, $inquiry_id]);
-                        syncEventInquiryPaymentSnapshot($pdo, $inquiry_id);
-                        $pdo->commit();
-
-                        if ($event_payment_id > 0) {
-                            try {
-                                require_once '../config/receipts.php';
-                                receipt_auto_send($pdo, $event_payment_id, $user);
-                            } catch (Throwable $rcptEx) {
-                                error_log('Receipt email failed for event payment ' . $event_payment_id . ': ' . $rcptEx->getMessage());
-                            }
-                        }
-
-                        $invoice_result = sendEventInvoiceEmail($inquiry_id);
-                        if ($invoice_result['success']) {
-                            $message = 'Payment recorded successfully! Invoice sent to ' . htmlspecialchars($inquiry['email']);
-                        } else {
-                            $message = 'Payment recorded successfully! (Invoice email failed: ' . $invoice_result['message'] . ')';
-                        }
-                    }
-                } catch (PDOException $e) {
-                    if ($pdo->inTransaction()) {
-                        $pdo->rollBack();
-                    }
-                    $error = 'Failed to record payment: ' . $e->getMessage();
-                    error_log("Event payment error: " . $e->getMessage());
+            } elseif ($action === 'record_payment') {
+                // Staff choose the method and the amount (default: the balance). The helper re-reads the paid
+                // total under a row lock, so a double click can never collect the balance twice.
+                $payRes = rh_record_account_payment($pdo, 'event', $inquiry_id, rh_account_payment_input_from_post($_POST), (int)($user['id'] ?? 0), (string)($user['full_name'] ?? $user['username'] ?? ''));
+                $message = rh_account_after_payment_messages($pdo, $payRes, !empty($_POST['email_invoice']), 'sendEventInvoiceEmail', $inquiry_id, $user, $currency_symbol . ' ');
+            } elseif ($action === 'resend_invoice') {
+                if ((float)($paymentSnapshot['amount_paid'] ?? 0) <= BALANCE_TOLERANCE) {
+                    throw new Exception('No payment has been recorded yet, so there is no invoice to send.');
+                }
+                if (!filter_var((string)($inquiry['email'] ?? ''), FILTER_VALIDATE_EMAIL)) {
+                    throw new Exception('This booking has no valid email address on file.');
+                }
+                $invoice_result = sendEventInvoiceEmail($inquiry_id);
+                if (!empty($invoice_result['success'])) {
+                    $message = stripos((string)($invoice_result['message'] ?? ''), 'preview') !== false
+                        ? 'Invoice generated (development mode: preview only, no live email sent).'
+                        : 'Invoice emailed to ' . htmlspecialchars((string)$inquiry['email']) . '.';
+                } else {
+                    $error = 'The invoice email could not be sent: ' . ($invoice_result['message'] ?? 'unknown error');
                 }
             } elseif ($action === 'send_quotation') {
                 $quoteValidDays = max(1, (int)($_POST['quotation_valid_days'] ?? 7));
@@ -385,6 +313,13 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $event_inquiries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // Figures the Record payment dialog needs (balance = gross billed - net paid; a cancelled bill is void).
+    foreach ($event_inquiries as &$rpRow) {
+        $rpRow['rp_total'] = rh_account_gross_total($rpRow);
+        $rpRow['rp_paid'] = (float)($rpRow['amount_paid'] ?? 0);
+        $rpRow['rp_balance'] = in_array($rpRow['status'], ['cancelled', 'waitlisted'], true) ? 0.0 : max(0.0, round($rpRow['rp_total'] - $rpRow['rp_paid'], 2));
+    }
+    unset($rpRow);
 
     // For each waitlisted booking, how many people joined the same event's waitlist before it
     // (drives the "promoting out of order" warning).
@@ -518,6 +453,9 @@ try {
                             <?php if (!empty($inquiry['event_date'])): ?>
                                 <br><small><?php echo date('M j, Y', strtotime($inquiry['event_date'])); ?></small>
                             <?php endif; ?>
+                            <?php if (!in_array($inquiry['status'], ['cancelled', 'waitlisted'], true) && (float)($inquiry['total_amount'] ?? 0) <= BALANCE_TOLERANCE): ?>
+                                <br><span class="badge" style="background:#fff3cd;color:#856404;" title="No ticket total is set yet. Open View and enter the total before quoting, confirming or recording payment.">Total not set</span>
+                            <?php endif; ?>
                         </td>
                         <td><?php echo (int)($inquiry['guests'] ?? 1); ?></td>
                         <td>
@@ -526,7 +464,7 @@ try {
                                 <input type="hidden" name="inquiry_id" value="<?php echo $inquiry['id']; ?>">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                                 <?php if (in_array($inquiry['status'], ['pending', 'confirmed', 'completed'], true)): ?>
-                                <select name="new_status" class="status-select" onchange="this.form.submit();">
+                                <select name="new_status" class="status-select" data-prev="<?php echo htmlspecialchars((string)$inquiry['status'], ENT_QUOTES); ?>" onchange="rhEventStatusChange(this)" aria-label="Change status">
                                     <option value="pending" <?php echo $inquiry['status'] === 'pending' ? 'selected' : ''; ?>>Pending</option>
                                     <option value="confirmed" <?php echo $inquiry['status'] === 'confirmed' ? 'selected' : ''; ?>>Confirmed</option>
                                     <option value="completed" <?php echo $inquiry['status'] === 'completed' ? 'selected' : ''; ?>>Completed</option>
@@ -549,7 +487,13 @@ try {
                                     <input type="hidden" name="inquiry_action" value="delete">
                                     <input type="hidden" name="inquiry_id" value="<?php echo $inquiry['id']; ?>">
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
-                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure you want to delete this booking?');">
+                                    <button type="submit" class="btn btn-danger btn-sm"
+                                            data-admin-confirm="Delete this booking permanently? This cannot be undone."
+                                            data-admin-confirm-title="Delete booking"
+                                            data-admin-confirm-ok="Delete"
+                                            data-admin-confirm-cancel="Keep"
+                                            data-admin-confirm-tone="danger"
+                                            data-admin-confirm-icon="fa-trash">
                                         <i class="fas fa-trash"></i> Delete
                                     </button>
                                 </form>
@@ -581,7 +525,25 @@ try {
         var eventCsrfToken = <?php echo json_encode($csrf_token); ?>;
         var eventCurrencySymbol = <?php echo json_encode($currency_symbol); ?>;
 
+        // Status dropdown: confirm through the shared admin dialog, put the old value back on cancel.
+        function rhEventStatusChange(sel) {
+            var form = sel.form;
+            var prev = sel.getAttribute('data-prev') || '';
+            var label = sel.options[sel.selectedIndex].text;
+            if (!window.AdminConfirm || typeof window.AdminConfirm.request !== 'function') {
+                form.submit();
+                return;
+            }
+            window.AdminConfirm.request({
+                title: 'Change status', message: 'Change this booking to "' + label + '"?', confirmText: 'Change status',
+                cancelText: 'Keep current', tone: 'warning', icon: 'fa-exchange-alt'
+            }).then(function (ok) {
+                if (ok) { form.submit(); } else { sel.value = prev; }
+            });
+        }
+
         function showInquiryDetails(inquiry) {
+            window._eventCurrentInquiry = inquiry;
             const modal = document.getElementById('inquiryModal');
             const body = document.getElementById('inquiryModalBody');
 
@@ -628,6 +590,10 @@ try {
                     <label>Payment Status</label>
                     <span>${paymentStatus.replace('_', ' ')}</span>
                 </div>
+                ${(!(totalAmount > 0) && inquiry.status !== 'cancelled' && inquiry.status !== 'waitlisted') ? `
+                <div class="detail-item" style="grid-column: 1 / -1;background:#fff3cd;border:1px solid #ffe08a;border-radius:6px;padding:10px 12px;color:#856404;">
+                    <i class="fas fa-exclamation-triangle"></i> <strong>No total amount is set.</strong> Ticket totals are entered by hand: set the total below before sending a quotation or recording a payment.
+                </div>` : ''}
                 ${canEventsFinancials ? `
                 <div class="detail-item" style="grid-column: 1 / -1;">
                     <form method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -639,13 +605,25 @@ try {
                         <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Save Amount</button>
                     </form>
                 </div>
-                <div class="detail-item" style="grid-column: 1 / -1;">
-                    <form method="POST" style="display:flex;gap:8px;align-items:center;">
-                        <input type="hidden" name="inquiry_action" value="send_invoice">
+                <div class="detail-item" style="grid-column: 1 / -1;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <button type="button" class="btn btn-primary btn-sm" ${(totalAmount > 0 && inquiry.status !== 'cancelled' && inquiry.status !== 'waitlisted') ? '' : 'disabled title="Set a total amount first (not for cancelled or waitlisted bookings)"'}
+                        onclick="closeInquiryModal();rhOpenRecordPayment({id: ${Number(inquiry.id)}, ref: window._eventCurrentInquiry.reference_number, name: window._eventCurrentInquiry.name, email: window._eventCurrentInquiry.email, total: window._eventCurrentInquiry.rp_total, paid: window._eventCurrentInquiry.rp_paid, balance: window._eventCurrentInquiry.rp_balance})">
+                        <i class="fas fa-cash-register"></i> Record payment
+                    </button>
+                    ${(Number(inquiry.rp_paid) > 0 && inquiry.email) ? `
+                    <form method="POST" style="display:inline;">
+                        <input type="hidden" name="inquiry_action" value="resend_invoice">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${eventCsrfToken}">
-                        <button type="submit" class="btn btn-primary btn-sm" ${totalAmount > 0 ? '' : 'disabled title="Set a total amount first"'}><i class="fas fa-file-invoice-dollar"></i> Record Payment &amp; Send Invoice</button>
-                    </form>
+                        <button type="submit" class="btn btn-secondary btn-sm"
+                            data-admin-confirm="Email the invoice to ${escapeHtml(inquiry.email)} now?"
+                            data-admin-confirm-title="Send invoice"
+                            data-admin-confirm-ok="Send invoice"
+                            data-admin-confirm-tone="warning"
+                            data-admin-confirm-icon="fa-file-invoice-dollar"><i class="fas fa-file-invoice-dollar"></i> Send invoice</button>
+                    </form>` : ''}
+                </div>
+                <div class="detail-item" style="grid-column: 1 / -1;">
                     <form method="POST" style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
                         <input type="hidden" name="inquiry_action" value="send_quotation">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
@@ -658,32 +636,32 @@ try {
                 ` : ''}
                 <div class="detail-item" style="grid-column: 1 / -1;display:flex;gap:8px;flex-wrap:wrap;">
                     ${inquiry.status === 'pending' ? `
-                    <form method="POST" onsubmit="return confirm('Confirm this event booking?');">
+                    <form method="POST">
                         <input type="hidden" name="inquiry_action" value="confirm">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${eventCsrfToken}">
-                        <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-check"></i> Confirm</button>
+                        <button type="submit" class="btn btn-primary btn-sm" data-admin-confirm="Confirm this event booking? The guest is emailed." data-admin-confirm-title="Confirm booking" data-admin-confirm-ok="Confirm" data-admin-confirm-tone="success" data-admin-confirm-icon="fa-check"><i class="fas fa-check"></i> Confirm</button>
                     </form>` : ''}
                     ${inquiry.status === 'waitlisted' ? `
-                    <form method="POST" onsubmit="return confirm((${Number(inquiry.earlier_waitlisted) || 0} > 0 ? 'WARNING: ${Number(inquiry.earlier_waitlisted) || 0} guest(s) joined this waitlist before this booking and are still waiting. Promoting this one skips them.\\n\\n' : '') + 'Move this booking off the waitlist? The guest will be emailed that a place is available.');">
+                    <form method="POST">
                         <input type="hidden" name="inquiry_action" value="promote">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${eventCsrfToken}">
-                        <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-arrow-up"></i> Promote from waitlist</button>
+                        <button type="submit" class="btn btn-primary btn-sm" data-admin-confirm="${(Number(inquiry.earlier_waitlisted) || 0) > 0 ? 'WARNING: ' + (Number(inquiry.earlier_waitlisted) || 0) + ' guest(s) joined this waitlist before this booking and are still waiting. Promoting this one skips them. ' : ''}Move this booking off the waitlist? The guest will be emailed that a place is available." data-admin-confirm-title="Promote from waitlist" data-admin-confirm-ok="Promote" data-admin-confirm-tone="warning" data-admin-confirm-icon="fa-arrow-up"><i class="fas fa-arrow-up"></i> Promote from waitlist</button>
                     </form>` : ''}
                     ${inquiry.status === 'confirmed' ? `
-                    <form method="POST" onsubmit="return confirm('Mark this booking as completed?');">
+                    <form method="POST">
                         <input type="hidden" name="inquiry_action" value="complete">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${eventCsrfToken}">
-                        <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-flag-checkered"></i> Mark Completed</button>
+                        <button type="submit" class="btn btn-secondary btn-sm" data-admin-confirm="Mark this booking as completed?" data-admin-confirm-title="Complete booking" data-admin-confirm-ok="Complete" data-admin-confirm-tone="warning" data-admin-confirm-icon="fa-flag-checkered"><i class="fas fa-flag-checkered"></i> Mark Completed</button>
                     </form>` : ''}
                     ${(inquiry.status !== 'cancelled') ? `
-                    <form method="POST" onsubmit="return confirm('Cancel this booking? The bill is voided; any payment already recorded stays as credit owed back to the guest (refund it from the Payments screen).');">
+                    <form method="POST">
                         <input type="hidden" name="inquiry_action" value="cancel">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
                         <input type="hidden" name="csrf_token" value="${eventCsrfToken}">
-                        <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-ban"></i> Cancel Booking</button>
+                        <button type="submit" class="btn btn-danger btn-sm" data-admin-confirm="Cancel this booking? The bill is voided; any payment already recorded stays as credit owed back to the guest (refund it from the Payments screen)." data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-cancel="Keep" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban"><i class="fas fa-ban"></i> Cancel Booking</button>
                     </form>` : ''}
                 </div>
                 <div class="detail-item" style="grid-column: 1 / -1;">
@@ -772,5 +750,7 @@ try {
         });
     </script>
     <script src="js/admin-components.js"></script>
+
+    <?php rh_render_record_payment_modal((string)$csrf_token, 'inquiry_action', 'inquiry_id', $currency_symbol); ?>
 
     <?php require_once 'includes/admin-footer.php'; ?>

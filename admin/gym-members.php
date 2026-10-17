@@ -16,6 +16,7 @@ require_once '../includes/alert.php';
 require_once __DIR__ . '/includes/gym-checkin-lib.php';
 require_once __DIR__ . '/includes/gym-analytics-lib.php';
 require_once __DIR__ . '/includes/gym-reminders-lib.php';
+require_once __DIR__ . '/includes/gym-billing-lib.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 
 /** @var PDO $pdo */
@@ -241,8 +242,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 $newNameCount = (int)($cur['name_change_count'] ?? 0) + ($nameChanged ? 1 : 0);
                 $nameChangedAtSql = $nameChanged ? date('Y-m-d H:i:s') : ($cur['name_last_changed_at'] ?? null);
 
-                $stmt = $pdo->prepare("UPDATE gym_members SET full_name=?, email=?, phone=?, membership_type=?, start_date=?, expiry_date=?, monthly_fee=?, is_complimentary=?, status=?, notes=?, name_change_count=?, name_last_changed_at=? WHERE id=?");
-                $stmt->execute([$name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $isComplimentary, $status, $notes ?: null, $newNameCount, $nameChangedAtSql, $memberId]);
+                // Renewal = the expiry moves later on a member who had one. Each paid renewal gets its own billable
+                // gym account (unless staff untick "Bill the renewal", e.g. when only correcting a wrong date).
+                $isRenewal = !empty($_POST['bill_renewal']) && !$isComplimentary
+                    && $fee !== null && $fee > BALANCE_TOLERANCE
+                    && (string)($cur['expiry_date'] ?? '') !== '' && $expiry !== '' && $expiry > (string)$cur['expiry_date'];
+                $renewalBill = null;
+                $pdo->beginTransaction();
+                try {
+                    $stmt = $pdo->prepare("UPDATE gym_members SET full_name=?, email=?, phone=?, membership_type=?, start_date=?, expiry_date=?, monthly_fee=?, is_complimentary=?, status=?, notes=?, name_change_count=?, name_last_changed_at=? WHERE id=?");
+                    $stmt->execute([$name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $isComplimentary, $status, $notes ?: null, $newNameCount, $nameChangedAtSql, $memberId]);
+                    if ($isRenewal) {
+                        $renewalBill = rh_gym_bill_membership($pdo, [
+                            'name' => $name, 'email' => $email, 'phone' => $phone, 'membership_type' => $type,
+                            'start_date' => $start, 'fee' => $fee, 'member_number' => (string)($cur['member_number'] ?? ''), 'kind' => 'renewal',
+                        ]);
+                    }
+                    $pdo->commit();
+                } catch (Throwable $saveEx) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $saveEx;
+                }
 
                 // ── Full audit trail ────────────────────────────────────────
                 $before = [
@@ -267,8 +289,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                     $auditAction = $nameChanged ? 'name_changed' : 'updated';
                     $auditNote = $nameChanged ? ('Name change reason: ' . $changeReason) : ($changeReason ?: null);
                     logGymMemberAudit($memberId, $auditAction, $before, $after, $auditNote, (string)($cur['member_number'] ?? ''));
+                    if ($renewalBill) {
+                        logGymMemberAudit($memberId, 'renewed', ['expiry_date' => (string)($cur['expiry_date'] ?? '')], ['expiry_date' => (string)$expiry, 'monthly_fee' => $fee], 'Renewal billed on account ' . $renewalBill['reference'], (string)($cur['member_number'] ?? ''));
+                    }
                 }
-                $gm_json(true, 'Member updated.');
+                $gm_json(true, 'Member updated.' . ($renewalBill
+                    ? ' Renewal billed: account ' . $renewalBill['reference'] . ' for ' . number_format($renewalBill['total'], 2) . ' - record the payment in Gym Inquiries (Record payment).'
+                    : ''));
             }
             $inquiryId = (int)($_POST['gym_inquiry_id'] ?? 0);
             // Duplicate checks and the insert run together under a lock, so a double-click or two
@@ -292,15 +319,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                         return ['error' => 'This inquiry is already enrolled as member ' . $dupNo . '.'];
                     }
                 }
-                $stmt = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, email, phone, membership_type, start_date, expiry_date, monthly_fee, is_complimentary, status, notes, gym_inquiry_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
-                $stmt->execute([$memberNumber, $name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $isComplimentary, $status, $notes ?: null, $inquiryId ?: null, (int)($user['id'] ?? 0)]);
-                return ['id' => (int)$pdo->lastInsertId(), 'number' => $memberNumber];
+                // Member and billable account are created together (a paid member without a bill is the leak this closes).
+                $pdo->beginTransaction();
+                try {
+                    $stmt = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, email, phone, membership_type, start_date, expiry_date, monthly_fee, is_complimentary, status, notes, gym_inquiry_id, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                    $stmt->execute([$memberNumber, $name, $email ?: null, $phone ?: null, $type ?: null, $start, $expiry ?: null, $fee, $isComplimentary, $status, $notes ?: null, $inquiryId ?: null, (int)($user['id'] ?? 0)]);
+                    $newId = (int)$pdo->lastInsertId();
+                    $bill = null;
+                    if (!$isComplimentary) {
+                        $bill = rh_gym_bill_membership($pdo, [
+                            'name' => $name, 'email' => $email, 'phone' => $phone, 'membership_type' => $type,
+                            'start_date' => $start, 'fee' => $fee, 'member_number' => $memberNumber, 'kind' => 'enrolment', 'inquiry_id' => $inquiryId,
+                        ]);
+                        if ($bill && $inquiryId <= 0) {
+                            // Link the member to the account that bills it (hides the Enrol shortcut, feeds cost-per-visit).
+                            $pdo->prepare("UPDATE gym_members SET gym_inquiry_id = ? WHERE id = ?")->execute([$bill['inquiry_id'], $newId]);
+                        }
+                    }
+                    $pdo->commit();
+                } catch (Throwable $enrolEx) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $enrolEx;
+                }
+                return ['id' => $newId, 'number' => $memberNumber, 'bill' => $bill];
             });
             if (isset($createRes['error'])) {
                 $gm_json(false, $createRes['error']);
             }
             $newMemberId = $createRes['id'];
             $memberNumber = $createRes['number'];
+            $enrolBill = $createRes['bill'] ?? null;
 
             if (function_exists('logGymMemberAudit')) {
                 logGymMemberAudit($newMemberId, $isComplimentary ? 'complimentary_granted' : 'enrolled', null, [
@@ -342,7 +392,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                     $cardNote = ' (Card email failed — member saved.)';
                 }
             }
-            $gm_json(true, 'Member enrolled — ' . $memberNumber . '.' . $cardNote);
+            $billNote = $enrolBill
+                ? ' Billable account ' . $enrolBill['reference'] . ' created for ' . number_format($enrolBill['total'], 2) . ' - record the payment in Gym Inquiries (Record payment).'
+                : '';
+            $gm_json(true, 'Member enrolled — ' . $memberNumber . '.' . $billNote . $cardNote);
         }
 
         if ($action === 'member_card') {
@@ -497,7 +550,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                                    ELSE 0 END),0)
                         FROM payments p
                         JOIN gym_inquiries gi ON gi.id = p.booking_id
-                        JOIN gym_members gm ON gm.gym_inquiry_id = gi.id
+                        JOIN gym_members gm ON (gm.gym_inquiry_id = gi.id OR gi.notes LIKE CONCAT('%[member:', gm.member_number, ']%'))
                         WHERE gm.id = ? AND p.booking_type='gym' AND p.deleted_at IS NULL
                     ");
                     $paidStmt->execute([$memberId]);
@@ -955,13 +1008,13 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                     </div>
                     <div style="flex:1;">
                         <label style="display:block;font-weight:600;margin-bottom:4px;">Expiry <span id="gmExpiryHint" style="font-weight:400;color:#9a8f82;">(auto from package)</span></label>
-                        <input type="date" id="gmExpiry" <?php echo $gm_can_financials_ui ? '' : 'readonly'; ?> style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;<?php echo $gm_can_financials_ui ? '' : 'background:#f3efe8;'; ?>">
+                        <input type="date" id="gmExpiry" oninput="gmSyncBill()" onchange="gmSyncBill()" <?php echo $gm_can_financials_ui ? '' : 'readonly'; ?> style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;<?php echo $gm_can_financials_ui ? '' : 'background:#f3efe8;'; ?>">
                     </div>
                 </div>
                 <div style="display:flex;gap:12px;margin-bottom:12px;">
                     <div style="flex:1;">
                         <label style="display:block;font-weight:600;margin-bottom:4px;">Fee (<?php echo htmlspecialchars($gm_currency); ?>)</label>
-                        <input type="number" id="gmFee" min="0" step="0.01" <?php echo $gm_can_financials_ui ? '' : 'readonly'; ?> style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;<?php echo $gm_can_financials_ui ? '' : 'background:#f3efe8;'; ?>">
+                        <input type="number" id="gmFee" min="0" step="0.01" oninput="gmSyncBill()" <?php echo $gm_can_financials_ui ? '' : 'readonly'; ?> style="width:100%;padding:9px;border:1px solid #d3cbc0;border-radius:4px;<?php echo $gm_can_financials_ui ? '' : 'background:#f3efe8;'; ?>">
                         <small style="color:#9a8f82;">Set by the package. <?php echo $gm_can_financials_ui ? 'Override allowed.' : 'Managers can override.'; ?></small>
                     </div>
                     <div style="flex:1;">
@@ -971,6 +1024,13 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                         </select>
                     </div>
                 </div>
+                <div id="gmBillEnrolNote" style="display:none;margin-bottom:12px;padding:8px 10px;background:#f3efe8;border-radius:4px;font-size:.85rem;color:#5a5147;">
+                    <i class="fas fa-file-invoice-dollar"></i> Saving creates a billable gym account for this fee. Record the payment afterwards in Gym Inquiries (Record payment) so it is invoiced and reported.
+                </div>
+                <label id="gmBillRenewalWrap" style="display:none;align-items:flex-start;gap:8px;margin-bottom:12px;cursor:pointer;font-size:.88rem;">
+                    <input type="checkbox" id="gmBillRenewal" checked style="margin-top:3px;">
+                    <span><strong>Bill this renewal.</strong> The expiry moves later, so a billable gym account is created for the fee (untick only when you are just correcting a date).</span>
+                </label>
                 <div id="gmReasonWrap" style="display:none;margin-bottom:12px;">
                     <label style="display:block;font-weight:600;margin-bottom:4px;color:#b45309;"><i class="fas fa-triangle-exclamation"></i> Reason for name change <span style="font-weight:400;">(required — audit logged)</span></label>
                     <input type="text" id="gmChangeReason" maxlength="255" placeholder="e.g. Legal name correction — marriage" style="width:100%;padding:9px;border:1px solid #e0b070;border-radius:4px;background:#fffaf0;">
@@ -1062,6 +1122,20 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
         }
 
         var gmOrigName = '';
+        var gmOrigExpiry = '';
+
+        // Billing hints: enrolment always bills a paid fee; an edit that extends the expiry offers "Bill this renewal".
+        function gmSyncBill() {
+            var isEdit = parseInt(document.getElementById('gmId').value, 10) > 0;
+            var compEl = document.getElementById('gmComplimentary');
+            var comp = !!(compEl && compEl.checked);
+            var fee = parseFloat(document.getElementById('gmFee').value || '0');
+            var expiry = document.getElementById('gmExpiry').value;
+            var note = document.getElementById('gmBillEnrolNote');
+            var renew = document.getElementById('gmBillRenewalWrap');
+            if (note) { note.style.display = (!isEdit && !comp && fee > 0) ? 'block' : 'none'; }
+            if (renew) { renew.style.display = (isEdit && !comp && fee > 0 && gmOrigExpiry && expiry && expiry > gmOrigExpiry) ? 'flex' : 'none'; }
+        }
 
         function gmOpenModal(m) {
             document.getElementById('gmModalTitle').textContent = m ? 'Edit Member' : 'Enrol Member';
@@ -1077,6 +1151,9 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             document.getElementById('gmStatus').value = m ? (m.status || 'active') : 'active';
             document.getElementById('gmNotes').value = m ? (m.notes || '') : '';
             gmOrigName = m ? (m.full_name || '') : '';
+            gmOrigExpiry = m ? (m.expiry_date || '') : '';
+            var billChk = document.getElementById('gmBillRenewal');
+            if (billChk) { billChk.checked = true; }
 
             // Match the package select to the stored membership type (by name).
             var pkgSel = document.getElementById('gmPackage');
@@ -1108,6 +1185,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             nameEl.style.background = lockIdentity ? '#f3efe8' : '';
             nameEl.title = lockIdentity ? 'Name changes require a manager — memberships are not transferable.' : '';
 
+            gmSyncBill();
             gmOpen('gmModal');
             setTimeout(function () { document.getElementById(lockIdentity ? 'gmEmail' : 'gmName').focus(); }, 60);
         }
@@ -1128,11 +1206,13 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             if (compEl) { compEl.checked = !!p.comp; }
             document.getElementById('gmFee').value = p.comp ? 0 : p.price;
             gmRecalcExpiry();
+            gmSyncBill();
         }
 
         function gmApplyComplimentary() {
             var comp = document.getElementById('gmComplimentary');
             if (comp && comp.checked) { document.getElementById('gmFee').value = 0; }
+            gmSyncBill();
         }
 
         // Expiry = start + package duration (days). Managers may override after.
@@ -1146,6 +1226,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             d.setDate(d.getDate() + (p.days - 1));
             document.getElementById('gmExpiry').value = rhYmd(d);
             if (hint) hint.textContent = '(auto: ' + p.days + ' days)';
+            gmSyncBill();
         }
 
         function gmSave() {
@@ -1190,6 +1271,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 expiry_date: document.getElementById('gmExpiry').value,
                 monthly_fee: document.getElementById('gmFee').value,
                 status: document.getElementById('gmStatus').value,
+                bill_renewal: (document.getElementById('gmBillRenewalWrap').style.display === 'flex' && document.getElementById('gmBillRenewal').checked) ? 1 : 0,
                 change_reason: reasonEl ? reasonEl.value.trim() : '',
                 notes: document.getElementById('gmNotes').value.trim()
             }).then(function (d) {

@@ -16,6 +16,7 @@ require_once '../includes/alert.php';
 require_once '../includes/finance-sequences.php';
 require_once '../includes/form-validation.php';
 require_once '../includes/conference-pricing.php';
+require_once __DIR__ . '/includes/account-record-payment.php';
 
 finance_ensure_sequence_tables($pdo);
 
@@ -396,7 +397,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             throw new Exception('Enquiry not found!');
         }
 
-        if (in_array($action, ['send_invoice', 'send_quotation', 'update_amount'], true) && !hasPermission((int)($user['id'] ?? 0), 'conference_financials')) {
+        if (in_array($action, ['record_payment', 'resend_invoice', 'send_quotation', 'update_amount'], true) && !hasPermission((int)($user['id'] ?? 0), 'conference_financials')) {
             throw new Exception('You do not have permission to handle conference invoicing or pricing.');
         }
 
@@ -584,100 +585,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 ]);
             }
             $message = 'Conference marked as completed!' . ($completeWithBalance ? ' (Outstanding balance of ' . number_format($outstandingAtComplete, 2) . ' logged.)' : '');
-        } elseif ($action === 'send_invoice') {
-            try {
-                $totalAmount = (float)$enquiry['total_amount'];
-                // VAT per installation mode (exclusive on top / inclusive extracted / off).
-                $vatParts = vat_components($totalAmount);
-                $vatRate = $vatParts['rate'];
-                $vatAmount = $vatParts['vat'];
-                $totalWithVat = $vatParts['total'];
-
-                // Idempotency guard — if already fully paid just resend the invoice
-                if (!in_array((string)($enquiry['status'] ?? ''), ['confirmed', 'completed'], true)) {
-                    throw new Exception('Payment can only be recorded for confirmed or completed bookings.');
-                }
-                if ($totalAmount <= BALANCE_TOLERANCE) {
-                    throw new Exception('Set a total amount before recording payment.');
-                }
-                $alreadyPaid = (float)($paymentSnapshot['amount_paid'] ?? 0);
-                // Only the outstanding balance is collected: a part-paid account must not be paid in full again.
-                $remainingGross = round($totalWithVat - $alreadyPaid, 2);
-                $payParts = ['net' => $vatParts['net'], 'rate' => $vatRate, 'vat' => $vatAmount, 'total' => $totalWithVat];
-                if ($alreadyPaid > BALANCE_TOLERANCE && $remainingGross > BALANCE_TOLERANCE) {
-                    require_once __DIR__ . '/includes/finance-account-sync.php';
-                    $balSplit = rh_account_vat_split($pdo, 'conference', $enquiry_id, $remainingGross, (float)$vatRate);
-                    $payParts = ['net' => $balSplit['net'], 'rate' => $balSplit['rate'], 'vat' => $balSplit['vat'], 'total' => $remainingGross];
-                }
-                if ($alreadyPaid >= $totalWithVat - BALANCE_TOLERANCE) {
-                    $invoice_result = sendConferenceInvoiceEmail($enquiry_id);
-                    $message = 'Payment already recorded. Invoice resent to ' . htmlspecialchars($enquiry['email'] ?? '');
-                    $message .= $invoice_result['success'] ? '' : ' (Invoice email failed: ' . $invoice_result['message'] . ')';
-                } else {
-                    do {
-                        $payment_reference = 'PAY' . date('Ym') . strtoupper(substr(uniqid(), -6));
-                        $refChk = $pdo->prepare('SELECT COUNT(*) FROM payments WHERE payment_reference = ? LIMIT 1');
-                        $refChk->execute([$payment_reference]);
-                    } while ((int)$refChk->fetchColumn() > 0);
-
-                    $pdo->beginTransaction();
-                    $receipt_number = finance_next_receipt_number($pdo, date('Y-m-d'));
-
-                    $insert_payment = $pdo->prepare("
-                            INSERT INTO payments (
-                                payment_reference, booking_type, booking_id, booking_reference,
-                                payment_date, payment_amount, vat_rate, vat_amount, total_amount,
-                                payment_method, payment_type, payment_status, invoice_generated,
-                                receipt_number, status, recorded_by
-                            ) VALUES (?, 'conference', ?, ?, CURDATE(), ?, ?, ?, ?, 'cash', 'full_payment', 'completed', 1, ?, 'completed', ?)
-                        ");
-                    $insert_payment->execute([
-                        $payment_reference,
-                        $enquiry_id,
-                        $enquiry['inquiry_reference'],
-                        $payParts['net'], // payment_amount is always the ex-VAT figure
-                        $payParts['rate'],
-                        $payParts['vat'],
-                        $payParts['total'],
-                        $receipt_number,
-                        $user['id']
-                    ]);
-                    $conf_payment_id = (int)$pdo->lastInsertId();
-
-                    // Lock the invoiced VAT figures, then derive paid/due/payment_status from the ledger
-                    // (never hard-code them: refunds and earlier part-payments must net out).
-                    $update_amounts = $pdo->prepare("
-                            UPDATE conference_inquiries
-                            SET vat_rate = ?, vat_amount = ?, total_with_vat = ?
-                            WHERE id = ?
-                        ");
-                    $update_amounts->execute([$vatRate, $vatAmount, $totalWithVat, $enquiry_id]);
-                    syncConferenceEnquiryPaymentSnapshot($pdo, $enquiry_id);
-                    $pdo->commit();
-
-                    // Send receipt email with PDF
-                    if ($conf_payment_id > 0) {
-                        try {
-                            require_once '../config/receipts.php';
-                            receipt_auto_send($pdo, $conf_payment_id, $user);
-                        } catch (Throwable $rcptEx) {
-                            error_log('Receipt email failed for conference payment ' . $conf_payment_id . ': ' . $rcptEx->getMessage());
-                        }
-                    }
-
-                    $invoice_result = sendConferenceInvoiceEmail($enquiry_id);
-                    if ($invoice_result['success']) {
-                        $message = 'Payment recorded successfully! Invoice sent to ' . htmlspecialchars($enquiry['email']);
-                    } else {
-                        $message = 'Payment recorded successfully! (Invoice email failed: ' . $invoice_result['message'] . ')';
-                    }
-                }
-            } catch (PDOException $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                $error = 'Failed to record payment: ' . $e->getMessage();
-                error_log("Conference payment error: " . $e->getMessage());
+        } elseif ($action === 'record_payment') {
+            // Staff choose the method and the amount (default: the balance). The helper re-reads the paid
+            // total under a row lock, so a double click can never collect the balance twice.
+            $payRes = rh_record_account_payment($pdo, 'conference', $enquiry_id, rh_account_payment_input_from_post($_POST), (int)($user['id'] ?? 0), (string)($user['full_name'] ?? $user['username'] ?? ''));
+            $message = rh_account_after_payment_messages($pdo, $payRes, !empty($_POST['email_invoice']), 'sendConferenceInvoiceEmail', $enquiry_id, $user, getSetting('currency_symbol') . ' ');
+        } elseif ($action === 'resend_invoice') {
+            if ((float)($paymentSnapshot['amount_paid'] ?? 0) <= BALANCE_TOLERANCE) {
+                throw new Exception('No payment has been recorded yet, so there is no invoice to send.');
+            }
+            if (!filter_var((string)($enquiry['email'] ?? ''), FILTER_VALIDATE_EMAIL)) {
+                throw new Exception('This enquiry has no valid email address on file.');
+            }
+            $invoice_result = sendConferenceInvoiceEmail($enquiry_id);
+            if (!empty($invoice_result['success'])) {
+                $message = stripos((string)($invoice_result['message'] ?? ''), 'preview') !== false
+                    ? 'Invoice generated (development mode: preview only, no live email sent).'
+                    : 'Invoice emailed to ' . htmlspecialchars((string)$enquiry['email']) . '.';
+            } else {
+                $error = 'The invoice email could not be sent: ' . ($invoice_result['message'] ?? 'unknown error');
             }
         } elseif ($action === 'send_quotation') {
             $quoteValidDays = max(1, (int)($_POST['quotation_valid_days'] ?? 7));
@@ -716,7 +642,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             if (!$dtS || $dtS->format('Y-m-d') !== $newStart) {
                 throw new Exception('Please enter a valid event date.');
             }
-            if ($newStart < date('Y-m-d')) {
+            // A start date that is already past is accepted only when it is the booking's own unchanged date
+            // (staff are fixing the end date / times of a running multi-day event); moving it into the past is refused.
+            if ($newStart < date('Y-m-d') && $newStart !== (string)($enquiry['event_date'] ?? '')) {
                 throw new Exception('An event cannot be rescheduled to a date in the past.');
             }
             $newEnd = null;
@@ -845,6 +773,9 @@ try {
         $confRoomsById[(int)$confRoomRow['id']] = $confRoomRow;
     }
     foreach ($conference_enquiries as &$confEnqRow) {
+        $confEnqRow['rp_total'] = rh_account_gross_total($confEnqRow);
+        $confEnqRow['rp_paid'] = (float)($confEnqRow['amount_paid'] ?? 0);
+        $confEnqRow['rp_balance'] = ((string)$confEnqRow['status'] === 'cancelled') ? 0.0 : max(0.0, round($confEnqRow['rp_total'] - $confEnqRow['rp_paid'], 2));
         $confEnqRow['date_range_label'] = rh_conf_format_range($confEnqRow['event_date'] ?? null, $confEnqRow['end_date'] ?? null, 'M j, Y');
         $confRoomForPrice = $confRoomsById[(int)($confEnqRow['conference_room_id'] ?? 0)] ?? null;
         if (($confHasEndDate || $confHasHalfDayRate) && $confRoomForPrice && !empty($confEnqRow['event_date'])) {
@@ -1077,6 +1008,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                     </td>
                                     <td>
                                         <div class="quick-actions">
+                                            <?php /* One consistent set: the next lifecycle step and Details are always visible; every other action (payment, quotation, cancel) lives in the shared More menu. */ ?>
                                             <?php if ($enquiry['status'] === 'pending'): ?>
                                                 <form method="POST" style="display:inline;">
                                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
@@ -1114,52 +1046,77 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                                         <i class="fas fa-check-circle"></i> Complete
                                                     </button>
                                                 </form>
-                                                <form method="POST" style="display:inline;">
-                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                                    <input type="hidden" name="enquiry_action" value="send_invoice">
-                                                    <input type="hidden" name="enquiry_id" value="<?php echo $enquiry['id']; ?>">
-                                                    <button type="submit" class="btn btn-info btn-sm"
-                                                        data-admin-confirm="Generate and send invoice for this conference?"
-                                                        data-admin-confirm-title="Send invoice"
-                                                        data-admin-confirm-ok="Send invoice"
-                                                        data-admin-confirm-cancel="Cancel"
-                                                        data-admin-confirm-tone="warning"
-                                                        data-admin-confirm-icon="fa-file-invoice-dollar">
-                                                        <i class="fas fa-file-invoice-dollar"></i> Paid
-                                                    </button>
-                                                </form>
                                             <?php endif; ?>
-                                            <?php if (in_array($enquiry['status'], ['pending', 'confirmed'])): ?>
-                                                <form method="POST" style="display:inline;">
-                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                                    <input type="hidden" name="enquiry_action" value="send_quotation">
-                                                    <input type="hidden" name="enquiry_id" value="<?php echo $enquiry['id']; ?>">
-                                                    <input type="hidden" name="quotation_valid_days" value="7">
-                                                    <input type="hidden" name="send_whatsapp" value="1">
-                                                    <button type="submit" class="btn btn-quote btn-sm"
-                                                        data-admin-confirm="Send conference quotation now? This sends email and WhatsApp (if enabled)."
-                                                        data-admin-confirm-title="Send quotation"
-                                                        data-admin-confirm-ok="Send quotation"
-                                                        data-admin-confirm-cancel="Cancel"
-                                                        data-admin-confirm-tone="warning"
-                                                        data-admin-confirm-icon="fa-file-signature">
-                                                        <i class="fas fa-file-signature"></i> Quote
+                                            <?php
+                                            $confCanRecordPay = in_array($enquiry['status'], ['confirmed', 'completed'], true) && hasPermission((int)($user['id'] ?? 0), 'conference_financials');
+                                            $confCanQuote = in_array($enquiry['status'], ['pending', 'confirmed'], true) && hasPermission((int)($user['id'] ?? 0), 'conference_financials');
+                                            $confCanResend = $confCanRecordPay && (float)$enquiry['rp_paid'] > BALANCE_TOLERANCE && filter_var((string)($enquiry['email'] ?? ''), FILTER_VALIDATE_EMAIL);
+                                            $confCanCancel = in_array($enquiry['status'], ['pending', 'confirmed'], true);
+                                            ?>
+                                            <?php if ($confCanRecordPay || $confCanQuote || $confCanCancel): ?>
+                                                <div class="actions-more">
+                                                    <button type="button" class="btn btn-secondary btn-sm actions-more-toggle" title="More actions" aria-label="More actions" onclick="toggleConfActionsMore(this, event)">
+                                                        <i class="fas fa-ellipsis-vertical"></i> More
                                                     </button>
-                                                </form>
-                                                <form method="POST" style="display:inline;">
-                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                                    <input type="hidden" name="enquiry_action" value="cancel">
-                                                    <input type="hidden" name="enquiry_id" value="<?php echo $enquiry['id']; ?>">
-                                                    <button type="submit" class="btn btn-secondary btn-sm"
-                                                        data-admin-confirm="Cancel this conference enquiry?"
-                                                        data-admin-confirm-title="Cancel enquiry"
-                                                        data-admin-confirm-ok="Cancel enquiry"
-                                                        data-admin-confirm-cancel="Keep enquiry"
-                                                        data-admin-confirm-tone="danger"
-                                                        data-admin-confirm-icon="fa-times">
-                                                        <i class="fas fa-times"></i> Cancel
-                                                    </button>
-                                                </form>
+                                                    <div class="actions-more-menu">
+                                                        <?php if ($confCanRecordPay): ?>
+                                                            <button type="button" <?php echo ((float)($enquiry['total_amount'] ?? 0) > BALANCE_TOLERANCE) ? '' : 'disabled title="Set a total amount first"'; ?>
+                                                                onclick='closeConfActionMenus();rhOpenRecordPayment(<?php echo htmlspecialchars(json_encode(['id' => (int)$enquiry['id'], 'ref' => (string)$enquiry['inquiry_reference'], 'name' => (string)($enquiry['company_name'] ?: $enquiry['contact_person']), 'email' => (string)$enquiry['email'], 'total' => $enquiry['rp_total'], 'paid' => $enquiry['rp_paid'], 'balance' => $enquiry['rp_balance']]), ENT_QUOTES, 'UTF-8'); ?>)'>
+                                                                <i class="fas fa-cash-register"></i> Record payment
+                                                            </button>
+                                                        <?php endif; ?>
+                                                        <?php if ($confCanResend): ?>
+                                                            <form method="POST" style="margin:0;">
+                                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                                                <input type="hidden" name="enquiry_action" value="resend_invoice">
+                                                                <input type="hidden" name="enquiry_id" value="<?php echo $enquiry['id']; ?>">
+                                                                <button type="submit"
+                                                                    data-admin-confirm="Email the invoice to <?php echo htmlspecialchars((string)$enquiry['email'], ENT_QUOTES, 'UTF-8'); ?> now?"
+                                                                    data-admin-confirm-title="Send invoice"
+                                                                    data-admin-confirm-ok="Send invoice"
+                                                                    data-admin-confirm-cancel="Cancel"
+                                                                    data-admin-confirm-tone="warning"
+                                                                    data-admin-confirm-icon="fa-file-invoice-dollar">
+                                                                    <i class="fas fa-file-invoice-dollar"></i> Send invoice
+                                                                </button>
+                                                            </form>
+                                                        <?php endif; ?>
+                                                        <?php if ($confCanQuote): ?>
+                                                            <form method="POST" style="margin:0;">
+                                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                                                <input type="hidden" name="enquiry_action" value="send_quotation">
+                                                                <input type="hidden" name="enquiry_id" value="<?php echo $enquiry['id']; ?>">
+                                                                <input type="hidden" name="quotation_valid_days" value="7">
+                                                                <input type="hidden" name="send_whatsapp" value="1">
+                                                                <button type="submit"
+                                                                    data-admin-confirm="Send conference quotation now? This sends email and WhatsApp (if enabled)."
+                                                                    data-admin-confirm-title="Send quotation"
+                                                                    data-admin-confirm-ok="Send quotation"
+                                                                    data-admin-confirm-cancel="Cancel"
+                                                                    data-admin-confirm-tone="warning"
+                                                                    data-admin-confirm-icon="fa-file-signature">
+                                                                    <i class="fas fa-file-signature"></i> Send quotation
+                                                                </button>
+                                                            </form>
+                                                        <?php endif; ?>
+                                                        <?php if ($confCanCancel): ?>
+                                                            <form method="POST" style="margin:0;">
+                                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                                                <input type="hidden" name="enquiry_action" value="cancel">
+                                                                <input type="hidden" name="enquiry_id" value="<?php echo $enquiry['id']; ?>">
+                                                                <button type="submit" class="text-danger"
+                                                                    data-admin-confirm="Cancel this conference enquiry? The bill is voided; any payment already recorded stays as credit owed back (refund it from the Payments screen)."
+                                                                    data-admin-confirm-title="Cancel enquiry"
+                                                                    data-admin-confirm-ok="Cancel enquiry"
+                                                                    data-admin-confirm-cancel="Keep enquiry"
+                                                                    data-admin-confirm-tone="danger"
+                                                                    data-admin-confirm-icon="fa-times">
+                                                                    <i class="fas fa-times"></i> Cancel enquiry
+                                                                </button>
+                                                            </form>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </div>
                                             <?php endif; ?>
                                             <button type="button" class="btn btn-primary btn-sm" onclick="showEnquiryDetails(<?php echo htmlspecialchars(json_encode($enquiry)); ?>)">
                                                 <i class="fas fa-eye"></i> Details
@@ -1726,6 +1683,36 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         function closeEnquiryModal() {
             document.getElementById('enquiryModal').style.display = 'none';
         }
+
+        // ===== MORE-ACTIONS MENU (shared placement from admin-components.js) =====
+        function closeConfActionMenus() {
+            document.querySelectorAll('.conference-enquiries-card .actions-more.open').forEach(function(el) {
+                el.classList.remove('open');
+                var m = el.querySelector('.actions-more-menu');
+                if (m) m.removeAttribute('style');
+            });
+        }
+
+        function toggleConfActionsMore(btn, e) {
+            if (e) e.stopPropagation();
+            var wrap = btn.closest('.actions-more');
+            var menu = wrap ? wrap.querySelector('.actions-more-menu') : null;
+            if (!menu) return;
+            var wasOpen = wrap.classList.contains('open');
+            closeConfActionMenus();
+            if (wasOpen) return;
+            wrap.classList.add('open');
+            if (window.rhPlaceActionMenu) window.rhPlaceActionMenu(btn, menu);
+        }
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.actions-more')) closeConfActionMenus();
+        });
+        document.addEventListener('scroll', function(e) {
+            if (!(e.target && e.target.closest && e.target.closest('.actions-more-menu'))) closeConfActionMenus();
+        }, true);
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeConfActionMenus();
+        });
 
         // ===== CLOSE MODALS ON OUTSIDE CLICK =====
         document.querySelectorAll('.modal-overlay').forEach(function(modal) {
@@ -2323,6 +2310,8 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             </div>
         </div>
     <?php endif; ?>
+
+    <?php rh_render_record_payment_modal((string)$csrf_token, 'enquiry_action', 'enquiry_id', (string)getSetting('currency_symbol')); ?>
 
     <?php require_once 'includes/admin-footer.php'; ?>
 

@@ -42,7 +42,16 @@ $adminId = (int)($user['id'] ?? 0);
 if ($action === 'scan') {
     $code   = (string)($_POST['code'] ?? '');
     $method = (string)($_POST['method'] ?? 'barcode');
-    $result = gym_checkin_process($pdo, $code, $adminId, $method);
+    // Only a manager (gym_financials) may override the daily-visit block; the override is logged by the lib.
+    $isGymManager = function_exists('hasPermission') && hasPermission($adminId, 'gym_financials');
+    $wantsOverride = !empty($_POST['override_daily']);
+    $result = gym_checkin_process($pdo, $code, $adminId, $method, $wantsOverride && $isGymManager);
+    if (($result['outcome'] ?? '') === 'blocked' && ($result['reason'] ?? '') === 'daily_limit') {
+        $result['can_override'] = $isGymManager;
+        if ($wantsOverride && !$isGymManager) {
+            $result['message'] .= ' Only a manager can override this limit.';
+        }
+    }
     $result['success']  = !in_array($result['outcome'], ['error', 'pending_migration'], true);
     $result['snapshot'] = gym_checkin_snapshot($pdo);
     echo json_encode($result);

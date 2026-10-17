@@ -342,17 +342,19 @@ function handleManualInput(){
 
 // ── Scan processing — one request in flight, latest queued ────────────────
 let _inFlight=false,_queued=null;
-function processScan(code,method){
+function processScan(code,method,override){
     if(!TABLE_READY){ setResult('err','fa-triangle-exclamation','Attendance table missing','Run the gym_attendance migration first.'); fbError(); return; }
-    if(_inFlight){ _queued={code:code,method:method}; return; }
+    if(_inFlight){ _queued={code:code,method:method,override:override}; return; }
+    window._lastScan={code:code,method:method};
     _inFlight=true;
     const fd=new FormData();
     fd.append('csrf_token',CSRF); fd.append('action','scan'); fd.append('code',code); fd.append('method',method||'barcode');
+    if(override){ fd.append('override_daily','1'); }
     fetch(API,{method:'POST',body:fd,credentials:'same-origin'})
         .then(r=>r.json())
         .then(d=>{ handleScanResult(d); })
         .catch(()=>{ setResult('err','fa-wifi','Network error','Could not reach the server — try again.'); fbError(); })
-        .finally(()=>{ _inFlight=false; if(_queued){ const q=_queued; _queued=null; processScan(q.code,q.method); } });
+        .finally(()=>{ _inFlight=false; if(_queued){ const q=_queued; _queued=null; processScan(q.code,q.method,q.override); } });
 }
 function handleScanResult(d){
     const m=d.member||{};
@@ -365,7 +367,18 @@ function handleScanResult(d){
         setResult('out','fa-person-walking-arrow-loop-left', d.message||'Checked out', (m.member_number||''));
         fbOut();
     }else if(d.outcome==='blocked'){
-        setResult('err','fa-ban', d.message||'Membership not valid', 'Renew the membership on the Gym Members page before check-in.');
+        if(d.reason==='daily_limit'){
+            setResult('err','fa-ban', d.message||'Daily visit limit reached', d.can_override ? 'A manager can let this person in after checking their identity (logged).' : 'Ask a manager to check the person and override.');
+            if(d.can_override && window._lastScan){
+                const btn=document.createElement('button');
+                btn.type='button'; btn.className='cam-btn'; btn.style.marginTop='8px';
+                btn.innerHTML='<i class="fas fa-user-shield"></i> Manager override: let in';
+                btn.onclick=function(){ btn.disabled=true; processScan(window._lastScan.code, window._lastScan.method, true); };
+                document.getElementById('rcSub').appendChild(btn);
+            }
+        }else{
+            setResult('err','fa-ban', d.message||'Membership not valid', 'Renew the membership on the Gym Members page before check-in.');
+        }
         fbError();
     }else if(d.outcome==='not_found'){
         setResult('err','fa-circle-question', d.message||'Member not found', 'Check the number or enrol the member first.');

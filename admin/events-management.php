@@ -389,11 +389,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'delete') {
             $eventId = (int)($_POST['id'] ?? 0);
-            // Guests already holding a place (or waiting) would be orphaned: cancel their bookings first.
-            $liveRsvp = $pdo->prepare("SELECT COUNT(*) FROM event_inquiries WHERE event_id = ? AND status IN ('pending','confirmed','waitlisted')");
+            // Any booking at all (even cancelled or completed) is a record with money and guest history
+            // attached: deleting the event would orphan it. Switch the event off instead.
+            $liveRsvp = $pdo->prepare("SELECT COUNT(*) FROM event_inquiries WHERE event_id = ?");
             $liveRsvp->execute([$eventId]);
             if ((int)$liveRsvp->fetchColumn() > 0) {
-                throw new Exception('This event has pending, confirmed or waitlisted bookings. Cancel them first (Event Bookings), or switch the event off instead of deleting it.');
+                throw new Exception('This event has bookings on record (pending, confirmed, waitlisted, completed or cancelled), so it cannot be deleted. Switch the event off instead to hide it from the website.');
             }
             if ($eventId > 0 && function_exists('upsertManagedMediaForSource')) {
                 upsertManagedMediaForSource('events', $eventId, 'image_path', null, ['source_context' => '']);
@@ -441,6 +442,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $message = 'Upcoming events section settings saved!';
         } elseif ($action === 'send_event_quotation') {
+            // Quotations are pricing documents: same gate as the booking-level quotation and amount screens.
+            if (!hasPermission((int)($user['id'] ?? 0), 'events_financials')) {
+                throw new Exception('You do not have permission to handle event invoicing or pricing.');
+            }
             $eventId = (int)($_POST['event_id'] ?? 0);
             $recipientName = trim((string)($_POST['recipient_name'] ?? ''));
             $recipientEmail = trim((string)($_POST['recipient_email'] ?? ''));
@@ -764,9 +769,11 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                                     <button class="btn-action btn-edit" type="button" onclick='openEditModal(<?php echo htmlspecialchars(json_encode($event), ENT_QUOTES, "UTF-8"); ?>)'>
                                         <i class="fas fa-edit"></i> Edit
                                     </button>
+                                    <?php if (hasPermission((int)($user['id'] ?? 0), 'events_financials')): ?>
                                     <button class="btn-action btn-quote" type="button" onclick='openEventQuoteModal(<?php echo htmlspecialchars(json_encode($event), ENT_QUOTES, "UTF-8"); ?>)'>
                                         <i class="fas fa-file-signature"></i> Quote
                                     </button>
+                                    <?php endif; ?>
                                     <button class="btn-action btn-toggle" type="button" onclick="toggleActive(<?php echo $event['id']; ?>)">
                                         <i class="fas fa-power-off"></i> Toggle
                                     </button>

@@ -76,7 +76,7 @@ try {
 // Fetch packages
 $gymPackages = [];
 try {
-    $stmt = $pdo->query("SELECT name, icon_class, includes_text, duration_label, price, currency_code, is_featured FROM gym_packages WHERE is_active = 1 ORDER BY display_order ASC, id ASC");
+    $stmt = $pdo->query("SELECT name, icon_class, includes_text, duration_label, price, currency_code, is_featured FROM gym_packages WHERE is_active = 1 AND is_complimentary = 0 ORDER BY display_order ASC, id ASC");
     $gymPackages = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     error_log("Error fetching gym packages: " . $e->getMessage());
@@ -206,9 +206,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
                 'goals' => $sanitized_data['goals'] ?? ''
             ];
 
-            // Log booking data for diagnostics
-            error_log("Gym booking data prepared: " . print_r($booking_data, true));
-
             // Generate the reference; success is only declared once the inquiry is really saved
             $bookingReference = 'GYM-' . strtoupper(substr(uniqid(), -8));
             $booking_data['reference_number'] = $bookingReference;
@@ -248,7 +245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
             if (!$customer_result['success']) {
                 error_log("Failed to send gym booking confirmation email: " . $customer_result['message']);
             } else {
-                error_log("Gym customer email sent successfully to: " . $sanitized_data['email']);
+                error_log("Gym customer email sent for reference: " . $bookingReference);
             }
 
             // Send notification email to admin
@@ -267,7 +264,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_booking_form'])) 
                 $bookingEmailWarning = 'Your booking request was saved and your confirmation email was sent, but internal team notification failed.';
             }
 
-            error_log("Gym booking submitted successfully from: " . $sanitized_data['email'] . " with reference: " . $bookingReference);
+            error_log("Gym booking submitted successfully, reference: " . $bookingReference);
 
             // Redirect to dedicated confirmation page
             pub_confirm_remember('gym', (string)$bookingReference);

@@ -62,6 +62,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (($_POST['duration_days'] ?? '') !== '' && (!is_numeric($_POST['duration_days']) || (int)$_POST['duration_days'] < 0 || (int)$_POST['duration_days'] > 3650)) {
                 throw new Exception('Duration must be a whole number of days between 0 and 3650.');
             }
+            // A paid package with no duration would enrol members with no expiry date (they would never lapse
+            // or renew), so a duration is required unless the package is complimentary.
+            if (!$gm_pkg_comp && ($gm_pkg_days === null || $gm_pkg_days <= 0)) {
+                throw new Exception('A paid package needs a duration in days (e.g. 30 monthly, 365 yearly) so membership expiry can be calculated. Only complimentary packages may be open-ended.');
+            }
             if (mb_strlen($gm_pkg_label) > 50) {
                 throw new Exception('Duration label is too long (max 50 characters).');
             }
@@ -155,6 +160,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'toggle_active') {
+            // Re-activating a paid package that has no duration would enrol open-ended memberships.
+            $gm_tgl = $pdo->prepare("SELECT is_active, is_complimentary, duration_days FROM gym_packages WHERE id = ?");
+            $gm_tgl->execute([(int)$_POST['id']]);
+            $gm_tglRow = $gm_tgl->fetch(PDO::FETCH_ASSOC);
+            if ($gm_tglRow && !(int)$gm_tglRow['is_active'] && !(int)$gm_tglRow['is_complimentary'] && (int)($gm_tglRow['duration_days'] ?? 0) <= 0) {
+                throw new Exception('Set a duration in days on this paid package (Edit) before activating it.');
+            }
             $stmt = $pdo->prepare("UPDATE gym_packages SET is_active = NOT is_active WHERE id = ?");
             $stmt->execute([(int)$_POST['id']]);
             if ($is_ajax) {
@@ -489,7 +501,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                                 <option value="180">6 Months</option>
                                 <option value="365">Yearly</option>
                             </datalist>
-                            <small class="form-text text-muted">Drives membership expiry. Leave blank / 0 for open-ended.</small>
+                            <small class="form-text text-muted">Required for paid packages (drives membership expiry). Only complimentary packages can be open-ended.</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Duration Label <small>(optional — auto-set from days)</small></label>
@@ -577,7 +589,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                         <div class="form-group">
                             <label class="form-label">Duration (days)</label>
                             <input type="number" name="duration_days" id="editGymDurationDays" class="form-control" min="0" step="1" list="gymDurationPresets">
-                            <small class="form-text text-muted">Drives membership expiry. Blank / 0 = open-ended.</small>
+                            <small class="form-text text-muted">Required for paid packages (drives membership expiry). Only complimentary packages can be open-ended.</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Duration Label <small>(optional)</small></label>
