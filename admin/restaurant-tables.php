@@ -829,24 +829,32 @@ if (!rh_restaurant_tables_exist($pdo)) {
                 $tableIds = $_POST['table_id'] ?? [];
                 $capacities = $_POST['capacity'] ?? [];
                 $notes = $_POST['notes'] ?? [];
+                $tableNames = $_POST['table_name'] ?? [];
                 $activeRows = $_POST['is_active'] ?? [];
                 if (!is_array($tableIds)) throw new RuntimeException('No table rows submitted.');
+                if (!is_array($capacities)) $capacities = [];
+                if (!is_array($notes)) $notes = [];
+                if (!is_array($tableNames)) $tableNames = [];
+                if (!is_array($activeRows)) $activeRows = [];
 
                 $idToNumber = [];
+                $idWasActive = [];
                 $tableIdsInt = array_values(array_filter(array_map('intval', $tableIds), static fn($id) => $id > 0));
                 if (!empty($tableIdsInt)) {
                     $ph = implode(',', array_fill(0, count($tableIdsInt), '?'));
-                    $lookup = $pdo->prepare("SELECT id, table_number FROM restaurant_tables WHERE id IN ($ph)");
+                    $lookup = $pdo->prepare("SELECT id, table_number, is_active FROM restaurant_tables WHERE id IN ($ph)");
                     $lookup->execute($tableIdsInt);
                     foreach ($lookup->fetchAll(PDO::FETCH_ASSOC) as $row) {
                         $idToNumber[(int)$row['id']] = (string)$row['table_number'];
+                        $idWasActive[(int)$row['id']] = (int)$row['is_active'] === 1;
                     }
                 }
                 $activeLocks = rh_restaurant_active_location_locks($pdo);
                 $activeTableLocks = $activeLocks['tables'] ?? [];
 
                 $pdo->beginTransaction();
-                $update = $pdo->prepare("UPDATE restaurant_tables SET capacity = ?, notes = ?, is_active = ?, updated_at = NOW() WHERE id = ?");
+                $update = $pdo->prepare("UPDATE restaurant_tables SET table_number = ?, capacity = ?, notes = ?, is_active = ?, updated_at = NOW() WHERE id = ?");
+                $seenNames = [];
                 foreach ($tableIds as $idx => $idRaw) {
                     $id = (int)$idRaw;
                     if ($id <= 0) continue;
@@ -858,15 +866,48 @@ if (!rh_restaurant_tables_exist($pdo)) {
                     $note = mb_substr(rh_clean_text($notes[$idx] ?? ''), 0, 255);
                     $active = isset($activeRows[$id]) ? 1 : 0;
 
-                    if ($active === 0) {
-                        $tableNumber = $idToNumber[$id] ?? null;
-                        if ($tableNumber !== null && isset($activeTableLocks[$tableNumber])) {
-                            $ref = (string)($activeTableLocks[$tableNumber]['reference'] ?? 'active order');
-                            throw new RuntimeException('Cannot deactivate Table ' . $tableNumber . ' while order ' . $ref . ' is still active.');
+                    if (!isset($idToNumber[$id])) {
+                        throw new RuntimeException('A table in this list no longer exists. Refresh the page and try again.');
+                    }
+                    $oldNumber = $idToNumber[$id];
+
+                    // Table name: editable, defaults to the current name when the field is not sent.
+                    $newNumber = array_key_exists($idx, $tableNames) ? rh_clean_text($tableNames[$idx]) : $oldNumber;
+                    if ($newNumber === '' || mb_strlen($newNumber) > 50) {
+                        throw new RuntimeException('Table name must be between 1 and 50 characters.');
+                    }
+                    $renamed = $newNumber !== $oldNumber;
+                    $nameKey = mb_strtolower($newNumber);
+                    if (isset($seenNames[$nameKey])) {
+                        throw new RuntimeException(rh_duplicate_message('table', $newNumber));
+                    }
+                    $seenNames[$nameKey] = true;
+                    if ($renamed) {
+                        // Exclude this row's own id so keeping or re-casing its own name is never a duplicate.
+                        if (rh_find_duplicate($pdo, 'restaurant_tables', 'table_number', $newNumber, [], $id) !== null) {
+                            throw new RuntimeException(rh_duplicate_message('table', $newNumber));
+                        }
+                        if (isset($activeTableLocks[$oldNumber])) {
+                            $ref = (string)($activeTableLocks[$oldNumber]['reference'] ?? 'active order');
+                            throw new RuntimeException('Cannot rename Table ' . $oldNumber . ' while order ' . $ref . ' is still active.');
                         }
                     }
 
-                    $update->execute([$capacity, $note ?: null, $active, $id]);
+                    // Only block a table that is being switched off now; an already-inactive table
+                    // with a stale order must not stop other rows from being saved.
+                    if ($active === 0 && !empty($idWasActive[$id]) && isset($activeTableLocks[$oldNumber])) {
+                        $ref = (string)($activeTableLocks[$oldNumber]['reference'] ?? 'active order');
+                        throw new RuntimeException('Cannot deactivate Table ' . $oldNumber . ' while order ' . $ref . ' is still active.');
+                    }
+
+                    try {
+                        $update->execute([$newNumber, $capacity, $note ?: null, $active, $id]);
+                    } catch (PDOException $dupe) {
+                        if ((string)$dupe->getCode() === '23000') {
+                            throw new RuntimeException(rh_duplicate_message('table', $newNumber));
+                        }
+                        throw $dupe;
+                    }
                 }
                 $pdo->commit();
 
@@ -1059,7 +1100,7 @@ foreach ($tables as $table) {
                     <div class="ck-kpi ck-kpi--good"><span class="ck-kpi__label">Active Tables</span><span class="ck-kpi__value"><?php echo $activeCount; ?></span></div>
                     <div class="ck-kpi"><span class="ck-kpi__label">Total Capacity</span><span class="ck-kpi__value"><?php echo $totalCapacity > 0 ? $totalCapacity : '&mdash;'; ?></span></div>
                 </div>
-                <p class="rt-muted" style="margin-top:12px;">Capacity is optional. Leave it blank if the table exists but seating changes often.</p>
+                <p class="rt-muted" style="margin-top:12px;">Table names can be edited in the list below (a table with an open order cannot be renamed or switched off). Capacity is optional. Leave it blank if the table exists but seating changes often.</p>
             </section>
         </div>
 
@@ -1089,7 +1130,7 @@ foreach ($tables as $table) {
                             <?php foreach ($tables as $idx => $table): ?>
                                 <tr>
                                     <td data-label="Table">
-                                        <strong>Table <?php echo htmlspecialchars($table['table_number']); ?></strong>
+                                        <input type="text" name="table_name[]" maxlength="50" required aria-label="Table name" value="<?php echo htmlspecialchars((string)$table['table_number']); ?>">
                                         <input type="hidden" name="table_id[]" value="<?php echo (int)$table['id']; ?>">
                                     </td>
                                     <td data-label="Live Status">
