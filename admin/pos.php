@@ -840,20 +840,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 // Apply discounts on first payment leg only (before any split payments)
-                $firstLeg = ($splitNumber === 1 && (int)$row['split_paid_count'] === 0 && (float)($row['discount_amount'] ?? 0) == 0);
+                $firstLeg = ($splitNumber === 1 && (int)$row['split_paid_count'] === 0 && abs((float)($row['discount_amount'] ?? 0)) < BALANCE_TOLERANCE);
 
                 if ($firstLeg) {
                     // Deal discounts — auto-applied, no pos_discount permission required,
                     // therefore priced server-side from the tab's own lines. The client
                     // figure only ever caps it downwards.
-                    $dealDiscountRaw = max(0.0, round((float)($_POST['deal_discount_amount'] ?? 0), 2));
-                    $dealIdsStr      = trim($_POST['deal_ids'] ?? '');
-                    $dealValidation  = ($dealDiscountRaw > 0)
-                        ? pos_validate_deal_discount($pdo, $dealIdsStr, (float)$row['total_amount'], pos_fetch_order_deal_lines($pdo, $orderId))
-                        : ['amount' => 0.0, 'reason' => ''];
-                    $dealDiscount    = round(min($dealDiscountRaw, (float)$dealValidation['amount']), 2);
+                    $dealValidation  = pos_resolve_deal_discount($pdo, trim($_POST['deal_ids'] ?? ''), (float)($_POST['deal_discount_amount'] ?? 0), (float)$row['total_amount'], $orderId);
+                    $dealDiscount    = $dealValidation['amount'];
                     if ($dealDiscount > 0) {
-                        $dealReason = !empty($dealValidation['reason']) ? $dealValidation['reason'] : 'Deal discount';
+                        $dealReason = $dealValidation['reason'];
                         $row['total_amount'] = max(0.01, round((float)$row['total_amount'] - $dealDiscount, 2));
                         $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
                             ->execute([$row['total_amount'], $dealDiscount, $dealReason, $orderId]);
@@ -867,7 +863,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if (!hasPermission($user['id'], 'pos_discount')) throw new RuntimeException('You do not have permission to apply discounts.');
                         $discountedTotal = max(0.01, round((float)$row['total_amount'] - $discountAmount, 2));
                         $combinedDiscount = round($dealDiscount + $discountAmount, 2);
-                        $combinedReason   = trim((isset($dealReason) && $dealReason ? $dealReason . ' + ' : '') . $discountReason);
+                        $combinedReason   = mb_substr(trim((isset($dealReason) && $dealReason ? $dealReason . ' + ' : '') . $discountReason), 0, 255);
                         $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
                             ->execute([$discountedTotal, $combinedDiscount, $combinedReason ?: null, $orderId]);
                         $row['total_amount'] = $discountedTotal;
@@ -1194,14 +1190,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Deal discounts — auto-applied, no pos_discount permission required,
                 // therefore priced server-side from the order's own lines. The client
                 // figure only ever caps it downwards.
-                $dealDiscountRaw  = max(0.0, round((float)($_POST['deal_discount_amount'] ?? 0), 2));
-                $dealIdsStr       = trim($_POST['deal_ids'] ?? '');
-                $dealValidation   = ($dealDiscountRaw > 0)
-                    ? pos_validate_deal_discount($pdo, $dealIdsStr, $totalAmount, pos_fetch_order_deal_lines($pdo, $orderId))
-                    : ['amount' => 0.0, 'reason' => ''];
-                $dealDiscount = round(min($dealDiscountRaw, (float)$dealValidation['amount']), 2);
+                $dealValidation   = pos_resolve_deal_discount($pdo, trim($_POST['deal_ids'] ?? ''), (float)($_POST['deal_discount_amount'] ?? 0), (float)$totalAmount, $orderId);
+                $dealDiscount = $dealValidation['amount'];
                 if ($dealDiscount > 0) {
-                    $dealReason = !empty($dealValidation['reason']) ? $dealValidation['reason'] : 'Deal discount';
+                    $dealReason = $dealValidation['reason'];
                     $totalAmount = max(0.01, round($totalAmount - $dealDiscount, 2));
                     $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
                         ->execute([$totalAmount, $dealDiscount, $dealReason, $orderId]);
@@ -1221,7 +1213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // If a deal already set discount_amount, add to it
                     $existingDiscount = (float)($dealDiscount);
                     $combinedDiscount = round($existingDiscount + $discountAmount, 2);
-                    $combinedReason   = trim((isset($dealReason) && $dealReason ? $dealReason . ' + ' : '') . $discountReason);
+                    $combinedReason   = mb_substr(trim((isset($dealReason) && $dealReason ? $dealReason . ' + ' : '') . $discountReason), 0, 255);
                     $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
                         ->execute([$totalAmount, $combinedDiscount, $combinedReason ?: null, $orderId]);
                     pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'discount_applied', json_encode(['amount' => $discountAmount, 'reason' => $discountReason]));
@@ -1386,38 +1378,57 @@ try {
 }
 
 /**
+ * Moment a sale is priced at. Normally now; an offline-queued sale replayed later is priced as at
+ * the time the cashier took it (client_queued_at is UTC and is injected by offline-queue.js only
+ * for forms that were actually queued), so a happy-hour sale rung up offline does not lose its
+ * discount - or fail the tender check - because it synced after the window closed. Only trusted
+ * when it is in the past and under 24 hours old.
+ */
+function pos_deal_as_of_ts(): int
+{
+    $now = time();
+    $queued = trim((string)($_POST['client_queued_at'] ?? ''));
+    if ($queued !== '' && trim((string)($_POST['client_uuid'] ?? '')) !== '' && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $queued)) {
+        $dt = DateTime::createFromFormat('!Y-m-d H:i:s', $queued, new DateTimeZone('UTC'));
+        if ($dt !== false) {
+            $ts = $dt->getTimestamp();
+            if ($ts <= $now && ($now - $ts) <= 86400) return $ts;
+        }
+    }
+    return $now;
+}
+
+/**
  * Server-side deal validation: verify submitted deal IDs are genuinely active
- * right now AND recompute, from the order's own saved lines, what each of them is
- * actually worth. Returns ['amount' => authoritative discount, 'reason' => names].
+ * at the pricing moment AND recompute, from the order's own saved lines, what each of them is
+ * actually worth. Returns ['amount' => authoritative discount, 'reason' => names of the deals
+ * that fired, 'lines' => [['id','name','saving'], ...]].
  *
- * Deal discounts do NOT require pos_discount permission — they are automatic —
- * which is exactly why the amount has to be derived server-side. This function
- * used to validate only the deal IDs and return amount = 0.0, and both callers
- * then applied `min($_POST['deal_discount_amount'], 90% of total)`. That made the
- * discount a client-supplied number: any till session could post a hand-crafted
- * deal_discount_amount and knock 90% off a tab with no permission, no manager
- * auth, and an audit line that recorded the forged figure as legitimate.
+ * Deal discounts do NOT require pos_discount permission - they are automatic -
+ * which is exactly why the amount has to be derived server-side: a client-supplied
+ * deal_discount_amount is never trusted, only ever used to cap the figure downwards.
  *
- * The evaluation below mirrors applyDeals() in the page's JS so the cashier is
- * never quoted one price and charged another; where the two disagree the lower
- * of (client figure, server figure) wins, so a stale menu can only ever under-
- * discount, never over-discount.
+ * The evaluation below mirrors _dealPrice()/applyDeals() in the page's JS so the cashier is
+ * never quoted one price and charged another (windows compare at minute resolution on the
+ * hotel clock, exclusive deals are decided by whether they actually save anything). Where
+ * the two disagree the lower figure wins and pos_resolve_deal_discount() refuses the sale.
  *
  * @param array $orderLines Rows of ['menu_item_id','menu_type','quantity','unit_price']
  */
-function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAmount, array $orderLines = []): array
+function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAmount, array $orderLines = [], ?int $asOfTs = null): array
 {
-    $result = ['amount' => 0.0, 'reason' => ''];
+    $result = ['amount' => 0.0, 'reason' => '', 'lines' => []];
     if (empty(trim($dealIdsStr))) return $result;
 
     $ids = array_values(array_filter(array_map('intval', explode(',', $dealIdsStr))));
     if (empty($ids)) return $result;
 
-    $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $nowDate = date('Y-m-d');
-    $nowTime = date('H:i:s');
-    $nowDow  = (int)date('N'); // 1=Mon … 7=Sun
+    $ts      = $asOfTs ?? time();
+    $nowDate = date('Y-m-d', $ts);
+    $nowHm   = date('H:i', $ts); // minute resolution, exactly like the till
+    $nowDow  = (int)date('N', $ts); // 1=Mon … 7=Sun
 
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
     $stmt = $pdo->prepare("
         SELECT id, name, deal_type, days_of_week, start_time, end_time, valid_from, valid_to,
                applies_to, item_types, item_ids,
@@ -1429,28 +1440,28 @@ function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAm
         WHERE id IN ($placeholders) AND is_active = 1
           AND (valid_from IS NULL OR valid_from <= ?)
           AND (valid_to   IS NULL OR valid_to   >= ?)
+        ORDER BY sort_order ASC, id ASC
     ");
     $stmt->execute([...$ids, $nowDate, $nowDate]);
     $deals = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $active = [];
     foreach ($deals as $d) {
-        // Check day-of-week window
+        // Day-of-week window (an empty list means every day, like the till)
         if ($d['days_of_week']) {
             $days = array_map('intval', json_decode($d['days_of_week'], true) ?: []);
-            if (!in_array($nowDow, $days, true)) continue;
+            if ($days && !in_array($nowDow, $days, true)) continue;
         }
-        // Check time window
+        // Time window
         if ($d['start_time'] && $d['end_time']) {
-            if ($nowTime < $d['start_time'] || $nowTime > $d['end_time']) continue;
+            if ($nowHm < substr($d['start_time'], 0, 5) || $nowHm > substr($d['end_time'], 0, 5)) continue;
         }
         $active[] = $d;
     }
 
     if (empty($active)) return $result;
-    $result['reason'] = implode(', ', array_column($active, 'name'));
 
-    // No lines to price against — validate the IDs but authorise nothing.
+    // No lines to price against - the IDs are valid but nothing is authorised.
     if (empty($orderLines)) return $result;
 
     $lines = [];
@@ -1484,21 +1495,8 @@ function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAm
         return $s;
     };
 
-    // Mirror of the JS first pass: one exclusive deal firing suppresses all
-    // non-exclusive deals for this order.
-    $hasExclusive = false;
-    foreach ($active as $d) {
-        if (empty($d['exclusive'])) continue;
-        $q = array_values(array_filter($lines, fn($l) => $qualifies($d, $l)));
-        if (!$q && !in_array($d['deal_type'], ['spend_save', 'combo'], true)) continue;
-        if ($d['deal_type'] === 'spend_save' && $d['spend_threshold'] !== null && $totalAmount < (float)$d['spend_threshold']) continue;
-        $hasExclusive = true;
-        break;
-    }
-
-    $totalSaving = 0.0;
-    foreach ($active as $d) {
-        if ($hasExclusive && empty($d['exclusive'])) continue;
+    // What one deal is worth against these lines (0.0 when it does not fire).
+    $priceDeal = static function (array $d) use ($lines, $totalAmount, $qualifies, $subtotalOf): float {
         $qualifying = array_values(array_filter($lines, fn($l) => $qualifies($d, $l)));
         $saving = 0.0;
 
@@ -1533,7 +1531,9 @@ function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAm
 
             case 'spend_save':
                 $threshold = (float)($d['spend_threshold'] ?? 0);
-                if ($totalAmount < $threshold) break;
+                if (round($totalAmount, 2) < round($threshold, 2)) break;
+                // A deal scoped to categories/items needs something in scope to discount.
+                if (!$qualifying && ($d['applies_to'] ?? '') !== 'all') break;
                 if ((float)$d['discount_percent'] > 0) {
                     $base = $qualifying ? $subtotalOf($qualifying) : $totalAmount;
                     $saving = round($base * ((float)$d['discount_percent'] / 100), 2);
@@ -1545,28 +1545,76 @@ function pos_validate_deal_discount(PDO $pdo, string $dealIdsStr, float $totalAm
             case 'combo':
                 $groups = json_decode((string)($d['combo_requires'] ?? ''), true) ?: [];
                 if (!$groups) break;
-                $comboItems = [];
+                $comboRows = []; // line index => line, so the same line is never counted twice
                 $allMet = true;
                 foreach ($groups as $grp) {
                     $types  = array_map('strval', $grp['item_types'] ?? []);
                     $minQty = max(1, (int)($grp['min_qty'] ?? 1));
-                    $matching = array_values(array_filter($lines, fn($l) => in_array($l['type'], $types, true)));
+                    $matching = array_filter($lines, fn($l) => in_array($l['type'], $types, true));
                     $grpQty = 0;
                     foreach ($matching as $m) $grpQty += (int)floor($m['qty']);
                     if ($grpQty < $minQty) { $allMet = false; break; }
-                    foreach ($matching as $m) $comboItems[$m['id']] = $m;
+                    foreach ($matching as $i => $m) $comboRows[$i] = $m;
                 }
                 if (!$allMet) break;
-                $saving = round($subtotalOf(array_values($comboItems)) * ((float)$d['discount_percent'] / 100), 2);
+                $saving = round($subtotalOf($comboRows) * ((float)$d['discount_percent'] / 100), 2);
                 break;
         }
 
-        if ($saving > 0) $totalSaving += $saving;
+        return $saving > 0 ? $saving : 0.0;
+    };
+
+    $priced = [];
+    foreach ($active as $d) {
+        $s = $priceDeal($d);
+        if ($s > 0) $priced[] = ['deal' => $d, 'saving' => $s];
     }
 
+    // An exclusive deal that actually saves something suppresses every non-exclusive deal on
+    // the order (an exclusive deal that does not fire - multi-buy short of units, combo
+    // incomplete, spend not reached - must not switch the others off).
+    $hasExclusive = false;
+    foreach ($priced as $p) {
+        if (!empty($p['deal']['exclusive'])) { $hasExclusive = true; break; }
+    }
+
+    $totalSaving = 0.0;
+    $names = [];
+    foreach ($priced as $p) {
+        if ($hasExclusive && empty($p['deal']['exclusive'])) continue;
+        $totalSaving += $p['saving'];
+        $names[] = (string)$p['deal']['name'];
+        $result['lines'][] = ['id' => (int)$p['deal']['id'], 'name' => (string)$p['deal']['name'], 'saving' => $p['saving']];
+    }
+    $result['reason'] = implode(', ', $names);
+
     // Same global sanity cap the till applies: deals can never take more than 90%.
-    $result['amount'] = min(round($totalSaving, 2), round($totalAmount * 0.90, 2));
+    $result['amount'] = max(0.0, min(round($totalSaving, 2), round($totalAmount * 0.90, 2)));
     return $result;
+}
+
+/**
+ * The deal discount to book on an order: the server's own figure, never more than the till quoted.
+ * If the till quoted noticeably MORE than the server will give (a promotion ended, was edited or
+ * switched off since the page loaded, or a price changed), the sale is refused instead of silently
+ * charging the guest more than they were told - a card/mobile payment keyed at the quoted amount
+ * would otherwise be recorded as paid in full while short by the difference.
+ * Returns ['amount' => float, 'reason' => string]. Must be called inside the order's transaction.
+ */
+function pos_resolve_deal_discount(PDO $pdo, string $dealIdsStr, float $clientAmount, float $totalAmount, int $orderId): array
+{
+    $clientAmount = max(0.0, round($clientAmount, 2));
+    if ($clientAmount <= 0) return ['amount' => 0.0, 'reason' => ''];
+    $v = pos_validate_deal_discount($pdo, $dealIdsStr, $totalAmount, pos_fetch_order_deal_lines($pdo, $orderId), pos_deal_as_of_ts());
+    $amount = round(min($clientAmount, (float)$v['amount']), 2);
+    $dealCount = max(1, count(array_filter(array_map('intval', explode(',', $dealIdsStr)))));
+    if ($clientAmount - $amount > BALANCE_TOLERANCE * $dealCount + 0.0001) {
+        throw new RuntimeException('The deals on this order changed after the till loaded (a promotion ended, was edited or no longer applies): the quoted discount was ' . number_format($clientAmount, 2) . ' but ' . number_format($amount, 2) . ' is now due. Nothing was charged - refresh the till and check the new total.');
+    }
+    return [
+        'amount' => $amount,
+        'reason' => $amount > 0 ? mb_substr(trim((string)$v['reason']) !== '' ? (string)$v['reason'] : 'Deal discount', 0, 200) : '',
+    ];
 }
 
 /** Order lines in the shape pos_validate_deal_discount() prices against. */
@@ -1937,6 +1985,45 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'tabs') {
         'window_start' => $restaurantWindow['start_sql'],
         'now' => date('c'),
     ]);
+    exit;
+}
+
+/* Deals that would apply to an open tab if it were settled now - the settle-tab modal quotes this
+ * figure. The settle POST re-prices server-side from the tab's own lines (pos_resolve_deal_discount),
+ * so this only lets the till show the same number. Offered on the first payment leg only, and never
+ * once a discount or split payment is already on the tab. */
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'tab_deals') {
+    header('Content-Type: application/json; charset=utf-8');
+    $dealOut = ['ok' => true, 'amount' => 0.0, 'ids' => [], 'reason' => '', 'lines' => []];
+    try {
+        $dealOrderId = (int)($_GET['order_id'] ?? 0);
+        $dealOrderSt = $pdo->prepare("SELECT status, order_type, total_amount, created_by,
+                                             COALESCE(discount_amount, 0) AS discount_amount,
+                                             COALESCE(split_paid_count, 0) AS split_paid_count
+                                        FROM stock_orders WHERE id = ?");
+        $dealOrderSt->execute([$dealOrderId]);
+        $dealOrder = $dealOrderSt->fetch(PDO::FETCH_ASSOC);
+        if ($dealOrder
+            && $dealOrder['status'] === 'placed'
+            && $dealOrder['order_type'] !== 'room_service'
+            && ($posCanAllTabs || (int)$dealOrder['created_by'] === (int)$user['id'])
+            && (int)$dealOrder['split_paid_count'] === 0
+            && abs((float)$dealOrder['discount_amount']) < BALANCE_TOLERANCE) {
+            $dealIdList = $pdo->query("SELECT id FROM pos_deals WHERE is_active = 1 ORDER BY sort_order ASC, id ASC")->fetchAll(PDO::FETCH_COLUMN);
+            if ($dealIdList) {
+                $dealPrev = pos_validate_deal_discount($pdo, implode(',', $dealIdList), (float)$dealOrder['total_amount'], pos_fetch_order_deal_lines($pdo, $dealOrderId), time());
+                if ($dealPrev['amount'] > 0) {
+                    $dealOut['amount'] = $dealPrev['amount'];
+                    $dealOut['reason'] = $dealPrev['reason'];
+                    $dealOut['lines']  = $dealPrev['lines'];
+                    $dealOut['ids']    = array_column($dealPrev['lines'], 'id');
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        $dealOut = ['ok' => false, 'amount' => 0.0, 'ids' => [], 'reason' => '', 'lines' => []];
+    }
+    echo json_encode($dealOut);
     exit;
 }
 
@@ -3407,6 +3494,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <div style="font-size:13px;text-align:center;color:#6c757d;margin:2px 0 2px;" id="payTabOrderTotalRow" style="display:none;">
                         Order total: <span id="payTabTotal" style="font-weight:600;"><?php echo $currency_symbol; ?> 0.00</span>
                     </div>
+                    <div id="payTabDealLines" style="display:none;font-size:13px;margin:4px 0 2px;"></div>
                     <!-- Amount due (= share + tip, what this person pays) -->
                     <div style="font-size:30px;font-weight:700;text-align:center;margin:6px 0 14px;color:#1f2937;" id="payTabAmountDueDisplay"><?php echo $currency_symbol; ?> 0.00</div>
 
@@ -3811,6 +3899,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const menuList = <?php echo json_encode($menuList); ?>;
         const stockSnapshot = <?php echo json_encode($stockSnapshot); ?>;
         const posDeals = <?php echo json_encode(array_values($posDealsRaw), JSON_HEX_TAG | JSON_HEX_AMP); ?>;
+        // Server time at page load + hotel UTC offset: deal windows are judged on the hotel clock, not this device's
+        const posServerClock = { epochMs: <?php echo time() * 1000; ?>, offsetMs: <?php echo (int)date('Z') * 1000; ?>, loadedAt: Date.now() };
         <?php if (!empty($posDealsError)): ?>
         console.error('[POS Deals] DB error loading deals:', <?php echo json_encode($posDealsError); ?>);
         <?php endif; ?>
@@ -6541,24 +6631,36 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         let _dealSavings = 0;
         let _dealLines   = [];  // [{id, name, saving, detail}]
 
-        function _dealNowValid(deal) {
-            const now  = new Date();
-            const dow  = now.getDay() === 0 ? 7 : now.getDay(); // 1=Mon … 7=Sun (ISO)
-            const hhmm = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-            // YYYY-MM-DD in LOCAL time (not UTC) to avoid midnight boundary bugs
-            const ymd  = now.getFullYear() + '-' +
-                         String(now.getMonth()+1).padStart(2,'0') + '-' +
-                         String(now.getDate()).padStart(2,'0');
+        /* HOTEL CLOCK START */
+        /* Deal windows (hours, days, dates) are judged on the hotel's clock exactly as the server judges
+           them - never the till device's own clock or timezone. posServerClock is the server's time when
+           the page loaded, carried forward by the time elapsed on this device. */
+        function _hotelNow() {
+            const ms = posServerClock.epochMs + (Date.now() - posServerClock.loadedAt) + posServerClock.offsetMs;
+            const d  = new Date(ms); // read with getUTC*(): the offset is already added, so these are hotel wall-clock values
+            const p2 = n => String(n).padStart(2, '0');
+            const wd = d.getUTCDay();
+            return {
+                ymd: d.getUTCFullYear() + '-' + p2(d.getUTCMonth() + 1) + '-' + p2(d.getUTCDate()),
+                hm:  p2(d.getUTCHours()) + ':' + p2(d.getUTCMinutes()),
+                dow: wd === 0 ? 7 : wd // 1=Mon … 7=Sun (ISO)
+            };
+        }
+        /* HOTEL CLOCK END */
 
-            if (deal.valid_from && ymd < deal.valid_from) return false;
-            if (deal.valid_to   && ymd > deal.valid_to)   return false;
+        /* Round to cents the way PHP's round() does, so the till and the server agree on half-cent cases. */
+        function _r2(x) { return Math.round(x * 100 + 1e-7) / 100; }
+
+        function _dealNowValid(deal) {
+            const now = _hotelNow();
+            if (deal.valid_from && now.ymd < deal.valid_from) return false;
+            if (deal.valid_to   && now.ymd > deal.valid_to)   return false;
             if (Array.isArray(deal.days_of_week) && deal.days_of_week.length) {
-                if (!deal.days_of_week.some(d => parseInt(d,10) === dow)) return false;
+                if (!deal.days_of_week.some(d => parseInt(d, 10) === now.dow)) return false;
             }
             if (deal.start_time && deal.end_time) {
-                const st = deal.start_time.slice(0,5);
-                const et = deal.end_time.slice(0,5);
-                if (hhmm < st || hhmm > et) return false;
+                // Minute resolution on both ends (the server compares HH:MM too)
+                if (now.hm < deal.start_time.slice(0, 5) || now.hm > deal.end_time.slice(0, 5)) return false;
             }
             return true;
         }
@@ -6584,118 +6686,109 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             return units;
         }
 
+        /* Prices ONE deal against the cart: {saving, detail}, saving 0 when the deal does not fire.
+           pos_validate_deal_discount() in this file is the server twin - keep the two in step. */
+        function _dealPrice(deal, qualifying, gross) {
+            const sumOf = rows => rows.reduce((s, l) => s + l.price * l.qty, 0);
+            const none  = { saving: 0, detail: '' };
+            let saving = 0;
+            let detail = '';
+
+            if (deal.deal_type === 'happy_hour' || deal.deal_type === 'percent_off') {
+                if (!qualifying.length) return none;
+                saving = _r2(sumOf(qualifying) * (deal.discount_percent / 100));
+                const scopeLabel = (deal.applies_to === 'all')
+                    ? 'all items'
+                    : qualifying.map(l => l.name).join(', ');
+                detail = `${deal.discount_percent}% off ${scopeLabel}`;
+                if (deal.deal_type === 'happy_hour') detail = '⏰ ' + detail;
+
+            } else if (deal.deal_type === 'fixed_off') {
+                if (!qualifying.length && deal.applies_to !== 'all') return none;
+                saving = deal.discount_fixed;
+                // Cap: cannot exceed qualifying subtotal
+                if (qualifying.length) saving = Math.min(saving, sumOf(qualifying));
+                detail = `${currencySymbol} ${fmtMoney(saving)} off`;
+
+            } else if (deal.deal_type === 'multi_buy') {
+                if (!qualifying.length) return none;
+                const units     = _expandUnits(qualifying).sort((a, b) => a - b); // cheapest first
+                const groupSize = Math.max(2, deal.multi_buy_qty || 2);
+                const payFor    = Math.max(1, deal.multi_buy_pay || 1);
+                let groups      = Math.floor(units.length / groupSize);
+                if (groups < 1) return none;
+                // Respect max_uses_per_order cap
+                if (deal.max_uses_per_order) groups = Math.min(groups, deal.max_uses_per_order);
+                const totalFree = groups * Math.max(0, groupSize - payFor);
+                saving = _r2(units.slice(0, totalFree).reduce((s, p) => s + p, 0));
+                detail = `Buy ${groupSize}, pay for ${payFor} — ${totalFree} item${totalFree !== 1 ? 's' : ''} free`;
+
+            } else if (deal.deal_type === 'spend_save') {
+                const threshold = deal.spend_threshold || 0;
+                if (_r2(gross) < _r2(threshold)) return none;
+                // A deal scoped to categories/items needs something in scope to discount
+                if (!qualifying.length && deal.applies_to !== 'all') return none;
+                if (deal.discount_percent > 0) {
+                    const base = qualifying.length ? sumOf(qualifying) : gross;
+                    saving = _r2(base * (deal.discount_percent / 100));
+                    detail = `Spend ${currencySymbol} ${fmtMoney(threshold)}+ · ${deal.discount_percent}% off`;
+                } else if (deal.discount_fixed > 0) {
+                    saving = deal.discount_fixed;
+                    detail = `Spend ${currencySymbol} ${fmtMoney(threshold)}+ · ${currencySymbol} ${fmtMoney(saving)} off`;
+                }
+
+            } else if (deal.deal_type === 'combo') {
+                // Requires items from each specified group to be present
+                const groups = Array.isArray(deal.combo_requires) ? deal.combo_requires : [];
+                if (!groups.length) return none;
+                let comboItems = [];
+                for (const grp of groups) {
+                    const types    = Array.isArray(grp.item_types) ? grp.item_types : [];
+                    const minQty   = parseInt(grp.min_qty || 1, 10);
+                    const matching = cart.filter(l => types.includes(String(l.type)));
+                    const grpQty   = matching.reduce((s, l) => s + Math.floor(Number(l.qty) || 0), 0);
+                    if (grpQty < minQty) return none;
+                    comboItems.push(...matching);
+                }
+                // Dedupe comboItems
+                comboItems = [...new Map(comboItems.map(l => [l.id, l])).values()];
+                saving = _r2(sumOf(comboItems) * (deal.discount_percent / 100));
+                detail = `Combo: ${groups.map(g => g.item_types.join('+')).join(' & ')} · ${deal.discount_percent}% off`;
+            }
+
+            return saving > 0 ? { saving, detail } : none;
+        }
+
         function applyDeals() {
             if (!posDeals || !posDeals.length || !cart.length) {
                 _dealSavings = 0; _dealLines = []; return;
             }
-            const lines   = [];
-            let totalSave = 0;
-            const gross   = cartTotal();
-            console.log('[applyDeals] cart:', JSON.stringify(cart.map(l=>({id:l.id,qty:l.qty}))), 'deals:', posDeals.length);
-            let hasExclusive = false;
+            const gross = cartTotal();
 
-            // First pass: find any exclusive deal that fires
+            // Price every deal that is inside its window
+            const fired = [];
             for (const deal of posDeals) {
-                if (!deal.exclusive) continue;
                 if (!_dealNowValid(deal)) continue;
                 const qualifying = cart.filter(l => _dealItemQualifies(deal, l));
-                if (!qualifying.length && deal.deal_type !== 'spend_save' && deal.deal_type !== 'combo') continue;
-                if (deal.deal_type === 'spend_save' && deal.spend_threshold && gross < deal.spend_threshold) continue;
-                hasExclusive = true;
-                break;
+                const r = _dealPrice(deal, qualifying, gross);
+                if (r.saving > 0) fired.push({ deal, saving: r.saving, detail: r.detail });
             }
 
-            for (const deal of posDeals) {
-                if (!_dealNowValid(deal)) continue;
-                // Skip non-exclusive deals if an exclusive deal is active
-                if (hasExclusive && !deal.exclusive) continue;
-                // If there are multiple exclusive deals, only run them (they may stack with each other)
-
-                const qualifying = cart.filter(l => _dealItemQualifies(deal, l));
-                let saving = 0;
-                let detail = '';
-
-                if (deal.deal_type === 'happy_hour' || deal.deal_type === 'percent_off') {
-                    if (!qualifying.length) continue;
-                    const pct  = deal.discount_percent / 100;
-                    const base = qualifying.reduce((s, l) => s + l.price * l.qty, 0);
-                    saving = Math.round(base * pct * 100) / 100;
-                    const scopeLabel = (deal.applies_to === 'all')
-                        ? 'all items'
-                        : qualifying.map(l => l.name).join(', ');
-                    detail = `${deal.discount_percent}% off ${scopeLabel}`;
-                    if (deal.deal_type === 'happy_hour') detail = '⏰ ' + detail;
-
-                } else if (deal.deal_type === 'fixed_off') {
-                    if (!qualifying.length && deal.applies_to !== 'all') continue;
-                    saving = deal.discount_fixed;
-                    detail = `${currencySymbol} ${fmtMoney(saving)} off`;
-                    // Cap: cannot exceed qualifying subtotal
-                    if (qualifying.length) {
-                        const qSub = qualifying.reduce((s, l) => s + l.price * l.qty, 0);
-                        saving = Math.min(saving, qSub);
-                    }
-
-                } else if (deal.deal_type === 'multi_buy') {
-                    if (!qualifying.length) continue;
-                    const units = _expandUnits(qualifying).sort((a, b) => a - b); // cheapest first
-                    const groupSize  = deal.multi_buy_qty || 2;
-                    const payFor     = deal.multi_buy_pay || 1;
-                    const freePerGrp = groupSize - payFor;
-                    const groups     = Math.floor(units.length / groupSize);
-                    console.log('[multi_buy]', deal.name, 'qualifying:', qualifying.length, 'units:', units.length, 'groupSize:', groupSize, 'payFor:', payFor, 'groups:', groups, 'freePerGrp:', freePerGrp);
-                    if (groups < 1) continue;
-                    // Respect max_uses_per_order cap
-                    const maxFreeGroups = deal.max_uses_per_order ? Math.min(groups, deal.max_uses_per_order) : groups;
-                    const totalFree  = maxFreeGroups * freePerGrp;
-                    saving = Math.round(units.slice(0, totalFree).reduce((s, p) => s + p, 0) * 100) / 100;
-                    console.log('[multi_buy]', deal.name, 'totalFree:', totalFree, 'saving:', saving);
-                    detail = `Buy ${groupSize}, pay for ${payFor} — ${totalFree} item${totalFree !== 1 ? 's' : ''} free`;
-
-                } else if (deal.deal_type === 'spend_save') {
-                    const threshold = deal.spend_threshold || 0;
-                    if (gross < threshold) continue;
-                    if (deal.discount_percent > 0) {
-                        const base = qualifying.length
-                            ? qualifying.reduce((s, l) => s + l.price * l.qty, 0)
-                            : gross;
-                        saving = Math.round(base * (deal.discount_percent / 100) * 100) / 100;
-                        detail = `Spend ${currencySymbol} ${fmtMoney(threshold)}+ · ${deal.discount_percent}% off`;
-                    } else if (deal.discount_fixed > 0) {
-                        saving = deal.discount_fixed;
-                        detail = `Spend ${currencySymbol} ${fmtMoney(threshold)}+ · ${currencySymbol} ${fmtMoney(saving)} off`;
-                    }
-
-                } else if (deal.deal_type === 'combo') {
-                    // Requires items from each specified group to be present
-                    const groups = Array.isArray(deal.combo_requires) ? deal.combo_requires : [];
-                    if (!groups.length) continue;
-                    let allGroupsMet = true;
-                    let comboItems   = [];
-                    for (const grp of groups) {
-                        const types    = Array.isArray(grp.item_types) ? grp.item_types : [];
-                        const minQty   = parseInt(grp.min_qty || 1, 10);
-                        const matching = cart.filter(l => types.includes(String(l.type)));
-                        const grpQty   = matching.reduce((s, l) => s + Math.floor(Number(l.qty) || 0), 0);
-                        if (grpQty < minQty) { allGroupsMet = false; break; }
-                        comboItems.push(...matching);
-                    }
-                    if (!allGroupsMet) continue;
-                    // Dedupe comboItems
-                    comboItems = [...new Map(comboItems.map(l => [l.id, l])).values()];
-                    const base = comboItems.reduce((s, l) => s + l.price * l.qty, 0);
-                    saving = Math.round(base * (deal.discount_percent / 100) * 100) / 100;
-                    detail = `Combo: ${groups.map(g => g.item_types.join('+')).join(' & ')} · ${deal.discount_percent}% off`;
-                }
-
-                if (saving <= 0) continue;
-                totalSave += saving;
-                lines.push({ id: String(deal.id), name: deal.name, saving, detail });
+            // An exclusive deal that actually saves something suppresses every non-exclusive deal
+            // (one that does not fire - multi-buy short of units, combo incomplete, spend not reached -
+            // must not switch the others off). Exclusive deals themselves may stack with each other.
+            const hasExclusive = fired.some(f => f.deal.exclusive);
+            const lines = [];
+            let totalSave = 0;
+            for (const f of fired) {
+                if (hasExclusive && !f.deal.exclusive) continue;
+                totalSave += f.saving;
+                lines.push({ id: String(f.deal.id), name: f.deal.name, saving: f.saving, detail: f.detail });
             }
 
             // Global cap: total deal savings ≤ 90% of cart total (sanity guard)
-            const maxSavings = Math.round(gross * 0.90 * 100) / 100;
-            _dealSavings = Math.min(totalSave, maxSavings);
+            const maxSavings = _r2(gross * 0.90);
+            _dealSavings = Math.min(_r2(totalSave), maxSavings);
             _dealLines   = lines;
         }
 
@@ -7129,6 +7222,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function openPayModal() {
             if (!cart.length) return;
             if (!validateServiceContext()) return;
+            // A deal window may have opened/closed since the cart last changed - price at this moment
+            const _dealsBefore = _dealSavings;
+            applyDeals();
+            if (Math.abs(_dealSavings - _dealsBefore) > 0.004) renderCart();
             // Reset manual discount (deal savings already computed in renderCart)
             _payDiscount = 0;
             const dAmtEl = document.getElementById('payDiscountAmt');
@@ -9279,6 +9376,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             current: 1,     // which split leg we're currently collecting (1-based)
             paid: [],       // { person, method, methodLabel, amount, tip, change } per completed leg
             discount: 0,    // discount applied before splitting (first leg only)
+            dealDiscount: 0, // automatic deal discount previewed for this tab (server re-prices it on payment)
+            dealIds: '',
+            dealLines: [],
         };
 
         /* Split share for one leg, matching pos_applyPaymentToOrder() exactly: even
@@ -9287,7 +9387,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
            same figure the server will demand, or the final cash payer is short-paid
            by the remainder and the tender check rejects an exactly-correct payment. */
         function ptShareFor(legNumber) {
-            const baseTotal = Math.max(0, _pt.total - (_pt.discount || 0));
+            const baseTotal = Math.max(0, _pt.total - (_pt.dealDiscount || 0) - (_pt.discount || 0));
             const ways = _pt.ways > 1 ? _pt.ways : 1;
             if (ways <= 1) return Math.round(baseTotal * 100) / 100;
             const even = Math.round(baseTotal / ways * 100) / 100;
@@ -9467,6 +9567,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             _pt.ref = ref;
             _pt.paid = [];
             _pt.discount = 0;
+            _pt.dealDiscount = 0;
+            _pt.dealIds = '';
+            _pt.dealLines = [];
+            ptRenderDeals();
             // Reset discount UI
             const dAmt = document.getElementById('payTabDiscountAmt');
             const dHidden = document.getElementById('payTabDiscountAmtHidden');
@@ -9513,9 +9617,43 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             ptResetForm();
             ptUpdateDisplay();
 
+            syncTabDiscountToForm();
             const ov = document.getElementById('payTabOverlay');
             ov.style.zIndex = '100001';
             ov.classList.add('show');
+            // Deals apply on the first payment leg only (a tab already mid-split was priced when its first leg was taken)
+            if (!(existingSplitPaid > 0)) ptLoadDeals(orderId);
+        }
+
+        function ptRenderDeals() {
+            const el = document.getElementById('payTabDealLines');
+            if (!el) return;
+            const lines = _pt.dealLines || [];
+            if (!(_pt.dealDiscount > 0) || !lines.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
+            el.innerHTML = lines.map(dl =>
+                `<div class="pay-deal-line"><i class="fas fa-tags" style="color:#10b981"></i> <span>${escHtml(dl.name)}</span><span style="color:#10b981;font-weight:600;">−${currencySymbol} ${fmtMoney(dl.saving)}</span></div>`
+            ).join('') + `<div class="pay-deal-line" style="font-weight:600;"><span>Deals total</span><span style="color:#10b981;">−${currencySymbol} ${fmtMoney(_pt.dealDiscount)}</span></div>`;
+            el.style.display = 'block';
+        }
+
+        async function ptLoadDeals(orderId) {
+            try {
+                const r = await fetch('pos.php?ajax=tab_deals&order_id=' + encodeURIComponent(orderId), {
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const j = await r.json();
+                if (!j || !j.ok || !(j.amount > 0) || _pt.orderId !== orderId || _pt.paid.length > 0) return;
+                _pt.dealDiscount = Number(j.amount) || 0;
+                _pt.dealIds = (j.ids || []).join(',');
+                _pt.dealLines = j.lines || [];
+                // A manual percentage already picked was worked out on the pre-deal total - recompute it
+                const activePreset = document.querySelector('#payTabDiscountPresets .discount-preset-btn.active');
+                if (activePreset && parseFloat(activePreset.dataset.pct) > 0) ptSetDiscountPct(activePreset, parseFloat(activePreset.dataset.pct));
+                syncTabDiscountToForm();
+                ptRenderDeals();
+                ptUpdateDisplay();
+            } catch (e) { /* no preview: the tab is settled at its full total */ }
         }
 
         // AJAX payment submission + receipt modal
@@ -9916,6 +10054,20 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 hidePosActionLoader();
                 return;
             }
+            // A promotion window may have closed while the modal was open: re-price and make the cashier confirm the new total
+            const _dealsAtSubmit = _dealSavings;
+            applyDeals();
+            if (Math.abs(_dealSavings - _dealsAtSubmit) > 0.004) {
+                e.preventDefault();
+                syncPayDiscountToForm();
+                document.getElementById('payTotal').textContent = currencySymbol + ' ' + fmtMoney(effectiveCartTotal());
+                updChange();
+                updConfirm();
+                renderCart();
+                hidePosActionLoader();
+                posToastReady('A promotion changed - the total was updated. Check it, then confirm again.', true);
+                return;
+            }
             showPosActionLoader('Taking payment...', 'Saving the order and sending station tickets.');
         });
 
@@ -9963,7 +10115,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         /* ── Discount for settle-tab modal ──────────────────────────────── */
         function ptSetDiscountPct(btn, pct) {
             if (_pt.paid.length > 0) { posToastReady('Cannot change discount once payments have started.', true); return; }
-            const base = _pt.total;
+            const base = Math.max(0, _pt.total - (_pt.dealDiscount || 0));
             _pt.discount = pct > 0 ? Math.round(base * pct / 100 * 100) / 100 : 0;
             const dEl = document.getElementById('payTabDiscountAmt');
             if (dEl) dEl.value = _pt.discount > 0 ? _pt.discount.toFixed(2) : '';
@@ -9983,13 +10135,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function syncTabDiscountToForm() {
-            // Manual discount only — deal discount on tabs is passed separately
+            // Manual discount here; the automatic deal discount is passed alongside it below
             document.getElementById('payTabDiscountAmtHidden').value = (_pt.discount || 0).toFixed(2);
             const reason = document.getElementById('payTabDiscountReason');
             document.getElementById('payTabDiscountReasonHidden').value = reason ? reason.value.trim() : '';
-            // Tab settlement: no deal discounts (deals applied at order creation)
-            document.getElementById('payTabDealDiscountAmtHidden').value = '0';
-            document.getElementById('payTabDealIdsHidden').value = '';
+            // Automatic deals previewed for this tab (the server re-prices them from the tab's own lines)
+            document.getElementById('payTabDealDiscountAmtHidden').value = (_pt.dealDiscount || 0).toFixed(2);
+            document.getElementById('payTabDealIdsHidden').value = _pt.dealIds || '';
         }
 
         /* ── 86 Mode (manager item availability toggle) ──────────────────── */

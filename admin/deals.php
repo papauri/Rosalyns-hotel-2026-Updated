@@ -98,7 +98,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             // Spend threshold
             $spendThreshold = null;
             if ($type === 'spend_save') {
-                $spendThreshold = min(99999999.99, max(0.01, (float)($_POST['spend_threshold'] ?? 0)));
+                if ((float)($_POST['spend_threshold'] ?? 0) <= 0) throw new InvalidArgumentException('Enter the minimum spend that triggers this deal.');
+                $spendThreshold = min(99999999.99, (float)$_POST['spend_threshold']);
             }
 
             // Combo requirements: [{item_types:[], min_qty:N}, ...]
@@ -208,11 +209,18 @@ function deal_active_now(array $d, string $nt, int $nd): bool {
     if ($d['valid_to']   && date('Y-m-d') > $d['valid_to'])   return false;
     if ($d['days_of_week']) {
         $days = json_decode($d['days_of_week'], true) ?: [];
-        if (!in_array($nd, $days)) return false;
+        if ($days && !in_array($nd, $days)) return false;
     }
-    if ($d['start_time'] && $d['end_time'])
-        if ($nt < $d['start_time'] || $nt > $d['end_time']) return false;
+    if ($d['start_time'] && $d['end_time']) {
+        $hm = substr($nt, 0, 5);
+        if ($hm < substr($d['start_time'], 0, 5) || $hm > substr($d['end_time'], 0, 5)) return false;
+    }
     return true;
+}
+
+/** 12.5 stays 12.5, 20.00 shows as 20 (percentages accept one decimal place). */
+function deal_fmt_pct($v): string {
+    return rtrim(rtrim(number_format((float)$v, 2, '.', ''), '0'), '.');
 }
 
 $csrf_token = generateCsrfToken();
@@ -230,10 +238,10 @@ $menuCatsRaw = $pdo->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $menuItemsRaw = $pdo->query("
-    SELECT mi.id, mi.item_name AS name, mi.category_id
+    SELECT mi.id, mi.item_name AS name, mi.category_id, mi.is_available
     FROM menu_items mi
     JOIN menu_categories mc ON mc.id = mi.category_id
-    WHERE mc.is_active = 1 AND mi.is_available = 1
+    WHERE mc.is_active = 1
       AND COALESCE(mc.business_context, 'food_service') = " . $pdo->quote($dealsCatalogContext) . "
       AND (mi.show_pos = 1 OR mi.show_room_service = 1)
     ORDER BY mi.item_name ASC
@@ -408,7 +416,7 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
             switch ($d['deal_type']) {
                 case 'happy_hour':
                 case 'percent_off':
-                    $det[] = '<i class="fas fa-percent"></i> ' . number_format($d['discount_percent'],0) . '% off';
+                    $det[] = '<i class="fas fa-percent"></i> ' . deal_fmt_pct($d['discount_percent']) . '% off';
                     break;
                 case 'fixed_off':
                     $det[] = '<i class="fas fa-tag"></i> ' . $sym . ' ' . number_format($d['discount_fixed'],2) . ' off';
@@ -419,13 +427,13 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
                     break;
                 case 'spend_save':
                     $thresh = $d['spend_threshold'] ? ($sym . ' ' . number_format($d['spend_threshold'],2) . '+') : 'any spend';
-                    if ($d['discount_percent'] > 0) $det[] = '<i class="fas fa-coins"></i> Spend ' . $thresh . ' → ' . number_format($d['discount_percent'],0) . '% off';
+                    if ($d['discount_percent'] > 0) $det[] = '<i class="fas fa-coins"></i> Spend ' . $thresh . ' → ' . deal_fmt_pct($d['discount_percent']) . '% off';
                     else $det[] = '<i class="fas fa-coins"></i> Spend ' . $thresh . ' → ' . $sym . ' ' . number_format($d['discount_fixed'],2) . ' off';
                     break;
                 case 'combo':
                     $grps = $d['combo_requires'] ? json_decode($d['combo_requires'], true) : [];
                     $gLabels = array_map(fn($g) => implode('+', (array)($g['item_types'] ?? [])) . ' ×' . ($g['min_qty']??1), $grps ?: []);
-                    $det[] = '<i class="fas fa-object-group"></i> ' . implode(' &amp; ', $gLabels) . ' → ' . number_format($d['discount_percent'],0) . '% off';
+                    $det[] = '<i class="fas fa-object-group"></i> ' . implode(' &amp; ', $gLabels) . ' → ' . deal_fmt_pct($d['discount_percent']) . '% off';
                     break;
             }
             if ($d['start_time'] && $d['end_time'])
@@ -609,12 +617,12 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
     <!-- 8. Time window (happy hour) -->
     <div class="fm-section" id="dmSecTime">
-        <div class="fm-sec-head"><i class="fas fa-clock" style="color:#f59e0b;"></i> What hours does this run?</div>
+        <div class="fm-sec-head"><i class="fas fa-clock" style="color:#f59e0b;"></i> What hours does this run? <span style="font-weight:400;font-size:11px;color:#9ca3af;">(optional)</span></div>
         <div class="fm-2col">
             <div class="fm-row"><label>Start time</label><input type="time" id="dmStartTime"></div>
             <div class="fm-row"><label>End time</label><input type="time" id="dmEndTime"></div>
         </div>
-        <div class="fm-hint">The deal will only fire between these times. Leave blank for all day.</div>
+        <div class="fm-hint">The deal will only fire between these times (hotel clock). Leave both blank for all day.</div>
     </div>
 
     <!-- 9. Which items does it cover? -->
@@ -730,6 +738,7 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const _dealsData = <?php echo json_encode(array_values($deals), JSON_HEX_TAG | JSON_HEX_AMP); ?>;
 const _dealsCsrf = <?php echo json_encode($csrf_token); ?>;
 let _dmEditId = 0;
+function _escH(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 let _comboGroupCount = 0;
 
 /* ── Deal type card selector ─────────────────────────────────────────────── */
@@ -742,8 +751,9 @@ function selectDealType(type) {
 function _applyTypeVisibility(t) {
     const show = id => document.getElementById(id).classList.add('show');
     const hide = id => document.getElementById(id).classList.remove('show');
-    ['dmSecPct','dmSecFixed','dmSecMb','dmSecSpend','dmSecTime','dmSecCombo'].forEach(hide);
-    if (t === 'happy_hour')  { show('dmSecPct'); show('dmSecTime'); }
+    ['dmSecPct','dmSecFixed','dmSecMb','dmSecSpend','dmSecCombo'].forEach(hide);
+    show('dmSecTime'); // every deal type can be limited to hours of the day
+    if (t === 'happy_hour')  { show('dmSecPct'); }
     if (t === 'percent_off') { show('dmSecPct'); }
     if (t === 'fixed_off')   { show('dmSecFixed'); }
     if (t === 'multi_buy')   { show('dmSecMb'); updateMbPreview(); }
@@ -802,7 +812,7 @@ function addComboGroup(data) {
     const cats = <?php echo json_encode(array_values(array_map(fn($c) => ['slug'=>$c['slug'],'name'=>$c['name']], $menuCatsRaw)), JSON_HEX_TAG|JSON_HEX_AMP); ?>;
     const savedTypes = data && data.item_types ? data.item_types : [];
     const chipHtml = cats.map(c =>
-        `<span class="ct-chip${savedTypes.includes(c.slug)?' sel':''}" data-slug="${c.slug}" style="font-size:11px;padding:3px 10px;" onclick="this.classList.toggle('sel')">${c.name}</span>`
+        `<span class="ct-chip${savedTypes.includes(c.slug)?' sel':''}" data-slug="${_escH(c.slug)}" style="font-size:11px;padding:3px 10px;" onclick="this.classList.toggle('sel')">${_escH(c.name)}</span>`
     ).join('');
     const div = document.createElement('div');
     div.id = 'cmb-grp-' + i;
@@ -866,6 +876,7 @@ function openDealModal(id) {
         ids.forEach(itemId => {
             const mi = _menuItems.find(x => x.id === itemId);
             if (mi) _ipItems.push({id: mi.id, name: mi.name, category: mi.catName});
+            else _ipItems.push({id: itemId, name: 'Item #' + itemId + ' (no longer on the POS menu)', category: ''});
         });
     }
     ipReset();
@@ -1028,7 +1039,7 @@ const _menuItems = <?php
     foreach ($menuCatsRaw as $c) $catNameMap[$c['id']] = $c['name'];
     $itemsOut = [];
     foreach ($menuItemsRaw as $mi) {
-        $itemsOut[] = ['id' => (int)$mi['id'], 'name' => $mi['name'], 'catId' => (int)$mi['category_id'], 'catName' => $catNameMap[$mi['category_id']] ?? ''];
+        $itemsOut[] = ['id' => (int)$mi['id'], 'name' => $mi['name'] . ((int)$mi['is_available'] ? '' : ' (unavailable)'), 'catId' => (int)$mi['category_id'], 'catName' => $catNameMap[$mi['category_id']] ?? ''];
     }
     echo json_encode($itemsOut, JSON_HEX_TAG | JSON_HEX_AMP);
 ?>;
@@ -1098,7 +1109,7 @@ function ipRender() {
         return;
     }
     chips.innerHTML = _ipItems.map(x =>
-        `<span class="ip-chip" title="${x.category||''}">${x.name.replace(/</g,'&lt;')}
+        `<span class="ip-chip" title="${_escH(x.category)}">${_escH(x.name)}
             <button type="button" class="ip-chip-x" onclick="ipRemove(${x.id})" title="Remove">&#215;</button>
         </span>`
     ).join('');
