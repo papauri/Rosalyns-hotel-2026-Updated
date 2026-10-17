@@ -322,6 +322,44 @@ try {
     error_log("Error fetching individual rooms: " . $e->getMessage());
 }
 
+// Joined rooms (room_combinations): a pair is sold as its own room type, but each member is
+// still a physical room. Label them so a member room is never mistaken for a plain room, and so
+// staff can see what a block does to the pair.
+$joined_type_ids = [];   // room types sold as pairs
+$room_joined_label = []; // individual room id => "joined room X (with 1B)"
+try {
+    $jst = $pdo->query("
+        SELECT rc.combined_name, rc.combined_room_type_id, rc.room_a_id, rc.room_b_id,
+               ra.room_number AS a_number, rb.room_number AS b_number
+        FROM room_combinations rc
+        JOIN individual_rooms ra ON ra.id = rc.room_a_id
+        JOIN individual_rooms rb ON rb.id = rc.room_b_id
+        WHERE rc.is_active = 1
+    ");
+    foreach ($jst->fetchAll(PDO::FETCH_ASSOC) as $jr) {
+        $joined_type_ids[(int)$jr['combined_room_type_id']] = true;
+        $room_joined_label[(int)$jr['room_a_id']][] = $jr['combined_name'] . ' (with ' . $jr['b_number'] . ')';
+        $room_joined_label[(int)$jr['room_b_id']][] = $jr['combined_name'] . ' (with ' . $jr['a_number'] . ')';
+    }
+} catch (PDOException $e) {
+    error_log('Error fetching joined rooms: ' . $e->getMessage());
+}
+$room_type_label = static function (array $room) use ($joined_type_ids): string {
+    return (string)$room['name'] . (isset($joined_type_ids[(int)$room['id']]) ? ' - joined pairs' : '');
+};
+$individual_room_label = static function (array $ir) use ($room_joined_label): string {
+    $label = 'Room ' . $ir['room_number'];
+    if (!empty($room_joined_label[(int)$ir['id']])) {
+        $label .= ' - part of joined room ' . implode(', ', $room_joined_label[(int)$ir['id']]);
+    }
+    return $label;
+};
+// Individual rooms grouped by their room type for <optgroup>s.
+$individual_rooms_by_type = [];
+foreach ($individual_rooms as $ir) {
+    $individual_rooms_by_type[(string)$ir['room_type_name']][] = $ir;
+}
+
 // Get blocked dates for calendar display
 $calendar_start = date('Y-m-d', strtotime('-3 months'));
 $calendar_end = date('Y-m-d', strtotime('+6 months'));
@@ -407,8 +445,8 @@ $site_name = getSetting('site_name');
                         <select name="room_id" class="form-select">
                             <option value="all">All Room Types</option>
                             <?php foreach ($rooms as $room): ?>
-                                <option value="<?php echo $room['id']; ?>" <?php echo $filter_room_id === $room['id'] ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($room['name']); ?>
+                                <option value="<?php echo $room['id']; ?>" <?php echo $filter_room_id === (int)$room['id'] ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($room_type_label($room)); ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
@@ -417,10 +455,14 @@ $site_name = getSetting('site_name');
                         <label class="form-label">Individual Room</label>
                         <select name="individual_room_id" class="form-select">
                             <option value="all">All Individual Rooms</option>
-                            <?php foreach ($individual_rooms as $ir): ?>
-                                <option value="<?php echo $ir['id']; ?>" <?php echo $filter_individual_room_id === $ir['id'] ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($ir['room_type_name'] . ' - ' . $ir['room_number']); ?>
-                                </option>
+                            <?php foreach ($individual_rooms_by_type as $irTypeName => $irGroup): ?>
+                                <optgroup label="<?php echo htmlspecialchars($irTypeName, ENT_QUOTES); ?>">
+                                    <?php foreach ($irGroup as $ir): ?>
+                                        <option value="<?php echo $ir['id']; ?>" <?php echo $filter_individual_room_id === (int)$ir['id'] ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($individual_room_label($ir)); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -496,6 +538,9 @@ $site_name = getSetting('site_name');
                                                 <span class="badge badge-info">
                                                     <?php echo htmlspecialchars($bd['room_name'] . ' - ' . $bd['individual_room_number']); ?>
                                                 </span>
+                                                <?php if (!empty($room_joined_label[(int)($bd['individual_room_id'] ?? 0)])): ?>
+                                                    <small class="blocked-dates-muted" style="display:block;margin-top:3px;"><i class="fas fa-link"></i> Also blocks joined room <?php echo htmlspecialchars(implode(', ', $room_joined_label[(int)$bd['individual_room_id']])); ?></small>
+                                                <?php endif; ?>
                                             <?php else: ?>
                                                 <?php if ($bd['room_id']): ?>
                                                     <span class="badge badge-info">
@@ -575,23 +620,27 @@ $site_name = getSetting('site_name');
                             <option value="">All Room Types</option>
                             <?php foreach ($rooms as $room): ?>
                                 <option value="<?php echo $room['id']; ?>">
-                                    <?php echo htmlspecialchars($room['name']); ?>
+                                    <?php echo htmlspecialchars($room_type_label($room)); ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
-                        <small class="text-muted">Select "All Room Types" to block all room types for this date</small>
+                        <small class="text-muted">Select "All Room Types" to block all room types for this date. Blocking a room type also stops joined pairs that use its rooms; blocking a joined-pairs type stops only the pairs (the rooms can still be sold on their own).</small>
                     </div>
 
                     <div class="mb-3 d-none" id="blockSingleIndividualRoomGroup">
                         <label class="form-label">Individual Room</label>
                         <select name="individual_room_id" id="blockSingleIndividualRoom" class="form-select">
-                            <?php foreach ($individual_rooms as $ir): ?>
-                                <option value="<?php echo $ir['id']; ?>">
-                                    <?php echo htmlspecialchars($ir['room_type_name'] . ' - ' . $ir['room_number']); ?>
-                                </option>
+                            <?php foreach ($individual_rooms_by_type as $irTypeName => $irGroup): ?>
+                                <optgroup label="<?php echo htmlspecialchars($irTypeName, ENT_QUOTES); ?>">
+                                    <?php foreach ($irGroup as $ir): ?>
+                                        <option value="<?php echo $ir['id']; ?>">
+                                            <?php echo htmlspecialchars($individual_room_label($ir)); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
                             <?php endforeach; ?>
                         </select>
-                        <small class="text-muted">Select a specific individual room to block</small>
+                        <small class="text-muted">Select a specific physical room to block. A room that is part of a joined room also takes that pair off sale on the blocked nights.</small>
                     </div>
 
                     <div class="mb-3">
@@ -657,23 +706,27 @@ $site_name = getSetting('site_name');
                             <option value="">All Room Types</option>
                             <?php foreach ($rooms as $room): ?>
                                 <option value="<?php echo $room['id']; ?>">
-                                    <?php echo htmlspecialchars($room['name']); ?>
+                                    <?php echo htmlspecialchars($room_type_label($room)); ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
-                        <small class="text-muted">Select "All Room Types" to block all room types for these dates</small>
+                        <small class="text-muted">Select "All Room Types" to block all room types for these dates. Blocking a room type also stops joined pairs that use its rooms; blocking a joined-pairs type stops only the pairs (the rooms can still be sold on their own).</small>
                     </div>
 
                     <div class="mb-3 d-none" id="blockRangeIndividualRoomGroup">
                         <label class="form-label">Individual Room</label>
                         <select name="individual_room_id" id="blockRangeIndividualRoom" class="form-select">
-                            <?php foreach ($individual_rooms as $ir): ?>
-                                <option value="<?php echo $ir['id']; ?>">
-                                    <?php echo htmlspecialchars($ir['room_type_name'] . ' - ' . $ir['room_number']); ?>
-                                </option>
+                            <?php foreach ($individual_rooms_by_type as $irTypeName => $irGroup): ?>
+                                <optgroup label="<?php echo htmlspecialchars($irTypeName, ENT_QUOTES); ?>">
+                                    <?php foreach ($irGroup as $ir): ?>
+                                        <option value="<?php echo $ir['id']; ?>">
+                                            <?php echo htmlspecialchars($individual_room_label($ir)); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
                             <?php endforeach; ?>
                         </select>
-                        <small class="text-muted">Select a specific individual room to block</small>
+                        <small class="text-muted">Select a specific physical room to block. A room that is part of a joined room also takes that pair off sale on the blocked nights.</small>
                     </div>
 
                     <div class="mb-3">

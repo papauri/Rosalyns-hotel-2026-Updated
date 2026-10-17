@@ -49,6 +49,51 @@ $error = '';
 // joined-room manager via ?combinations=1.
 $autoOpenCombinations = isset($_GET['combinations']) && $_GET['combinations'] === '1';
 
+/**
+ * Why two rooms cannot be moved into a joined-room type (null = they can): an active booking
+ * of another room type holds one of them, and moving the room would leave that booking in a
+ * room that is no longer of its type.
+ */
+function ir_combo_move_blocker(PDO $pdo, array $roomIds, int $combinedTypeId): ?string
+{
+    $roomIds = array_values(array_filter(array_map('intval', $roomIds)));
+    if (empty($roomIds)) {
+        return null;
+    }
+    $ph = implode(',', array_fill(0, count($roomIds), '?'));
+    $st = $pdo->prepare("
+        SELECT DISTINCT b.booking_reference, ir.room_number
+        FROM bookings b
+        JOIN individual_rooms ir ON ir.id IN ($ph)
+        WHERE b.deleted_at IS NULL
+          AND b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
+          AND b.room_id <> ?
+          AND (b.individual_room_id = ir.id
+               OR EXISTS (SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.individual_room_id = ir.id AND br.released_at IS NULL))
+        ORDER BY b.check_in_date
+        LIMIT 5
+    ");
+    $st->execute(array_merge($roomIds, [$combinedTypeId]));
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (empty($rows)) {
+        return null;
+    }
+    $list = implode(', ', array_map(static fn($r) => $r['booking_reference'] . ' (room ' . $r['room_number'] . ')', $rows));
+    return 'These rooms cannot be sold only as the joined room yet: upcoming bookings of their current room type are assigned to them - ' . $list
+        . '. Move those bookings to other rooms first, or keep the rooms sellable on their own.';
+}
+
+/** How many bookings (any status) refer to a joined-room combination. */
+function ir_combo_booking_count(PDO $pdo, int $combinationId): int
+{
+    $st = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_combination_id = ?");
+    $st->execute([$combinationId]);
+    $n = (int)$st->fetchColumn();
+    $st = $pdo->prepare("SELECT COUNT(DISTINCT booking_id) FROM booking_rooms WHERE room_combination_id = ?");
+    $st->execute([$combinationId]);
+    return max($n, (int)$st->fetchColumn());
+}
+
 function saveRoomAmenities(PDO $pdo, int $roomId, string $amenitiesRaw): void
 {
     $pdo->prepare("DELETE FROM individual_room_amenities WHERE individual_room_id = ?")->execute([$roomId]);
@@ -240,6 +285,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $max_guests_combined = max(1, (int)($_POST['max_guests_combined'] ?? 1));
             $notes = trim($_POST['combination_notes'] ?? '');
             $is_active = isset($_POST['combination_is_active']) ? 1 : 0;
+            // 'shared': both rooms keep their own type and are sold on their own AND as the pair.
+            // 'joined_only': both rooms move to the "Book As" type and are sold only as the pair.
+            $sale_mode = ($_POST['combination_sale_mode'] ?? 'shared') === 'joined_only' ? 'joined_only' : 'shared';
+            $autoOpenCombinations = true; // reopen the manager to show the result or the error
 
             if ($combined_name === '' || $combined_room_type_id <= 0 || $room_a_id <= 0 || $room_b_id <= 0) {
                 $error = 'Combination name, room type, and both rooms are required.';
@@ -255,6 +304,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pairSt->execute([$id, $room_a_id, $room_b_id, $room_b_id, $room_a_id]);
                 $pairDup = $pairSt->fetch(PDO::FETCH_ASSOC);
                 $comboDup = rh_find_duplicate($pdo, 'room_combinations', 'combined_name', $combined_name, [], $id > 0 ? $id : null);
+                // A room can belong to only one active pair: two active pairs sharing a room would
+                // let the same physical room be sold twice as part of different joined rooms.
+                $sharedSt = $pdo->prepare('SELECT combined_name FROM room_combinations WHERE is_active = 1 AND id <> ? AND (room_a_id IN (?, ?) OR room_b_id IN (?, ?)) LIMIT 1');
+                $sharedSt->execute([$id, $room_a_id, $room_b_id, $room_a_id, $room_b_id]);
+                $sharedCombo = $sharedSt->fetchColumn();
+                $moveBlocker = $sale_mode === 'joined_only' ? ir_combo_move_blocker($pdo, [$room_a_id, $room_b_id], $combined_room_type_id) : null;
                 if (mb_strlen($combined_name) > 120) {
                     $error = 'Combination name is too long (max 120 characters).';
                 } elseif ((int)$roomCheck->fetchColumn() !== 2) {
@@ -267,6 +322,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = rh_duplicate_message('joined-room combination', (string)$comboDup['value']);
                 } elseif ($pairDup && $is_active) {
                     $error = 'These two rooms are already joined as "' . $pairDup['combined_name'] . '".';
+                } elseif ($sharedCombo !== false && $is_active) {
+                    $error = 'One of these rooms is already part of the active joined room "' . $sharedCombo . '". Deactivate or delete that combination first.';
+                } elseif ($moveBlocker !== null) {
+                    $error = $moveBlocker;
                 } elseif ($id > 0) {
                     $stmt = $pdo->prepare(" 
                         UPDATE room_combinations
@@ -292,15 +351,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $autoOpenCombinations = true;
                     });
                 }
+                if (empty($error) && $sale_mode === 'joined_only') {
+                    $moveSt = $pdo->prepare("UPDATE individual_rooms SET room_type_id = ? WHERE id IN (?, ?) AND room_type_id <> ?");
+                    $moveSt->execute([$combined_room_type_id, $room_a_id, $room_b_id, $combined_room_type_id]);
+                    if ($moveSt->rowCount() > 0) {
+                        $message .= ' Both rooms now belong to the joined room type and are sold only as the pair.';
+                    }
+                }
+                if (empty($error)) {
+                    require_once __DIR__ . '/../config/cache.php';
+                    clearRoomCache();
+                }
             }
         } elseif ($action === 'deactivate_room_combination') {
             $id = (int)($_POST['combination_id'] ?? 0);
             if ($id > 0) {
                 $stmt = $pdo->prepare("UPDATE room_combinations SET is_active = 0 WHERE id = ?");
                 $stmt->execute([$id]);
-                $message = 'Joined-room combination deactivated successfully!';
+                $message = 'Joined-room combination deactivated. It is no longer sold; bookings that already hold it keep their rooms.';
                 $autoOpenCombinations = true;
+                require_once __DIR__ . '/../config/cache.php';
+                clearRoomCache();
             }
+        } elseif ($action === 'activate_room_combination') {
+            $id = (int)($_POST['combination_id'] ?? 0);
+            $comboSt = $pdo->prepare("SELECT id, room_a_id, room_b_id FROM room_combinations WHERE id = ?");
+            $comboSt->execute([$id]);
+            $combo = $comboSt->fetch(PDO::FETCH_ASSOC);
+            if (!$combo) {
+                $error = 'Combination not found.';
+            } else {
+                $clash = $pdo->prepare('SELECT combined_name FROM room_combinations WHERE is_active = 1 AND id <> ? AND (room_a_id IN (?, ?) OR room_b_id IN (?, ?)) LIMIT 1');
+                $clash->execute([$id, $combo['room_a_id'], $combo['room_b_id'], $combo['room_a_id'], $combo['room_b_id']]);
+                $clashName = $clash->fetchColumn();
+                if ($clashName !== false) {
+                    $error = 'One of these rooms is already part of the active joined room "' . $clashName . '". Deactivate that one first.';
+                } else {
+                    $pdo->prepare("UPDATE room_combinations SET is_active = 1 WHERE id = ?")->execute([$id]);
+                    $message = 'Joined-room combination reactivated.';
+                    require_once __DIR__ . '/../config/cache.php';
+                    clearRoomCache();
+                }
+            }
+            $autoOpenCombinations = true;
+        } elseif ($action === 'delete_room_combination') {
+            // Removes the pairing only; the two physical rooms are untouched. A pairing that any
+            // booking has used is kept for that booking's history: deactivate it instead.
+            $id = (int)($_POST['combination_id'] ?? 0);
+            $comboSt = $pdo->prepare("SELECT combined_name FROM room_combinations WHERE id = ?");
+            $comboSt->execute([$id]);
+            $comboName = $comboSt->fetchColumn();
+            if ($comboName === false) {
+                $error = 'Combination not found.';
+            } else {
+                $used = ir_combo_booking_count($pdo, $id);
+                if ($used > 0) {
+                    $error = '"' . $comboName . '" has been used by ' . $used . ' booking' . ($used === 1 ? '' : 's') . ', so it is kept for their history. Deactivate it instead - it will no longer be sold.';
+                } else {
+                    $pdo->prepare("DELETE FROM room_combinations WHERE id = ?")->execute([$id]);
+                    $message = 'Joined-room combination "' . $comboName . '" deleted. The two rooms are unchanged.';
+                    require_once __DIR__ . '/../config/cache.php';
+                    clearRoomCache();
+                }
+            }
+            $autoOpenCombinations = true;
         } elseif ($action === 'update_status') {
             $id = (int)$_POST['id'];
             $new_status = $_POST['new_status'];
@@ -828,17 +942,34 @@ $combinationRoomOptionsStmt = $pdo->query("
 ");
 $combinationRoomOptions = $combinationRoomOptionsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-$roomCombinationsStmt = $pdo->query(" 
+$roomCombinationsStmt = $pdo->query("
     SELECT rc.*, r.name AS combined_room_type_name,
-           ra.room_number AS room_a_number, ra.room_name AS room_a_name,
-           rb.room_number AS room_b_number, rb.room_name AS room_b_name
+           ra.room_number AS room_a_number, ra.room_name AS room_a_name, ra.room_type_id AS room_a_type_id, rta.name AS room_a_type_name,
+           rb.room_number AS room_b_number, rb.room_name AS room_b_name, rb.room_type_id AS room_b_type_id, rtb.name AS room_b_type_name,
+           (SELECT COUNT(*) FROM bookings bk WHERE bk.room_combination_id = rc.id) AS booking_count
     FROM room_combinations rc
     JOIN rooms r ON r.id = rc.combined_room_type_id
     JOIN individual_rooms ra ON ra.id = rc.room_a_id
     JOIN individual_rooms rb ON rb.id = rc.room_b_id
+    LEFT JOIN rooms rta ON rta.id = ra.room_type_id
+    LEFT JOIN rooms rtb ON rtb.id = rb.room_type_id
     ORDER BY rc.is_active DESC, r.name, rc.combined_name
 ");
 $roomCombinations = $roomCombinationsStmt->fetchAll(PDO::FETCH_ASSOC);
+// Room id => the joined rooms it belongs to, so the rooms list shows that a room is also sold
+// as part of a pair (its own room type does not change unless it is sold ONLY as the pair).
+$roomJoinedIn = [];
+foreach ($roomCombinations as $rcRow) {
+    foreach (['a' => 'b', 'b' => 'a'] as $self => $other) {
+        $roomJoinedIn[(int)$rcRow['room_' . $self . '_id']][] = [
+            'name' => (string)$rcRow['combined_name'],
+            'type' => (string)$rcRow['combined_room_type_name'],
+            'partner' => (string)$rcRow['room_' . $other . '_number'],
+            'active' => !empty($rcRow['is_active']),
+            'only' => (int)$rcRow['room_' . $self . '_type_id'] === (int)$rcRow['combined_room_type_id'],
+        ];
+    }
+}
 
 // Get unique floors for filter
 $floorsStmt = $pdo->query("SELECT DISTINCT floor FROM individual_rooms WHERE floor IS NOT NULL AND floor != '' ORDER BY floor");
@@ -1166,7 +1297,15 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                             <div class="room-name"><?php echo htmlspecialchars($room['room_name']); ?></div>
                                         <?php endif; ?>
                                     </td>
-                                    <td><?php echo htmlspecialchars($room['room_type_name'] ?? 'Unknown'); ?></td>
+                                    <td>
+                                        <?php echo htmlspecialchars($room['room_type_name'] ?? 'Unknown'); ?>
+                                        <?php foreach ($roomJoinedIn[(int)$room['id']] ?? [] as $ji): ?>
+                                            <small class="ir-joined-badge<?php echo $ji['active'] ? '' : ' is-inactive'; ?>" title="<?php echo htmlspecialchars($ji['only'] ? 'Sold only as the joined room' : 'Sold on its own and as part of the joined room', ENT_QUOTES); ?>">
+                                                <i class="fas fa-link"></i>
+                                                <?php echo htmlspecialchars(($ji['only'] ? 'Joined only: ' : 'Also joined: ') . $ji['type'] . ' with ' . $ji['partner']); ?><?php echo $ji['active'] ? '' : ' (inactive)'; ?>
+                                            </small>
+                                        <?php endforeach; ?>
+                                    </td>
                                     <td><?php echo $room['floor'] ? htmlspecialchars($room['floor']) : '-'; ?></td>
                                     <td>
                                         <?php echo (int)($room['max_guests_override'] ?? $room['max_guests']); ?> guests
@@ -1313,12 +1452,45 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
     </div>
 
     <!-- ══ JOINED ROOM COMBINATIONS MODAL ══ -->
-    <div class="modal-overlay" id="combinationsModal" style="display:none;align-items:flex-start;padding-top:40px;" onclick="if(event.target===this)closeCombinationsModal()">
-        <div class="modal-content" style="max-width:880px;width:100%;max-height:90vh;overflow-y:auto;">
+    <style>
+        .ir-joined-badge { display: block; margin-top: 4px; font-size: 11px; font-weight: 600; color: #0369a1; }
+        .ir-joined-badge.is-inactive { color: #9b8f85; font-weight: 500; }
+        #combinationsModal .combo-modal { width: min(1180px, 96vw); max-width: none; max-height: 92vh; overflow-y: auto; }
+        #combinationsModal .combo-label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #6b625a; margin-bottom: 5px; }
+        #combinationsModal .combo-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin-bottom: 12px; }
+        #combinationsModal .combo-grid-4 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 12px 16px; align-items: end; margin-bottom: 14px; }
+        #combinationsModal .combo-grid-2 input, #combinationsModal .combo-grid-2 select,
+        #combinationsModal .combo-grid-4 input { width: 100%; box-sizing: border-box; }
+        #combinationsModal .combo-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+        #combinationsModal .combo-mode label { display: flex; gap: 10px; align-items: flex-start; border: 1px solid #e0d6cb; border-radius: 8px; padding: 10px 12px; background: #fff; cursor: pointer; font-size: 13px; color: #2A2723; }
+        #combinationsModal .combo-mode label small { display: block; color: #6b625a; font-weight: 400; margin-top: 2px; }
+        #combinationsModal .combo-mode input { margin-top: 3px; }
+        #combinationsModal .combo-table-wrap { overflow-x: auto; border: 1px solid #e8e0d8; border-radius: 8px; }
+        #combinationsModal .combo-table { margin: 0; width: 100%; min-width: 980px; table-layout: auto !important; }
+        #combinationsModal .combo-table th, #combinationsModal .combo-table td { vertical-align: middle; width: auto !important; max-width: none !important; overflow: visible !important; text-overflow: clip !important; }
+        #combinationsModal .combo-table th { white-space: nowrap; }
+        #combinationsModal .combo-rooms { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 190px; }
+        #combinationsModal .combo-room { display: inline-flex; flex-direction: column; background: #e8f4fd; color: #0369a1; border-radius: 4px; padding: 2px 8px; font-size: 12px; font-weight: 600; }
+        #combinationsModal .combo-room small { font-weight: 400; color: #4a6b85; font-size: 10px; }
+        #combinationsModal .combo-actions { display: flex; flex-wrap: nowrap; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+        #combinationsModal .combo-actions form { display: inline; margin: 0; }
+        #combinationsModal .combo-pill { border-radius: 12px; padding: 3px 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+        @media (max-width: 760px) {
+            #combinationsModal .combo-grid-2, #combinationsModal .combo-grid-4, #combinationsModal .combo-mode { grid-template-columns: 1fr; }
+            #combinationsModal .combo-table { min-width: 0; }
+            #combinationsModal .combo-table thead { display: none; }
+            #combinationsModal .combo-table tr { display: block; border-bottom: 1px solid #e8e0d8; padding: 10px 12px; }
+            #combinationsModal .combo-table td { display: flex; justify-content: space-between; gap: 12px; border: 0; padding: 4px 0; text-align: right !important; }
+            #combinationsModal .combo-table td::before { content: attr(data-label); font-size: 11px; font-weight: 600; text-transform: uppercase; color: #6b625a; text-align: left; }
+            #combinationsModal .combo-actions { justify-content: flex-end; }
+        }
+    </style>
+    <div class="modal-overlay" id="combinationsModal" style="display:none;align-items:flex-start;padding-top:32px;" onclick="if(event.target===this)closeCombinationsModal()">
+        <div class="modal-content combo-modal" role="dialog" aria-modal="true" aria-labelledby="combinationsModalTitle">
             <div class="modal-header">
                 <div>
-                    <h3><i class="fas fa-link"></i> Joined Room Combinations</h3>
-                    <p style="margin:4px 0 0;color:#6b625a;font-size:13px;">Pair adjoining rooms into one bookable unit. Accounting, refunds, invoices, and folios stay under one booking.</p>
+                    <h3 id="combinationsModalTitle"><i class="fas fa-link"></i> Joined Room Combinations</h3>
+                    <p style="margin:4px 0 0;color:#6b625a;font-size:13px;">Pair two rooms into one bookable unit sold as the "Book As" room type. Accounting, refunds, invoices and folios stay under one booking.</p>
                 </div>
                 <button type="button" class="modal-close" aria-label="Close" onclick="closeCombinationsModal()">&times;</button>
             </div>
@@ -1332,14 +1504,14 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                         <input type="hidden" name="action" value="save_room_combination">
                         <input type="hidden" name="combination_id" id="combination_id" value="">
 
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin-bottom:12px;">
+                        <div class="combo-grid-2">
                             <div>
-                                <label for="combined_name" style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#6b625a;margin-bottom:5px;">Combination Name *</label>
-                                <input type="text" name="combined_name" id="combined_name" placeholder="Family Suite 101A + 101B" required style="width:100%;box-sizing:border-box;">
+                                <label for="combined_name" class="combo-label">Combination Name *</label>
+                                <input type="text" name="combined_name" id="combined_name" placeholder="Family Suite 101A + 101B" required maxlength="120">
                             </div>
                             <div>
-                                <label for="combined_room_type_id" style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#6b625a;margin-bottom:5px;">Book As Room Type *</label>
-                                <select name="combined_room_type_id" id="combined_room_type_id" required style="width:100%;box-sizing:border-box;">
+                                <label for="combined_room_type_id" class="combo-label">Book As Room Type *</label>
+                                <select name="combined_room_type_id" id="combined_room_type_id" required>
                                     <option value="">Select Room Type</option>
                                     <?php foreach ($roomTypes as $type): ?>
                                         <option value="<?php echo (int)$type['id']; ?>"><?php echo htmlspecialchars($type['name']); ?></option>
@@ -1347,8 +1519,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                 </select>
                             </div>
                             <div>
-                                <label for="room_a_id" style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#6b625a;margin-bottom:5px;">First Room *</label>
-                                <select name="room_a_id" id="room_a_id" required style="width:100%;box-sizing:border-box;">
+                                <label for="room_a_id" class="combo-label">First Room *</label>
+                                <select name="room_a_id" id="room_a_id" required>
                                     <option value="">Select Room</option>
                                     <?php foreach ($combinationRoomOptions as $roomOption): ?>
                                         <option value="<?php echo (int)$roomOption['id']; ?>"><?php echo htmlspecialchars($roomOption['room_type_name'] . ' — ' . $roomOption['room_number'] . (!empty($roomOption['room_name']) ? ' (' . $roomOption['room_name'] . ')' : '')); ?></option>
@@ -1356,8 +1528,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                 </select>
                             </div>
                             <div>
-                                <label for="room_b_id" style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#6b625a;margin-bottom:5px;">Second Room *</label>
-                                <select name="room_b_id" id="room_b_id" required style="width:100%;box-sizing:border-box;">
+                                <label for="room_b_id" class="combo-label">Second Room *</label>
+                                <select name="room_b_id" id="room_b_id" required>
                                     <option value="">Select Room</option>
                                     <?php foreach ($combinationRoomOptions as $roomOption): ?>
                                         <option value="<?php echo (int)$roomOption['id']; ?>"><?php echo htmlspecialchars($roomOption['room_type_name'] . ' — ' . $roomOption['room_number'] . (!empty($roomOption['room_name']) ? ' (' . $roomOption['room_name'] . ')' : '')); ?></option>
@@ -1366,20 +1538,20 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             </div>
                         </div>
 
-                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px 16px;align-items:end;margin-bottom:16px;">
+                        <div class="combo-grid-4">
                             <div>
-                                <label for="price_override" style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#6b625a;margin-bottom:5px;">Rate Override <span style="text-transform:none;font-weight:400;">(optional)</span></label>
-                                <input type="number" name="price_override" id="price_override" step="0.01" min="0" placeholder="Room type rate" style="width:100%;box-sizing:border-box;">
+                                <label for="price_override" class="combo-label">Rate Override <span style="text-transform:none;font-weight:400;">(optional)</span></label>
+                                <input type="number" name="price_override" id="price_override" step="0.01" min="0" placeholder="Room type rate">
                             </div>
                             <div>
-                                <label for="max_guests_combined" style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#6b625a;margin-bottom:5px;">Max Guests *</label>
-                                <input type="number" name="max_guests_combined" id="max_guests_combined" min="1" value="4" required style="width:100%;box-sizing:border-box;">
+                                <label for="max_guests_combined" class="combo-label">Max Guests *</label>
+                                <input type="number" name="max_guests_combined" id="max_guests_combined" min="1" value="4" required>
                             </div>
                             <div>
-                                <label for="combination_notes" style="display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#6b625a;margin-bottom:5px;">Notes</label>
-                                <input type="text" name="combination_notes" id="combination_notes" placeholder="e.g. Adjoining door" style="width:100%;box-sizing:border-box;">
+                                <label for="combination_notes" class="combo-label">Notes</label>
+                                <input type="text" name="combination_notes" id="combination_notes" placeholder="e.g. Adjoining door">
                             </div>
-                            <div style="padding-bottom:1px;">
+                            <div style="padding-bottom:6px;">
                                 <label style="display:flex;align-items:center;gap:7px;cursor:pointer;white-space:nowrap;font-size:13px;font-weight:600;color:#2A2723;">
                                     <input type="checkbox" name="combination_is_active" id="combination_is_active" checked>
                                     Active
@@ -1387,7 +1559,23 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             </div>
                         </div>
 
-                        <div style="display:flex;gap:8px;">
+                        <span class="combo-label">How are these two rooms sold?</span>
+                        <div class="combo-mode">
+                            <label>
+                                <input type="radio" name="combination_sale_mode" value="shared" id="combo_mode_shared" checked>
+                                <span>On their own <strong>and</strong> as the joined room
+                                    <small>Each room keeps its own room type. When the pair is booked, both rooms are taken; when either room is booked, the pair is unavailable.</small>
+                                </span>
+                            </label>
+                            <label>
+                                <input type="radio" name="combination_sale_mode" value="joined_only" id="combo_mode_joined">
+                                <span>Only as the joined room
+                                    <small>Both rooms move to the "Book As" room type and are no longer sold on their own.</small>
+                                </span>
+                            </label>
+                        </div>
+
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
                             <button type="submit" class="btn btn-primary"><i class="fas fa-link"></i> Save Combination</button>
                             <button type="button" class="btn btn-secondary" onclick="resetCombinationForm()"><i class="fas fa-rotate-left"></i> Clear</button>
                         </div>
@@ -1397,67 +1585,103 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 <h4 style="margin:0 0 12px;font-size:14px;font-weight:600;color:#2A2723;display:flex;align-items:center;gap:8px;">
                     <i class="fas fa-list" style="color:#766550;"></i> Existing Combinations
                 </h4>
-                <div style="overflow-x:auto;border:1px solid #e8e0d8;border-radius:8px;overflow:hidden;">
-                    <table class="table" style="margin:0;">
+                <div class="combo-table-wrap">
+                    <table class="table combo-table">
                         <thead>
                             <tr>
                                 <th>Name</th>
                                 <th>Book As</th>
                                 <th>Rooms</th>
+                                <th>Sold</th>
                                 <th style="text-align:center;">Capacity</th>
-                                <th>Rate Override</th>
+                                <th>Rate</th>
                                 <th style="text-align:center;">Status</th>
                                 <th style="text-align:right;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if (empty($roomCombinations)): ?>
-                                <tr><td colspan="7" style="text-align:center;padding:32px;color:#9b8f85;font-style:italic;">No joined-room combinations configured yet.</td></tr>
+                                <tr><td colspan="8" style="text-align:center;padding:32px;color:#9b8f85;font-style:italic;">No joined-room combinations configured yet.</td></tr>
                             <?php else: ?>
                                 <?php foreach ($roomCombinations as $combination): ?>
+                                    <?php
+                                    $comboOnlyJoined = (int)$combination['room_a_type_id'] === (int)$combination['combined_room_type_id']
+                                        && (int)$combination['room_b_type_id'] === (int)$combination['combined_room_type_id'];
+                                    $comboUsed = (int)($combination['booking_count'] ?? 0);
+                                    $comboName = (string)$combination['combined_name'];
+                                    ?>
                                     <tr>
-                                        <td style="font-weight:600;color:#2A2723;"><?php echo htmlspecialchars($combination['combined_name']); ?></td>
-                                        <td style="color:#5E554D;"><?php echo htmlspecialchars($combination['combined_room_type_name']); ?></td>
-                                        <td>
-                                            <span style="background:#e8f4fd;color:#0369a1;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;font-family:monospace;">
-                                                <?php echo htmlspecialchars($combination['room_a_number']); ?>
-                                            </span>
-                                            <span style="color:#9b8f85;margin:0 4px;">+</span>
-                                            <span style="background:#e8f4fd;color:#0369a1;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;font-family:monospace;">
-                                                <?php echo htmlspecialchars($combination['room_b_number']); ?>
-                                            </span>
+                                        <td data-label="Name" style="font-weight:600;color:#2A2723;"><?php echo htmlspecialchars($comboName); ?></td>
+                                        <td data-label="Book As" style="color:#5E554D;"><?php echo htmlspecialchars($combination['combined_room_type_name']); ?></td>
+                                        <td data-label="Rooms">
+                                            <div class="combo-rooms">
+                                                <span class="combo-room"><?php echo htmlspecialchars($combination['room_a_number']); ?><small><?php echo htmlspecialchars((string)$combination['room_a_type_name']); ?></small></span>
+                                                <span style="color:#9b8f85;">+</span>
+                                                <span class="combo-room"><?php echo htmlspecialchars($combination['room_b_number']); ?><small><?php echo htmlspecialchars((string)$combination['room_b_type_name']); ?></small></span>
+                                            </div>
                                         </td>
-                                        <td style="text-align:center;">
-                                            <span style="background:#f3ece4;color:#6b4c2a;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;">
+                                        <td data-label="Sold" style="font-size:12px;color:#5E554D;"><?php echo $comboOnlyJoined ? 'Only as the pair' : 'Alone and as the pair'; ?></td>
+                                        <td data-label="Capacity" style="text-align:center;">
+                                            <span style="background:#f3ece4;color:#6b4c2a;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;white-space:nowrap;">
                                                 <i class="fas fa-user" style="font-size:10px;"></i> <?php echo (int)$combination['max_guests_combined']; ?>
                                             </span>
                                         </td>
-                                        <td style="font-weight:500;">
+                                        <td data-label="Rate" style="font-weight:500;white-space:nowrap;">
                                             <?php if ($combination['price_override'] !== null): ?>
                                                 <span style="color:#1a6b35;font-weight:600;"><?php echo htmlspecialchars(getSetting('currency_symbol', 'MWK') . ' ' . number_format((float)$combination['price_override'], 0)); ?></span>
                                             <?php else: ?>
                                                 <span style="color:#9b8f85;font-style:italic;">Room type rate</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td style="text-align:center;">
+                                        <td data-label="Status" style="text-align:center;">
                                             <?php if (!empty($combination['is_active'])): ?>
-                                                <span style="background:#d1fae5;color:#065f46;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Active</span>
+                                                <span class="combo-pill" style="background:#d1fae5;color:#065f46;">Active</span>
                                             <?php else: ?>
-                                                <span style="background:#f3f4f6;color:#9b8f85;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Inactive</span>
+                                                <span class="combo-pill" style="background:#f3f4f6;color:#6b625a;">Inactive</span>
+                                            <?php endif; ?>
+                                            <?php if ($comboUsed > 0): ?>
+                                                <small style="display:block;color:#6b625a;margin-top:3px;"><?php echo $comboUsed; ?> booking<?php echo $comboUsed === 1 ? '' : 's'; ?></small>
                                             <?php endif; ?>
                                         </td>
-                                        <td style="text-align:right;white-space:nowrap;">
-                                            <button type="button" class="btn btn-info btn-sm" onclick='openCombinationForm(<?php echo htmlspecialchars(json_encode($combination), ENT_QUOTES, "UTF-8"); ?>)'>
-                                                <i class="fas fa-edit"></i> Edit
-                                            </button>
-                                            <?php if (!empty($combination['is_active'])): ?>
-                                                <form method="POST" style="display:inline;margin-left:4px;">
+                                        <td data-label="Actions">
+                                            <div class="combo-actions">
+                                                <button type="button" class="btn btn-info btn-sm" onclick='openCombinationForm(<?php echo htmlspecialchars(json_encode($combination), ENT_QUOTES, "UTF-8"); ?>)'>
+                                                    <i class="fas fa-edit"></i> Edit
+                                                </button>
+                                                <form method="POST">
                                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
-                                                    <input type="hidden" name="action" value="deactivate_room_combination">
                                                     <input type="hidden" name="combination_id" value="<?php echo (int)$combination['id']; ?>">
-                                                    <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-ban"></i> Deactivate</button>
+                                                    <?php if (!empty($combination['is_active'])): ?>
+                                                        <input type="hidden" name="action" value="deactivate_room_combination">
+                                                        <button type="submit" class="btn btn-secondary btn-sm"
+                                                            data-admin-confirm="<?php echo htmlspecialchars('Stop selling "' . $comboName . '"?', ENT_QUOTES); ?>"
+                                                            data-admin-confirm-title="Deactivate joined room"
+                                                            data-admin-confirm-details="Bookings that already hold these rooms keep them.|You can reactivate it later."
+                                                            data-admin-confirm-ok="Deactivate" data-admin-confirm-icon="fa-ban">
+                                                            <i class="fas fa-ban"></i> Deactivate
+                                                        </button>
+                                                    <?php else: ?>
+                                                        <input type="hidden" name="action" value="activate_room_combination">
+                                                        <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-rotate-right"></i> Reactivate</button>
+                                                    <?php endif; ?>
                                                 </form>
-                                            <?php endif; ?>
+                                                <?php if ($comboUsed === 0): ?>
+                                                    <form method="POST">
+                                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
+                                                        <input type="hidden" name="action" value="delete_room_combination">
+                                                        <input type="hidden" name="combination_id" value="<?php echo (int)$combination['id']; ?>">
+                                                        <button type="submit" class="btn btn-danger btn-sm"
+                                                            data-admin-confirm="<?php echo htmlspecialchars('Delete the joined room "' . $comboName . '"?', ENT_QUOTES); ?>"
+                                                            data-admin-confirm-title="Delete combination"
+                                                            data-admin-confirm-details="<?php echo htmlspecialchars('Only the pairing is removed - rooms ' . $combination['room_a_number'] . ' and ' . $combination['room_b_number'] . ' stay as they are.' . ($comboOnlyJoined ? '|Both rooms still belong to ' . $combination['combined_room_type_name'] . ': change their room type under Individual Rooms to sell them on their own.' : ''), ENT_QUOTES); ?>"
+                                                            data-admin-confirm-ok="Delete" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-trash">
+                                                            <i class="fas fa-trash"></i> Delete
+                                                        </button>
+                                                    </form>
+                                                <?php else: ?>
+                                                    <button type="button" class="btn btn-danger btn-sm" disabled title="Used by bookings - kept for their history. Deactivate it instead."><i class="fas fa-trash"></i> Delete</button>
+                                                <?php endif; ?>
+                                            </div>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -1834,6 +2058,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             form.reset();
             document.getElementById('combination_id').value = '';
             document.getElementById('combination_is_active').checked = true;
+            document.getElementById('combo_mode_shared').checked = true;
             const title = document.getElementById('combinationFormTitle');
             if (title) title.innerHTML = '<i class="fas fa-plus-circle" style="color:#766550;margin-right:6px;"></i> Add / Edit Combination';
         }
@@ -1858,6 +2083,9 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             document.getElementById('max_guests_combined').value = combination.max_guests_combined || 1;
             document.getElementById('combination_notes').value = combination.notes || '';
             document.getElementById('combination_is_active').checked = String(combination.is_active) === '1';
+            const onlyJoined = String(combination.room_a_type_id) === String(combination.combined_room_type_id)
+                && String(combination.room_b_type_id) === String(combination.combined_room_type_id);
+            document.getElementById(onlyJoined ? 'combo_mode_joined' : 'combo_mode_shared').checked = true;
             const title = document.getElementById('combinationFormTitle');
             if (title) title.innerHTML = '<i class="fas fa-edit" style="color:#766550;margin-right:6px;"></i> Editing: ' + (combination.combined_name || '');
             openCombinationsModal();
