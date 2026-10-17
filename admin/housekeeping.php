@@ -8,6 +8,7 @@
 require_once 'admin-init.php';
 require_once 'includes/admin-modal.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/includes/bulk-actions.php';
 /** @var array{id: int, username: string, role: string} $user */
 /** @var string $csrf_token */
 
@@ -646,6 +647,70 @@ function hkValidateAssignmentFields(string $dueDate, int $estimated, ?string $sc
     return '';
 }
 
+/**
+ * Single-row workflow steps shared by the one-by-one buttons and the bulk bar, so both enforce the
+ * same rules. The caller owns the transaction. Each returns true when it changed the row, false when
+ * the row is not in a state the step applies to.
+ */
+function hkLoadAssignment(PDO $pdo, int $id): ?array
+{
+    $st = $pdo->prepare("SELECT * FROM housekeeping_assignments WHERE id = ? FOR UPDATE");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+function hkStartAssignment(PDO $pdo, int $id, array $beforeData, ?int $userId, ?string $username): void
+{
+    if (housekeepingColumnExists($pdo, 'started_at')) {
+        $pdo->prepare("UPDATE housekeeping_assignments SET started_at = COALESCE(started_at, NOW()), status = CASE WHEN status = 'pending' THEN 'in_progress' ELSE status END WHERE id = ?")
+            ->execute([$id]);
+    } else {
+        $pdo->prepare("UPDATE housekeeping_assignments SET status = 'in_progress' WHERE id = ? AND status = 'pending'")
+            ->execute([$id]);
+    }
+    $afterData = hkLoadAssignment($pdo, $id);
+    logHousekeepingAction($id, 'status_changed', $beforeData, $afterData, $userId, $username);
+    reconcileIndividualRoomHousekeeping($pdo, (int)$beforeData['individual_room_id'], $userId);
+}
+
+function hkCompleteAssignment(PDO $pdo, int $id, array $beforeData, ?int $userId, ?string $username): void
+{
+    $setClause = "status = 'completed', completed_at = COALESCE(completed_at, NOW())";
+    if (housekeepingColumnExists($pdo, 'started_at')) {
+        $setClause .= ", started_at = COALESCE(started_at, NOW())";
+    }
+    $pdo->prepare("UPDATE housekeeping_assignments SET {$setClause} WHERE id = ?")->execute([$id]);
+    $afterData = hkLoadAssignment($pdo, $id);
+    logHousekeepingAction($id, 'status_changed', $beforeData, $afterData, $userId, $username);
+    reconcileIndividualRoomHousekeeping($pdo, (int)$beforeData['individual_room_id'], $userId);
+}
+
+/** Verify a completed, not-yet-verified task. False when it is not in that state. */
+function hkVerifyAssignment(PDO $pdo, int $id, ?int $userId, ?string $username): bool
+{
+    $beforeData = hkLoadAssignment($pdo, $id);
+    $stmt = $pdo->prepare("UPDATE housekeeping_assignments SET verified_by = ?, verified_at = NOW() WHERE id = ? AND status = 'completed' AND verified_at IS NULL");
+    $stmt->execute([$userId, $id]);
+    if ($stmt->rowCount() <= 0) {
+        return false;
+    }
+    $afterData = hkLoadAssignment($pdo, $id);
+    logHousekeepingAction($id, 'verified', $beforeData, $afterData, $userId, $username);
+    if (!empty($beforeData['individual_room_id'])) {
+        reconcileIndividualRoomHousekeeping($pdo, (int)$beforeData['individual_room_id'], $userId);
+    }
+    return true;
+}
+
+function hkDeleteAssignment(PDO $pdo, array $deletedData, ?int $userId, ?string $username): void
+{
+    $id = (int)$deletedData['id'];
+    $pdo->prepare("DELETE FROM housekeeping_assignments WHERE id = ?")->execute([$id]);
+    reconcileIndividualRoomHousekeeping($pdo, (int)$deletedData['individual_room_id'], $userId);
+    logHousekeepingAction($id, 'deleted', $deletedData, null, $userId, $username);
+}
+
 // Handle POST requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
@@ -984,25 +1049,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Invalid assignment selected.';
             } else {
                 $pdo->beginTransaction();
-                $rowStmt = $pdo->prepare("SELECT individual_room_id FROM housekeeping_assignments WHERE id = ?");
-                $rowStmt->execute([$id]);
-                $row = $rowStmt->fetch(PDO::FETCH_ASSOC);
-                if (!$row) {
+                $deletedData = hkLoadAssignment($pdo, $id);
+                if (!$deletedData) {
                     throw new RuntimeException('Assignment not found.');
                 }
-
-                // Get assignment data before deletion for audit log
-                $dataStmt = $pdo->prepare("SELECT * FROM housekeeping_assignments WHERE id = ?");
-                $dataStmt->execute([$id]);
-                $deletedData = $dataStmt->fetch(PDO::FETCH_ASSOC);
-
-                $pdo->prepare("DELETE FROM housekeeping_assignments WHERE id = ?")->execute([$id]);
-
-                reconcileIndividualRoomHousekeeping($pdo, (int)$row['individual_room_id'], $user['id'] ?? null);
-
-                // Log audit trail
-                logHousekeepingAction($id, 'deleted', $deletedData, null, $user['id'] ?? null, $user['username'] ?? null);
-
+                hkDeleteAssignment($pdo, $deletedData, $user['id'] ?? null, $user['username'] ?? null);
                 $pdo->commit();
                 $message = 'Assignment deleted successfully.';
             }
@@ -1100,30 +1151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = 'Verification feature requires database migration 004. Please contact administrator.';
                 } else {
                     $pdo->beginTransaction();
-                    // Get assignment data before verification for audit log
-                    $dataStmt = $pdo->prepare("SELECT * FROM housekeeping_assignments WHERE id = ?");
-                    $dataStmt->execute([$id]);
-                    $beforeData = $dataStmt->fetch(PDO::FETCH_ASSOC);
-
-                    $stmt = $pdo->prepare("
-                        UPDATE housekeeping_assignments
-                        SET verified_by = ?, verified_at = NOW()
-                        WHERE id = ? AND status = 'completed' AND verified_at IS NULL
-                    ");
-                    $stmt->execute([$user['id'] ?? null, $id]);
-
-                    if ($stmt->rowCount() > 0) {
-                        // Get updated data for audit log
-                        $dataStmt->execute([$id]);
-                        $afterData = $dataStmt->fetch(PDO::FETCH_ASSOC);
-
-                        // Log audit trail
-                        logHousekeepingAction($id, 'verified', $beforeData, $afterData, $user['id'] ?? null, $user['username'] ?? null);
-
-                        if (!empty($beforeData['individual_room_id'])) {
-                            reconcileIndividualRoomHousekeeping($pdo, (int)$beforeData['individual_room_id'], $user['id'] ?? null);
-                        }
-
+                    if (hkVerifyAssignment($pdo, $id, $user['id'] ?? null, $user['username'] ?? null)) {
                         $message = 'Assignment verified successfully.';
                     } else {
                         $error = 'Assignment not found or not in completed status.';
@@ -1138,22 +1166,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Invalid assignment selected.';
             } else {
                 $pdo->beginTransaction();
-                $dataStmt = $pdo->prepare("SELECT * FROM housekeeping_assignments WHERE id = ?");
-                $dataStmt->execute([$id]);
-                $beforeData = $dataStmt->fetch(PDO::FETCH_ASSOC);
+                $beforeData = hkLoadAssignment($pdo, $id);
                 if (!$beforeData) throw new RuntimeException('Assignment not found.');
-                $hasStartedAtCol = housekeepingColumnExists($pdo, 'started_at');
-                if ($hasStartedAtCol) {
-                    $pdo->prepare("UPDATE housekeeping_assignments SET started_at = COALESCE(started_at, NOW()), status = CASE WHEN status = 'pending' THEN 'in_progress' ELSE status END WHERE id = ?")
-                        ->execute([$id]);
-                } else {
-                    $pdo->prepare("UPDATE housekeeping_assignments SET status = 'in_progress' WHERE id = ? AND status = 'pending'")
-                        ->execute([$id]);
-                }
-                $dataStmt->execute([$id]);
-                $afterData = $dataStmt->fetch(PDO::FETCH_ASSOC);
-                logHousekeepingAction($id, 'status_changed', $beforeData, $afterData, $user['id'] ?? null, $user['username'] ?? null);
-                reconcileIndividualRoomHousekeeping($pdo, (int)$beforeData['individual_room_id'], $user['id'] ?? null);
+                hkStartAssignment($pdo, $id, $beforeData, $user['id'] ?? null, $user['username'] ?? null);
                 $pdo->commit();
                 $message = 'Assignment marked as started.';
             }
@@ -1163,23 +1178,111 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Invalid assignment selected.';
             } else {
                 $pdo->beginTransaction();
-                $dataStmt = $pdo->prepare("SELECT * FROM housekeeping_assignments WHERE id = ?");
-                $dataStmt->execute([$id]);
-                $beforeData = $dataStmt->fetch(PDO::FETCH_ASSOC);
+                $beforeData = hkLoadAssignment($pdo, $id);
                 if (!$beforeData) throw new RuntimeException('Assignment not found.');
-                $hasStartedAtCol = housekeepingColumnExists($pdo, 'started_at');
-                $setClause = "status = 'completed', completed_at = COALESCE(completed_at, NOW())";
-                if ($hasStartedAtCol) {
-                    $setClause .= ", started_at = COALESCE(started_at, NOW())";
-                }
-                $pdo->prepare("UPDATE housekeeping_assignments SET {$setClause} WHERE id = ?")
-                    ->execute([$id]);
-                $dataStmt->execute([$id]);
-                $afterData = $dataStmt->fetch(PDO::FETCH_ASSOC);
-                logHousekeepingAction($id, 'status_changed', $beforeData, $afterData, $user['id'] ?? null, $user['username'] ?? null);
-                reconcileIndividualRoomHousekeeping($pdo, (int)$beforeData['individual_room_id'], $user['id'] ?? null);
+                hkCompleteAssignment($pdo, $id, $beforeData, $user['id'] ?? null, $user['username'] ?? null);
                 $pdo->commit();
                 $message = 'Assignment marked as completed.';
+            }
+        } elseif ($action === 'bulk_assignments') {
+            // Bulk bar over the assignments table: every row goes through the same helpers/rules as the
+            // single-row buttons, in one transaction; rows a rule rejects are skipped and reported.
+            $bulkOp = (string)($_POST['bulk_op'] ?? '');
+            $bulkIds = adminBulkIds();
+            $bulkAssignTo = null;
+            $bulkPriority = '';
+            $bulkError = '';
+            if (!in_array($bulkOp, ['start', 'complete', 'verify', 'assign', 'priority', 'delete'], true)) {
+                $bulkError = 'Choose a bulk action.';
+            } elseif (!$bulkIds) {
+                $bulkError = 'Select at least one assignment.';
+            } elseif ($bulkOp === 'assign') {
+                $rawAssignTo = (string)($_POST['assigned_to'] ?? '');
+                if ($rawAssignTo === '' || !ctype_digit($rawAssignTo)) {
+                    $bulkError = 'Choose who to assign the selected tasks to (or Unassigned).';
+                } else {
+                    $bulkAssignTo = (int)$rawAssignTo > 0 ? (int)$rawAssignTo : null;
+                    if (!housekeepingUserExists($pdo, $bulkAssignTo)) {
+                        $bulkError = 'Assigned user is invalid.';
+                    }
+                }
+            } elseif ($bulkOp === 'priority') {
+                $bulkPriority = (string)($_POST['priority'] ?? '');
+                if (!housekeepingColumnExists($pdo, 'priority')) {
+                    $bulkError = 'Priority is not available on this installation.';
+                } elseif (!in_array($bulkPriority, $validPriorities, true)) {
+                    $bulkError = 'Invalid priority level.';
+                }
+            } elseif ($bulkOp === 'verify' && (!housekeepingColumnExists($pdo, 'verified_by') || !housekeepingColumnExists($pdo, 'verified_at'))) {
+                $bulkError = 'Verification feature requires database migration 004. Please contact administrator.';
+            }
+
+            if ($bulkError !== '') {
+                $error = $bulkError;
+            } else {
+                $bulkDone = 0;
+                $bulkSkipped = [];
+                $actorId = $user['id'] ?? null;
+                $actorName = $user['username'] ?? null;
+                $pdo->beginTransaction();
+                foreach ($bulkIds as $bulkId) {
+                    $bulkRow = hkLoadAssignment($pdo, $bulkId);
+                    if (!$bulkRow) {
+                        adminBulkSkip($bulkSkipped, 'not found');
+                        continue;
+                    }
+                    $logical = rhHkStatusFromRow($bulkRow);
+                    if ($bulkOp === 'start') {
+                        if ($logical !== 'pending') {
+                            adminBulkSkip($bulkSkipped, 'not pending');
+                            continue;
+                        }
+                        hkStartAssignment($pdo, $bulkId, $bulkRow, $actorId, $actorName);
+                    } elseif ($bulkOp === 'complete') {
+                        if (!in_array($logical, ['pending', 'in_progress'], true)) {
+                            adminBulkSkip($bulkSkipped, 'only pending or in-progress tasks can be marked done');
+                            continue;
+                        }
+                        hkCompleteAssignment($pdo, $bulkId, $bulkRow, $actorId, $actorName);
+                    } elseif ($bulkOp === 'verify') {
+                        if ($logical !== 'completed' || !hkVerifyAssignment($pdo, $bulkId, $actorId, $actorName)) {
+                            adminBulkSkip($bulkSkipped, 'not completed or already verified');
+                            continue;
+                        }
+                    } elseif ($bulkOp === 'delete') {
+                        if ($logical === 'verified') {
+                            adminBulkSkip($bulkSkipped, 'verified tasks are kept as records');
+                            continue;
+                        }
+                        hkDeleteAssignment($pdo, $bulkRow, $actorId, $actorName);
+                    } else { // assign / priority: same lock as the edit form - verified tasks cannot change
+                        if ($logical === 'verified') {
+                            adminBulkSkip($bulkSkipped, 'verified tasks are locked');
+                            continue;
+                        }
+                        if ($bulkOp === 'assign') {
+                            if (($bulkRow['assigned_to'] !== null ? (int)$bulkRow['assigned_to'] : null) === $bulkAssignTo) {
+                                adminBulkSkip($bulkSkipped, 'already set');
+                                continue;
+                            }
+                            $pdo->prepare("UPDATE housekeeping_assignments SET assigned_to = ? WHERE id = ?")->execute([$bulkAssignTo, $bulkId]);
+                            $bulkAudit = $bulkAssignTo ? 'assigned' : 'unassigned';
+                        } else {
+                            if ((string)($bulkRow['priority'] ?? '') === $bulkPriority) {
+                                adminBulkSkip($bulkSkipped, 'already set');
+                                continue;
+                            }
+                            $pdo->prepare("UPDATE housekeeping_assignments SET priority = ? WHERE id = ?")->execute([$bulkPriority, $bulkId]);
+                            $bulkAudit = 'priority_changed';
+                        }
+                        logHousekeepingAction($bulkId, $bulkAudit, $bulkRow, hkLoadAssignment($pdo, $bulkId), $actorId, $actorName);
+                        reconcileIndividualRoomHousekeeping($pdo, (int)$bulkRow['individual_room_id'], $actorId);
+                    }
+                    $bulkDone++;
+                }
+                $pdo->commit();
+                $bulkVerbs = ['start' => 'started', 'complete' => 'marked done', 'verify' => 'verified', 'assign' => 'assigned', 'priority' => 'priority updated', 'delete' => 'deleted'];
+                [$message, $error] = adminBulkOutcome($bulkVerbs[$bulkOp], $bulkDone, $bulkSkipped);
             }
         }
     } catch (Throwable $e) {
@@ -1494,7 +1597,7 @@ foreach ($assignments as $a) {
         <?php endif; ?>
 
         <!-- Assignments Table -->
-        <div class="table-card">
+        <div class="table-card" id="hkAssignmentsCard">
             <div class="hk-table-toolbar">
                 <h3 class="hk-table-toolbar__title"><i class="fas fa-list-check"></i> All Assignments (<?php echo count($assignments); ?>)</h3>
                 <div class="hk-table-toolbar__filters">
@@ -1512,6 +1615,7 @@ foreach ($assignments as $a) {
             <table id="assignmentsTable">
                 <thead>
                     <tr>
+                        <th class="admin-bulk-col"><?php echo adminBulkAllBox('Select all visible assignments'); ?></th>
                         <th>Room</th>
                         <th>Type</th>
                         <th>Priority</th>
@@ -1525,11 +1629,12 @@ foreach ($assignments as $a) {
                 <tbody>
                     <?php if (empty($assignments)): ?>
                         <tr>
-                            <td colspan="8" style="text-align:center;padding:24px;color:#9ca3af;">No housekeeping assignments yet.</td>
+                            <td colspan="9" style="text-align:center;padding:24px;color:#9ca3af;">No housekeeping assignments yet.</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($assignments as $row): ?>
                             <tr data-status="<?php echo htmlspecialchars((string)$row['status']); ?>" data-priority="<?php echo htmlspecialchars((string)($row['priority'] ?? '')); ?>" data-type="<?php echo htmlspecialchars((string)($row['assignment_type'] ?? '')); ?>" data-room="<?php echo htmlspecialchars(trim((string)($row['room_number'] ?? '') . ' ' . (string)($row['room_name'] ?? ''))); ?>" data-assignee="<?php echo htmlspecialchars((string)($row['assigned_to_name'] ?? 'Unassigned')); ?>" data-due-date="<?php echo htmlspecialchars((string)($row['due_date'] ?? '')); ?>">
+                                <td class="admin-bulk-col"><?php echo adminBulkRowBox($row['id'], 'Select assignment for room ' . $row['room_number']); ?></td>
                                 <td><strong><?php echo htmlspecialchars($row['room_number'] . ' ' . ($row['room_name'] ?? '')); ?></strong></td>
                                 <td><span class="type-badge <?php echo htmlspecialchars($row['assignment_type'] ?? ''); ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $row['assignment_type'] ?? ''))); ?></span></td>
                                 <td><span class="priority-badge <?php echo htmlspecialchars($row['priority'] ?? ''); ?>"><?php echo htmlspecialchars(ucfirst($row['priority'] ?? '')); ?></span></td>
@@ -1591,6 +1696,29 @@ foreach ($assignments as $a) {
                     <?php endif; ?>
                 </tbody>
             </table>
+            <?php if (!empty($assignments)): ?>
+                <?php adminBulkBarStart('bulk_assignments', '#hkAssignmentsCard', $csrf_token); ?>
+                    <select name="assigned_to" data-bulk-field aria-label="Assign selected to">
+                        <option value="">Assign to...</option>
+                        <option value="0">Unassigned</option>
+                        <?php foreach ($users as $u): ?>
+                            <option value="<?php echo (int)$u['id']; ?>"><?php echo htmlspecialchars($u['username']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php adminBulkButton('assign', 'Assign', 'fa-user-check', 'Assign {n} selected task(s) to the chosen staff member? Verified tasks are locked and will be skipped.', 'btn-primary', 'assigned_to'); ?>
+                    <select name="priority" data-bulk-field aria-label="Set priority of selected">
+                        <option value="">Priority...</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                    <?php adminBulkButton('priority', 'Set priority', 'fa-flag', 'Change the priority of {n} selected task(s)? Verified tasks are locked and will be skipped.', 'btn-secondary', 'priority'); ?>
+                    <?php adminBulkButton('start', 'Start', 'fa-play', 'Mark {n} selected task(s) as started? Only pending tasks are changed.', 'btn-warning'); ?>
+                    <?php adminBulkButton('complete', 'Mark done', 'fa-check', 'Mark {n} selected task(s) as completed? Only pending or in-progress tasks are changed.', 'btn-success'); ?>
+                    <?php adminBulkButton('verify', 'Verify', 'fa-check-double', 'Verify {n} selected task(s)? Only completed tasks are verified. This cannot be undone.', 'btn-success'); ?>
+                    <?php adminBulkButton('delete', 'Delete', 'fa-trash', 'Delete {n} selected assignment(s)? This cannot be undone. Verified tasks are kept.', 'btn-danger', '', 'Delete', 'danger'); ?>
+                <?php adminBulkBarEnd(); ?>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -2213,6 +2341,7 @@ foreach ($assignments as $a) {
                     if (next && cur) cur.innerHTML = next.innerHTML;
                     if (nextStats && curStats) curStats.innerHTML = nextStats.innerHTML;
                     if (nextData && curData) curData.textContent = nextData.textContent;
+                    if (window.AdminBulk) window.AdminBulk.refresh();
                 }).catch(function() {});
         }
 

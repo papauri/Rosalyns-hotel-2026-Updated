@@ -11,6 +11,7 @@ require_once 'includes/admin-modal.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/../includes/room-management.php';
 require_once __DIR__ . '/../includes/maintenance-recurring.php';
+require_once __DIR__ . '/includes/bulk-actions.php';
 /** @var array{id: int, username: string, role: string} $user */
 /** @var string $csrf_token */
 
@@ -45,6 +46,90 @@ function maintenanceRoomExists(PDO $pdo, int $roomId): bool
 /**
  * Check if a user exists and is active
  */
+/* Single-row workflow steps shared by the one-by-one buttons and the bulk bar, so both enforce
+ * the same rules and write the same audit trail. Each runs inside the caller's transaction and
+ * returns '' on success or the reason the row was skipped. */
+function mtLoadSchedule(PDO $pdo, int $id): ?array
+{
+    $st = $pdo->prepare("SELECT * FROM room_maintenance_schedules WHERE id = ?");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+function mtLogicalStatus(array $row): string
+{
+    return rh_maint_status_from_db($row['status'] ?? '', $row['verified_at'] ?? null);
+}
+
+function mtStartSchedule(PDO $pdo, int $id, ?int $userId, ?string $userName): string
+{
+    $before = mtLoadSchedule($pdo, $id);
+    if (!$before) return 'not found';
+    if (mtLogicalStatus($before) !== 'pending') return 'not pending';
+    if (maintenanceColumnExists($pdo, 'started_at')) {
+        $pdo->prepare("UPDATE room_maintenance_schedules SET started_at = COALESCE(started_at, NOW()), status = CASE WHEN status IN ('planned', 'pending', '') THEN 'in_progress' ELSE status END WHERE id = ?")->execute([$id]);
+    } else {
+        $pdo->prepare("UPDATE room_maintenance_schedules SET status = 'in_progress' WHERE id = ? AND status IN ('planned', 'pending', '')")->execute([$id]);
+    }
+    logMaintenanceAction($id, 'status_changed', $before, mtLoadSchedule($pdo, $id), $userId, $userName);
+    reconcileMaintenanceRoomStatus($pdo, (int)$before['individual_room_id'], $userId);
+    return '';
+}
+
+function mtCompleteSchedule(PDO $pdo, int $id, ?int $userId, ?string $userName): string
+{
+    $before = mtLoadSchedule($pdo, $id);
+    if (!$before) return 'not found';
+    if (!in_array(mtLogicalStatus($before), ['pending', 'in_progress'], true)) return 'only pending or in-progress tasks can be marked done';
+    $setClause = "status = 'completed', completed_at = COALESCE(completed_at, NOW())";
+    if (maintenanceColumnExists($pdo, 'started_at')) {
+        $setClause .= ", started_at = COALESCE(started_at, NOW())";
+    }
+    $pdo->prepare("UPDATE room_maintenance_schedules SET {$setClause} WHERE id = ?")->execute([$id]);
+    logMaintenanceAction($id, 'status_changed', $before, mtLoadSchedule($pdo, $id), $userId, $userName);
+    reconcileMaintenanceRoomStatus($pdo, (int)$before['individual_room_id'], $userId);
+    return '';
+}
+
+function mtVerifySchedule(PDO $pdo, int $id, ?int $userId, ?string $userName): string
+{
+    if (!maintenanceColumnExists($pdo, 'verified_by') || !maintenanceColumnExists($pdo, 'verified_at')) {
+        return 'verification needs database migration 005';
+    }
+    $before = mtLoadSchedule($pdo, $id);
+    if (!$before) return 'not found';
+    $stmt = $pdo->prepare("UPDATE room_maintenance_schedules SET verified_by = ?, verified_at = NOW() WHERE id = ? AND status = 'completed' AND verified_at IS NULL");
+    $stmt->execute([$userId, $id]);
+    if ($stmt->rowCount() === 0) return 'not completed or already verified';
+    logMaintenanceAction($id, 'verified', $before, mtLoadSchedule($pdo, $id), $userId, $userName);
+    if (!empty($before['individual_room_id'])) {
+        reconcileMaintenanceRoomStatus($pdo, (int)$before['individual_room_id'], $userId);
+    }
+    return '';
+}
+
+function mtDeleteSchedule(PDO $pdo, int $id, ?int $userId, ?string $userName): string
+{
+    $before = mtLoadSchedule($pdo, $id);
+    if (!$before) return 'not found';
+    $pdo->prepare("DELETE FROM room_maintenance_schedules WHERE id = ?")->execute([$id]);
+    reconcileMaintenanceRoomStatus($pdo, (int)($before['individual_room_id'] ?? 0), $userId);
+    logMaintenanceAction($id, 'deleted', $before, null, $userId, $userName);
+    return '';
+}
+
+function mtAssignSchedule(PDO $pdo, int $id, ?int $assignTo, ?int $userId, ?string $userName): string
+{
+    $before = mtLoadSchedule($pdo, $id);
+    if (!$before) return 'not found';
+    if (mtLogicalStatus($before) === 'verified') return 'verified tasks are locked';
+    if (($before['assigned_to'] !== null ? (int)$before['assigned_to'] : null) === $assignTo) return 'already set';
+    $pdo->prepare("UPDATE room_maintenance_schedules SET assigned_to = ? WHERE id = ?")->execute([$assignTo, $id]);
+    logMaintenanceAction($id, $assignTo ? 'assigned' : 'unassigned', $before, mtLoadSchedule($pdo, $id), $userId, $userName);
+    return '';
+}
+
 function maintenanceUserExists(PDO $pdo, ?int $userId): bool
 {
     if (empty($userId)) {
@@ -862,27 +947,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Invalid schedule selected.';
             } else {
                 $pdo->beginTransaction();
-                $rowStmt = $pdo->prepare("SELECT individual_room_id FROM room_maintenance_schedules WHERE id = ?");
-                $rowStmt->execute([$id]);
-                $row = $rowStmt->fetch(PDO::FETCH_ASSOC);
-                if (!$row) {
+                $why = mtDeleteSchedule($pdo, $id, $user['id'] ?? null, $user['username'] ?? null);
+                if ($why !== '') {
                     throw new RuntimeException('Schedule not found.');
                 }
-
-                // Get schedule data before deletion for audit log
-                $dataStmt = $pdo->prepare("SELECT * FROM room_maintenance_schedules WHERE id = ?");
-                $dataStmt->execute([$id]);
-                $deletedData = $dataStmt->fetch(PDO::FETCH_ASSOC);
-
-                $pdo->prepare("DELETE FROM room_maintenance_schedules WHERE id = ?")->execute([$id]);
-
-                reconcileMaintenanceRoomStatus($pdo, (int)($row['individual_room_id'] ?? 0), $user['id'] ?? null);
-
-                // Log audit trail
-                logMaintenanceAction($id, 'deleted', $deletedData, null, $user['id'] ?? null, $user['username'] ?? null);
-
                 $pdo->commit();
                 $message = 'Maintenance schedule deleted successfully.';
+            }
+        } elseif ($action === 'bulk_schedules') {
+            // Bulk bar: every selected row goes through the same single-row step as its button.
+            $bulkOp = (string)($_POST['bulk_op'] ?? '');
+            $bulkIds = adminBulkIds();
+            $bulkAssignTo = null;
+            if (!in_array($bulkOp, ['start', 'complete', 'verify', 'assign', 'delete'], true)) {
+                $error = 'Choose a bulk action.';
+            } elseif (!$bulkIds) {
+                $error = 'Select at least one schedule.';
+            } elseif ($bulkOp === 'assign' && ($_POST['assigned_to'] ?? '') !== '' && !maintenanceUserExists($pdo, (int)$_POST['assigned_to'])) {
+                $error = 'Assigned user is invalid.';
+            } else {
+                $bulkAssignTo = !empty($_POST['assigned_to']) ? (int)$_POST['assigned_to'] : null;
+                $bulkDone = 0;
+                $bulkSkipped = [];
+                $actorId = $user['id'] ?? null;
+                $actorName = $user['username'] ?? null;
+                $pdo->beginTransaction();
+                foreach ($bulkIds as $bulkId) {
+                    $why = match ($bulkOp) {
+                        'start'    => mtStartSchedule($pdo, $bulkId, $actorId, $actorName),
+                        'complete' => mtCompleteSchedule($pdo, $bulkId, $actorId, $actorName),
+                        'verify'   => mtVerifySchedule($pdo, $bulkId, $actorId, $actorName),
+                        'delete'   => mtDeleteSchedule($pdo, $bulkId, $actorId, $actorName),
+                        'assign'   => mtAssignSchedule($pdo, $bulkId, $bulkAssignTo, $actorId, $actorName),
+                    };
+                    if ($why === '') {
+                        $bulkDone++;
+                    } else {
+                        adminBulkSkip($bulkSkipped, $why);
+                    }
+                }
+                $pdo->commit();
+                $bulkVerbs = ['start' => 'started', 'complete' => 'marked done', 'verify' => 'verified', 'assign' => 'assigned', 'delete' => 'deleted'];
+                [$message, $error] = adminBulkOutcome($bulkVerbs[$bulkOp], $bulkDone, $bulkSkipped);
             }
         } elseif ($action === 'auto_create_tasks') {
             $pdo->beginTransaction();
@@ -1480,6 +1586,7 @@ try {
             <table>
                 <thead>
                     <tr>
+                        <th class="admin-bulk-col"><?php echo adminBulkAllBox('Select all visible schedules'); ?></th>
                         <th>Room</th>
                         <th>Title</th>
                         <th>Type</th>
@@ -1493,11 +1600,12 @@ try {
                 <tbody>
                     <?php if (empty($schedules)): ?>
                         <tr>
-                            <td colspan="8" style="text-align:center;padding:24px;">No maintenance schedules.</td>
+                            <td colspan="9" style="text-align:center;padding:24px;">No maintenance schedules.</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($sched_display as $row): ?>
                             <tr data-status="<?php echo htmlspecialchars((string)$row['status']); ?>" data-priority="<?php echo htmlspecialchars((string)($row['priority'] ?? '')); ?>" data-type="<?php echo htmlspecialchars((string)($row['maintenance_type'] ?? '')); ?>" data-room="<?php echo htmlspecialchars(trim((string)($row['room_number'] ?? '') . ' ' . (string)($row['room_name'] ?? ''))); ?>" data-assignee="<?php echo htmlspecialchars((string)($row['assigned_to_name'] ?? 'Unassigned')); ?>" data-due-date="<?php echo htmlspecialchars((string)($row['due_date'] ?? '')); ?>">
+                                <td class="admin-bulk-col"><?php echo adminBulkRowBox($row['id'], 'Select schedule ' . $row['title']); ?></td>
                                 <td><?php echo htmlspecialchars($row['room_number'] . ' ' . ($row['room_name'] ?? '')); ?></td>
                                 <td><?php echo htmlspecialchars($row['title']); ?></td>
                                 <td>
@@ -1568,6 +1676,19 @@ try {
                     <?php endif; ?>
                 </tbody>
             </table>
+            <?php adminBulkBarStart('bulk_schedules', '#maintenanceSchedulesContainer', $csrf_token); ?>
+                <select name="assigned_to" aria-label="Assign selected to">
+                    <option value="">Unassigned</option>
+                    <?php foreach ($users as $u): ?>
+                        <option value="<?php echo (int)$u['id']; ?>"><?php echo htmlspecialchars($u['username']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php adminBulkButton('assign', 'Assign', 'fa-user-check', 'Assign {n} selected schedule(s) to the chosen person? Verified tasks are locked and skipped.', 'btn-primary'); ?>
+                <?php adminBulkButton('start', 'Start', 'fa-play', 'Mark {n} selected schedule(s) as started? Only pending ones change.', 'btn-warning'); ?>
+                <?php adminBulkButton('complete', 'Mark done', 'fa-check', 'Mark {n} selected schedule(s) as completed? Rooms stay in Maintenance until verified.', 'btn-success'); ?>
+                <?php adminBulkButton('verify', 'Verify', 'fa-check-double', 'Verify {n} selected schedule(s)? Only completed ones are verified and their rooms released. This cannot be undone.', 'btn-success'); ?>
+                <?php adminBulkButton('delete', 'Delete', 'fa-trash', 'Delete {n} selected schedule(s)? This cannot be undone.', 'btn-danger', '', 'Delete', 'danger'); ?>
+            <?php adminBulkBarEnd(); ?>
         </div>
         <?php if ($sched_total_pages > 1): ?>
             <nav style="display:flex;align-items:center;justify-content:center;gap:6px;padding:16px 0;flex-wrap:wrap;">

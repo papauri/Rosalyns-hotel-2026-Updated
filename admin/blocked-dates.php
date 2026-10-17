@@ -16,6 +16,7 @@ require_once __DIR__ . '/../includes/form-validation.php';
 
 require_once '../includes/modal.php';
 require_once '../includes/alert.php';
+require_once __DIR__ . '/includes/bulk-actions.php';
 
 // Handle form submissions
 $message = '';
@@ -170,6 +171,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 }
             }
+        }
+    } elseif ($action === 'bulk_unblock') {
+        // Bulk bar: unblock every selected row the same way as its Unblock button (id + scope).
+        $tokens = array_slice(array_values(array_filter((array)($_POST['bulk_ids'] ?? []), static fn($t) => is_string($t) && preg_match('/^(type|individual)-\d{1,18}$/', $t))), 0, 500);
+        $done = 0;
+        $skipped = [];
+        if (!$tokens) {
+            $message = 'Select at least one blocked date.';
+            $messageType = 'error';
+        } else {
+            $all = getBlockedDates(null, null, null);
+            foreach ($tokens as $tok) {
+                [$scope, $tid] = explode('-', $tok, 2);
+                $target = null;
+                foreach ($all as $bd) {
+                    if ((int)$bd['id'] === (int)$tid && ($bd['block_scope'] ?? 'type') === $scope) {
+                        $target = $bd;
+                        break;
+                    }
+                }
+                if (!$target) {
+                    adminBulkSkip($skipped, 'not found');
+                    continue;
+                }
+                $ok = $scope === 'individual' && !empty($target['individual_room_id'])
+                    ? unblockIndividualRoomDate($target['individual_room_id'], $target['block_date'])
+                    : unblockRoomDate($target['room_id'], $target['block_date']);
+                if ($ok) {
+                    $done++;
+                } else {
+                    adminBulkSkip($skipped, 'could not unblock');
+                }
+            }
+            [$okMsg, $errMsg] = adminBulkOutcome('unblocked', $done, $skipped);
+            $message = $okMsg !== '' ? $okMsg : $errMsg;
+            $messageType = $okMsg !== '' ? 'success' : 'error';
         }
     } elseif ($action === 'unblock_date') {
         $id = (int)$_POST['id'] ?? 0;
@@ -505,6 +542,7 @@ $site_name = getSetting('site_name');
                         <table class="table table-hover blocked-dates-table">
                             <thead>
                                 <tr>
+                                    <th class="admin-bulk-col"><?php echo adminBulkAllBox('Select all visible blocked dates'); ?></th>
                                     <th>Date</th>
                                     <th>Scope</th>
                                     <th>Room</th>
@@ -518,6 +556,7 @@ $site_name = getSetting('site_name');
                             <tbody>
                                 <?php foreach ($blocked_dates as $bd): ?>
                                     <tr>
+                                        <td class="admin-bulk-col"><input type="checkbox" class="admin-bulk-check" data-bulk-row value="<?php echo (($bd['block_scope'] ?? 'type') === 'individual' ? 'individual' : 'type') . '-' . (int)$bd['id']; ?>" aria-label="Select blocked date <?php echo htmlspecialchars((string)$bd['block_date'], ENT_QUOTES); ?>"></td>
                                         <td data-label="Date">
                                             <i class="fas fa-calendar-day blocked-dates-date-icon"></i>
                                             <?php echo date('M j, Y', strtotime($bd['block_date'])); ?>
@@ -584,6 +623,9 @@ $site_name = getSetting('site_name');
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                        <?php adminBulkBarStart('bulk_unblock', '#blockedDatesContainer', $csrf_token); ?>
+                            <?php adminBulkButton('unblock', 'Unblock', 'fa-unlock', 'Unblock {n} selected date(s) and make them available for booking again?', 'btn-primary', '', 'Unblock'); ?>
+                        <?php adminBulkBarEnd(); ?>
                     </div>
                 <?php endif; ?>
             </div>

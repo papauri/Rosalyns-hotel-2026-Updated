@@ -16,6 +16,8 @@
 <script src="js/admin-components.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-components.js'); ?>"></script>
 <!-- Admin Core JS (burger menu, nav, modals) -->
 <script src="js/admin-main.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-main.js'); ?>"></script>
+<!-- Shared bulk-selection helper (select-all + bulk bar), delegated so it survives SPA navigation -->
+<script src="js/admin-bulk.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-bulk.js'); ?>"></script>
 <!-- Global table-section pagination (10 rows max + inline loader) -->
 <script src="js/admin-section-pagination.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-section-pagination.js'); ?>"></script>
 <!-- Admin Mobile Enhancements -->

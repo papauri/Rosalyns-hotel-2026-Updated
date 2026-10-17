@@ -6273,3 +6273,21 @@ body>:is(.content,
 /* Toolbar/filter buttons lay out as flex, which drops the space between the icon and the
    label ("Apply" sat against its magnifier). */
 .filter-bar button, .filter-bar .btn, .toolbar button, .toolbar .btn, .btn-filter { column-gap: 0.4em; }
+
+/* Bulk selection (admin/js/admin-bulk.js + admin/includes/bulk-actions.php): a bar that appears
+   under a list once rows are ticked. Sticks to the bottom of the viewport while the list is on screen. */
+.admin-bulk-check { width: 17px; height: 17px; cursor: pointer; accent-color: var(--admin-accent, #766550); vertical-align: middle; }
+th.admin-bulk-col, td.admin-bulk-col { width: 38px; text-align: center; padding-left: 8px; padding-right: 8px; }
+.admin-bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; position: sticky; bottom: 12px; z-index: 40; margin: 12px 0; padding: 10px 14px; background: #231f1c; color: #fff; border-radius: 10px; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.22); }
+.admin-bulk-bar[hidden] { display: none !important; }
+.admin-bulk-bar__count { font-size: 14px; white-space: nowrap; }
+.admin-bulk-bar__count strong { font-size: 16px; }
+.admin-bulk-bar__controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1 1 auto; }
+.admin-bulk-bar select, .admin-bulk-bar input[type="text"], .admin-bulk-bar input[type="date"] { min-height: 32px; padding: 4px 8px; border-radius: 6px; border: 1px solid #d7dde6; background: #fff; color: #1f2a37; font-size: 13px; max-width: 100%; }
+.admin-bulk-bar .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+.admin-bulk-bar__clear { margin-left: auto; }
+@media (max-width: 640px) {
+    .admin-bulk-bar { bottom: 6px; padding: 10px; }
+    .admin-bulk-bar__controls { width: 100%; }
+    .admin-bulk-bar__clear { margin-left: 0; }
+}
