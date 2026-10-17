@@ -360,6 +360,16 @@ if (!$error && !empty($_GET['ajax']) && $_GET['ajax'] === 'order_items') {
     exit;
 }
 
+/* What this user may do from Orders & Tabs. Settling uses the till's own payment path
+ * (pos.php pay_existing: deals, discounts, split bills, tips, the same ledger rows), so it
+ * needs POS Take Payment & Settle plus access to the till. */
+$soCanTakePayment = hasPermission((int)$user['id'], 'pos_take_payment');
+$soCanSettleHere  = $soCanTakePayment && hasPermission((int)$user['id'], 'pos_till');
+$soCanDiscount    = hasPermission((int)$user['id'], 'pos_discount');
+$soCanForceServe  = hasPermission((int)$user['id'], 'pos_force_serve');
+$soCanVoid        = in_array($user['role'] ?? '', ['admin', 'manager'], true);
+$soIsAjax         = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
     if (!validateCsrfToken($token)) {
@@ -741,6 +751,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 /* SETTLE — close a placed (open) order by collecting payment.
                  * The order already exists with items; we just need to record
                  * payment and flip status to 'paid'. */
+                if (!$soCanTakePayment) {
+                    throw new RuntimeException('You do not have permission to take payments (POS Take Payment & Settle).');
+                }
                 $orderId = (int)($_POST['order_id'] ?? 0);
                 $paymentMethod = $_POST['payment_method'] ?? '';
                 $allowedMethods = ['cash', 'mobile_money', 'card_manual'];
@@ -827,6 +840,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // Orders & Tabs works in place: AJAX actions answer in JSON and the page refreshes its
+    // list without navigating; plain form posts still redirect back.
+    if ($soIsAjax) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['ok' => $error === '' || $error === null, 'message' => (string)$message, 'error' => (string)$error]);
+        exit;
+    }
     if ($message) $_SESSION['stock_msg'] = $message;
     if ($error)   $_SESSION['stock_err'] = $error;
     header('Location: stock-orders.php');
@@ -1245,6 +1265,8 @@ $csrf_token = generateCsrfToken();
         <div class="page-header">
             <h2 class="page-title"><i class="fas fa-receipt" style="color:#7E684B;"></i> Restaurant Orders</h2>
         </div>
+        <?php /* #soLive is refreshed in place after every action (no page reload / redirect). */ ?>
+        <div id="soLive">
 
         <?php if ($message): showAlert($message, 'success');
         endif; ?>
@@ -2280,10 +2302,23 @@ $csrf_token = generateCsrfToken();
         </script>
 
         <h3 style="margin-top:32px;">Recent Orders</h3>
+        <div class="so-bulkbar" id="soBulkBar" hidden>
+            <strong><span id="soBulkCount">0</span> selected</strong>
+            <button type="button" class="mini-action danger" onclick="soBulk('cancel')" title="Cancel the selected open, unpaid orders whose preparation has not started"><i class="fas fa-circle-xmark"></i> Cancel</button>
+            <?php if ($soCanVoid): ?>
+                <button type="button" class="mini-action danger" onclick="soBulk('void')" title="Void the selected open or paid orders (one reason for all)"><i class="fas fa-ban"></i> Void</button>
+            <?php endif; ?>
+            <?php if ($canReconcile): ?>
+                <button type="button" class="mini-action warn" onclick="soBulk('reconcile')" title="Reconcile the selected orders that need review"><i class="fas fa-scale-balanced"></i> Reconcile</button>
+            <?php endif; ?>
+            <button type="button" class="mini-action" onclick="soBulk('export')" title="Download the selected rows as CSV"><i class="fas fa-file-csv"></i> Export</button>
+            <button type="button" class="mini-action" onclick="soBulkClear()">Clear</button>
+        </div>
         <div class="table-responsive">
-            <table class="order-list">
+            <table class="order-list" id="soOrdersTable">
                 <thead>
                     <tr>
+                        <th style="width:32px;"><input type="checkbox" id="soSelectAll" aria-label="Select all orders on this page" onchange="soToggleAll(this.checked)"></th>
                         <th>Reference</th>
                         <th>Type</th>
                         <th>Customer</th>
@@ -2366,7 +2401,16 @@ $csrf_token = generateCsrfToken();
                             }
                         }
                     ?>
-                        <tr>
+                        <tr data-so-id="<?php echo (int)$o['id']; ?>"
+                            data-so-ref="<?php echo htmlspecialchars((string)$o['reference'], ENT_QUOTES); ?>"
+                            data-so-status="<?php echo htmlspecialchars((string)$o['status'], ENT_QUOTES); ?>"
+                            data-so-type="<?php echo htmlspecialchars((string)$o['order_type'], ENT_QUOTES); ?>"
+                            data-so-total="<?php echo htmlspecialchars(number_format((float)$o['total_amount'], 2, '.', ''), ENT_QUOTES); ?>"
+                            data-so-method="<?php echo htmlspecialchars((string)($o['payment_method'] ?? ''), ENT_QUOTES); ?>"
+                            data-so-customer="<?php echo htmlspecialchars((string)($o['customer_name'] ?? ''), ENT_QUOTES); ?>"
+                            data-so-created="<?php echo htmlspecialchars((string)$o['created_at'], ENT_QUOTES); ?>"
+                            data-so-review="<?php echo empty($health['is_balanced']) ? '1' : '0'; ?>">
+                            <td><input type="checkbox" class="so-row-check" aria-label="Select order <?php echo htmlspecialchars((string)$o['reference'], ENT_QUOTES); ?>" onchange="soSyncBulk()"></td>
                             <td><strong><?php echo htmlspecialchars($o['reference']); ?></strong></td>
                             <td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $o['order_type']))); ?></td>
                             <td><?php echo htmlspecialchars($o['customer_name'] ?: '—'); ?></td>
@@ -2446,45 +2490,26 @@ $csrf_token = generateCsrfToken();
                                 <?php endif; ?>
                                 <?php if ($o['status'] === 'placed'): ?>
                                     <button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" class="mini-action primary" title="View live order status, items, and kitchen progress"><i class="fas fa-hourglass-half"></i> Open</button>
-                                    <?php if (($o['order_type'] ?? '') !== 'room_service'): ?>
+                                    <?php if (($o['order_type'] ?? '') !== 'room_service' && $soCanSettleHere): ?>
                                         <button type="button" class="mini-action success"
-                                            onclick="promptSettle(document.getElementById('sf-<?php echo (int)$o['id']; ?>'), <?php echo htmlspecialchars(json_encode($o['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(json_encode((float)$o['total_amount']), ENT_QUOTES, 'UTF-8'); ?>)"
-                                            title="Settle this order and collect payment now">
-                                            <i class="fas fa-circle-check"></i> Settle
+                                            onclick="soOpenSettle(<?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(json_encode((float)$o['total_amount']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo (int)($o['split_count'] ?? 1); ?>, <?php echo (int)($o['split_paid_count'] ?? 0); ?>)"
+                                            title="Take payment and close this order (deals, discount, split bill and tip as on the till)">
+                                            <i class="fas fa-circle-check"></i> Settle<?php echo (int)($o['split_paid_count'] ?? 0) > 0 ? ' (' . (int)$o['split_paid_count'] . '/' . (int)$o['split_count'] . ' paid)' : ''; ?>
                                         </button>
-                                        <form method="POST" id="sf-<?php echo (int)$o['id']; ?>" style="display:none;">
-                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                                            <input type="hidden" name="action" value="settle_order">
-                                            <input type="hidden" name="order_id" value="<?php echo (int)$o['id']; ?>">
-                                            <input type="hidden" name="payment_method" value="">
-                                            <input type="hidden" name="tendered_amount" value="">
-                                            <input type="hidden" name="mobile_wallet_provider" value="">
-                                            <input type="hidden" name="mobile_wallet_reference" value="">
-                                            <input type="hidden" name="card_last4" value="">
-                                            <input type="hidden" name="card_auth_code" value="">
-                                        </form>
                                     <?php endif; ?>
-                                    <form method="POST" style="display:inline;" onsubmit="return confirm('Cancel unpaid order and restore stock?');">
-                                        <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
-                                        <input type="hidden" name="action" value="cancel_order">
-                                        <input type="hidden" name="order_id" value="<?php echo (int)$o['id']; ?>">
-                                        <button class="mini-action danger" type="submit">Cancel</button>
-                                    </form>
-                                <?php elseif (in_array($o['status'], ['paid', 'completed'], true) && in_array($user['role'] ?? '', ['admin', 'manager'], true)): ?>
-                                    <form method="POST" style="display:inline;">
-                                        <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
-                                        <input type="hidden" name="action" value="void_order">
-                                        <input type="hidden" name="order_id" value="<?php echo (int)$o['id']; ?>">
-                                        <input type="hidden" name="void_reason" value="">
-                                        <button class="mini-action danger" type="button" onclick="promptVoid(this.closest('form'))"><i class="fas fa-ban"></i> Void</button>
-                                    </form>
+                                    <button class="mini-action danger" type="button" onclick="soRowAction('cancel', <?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>)">Cancel</button>
+                                    <?php if ($soCanVoid): ?>
+                                        <button class="mini-action danger" type="button" onclick="soRowAction('void', <?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>)" title="Void an open order whose preparation has started (stock restored, payments reversed)"><i class="fas fa-ban"></i> Void</button>
+                                    <?php endif; ?>
+                                <?php elseif (in_array($o['status'], ['paid', 'completed'], true) && $soCanVoid): ?>
+                                    <button class="mini-action danger" type="button" onclick="soRowAction('void', <?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>)"><i class="fas fa-ban"></i> Void</button>
                                 <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
                     <?php if (empty($orders)): ?>
                         <tr>
-                            <td colspan="14" style="text-align:center;padding:30px;color:#6c757d;">No orders yet.</td>
+                            <td colspan="15" style="text-align:center;padding:30px;color:#6c757d;">No orders yet.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
@@ -2514,6 +2539,7 @@ $csrf_token = generateCsrfToken();
                 </span>
             </nav>
         <?php endif; ?>
+        </div><?php /* /#soLive */ ?>
 
         <div class="modal-overlay" id="stockOrdersInsightModal-overlay" data-modal-overlay aria-hidden="true"></div>
         <div class="modal-overlay modal-lg" id="stockOrdersInsightModal" role="dialog" aria-modal="true" aria-labelledby="stockOrdersInsightTitle" data-modal data-close-on-escape="true" data-close-on-overlay="true">
@@ -2706,52 +2732,95 @@ $csrf_token = generateCsrfToken();
         </div>
     </div>
 
-    <!-- Settle Order Modal -->
+    <!-- Settle Order Modal: the till's payment path (pos.php pay_existing) - deals, discount,
+         split bill and tip are applied and recorded exactly as on the POS. -->
+    <style>
+        .so-bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; padding: 10px 12px; border: 1px solid #e3d9cc; border-radius: 8px; background: #faf7f2; }
+        .so-bulkbar[hidden] { display: none; }
+        .so-settle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+        .so-settle-grid label, .so-settle-field label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px; }
+        .so-settle-grid input, .so-settle-grid select, .so-settle-field input, .so-settle-field select { width: 100%; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+        .so-settle-field { margin-bottom: 10px; }
+        .so-settle-sum { border: 1px solid #e5e7eb; border-radius: 6px; margin: 10px 0; font-size: 14px; }
+        .so-settle-sum div { display: flex; justify-content: space-between; padding: 6px 12px; }
+        .so-settle-sum div + div { border-top: 1px solid #f1f1f1; }
+        .so-settle-sum .is-due { font-weight: 700; background: #f0fdf4; }
+        .so-settle-sum .is-deal { color: #166534; }
+        @media (max-width: 560px) { .so-settle-grid { grid-template-columns: 1fr; } }
+    </style>
     <div id="soSettleModal" class="modal-overlay" data-modal role="dialog" aria-modal="true" aria-labelledby="soSettleTitle">
-        <div class="modal-content" style="max-width:min(96vw,30rem);width:min(96vw,30rem);">
+        <div class="modal-content" style="max-width:min(96vw,34rem);width:min(96vw,34rem);">
             <div class="modal-header">
-                <h3 class="modal-title" id="soSettleTitle"><i class="fas fa-circle-check"></i> Settle Order</h3>
+                <h3 class="modal-title" id="soSettleTitle"><i class="fas fa-circle-check"></i> Settle <span id="soSettleRef"></span></h3>
                 <button type="button" class="modal-close" aria-label="Close" onclick="soCloseSettle()">&times;</button>
             </div>
             <div class="modal-body">
-                <div id="soSettleInfo" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:14px;"></div>
-                <div style="margin-bottom:12px;">
-                    <label for="soSettleMethod" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Payment Method</label>
-                    <select id="soSettleMethod" style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;" onchange="soUpdateSettleFields()">
-                        <option value="">— Select —</option>
-                        <option value="cash">Cash</option>
-                        <option value="mobile_money">Mobile Money</option>
-                        <option value="card_manual">Card (Manual / Slip)</option>
-                    </select>
+                <div class="so-settle-sum">
+                    <div><span>Order total</span><span id="soSumTotal"></span></div>
+                    <div class="is-deal" id="soSumDealRow" hidden><span id="soSumDealLabel">Deals</span><span id="soSumDeal"></span></div>
+                    <div id="soSumDiscRow" hidden><span>Discount</span><span id="soSumDisc"></span></div>
+                    <div id="soSumSplitRow" hidden><span id="soSumSplitLabel"></span><span id="soSumSplit"></span></div>
+                    <div class="is-due"><span>To collect now</span><span id="soSumDue"></span></div>
                 </div>
-                <div id="soSettleCashFields" style="display:none;margin-bottom:12px;">
-                    <label for="soSettleTendered" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Amount Tendered</label>
-                    <input type="number" id="soSettleTendered" min="0" step="0.01" placeholder="0.00"
-                        style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;box-sizing:border-box;"
-                        oninput="soCalcChange()">
+                <div class="so-settle-grid">
+                    <div>
+                        <label for="soSettleMethod">Payment method</label>
+                        <select id="soSettleMethod" onchange="soUpdateSettleFields()">
+                            <option value="">— Select —</option>
+                            <option value="cash">Cash</option>
+                            <option value="mobile_money">Mobile Money</option>
+                            <option value="card_manual">Card (manual / slip)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="soSettleSplit">Split bill</label>
+                        <select id="soSettleSplit" onchange="soRecalcSettle()">
+                            <?php for ($sp = 1; $sp <= 10; $sp++): ?>
+                                <option value="<?php echo $sp; ?>"><?php echo $sp === 1 ? 'No split' : $sp . ' ways'; ?></option>
+                            <?php endfor; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="soSettleTip">Tip (optional)</label>
+                        <input type="number" id="soSettleTip" min="0" step="0.01" placeholder="0.00" oninput="soRecalcSettle()">
+                    </div>
+                    <?php if ($soCanDiscount): ?>
+                        <div>
+                            <label for="soSettleDisc">Discount amount</label>
+                            <input type="number" id="soSettleDisc" min="0" step="0.01" placeholder="0.00" oninput="soRecalcSettle()">
+                        </div>
+                    <?php endif; ?>
+                </div>
+                <?php if ($soCanDiscount): ?>
+                    <div class="so-settle-field" id="soSettleDiscReasonWrap" hidden>
+                        <label for="soSettleDiscReason">Discount reason</label>
+                        <input type="text" id="soSettleDiscReason" maxlength="255" placeholder="e.g. Manager comp, loyalty">
+                    </div>
+                <?php endif; ?>
+                <div id="soSettleCashFields" class="so-settle-field" hidden>
+                    <label for="soSettleTendered">Amount tendered</label>
+                    <input type="number" id="soSettleTendered" min="0" step="0.01" placeholder="0.00" oninput="soCalcChange()">
                     <div id="soSettleChangeDisplay" style="font-size:13px;margin-top:6px;font-weight:600;min-height:20px;"></div>
                 </div>
-                <div id="soSettleMobileFields" style="display:none;margin-bottom:12px;">
-                    <label for="soSettleMobileProvider" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Provider</label>
-                    <input type="text" id="soSettleMobileProvider" placeholder="e.g. Airtel Money, TNM Mpamba"
-                        style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;box-sizing:border-box;margin-bottom:8px;">
-                    <label for="soSettleMobileRef" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Transaction Reference</label>
-                    <input type="text" id="soSettleMobileRef" placeholder="e.g. P234567890"
-                        style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;box-sizing:border-box;">
+                <div id="soSettleMobileFields" class="so-settle-grid" hidden>
+                    <div><label for="soSettleMobileProvider">Provider</label><input type="text" id="soSettleMobileProvider" placeholder="e.g. Airtel Money, TNM Mpamba"></div>
+                    <div><label for="soSettleMobileRef">Transaction reference</label><input type="text" id="soSettleMobileRef" placeholder="e.g. P234567890"></div>
                 </div>
-                <div id="soSettleCardFields" style="display:none;margin-bottom:12px;">
-                    <label for="soSettleCardLast4" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Card Last 4 Digits</label>
-                    <input type="text" id="soSettleCardLast4" maxlength="4" placeholder="1234"
-                        style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;box-sizing:border-box;margin-bottom:8px;">
-                    <label for="soSettleCardAuth" style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">Auth Code (from slip)</label>
-                    <input type="text" id="soSettleCardAuth" placeholder="e.g. 123456"
-                        style="width:100%;padding:8px 10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;box-sizing:border-box;">
+                <div id="soSettleCardFields" class="so-settle-grid" hidden>
+                    <div><label for="soSettleCardLast4">Card last 4 digits</label><input type="text" id="soSettleCardLast4" maxlength="4" inputmode="numeric" placeholder="1234"></div>
+                    <div><label for="soSettleCardAuth">Auth code (from slip)</label><input type="text" id="soSettleCardAuth" placeholder="e.g. 123456"></div>
                 </div>
-                <span id="soSettleErr" style="color:#c82333;font-size:13px;display:none;"></span>
+                <?php if ($soCanForceServe): ?>
+                    <label class="so-settle-field" style="display:flex;gap:8px;align-items:flex-start;font-size:13px;">
+                        <input type="checkbox" id="soSettleForce" style="width:auto;margin-top:2px;">
+                        <span>Some kitchen items were never bumped: mark them served and settle anyway (recorded in the order log)</span>
+                    </label>
+                <?php endif; ?>
+                <div id="soSettleErr" style="color:#c82333;font-size:13px;" hidden></div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="soCloseSettle()">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="soDoSettle()"><i class="fas fa-circle-check"></i> Settle &amp; Close Order</button>
+                <button type="button" class="btn btn-primary" id="soSettleBtn" onclick="soDoSettle()"><i class="fas fa-circle-check"></i> Take payment</button>
             </div>
         </div>
     </div>
@@ -2759,12 +2828,63 @@ $csrf_token = generateCsrfToken();
        only swaps that container, so markup printed after it is lost on in-place navigation. */ ?>
     <?php require_once 'includes/admin-footer.php'; ?>
     <script>
-        var _soVoidForm = null;
+        var SO_CSRF = <?php echo json_encode($csrf_token); ?>;
+        var SO_CUR = (typeof REVIEW_CURRENCY !== 'undefined' && REVIEW_CURRENCY) ? REVIEW_CURRENCY : <?php echo json_encode((string)$currency_symbol); ?>;
 
-        function promptVoid(form) {
-            _soVoidForm = form;
+        function soMoney(v) {
+            return SO_CUR + ' ' + Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function soToast(msg, type) {
+            if (window.Alert && typeof Alert.show === 'function') Alert.show(msg, type || 'success');
+        }
+
+        /* POST an action to this page (or another URL) as AJAX and return the JSON answer. */
+        async function soPost(fields, url) {
+            var fd = new FormData();
+            fd.append('csrf_token', SO_CSRF);
+            Object.keys(fields).forEach(function(k) { fd.append(k, fields[k]); });
+            var r = await fetch(url || 'stock-orders.php', { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } });
+            var j = await r.json().catch(function() { return { ok: false, error: 'Unexpected response (' + r.status + ').' }; });
+            return j;
+        }
+
+        /* Refresh the live region (cards, lists, table) in place - no reload, no redirect. */
+        async function soRefresh() {
+            try {
+                var r = await fetch(window.location.href, { credentials: 'same-origin' });
+                var html = await r.text();
+                var doc = new DOMParser().parseFromString(html, 'text/html');
+                var fresh = doc.getElementById('soLive');
+                var live = document.getElementById('soLive');
+                if (fresh && live) live.innerHTML = fresh.innerHTML;
+            } catch (e) {
+                window.location.reload();
+            }
+            soSyncBulk();
+        }
+
+        // ── Row actions (cancel / void / reconcile) ─────────────────────────
+        var _soVoidIds = [];
+
+        async function soRowAction(kind, id, ref) {
+            if (kind === 'cancel') {
+                var ok = await (window.AdminConfirm ? AdminConfirm.request({ title: 'Cancel order', message: 'Cancel ' + ref + ' and restore its stock?', details: ['Only an open, unpaid order whose preparation has not started can be cancelled. Use Void otherwise.'], confirmText: 'Cancel order', tone: 'danger', icon: 'fa-circle-xmark' }) : Promise.resolve(confirm('Cancel ' + ref + '?')));
+                if (!ok) return;
+                var j = await soPost({ action: 'cancel_order', order_id: id });
+                soToast(j.ok ? j.message : j.error, j.ok ? 'success' : 'error');
+                if (j.ok) soRefresh();
+            } else if (kind === 'void') {
+                promptVoid([id], ref);
+            }
+        }
+
+        function promptVoid(ids, label) {
+            _soVoidIds = Array.isArray(ids) ? ids : [];
             document.getElementById('soVoidReason').value = '';
             document.getElementById('soVoidErr').style.display = 'none';
+            var t = document.getElementById('soVoidTitle');
+            if (t) t.innerHTML = '<i class="fas fa-ban"></i> Void ' + (_soVoidIds.length > 1 ? _soVoidIds.length + ' orders' : String(label || 'order').replace(/[<>&"]/g, ''));
             var modal = document.getElementById('soVoidModal');
             if (modal) {
                 modal.classList.add('active');
@@ -2772,141 +2892,291 @@ $csrf_token = generateCsrfToken();
             }
         }
 
-        function soCloseVoid(resetState = true) {
+        function soCloseVoid() {
             var modal = document.getElementById('soVoidModal');
-            if (modal) {
-                modal.classList.remove('active');
-            }
-            if (!document.querySelector('.modal-overlay.active')) {
-                document.body.classList.remove('modal-open');
-            }
-            if (resetState) {
-                _soVoidForm = null;
-            }
+            if (modal) modal.classList.remove('active');
+            if (!document.querySelector('.modal-overlay.active')) document.body.classList.remove('modal-open');
         }
 
-        function soDoVoid() {
-            const reason = document.getElementById('soVoidReason').value.trim();
-            const errEl = document.getElementById('soVoidErr');
-            const form = _soVoidForm;
+        async function soDoVoid() {
+            var reason = document.getElementById('soVoidReason').value.trim();
+            var errEl = document.getElementById('soVoidErr');
             if (reason.length < 8) {
                 errEl.textContent = 'Reason must be at least 8 characters.';
                 errEl.style.display = '';
                 return;
             }
-            if (!form) {
+            var ids = _soVoidIds.slice();
+            if (!ids.length) return;
+            soCloseVoid();
+            var res = await soRunEach(ids, function(id) { return soPost({ action: 'void_order', order_id: id, void_reason: reason }); });
+            soReportBulk('voided', res);
+        }
+
+        function _doReconcile() {
+            if (!_reviewFormId) return;
+            var form = document.getElementById(_reviewFormId);
+            var idInput = form ? form.querySelector('[name=order_id]') : null;
+            if (!idInput) return;
+            soPost({ action: 'reconcile_order', order_id: idInput.value }).then(function(j) {
+                soToast(j.ok ? j.message : j.error, j.ok ? 'success' : 'error');
+                if (typeof closeOrderReview === 'function') closeOrderReview();
+                document.querySelectorAll('.modal-overlay.active').forEach(function(m) { if (m.id !== 'soSettleModal') m.classList.remove('active'); });
+                if (j.ok) soRefresh();
+            });
+        }
+
+        // ── Bulk selection ───────────────────────────────────────────────
+        function soSelectedRows() {
+            return Array.from(document.querySelectorAll('#soOrdersTable .so-row-check:checked')).map(function(cb) { return cb.closest('tr'); }).filter(Boolean);
+        }
+
+        function soSyncBulk() {
+            var rows = soSelectedRows();
+            var bar = document.getElementById('soBulkBar');
+            var cnt = document.getElementById('soBulkCount');
+            if (cnt) cnt.textContent = String(rows.length);
+            if (bar) bar.hidden = rows.length === 0;
+            var all = document.getElementById('soSelectAll');
+            var boxes = document.querySelectorAll('#soOrdersTable .so-row-check');
+            if (all) {
+                all.checked = boxes.length > 0 && rows.length === boxes.length;
+                all.indeterminate = rows.length > 0 && rows.length < boxes.length;
+            }
+        }
+
+        function soToggleAll(on) {
+            document.querySelectorAll('#soOrdersTable .so-row-check').forEach(function(cb) { cb.checked = !!on; });
+            soSyncBulk();
+        }
+
+        function soBulkClear() { soToggleAll(false); }
+
+        async function soRunEach(ids, fn) {
+            var done = 0, failed = [];
+            for (var i = 0; i < ids.length; i++) {
+                try {
+                    var j = await fn(ids[i]);
+                    if (j && j.ok) done++; else failed.push((j && j.error) || 'failed');
+                } catch (e) {
+                    failed.push('network error');
+                }
+            }
+            return { done: done, failed: failed };
+        }
+
+        function soReportBulk(verb, res) {
+            var msg = res.done + ' ' + verb + (res.failed.length ? ', ' + res.failed.length + ' skipped: ' + res.failed.slice(0, 3).join(' · ') : '.');
+            soToast(msg, res.failed.length && !res.done ? 'error' : (res.failed.length ? 'warning' : 'success'));
+            soRefresh();
+        }
+
+        async function soBulk(kind) {
+            var rows = soSelectedRows();
+            if (!rows.length) return;
+            if (kind === 'export') {
+                var head = ['Reference', 'Type', 'Customer', 'Status', 'Payment', 'Total', 'Created'];
+                var lines = [head.join(',')].concat(rows.map(function(tr) {
+                    return [tr.dataset.soRef, tr.dataset.soType, tr.dataset.soCustomer, tr.dataset.soStatus, tr.dataset.soMethod, tr.dataset.soTotal, tr.dataset.soCreated]
+                        .map(function(v) { return '"' + String(v || '').replace(/"/g, '""') + '"'; }).join(',');
+                }));
+                var blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'orders-selected-' + new Date().toISOString().slice(0, 10) + '.csv';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 500);
                 return;
             }
-            form.querySelector('[name=void_reason]').value = reason;
-            soCloseVoid(false);
-            _soVoidForm = null;
-            form.submit();
-        }
-
-        // ── Settle Order Modal ─────────────────────────────────────────────
-        var _soSettleForm = null;
-        var _soSettleTotal = 0;
-
-        function promptSettle(form, ref, total) {
-            _soSettleForm = form;
-            _soSettleTotal = parseFloat(total) || 0;
-            document.getElementById('soSettleMethod').value = '';
-            document.getElementById('soSettleTendered').value = '';
-            document.getElementById('soSettleMobileProvider').value = '';
-            document.getElementById('soSettleMobileRef').value = '';
-            document.getElementById('soSettleCardLast4').value = '';
-            document.getElementById('soSettleCardAuth').value = '';
-            document.getElementById('soSettleChangeDisplay').textContent = '';
-            document.getElementById('soSettleErr').style.display = 'none';
-            document.getElementById('soSettleInfo').innerHTML =
-                '<strong><i class="fas fa-receipt"></i> ' + ref + '</strong> &mdash; Total: <strong>' +
-                (REVIEW_CURRENCY || 'MWK') + ' ' + Number(total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</strong>';
-            soUpdateSettleFields();
-            var modal = document.getElementById('soSettleModal');
-            if (modal) {
-                modal.classList.add('active');
-                document.body.classList.add('modal-open');
+            var pick = function(statuses) { return rows.filter(function(tr) { return statuses.indexOf(tr.dataset.soStatus) !== -1; }); };
+            if (kind === 'cancel') {
+                var c = pick(['placed']);
+                if (!c.length) { soToast('None of the selected orders is open - only open, unpaid orders can be cancelled.', 'warning'); return; }
+                var ok = await (window.AdminConfirm ? AdminConfirm.request({ title: 'Cancel ' + c.length + ' order(s)', message: 'Cancel the selected open orders and restore their stock?', details: ['Orders already paid, part-paid or being prepared are skipped (use Void for those).'], confirmText: 'Cancel orders', tone: 'danger', icon: 'fa-circle-xmark' }) : Promise.resolve(confirm('Cancel ' + c.length + ' order(s)?')));
+                if (!ok) return;
+                soReportBulk('cancelled', await soRunEach(c.map(function(tr) { return tr.dataset.soId; }), function(id) { return soPost({ action: 'cancel_order', order_id: id }); }));
+            } else if (kind === 'void') {
+                var v = pick(['placed', 'paid']);
+                if (!v.length) { soToast('Only open or paid orders can be voided.', 'warning'); return; }
+                promptVoid(v.map(function(tr) { return tr.dataset.soId; }), '');
+            } else if (kind === 'reconcile') {
+                var rc = rows.filter(function(tr) { return tr.dataset.soReview === '1'; });
+                if (!rc.length) { soToast('None of the selected orders needs reconciling.', 'warning'); return; }
+                soReportBulk('reconciled', await soRunEach(rc.map(function(tr) { return tr.dataset.soId; }), function(id) { return soPost({ action: 'reconcile_order', order_id: id }); }));
             }
         }
 
-        function soCloseSettle(resetState) {
-            if (resetState !== false) _soSettleForm = null;
+        // ── Settle (till payment path) ─────────────────────────────────────
+        var _soSettle = null;
+
+        async function soOpenSettle(id, ref, total, splitCount, splitPaid) {
+            _soSettle = { id: id, ref: ref, total: parseFloat(total) || 0, splitCount: parseInt(splitCount, 10) || 1, splitPaid: parseInt(splitPaid, 10) || 0, deal: { amount: 0, ids: [], reason: '' } };
+            document.getElementById('soSettleRef').textContent = ref;
+            ['soSettleMethod', 'soSettleTendered', 'soSettleMobileProvider', 'soSettleMobileRef', 'soSettleCardLast4', 'soSettleCardAuth', 'soSettleTip', 'soSettleDisc', 'soSettleDiscReason'].forEach(function(fid) {
+                var el = document.getElementById(fid);
+                if (el) el.value = '';
+            });
+            var force = document.getElementById('soSettleForce');
+            if (force) force.checked = false;
+            var split = document.getElementById('soSettleSplit');
+            split.value = String(Math.max(1, _soSettle.splitCount));
+            split.disabled = _soSettle.splitPaid > 0; // a bill already being split keeps its ways
+            var disc = document.getElementById('soSettleDisc');
+            if (disc) disc.disabled = _soSettle.splitPaid > 0;
+            document.getElementById('soSettleErr').hidden = true;
+            soUpdateSettleFields();
+            soRecalcSettle();
+            var modal = document.getElementById('soSettleModal');
+            modal.classList.add('active');
+            document.body.classList.add('modal-open');
+            // Deals the till would apply right now (only before the first split leg).
+            if (_soSettle.splitPaid === 0) {
+                try {
+                    var r = await fetch('pos.php?ajax=tab_deals&order_id=' + encodeURIComponent(id), { credentials: 'same-origin' });
+                    var d = await r.json();
+                    if (_soSettle && _soSettle.id === id && d && d.ok && d.amount > 0) {
+                        _soSettle.deal = { amount: parseFloat(d.amount) || 0, ids: d.ids || [], reason: d.reason || '' };
+                        soRecalcSettle();
+                    }
+                } catch (e) { /* no deals */ }
+            }
+        }
+
+        function soCloseSettle() {
+            _soSettle = null;
             var modal = document.getElementById('soSettleModal');
             if (modal) modal.classList.remove('active');
-            if (!document.querySelector('.modal-overlay.active')) {
-                document.body.classList.remove('modal-open');
-            }
+            if (!document.querySelector('.modal-overlay.active')) document.body.classList.remove('modal-open');
         }
 
         function soUpdateSettleFields() {
             var method = document.getElementById('soSettleMethod').value;
-            document.getElementById('soSettleCashFields').style.display   = method === 'cash'         ? '' : 'none';
-            document.getElementById('soSettleMobileFields').style.display = method === 'mobile_money' ? '' : 'none';
-            document.getElementById('soSettleCardFields').style.display   = method === 'card_manual'  ? '' : 'none';
-            document.getElementById('soSettleChangeDisplay').textContent = '';
+            document.getElementById('soSettleCashFields').hidden = method !== 'cash';
+            document.getElementById('soSettleMobileFields').hidden = method !== 'mobile_money';
+            document.getElementById('soSettleCardFields').hidden = method !== 'card_manual';
+            soCalcChange();
+        }
+
+        /* Amount for this payment: (total - deals - discount) split N ways, plus tip. The server
+           recomputes everything; this is the cashier's guide and the cash-tendered check. */
+        function soSettleAmounts() {
+            if (!_soSettle) return { due: 0 };
+            var s = _soSettle;
+            var discEl = document.getElementById('soSettleDisc');
+            var disc = discEl && !discEl.disabled ? Math.max(0, parseFloat(discEl.value) || 0) : 0;
+            var net = s.splitPaid > 0 ? s.total : Math.max(0.01, s.total - s.deal.amount - disc);
+            var ways = Math.max(1, parseInt(document.getElementById('soSettleSplit').value, 10) || 1);
+            var leg = s.splitPaid + 1;
+            var per = Math.floor((net / ways) * 100) / 100;
+            var thisLeg = leg >= ways ? Math.round((net - per * (ways - 1)) * 100) / 100 : per;
+            var tip = Math.max(0, parseFloat(document.getElementById('soSettleTip').value) || 0);
+            return { disc: disc, net: net, ways: ways, leg: leg, thisLeg: thisLeg, tip: tip, due: Math.round((thisLeg + tip) * 100) / 100 };
+        }
+
+        function soRecalcSettle() {
+            if (!_soSettle) return;
+            var a = soSettleAmounts();
+            document.getElementById('soSumTotal').textContent = soMoney(_soSettle.total);
+            var dealRow = document.getElementById('soSumDealRow');
+            dealRow.hidden = !(_soSettle.deal.amount > 0 && _soSettle.splitPaid === 0);
+            document.getElementById('soSumDeal').textContent = '- ' + soMoney(_soSettle.deal.amount);
+            document.getElementById('soSumDealLabel').textContent = 'Deals' + (_soSettle.deal.reason ? ' (' + _soSettle.deal.reason + ')' : '');
+            var discRow = document.getElementById('soSumDiscRow');
+            discRow.hidden = !(a.disc > 0);
+            document.getElementById('soSumDisc').textContent = '- ' + soMoney(a.disc);
+            var reasonWrap = document.getElementById('soSettleDiscReasonWrap');
+            if (reasonWrap) reasonWrap.hidden = !(a.disc > 0);
+            var splitRow = document.getElementById('soSumSplitRow');
+            splitRow.hidden = a.ways <= 1;
+            document.getElementById('soSumSplitLabel').textContent = 'Split ' + a.ways + ' ways - payment ' + a.leg + ' of ' + a.ways;
+            document.getElementById('soSumSplit').textContent = soMoney(a.thisLeg);
+            document.getElementById('soSumDue').textContent = soMoney(a.due);
+            soCalcChange();
         }
 
         function soCalcChange() {
             var cd = document.getElementById('soSettleChangeDisplay');
+            if (!cd || !_soSettle) return;
             var tendered = parseFloat(document.getElementById('soSettleTendered').value) || 0;
             if (tendered <= 0) { cd.textContent = ''; return; }
-            var change = tendered - _soSettleTotal;
-            if (change < -0.001) {
-                cd.style.color = '#c82333';
-                cd.textContent = 'Short by ' + (REVIEW_CURRENCY || '') + ' ' + Math.abs(change).toFixed(2);
-            } else {
-                cd.style.color = '#155724';
-                cd.textContent = 'Change due: ' + (REVIEW_CURRENCY || '') + ' ' + change.toFixed(2);
-            }
+            var change = tendered - soSettleAmounts().due;
+            cd.style.color = change < -0.004 ? '#c82333' : '#155724';
+            cd.textContent = change < -0.004 ? 'Short by ' + soMoney(Math.abs(change)) : 'Change due: ' + soMoney(change);
         }
 
-        function soDoSettle() {
+        async function soDoSettle() {
+            if (!_soSettle) return;
             var errEl = document.getElementById('soSettleErr');
-            errEl.style.display = 'none';
+            var fail = function(m) { errEl.textContent = m; errEl.hidden = false; };
+            errEl.hidden = true;
             var method = document.getElementById('soSettleMethod').value;
-            if (!method) {
-                errEl.textContent = 'Select a payment method.';
-                errEl.style.display = '';
-                return;
-            }
-            var form = _soSettleForm;
-            if (!form) return;
-
-            form.querySelector('[name=payment_method]').value = method;
-
+            if (!method) return fail('Select a payment method.');
+            var a = soSettleAmounts();
+            var f = {
+                action: 'pay_existing',
+                order_id: _soSettle.id,
+                payment_method: method,
+                split_count: a.ways,
+                split_number: a.leg,
+                tip_amount: a.tip.toFixed(2)
+            };
             if (method === 'cash') {
                 var tendered = parseFloat(document.getElementById('soSettleTendered').value) || 0;
-                if (tendered + 0.001 < _soSettleTotal) {
-                    errEl.textContent = 'Tendered amount is less than the order total.';
-                    errEl.style.display = '';
-                    return;
-                }
-                form.querySelector('[name=tendered_amount]').value = tendered.toFixed(2);
+                if (tendered + 0.004 < a.due) return fail('Tendered amount is less than the amount to collect (' + soMoney(a.due) + ').');
+                f.tendered_amount = tendered.toFixed(2);
             } else if (method === 'mobile_money') {
-                var provider = document.getElementById('soSettleMobileProvider').value.trim();
-                var ref = document.getElementById('soSettleMobileRef').value.trim();
-                if (!provider || !ref) {
-                    errEl.textContent = 'Enter both provider and transaction reference.';
-                    errEl.style.display = '';
-                    return;
-                }
-                form.querySelector('[name=mobile_wallet_provider]').value = provider;
-                form.querySelector('[name=mobile_wallet_reference]').value = ref;
+                f.mobile_wallet_provider = document.getElementById('soSettleMobileProvider').value.trim();
+                f.mobile_wallet_reference = document.getElementById('soSettleMobileRef').value.trim();
+                if (!f.mobile_wallet_provider || !f.mobile_wallet_reference) return fail('Enter both the provider and the transaction reference.');
             } else if (method === 'card_manual') {
-                var last4 = document.getElementById('soSettleCardLast4').value.trim();
-                var auth = document.getElementById('soSettleCardAuth').value.trim();
-                if (last4.length !== 4 || !/^\d{4}$/.test(last4) || !auth) {
-                    errEl.textContent = 'Enter exactly 4 card digits and the auth code.';
-                    errEl.style.display = '';
-                    return;
-                }
-                form.querySelector('[name=card_last4]').value = last4;
-                form.querySelector('[name=card_auth_code]').value = auth;
+                f.card_last4 = document.getElementById('soSettleCardLast4').value.trim();
+                f.card_auth_code = document.getElementById('soSettleCardAuth').value.trim();
+                if (!/^\d{4}$/.test(f.card_last4) || !f.card_auth_code) return fail('Enter exactly 4 card digits and the auth code.');
             }
+            if (_soSettle.splitPaid === 0 && a.leg === 1) {
+                if (_soSettle.deal.amount > 0) {
+                    f.deal_ids = _soSettle.deal.ids.join(',');
+                    f.deal_discount_amount = _soSettle.deal.amount.toFixed(2);
+                }
+                if (a.disc > 0) {
+                    var reasonEl = document.getElementById('soSettleDiscReason');
+                    f.discount_amount = a.disc.toFixed(2);
+                    f.discount_reason = reasonEl ? reasonEl.value.trim() : '';
+                    if (!f.discount_reason) return fail('Give a reason for the discount.');
+                }
+            }
+            var force = document.getElementById('soSettleForce');
+            if (force && force.checked) f.force_serve_kitchen = '1';
 
-            soCloseSettle(false);
-            _soSettleForm = null;
-            form.submit();
+            var btn = document.getElementById('soSettleBtn');
+            btn.disabled = true;
+            try {
+                var j = await soPost(f, 'pos.php');
+                if (!j.ok) return fail(j.error || 'Payment was not taken.');
+                if (j.split_intermediate) {
+                    _soSettle.splitPaid = parseInt(j.split_paid, 10) || (_soSettle.splitPaid + 1);
+                    _soSettle.splitCount = parseInt(j.split_total, 10) || a.ways;
+                    document.getElementById('soSettleSplit').disabled = true;
+                    var d2 = document.getElementById('soSettleDisc');
+                    if (d2) { d2.value = ''; d2.disabled = true; }
+                    ['soSettleTendered', 'soSettleMobileRef', 'soSettleCardLast4', 'soSettleCardAuth', 'soSettleTip'].forEach(function(fid) { var el = document.getElementById(fid); if (el) el.value = ''; });
+                    // The order total now carries the deals/discount applied on the first payment.
+                    _soSettle.total = a.net;
+                    _soSettle.deal = { amount: 0, ids: [], reason: '' };
+                    soToast(j.message || 'Payment recorded - next person.', 'success');
+                    soRefresh();
+                    soRecalcSettle();
+                } else {
+                    soCloseSettle();
+                    soToast(j.message || 'Order settled.', 'success');
+                    soRefresh();
+                }
+            } catch (e) {
+                fail('Network error - check the order before trying again.');
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         // ── Order Items Viewer ─────────────────────────────────────────────
