@@ -523,75 +523,78 @@ $site_logo = getSetting('site_logo');
                 </div>
             </div>
         </div>
+        <!-- Booking-modal script lives inside <main> on purpose: SPA navigation (api/page-content.php) only
+             returns <main>, so a script placed after the footer never runs and the buttons are dead. -->
+        <script>
+            (function () {
+                const bookingModal = document.getElementById('eventBookingModal');
+                const eventIdField = document.getElementById('eventBookingEventId');
+                const eventNameLabel = document.getElementById('eventBookingModalEventName');
+                const openButtons = document.querySelectorAll('[data-open-event-booking]');
+                const closeButtons = document.querySelectorAll('[data-close-event-booking]');
+
+                function openModal(eventId, eventTitle) {
+                    if (!bookingModal) return;
+                    if (eventIdField) eventIdField.value = eventId || '';
+                    if (eventNameLabel) eventNameLabel.textContent = eventTitle || 'This Event';
+                    bookingModal.classList.add('modal--active');
+                    document.body.classList.add('modal-open');
+                }
+
+                function closeModal() {
+                    if (!bookingModal) return;
+                    bookingModal.classList.remove('modal--active');
+                    document.body.classList.remove('modal-open');
+                }
+
+                openButtons.forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        openModal(btn.getAttribute('data-event-id'), btn.getAttribute('data-event-title'));
+                    });
+                });
+                closeButtons.forEach(function (btn) { btn.addEventListener('click', closeModal); });
+                document.addEventListener('keyup', function (e) {
+                    if (e.key === 'Escape') closeModal();
+                });
+
+                <?php if ($bookingError): ?>
+                // Re-open the modal automatically if the last submission failed validation
+                openModal(<?php echo json_encode((int)($_POST['event_id'] ?? 0)); ?>, '');
+                <?php endif; ?>
+
+                const consentCheckbox = bookingModal ? bookingModal.querySelector('input[name="consent"]') : null;
+                const submitBtn = document.getElementById('eventBookingSubmitBtn');
+
+                if (consentCheckbox && submitBtn) {
+                    submitBtn.disabled = !consentCheckbox.checked;
+                    submitBtn.style.opacity = consentCheckbox.checked ? '1' : '0.6';
+                    submitBtn.style.cursor = consentCheckbox.checked ? 'pointer' : 'not-allowed';
+
+                    consentCheckbox.addEventListener('change', function () {
+                        submitBtn.disabled = !this.checked;
+                        submitBtn.style.opacity = this.checked ? '1' : '0.6';
+                        submitBtn.style.cursor = this.checked ? 'pointer' : 'not-allowed';
+                    });
+                }
+
+                const bookingForm = bookingModal ? bookingModal.querySelector('.booking-form') : null;
+                if (bookingForm && submitBtn) {
+                    bookingForm.addEventListener('submit', function () {
+                        submitBtn.disabled = true;
+                        submitBtn.style.opacity = '0.6';
+                        submitBtn.style.cursor = 'not-allowed';
+                        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+                    });
+                }
+            })();
+        </script>
     </main>
 
     <!-- Footer -->
     <?php include 'includes/footer.php'; ?>
 
     <script src="js/main.js"></script>
-    <script>
-        (function () {
-            const bookingModal = document.getElementById('eventBookingModal');
-            const eventIdField = document.getElementById('eventBookingEventId');
-            const eventNameLabel = document.getElementById('eventBookingModalEventName');
-            const openButtons = document.querySelectorAll('[data-open-event-booking]');
-            const closeButtons = document.querySelectorAll('[data-close-event-booking]');
 
-            function openModal(eventId, eventTitle) {
-                if (!bookingModal) return;
-                if (eventIdField) eventIdField.value = eventId || '';
-                if (eventNameLabel) eventNameLabel.textContent = eventTitle || 'This Event';
-                bookingModal.classList.add('modal--active');
-                document.body.classList.add('modal-open');
-            }
-
-            function closeModal() {
-                if (!bookingModal) return;
-                bookingModal.classList.remove('modal--active');
-                document.body.classList.remove('modal-open');
-            }
-
-            openButtons.forEach(function (btn) {
-                btn.addEventListener('click', function () {
-                    openModal(btn.getAttribute('data-event-id'), btn.getAttribute('data-event-title'));
-                });
-            });
-            closeButtons.forEach(function (btn) { btn.addEventListener('click', closeModal); });
-            document.addEventListener('keyup', function (e) {
-                if (e.key === 'Escape') closeModal();
-            });
-
-            <?php if ($bookingError): ?>
-            // Re-open the modal automatically if the last submission failed validation
-            openModal(<?php echo json_encode((int)($_POST['event_id'] ?? 0)); ?>, '');
-            <?php endif; ?>
-
-            const consentCheckbox = bookingModal ? bookingModal.querySelector('input[name="consent"]') : null;
-            const submitBtn = document.getElementById('eventBookingSubmitBtn');
-
-            if (consentCheckbox && submitBtn) {
-                submitBtn.disabled = !consentCheckbox.checked;
-                submitBtn.style.opacity = consentCheckbox.checked ? '1' : '0.6';
-                submitBtn.style.cursor = consentCheckbox.checked ? 'pointer' : 'not-allowed';
-
-                consentCheckbox.addEventListener('change', function () {
-                    submitBtn.disabled = !this.checked;
-                    submitBtn.style.opacity = this.checked ? '1' : '0.6';
-                    submitBtn.style.cursor = this.checked ? 'pointer' : 'not-allowed';
-                });
-            }
-
-            const bookingForm = bookingModal ? bookingModal.querySelector('.booking-form') : null;
-            if (bookingForm && submitBtn) {
-                bookingForm.addEventListener('submit', function () {
-                    submitBtn.disabled = true;
-                    submitBtn.style.opacity = '0.6';
-                    submitBtn.style.cursor = 'not-allowed';
-                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
-                });
-            }
-        })();
-    </script>
 </body>
 
 </html>
