@@ -1215,8 +1215,11 @@ $bd_back_pages = [
 $bdRef = parse_url((string)($_SERVER['HTTP_REFERER'] ?? ''));
 if (!empty($bdRef['path']) && (empty($bdRef['host']) || $bdRef['host'] === ($_SERVER['HTTP_HOST'] ?? '') || strpos((string)($_SERVER['HTTP_HOST'] ?? ''), (string)$bdRef['host']) === 0)) {
     $bdRefPage = basename((string)$bdRef['path']);
-    if (isset($bd_back_pages[$bdRefPage])) {
-        parse_str((string)($bdRef['query'] ?? ''), $bdRefQuery);
+    parse_str((string)($bdRef['query'] ?? ''), $bdRefQuery);
+    // Coming back from a deep link this booking opened (bookings.php?action=assign-room&booking_id=N)
+    // is a round trip, not a new origin: keep the original Back target.
+    $bdRefIsDeepLink = !empty($bdRefQuery['action']) && (int)($bdRefQuery['booking_id'] ?? 0) === (int)$booking_id;
+    if (isset($bd_back_pages[$bdRefPage]) && !$bdRefIsDeepLink) {
         unset($bdRefQuery['action'], $bdRefQuery['booking_id'], $bdRefQuery['export']); // never replay a deep link / export
         $_SESSION['bd_back'][(int)$booking_id] = $bdRefPage . ($bdRefQuery ? '?' . http_build_query($bdRefQuery) : '');
         $_SESSION['bd_back'] = array_slice($_SESSION['bd_back'], -20, null, true);
@@ -2307,6 +2310,20 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         }
         if (bookingFlash.error) {
             showBookingActionMessage(bookingFlash.error, 'error');
+        }
+        // Result of an action finished on the bookings list (assign room, change room type,
+        // checkout) that was opened from this booking.
+        try {
+            var _bkQueued = sessionStorage.getItem('rh_booking_action_message');
+            if (_bkQueued) {
+                sessionStorage.removeItem('rh_booking_action_message');
+                var _bkQueuedMsg = JSON.parse(_bkQueued);
+                if (_bkQueuedMsg && _bkQueuedMsg.message) {
+                    showBookingActionMessage(_bkQueuedMsg.message, _bkQueuedMsg.type || 'success');
+                }
+            }
+        } catch (e) {
+            try { sessionStorage.removeItem('rh_booking_action_message'); } catch (e2) {}
         }
 
         function openAddChargeModal() {

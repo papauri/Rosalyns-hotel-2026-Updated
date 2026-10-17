@@ -455,36 +455,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $bookingChildGuests = 0;
+            $bookingInHouse = false;
             if ($exclude_booking_id) {
-                $childStmt = $pdo->prepare("SELECT child_guests FROM bookings WHERE id = ?");
+                $childStmt = $pdo->prepare("SELECT child_guests, status FROM bookings WHERE id = ?");
                 $childStmt->execute([$exclude_booking_id]);
-                $bookingChildGuests = (int)($childStmt->fetchColumn() ?: 0);
+                $bkRow = $childStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                $bookingChildGuests = (int)($bkRow['child_guests'] ?? 0);
+                $bookingInHouse = (string)($bkRow['status'] ?? '') === 'checked-in';
             }
 
-            $availableRooms = getAvailableIndividualRooms($room_type_id, $check_in, $check_out, $exclude_booking_id);
-
-            $normalized = array_map(function ($room) use ($bookingChildGuests) {
-                $childrenAllowed = (int)($room['children_allowed'] ?? 1);
-                return [
-                    'id' => (int)$room['id'],
-                    'room_number' => $room['room_number'] ?? '',
-                    'room_name' => $room['room_name'] ?? '',
-                    'room_type_name' => $room['room_type_name'] ?? null,
-                    'floor' => $room['floor'] ?? null,
-                    'children_allowed' => $childrenAllowed,
-                    'ready' => (int)($room['ready'] ?? 1),
-                    'status' => $room['status'] ?? 'available',
-                    'requires_child_override' => $bookingChildGuests > 0 && $childrenAllowed === 0,
-                    'available' => true
-                ];
-            }, $availableRooms);
+            // Every room of the type (or every joined pair) with its state and the reason it
+            // cannot be used, so nothing silently disappears from the picker.
+            $candidates = rh_room_assignment_candidates($room_type_id, $check_in, $check_out, $exclude_booking_id, $bookingInHouse);
+            $normalized = array_map(function ($item) use ($bookingChildGuests) {
+                $item['requires_child_override'] = $item['available'] && $bookingChildGuests > 0 && (int)$item['children_allowed'] === 0;
+                return $item;
+            }, $candidates['items']);
 
             header('Content-Type: application/json');
             echo json_encode([
                 'success' => true,
-                'message' => 'Available rooms loaded',
+                'message' => 'Rooms loaded',
+                'mode' => $candidates['mode'],
                 'data' => $normalized
             ]);
+            exit;
+        } elseif ($action === 'assign_room_combination') {
+            // Joined-room booking: assign a whole pair (room_combinations row).
+            if (!isAjaxRequest()) {
+                throw new Exception('Invalid request');
+            }
+            $booking_id = (int)($_POST['booking_id'] ?? 0);
+            $combination_id = (int)($_POST['combination_id'] ?? 0);
+            if ($booking_id <= 0 || $combination_id <= 0) {
+                throw new Exception('Invalid booking or room pair selection');
+            }
+            $bkStmt = $pdo->prepare("SELECT id, status, booking_reference, individual_room_id, room_combination_id FROM bookings WHERE id = ? AND deleted_at IS NULL");
+            $bkStmt->execute([$booking_id]);
+            $bookingToAssign = $bkStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$bookingToAssign) {
+                throw new Exception('Booking not found');
+            }
+            $validation = validateRoomAssignment($bookingToAssign);
+            if (!$validation['allowed']) {
+                throw new Exception(getBookingActionErrorMessage('assign_room', $validation['reason']));
+            }
+            $comboResult = assignRoomCombinationToBooking($booking_id, $combination_id, isset($user['id']) ? (int)$user['id'] : null);
+            if (empty($comboResult['success'])) {
+                throw new Exception('Those joined rooms could not be assigned: ' . ($comboResult['message'] ?: 'they are unavailable for the booking dates') . '.');
+            }
+            logBookingAudit(
+                $booking_id,
+                'room_assigned',
+                ['individual_room_id' => $bookingToAssign['individual_room_id'] ?? null, 'room_combination_id' => $bookingToAssign['room_combination_id'] ?? null],
+                ['individual_room_id' => $comboResult['assigned_room_id'], 'room_combination_id' => $combination_id],
+                'Joined rooms ' . $comboResult['assigned_room_number'] . ' assigned manually by admin',
+                $bookingToAssign['booking_reference'] ?? null
+            );
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true, 'message' => $comboResult['message']]);
             exit;
         } elseif ($action === 'assign_individual_room') {
             if (!isAjaxRequest()) {
@@ -502,7 +531,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            $bkStmt = $pdo->prepare("SELECT id, status, room_id, individual_room_id, child_guests, booking_reference, check_in_date FROM bookings WHERE id = ?");
+            $bkStmt = $pdo->prepare("SELECT id, status, room_id, individual_room_id, child_guests, booking_reference, check_in_date FROM bookings WHERE id = ? AND deleted_at IS NULL");
             $bkStmt->execute([$booking_id]);
             $bookingToAssign = $bkStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -517,6 +546,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$validation['allowed']) {
                 header('Content-Type: application/json');
                 echo json_encode(['success' => false, 'message' => getBookingActionErrorMessage('assign_room', $validation['reason'])]);
+                exit;
+            }
+
+            if (roomTypeHasActiveCombinations((int)$bookingToAssign['room_id'])) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'This is a joined-room booking: assign a pair of rooms, not a single room.']);
                 exit;
             }
 
@@ -535,10 +570,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // Housekeeping / room-status gate with a clear, actionable reason so
-            // staff know WHY the room is blocked and HOW to free it (rooms with a
-            // pending checkout cleanup must not be assignable until it is done).
-            $hkBlock = getRoomHousekeepingAssignmentBlock($individual_room_id, (string)($bookingToAssign['check_in_date'] ?? ''));
+            // Room-status gate with a clear, actionable reason (out of service; or not clean
+            // when an in-house guest would move in now). A reservation may take a room that is
+            // still being turned over: check-in is what waits for housekeeping.
+            $hkBlock = getRoomHousekeepingAssignmentBlock($individual_room_id, (string)$bookingToAssign['status'] === 'checked-in');
             if ($hkBlock && !empty($hkBlock['blocked'])) {
                 header('Content-Type: application/json');
                 echo json_encode(['success' => false, 'message' => $hkBlock['message']]);
@@ -2479,13 +2514,21 @@ $filter_date_from = $_GET['date_from'] ?? '';
 $filter_date_to = $_GET['date_to'] ?? '';
 
 // Deep links from booking-details.php (?action=assign-room|room-change&booking_id=N): narrow the list to
-// that booking so its row is on screen, then the page script opens the matching modal.
+// that booking so its row is on screen, then the page script opens the matching modal. When the action
+// finishes or is cancelled the page returns to the booking (see BK_DEEP_RETURN_URL), so the list is
+// never left filtered down to one booking and a reload never re-opens the modal.
 $deep_link_action = in_array(($_GET['action'] ?? ''), ['assign-room', 'room-change', 'checkout'], true) ? (string)$_GET['action'] : '';
 $deep_link_booking_id = $deep_link_action !== '' ? (int)($_GET['booking_id'] ?? 0) : 0;
 if ($deep_link_booking_id > 0 && $search_query === '') {
-    $dlSt = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ? AND deleted_at IS NULL");
+    $dlSt = $pdo->prepare("SELECT booking_reference, status FROM bookings WHERE id = ? AND deleted_at IS NULL");
     $dlSt->execute([$deep_link_booking_id]);
-    $search_query = (string)($dlSt->fetchColumn() ?: '');
+    $dlRow = $dlSt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $search_query = (string)($dlRow['booking_reference'] ?? '');
+    if ($deep_link_action === 'assign-room' && $search_query !== '' && (string)$dlRow['status'] !== 'confirmed') {
+        $_SESSION['error_message'] = 'A room can only be assigned to a confirmed booking (this one is ' . str_replace('-', ' ', (string)$dlRow['status']) . ').';
+        header('Location: booking-details.php?id=' . $deep_link_booking_id);
+        exit;
+    }
     if ($search_query === '') {
         $deep_link_action = '';
         $deep_link_booking_id = 0;
@@ -3552,7 +3595,8 @@ $today_str = $today->format('Y-m-d');
                                                 && !in_array($booking['payment_status'], ['paid', 'partial', 'completed'], true);
                                             $can_modify = $bk_holding || $bk_inhouse;
                                             $can_change_room_type = ($bk_holding && !$is_missed_checkin) || $bk_inhouse;
-                                            $can_assign_room = $bk_status === 'confirmed' && !$is_missed_checkin;
+                                            // A late arrival (confirmed, arrival date passed) still needs a room to check in.
+                                            $can_assign_room = $bk_status === 'confirmed';
                                             $can_quote = in_array($bk_status, ['pending', 'tentative'], true);
                                             $can_invoice = in_array($bk_status, ['confirmed', 'checked-in', 'checked-out'], true);
                                             $can_consolidate = $_perm_pay && ($bk_holding || $bk_inhouse
@@ -4029,10 +4073,32 @@ $today_str = $today->format('Y-m-d');
             }
         }
 
+        // Set when a booking opened this page through a deep link (?action=...&booking_id=N):
+        // finishing or cancelling that action goes back to the booking instead of leaving the
+        // list filtered to one row (and a reload would re-open the modal).
+        window.BK_DEEP_RETURN_URL = <?php echo json_encode($deep_link_booking_id > 0 ? 'booking-details.php?id=' . (int)$deep_link_booking_id : ''); ?>;
+        window.bkDeepLeaving = false;
+
+        function bkReturnOrReload() {
+            if (window.BK_DEEP_RETURN_URL) {
+                window.bkDeepLeaving = true;
+                window.location.replace(window.BK_DEEP_RETURN_URL);
+            } else {
+                window.location.reload();
+            }
+        }
+
+        function bkDeepCancel() {
+            if (window.BK_DEEP_RETURN_URL && !window.bkDeepLeaving) {
+                window.bkDeepLeaving = true;
+                window.location.replace(window.BK_DEEP_RETURN_URL);
+            }
+        }
+
         function reloadWithBookingActionMessage(responseData, fallbackMessage = 'Action completed successfully.') {
             const message = responseData && responseData.message ? responseData.message : fallbackMessage;
             queueBookingActionMessage(message, 'success');
-            window.location.reload();
+            bkReturnOrReload();
         }
 
         if (document.readyState === 'loading') {
@@ -6459,11 +6525,23 @@ $today_str = $today->format('Y-m-d');
             document.getElementById('quick_assign_children_override').checked = false;
             document.getElementById('quick_assign_override_note').value = '';
             selectedRoomId = null;
+            bkDeepCancel();
         }
 
+        function quickAssignEsc(value) {
+            return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[ch]);
+        }
+
+        // Lists EVERY room of the booking's type (or every joined pair for a joined-room type).
+        // Rooms that cannot take the stay stay visible, greyed out with the reason, instead of
+        // silently disappearing. A room still being turned over can be assigned: check-in waits
+        // for housekeeping, not the assignment.
         function loadAvailableRooms(roomId, checkIn, checkOut, bookingId) {
             const roomList = document.getElementById('quick_assign_room_list');
-            roomList.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;"><i class="fas fa-spinner fa-spin"></i> Loading available rooms...</div>';
+            const modal = document.getElementById('quickRoomAssignModal');
+            roomList.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;"><i class="fas fa-spinner fa-spin"></i> Loading rooms...</div>';
 
             const formData = new FormData();
             formData.append('action', 'get_available_rooms');
@@ -6481,62 +6559,96 @@ $today_str = $today->format('Y-m-d');
                 })
                 .then(response => response.json())
                 .then(data => {
-                    if (data.success && data.data && data.data.length > 0) {
-                        roomList.innerHTML = '';
-                        data.data.forEach(room => {
-                            const roomCard = document.createElement('div');
-                            const requiresChildOverride = room.requires_child_override === true;
-                            roomCard.className = 'room-assign-card';
-                            roomCard.dataset.available = room.available ? 'true' : 'false';
-                            roomCard.dataset.requiresChildOverride = requiresChildOverride ? 'true' : 'false';
-                            roomCard.style.cssText = `
-                                display: flex;
-                                justify-content: space-between;
-                                align-items: center;
-                                padding: 12px;
-                                margin-bottom: 8px;
-                                border: 2px solid ${requiresChildOverride ? '#f0ad4e' : (room.available ? '#28a745' : '#dc3545')};
-                                border-radius: 8px;
-                                cursor: ${room.available ? 'pointer' : 'not-allowed'};
-                                background: ${requiresChildOverride ? '#fff8e1' : (room.available ? '#fff' : '#f8f8f8')};
-                                transition: all 0.2s;
-                            `;
-
-                            const roomName = room.room_name ?
-                                (room.room_number ? `${room.room_name} <small style="font-weight:400;opacity:0.8">#${room.room_number}</small>` : room.room_name) :
-                                (room.room_type_name ? `${room.room_type_name} ${room.room_number}` : `Room ${room.room_number}`);
-
-                            roomCard.innerHTML = `
-                                <div>
-                                    <div style="font-weight: 600; color: var(--navy);">
-                                        <i class="fas fa-door-open" style="color: var(--gold);"></i>
-                                        ${roomName}
-                                    </div>
-                                    ${room.floor ? `<small style="color: #666;"><i class="fas fa-layer-group"></i> Floor: ${room.floor}</small>` : ''}
-                                    ${requiresChildOverride ? `<small style="display:block; color:#7a4f01; margin-top:4px;"><i class="fas fa-triangle-exclamation"></i> Child policy override note required</small>` : ''}
-                                </div>
-                                <div>
-                                    ${requiresChildOverride
-                                        ? `<span class="badge" style="background: #fff3cd; color: #7a4f01; padding: 4px 12px; border-radius: 12px; font-size: 11px;">Needs Note</span>`
-                                        : (room.available
-                                        ? `<span class="badge" style="background: #d4edda; color: #155724; padding: 4px 12px; border-radius: 12px; font-size: 11px;">Available</span>`
-                                        : `<span class="badge" style="background: #f8d7da; color: #721c24; padding: 4px 12px; border-radius: 12px; font-size: 11px;">Unavailable</span>`)
-                                    }
-                                </div>
-                            `;
-
-                            if (room.available) {
-                                roomCard.onclick = () => selectRoomForAssignment(room.id, roomCard);
-                            }
-
-                            roomList.appendChild(roomCard);
-                        });
-                    } else {
-                        roomList.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;"><i class="fas fa-exclamation-triangle"></i> No available rooms found for these dates.</div>';
+                    const mode = data.mode === 'combinations' ? 'combinations' : 'rooms';
+                    if (modal) modal.dataset.assignMode = mode;
+                    const items = (data.success && Array.isArray(data.data)) ? data.data : [];
+                    if (!items.length) {
+                        roomList.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;"><i class="fas fa-exclamation-triangle"></i> '
+                            + (mode === 'combinations' ? 'No joined-room pairs are set up for this room type.' : 'No active rooms are set up for this room type.') + '</div>';
+                        return;
                     }
+                    const free = items.filter(i => i.available && !i.current).length;
+                    roomList.innerHTML = '';
+                    const summary = document.createElement('div');
+                    summary.style.cssText = 'font-size: 12px; color: #555; margin-bottom: 8px;';
+                    summary.textContent = free + ' of ' + items.length + (mode === 'combinations' ? ' joined-room pairs' : ' rooms') + ' can take this stay.';
+                    roomList.appendChild(summary);
+
+                    items.forEach(room => {
+                        const roomCard = document.createElement('div');
+                        const selectable = room.available && !room.current;
+                        const requiresChildOverride = room.requires_child_override === true;
+                        const turnover = selectable && room.turnover;
+                        const accent = !room.available ? '#dc3545' : (room.current ? '#6c757d' : ((requiresChildOverride || turnover || room.held_for_joined) ? '#f0ad4e' : '#28a745'));
+                        roomCard.className = 'room-assign-card';
+                        roomCard.dataset.available = selectable ? 'true' : 'false';
+                        roomCard.dataset.accent = accent;
+                        roomCard.dataset.requiresChildOverride = requiresChildOverride ? 'true' : 'false';
+                        roomCard.style.cssText = `
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            gap: 12px;
+                            padding: 12px;
+                            margin-bottom: 8px;
+                            border: 2px solid ${accent};
+                            border-radius: 8px;
+                            cursor: ${selectable ? 'pointer' : 'not-allowed'};
+                            background: ${selectable ? '#fff' : '#f6f6f6'};
+                            opacity: ${room.available ? '1' : '0.75'};
+                            transition: all 0.2s;
+                        `;
+
+                        let title;
+                        if (mode === 'combinations') {
+                            title = 'Rooms ' + quickAssignEsc(room.label) + (room.room_name ? ` <small style="font-weight:400;opacity:0.8">${quickAssignEsc(room.room_name)}</small>` : '');
+                        } else {
+                            title = 'Room ' + quickAssignEsc(room.label)
+                                + (room.room_name && room.room_name !== room.label ? ` <small style="font-weight:400;opacity:0.8">${quickAssignEsc(room.room_name)}</small>` : '');
+                        }
+
+                        const notes = [];
+                        if (room.floor) notes.push(`<small style="color: #666;"><i class="fas fa-layer-group"></i> Floor: ${quickAssignEsc(room.floor)}</small>`);
+                        if (!room.available) notes.push(`<small style="display:block; color:#a71d2a; margin-top:4px;"><i class="fas fa-ban"></i> ${quickAssignEsc(room.reason)}</small>`);
+                        if (turnover) notes.push(`<small style="display:block; color:#7a4f01; margin-top:4px;"><i class="fas fa-broom"></i> ${quickAssignEsc(room.turnover)} - it must be marked clean before check-in</small>`);
+                        if (selectable && room.held_for_joined) notes.push(`<small style="display:block; color:#7a4f01; margin-top:4px;"><i class="fas fa-link"></i> Held for a joined-room booking that has no rooms yet</small>`);
+                        if (requiresChildOverride) notes.push(`<small style="display:block; color:#7a4f01; margin-top:4px;"><i class="fas fa-triangle-exclamation"></i> Child policy override note required</small>`);
+
+                        let badge;
+                        if (room.current) {
+                            badge = ['#e2e3e5', '#383d41', 'Current'];
+                        } else if (!room.available) {
+                            badge = ['#f8d7da', '#721c24', 'Unavailable'];
+                        } else if (requiresChildOverride) {
+                            badge = ['#fff3cd', '#7a4f01', 'Needs note'];
+                        } else if (turnover) {
+                            badge = ['#fff3cd', '#7a4f01', 'Turnover'];
+                        } else {
+                            badge = ['#d4edda', '#155724', 'Available'];
+                        }
+
+                        roomCard.innerHTML = `
+                            <div>
+                                <div style="font-weight: 600; color: var(--navy);">
+                                    <i class="fas fa-door-open" style="color: var(--gold);"></i>
+                                    ${title}
+                                </div>
+                                ${notes.join('')}
+                            </div>
+                            <div>
+                                <span class="badge" style="background: ${badge[0]}; color: ${badge[1]}; padding: 4px 12px; border-radius: 12px; font-size: 11px; white-space: nowrap;">${badge[2]}</span>
+                            </div>
+                        `;
+
+                        if (selectable) {
+                            roomCard.onclick = () => selectRoomForAssignment(room.id, roomCard);
+                        }
+
+                        roomList.appendChild(roomCard);
+                    });
                 })
                 .catch(() => {
-                    roomList.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;"><i class="fas fa-exclamation-circle"></i> Error loading available rooms.</div>';
+                    roomList.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;"><i class="fas fa-exclamation-circle"></i> Error loading rooms.</div>';
                 });
         }
 
@@ -6546,9 +6658,8 @@ $today_str = $today->format('Y-m-d');
             // Remove previous selection
             document.querySelectorAll('.room-assign-card').forEach(card => {
                 delete card.dataset.selected;
-                const needsOverride = card.dataset.requiresChildOverride === 'true';
-                card.style.background = needsOverride ? '#fff8e1' : '#fff';
-                card.style.borderColor = needsOverride ? '#f0ad4e' : (card.dataset.available === 'true' ? '#28a745' : '#dc3545');
+                card.style.background = card.dataset.available === 'true' ? '#fff' : '#f6f6f6';
+                card.style.borderColor = card.dataset.accent || '#28a745';
             });
 
             // Highlight selected card
@@ -6570,6 +6681,8 @@ $today_str = $today->format('Y-m-d');
                 return;
             }
 
+            const modal = document.getElementById('quickRoomAssignModal');
+            const isPair = !!(modal && modal.dataset.assignMode === 'combinations');
             const bookingId = document.getElementById('quick_assign_booking_id').value;
             const bookingRef = document.getElementById('quick_assign_booking_ref').value;
             const dates = document.getElementById('quick_assign_dates').value;
@@ -6585,10 +6698,10 @@ $today_str = $today->format('Y-m-d');
             }
 
             const confirmed = await confirmAdminAction({
-                title: 'Confirm room assignment',
-                message: 'Assign this room to booking ' + (bookingRef || bookingId) + '?',
-                details: ['Room: ' + roomName, 'Stay dates: ' + dates],
-                confirmText: 'Assign Room',
+                title: isPair ? 'Confirm joined-room assignment' : 'Confirm room assignment',
+                message: (isPair ? 'Assign this pair of rooms to booking ' : 'Assign this room to booking ') + (bookingRef || bookingId) + '?',
+                details: [(isPair ? 'Rooms: ' : 'Room: ') + roomName, 'Stay dates: ' + dates],
+                confirmText: isPair ? 'Assign Rooms' : 'Assign Room',
                 icon: 'fa-door-open',
                 tone: 'success'
             });
@@ -6596,15 +6709,20 @@ $today_str = $today->format('Y-m-d');
 
             const submitBtn = document.querySelector('#quickRoomAssignModal button[onclick="submitQuickRoomAssign()"]');
             if (submitBtn) setButtonLoading(submitBtn, true);
-            showLoadingOverlay('Assigning room...');
+            showLoadingOverlay(isPair ? 'Assigning rooms...' : 'Assigning room...');
 
             const formData = new FormData();
-            formData.append('action', 'assign_individual_room');
             formData.append('booking_id', bookingId);
-            formData.append('individual_room_id', selectedRoomId);
-            if (requiresOverride) {
-                formData.append('allow_child_policy_override', '1');
-                formData.append('child_policy_override_note', overrideNote);
+            if (isPair) {
+                formData.append('action', 'assign_room_combination');
+                formData.append('combination_id', selectedRoomId);
+            } else {
+                formData.append('action', 'assign_individual_room');
+                formData.append('individual_room_id', selectedRoomId);
+                if (requiresOverride) {
+                    formData.append('allow_child_policy_override', '1');
+                    formData.append('child_policy_override_note', overrideNote);
+                }
             }
 
             fetch(window.location.href, {
@@ -6620,10 +6738,9 @@ $today_str = $today->format('Y-m-d');
                         const successMessage = data.message || 'Room assigned successfully!';
                         showBookingActionMessage(successMessage, 'success');
                         queueBookingActionMessage(successMessage, 'success');
+                        window.bkDeepLeaving = true; // closing the modal below is not a cancel
                         closeQuickRoomAssignModal();
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1000);
+                        setTimeout(bkReturnOrReload, 1000);
                     } else {
                         hideLoadingOverlay();
                         if (submitBtn) setButtonLoading(submitBtn, false);
@@ -7367,6 +7484,7 @@ $today_str = $today->format('Y-m-d');
         function closeUpgradeRoomModal() {
             setBookingPageModalOpen(document.getElementById('upgradeRoomModal'), false);
             roomChangeData = null;
+            bkDeepCancel();
         }
 
         function rcSelectedOption() {
@@ -7487,7 +7605,9 @@ $today_str = $today->format('Y-m-d');
             fd.append('send_email', document.getElementById('upgrade_send_email').checked ? '1' : '0');
             postBookingAction(fd, 'Could not change the room type.')
                 .then(data => {
+                    window.bkDeepLeaving = true; // closing the modal below is not a cancel
                     closeUpgradeRoomModal();
+                    window.bkDeepLeaving = false;
                     reloadWithBookingActionMessage(data, 'Room type changed.');
                 })
                 .catch(err => {
@@ -7656,26 +7776,31 @@ $today_str = $today->format('Y-m-d');
             const deepAction = <?php echo json_encode($deep_link_action); ?>;
             const deepId = <?php echo (int)$deep_link_booking_id; ?>;
             if (!deepAction || !deepId) return;
+            // The action cannot run from here: say why on the booking page and go back to it.
+            const bounce = function(message) {
+                queueBookingActionMessage(message, 'warning');
+                bkDeepCancel();
+            };
             const run = function() {
                 if (deepAction === 'room-change') {
                     if (document.querySelector('[data-action="upgrade-room"][data-booking-id="' + deepId + '"]')) {
                         openUpgradeRoomModal(deepId);
                     } else {
-                        Alert.show('The room type of this booking cannot be changed in its current state.', 'warning');
+                        bounce('The room type of this booking cannot be changed in its current state.');
                     }
                 } else if (deepAction === 'checkout') {
                     const row = document.getElementById('booking-' + deepId);
                     if (row && row.dataset.status === 'checked-in') {
                         checkoutBooking(deepId, row.querySelector('td strong') ? row.querySelector('td strong').textContent.trim() : '');
                     } else {
-                        Alert.show('Only an in-house (checked-in) guest can be checked out.', 'warning');
+                        bounce('Only an in-house (checked-in) guest can be checked out.');
                     }
                 } else if (deepAction === 'assign-room') {
                     const btn = document.querySelector('[data-action="assign-room"][data-booking-id="' + deepId + '"]');
                     if (btn) {
                         btn.click();
                     } else {
-                        Alert.show('A room can only be assigned to a confirmed booking before its arrival date has passed.', 'warning');
+                        bounce('You need permission to edit bookings to assign a room.');
                     }
                 }
             };

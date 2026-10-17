@@ -311,8 +311,8 @@ function getIndividualRoomsAvailability(int $roomTypeId, ?string $checkIn, ?stri
     $unavailableRooms = [];
 
     // One rule set for the whole system: every room is judged by
-    // checkIndividualRoomAvailability() (status, maintenance windows, housekeeping for a
-    // same-day arrival, per-night room blocks, overlapping bookings incl. joined rooms and
+    // checkIndividualRoomAvailability() (status, maintenance windows, per-night room
+    // blocks, overlapping bookings incl. joined rooms and
     // live tentative holds) - the same function checkRoomAvailability() counts with, so
     // this list can never disagree with the public availability count.
     foreach ($individualRooms as $room) {

@@ -84,7 +84,10 @@ if (in_array($status, ['pending', 'tentative', 'confirmed'], true)) {
     $edit_mode = 'closed';
 }
 $can_edit_stay = $edit_mode === 'reservation';
-$can_move_room = in_array($edit_mode, ['reservation', 'inhouse'], true);
+// Joined-room bookings hold a PAIR of rooms: picking one room here would split the pair, so the
+// pair is changed with Assign room on the bookings list instead.
+$is_joined_type = $booking && roomTypeHasActiveCombinations((int)$booking['room_id']);
+$can_move_room = in_array($edit_mode, ['reservation', 'inhouse'], true) && !$is_joined_type;
 $can_change_room_type = ($edit_mode === 'reservation' && (string)$booking['check_in_date'] >= date('Y-m-d'))
     || ($edit_mode === 'inhouse' && (string)$booking['check_out_date'] > date('Y-m-d'));
 
@@ -125,10 +128,11 @@ if ($booking && $booking['room_id'] && $can_move_room) {
         foreach ($allIndividualRooms as $room) {
             $isAvailable = true;
             $reason = '';
-            // One rule for the whole system: status, maintenance, blocks, same-day cleaning and
-            // overlapping bookings. The booking's own stay is excluded; an in-house guest's own
-            // room is not held to the cleaning rule.
-            $roomCheck = checkIndividualRoomAvailability((int)$room['id'], $checkIn, $checkOut, (int)$booking_id, $edit_mode === 'inhouse');
+            // One rule for the whole system: status, maintenance, blocks and overlapping bookings.
+            // The booking's own stay is excluded. Cleaning only matters when an in-house guest
+            // moves into another room now; a reservation's room is turned over before arrival.
+            $isOwnRoom = (int)$room['id'] === (int)($booking['individual_room_id'] ?? 0);
+            $roomCheck = checkIndividualRoomAvailability((int)$room['id'], $checkIn, $checkOut, (int)$booking_id, $edit_mode === 'inhouse' && !$isOwnRoom);
             if (empty($roomCheck['available'])) {
                 $isAvailable = false;
                 if (!empty($roomCheck['conflicts'])) {
@@ -137,11 +141,13 @@ if ($booking && $booking['room_id'] && $can_move_room) {
                     $reason = 'Blocked';
                 } elseif (!empty($roomCheck['maintenance'])) {
                     $reason = 'Maintenance';
+                } elseif (($roomCheck['error'] ?? '') === 'Selected room has not been cleaned yet') {
+                    $reason = 'Not clean yet';
                 } else {
                     $reason = (string)($roomCheck['error'] ?? ucfirst(str_replace('_', ' ', (string)$room['status'])));
                 }
             }
-            if ((int)$room['id'] === (int)($booking['individual_room_id'] ?? 0)) {
+            if ($isOwnRoom) {
                 $isAvailable = true; // the guest's own room
                 $reason = '';
             }
@@ -624,6 +630,17 @@ $back_url = 'booking-details.php?id=' . $booking_id;
 
                 <?php if ($edit_mode === 'inhouse'): ?>
                     <div class="eb-locked"><i class="fas fa-calendar-days"></i> Stay length: use <a href="booking-details.php?id=<?php echo $booking_id; ?>">Adjust Stay Dates</a> on the booking, or <a href="bookings.php?search=<?php echo urlencode($booking['booking_reference']); ?>">Extend stay</a> on the list. Both reprice at the booked rate and are audited.</div>
+                <?php endif; ?>
+
+                <?php if ($is_joined_type && in_array($edit_mode, ['reservation', 'inhouse'], true)): ?>
+                    <?php $ebPairLabel = getBookingRoomLabel((int)$booking_id); ?>
+                    <div class="eb-locked"><i class="fas fa-link"></i> Joined room<?php echo $ebPairLabel !== '' ? ': ' . htmlspecialchars($ebPairLabel) : ' (no rooms assigned yet)'; ?>.
+                        <?php if ($status === 'confirmed'): ?>
+                            Change the pair with <a href="bookings.php?action=assign-room&amp;booking_id=<?php echo (int)$booking_id; ?>"><?php echo $ebPairLabel !== '' ? 'Change rooms' : 'Assign rooms'; ?></a>.
+                        <?php else: ?>
+                            The pair is assigned once the booking is confirmed.
+                        <?php endif; ?>
+                    </div>
                 <?php endif; ?>
 
                 <?php if (!empty($availableIndividualRooms)): ?>

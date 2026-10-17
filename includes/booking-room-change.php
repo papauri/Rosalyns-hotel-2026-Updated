@@ -288,8 +288,9 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
         $oldRoomIds = getBookingRoomIds($bookingId);
         if ($status === 'checked-in') {
             // The guest is in the building: never take their room away unless a room of the new type is free.
+            // Same rule auto-assign applies to a guest moving in now: the new room must be clean.
             $freeRooms = getAvailableIndividualRooms($newRoomId, max(date('Y-m-d'), substr((string)$b['check_in_date'], 0, 10)),
-                substr((string)$b['check_out_date'], 0, 10), $bookingId, (int)($b['child_guests'] ?? 0) > 0);
+                substr((string)$b['check_out_date'], 0, 10), $bookingId, (int)($b['child_guests'] ?? 0) > 0, true);
             if (empty($freeRooms)) {
                 throw new RuntimeException('No ' . $newRoom['name'] . ' room is free from tonight to ' . $b['check_out_date'] . ', so the guest stays where they are.');
             }

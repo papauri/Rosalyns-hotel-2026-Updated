@@ -3391,7 +3391,7 @@ function roomTypeHasActiveCombinations(int $roomTypeId): bool
     }
 }
 
-function getAvailableRoomCombinations(int $roomTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null): array
+function getAvailableRoomCombinations(int $roomTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null, bool $requireClean = false): array
 {
     global $pdo;
 
@@ -3406,9 +3406,11 @@ function getAvailableRoomCombinations(int $roomTypeId, string $checkIn, string $
                 a.room_number AS room_a_number,
                 a.room_name AS room_a_name,
                 a.status AS room_a_status,
+                a.room_type_id AS room_a_type_id,
                 b.room_number AS room_b_number,
                 b.room_name AS room_b_name,
                 b.status AS room_b_status,
+                b.room_type_id AS room_b_type_id,
                 rt.name AS combined_room_type_name,
                 rt.price_per_night AS combined_type_price,
                 rt.max_guests AS combined_type_max_guests
@@ -3430,13 +3432,19 @@ function getAvailableRoomCombinations(int $roomTypeId, string $checkIn, string $
                 continue;
             }
 
-            $aAvailability = checkIndividualRoomAvailability($roomA, $checkIn, $checkOut, $excludeBookingId);
+            $aAvailability = checkIndividualRoomAvailability($roomA, $checkIn, $checkOut, $excludeBookingId, $requireClean);
             if (empty($aAvailability['available'])) {
                 continue;
             }
 
-            $bAvailability = checkIndividualRoomAvailability($roomB, $checkIn, $checkOut, $excludeBookingId);
+            $bAvailability = checkIndividualRoomAvailability($roomB, $checkIn, $checkOut, $excludeBookingId, $requireClean);
             if (empty($bAvailability['available'])) {
+                continue;
+            }
+
+            // A member room whose own room type is blocked for these nights (e.g. all Superior
+            // Suites closed) cannot be sold as part of a pair either.
+            if (rh_combination_member_type_blocked($combination, $roomTypeId, $checkIn, $checkOut)) {
                 continue;
             }
 
@@ -3453,6 +3461,20 @@ function getAvailableRoomCombinations(int $roomTypeId, string $checkIn, string $
         error_log('getAvailableRoomCombinations warning: ' . $e->getMessage());
         return [];
     }
+}
+
+/**
+ * True when a member room of a joined pair belongs to another room type that is blocked
+ * (room-type or all-rooms block) on any night of the stay. Expects room_a_type_id / room_b_type_id.
+ */
+function rh_combination_member_type_blocked(array $combination, int $combinedTypeId, string $checkIn, string $checkOut): bool
+{
+    foreach (array_unique([(int)($combination['room_a_type_id'] ?? 0), (int)($combination['room_b_type_id'] ?? 0)]) as $memberType) {
+        if ($memberType > 0 && $memberType !== $combinedTypeId && !empty(getRoomTypeBlockedDatesOnly($memberType, $checkIn, $checkOut))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -3617,8 +3639,9 @@ function assignRoomCombinationToBooking(int $bookingId, int $combinationId, ?int
         $lockStmt = $pdo->prepare($lockSql);
         $lockStmt->execute($roomIds);
 
+        $comboMoveIn = (string)$booking['status'] === 'checked-in';
         foreach ($roomIds as $roomId) {
-            $availability = checkIndividualRoomAvailability($roomId, (string)$booking['check_in_date'], (string)$booking['check_out_date'], $bookingId);
+            $availability = checkIndividualRoomAvailability($roomId, (string)$booking['check_in_date'], (string)$booking['check_out_date'], $bookingId, $comboMoveIn && !in_array($roomId, getBookingRoomIds($bookingId), true));
             if (empty($availability['available'])) {
                 throw new RuntimeException($availability['error'] ?? 'One of the joined rooms is no longer available');
             }
@@ -4181,13 +4204,14 @@ function checkRoomAvailability(int $room_id, string $check_in_date, string $chec
  * For every night in [startDate, endDate) returns how many physical rooms of the type can
  * be sold that night: active rooms that are not out of service (maintenance / out_of_order),
  * not blocked that night (individual_room_blocked_dates), not inside a blocking maintenance
- * window, not dirty today, and not occupied by an active booking (assigned directly or via
+ * window, and not occupied by an active booking (assigned directly or via
  * booking_rooms) - minus bookings of the type that have no room yet. Joined-room types count
  * free PAIRS instead. This is the per-night counterpart of checkIndividualRoomAvailability()
  * and uses exactly the same rules, so the public calendar and the assignable-room list agree.
  *
  * Room-type / global blocks (blocked_dates) are NOT applied here; callers treat them
- * separately, as checkRoomAvailability() does.
+ * separately, as checkRoomAvailability() does. Housekeeping never reduces what can be sold:
+ * a room being cleaned this morning is still tonight's room.
  *
  * @return array<string,int>|null night (Y-m-d) => sellable units, or null when the type has
  *                                no individual rooms (legacy total_rooms counting applies)
@@ -4198,9 +4222,8 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
 
     $start = substr($start_date, 0, 10);
     $end = substr($end_date, 0, 10);
-    $today = date('Y-m-d');
 
-    $roomsStmt = $pdo->prepare("SELECT id, status, housekeeping_status FROM individual_rooms WHERE room_type_id = ? AND is_active = 1");
+    $roomsStmt = $pdo->prepare("SELECT id, status FROM individual_rooms WHERE room_type_id = ? AND is_active = 1");
     $roomsStmt->execute([$room_id]);
     $rooms = $roomsStmt->fetchAll(PDO::FETCH_ASSOC);
     if (empty($rooms)) {
@@ -4249,24 +4272,31 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
         }
     };
 
-    $openHkRooms = [];
-    if ($start <= $today && $today < $end) {
-        $hk = $pdo->prepare("SELECT DISTINCT individual_room_id FROM housekeeping_assignments WHERE individual_room_id IN ($idPh) AND status IN ('pending', 'in_progress') AND due_date <= CURDATE()");
-        $hk->execute($roomIds);
-        $openHkRooms = array_flip(array_map('intval', $hk->fetchAll(PDO::FETCH_COLUMN)));
-    }
     foreach ($rooms as $r) {
-        $rid = (int)$r['id'];
         if (in_array((string)$r['status'], rh_room_out_of_service_statuses(), true)) {
-            $markRange($rid, $start, $end);
-            continue;
+            $markRange((int)$r['id'], $start, $end);
         }
-        // Same "dirty now" rule as rh_room_is_dirty_now(), evaluated in bulk.
-        if ($start <= $today && $today < $end
-            && ((string)$r['status'] === 'cleaning'
-                || in_array((string)$r['housekeeping_status'], ['pending', 'in_progress'], true)
-                || isset($openHkRooms[$rid]))) {
-            $taken[$rid][$today] = true;
+    }
+    // Pair members that belong to OTHER room types: out of service, or their own type blocked
+    // that night (room-type / all-rooms block), means the pair cannot be sold that night.
+    $foreignIds = array_values(array_diff($roomIds, $ownRoomIds));
+    if (!empty($foreignIds)) {
+        $fst = $pdo->prepare('SELECT id, status, room_type_id FROM individual_rooms WHERE id IN (' . implode(',', array_fill(0, count($foreignIds), '?')) . ')');
+        $fst->execute($foreignIds);
+        $typeBlocks = [];
+        foreach ($fst->fetchAll(PDO::FETCH_ASSOC) as $fr) {
+            $fid = (int)$fr['id'];
+            if (in_array((string)$fr['status'], rh_room_out_of_service_statuses(), true)) {
+                $markRange($fid, $start, $end);
+                continue;
+            }
+            $ft = (int)$fr['room_type_id'];
+            if (!isset($typeBlocks[$ft])) {
+                $typeBlocks[$ft] = array_column(getRoomTypeBlockedDatesOnly($ft, $start, $end), 'block_date');
+            }
+            foreach ($typeBlocks[$ft] as $bd) {
+                $taken[$fid][substr((string)$bd, 0, 10)] = true;
+            }
         }
     }
 
@@ -4966,8 +4996,8 @@ function getAvailableDates(int $room_id, string $start_date, string $end_date)
  *
  *  - type level: checkRoomAvailability() for the new nights of the (new) room type
  *  - room level: each assigned room (incl. joined rooms), or the explicitly requested room,
- *    re-checked with locking reads (blocks, maintenance, overlapping bookings, cleaning for a
- *    same-day arrival)
+ *    re-checked with locking reads (blocks, maintenance, overlapping bookings; a room an
+ *    in-house guest moves into must also be clean)
  * For an in-house guest nights before today are history and are not re-checked.
  *
  * @param int|null $newTypeId        New room type (null = unchanged)
@@ -5048,7 +5078,7 @@ function rh_validate_booking_stay_change(int $bookingId, string $newCheckIn, str
     }
 
     // Room level
-    $roomChecks = []; // [roomId, [[a,b],...], ignoreHousekeeping]
+    $roomChecks = []; // [roomId, [[a,b],...], requireClean]
     if ($explicitRoom > 0) {
         $rt = $pdo->prepare("SELECT room_type_id FROM individual_rooms WHERE id = ? AND is_active = 1");
         $rt->execute([$explicitRoom]);
@@ -5056,7 +5086,7 @@ function rh_validate_booking_stay_change(int $bookingId, string $newCheckIn, str
         if ($rtype === false || (int)$rtype !== $typeId) {
             return $fail('The selected room does not exist or does not belong to this booking\'s room type.');
         }
-        $roomChecks[] = [$explicitRoom, $clip([[$newIn, $newOut]]), false];
+        $roomChecks[] = [$explicitRoom, $clip([[$newIn, $newOut]]), $inHouse]; // an in-house guest moves in now
     } elseif (!$typeChanged) {
         $roomSegs = [];
         if ($newIn < $oldIn) {
@@ -5068,16 +5098,16 @@ function rh_validate_booking_stay_change(int $bookingId, string $newCheckIn, str
         $roomSegs = $clip($roomSegs);
         if (!empty($roomSegs)) {
             foreach (getBookingRoomIds($bookingId) as $rid) {
-                $roomChecks[] = [(int)$rid, $roomSegs, $inHouse];
+                $roomChecks[] = [(int)$rid, $roomSegs, false];
             }
         }
     }
 
     usort($roomChecks, function ($x, $y) { return $x[0] <=> $y[0]; });
-    foreach ($roomChecks as [$rid, $segs, $ignoreHk]) {
+    foreach ($roomChecks as [$rid, $segs, $requireClean]) {
         $pdo->prepare("SELECT id FROM individual_rooms WHERE id = ? FOR UPDATE")->execute([$rid]);
         foreach ($segs as [$a, $b]) {
-            $c = checkIndividualRoomAvailability($rid, $a, $b, $bookingId, $ignoreHk);
+            $c = checkIndividualRoomAvailability($rid, $a, $b, $bookingId, $requireClean);
             $label = 'Room ' . (string)($c['individual_room']['room_number'] ?? $rid);
             if (empty($c['available'])) {
                 return $fail($label . ' is not free for ' . $a . ' to ' . $b . ': ' . ($c['error'] ?? 'unavailable')
@@ -5250,12 +5280,9 @@ function revalidateBookingRoomAssignment(int $bookingId, string $newCheckIn, str
     sort($roomIds);
     $ph = implode(',', array_fill(0, count($roomIds), '?'));
     $pdo->prepare("SELECT id FROM individual_rooms WHERE id IN ($ph) FOR UPDATE")->execute($roomIds);
-    $stSt = $pdo->prepare("SELECT status FROM bookings WHERE id = ?");
-    $stSt->execute([$bookingId]);
-    $inHouse = (string)$stSt->fetchColumn() === 'checked-in';
 
     foreach ($roomIds as $rid) {
-        $check = checkIndividualRoomAvailability($rid, $newCheckIn, $newCheckOut, $bookingId, $inHouse);
+        $check = checkIndividualRoomAvailability($rid, $newCheckIn, $newCheckOut, $bookingId);
         $error = '';
         if (empty($check['available'])) {
             $error = (string)($check['error'] ?? 'Room unavailable for the new dates');
@@ -6034,9 +6061,10 @@ function canConvertTentativeBooking(int $booking_id)
  * @param string $checkIn Check-in date (YYYY-MM-DD)
  * @param string $checkOut Check-out date (YYYY-MM-DD)
  * @param int $excludeBookingId Optional booking ID to exclude from conflicts
+ * @param bool $requireClean Only rooms clean right now (an in-house guest moving in today)
  * @return array Available individual rooms
  */
-function getAvailableIndividualRooms(int $roomTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null, bool $requireChildrenAllowed = false)
+function getAvailableIndividualRooms(int $roomTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null, bool $requireChildrenAllowed = false, bool $requireClean = false)
 {
     global $pdo;
 
@@ -6077,7 +6105,7 @@ function getAvailableIndividualRooms(int $roomTypeId, string $checkIn, string $c
         $availableRooms = [];
 
         foreach ($rooms as $room) {
-            $roomAvailability = checkIndividualRoomAvailability((int)$room['id'], $checkIn, $checkOut, $excludeBookingId);
+            $roomAvailability = checkIndividualRoomAvailability((int)$room['id'], $checkIn, $checkOut, $excludeBookingId, $requireClean);
             if (empty($roomAvailability['available'])) {
                 continue;
             }
@@ -6122,6 +6150,160 @@ function getAvailableIndividualRooms(int $roomTypeId, string $checkIn, string $c
     }
 }
 
+/** Short staff-facing reason from a checkIndividualRoomAvailability() result. */
+function rh_room_unavailable_reason(array $check): string
+{
+    if (!empty($check['conflicts'])) {
+        $c = $check['conflicts'][0];
+        return 'Booked: ' . $c['booking_reference'] . ' (' . date('j M', strtotime((string)$c['check_in_date'])) . ' - ' . date('j M', strtotime((string)$c['check_out_date'])) . ')'
+            . (count($check['conflicts']) > 1 ? ' +' . (count($check['conflicts']) - 1) . ' more' : '');
+    }
+    if (!empty($check['blocked_dates'])) {
+        return 'Blocked on ' . date('j M', strtotime((string)$check['blocked_dates'][0]['block_date']))
+            . (count($check['blocked_dates']) > 1 ? ' and ' . (count($check['blocked_dates']) - 1) . ' more night(s)' : '');
+    }
+    if (!empty($check['maintenance'])) {
+        return 'Maintenance during the stay';
+    }
+    return (string)($check['error'] ?? 'Unavailable');
+}
+
+/**
+ * Every room (or joined-room pair) an admin could assign to a stay, each with its state, so the
+ * picker shows WHY a room cannot be used instead of silently dropping it. Joined-room types
+ * (active room_combinations) are assigned as pairs, never as one member room.
+ *
+ * Turnover (previous guest still in, or cleaning not finished) only matters for a stay that
+ * starts today or earlier and never makes a room unassignable: check-in is gated on a clean room.
+ * $requireClean (in-house move) makes such a room unavailable instead.
+ *
+ * @return array{mode:string, items:array<int,array>}
+ */
+function rh_room_assignment_candidates(int $roomTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null, bool $requireClean = false): array
+{
+    global $pdo;
+
+    $checkIn = substr($checkIn, 0, 10);
+    $checkOut = substr($checkOut, 0, 10);
+    $sameDay = $checkIn <= date('Y-m-d');
+    $currentIds = $excludeBookingId ? array_map('intval', getBookingRoomIds($excludeBookingId)) : [];
+
+    $turnover = static function (string $status, int $roomId) use ($sameDay): string {
+        if (!$sameDay) {
+            return '';
+        }
+        if ($status === 'occupied') {
+            return 'Previous guest still in the room';
+        }
+        return rh_room_is_dirty_now($roomId) ? 'Being cleaned' : '';
+    };
+
+    try {
+        if (roomTypeHasActiveCombinations($roomTypeId)) {
+            $st = $pdo->prepare("
+                SELECT rc.id, rc.combined_name, rc.room_a_id, rc.room_b_id,
+                       a.room_number AS a_number, a.status AS a_status, a.room_type_id AS room_a_type_id,
+                       b.room_number AS b_number, b.status AS b_status, b.room_type_id AS room_b_type_id
+                FROM room_combinations rc
+                JOIN individual_rooms a ON a.id = rc.room_a_id AND a.is_active = 1
+                JOIN individual_rooms b ON b.id = rc.room_b_id AND b.is_active = 1
+                WHERE rc.combined_room_type_id = ? AND rc.is_active = 1
+                ORDER BY rc.combined_name ASC, a.room_number ASC, b.room_number ASC
+            ");
+            $st->execute([$roomTypeId]);
+            $items = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $c) {
+                $members = [
+                    [(int)$c['room_a_id'], (string)$c['a_number'], (string)$c['a_status']],
+                    [(int)$c['room_b_id'], (string)$c['b_number'], (string)$c['b_status']],
+                ];
+                if ($members[0][0] === $members[1][0]) {
+                    continue;
+                }
+                $reason = '';
+                $notes = [];
+                foreach ($members as [$rid, $num, $status]) {
+                    $chk = checkIndividualRoomAvailability($rid, $checkIn, $checkOut, $excludeBookingId, $requireClean && !in_array($rid, $currentIds, true));
+                    if (empty($chk['available'])) {
+                        $reason = 'Room ' . $num . ': ' . rh_room_unavailable_reason($chk);
+                        break;
+                    }
+                    $t = $turnover($status, $rid);
+                    if ($t !== '') {
+                        $notes[] = 'Room ' . $num . ': ' . $t;
+                    }
+                }
+                if ($reason === '' && rh_combination_member_type_blocked($c, $roomTypeId, $checkIn, $checkOut)) {
+                    $reason = 'The room type of one of these rooms is blocked on these dates';
+                }
+                $items[] = [
+                    'id' => (int)$c['id'],
+                    'label' => $members[0][1] . ' + ' . $members[1][1],
+                    'room_name' => (string)($c['combined_name'] ?? ''),
+                    'floor' => null,
+                    'available' => $reason === '',
+                    'reason' => $reason,
+                    'ready' => empty($notes) ? 1 : 0,
+                    'turnover' => implode('; ', $notes),
+                    'children_allowed' => 1,
+                    'held_for_joined' => false,
+                    'current' => in_array($members[0][0], $currentIds, true) && in_array($members[1][0], $currentIds, true),
+                    'display_order' => 0,
+                ];
+            }
+            usort($items, static function (array $a, array $b): int {
+                return [$b['available'], $b['ready']] <=> [$a['available'], $a['ready']] ?: strnatcmp($a['label'], $b['label']);
+            });
+            return ['mode' => 'combinations', 'items' => $items];
+        }
+
+        $st = $pdo->prepare("
+            SELECT ir.id, ir.room_number, ir.room_name, ir.floor, ir.status, ir.display_order,
+                   ir.single_occupancy_enabled_override, ir.double_occupancy_enabled_override,
+                   ir.triple_occupancy_enabled_override, ir.children_allowed_override, ir.max_guests_override,
+                   r.max_guests, r.single_occupancy_enabled, r.double_occupancy_enabled, r.triple_occupancy_enabled,
+                   r.children_allowed, r.price_double_occupancy, r.price_triple_occupancy
+            FROM individual_rooms ir
+            JOIN rooms r ON r.id = ir.room_type_id
+            WHERE ir.room_type_id = ? AND ir.is_active = 1
+        ");
+        $st->execute([$roomTypeId]);
+        $held = array_map('intval', rh_rooms_held_for_combinations($roomTypeId, $checkIn, $checkOut, $excludeBookingId));
+        $items = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $room) {
+            $rid = (int)$room['id'];
+            $isCurrent = in_array($rid, $currentIds, true);
+            $chk = checkIndividualRoomAvailability($rid, $checkIn, $checkOut, $excludeBookingId, $requireClean && !$isCurrent);
+            $available = !empty($chk['available']);
+            $policy = resolveOccupancyPolicy($room, $room);
+            $t = $available ? $turnover((string)$room['status'], $rid) : '';
+            $items[] = [
+                'id' => $rid,
+                'label' => (string)$room['room_number'],
+                'room_number' => (string)$room['room_number'],
+                'room_name' => (string)($room['room_name'] ?? ''),
+                'floor' => $room['floor'],
+                'available' => $available,
+                'reason' => $available ? '' : rh_room_unavailable_reason($chk),
+                'ready' => $t === '' ? 1 : 0,
+                'turnover' => $t,
+                'children_allowed' => (int)$policy['children_allowed'],
+                'held_for_joined' => $available && in_array($rid, $held, true),
+                'current' => $isCurrent,
+                'display_order' => (int)$room['display_order'],
+            ];
+        }
+        usort($items, static function (array $a, array $b): int {
+            return [$b['available'], $b['ready'], $a['held_for_joined'], $a['display_order']] <=> [$a['available'], $a['ready'], $b['held_for_joined'], $b['display_order']]
+                ?: strnatcmp($a['label'], $b['label']);
+        });
+        return ['mode' => 'rooms', 'items' => $items];
+    } catch (Throwable $e) {
+        error_log('rh_room_assignment_candidates warning: ' . $e->getMessage());
+        return ['mode' => 'rooms', 'items' => []];
+    }
+}
+
 /**
  * Check if an individual room is available for specific dates
  *
@@ -6138,26 +6320,23 @@ function isIndividualRoomAvailable(int $individualRoomId, string $checkIn, strin
 }
 
 /**
- * Explain whether an individual room is blocked from being assigned to a guest
- * because of housekeeping (a pending/in-progress cleanup) or because the room is
- * in a non-bookable physical state (cleaning / maintenance / out of order).
+ * Explain whether an individual room is blocked from being assigned to a guest because it
+ * is out of service (maintenance / out of order), or - only when the guest moves in right
+ * now ($movingInNow: an in-house room move) - because it is not clean yet.
  *
- * This powers the admin-facing assignment messaging: it tells staff exactly WHY
- * a room cannot be assigned and HOW to free it. A room is only assignable once
- * its checkout cleanup is completed (which returns it to 'available').
+ * Cleaning never blocks assigning a reservation, even a same-day arrival: the room is
+ * turned over before the guest arrives and check-in itself is gated on a clean room
+ * (evaluateCheckInRoomReady). Blocking assignment hid every room that checked out that
+ * morning, and stale housekeeping tasks hid rooms for days.
  *
  * @return array{blocked:bool, reason:string, message:string}|null
  *         null  => no housekeeping/status block (room is free to assign)
  */
-function getRoomHousekeepingAssignmentBlock(int $individualRoomId, ?string $stayCheckIn = null): ?array
+function getRoomHousekeepingAssignmentBlock(int $individualRoomId, bool $movingInNow = false): ?array
 {
     global $pdo;
 
     try {
-        // A cleaning backlog only blocks a stay that begins today or earlier; a later
-        // arrival is turned over in time. Maintenance / out-of-order always blocks.
-        $cleaningMatters = $stayCheckIn === null || substr($stayCheckIn, 0, 10) <= date('Y-m-d');
-
         $stmt = $pdo->prepare("SELECT room_number, room_name, status, housekeeping_status FROM individual_rooms WHERE id = ?");
         $stmt->execute([$individualRoomId]);
         $room = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -6169,25 +6348,12 @@ function getRoomHousekeepingAssignmentBlock(int $individualRoomId, ?string $stay
             ? 'Room ' . $room['room_number']
             : (trim((string)($room['room_name'] ?? '')) ?: 'This room');
 
-        // Count open housekeeping assignments — the authoritative blocker.
-        $openStmt = $pdo->prepare("
-            SELECT COUNT(*) FROM housekeeping_assignments
-            WHERE individual_room_id = ? AND status IN ('pending', 'in_progress', 'blocked')
-        ");
-        $openStmt->execute([$individualRoomId]);
-        $openCount = (int)$openStmt->fetchColumn();
-
-        $needsCleaning = $openCount > 0
-            || (string)($room['housekeeping_status'] ?? '') === 'pending'
-            || (string)($room['status'] ?? '') === 'cleaning';
-
-        if ($needsCleaning && $cleaningMatters) {
-            $taskWord = $openCount > 1 ? 'cleanups' : 'cleanup';
+        if ($movingInNow && rh_room_is_dirty_now($individualRoomId)) {
             return [
                 'blocked' => true,
                 'reason'  => 'housekeeping_pending',
-                'message' => $label . ' cannot be assigned yet — it has a pending checkout ' . $taskWord . '. '
-                    . 'Open Housekeeping and mark the ' . $taskWord . ' as completed to free the room, then assign it.',
+                'message' => $label . ' is not clean yet, so the guest cannot move in now. '
+                    . 'Open Housekeeping and mark the cleanup as completed, or pick a clean room.',
             ];
         }
 
@@ -6288,8 +6454,13 @@ function rh_room_is_dirty_now(int $individualRoomId): bool
  * check-out day is free. Every date comparison below follows that: blocks are per
  * night (block_date >= check_in AND block_date < check_out), bookings overlap only when
  * they share a night, maintenance windows are inclusive of their last day.
+ *
+ * Housekeeping never takes a room off sale or out of the assignable list: a room being
+ * turned over today is still tonight's room (the check-in clean-room gate,
+ * evaluateCheckInRoomReady, stops a guest walking into it dirty). Pass $requireClean only
+ * when a guest moves in straight away (an in-house room move): then a dirty room is refused.
  */
-function checkIndividualRoomAvailability(int $individualRoomId, string $checkIn, string $checkOut, ?int $excludeBookingId = null, bool $ignoreHousekeeping = false)
+function checkIndividualRoomAvailability(int $individualRoomId, string $checkIn, string $checkOut, ?int $excludeBookingId = null, bool $requireClean = false)
 {
     global $pdo;
 
@@ -6388,25 +6559,6 @@ function checkIndividualRoomAvailability(int $individualRoomId, string $checkIn,
                 $result['error'] = 'Selected room is blocked for maintenance during these dates';
                 return $result;
             }
-        }
-
-        // Housekeeping only matters when the stay begins today (or earlier): a room that
-        // is not clean yet cannot receive tonight's guest. For a later arrival the room
-        // will have been turned over long before, and routine/recurring cleaning tasks
-        // scheduled inside the stay must not remove the room from sale.
-        if (!$ignoreHousekeeping && $checkIn <= date('Y-m-d') && rh_room_is_dirty_now($individualRoomId)) {
-            $hkStmt = $pdo->prepare("
-                SELECT id, due_date, status
-                FROM housekeeping_assignments
-                WHERE individual_room_id = ?
-                AND status IN ('pending', 'in_progress', 'blocked')
-                AND due_date <= CURDATE()
-            ");
-            $hkStmt->execute([$individualRoomId]);
-            $result['available'] = false;
-            $result['housekeeping'] = $hkStmt->fetchAll(PDO::FETCH_ASSOC);
-            $result['error'] = 'Selected room has not been cleaned yet';
-            return $result;
         }
 
         // Check for individual room blocked dates (per night; the check-out day is free)
@@ -6516,6 +6668,13 @@ function checkIndividualRoomAvailability(int $individualRoomId, string $checkIn,
                 );
             }
             $result['conflict_message'] = implode('; ', $conflict_details);
+            return $result;
+        }
+
+        // A guest moving in right now (in-house room move) needs a clean room.
+        if ($requireClean && rh_room_is_dirty_now($individualRoomId)) {
+            $result['available'] = false;
+            $result['error'] = 'Selected room has not been cleaned yet';
             return $result;
         }
 
@@ -6771,7 +6930,9 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
         }
 
         // Check if room is available for booking dates
-        $assignAvailability = checkIndividualRoomAvailability($individualRoomId, (string)$booking['check_in_date'], (string)$booking['check_out_date'], $bookingId);
+        // An in-house guest moving to another room moves in now: that room must be clean.
+        $movingInNow = (string)$booking['status'] === 'checked-in' && (int)($booking['previous_individual_room_id'] ?? 0) !== $individualRoomId;
+        $assignAvailability = checkIndividualRoomAvailability($individualRoomId, (string)$booking['check_in_date'], (string)$booking['check_out_date'], $bookingId, $movingInNow);
         if (empty($assignAvailability['available'])) {
             $rollback();
             rh_room_assign_last_error((string)($assignAvailability['error'] ?? 'Selected room is not available for the booking dates')
@@ -6990,11 +7151,15 @@ function autoAssignIndividualRoom(int $bookingId)
             return $result;
         }
 
+        // A guest already in the building (in-house room-type change) moves in now and needs
+        // clean rooms; any other arrival is turned over before it checks in.
+        $movingInNow = (string)$booking['status'] === 'checked-in';
         $availableCombinations = getAvailableRoomCombinations(
             $roomTypeId,
             $booking['check_in_date'],
             $booking['check_out_date'],
-            $bookingId
+            $bookingId,
+            $movingInNow
         );
 
         if (!empty($availableCombinations)) {
@@ -7016,7 +7181,8 @@ function autoAssignIndividualRoom(int $bookingId)
             $booking['check_in_date'],
             $booking['check_out_date'],
             $bookingId,
-            (int)($booking['child_guests'] ?? 0) > 0
+            (int)($booking['child_guests'] ?? 0) > 0,
+            $movingInNow
         );
 
         if (empty($availableRooms)) {
