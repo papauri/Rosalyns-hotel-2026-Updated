@@ -7131,3 +7131,110 @@ html.page-zoomed .pos-ready-card {
         font-size: .9rem;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Till <-> station chat (Messages window)
+   Counterpart of the KDS "FOH chat": bubbles, newest at the bottom, a reply
+   strip while a station note is waiting, and a box to write to a station.
+   ══════════════════════════════════════════════════════════════════════════ */
+.pos-chat__tabs { flex-wrap: wrap; padding-bottom: 4px; }
+.pos-chat__tabs .svc-filter__btn i { margin-right: 6px; }
+.pos-chat__tabs .svc-filter__btn span:empty { display: none; }
+.pos-chat__tabs .svc-filter__btn span:not(:empty) {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #b3261e;
+    color: #fff;
+}
+
+.pos-chat__log { gap: 8px; }
+
+.pos-chat__msg {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    max-width: 80%;
+    align-self: flex-start;
+}
+
+.pos-chat__msg.is-mine { align-self: flex-end; align-items: flex-end; }
+
+.pos-chat__who {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: #7a6f63;
+}
+
+.pos-chat__bubble {
+    padding: 10px 14px;
+    border: 1px solid #e6ded1;
+    border-radius: 16px 16px 16px 4px;
+    background: #fffdfb;
+    font-size: 17px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.pos-chat__msg.is-mine .pos-chat__bubble {
+    border-color: #cfe3d3;
+    border-radius: 16px 16px 4px 16px;
+    background: #e8f3ea;
+}
+
+.pos-chat__msg.is-pending .pos-chat__bubble { border-left: 6px solid #c28a2c; }
+.pos-chat__msg.is-urgent:not(.is-mine) .pos-chat__bubble { border-color: #b3261e; background: #fde7e5; }
+
+.pos-chat__time { font-size: 13px; color: #7a6f63; }
+
+.pos-chat__status {
+    align-self: center;
+    padding: 2px 0;
+    font-size: 13px;
+    color: #7a6f63;
+}
+
+.pos-chat__actions {
+    padding: 12px 22px;
+    border-top: 1px solid #e6ded1;
+    background: #fbf0dc;
+}
+
+.pos-chat__actions[hidden] { display: none; }
+
+.pos-chat__waiting { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+
+.pos-chat__quick {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.pos-chat__quick-label { font-size: 14px; color: #7a6f63; margin-left: 4px; }
+
+.pos-chat__foot { display: flex; flex-direction: column; gap: 8px; }
+.pos-chat__compose { display: flex; gap: 8px; }
+
+.pos-chat__compose input,
+.pos-chat__to {
+    min-height: 48px;
+    padding: 0 14px;
+    border: 1px solid #dccfc2;
+    border-radius: 10px;
+    background: #fff;
+    color: #2a2723;
+    font: 16px 'Jost', system-ui, sans-serif;
+}
+
+.pos-chat__compose input { flex: 1; min-width: 0; }
+.pos-chat__to[hidden] { display: none; }
+.pos-chat__note { align-self: flex-start; min-height: 40px; font-size: 14px; }
+
+@media (max-width: 640px) {
+    .pos-chat__msg { max-width: 92%; }
+    .pos-chat__actions { padding-left: 12px; padding-right: 12px; }
+}

@@ -630,9 +630,10 @@ try {
         $userId = (int)$user['id'];
         $businessStart = (string)$unionWindow['start_sql'];
         $businessEnd = (string)$unionWindow['end_sql'];
-        /* Pull (a) recent messages this user initiated,
-           (b) recent inbound non-station rows,
-           (c) station→POS direct notes that still require FOH action. */
+        /* The till's chat history with the stations. Pull (a) every note this user sent today
+           (replied to or not), (b) recent inbound non-station rows, (c) station→POS direct
+           notes: all of today's, acknowledged or not, plus any older one still awaiting action.
+           Acknowledging a note only clears its alert; it must stay in the conversation. */
         $stmt = $pdo->prepare("SELECT sm.id, sm.station, sm.message, sm.source, sm.sent_by_name, sm.priority,
                 sm.order_id, sm.order_ref, sm.created_at, sm.seen_at, sm.is_acknowledged, sm.acknowledged_at,
                 sm.reply_message, sm.replied_at, sm.replied_by_name, sm.to_user_id,
@@ -648,21 +649,22 @@ try {
                 GROUP BY soi.order_id
             ) oi ON oi.order_id = sm.order_id
             WHERE (
-                (sm.sent_by = ? AND sm.source <> 'station' AND sm.reply_message IS NOT NULL AND sm.created_at >= ? AND sm.created_at < ?)
+                (sm.sent_by = ? AND sm.source <> 'station' AND sm.created_at >= ? AND sm.created_at < ?)
                 OR
                 (sm.to_user_id = ? AND sm.source <> 'station' AND sm.created_at >= ? AND sm.created_at < ?)
                 OR
-                (sm.to_user_id = ? AND sm.source = 'station' AND COALESCE(sm.pos_acknowledged, 0) = 0)
+                (sm.to_user_id = ? AND sm.source = 'station' AND (COALESCE(sm.pos_acknowledged, 0) = 0 OR (sm.created_at >= ? AND sm.created_at < ?)))
             )
-            ORDER BY sm.created_at DESC
-            LIMIT 50");
-        /* Clause (c) deliberately carries NO time bound. It is the only clause covering notes
+            ORDER BY sm.created_at DESC, sm.id DESC
+            LIMIT 150");
+        /* The still-unacknowledged half of clause (c) deliberately carries NO time bound. It is the only clause covering notes
          * that still REQUIRE FOH action, and an unacknowledged note does not stop mattering
          * because a business window rolled over — bounding it by $businessStart silently hid
          * exactly the notes someone still had to act on (same failure the KDS board had). The
          * pos_acknowledged flag, not the clock, is what removes a note from this list. The two
-         * informational clauses above stay window-bounded: those are already-handled traffic. */
-        $stmt->execute([$userId, $businessStart, $businessEnd, $userId, $businessStart, $businessEnd, $userId]);
+         * informational clauses above (and the acknowledged half of (c)) stay window-bounded: that is already-handled
+         * traffic, kept only as today's conversation history. */
+        $stmt->execute([$userId, $businessStart, $businessEnd, $userId, $businessStart, $businessEnd, $userId, $businessStart, $businessEnd]);
         jok(['messages' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
     }
 

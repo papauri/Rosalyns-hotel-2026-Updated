@@ -4252,6 +4252,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         let _inboxLastMsgs = [];
         const _seenReplies = posLoadSeenSet(POS_INBOX_SEEN_KEY);
         const _inboxReplyInFlight = new Set();
+        let _posChatStation = 'all'; /* all | kitchen | bar | coffee_bar */
+        let _posChatSig = '';
+        let _posChatStick = true;
+        let _posChatToTouched = false;
+        let _posChatSending = false;
         const POS_INBOX_STATION_LABELS = {
             kitchen: 'Kitchen',
             bar: 'Bar',
@@ -4284,8 +4289,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             return text.includes('ready for collection') || text.includes('for collection');
         }
 
+        /* The Messages window is a chat: acknowledged notes stay in the history
+           (acknowledging only clears the alert and the badge). */
         function normalizePosInboxMessages(messages) {
-            return (messages || []).filter(m => !posInboxIsCleared(m) && (!isPosInboxDirectMessage(m) || isPosInboxDirectPending(m) || !!m.reply_message));
+            return (messages || []).slice();
         }
 
         function posInboxFindMessage(messageId) {
@@ -4439,6 +4446,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             _inboxVisible = open && showMessages;
             _myOrdersVisible = open && !showMessages;
             if (_inboxVisible) {
+                _posChatSig = '';
+                _posChatStick = true;
                 renderPosInbox(_inboxLastMsgs);
                 markInboxMessagesSeen(_inboxLastMsgs);
                 updatePosInboxBadgesFromMessages(_inboxLastMsgs);
@@ -4513,125 +4522,259 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             return station === 'bar' ? 'fa-martini-glass' : (station === 'coffee_bar' ? 'fa-mug-hot' : 'fa-fire-burner');
         }
 
-        /* A station's note to this cashier, with every message about the same order
-           folded into one card. A card that needs action carries one obvious button. */
-        function posInboxDirectCardHtml(thread) {
-            const lead = thread[thread.length - 1];
-            const pending = thread.filter(isPosInboxDirectPending);
-            const latestPending = pending[pending.length - 1] || null;
-            const urgent = thread.some(m => m.priority === 'urgent' || isCollectionDirectMessage(m));
-            const station = posInboxStationLabel(lead.station);
-            const ref = lead.order_ref || (lead.order_id ? 'Order #' + lead.order_id : '');
-            const where = posInboxOrderContext(lead);
-            const items = posCompactItemsSummary(lead.order_items_summary || '', 6);
-
-            const lines = thread.map(m => {
-                const mine = m.reply_message ?
-                    `<li class="svc-line svc-line--mine"><span class="svc-line__who">You</span>${escHtml(m.reply_message)}<time>${escHtml(stationNoteFmtTime(m.replied_at))}</time></li>` : '';
-                return `<li class="svc-line"><span class="svc-line__who">${escHtml(posInboxStationLabel(m.station))}</span>${escHtml(m.message || '')}<time>${escHtml(stationNoteFmtTime(m.created_at))}</time></li>${mine}`;
-            }).join('');
-
-            let actions;
-            if (latestPending) {
-                const id = parseInt(latestPending.id, 10) || 0;
-                const draft = _posReplyDrafts[String(id)] || '';
-                actions = `<div class="svc-card__actions">
-                        <button type="button" class="svc-btn svc-btn--primary svc-btn--big" data-pos-ack="${id}" onclick="ackPosInboxMessage(${id}, this)"><i class="fas fa-check"></i> Got it</button>
-                    </div>
-                    <div class="svc-reply">
-                        <span class="svc-reply__label">Or reply to ${escHtml(station)}:</span>
-                        <div class="svc-reply__chips">${posInboxQuickRepliesHtml(id)}</div>
-                        <div class="svc-reply__row">
-                            <input type="text" id="posInboxReplyInput-${id}" maxlength="255" placeholder="Type a reply…" value="${escHtml(draft)}" aria-label="Reply to ${escHtml(station)}"
-                                oninput="_posReplyDrafts['${id}'] = this.value;"
-                                onkeydown="if(event.key==='Enter'){event.preventDefault();sendPosInboxReply(${id}, null, true);}">
-                            <button type="button" class="svc-btn svc-btn--ghost" data-pos-reply="${id}" onclick="sendPosInboxReply(${id}, this, true)"><i class="fas fa-paper-plane"></i> Send</button>
-                        </div>
-                    </div>`;
-            } else {
-                actions = `<div class="svc-card__actions"><span class="svc-done"><i class="fas fa-circle-check"></i> Done</span>
-                    <button type="button" class="svc-btn svc-btn--ghost" onclick="dismissPosInboxThread(${escHtml(JSON.stringify(thread.map(m => parseInt(m.id, 10) || 0)))})">Clear</button></div>`;
-            }
-
-            return `<article class="svc-card svc-card--msg${urgent ? ' is-urgent' : ''}${latestPending ? ' is-pending' : ''}">
-                <header class="svc-card__head">
-                    <span class="svc-card__from"><i class="fas ${posInboxStationIcon(lead.station)}"></i> ${escHtml(station)}</span>
-                    ${urgent ? '<span class="svc-tag svc-tag--urgent">Urgent</span>' : ''}
-                    ${latestPending ? '<span class="svc-tag svc-tag--wait">Needs you</span>' : ''}
-                    <time class="svc-card__time">${escHtml(stationNoteFmtTime(lead.created_at))}</time>
-                </header>
-                ${ref || where ? `<p class="svc-card__order">${ref ? `<strong>${escHtml(ref)}</strong>` : ''}${ref && where ? ' · ' : ''}${escHtml(where)}</p>` : ''}
-                ${items ? `<p class="svc-card__items">${escHtml(items)}</p>` : ''}
-                <ul class="svc-lines">${lines}</ul>
-                ${actions}
-            </article>`;
+        /* ── Till <-> station chat ───────────────────────────────────────────
+           The counterpart of the KDS "FOH chat": today's whole conversation with
+           the Kitchen, Bar and Coffee Bar, newest at the bottom. A station's note
+           and the cashier's answer to it live on one row (reply_message); a note the
+           cashier started carries the station's answer the same way. */
+        function posChatBubbles(messages) {
+            const out = [];
+            (messages || []).forEach(m => {
+                const station = String(m.station || '');
+                const label = posInboxStationLabel(station);
+                const ref = String(m.order_ref || '');
+                if (isPosInboxDirectMessage(m)) {
+                    const pending = isPosInboxDirectPending(m);
+                    out.push({
+                        at: m.created_at,
+                        station,
+                        mine: false,
+                        who: label,
+                        ref,
+                        text: m.message || '',
+                        urgent: m.priority === 'urgent' || isCollectionDirectMessage(m),
+                        pending
+                    });
+                    if (m.reply_message) {
+                        out.push({ at: m.replied_at || m.created_at, station, mine: true, who: 'You', text: m.reply_message });
+                    } else if (!pending) {
+                        out.push({ at: m.created_at, station, status: 'You marked this as seen' });
+                    }
+                } else {
+                    out.push({
+                        at: m.created_at,
+                        station,
+                        mine: true,
+                        who: 'You',
+                        ref,
+                        text: m.message || '',
+                        urgent: m.priority === 'urgent'
+                    });
+                    if (m.reply_message) {
+                        out.push({ at: m.replied_at || m.created_at, station, mine: false, who: m.replied_by_name || label, text: m.reply_message });
+                    } else if (parseInt(m.is_acknowledged || 0, 10) === 1) {
+                        out.push({ at: m.created_at, station, status: label + ' acknowledged' });
+                    } else if (m.seen_at) {
+                        out.push({ at: m.created_at, station, status: 'Seen by ' + label });
+                    }
+                }
+            });
+            return out.sort((x, y) => String(x.at || '').localeCompare(String(y.at || '')));
         }
 
-        /* A note this cashier sent, shown once the station has answered it. */
-        function posInboxOwnNoteCardHtml(m) {
-            const station = posInboxStationLabel(m.station);
-            let status;
-            if (m.reply_message) {
-                status = `<li class="svc-line"><span class="svc-line__who">${escHtml(m.replied_by_name || station)}</span>${escHtml(m.reply_message)}<time>${escHtml(stationNoteFmtTime(m.replied_at))}</time></li>`;
-            } else if (parseInt(m.is_acknowledged || 0, 10) === 1) {
-                status = `<li class="svc-line svc-line--status"><i class="fas fa-check-double"></i> ${escHtml(station)} acknowledged</li>`;
-            } else if (m.seen_at) {
-                status = `<li class="svc-line svc-line--status"><i class="fas fa-eye"></i> Seen by ${escHtml(station)}</li>`;
-            } else {
-                status = `<li class="svc-line svc-line--status"><i class="fas fa-hourglass-half"></i> Not seen yet</li>`;
-            }
-            return `<article class="svc-card svc-card--msg${m.priority === 'urgent' ? ' is-urgent' : ''}">
-                <header class="svc-card__head">
-                    <span class="svc-card__from"><i class="fas fa-reply"></i> Your note to ${escHtml(station)}</span>
-                    <time class="svc-card__time">${escHtml(stationNoteFmtTime(m.created_at))}</time>
-                </header>
-                ${m.order_ref ? `<p class="svc-card__order"><strong>${escHtml(m.order_ref)}</strong></p>` : ''}
-                <ul class="svc-lines">
-                    <li class="svc-line svc-line--mine"><span class="svc-line__who">You</span>${escHtml(m.message || '')}</li>
-                    ${status}
-                </ul>
-                <div class="svc-card__actions"><button type="button" class="svc-btn svc-btn--ghost" onclick="dismissPosInboxThread([${parseInt(m.id, 10) || 0}])">Clear</button></div>
-            </article>`;
+        function posChatPendingNotes(messages) {
+            return (messages || []).filter(isPosInboxDirectPending)
+                .sort((x, y) => (parseInt(x.id, 10) || 0) - (parseInt(y.id, 10) || 0));
+        }
+
+        function posChatSetStation(station) {
+            _posChatStation = POS_INBOX_STATION_LABELS[station] ? station : 'all';
+            _posChatToTouched = false;
+            _posChatSig = '';
+            _posChatStick = true;
+            renderPosInbox(_inboxLastMsgs);
+        }
+
+        function posChatBubbleHtml(b) {
+            if (b.status) return `<div class="pos-chat__status">${escHtml(b.status)}</div>`;
+            const who = b.mine
+                ? (_posChatStation === 'all' ? 'You · to ' + posInboxStationLabel(b.station) : 'You')
+                : b.who;
+            return `<div class="pos-chat__msg${b.mine ? ' is-mine' : ''}${b.urgent ? ' is-urgent' : ''}${b.pending ? ' is-pending' : ''}">
+                <span class="pos-chat__who">${escHtml(who)}${b.ref ? ' · ' + escHtml(b.ref) : ''}${b.urgent ? ' · urgent' : ''}</span>
+                <div class="pos-chat__bubble">${escHtml(b.text || '')}</div>
+                <span class="pos-chat__time">${escHtml(stationNoteFmtTime(b.at))}</span>
+            </div>`;
+        }
+
+        function posChatActionsHtml(pending) {
+            const latest = pending[pending.length - 1];
+            const label = posInboxStationLabel(latest.station);
+            const n = pending.length;
+            const chips = POS_QUICK_REPLIES.map(r =>
+                `<button type="button" class="svc-chip" onclick="posChatQuick(${escHtml(JSON.stringify(String(latest.station)))}, ${escHtml(JSON.stringify(r))}, this)">${escHtml(r)}</button>`
+            ).join('');
+            return `<div class="pos-chat__waiting"><span class="svc-tag svc-tag--wait">Needs you</span>
+                    <strong>${n} note${n === 1 ? '' : 's'} waiting</strong></div>
+                <div class="pos-chat__quick">
+                    <button type="button" class="svc-btn svc-btn--primary" onclick="posChatAckAll(this)"><i class="fas fa-check"></i> Got it${n > 1 ? ' (' + n + ')' : ''}</button>
+                    <span class="pos-chat__quick-label">Quick reply to ${escHtml(label)}:</span>
+                    ${chips}
+                </div>`;
         }
 
         function renderPosInbox(messages) {
             const list = document.getElementById('posInboxList');
             if (!list) return;
-            // Preserve any in-progress typed replies before rebuilding
-            list.querySelectorAll('[id^="posInboxReplyInput-"]').forEach(el => {
-                const id = el.id.replace('posInboxReplyInput-', '');
-                if (id) _posReplyDrafts[id] = el.value;
+            const filter = _posChatStation;
+            const pendingAll = posChatPendingNotes(messages);
+            const scoped = pendingAll.filter(m => filter === 'all' || m.station === filter);
+            const bubbles = posChatBubbles(messages).filter(b => filter === 'all' || b.station === filter);
+
+            document.querySelectorAll('[data-chat-station]').forEach(btn => {
+                const st = btn.dataset.chatStation;
+                const on = st === filter;
+                btn.classList.toggle('is-active', on);
+                btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+                const c = btn.querySelector('[data-chat-count]');
+                if (c) {
+                    const n = st === 'all' ? pendingAll.length : pendingAll.filter(m => m.station === st).length;
+                    c.textContent = n > 0 ? String(n) : '';
+                }
             });
-            const active = document.activeElement;
-            const focusedId = active && list.contains(active) && active.tagName === 'INPUT' ? active.id : '';
 
-            const threads = groupPosInboxDirectThreads(messages || []);
-            const needsYou = threads.filter(t => t.some(isPosInboxDirectPending));
-            const doneThreads = threads.filter(t => !t.some(isPosInboxDirectPending));
-            const ownNotes = (messages || []).filter(m => !isPosInboxDirectMessage(m));
-
-            if (!needsYou.length && !doneThreads.length && !ownNotes.length) {
-                list.innerHTML = '<div class="svc-empty"><i class="fas fa-comments"></i><strong>No messages</strong><span>Notes from Kitchen, Bar and Coffee land here, and pop up on screen the moment they arrive.</span></div>';
-                return;
-            }
-
-            let html = '';
-            if (needsYou.length) {
-                html += `<h3 class="svc-section">Needs you <span>${needsYou.length}</span></h3>` + needsYou.map(posInboxDirectCardHtml).join('');
-            }
-            if (ownNotes.length || doneThreads.length) {
-                html += '<h3 class="svc-section">Earlier today</h3>' +
-                    ownNotes.map(posInboxOwnNoteCardHtml).join('') +
-                    doneThreads.map(posInboxDirectCardHtml).join('');
-            }
-            list.innerHTML = html;
-            if (focusedId) {
-                const el = document.getElementById(focusedId);
-                if (el) {
-                    el.focus();
-                    if (typeof el.setSelectionRange === 'function') el.setSelectionRange(el.value.length, el.value.length);
+            /* Composer: pick the station only on the "All" tab. */
+            const to = document.getElementById('posChatTo');
+            const input = document.getElementById('posChatInput');
+            if (to) {
+                to.hidden = filter !== 'all';
+                if (filter === 'all' && !_posChatToTouched) {
+                    const lastBubble = bubbles.filter(b => b.station).pop();
+                    const guess = (scoped.length ? scoped[scoped.length - 1].station : (lastBubble ? lastBubble.station : 'kitchen'));
+                    if (POS_INBOX_STATION_LABELS[guess]) to.value = guess;
                 }
             }
+            if (input) {
+                const target = filter === 'all' ? (to ? to.value : 'kitchen') : filter;
+                input.placeholder = scoped.length ? 'Reply to ' + posInboxStationLabel(target) + '…' : 'Message ' + posInboxStationLabel(target) + '…';
+            }
+
+            const sig = JSON.stringify([filter, bubbles.map(b => [b.at, b.text, b.status, b.pending]), scoped.map(m => m.id)]);
+            if (sig === _posChatSig) return;
+            _posChatSig = sig;
+
+            const actions = document.getElementById('posChatActions');
+            if (actions) {
+                actions.hidden = !scoped.length;
+                actions.innerHTML = scoped.length ? posChatActionsHtml(scoped) : '';
+            }
+
+            const wasAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+            if (!bubbles.length) {
+                list.innerHTML = '<div class="svc-empty"><i class="fas fa-comments"></i><strong>No messages yet today</strong><span>Write to the Kitchen, Bar or Coffee Bar below. Their notes and replies appear here, and pop up on screen the moment they arrive.</span></div>';
+            } else {
+                list.innerHTML = bubbles.map(posChatBubbleHtml).join('');
+            }
+            if (_posChatStick || wasAtBottom) list.scrollTop = list.scrollHeight;
+            if (_inboxVisible) _posChatStick = false;
+        }
+
+        /* Answer a station (replying to its waiting note and recording the FOH
+           action), or start a new note when nothing is waiting from it. */
+        async function posChatDeliver(station, text) {
+            if (!POS_INBOX_STATION_LABELS[station]) return false;
+            text = String(text || '').trim().slice(0, 255);
+            if (!text) return false;
+            const pending = posChatPendingNotes(_inboxLastMsgs).filter(m => m.station === station);
+            if (pending.length) {
+                const target = pending[pending.length - 1];
+                _posReplyDrafts[String(target.id)] = text;
+                const ok = await sendPosInboxReply(target.id, null, true);
+                delete _posReplyDrafts[String(target.id)];
+                if (ok) {
+                    for (const m of pending.slice(0, -1)) {
+                        await ackPosInboxMessage(m.id, null, { suppressToast: true, skipRepoll: true });
+                    }
+                }
+                return ok;
+            }
+            const fd = new FormData();
+            fd.append('csrf_token', posCsrfToken);
+            fd.append('action', 'send_message');
+            fd.append('station', station);
+            fd.append('message', text);
+            fd.append('priority', 'normal');
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 12000);
+                const r = await fetch('../api/kds-action.php', { method: 'POST', body: fd, credentials: 'same-origin', signal: controller.signal });
+                clearTimeout(timeoutId);
+                const j = await r.json();
+                if (!j.ok) {
+                    posToastReady(j.error || 'Message not sent.', true);
+                    return false;
+                }
+                const ts = (window.rhNowSql ? window.rhNowSql() : new Date().toISOString().slice(0, 19).replace('T', ' '));
+                _inboxLastMsgs = (_inboxLastMsgs || []).concat([{
+                    id: j.message_id, station, message: text, source: 'pos', sent_by_name: posCurrentUserName || 'You',
+                    priority: 'normal', order_id: null, order_ref: '', created_at: ts, seen_at: null, is_acknowledged: 0,
+                    reply_message: null, replied_at: null, to_user_id: null, pos_acknowledged: 0
+                }]);
+                if (_inboxVisible) renderPosInbox(_inboxLastMsgs);
+                posToastReady('Sent to ' + posInboxStationLabel(station) + '.', false);
+                setTimeout(pollStationReplies, 400);
+                return true;
+            } catch (e) {
+                posToastReady(e && e.name === 'AbortError' ? 'Message timed out. Please retry.' : 'Network error - message not sent.', true);
+                return false;
+            }
+        }
+
+        async function posChatSend() {
+            if (_posChatSending) return;
+            const input = document.getElementById('posChatInput');
+            const btn = document.getElementById('posChatSendBtn');
+            const text = String(input ? input.value : '').trim().slice(0, 255);
+            if (!text) {
+                input?.focus();
+                return;
+            }
+            const to = document.getElementById('posChatTo');
+            const station = _posChatStation !== 'all' ? _posChatStation : (to ? to.value : 'kitchen');
+            _posChatSending = true;
+            _posChatStick = true;
+            if (btn) btn.disabled = true;
+            try {
+                if (await posChatDeliver(station, text)) {
+                    if (input) input.value = '';
+                    _posChatSig = '';
+                    renderPosInbox(_inboxLastMsgs);
+                }
+            } finally {
+                _posChatSending = false;
+                if (btn) btn.disabled = false;
+                input?.focus();
+            }
+        }
+
+        async function posChatQuick(station, text, button) {
+            if (_posChatSending) return;
+            _posChatSending = true;
+            _posChatStick = true;
+            document.querySelectorAll('#posChatActions button').forEach(b => { b.disabled = true; });
+            try {
+                await posChatDeliver(station, text);
+            } finally {
+                _posChatSending = false;
+                document.querySelectorAll('#posChatActions button').forEach(b => { b.disabled = false; });
+            }
+        }
+
+        /* "Got it": records the FOH action on every waiting note in view. The notes
+           stay in the conversation; only the alert and the badge clear. */
+        async function posChatAckAll(button) {
+            const ids = posChatPendingNotes(_inboxLastMsgs)
+                .filter(m => _posChatStation === 'all' || m.station === _posChatStation)
+                .map(m => parseInt(m.id, 10) || 0).filter(Boolean);
+            if (!ids.length) return;
+            if (button) button.disabled = true;
+            let failed = false;
+            for (const id of ids) {
+                if (!(await ackPosInboxMessage(id, null, { suppressToast: true, skipRepoll: true }))) failed = true;
+            }
+            posToastReady(failed ? 'Could not save action for every note.' : 'FOH action recorded.', failed);
+            setTimeout(pollStationReplies, 300);
+            if (button) button.disabled = false;
         }
 
         /* ── Incoming alerts ────────────────────────────────────────────────
@@ -4739,6 +4882,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const primary = document.getElementById('posAlertPrimary');
             primary.innerHTML = `<i class="fas fa-check" aria-hidden="true"></i> ${escHtml(a.primaryLabel)}`;
             primary.onclick = posAlertPrimary;
+            const chatBtn = document.getElementById('posAlertChat');
+            if (chatBtn) {
+                chatBtn.hidden = a.kind !== 'direct';
+                chatBtn.onclick = posAlertOpenChat;
+            }
             const secondary = document.getElementById('posAlertSecondary');
             secondary.hidden = !a.secondaryLabel;
             secondary.textContent = a.secondaryLabel || '';
@@ -4778,7 +4926,19 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (!a) return;
             posAlertNext();
             if (a.secondaryAction === 'order' && a.orderId) openTabDetail(a.orderId);
-            else if (a.secondaryAction === 'messages') togglePosInbox(true);
+            else if (a.secondaryAction === 'messages') {
+                posChatSetStation(a.stationKey || 'all');
+                togglePosInbox(true);
+            }
+        }
+
+        /* Open the till <-> station chat from an alert. The queued alerts close
+           (the notes are in the chat); they are not marked done by this. */
+        function posAlertOpenChat() {
+            const a = _posAlerts[0];
+            posAlertDismissAll();
+            posChatSetStation(a && a.stationKey ? a.stationKey : 'all');
+            togglePosInbox(true);
         }
 
         async function posAlertReply(text, button) {
@@ -4805,6 +4965,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 key: 'direct:' + m.id,
                 kind: 'direct',
                 station,
+                stationKey: String(m.station || ''),
                 msgId: parseInt(m.id, 10) || 0,
                 tone: urgent ? 'urgent' : 'note',
                 urgent,
@@ -4836,7 +4997,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 message: m.reply_message || '',
                 orderId: parseInt(m.order_id, 10) || 0,
                 primaryLabel: 'OK',
-                secondaryLabel: 'Open messages',
+                stationKey: String(m.station || ''),
+                secondaryLabel: 'Open chat',
                 secondaryAction: 'messages'
             };
         }
@@ -5037,7 +5199,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     showPosInboxAttention(hasUrgentDirect);
                     newDirect.forEach(m => {
                         posRememberSeen(_seenReplies, POS_INBOX_SEEN_KEY, posInboxDirectKey(m));
-                        posAlertPush(posAlertFromDirect(m));
+                        /* With the chat open the note is already on screen with its own Got it. */
+                        if (!_inboxVisible) posAlertPush(posAlertFromDirect(m));
                     });
                     /* One cue for the batch, graded by the most severe note in it. */
                     RHSounds.play(hasUrgentDirect ? 'urgent' : 'normal');
@@ -10343,9 +10506,28 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <div class="svc-list" id="myOrdersList"><p class="svc-empty">Loading…</p></div>
             </section>
             <section class="svc-pane" id="svcPaneMessages" role="tabpanel" aria-labelledby="svcTabMessages" hidden>
-                <div class="svc-list" id="posInboxList"><p class="svc-empty">Loading…</p></div>
-                <footer class="svc-foot">
-                    <button type="button" class="svc-btn svc-btn--ghost" onclick="closePosService(); openStationNoteModal();"><i class="fas fa-paper-plane"></i> Send a note to a station</button>
+                <?php /* Till <-> station chat: the counterpart of the KDS "FOH chat". Kept inside
+                          this window (page content) so it survives SPA navigation. */ ?>
+                <div class="svc-filter pos-chat__tabs" id="posChatTabs" role="group" aria-label="Chat with">
+                    <button type="button" class="svc-filter__btn is-active" data-chat-station="all" aria-pressed="true" onclick="posChatSetStation('all')">All <span data-chat-count></span></button>
+                    <button type="button" class="svc-filter__btn" data-chat-station="kitchen" aria-pressed="false" onclick="posChatSetStation('kitchen')"><i class="fas fa-fire-burner"></i> Kitchen <span data-chat-count></span></button>
+                    <button type="button" class="svc-filter__btn" data-chat-station="bar" aria-pressed="false" onclick="posChatSetStation('bar')"><i class="fas fa-martini-glass"></i> Bar <span data-chat-count></span></button>
+                    <button type="button" class="svc-filter__btn" data-chat-station="coffee_bar" aria-pressed="false" onclick="posChatSetStation('coffee_bar')"><i class="fas fa-mug-hot"></i> Coffee Bar <span data-chat-count></span></button>
+                </div>
+                <div class="svc-list pos-chat__log" id="posInboxList" aria-live="polite"><p class="svc-empty">Loading…</p></div>
+                <div class="pos-chat__actions" id="posChatActions" hidden></div>
+                <footer class="svc-foot pos-chat__foot">
+                    <div class="pos-chat__compose">
+                        <select id="posChatTo" class="pos-chat__to" aria-label="Send to" onchange="_posChatToTouched = true; _posChatSig = ''; renderPosInbox(_inboxLastMsgs);">
+                            <option value="kitchen">Kitchen</option>
+                            <option value="bar">Bar</option>
+                            <option value="coffee_bar">Coffee Bar</option>
+                        </select>
+                        <input type="text" id="posChatInput" maxlength="255" autocomplete="off" placeholder="Message the Kitchen…" aria-label="Message"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();posChatSend();}">
+                        <button type="button" class="svc-btn svc-btn--primary" id="posChatSendBtn" onclick="posChatSend()"><i class="fas fa-paper-plane"></i> Send</button>
+                    </div>
+                    <button type="button" class="svc-btn svc-btn--ghost pos-chat__note" onclick="closePosService(); openStationNoteModal();"><i class="fas fa-receipt"></i> Note about an order</button>
                 </footer>
             </section>
         </div>
@@ -10370,6 +10552,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             </div>
             <div class="pos-alert__actions">
                 <button type="button" class="svc-btn svc-btn--ghost" id="posAlertSecondary" hidden></button>
+                <button type="button" class="svc-btn svc-btn--ghost" id="posAlertChat" hidden><i class="fas fa-comments" aria-hidden="true"></i> Open chat</button>
                 <button type="button" class="svc-btn svc-btn--primary" id="posAlertPrimary"></button>
             </div>
             <button type="button" class="pos-alert__all" id="posAlertAll" onclick="posAlertDismissAll()" hidden>Got them all — close</button>
