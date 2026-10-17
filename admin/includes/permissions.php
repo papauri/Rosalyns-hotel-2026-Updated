@@ -93,6 +93,7 @@ function getAllRoles()
                 'stock_batches',
                 'stock_orders',
                 'pos_till',
+                'pos_take_payment',
                 'pos_float',
                 'pos_discount',
                 'pos_86',
@@ -200,6 +201,7 @@ function getAllRoles()
             'is_system' => true,
             'permissions' => [
                 'pos_till',
+                'pos_take_payment',
                 'pos_float',
                 'pos_discount',
                 'stock_orders',
@@ -257,8 +259,8 @@ function getAllRoles()
                 'room_service_view',
                 'room_service_manage',
                 'pos_till',
-                'stock_orders',
-                'pos_all_tabs'
+                'pos_take_payment',
+                'stock_orders'
             ]
         ],
         'gym_staff' => [
@@ -629,6 +631,14 @@ function getAllPermissions()
             'label' => 'POS Till (Touch)',
             'description' => 'Modern touchscreen till for restaurant staff',
             'icon' => 'fa-cash-register',
+            'category' => 'Stations',
+            'page' => 'pos.php',
+            'group' => 'stations'
+        ],
+        'pos_take_payment' => [
+            'label' => 'POS Take Payment & Settle',
+            'description' => 'Take payment on the till: Pay now, settle tabs and split bills. Without it the till only fires orders and runs tabs (e.g. FOH / waiters); the bill is settled from Orders & Tabs by someone who has it',
+            'icon' => 'fa-credit-card',
             'category' => 'Stations',
             'page' => 'pos.php',
             'group' => 'stations'

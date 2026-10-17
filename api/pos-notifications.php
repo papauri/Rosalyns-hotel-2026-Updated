@@ -169,10 +169,10 @@ if ($action === 'poll') {
         foreach ($rows as $row) {
             $seenBy = json_decode($row['seen_by'] ?? '[]', true) ?: [];
             if (in_array($userId, $seenBy, true)) continue; // already seen by this user
-            /* "Ready" goes to the till of the person who placed the order, and to
-               supervisors who follow every tab — not to every cashier on shift. */
+            /* "Ready" goes only to the till of the person who placed the order. Managers and
+               admins can open every tab, but another cashier's order is not their alert. */
             $placedBy = (int)($row['placed_by'] ?? 0);
-            if ($placedBy > 0 && $placedBy !== $userId && !$seesAllTabs) continue;
+            if ($placedBy > 0 && $placedBy !== $userId) continue;
             $unseen[] = [
                 'id'          => (int)$row['id'],
                 'order_id'    => (int)$row['order_id'],

@@ -5144,6 +5144,27 @@ a.recent-toggle span {
 button.svc-card { cursor: pointer; }
 button.svc-card:hover { border-color: #cbbba7; }
 button.svc-card:focus-visible { outline: 3px solid #766550; outline-offset: 2px; }
+.svc-card--clickable { cursor: pointer; }
+.svc-card--clickable:hover { border-color: #cbbba7; }
+.svc-card--clickable:focus-visible { outline: 3px solid #766550; outline-offset: 2px; }
+/* Message the station about this order, straight from the order card. */
+.svc-order__chat {
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid #d9cdbd;
+    border-radius: 999px;
+    background: #fff;
+    color: #5e4b33;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.svc-order__chat:hover { background: #f6f1ea; }
+.svc-order__chat:focus-visible { outline: 3px solid #766550; outline-offset: 2px; }
 
 .svc-order.is-wait { border-left-color: #c28a2c; }
 .svc-order.is-cooking { border-left-color: #2f6fad; }

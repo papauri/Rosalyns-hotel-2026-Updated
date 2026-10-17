@@ -30,6 +30,8 @@ require_once __DIR__ . '/../includes/idempotency.php';
    trusted cashier could not be given any one of them on its own. */
 $posCanAllTabs     = hasPermission($user['id'], 'pos_all_tabs');
 $posCanVoid        = hasPermission($user['id'], 'pos_void');
+// Without it the till only places orders and runs tabs; payment is taken from Orders & Tabs.
+$posCanTakePayment = hasPermission($user['id'], 'pos_take_payment');
 $posCanStations    = hasPermission($user['id'], 'pos_stations_overview');
 $posCanOverrideShift = hasPermission($user['id'], 'pos_shift_override');
 $posHasAdminPortal = rhHasAdminPortal((int)$user['id']);
@@ -544,6 +546,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Customer email looks invalid.');
             }
             $orderNote = trim($_POST['notes'] ?? '');
+
+            // Tills without "POS Take Payment & Settle" fire orders and tabs only.
+            if (!$posCanTakePayment && !in_array($action, ['park', 'add_to_tab', 'close_shift', 'set_float', 'refund_order'], true)) {
+                throw new RuntimeException('This till does not take payments. Fire the order as a tab - it is settled from Orders & Tabs.');
+            }
 
             if ($action === 'park') {
                 /* === Fire order to stations, pay later (open tab) === */
@@ -2798,7 +2805,9 @@ if ($posCanStations) {
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
                         <button class="park-btn" id="parkBtn" onclick="parkOrder()" disabled data-help="Fire order|Sends the order to the relevant station (Kitchen, Bar, or both) and opens it as a TAB (no payment yet). Stock is not deducted yet: food comes off stock when the kitchen marks it Ready/Served (or it is bumped), and drinks when they are handed over at payment. Pay later from the Tabs button.
 Use for dine-in: staff can prepare while the customer is still seated."><span id="parkBtnLabel"><i class="fas fa-fire"></i> Fire Order</span></button>
+                        <?php if ($posCanTakePayment): ?>
                         <button class="pay-btn" id="payBtn" onclick="openPayModal()" disabled data-help="Pay now|Take payment AND place the order in one step. Use for walk-in / takeaway / quick-service. The kitchen still receives the ticket automatically."><i class="fas fa-credit-card ico"></i> Pay</button>
+                        <?php endif; ?>
                     </div>
                     <div style="font-size:11px; color:#6c757d; margin-top:8px; text-align:center;" id="parkHint">Fire Order = open tab (pay later)</div>
                     <button type="button" id="repeatRoundBtn" onclick="repeatLastRound()" style="display:none; width:100%; margin-top:8px; padding:9px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:8px; font-size:12.5px; font-weight:600; color:#334155; cursor:pointer;" data-help="Repeat last round|Re-loads the items from the last order you fired or paid so you can quickly send the same round again."><i class="fas fa-rotate-right"></i> Repeat last round (<span id="repeatRoundCount">0</span>)</button>
@@ -3245,11 +3254,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                         <i class="fas fa-plus"></i> Add items
                                     </button>
                                     <?php endif; ?>
+                                    <?php if ($posCanTakePayment): ?>
                                     <button type="button" onclick="openPayForTab(<?php echo (int)$t['id']; ?>, <?php echo (float)$t['total_amount']; ?>, <?php echo htmlspecialchars(json_encode((string)$t['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo $canSettle ? 'true' : 'false'; ?>, <?php echo (int)($t['split_count'] ?? 1); ?>, <?php echo (int)($t['split_paid_count'] ?? 0); ?>)"
                                         class="tc-btn tc-btn-settle"
                                         data-help="Settle tab|Close this tab — take payment and mark the order as paid.">
                                         <i class="fas fa-credit-card"></i> Settle
                                     </button>
+                                    <?php endif; ?>
                                     <button type="button" class="tc-btn tc-btn-more" onclick="toggleTabCardActions(this)" aria-expanded="false">
                                         <i class="fas fa-ellipsis"></i> More
                                     </button>
@@ -3918,6 +3929,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const posUserId = <?php echo (int)$user['id']; ?>;
         const posCurrentUserName = <?php echo json_encode($user['full_name'] ?: $user['username']); ?>;
         const posCanVoid = <?php echo $posCanVoid ? 'true' : 'false'; ?>;
+        const posCanTakePayment = <?php echo $posCanTakePayment ? 'true' : 'false'; ?>;
+        function posPaymentsBlocked() {
+            if (posCanTakePayment) return false;
+            posToastReady('This till does not take payments. Fire the order as a tab; it is settled from Orders & Tabs.', true);
+            return true;
+        }
         const posCanSeeTimeline = <?php echo $posCanStations ? 'true' : 'false'; ?>;
         const posCanRefund     = <?php echo $posCanRefund ? 'true' : 'false'; ?>;
         const posCanDiscount   = <?php echo $posCanDiscount ? 'true' : 'false'; ?>;
@@ -4339,6 +4356,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         /* ── Station inbox (replies + ack feed) ───────────────────────── */
         let _inboxVisible = false;
+        let _posInboxPrimed = false; // first inbox poll after load only learns what is already there
         let _inboxLastMsgs = [];
         const _seenReplies = posLoadSeenSet(POS_INBOX_SEEN_KEY);
         const _inboxReplyInFlight = new Set();
@@ -5272,7 +5290,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                    the cashier's own answer in reply_message, so they are excluded here -
                    otherwise sending a reply announced itself back as "Kitchen replied". */
                 const newReplies = msgs.filter(m => !isPosInboxDirectMessage(m) && m.reply_message && !_seenReplies.has(posInboxReplyKey(m)));
-                if (newReplies.length > 0 && !_inboxVisible) {
+                /* Replies already on screen (chat open) or already there when this till loaded
+                   are read: remember them without an alert, so they never pop up again later. */
+                if (newReplies.length > 0 && (_inboxVisible || !_posInboxPrimed)) {
+                    newReplies.forEach(m => posRememberSeen(_seenReplies, POS_INBOX_SEEN_KEY, posInboxReplyKey(m)));
+                } else if (newReplies.length > 0) {
                     showPosInboxAttention(false);
                     newReplies.forEach(m => {
                         posRememberSeen(_seenReplies, POS_INBOX_SEEN_KEY, posInboxReplyKey(m));
@@ -5282,6 +5304,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                        fire three overlapping chimes. */
                     RHSounds.play('success');
                 }
+                _posInboxPrimed = true;
                 /* New notes a station sent to this cashier. */
                 const newDirect = msgs.filter(m => isPosInboxDirectPending(m) && !_seenReplies.has(posInboxDirectKey(m)));
                 if (newDirect.length > 0) {
@@ -5416,9 +5439,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             ).join('') : '';
             const progress = Math.max(0, Math.min(100, parseInt(o.progress_percent || 0, 10) || 0));
             const showProgress = ['placed', 'preparing', 'ready'].includes(o.kitchen_status);
-            return `<button type="button" class="svc-card svc-order ${kitchen[0]}${String(o.is_priority) === '1' ? ' is-rush' : ''}" onclick="openTabDetail(${parseInt(o.id, 10) || 0})">
+            const oid = parseInt(o.id, 10) || 0;
+            const chatStation = (o.stations || []).find(st => !st.done) || (o.stations || [])[0] || null;
+            const chatTarget = chatStation && chatStation.station ? String(chatStation.station) : 'kitchen';
+            return `<div role="button" tabindex="0" class="svc-card svc-order svc-card--clickable ${kitchen[0]}${String(o.is_priority) === '1' ? ' is-rush' : ''}" onclick="openTabDetail(${oid})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openTabDetail(${oid});}">
                 <span class="svc-order__top">
                     <strong class="svc-order__ref">${escHtml(o.reference || '')}</strong>
+                    <button type="button" class="svc-order__chat" onclick="event.stopPropagation(); if (typeof closePosService === 'function') closePosService(); openStationNoteModal(${escHtml(JSON.stringify(chatTarget))}, ${oid})" title="Message the station about this order" aria-label="Message the station about order ${escHtml(o.reference || '')}"><i class="fas fa-comment"></i> Chat</button>
                     ${String(o.is_priority) === '1' ? '<span class="svc-tag svc-tag--urgent">Rush</span>' : ''}
                     <span class="svc-order__where">${escHtml(where)}${o.customer_name ? ' · ' + escHtml(o.customer_name) : ''}</span>
                     <strong class="svc-order__total">${escHtml(currencySymbol)} ${fmtMoney(o.total_amount || 0)}</strong>
@@ -5431,7 +5458,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 </span>
                 ${stations ? `<span class="svc-order__stations">${stations}</span>` : ''}
                 ${showProgress ? `<span class="svc-progress" aria-hidden="true"><span style="width:${progress}%"></span></span>` : ''}
-            </button>`;
+            </div>`;
         }
 
         function renderMyOrders(orders) {
@@ -7220,6 +7247,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function openPayModal() {
+            if (posPaymentsBlocked()) return;
             if (!cart.length) return;
             if (!validateServiceContext()) return;
             // A deal window may have opened/closed since the cart last changed - price at this moment
@@ -8181,7 +8209,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
                     <div class="tc-actions">
                         ${parseInt(t.split_paid_count||0) === 0 ? `<button type="button" onclick="startAddToTab(${orderId}, ${actionRef}, ${parseFloat(t.total_amount || 0) || 0})" class="tc-btn tc-btn-add" data-help="Add items|Add another round to this tab. Returns you to the menu; the next Fire adds to this tab."><i class="fas fa-plus"></i> Add items</button>` : ''}
-                        <button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'}, ${parseInt(t.split_count||1)||1}, ${parseInt(t.split_paid_count||0)||0})" class="tc-btn tc-btn-settle" data-help="Settle tab|Close this tab — take payment and mark the order as paid."><i class="fas fa-credit-card"></i> Settle</button>
+                        ${posCanTakePayment ? `<button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'}, ${parseInt(t.split_count||1)||1}, ${parseInt(t.split_paid_count||0)||0})" class="tc-btn tc-btn-settle" data-help="Settle tab|Close this tab — take payment and mark the order as paid."><i class="fas fa-credit-card"></i> Settle</button>` : ''}
                         <button type="button" class="tc-btn tc-btn-more" onclick="toggleTabCardActions(this)" aria-expanded="false"><i class="fas fa-ellipsis"></i> More</button>
                     </div>
                     <div class="tc-actions tc-actions--secondary" hidden>
@@ -8919,8 +8947,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
 
             const detailActions = [];
-            if (canSettle) {
+            if (canSettle && posCanTakePayment) {
                 detailActions.push(`<button type="button" class="tc-btn tc-btn-settle tdi-action" onclick="settleTabFromDetail(${parseInt(o.id, 10) || 0}, ${grossTotal}, ${escHtml(JSON.stringify(String(o.reference || 'TAB')))})"><i class="fas fa-credit-card"></i> Settle tab</button>`);
+            }
+            if (o.status === 'placed' || o.status === 'paid') {
+                const tdStation = (items.find(i => !['served', 'void'].includes(i.kds_status)) || items[0] || {}).station || 'kitchen';
+                detailActions.push(`<button type="button" class="tc-btn tdi-action" onclick="closeTabDetailOverlay(); openStationNoteModal(${escHtml(JSON.stringify(String(tdStation)))}, ${parseInt(o.id, 10) || 0})"><i class="fas fa-comment"></i> Message station</button>`);
             }
             detailActions.push(`<button type="button" class="tc-btn tc-btn-kot tdi-action" onclick="openPosPageModal('stock-receipt.php?id=${parseInt(o.id, 10) || 0}&print=1&kot=1','Print KOT','fas fa-print')"><i class="fas fa-print"></i> Print KOT</button>`);
             detailActions.push(`<button type="button" class="tc-btn tc-btn-log tdi-action" onclick="openPosPageModal('order-lifecycle.php?embed=1&id=${parseInt(o.id, 10) || 0}','Timeline','fas fa-stream')"><i class="fas fa-stream"></i> Timeline</button>`);
@@ -9555,6 +9587,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function openPayForTab(orderId, total, ref, canSettle = true, existingSplitCount = 1, existingSplitPaid = 0) {
+            if (posPaymentsBlocked()) return;
             if (!canSettle) {
                 posToastReady('Wait until all items are served before settling the tab.', true);
                 return;
@@ -9886,6 +9919,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function settleTabFromDetail(orderId, total, ref) {
+            if (posPaymentsBlocked()) return;
             // Close the detail overlay first, then open the pay modal in the next tick
             // so the DOM transition completes before opening the next overlay.
             closeTabDetailOverlay();

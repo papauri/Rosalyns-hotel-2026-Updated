@@ -428,8 +428,9 @@ $bootstrap['fingerprint'] = md5(
             <p id="kdsChatPeekText"></p>
             <span id="kdsChatPeekMore"></span>
         </div>
-        <button type="button" class="kds-chathead" id="kdsChatHead" data-loader-manual onclick="openKdsChat()" aria-label="Open FOH chat" data-help="FOH chat|Every message with the till. A bubble pops up here when FOH writes.">
-            <i class="fas fa-comment-dots" aria-hidden="true"></i>
+        <button type="button" class="kds-chathead" id="kdsChatHead" data-loader-manual onclick="openKdsChat()" aria-label="Open FOH chat" data-help="FOH chat|Every message with the till. A preview pops up here when FOH writes.">
+            <i class="fas fa-message" aria-hidden="true"></i>
+            <span class="kds-chathead__label">FOH chat</span>
             <b class="kds-chathead__badge" id="kdsChatBadge" hidden></b>
         </button>
     </div>
@@ -1016,10 +1017,12 @@ $bootstrap['fingerprint'] = md5(
         function markTicketMsgsSeen(ticketId) {
             const t = (state.tickets || []).find(x => parseInt(x.id, 10) === parseInt(ticketId, 10));
             if (!t) return;
-            (state.messages || []).filter(m => m.order_ref === t.reference).forEach(m => {
+            const ticketMsgs = (state.messages || []).filter(m => m.order_ref === t.reference);
+            ticketMsgs.forEach(m => {
                 _seenTicketMsgIds.add(parseInt(m.id, 10));
                 kdsRememberSeen('note:' + m.id);
             });
+            kdsMarkNotesSeenOnServer(ticketMsgs.filter(isInboundNote));
             const card = document.querySelector(`.ticket[data-id="${ticketId}"]`);
             if (card) card.classList.remove('has-foh-flash');
         }
@@ -1458,7 +1461,7 @@ $bootstrap['fingerprint'] = md5(
                         .filter(m => freshMessages.includes(m.id) || freshMessages.includes(String(m.id)))
                         /* Station→FOH notes this display sent are echoed back by the feed.
                            Alerting the cook to their own outgoing note is noise. */
-                        .filter(m => (m.source || '') !== 'station' && !m.is_outbound && kdsNoteIsWaiting(m));
+                        .filter(m => (m.source || '') !== 'station' && !m.is_outbound && kdsNoteIsWaiting(m) && !m.seen_at);
                     if (freshData.length) {
                         const hasUrgent = freshData.some(m => m.priority === 'urgent');
                         /* One chime for the batch, pitched to the most severe note in it. */
@@ -1980,7 +1983,7 @@ $bootstrap['fingerprint'] = md5(
 
         /* Unread = FOH notes not yet looked at in the chat, plus FOH replies not yet seen. */
         function kdsChatUnread() {
-            const notes = kdsInboundNotes().filter(m => !_kdsSeen.has('note:' + m.id));
+            const notes = kdsInboundNotes().filter(m => !m.seen_at && !_kdsSeen.has('note:' + m.id));
             const replies = kdsAnsweredOwnNotes().filter(m => !_kdsSeen.has('reply:' + m.id));
             return { notes, replies, total: notes.length + replies.length };
         }
@@ -1995,12 +1998,19 @@ $bootstrap['fingerprint'] = md5(
             const waiting = kdsInboundNotes();
             const unread = kdsChatUnread();
             const n = new Set([...waiting.map(m => 'n' + m.id), ...unread.replies.map(m => 'r' + m.id)]).size;
-            ['kdsChatBadge', 'kdsNotesCount', 'kdsDrawerNotesCount'].forEach(id => {
+            /* The top-bar buttons count what still needs an answer; the chat button counts
+               only what nobody has read yet, so it goes quiet once the chat is opened. */
+            ['kdsNotesCount', 'kdsDrawerNotesCount'].forEach(id => {
                 const el = document.getElementById(id);
                 if (!el) return;
                 el.textContent = n > 99 ? '99+' : String(n);
                 el.hidden = n === 0;
             });
+            const chatBadge = document.getElementById('kdsChatBadge');
+            if (chatBadge) {
+                chatBadge.textContent = unread.total > 99 ? '99+' : String(unread.total);
+                chatBadge.hidden = unread.total === 0;
+            }
             const head = document.getElementById('kdsChatHead');
             if (head) {
                 head.classList.toggle('has-unread', unread.total > 0);
@@ -2139,6 +2149,21 @@ $bootstrap['fingerprint'] = md5(
         function kdsChatMarkSeen() {
             kdsInboundNotes().forEach(m => kdsRememberSeen('note:' + m.id));
             kdsAnsweredOwnNotes().forEach(m => kdsRememberSeen('reply:' + m.id));
+            kdsMarkNotesSeenOnServer(kdsInboundNotes());
+        }
+
+        /* Read state lives on the server (station_messages.seen_at), so a note read on one
+           screen does not alert again on another screen, after a reload or a cleared cache. */
+        function kdsMarkNotesSeenOnServer(notes) {
+            const ids = (notes || []).filter(m => !m.seen_at && parseInt(m.id, 10) > 0).map(m => parseInt(m.id, 10));
+            if (!ids.length) return;
+            const now = new Date().toISOString();
+            (notes || []).forEach(m => { if (!m.seen_at) m.seen_at = now; });
+            const fd = new FormData();
+            fd.append('action', 'mark_notes_seen');
+            fd.append('station', STATION);
+            ids.forEach(id => fd.append('ids[]', String(id)));
+            fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' }).catch(() => {});
         }
 
         function kdsChatThreads() {

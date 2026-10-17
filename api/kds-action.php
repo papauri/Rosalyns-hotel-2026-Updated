@@ -446,11 +446,11 @@ function kds_ensure_station_messages_table(PDO $pdo): void
 function kds_recent_station_messages(PDO $pdo, string $station): array
 {
     kds_ensure_station_messages_table($pdo);
-    /* Mark FOH notes as seen by the station on first retrieval. It must cover exactly the
-     * inbound rows the SELECT below returns, or an old unacknowledged note renders
-     * permanently "unseen" because the marker skipped it while the list still showed it. */
-    $pdo->prepare("UPDATE station_messages SET seen_at = NOW() WHERE station = ? AND source <> 'station' AND seen_at IS NULL AND is_acknowledged = 0")
-        ->execute([$station]);
+    /* seen_at is set when a cook actually looks at the note (chat opened / ticket thread
+     * tapped - action mark_notes_seen), not when the board polls. Marking on retrieval made
+     * every note "seen" the moment the screen refreshed, so the server could not tell a read
+     * note from an unread one and read notes kept coming back on another screen or after a
+     * reload. */
     /* Two kinds of row, with different lifetimes:
      *  - Notes FROM FOH (source <> 'station') are outstanding work until the station
      *    replies or dismisses them (is_acknowledged = 1), however old they are. Once
@@ -590,16 +590,28 @@ try {
         jok(['message_id' => $newMessageId, 'station' => $STATION]);
     }
 
+    if ($action === 'mark_notes_seen') {
+        /* The cook has read these FOH notes (chat opened or ticket thread tapped). Server-side,
+           so every screen of the station agrees and a read note never alerts again. */
+        $ids = array_slice(array_values(array_filter(array_map('intval', (array)($_POST['ids'] ?? [])), static fn($v) => $v > 0)), 0, 200);
+        if (!$ids) jok(['marked' => 0]);
+        kds_ensure_station_messages_table($pdo);
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $st = $pdo->prepare("UPDATE station_messages SET seen_at = NOW() WHERE station = ? AND source <> 'station' AND seen_at IS NULL AND id IN ($ph)");
+        $st->execute(array_merge([$STATION], $ids));
+        jok(['marked' => $st->rowCount()]);
+    }
+
     if ($action === 'ack_message') {
         $messageId = (int)($_POST['message_id'] ?? 0);
         if ($messageId <= 0) jerr('Missing message_id');
         $reply = mb_substr(trim((string)($_POST['reply'] ?? '')), 0, 255);
         kds_ensure_station_messages_table($pdo);
         if ($reply !== '') {
-            $stmt = $pdo->prepare("UPDATE station_messages SET is_acknowledged = 1, acknowledged_by = ?, acknowledged_at = NOW(), reply_message = ?, replied_at = NOW(), replied_by_name = ? WHERE id = ? AND station = ?");
+            $stmt = $pdo->prepare("UPDATE station_messages SET is_acknowledged = 1, acknowledged_by = ?, acknowledged_at = NOW(), seen_at = COALESCE(seen_at, NOW()), reply_message = ?, replied_at = NOW(), replied_by_name = ? WHERE id = ? AND station = ?");
             $stmt->execute([(int)$user['id'], $reply, $user['full_name'] ?? $user['username'] ?? '', $messageId, $STATION]);
         } else {
-            $stmt = $pdo->prepare("UPDATE station_messages SET is_acknowledged = 1, acknowledged_by = ?, acknowledged_at = NOW() WHERE id = ? AND station = ?");
+            $stmt = $pdo->prepare("UPDATE station_messages SET is_acknowledged = 1, acknowledged_by = ?, acknowledged_at = NOW(), seen_at = COALESCE(seen_at, NOW()) WHERE id = ? AND station = ?");
             $stmt->execute([(int)$user['id'], $messageId, $STATION]);
         }
         if ($stmt->rowCount() === 0) {
@@ -614,7 +626,7 @@ try {
         $reply = mb_substr(trim((string)($_POST['reply'] ?? '')), 0, 255);
         if ($reply === '') jerr('Reply message required');
         kds_ensure_station_messages_table($pdo);
-        $stmt = $pdo->prepare("UPDATE station_messages SET reply_message = ?, replied_at = NOW(), replied_by_name = ? WHERE id = ? AND station = ?");
+        $stmt = $pdo->prepare("UPDATE station_messages SET reply_message = ?, replied_at = NOW(), replied_by_name = ?, seen_at = CASE WHEN source <> 'station' THEN COALESCE(seen_at, NOW()) ELSE seen_at END WHERE id = ? AND station = ?");
         $stmt->execute([$reply, $user['full_name'] ?? $user['username'] ?? '', $messageId, $STATION]);
         /* Nothing matched means the id is wrong or the note belongs to another
            station. Reporting ok here told the cook "reply sent" while the cashier
