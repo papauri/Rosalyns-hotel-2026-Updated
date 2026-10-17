@@ -25,6 +25,11 @@ do not re-derive plans or re-scan the repo ad hoc.
   plans only, never edits code) · backend-specialist (sonnet) · frontend-specialist
   (sonnet) · ui-designer (sonnet, polish pass on just-touched files) · qa-auditor
   (read-only gate; haiku for lint, sonnet for logic/security).
+- Department leads (`.claude/DEPARTMENTS.md`): `dept-rooms-lead`, `dept-restaurant-lead`,
+  `dept-accounting-lead`, `dept-stock-lead` (sonnet; each audits/fixes its department end to end and
+  is the one to ask when it breaks) and `ui-lead` (one visual language; turns the leads'
+  `UI_REQUEST`s into shared `UI_DECISION`s). Money changes from any department are reviewed by the
+  accounting lead.
 - `.claude/skills/build-loop/SKILL.md` — the cycle: plan → build → polish (UI only) →
   QA gate → mark done or one retry → STATUS block → advance automatically.
 
