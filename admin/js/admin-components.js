@@ -967,3 +967,74 @@
         }
     }, true); // capture phase so page handlers can still stopPropagation if needed
 })();
+
+/**
+ * Shared placement for row "More actions" menus (.actions-more-menu).
+ * Table layout: a dropdown anchored under the button, right edges aligned, as wide as its
+ * longest item. Card layout (phones/tablets, where the table row becomes a card): the menu
+ * spans the full width of the card's actions row, directly under it - not a narrow popover
+ * floating beside the button. Always kept inside the viewport (flips above when needed) and
+ * corrected for transformed ancestors that shift position:fixed.
+ */
+(function () {
+    'use strict';
+    if (window.rhPlaceActionMenu) return;
+
+    window.rhPlaceActionMenu = function (btn, menu) {
+        if (!btn || !menu) return;
+        var vv = window.visualViewport;
+        var vw = vv ? vv.width : window.innerWidth;
+        var vh = vv ? vv.height : window.innerHeight;
+        var pad = 8, gap = 6;
+
+        var cell = btn.closest('td, th');
+        var cardMode = vw <= 640 || (cell && window.getComputedStyle(cell).display !== 'table-cell');
+        var anchor = cardMode ? (btn.closest('.actions-row') || cell || btn.parentElement) : btn;
+        var a = anchor.getBoundingClientRect();
+        var b = btn.getBoundingClientRect();
+
+        // Measure the natural size first.
+        menu.style.cssText = 'display:block;position:fixed;visibility:hidden;left:0;top:0;z-index:12050;width:max-content;min-width:0;max-width:' + Math.floor(vw - pad * 2) + 'px;';
+        var probe = menu.getBoundingClientRect();
+        var offsetX = probe.left, offsetY = probe.top; // non-zero when an ancestor is transformed
+
+        var width, left;
+        if (cardMode) {
+            width = Math.min(Math.max(a.width, Math.min(probe.width, 320)), vw - pad * 2);
+            left = a.left;
+        } else {
+            width = Math.min(Math.max(probe.width, 220), vw - pad * 2);
+            left = b.right - width;
+        }
+        left = Math.min(Math.max(left, pad), vw - pad - width);
+
+        menu.style.width = Math.round(width) + 'px';
+        var natural = menu.getBoundingClientRect().height;
+        // Below the button when it fits, else above; if neither fits, use the roomier side and
+        // let the menu scroll - never cover the button itself.
+        var below = vh - pad - (b.bottom + gap);
+        var above = b.top - gap - pad;
+        var top, maxH;
+        if (natural <= below || below >= above) {
+            maxH = Math.max(120, Math.floor(below));
+            top = b.bottom + gap;
+        } else {
+            maxH = Math.max(120, Math.floor(above));
+            top = b.top - gap - Math.min(natural, maxH);
+        }
+        top = Math.max(top, pad);
+
+        var place = function (x, y) {
+            menu.style.cssText = 'display:block;position:fixed;z-index:12050;left:' + Math.round(x) + 'px;top:' + Math.round(y) + 'px;right:auto;margin:0;transform:none;'
+                + 'width:' + Math.round(width) + 'px;max-width:' + Math.floor(vw - pad * 2) + 'px;max-height:' + maxH + 'px;overflow-y:auto;overflow-x:hidden;';
+        };
+        var x = left - offsetX, y = top - offsetY;
+        place(x, y);
+        // Correct any remaining drift (page CSS offsets, transformed ancestors).
+        var got = menu.getBoundingClientRect();
+        if (Math.abs(got.left - left) > 0.5 || Math.abs(got.top - top) > 0.5) {
+            place(x + (left - got.left), y + (top - got.top));
+        }
+        menu.classList.toggle('actions-more-menu--card', !!cardMode);
+    };
+})();

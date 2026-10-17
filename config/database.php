@@ -5289,8 +5289,13 @@ function getBookingsOverlappingBlockDates(?int $roomTypeId, ?int $individualRoom
         $params[] = $individualRoomId;
         $params[] = $individualRoomId;
     } elseif ($roomTypeId !== null) {
-        $sql = "SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, {$effCo} AS check_out_date, b.status
-                FROM bookings b WHERE $where AND b.room_id = ?";
+        // Bookings of the type, plus joined-room bookings whose pair uses rooms of this type
+        // (a room-type block also stops those pairs).
+        $sql = "SELECT DISTINCT b.id, b.booking_reference, b.guest_name, b.check_in_date, {$effCo} AS check_out_date, b.status
+                FROM bookings b WHERE $where AND (b.room_id = ? OR EXISTS (
+                    SELECT 1 FROM booking_rooms br JOIN individual_rooms irx ON irx.id = br.individual_room_id
+                    WHERE br.booking_id = b.id AND br.released_at IS NULL AND irx.room_type_id = ?))";
+        $params[] = $roomTypeId;
         $params[] = $roomTypeId;
     } else {
         $sql = "SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, {$effCo} AS check_out_date, b.status

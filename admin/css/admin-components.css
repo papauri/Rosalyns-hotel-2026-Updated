@@ -3435,3 +3435,30 @@ body:not(:has(> .admin-header)) .admin-page-loader {
     flex: 1 1 22rem;
     min-width: 0;
 }
+
+/* Row "More actions" menus: items are always full-width, left-aligned rows - card-mode table
+   rules that turn every button in an Actions cell into a centred pill must not reach them. */
+:is(.admin-content, #rh-admin-page) .actions-more-menu :is(a, button),
+:is(.admin-content, #rh-admin-page) table.mobile-enhanced td .actions-more-menu :is(a, button) {
+    display: flex !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    align-items: center;
+    justify-content: flex-start !important;
+    gap: 10px;
+    padding: 8px 12px !important;
+    border: 0 !important;
+    border-radius: 7px;
+    background: transparent !important;
+    box-shadow: none !important;
+    text-align: left !important;
+    white-space: nowrap;
+}
+:is(.admin-content, #rh-admin-page) .actions-more-menu :is(a, button):hover {
+    background: #f3f4f6 !important;
+}
+:is(.admin-content, #rh-admin-page) .actions-more-menu--card :is(a, button) {
+    padding: 11px 14px !important;
+    white-space: normal;
+}

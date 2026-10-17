@@ -989,7 +989,10 @@ $modalsHtml = ob_get_clean();
         // ── Actions-more dropdown ─────────────────────────────────────────────────
         function _cnCloseAllMenus(except) {
             document.querySelectorAll('.cn-table .actions-more.open').forEach(function(el) {
-                if (el !== except) el.classList.remove('open');
+                if (el === except) return;
+                el.classList.remove('open');
+                var m = el.querySelector('.actions-more-menu');
+                if (m) m.removeAttribute('style'); // the inline display:block kept a "closed" menu on screen
             });
         }
 
@@ -1004,14 +1007,7 @@ $modalsHtml = ob_get_clean();
             if (isOpen) return;
 
             wrap.classList.add('open');
-            // Position using fixed so overflow doesn't clip it
-            var rect = btn.getBoundingClientRect();
-            var menuW = 200;
-            var left = rect.right - menuW;
-            var top = rect.bottom + 4;
-            left = Math.max(8, Math.min(left, window.innerWidth - menuW - 8));
-            top  = Math.min(top, window.innerHeight - 160);
-            menu.style.cssText = 'display:block;position:fixed;z-index:12050;top:' + Math.round(top) + 'px;left:' + Math.round(left) + 'px;width:' + menuW + 'px;';
+            window.rhPlaceActionMenu(btn, menu); // shared placement (admin-components.js)
         }
 
         document.addEventListener('click', function(e) {

@@ -134,7 +134,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? '';
         try {
             if ($action === 'place_rs_order') {
-                $bookingId = (int)($_POST['booking_id'] ?? 0);
+                // "bookingId:roomNumber" - a joined-room booking has one option per room of its pair,
+                // so the order goes to the room the guest is in and charges the one booking.
+                $rsSel = explode(':', (string)($_POST['booking_id'] ?? ''), 2);
+                $bookingId = (int)$rsSel[0];
+                $rsRoomPick = trim((string)($rsSel[1] ?? ''));
                 $itemIds   = $_POST['item_id']   ?? [];
                 $itemTypes = $_POST['item_type'] ?? [];
                 $itemQtys  = $_POST['item_qty']  ?? [];
@@ -178,7 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Guard: rh_restaurant_resolve_pos_location throws if room_number is empty.
                 // If a booking is checked-in but not yet assigned to a physical room, fall
                 // back to using the booking data directly so the order is still allowed.
-                $roomNumForResolver = (string)($booking['room_number'] ?? '');
+                $roomNumForResolver = $rsRoomPick !== '' ? $rsRoomPick : (string)($booking['room_number'] ?? '');
                 if ($roomNumForResolver !== '') {
                     $resolvedRoom = rh_restaurant_resolve_pos_location($pdo, 'room_service', $roomNumForResolver);
                 } else {
@@ -444,13 +448,18 @@ $st = $pdo->prepare($chargesSql);
 $st->execute([$today]);
 $rsCharges = $st->fetchAll(PDO::FETCH_ASSOC);
 
-$bkSt = $pdo->query("SELECT b.id, b.booking_reference, b.guest_name, b.status, ir.room_number, r.name AS room_type_name
-                     FROM bookings b
-                     LEFT JOIN individual_rooms ir ON ir.id=b.individual_room_id
-                     LEFT JOIN rooms r ON r.id=b.room_id
-                     WHERE b.status='checked-in' AND b.deleted_at IS NULL
-                     ORDER BY ir.room_number, b.guest_name");
-$checkedIn = $bkSt->fetchAll(PDO::FETCH_ASSOC);
+// One option per room an in-house booking holds (both rooms of a joined pair), plus in-house
+// bookings that have no room yet.
+$checkedIn = [];
+foreach (rh_restaurant_checked_in_rooms($pdo) as $rr) {
+    $checkedIn[] = ['id' => (int)$rr['booking_id'], 'booking_reference' => $rr['booking_reference'], 'guest_name' => $rr['guest_name'], 'room_number' => $rr['room_number']];
+}
+$bkSt = $pdo->query("SELECT b.id, b.booking_reference, b.guest_name FROM bookings b
+                     WHERE b.status='checked-in' AND b.deleted_at IS NULL AND b.individual_room_id IS NULL
+                     ORDER BY b.guest_name");
+foreach ($bkSt->fetchAll(PDO::FETCH_ASSOC) as $nr) {
+    $checkedIn[] = ['id' => (int)$nr['id'], 'booking_reference' => $nr['booking_reference'], 'guest_name' => $nr['guest_name'], 'room_number' => null];
+}
 
 $rsMenuItems = $pdo->query("
     SELECT mi.id, mi.item_name, mi.price,
@@ -611,7 +620,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                             <select name="booking_id" id="rsBooking" required style="width:100%; padding:10px; border:1px solid #d8dde3; border-radius:6px; margin:6px 0 14px;">
                                 <option value="">— Select a guest / room —</option>
                                 <?php foreach ($checkedIn as $b): ?>
-                                    <option value="<?php echo (int)$b['id']; ?>">
+                                    <option value="<?php echo (int)$b['id'] . ($b['room_number'] ? ':' . htmlspecialchars((string)$b['room_number'], ENT_QUOTES) : ''); ?>">
                                         <?php echo htmlspecialchars(($b['room_number'] ? 'Rm ' . $b['room_number'] . ' · ' : '') . $b['guest_name'] . ' · ' . $b['booking_reference']); ?>
                                     </option>
                                 <?php endforeach; ?>

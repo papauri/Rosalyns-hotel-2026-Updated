@@ -631,6 +631,8 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
         function _rcpCloseAllMenus() {
             document.querySelectorAll('.receipts-table .actions-more.open').forEach(function(el) {
                 el.classList.remove('open');
+                var m = el.querySelector('.actions-more-menu');
+                if (m) m.removeAttribute('style'); // the inline display:block kept a "closed" menu on screen
             });
         }
 
@@ -645,13 +647,7 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
             if (isOpen) return;
 
             wrap.classList.add('open');
-            var rect = btn.getBoundingClientRect();
-            var menuW = 190;
-            var left = rect.right - menuW;
-            var top = rect.bottom + 4;
-            left = Math.max(8, Math.min(left, window.innerWidth - menuW - 8));
-            top = Math.min(top, window.innerHeight - 120);
-            menu.style.cssText = 'display:block;position:fixed;z-index:12050;top:' + Math.round(top) + 'px;left:' + Math.round(left) + 'px;width:' + menuW + 'px;';
+            window.rhPlaceActionMenu(btn, menu); // shared placement (admin-components.js)
         }
 
         document.addEventListener('click', function(e) {

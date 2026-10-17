@@ -175,6 +175,8 @@ try {
         $roomKeys = $roomIdsHeld
             ? array_map(static fn ($rid) => 'ir_' . $rid, array_keys($roomIdsHeld))
             : ['rt_' . $booking['room_id']];
+        // A joined-room booking shows on both rooms; say which pair it is.
+        $booking['pair_label'] = count($roomIdsHeld) > 1 ? getBookingRoomLabel((int)$booking['id']) : '';
 
         $currentDate = clone $checkIn;
         while ($currentDate < $checkOut) {
@@ -466,7 +468,7 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                         &middot; <?php echo htmlspecialchars($ub['guest_name']); ?>
                                         &middot; <?php echo date('j M', strtotime($ub['check_in_date'])); ?> &ndash; <?php echo date('j M', strtotime($ub['check_out_date'])); ?>
                                         &middot; <?php echo htmlspecialchars(ucfirst($ub['status'])); ?>
-                                        <?php if ($ub['status'] === 'confirmed' && (string)$ub['check_in_date'] >= $today): ?>
+                                        <?php if ($ub['status'] === 'confirmed'): /* late arrivals can be given a room too */ ?>
                                             &middot; <a href="bookings.php?action=assign-room&amp;booking_id=<?php echo (int)$ub['id']; ?>">Assign room</a>
                                         <?php endif; ?>
                                     </li>
@@ -602,7 +604,7 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                                 $nights = $checkInObj->diff($checkOutObj)->days;
 
                                                 // Room info
-                                                $roomName = htmlspecialchars($booking['room_name'], ENT_QUOTES, 'UTF-8');
+                                                $roomName = htmlspecialchars($booking['room_name'] . (!empty($booking['pair_label']) ? ' (rooms ' . $booking['pair_label'] . ')' : ''), ENT_QUOTES, 'UTF-8');
                                                 $individualRoomNumber = !empty($booking['individual_room_number'])
                                                     ? htmlspecialchars($booking['individual_room_number'], ENT_QUOTES, 'UTF-8')
                                                     : 'Not assigned';
