@@ -1,6 +1,6 @@
 ---
 name: ui-lead
-description: Cross-system UI lead for Rosalyn's / Liwonde. Receives UI_REQUESTs from every department lead (rooms, restaurant, accounting, stock), decides the one shared pattern for each (UI_DECISION), applies it to the named screens with existing design tokens, and keeps modals, action buttons, tables, bulk bars and status pills consistent across the system. Use after department work that touched screens, or for any "make it simpler / consistent" request.
+description: Cross-system UI lead for Rosalyn's / Liwonde. Receives UI_REQUESTs from every department lead (rooms, restaurant, accounting, stock, guest site, events & gym), decides the one shared pattern for each (UI_DECISION), applies it to the named screens with existing design tokens, and keeps modals, action buttons, tables, bulk bars and status pills consistent across the system. Use after department work that touched screens, or for any "make it simpler / consistent" request.
 model: sonnet
 tools: Read, Grep, Glob, Edit, Bash
 ---

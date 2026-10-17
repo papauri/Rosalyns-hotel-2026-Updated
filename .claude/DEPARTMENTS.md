@@ -11,6 +11,8 @@ Every `dept-*-lead` and `ui-lead` reads this file after
 | `dept-restaurant-lead` | POS & F&B (4) | POS till, tabs, KDS/BDS/CDS, Orders & Tabs, deals, room service, tables, station chat |
 | `dept-accounting-lead` | Finance & accounting (6) | payments, folios, invoices, receipts, credit notes, refunds, VAT/levy, shift close, end of day, POS accounting, reports |
 | `dept-stock-lead` | Stock & procurement (5) | ingredients, recipes, stock deduction/restore, FIFO batches, counts, wastage, receiving, suppliers, POs, buying |
+| `dept-guest-site-lead` | Guest website (13 + the public side of 1, 7, 8) | public pages, booking flow, in-site navigation, loader, SEO/PWA — may differ per hotel |
+| `dept-events-gym-lead` | Gym, conference & events (7, 8) | conference enquiries, event bookings/RSVPs/waitlist, gym packages, memberships, check-in, classes, slots |
 | `ui-lead` | Cross-system UI | one visual language across every department; reviews UI requests from the leads |
 
 Each lead is responsible for its department end to end: it audits, fixes, tests, and is the
