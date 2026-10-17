@@ -534,6 +534,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
+            // A room serves bookings of its own type, and - when it is part of an active joined
+            // pair - bookings of that joined type (they take the whole pair).
+            $pairs = [];
+            if ($individual_room_id > 0 && bookingAvailabilityTableExists('room_combinations')) {
+                $pst = $pdo->prepare("SELECT rc.id, rc.combined_room_type_id, rc.room_a_id, rc.room_b_id, a.room_number AS a_number, b.room_number AS b_number
+                    FROM room_combinations rc
+                    JOIN individual_rooms a ON a.id = rc.room_a_id
+                    JOIN individual_rooms b ON b.id = rc.room_b_id
+                    WHERE rc.is_active = 1 AND (rc.room_a_id = ? OR rc.room_b_id = ?)");
+                $pst->execute([$individual_room_id, $individual_room_id]);
+                foreach ($pst->fetchAll(PDO::FETCH_ASSOC) as $p) {
+                    $pairs[(int)$p['combined_room_type_id']] = $p;
+                }
+            }
+            $typeIds = array_values(array_unique(array_merge([$room_type_id], array_keys($pairs))));
+            $tph = implode(',', array_fill(0, count($typeIds), '?'));
+
             // Fetch bookings that are eligible for assignment
             $stmt = $pdo->prepare("
                 SELECT
@@ -543,33 +560,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     b.check_in_date,
                     b.check_out_date,
                     b.status,
+                    b.room_id,
                     b.individual_room_id,
                     r.name as room_name
                 FROM bookings b
                 JOIN rooms r ON b.room_id = r.id
-                WHERE b.room_id = ?
+                WHERE b.room_id IN ($tph)
                 AND b.status = 'confirmed'
-                AND (b.individual_room_id IS NULL OR b.individual_room_id = ?)
+                AND b.deleted_at IS NULL
+                AND (b.individual_room_id IS NULL OR b.individual_room_id = ? OR EXISTS (
+                    SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.individual_room_id = ? AND br.released_at IS NULL))
                 AND b.check_out_date > CURDATE()
                 ORDER BY b.check_in_date ASC
             ");
-            $stmt->execute([$room_type_id, $individual_room_id]);
+            $stmt->execute(array_merge($typeIds, [$individual_room_id, $individual_room_id]));
             $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $roomTypeIsJoined = roomTypeHasActiveCombinations($room_type_id);
 
-            // Only offer bookings this exact room can take for their dates (no overlap, not
-            // blocked, not in maintenance) - otherwise staff pick one and the assignment is refused.
+            // Only offer bookings this exact room (or its pair) can take for their dates (no
+            // overlap, not blocked, not in maintenance, not needed by an unassigned joined
+            // booking) - otherwise staff pick one and the assignment is refused.
             if ($individual_room_id > 0) {
-                $bookings = array_values(array_filter($bookings, function ($b) use ($individual_room_id) {
-                    if ((int)$b['individual_room_id'] === $individual_room_id) {
+                $bookings = array_values(array_filter($bookings, function ($b) use ($individual_room_id, $pairs, $room_type_id, $roomTypeIsJoined) {
+                    $ci = (string)$b['check_in_date'];
+                    $co = (string)$b['check_out_date'];
+                    if (in_array($individual_room_id, getBookingRoomIds((int)$b['id']), true)) {
                         return true;
                     }
-                    $chk = checkIndividualRoomAvailability($individual_room_id, (string)$b['check_in_date'], (string)$b['check_out_date'], (int)$b['id']);
-                    return !empty($chk['available']);
+                    if (isset($pairs[(int)$b['room_id']])) {
+                        $p = $pairs[(int)$b['room_id']];
+                        foreach ([(int)$p['room_a_id'], (int)$p['room_b_id']] as $rid) {
+                            if (empty(checkIndividualRoomAvailability($rid, $ci, $co, (int)$b['id'])['available'])) {
+                                return false;
+                            }
+                        }
+                        return true;
+                    }
+                    if ((int)$b['room_id'] !== $room_type_id || $roomTypeIsJoined) {
+                        return false; // a joined type's own room is only sold as part of its pair
+                    }
+                    $chk = checkIndividualRoomAvailability($individual_room_id, $ci, $co, (int)$b['id']);
+                    return !empty($chk['available']) && rh_room_needed_for_joined($individual_room_id, $ci, $co, (int)$b['id']) === null;
                 }));
             }
 
             // Normalize for JSON
-            $normalized = array_map(function ($booking) {
+            $normalized = array_map(function ($booking) use ($pairs) {
+                $pair = $pairs[(int)$booking['room_id']] ?? null;
                 return [
                     'id' => (int)$booking['id'],
                     'reference' => $booking['booking_reference'],
@@ -577,7 +614,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'check_in' => $booking['check_in_date'],
                     'check_out' => $booking['check_out_date'],
                     'status' => $booking['status'],
-                    'room_name' => $booking['room_name'],
+                    'room_name' => $booking['room_name'] . ($pair ? ' (takes rooms ' . $pair['a_number'] . ' + ' . $pair['b_number'] . ')' : ''),
                     'already_assigned' => !empty($booking['individual_room_id'])
                 ];
             }, $bookings);

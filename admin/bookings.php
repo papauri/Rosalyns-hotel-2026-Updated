@@ -550,8 +550,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if (roomTypeHasActiveCombinations((int)$bookingToAssign['room_id'])) {
+                // A joined-room booking takes the whole pair the chosen room belongs to
+                // (e.g. "Assign" on one member room in Individual Rooms).
+                $pairSt = $pdo->prepare("SELECT id FROM room_combinations WHERE is_active = 1 AND combined_room_type_id = ? AND (room_a_id = ? OR room_b_id = ?) ORDER BY id LIMIT 1");
+                $pairSt->execute([(int)$bookingToAssign['room_id'], $individual_room_id, $individual_room_id]);
+                $pairId = (int)$pairSt->fetchColumn();
                 header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'This is a joined-room booking: assign a pair of rooms, not a single room.']);
+                if ($pairId <= 0) {
+                    echo json_encode(['success' => false, 'message' => 'This is a joined-room booking and that room is not part of one of its pairs. Assign it a pair from Bookings.']);
+                    exit;
+                }
+                $comboResult = assignRoomCombinationToBooking($booking_id, $pairId, isset($user['id']) ? (int)$user['id'] : null);
+                if (empty($comboResult['success'])) {
+                    echo json_encode(['success' => false, 'message' => 'Those joined rooms could not be assigned: ' . ($comboResult['message'] ?: 'they are unavailable for the booking dates') . '.']);
+                    exit;
+                }
+                logBookingAudit($booking_id, 'room_assigned', ['individual_room_id' => $bookingToAssign['individual_room_id'] ?? null],
+                    ['individual_room_id' => $comboResult['assigned_room_id'], 'room_combination_id' => $pairId],
+                    'Joined rooms ' . $comboResult['assigned_room_number'] . ' assigned manually by admin', $bookingToAssign['booking_reference'] ?? null);
+                echo json_encode(['success' => true, 'message' => $comboResult['message']]);
                 exit;
             }
 

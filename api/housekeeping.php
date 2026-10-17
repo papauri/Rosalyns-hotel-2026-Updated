@@ -156,7 +156,8 @@ function getOccupiedRooms(): array {
                 ELSE 'occupied'
             END as occupancy_type
         FROM individual_rooms ir
-        INNER JOIN bookings b ON b.individual_room_id = ir.id
+        INNER JOIN bookings b ON (b.individual_room_id = ir.id OR EXISTS (
+            SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.individual_room_id = ir.id AND br.released_at IS NULL))
         WHERE b.status = 'checked-in'
           AND b.deleted_at IS NULL
           AND b.check_in_date <= CURDATE()

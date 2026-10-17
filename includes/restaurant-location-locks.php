@@ -39,11 +39,15 @@ function rh_restaurant_active_tables(PDO $pdo): array {
 }
 
 function rh_restaurant_checked_in_rooms(PDO $pdo): array {
-    $stmt = $pdo->query("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.individual_room_id, ir.room_number, r.name AS room_type_name
+    // Every room an in-house booking holds: both rooms of a joined pair can order and charge
+    // to the one booking, not just the primary room.
+    $stmt = $pdo->query("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, ir.id AS individual_room_id, ir.room_number, r.name AS room_type_name
         FROM bookings b
-        INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
+        INNER JOIN individual_rooms ir ON (ir.id = b.individual_room_id OR EXISTS (
+            SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.individual_room_id = ir.id AND br.released_at IS NULL))
         LEFT JOIN rooms r ON r.id = b.room_id
         WHERE b.status = 'checked-in'
+          AND b.deleted_at IS NULL
           AND ir.is_active = 1
         ORDER BY ir.display_order ASC, CAST(ir.room_number AS UNSIGNED) ASC, ir.room_number ASC");
     return $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
@@ -181,12 +185,13 @@ function rh_restaurant_resolve_pos_location(PDO $pdo, string $orderType, ?string
         $room = $roomStmt->fetch(PDO::FETCH_ASSOC);
         if (!$room) throw new RuntimeException('Room ' . $location . ' is not configured as an active room.');
 
-        $bookingStmt = $pdo->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.guest_email, b.guest_phone, b.individual_room_id, ir.room_number
+        $bookingStmt = $pdo->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.guest_email, b.guest_phone, ir.id AS individual_room_id, ir.room_number
             FROM bookings b
-            INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
+            INNER JOIN individual_rooms ir ON ir.id = ?
             WHERE b.status = 'checked-in'
               AND b.deleted_at IS NULL
-              AND b.individual_room_id = ?
+              AND (b.individual_room_id = ir.id OR EXISTS (
+                    SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.individual_room_id = ir.id AND br.released_at IS NULL))
             ORDER BY b.check_in_date DESC, b.id DESC
             LIMIT 1 FOR UPDATE");
         $bookingStmt->execute([(int)$room['id']]);

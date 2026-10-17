@@ -3566,6 +3566,66 @@ function rh_rooms_held_for_combinations(int $roomTypeId, string $checkIn, string
     }
 }
 
+/**
+ * Is this room needed by a joined-room booking that has no rooms yet? Joined-room bookings
+ * made on the website arrive unassigned and are owed a free pair. Taking one member room of a
+ * pair for another booking is only allowed while enough OTHER free pairs remain for every such
+ * booking; otherwise the room is spoken for.
+ *
+ * @return string|null  reference(s) of the joined-room booking(s) that need the room, or null
+ */
+function rh_room_needed_for_joined(int $individualRoomId, string $checkIn, string $checkOut, ?int $excludeBookingId = null): ?string
+{
+    global $pdo;
+    if ($individualRoomId <= 0 || !bookingAvailabilityTableExists('room_combinations')) {
+        return null;
+    }
+    try {
+        $own = null;
+        if ($excludeBookingId) {
+            $ownSt = $pdo->prepare('SELECT room_id FROM bookings WHERE id = ?');
+            $ownSt->execute([$excludeBookingId]);
+            $own = (int)$ownSt->fetchColumn();
+        }
+        $st = $pdo->prepare("SELECT DISTINCT combined_room_type_id FROM room_combinations
+            WHERE is_active = 1 AND (room_a_id = ? OR room_b_id = ?)");
+        $st->execute([$individualRoomId, $individualRoomId]);
+        foreach (array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)) as $familyType) {
+            if ($own !== null && $familyType === $own) {
+                continue; // the booking being assigned is itself of this joined type
+            }
+            $holds = rh_combination_unassigned_holds($familyType, $checkIn, $checkOut, $excludeBookingId);
+            if ((int)$holds['count'] <= 0) {
+                continue;
+            }
+            $otherFree = 0;
+            foreach (getAvailableRoomCombinations($familyType, $checkIn, $checkOut, $excludeBookingId) as $combo) {
+                if ((int)$combo['room_a_id'] !== $individualRoomId && (int)$combo['room_b_id'] !== $individualRoomId) {
+                    $otherFree++;
+                }
+            }
+            if ($otherFree < (int)$holds['count']) {
+                $statuses = getBookingStatusesThatBlockAvailability(false);
+                $ph = implode(',', array_fill(0, count($statuses), '?'));
+                $refSt = $pdo->prepare("SELECT b.booking_reference FROM bookings b
+                    WHERE b.room_id = ? AND b.individual_room_id IS NULL AND b.status IN ($ph)
+                      AND b.check_in_date < ? AND b.check_out_date > ?" . ($excludeBookingId ? ' AND b.id <> ?' : '') . "
+                    ORDER BY b.check_in_date LIMIT 3");
+                $params = array_merge([$familyType], $statuses, [$checkOut, $checkIn]);
+                if ($excludeBookingId) {
+                    $params[] = $excludeBookingId;
+                }
+                $refSt->execute($params);
+                $refs = $refSt->fetchAll(PDO::FETCH_COLUMN);
+                return $refs ? implode(', ', $refs) : 'a joined-room booking';
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('rh_room_needed_for_joined: ' . $e->getMessage());
+    }
+    return null;
+}
+
 function getRoomCombinationAvailabilitySummary(int $roomTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null): ?array
 {
     if (!roomTypeHasActiveCombinations($roomTypeId)) {
@@ -6109,6 +6169,10 @@ function getAvailableIndividualRooms(int $roomTypeId, string $checkIn, string $c
             if (empty($roomAvailability['available'])) {
                 continue;
             }
+            // A member room an unassigned joined-room booking still needs is not offered.
+            if (rh_room_needed_for_joined((int)$room['id'], $checkIn, $checkOut, $excludeBookingId) !== null) {
+                continue;
+            }
 
             $policy = resolveOccupancyPolicy($room, $room);
             if ($requireChildrenAllowed && empty($policy['children_allowed'])) {
@@ -6275,6 +6339,14 @@ function rh_room_assignment_candidates(int $roomTypeId, string $checkIn, string 
             $isCurrent = in_array($rid, $currentIds, true);
             $chk = checkIndividualRoomAvailability($rid, $checkIn, $checkOut, $excludeBookingId, $requireClean && !$isCurrent);
             $available = !empty($chk['available']);
+            $reason = $available ? '' : rh_room_unavailable_reason($chk);
+            if ($available && !$isCurrent) {
+                $neededBy = rh_room_needed_for_joined($rid, $checkIn, $checkOut, $excludeBookingId);
+                if ($neededBy !== null) {
+                    $available = false;
+                    $reason = 'Needed for joined-room booking ' . $neededBy . ' (assign that booking its pair first)';
+                }
+            }
             $policy = resolveOccupancyPolicy($room, $room);
             $t = $available ? $turnover((string)$room['status'], $rid) : '';
             $items[] = [
@@ -6284,7 +6356,7 @@ function rh_room_assignment_candidates(int $roomTypeId, string $checkIn, string 
                 'room_name' => (string)($room['room_name'] ?? ''),
                 'floor' => $room['floor'],
                 'available' => $available,
-                'reason' => $available ? '' : rh_room_unavailable_reason($chk),
+                'reason' => $reason,
                 'ready' => $t === '' ? 1 : 0,
                 'turnover' => $t,
                 'children_allowed' => (int)$policy['children_allowed'],
@@ -6912,10 +6984,24 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
             return false;
         }
 
+        // A joined-room booking always holds a whole pair (assignRoomCombinationToBooking).
+        if (roomTypeHasActiveCombinations((int)$booking['room_id'])) {
+            $rollback();
+            rh_room_assign_last_error('This is a joined-room booking: assign a pair of rooms, not a single room');
+            return false;
+        }
+
         $policyInfo = getIndividualRoomEffectivePolicy((int)$booking['room_id'], $individualRoomId);
         if (!$policyInfo) {
             $rollback();
             rh_room_assign_last_error('Selected room is inactive or does not match this booking\'s room type');
+            return false;
+        }
+
+        $neededBy = rh_room_needed_for_joined($individualRoomId, (string)$booking['check_in_date'], (string)$booking['check_out_date'], $bookingId);
+        if ($neededBy !== null && (int)($booking['previous_individual_room_id'] ?? 0) !== $individualRoomId) {
+            $rollback();
+            rh_room_assign_last_error('This room is needed for joined-room booking ' . $neededBy . ' (no other free pair is left). Assign that booking its pair first, or pick another room');
             return false;
         }
 
@@ -7173,6 +7259,11 @@ function autoAssignIndividualRoom(int $bookingId)
                 }
             }
             return $lastComboResult;
+        }
+        if (roomTypeHasActiveCombinations($roomTypeId)) {
+            // A joined-room booking never falls back to a single member room.
+            $result['message'] = 'No free joined-room pair for the selected dates';
+            return $result;
         }
 
         // Get available individual rooms using existing availability logic

@@ -481,7 +481,8 @@ try {
     $overallOccupancyStmt = $pdo->prepare("
         SELECT
             COUNT(DISTINCT b.id) as total_bookings,
-            COALESCE(SUM(b.number_of_nights), 0) as total_nights_booked,
+            -- room-nights: a joined-room booking occupies both rooms of its pair
+            COALESCE(SUM(b.number_of_nights * (CASE WHEN b.room_combination_id IS NOT NULL THEN 2 ELSE 1 END)), 0) as total_nights_booked,
             COALESCE(SUM(b.number_of_guests), 0) as total_guests,
             COALESCE(SUM(COALESCE(b.adult_guests, GREATEST(b.number_of_guests - COALESCE(b.child_guests, 0), 1))), 0) as total_adults,
             COALESCE(SUM(COALESCE(b.child_guests, 0)), 0) as total_children,
