@@ -2110,6 +2110,9 @@ function rhBookingActionPermission(string $action, string $status = ''): ?string
         case 'payment': case 'update_payment': case 'consolidation_record':
             return 'payment_add';
         case 'adjust_dates': case 'admin_update_checkout_date':
+        // Owner 2026-10-19: confirming/converting a booking and guest-bill (folio) charges need Edit Booking.
+        case 'confirm': case 'confirmed': case 'convert': case 'convert_tentative':
+        case 'add_charge': case 'add_menu_item': case 'void_charge':
             return 'edit_booking';
     }
     return null;

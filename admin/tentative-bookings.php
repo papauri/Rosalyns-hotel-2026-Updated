@@ -80,6 +80,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('This is not an active tentative booking.');
                 }
 
+                if (!hasPermission((int)($user['id'] ?? 0), 'edit_booking')) {
+                    throw new Exception('Converting a booking to confirmed needs the Edit Booking permission.');
+                }
                 $conv = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, converted_to_confirmed_at = NOW(), converted_from_tentative = 1 WHERE id = ? AND status = 'tentative' AND is_tentative = 1");
                 $conv->execute([$booking_id]);
                 if ($conv->rowCount() !== 1) {

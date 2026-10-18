@@ -84,6 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_bdNeed = rhBookingActionPermission('adjust_dates');
     } elseif (isset($_POST['update_payment'])) {
         $_bdNeed = rhBookingActionPermission('payment');
+    } elseif (isset($_POST['charge_action'])) {
+        $_bdNeed = rhBookingActionPermission((string)$_POST['charge_action']);
     }
     if ($_bdNeed !== null && !hasPermission((int)($user['id'] ?? 0), $_bdNeed)) {
         $_bdMsg = 'You do not have permission to do that (' . (getAllPermissions()[$_bdNeed]['label'] ?? $_bdNeed) . ').';
@@ -903,6 +905,16 @@ try {
 
 // Build permission map used throughout the template
 $bPerms = getBookingPermissions($booking);
+// Guest-bill charges and confirming need Edit Booking (owner 2026-10-19); the server enforces it above.
+$bdCanEditBooking = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
+if (!$bdCanEditBooking) {
+    foreach (['can_add_charge', 'can_void_charge'] as $_bdFlag) {
+        if (!empty($bPerms[$_bdFlag])) {
+            $bPerms[$_bdFlag] = false;
+            $bPerms[$_bdFlag . '_reason'] = 'Needs the Edit Booking permission.';
+        }
+    }
+}
 
 // Handle note submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_note'])) {
@@ -1351,14 +1363,14 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         <button type="button" class="action-btn confirm" onclick="bdRestoreBooking()"><i class="fas fa-trash-arrow-up"></i> Restore Booking</button>
                     <?php endif; ?>
                 <?php else: ?>
-                <?php if ($booking['status'] == 'tentative' || $booking['is_tentative'] == 1): ?>
+                <?php if ($bdCanEditBooking && ($booking['status'] == 'tentative' || $booking['is_tentative'] == 1)): ?>
                     <form method="POST" class="booking-action-form" data-admin-confirm="Convert this tentative booking to confirmed and send the conversion email?" data-admin-confirm-title="Convert tentative booking" data-admin-confirm-ok="Convert" data-admin-confirm-icon="fa-circle-check" data-admin-submit-text="Converting...">
                         <input type="hidden" name="booking_action" value="convert">
                         <button type="submit" class="action-btn convert" aria-label="Convert to confirmed"><i class="fas fa-circle-check"></i> Convert to Confirmed</button>
                     </form>
                 <?php endif; ?>
 
-                <?php if ($booking['status'] == 'pending'): ?>
+                <?php if ($bdCanEditBooking && ($booking['status'] == 'pending')): ?>
                     <form method="POST" class="booking-action-form" data-admin-confirm="Confirm this booking and send the guest confirmation email?" data-admin-confirm-title="Confirm booking" data-admin-confirm-ok="Confirm" data-admin-confirm-icon="fa-circle-check" data-admin-submit-text="Confirming...">
                         <input type="hidden" name="booking_action" value="confirm">
                         <button type="submit" class="action-btn confirm" aria-label="Confirm booking"><i class="fas fa-circle-check"></i> Confirm Booking</button>

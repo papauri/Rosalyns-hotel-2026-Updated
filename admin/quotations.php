@@ -88,7 +88,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $error = $lcCheck['reason'];
                     } else {
                         $pdo->prepare("UPDATE quotations SET status = 'accepted', updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
-                        if (!empty($mqRow['booking_id']) && (string)$mqRow['booking_type'] === 'room') {
+                        if (!empty($mqRow['booking_id']) && (string)$mqRow['booking_type'] === 'room' && !hasPermission((int)($user['id'] ?? 0), 'edit_booking')) {
+                            $message = 'Quotation marked as accepted. Confirming the booking needs the Edit Booking permission - ask a colleague who has it.';
+                        } elseif (!empty($mqRow['booking_id']) && (string)$mqRow['booking_type'] === 'room') {
                             $pdo->prepare("UPDATE bookings SET status = 'confirmed', updated_at = NOW() WHERE id = ? AND status IN ('pending','tentative')")->execute([$mqRow['booking_id']]);
                             $message = 'Quotation marked as accepted and booking confirmed.';
                         } else {

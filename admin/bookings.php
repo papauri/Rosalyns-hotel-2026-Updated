@@ -3248,6 +3248,8 @@ $today     = new DateTime();
 $today_str = $today->format('Y-m-d');
 // $today_checkins, $today_checkouts, $today_bookings, $week_bookings,
 // $month_bookings are already set by the DB stats query above.
+// Confirm / Convert buttons need Edit Booking (owner 2026-10-19; enforced server-side too).
+$bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -3688,11 +3690,11 @@ $today_str = $today->format('Y-m-d');
                                                 <?php else: ?>
 
                                                 <?php /* ── Reservation stage ── */ ?>
-                                                <?php if ($is_tentative): ?>
+                                                <?php if ($is_tentative && $bkCanConfirm): ?>
                                                     <button class="quick-action confirm" title="Convert to confirmed" aria-label="Convert to confirmed" onclick="convertTentativeBooking(<?php echo $bk_id; ?>)">
                                                         <i class="fas fa-circle-check"></i>
                                                     </button>
-                                                <?php elseif ($bk_status === 'pending'): ?>
+                                                <?php elseif ($bk_status === 'pending' && $bkCanConfirm): ?>
                                                     <button class="quick-action confirm" title="Confirm booking" aria-label="Confirm booking" data-help="Confirm Booking|Move this pending booking to Confirmed status so it appears in the confirmed queue and can proceed to check-in." onclick="updateStatus(<?php echo $bk_id; ?>, 'confirmed')">
                                                         <i class="fas fa-circle-check"></i>
                                                     </button>
