@@ -73,7 +73,7 @@
     <li>If a room has a display order above 0, a small number such as <em>#2</em> shows on the card.</li>
     <li>Below the cards, a table called <strong>Conference Enquiries</strong> with columns Reference, Company, Contact, Event Date, Time, Room, Attendees, Status, Amount, Actions. The newest event dates are at the top.</li>
     <li>The Amount column shows the amount, or <em>Pending</em> when the amount is zero.</li>
-    <li>Buttons in the Actions column depend on the status: <strong>Confirm</strong> (pending only), <strong>Complete</strong> and <strong>Paid</strong> (confirmed only), <strong>Quote</strong> and <strong>Cancel</strong> (pending or confirmed), and <strong>Details</strong> (always).</li>
+    <li>Buttons in the Actions column depend on the status: <strong>Confirm</strong> (pending only), <strong>Complete</strong> (confirmed only) and <strong>Details</strong> (always). Everything else is in the row's <strong>More</strong> menu: <strong>Record payment</strong>, <strong>Send invoice</strong>, <strong>Send quotation</strong>, <strong>Cancel enquiry</strong> and, for administrators and managers only, <strong>Delete enquiry</strong>.</li>
   </ul>
 
   <h3>Events page</h3>
@@ -217,22 +217,23 @@
   </ul>
   <h3>Send a quotation</h3>
   <ol class="steps">
-    <li>On a <strong>Pending</strong> or <strong>Confirmed</strong> enquiry click <strong>Quote</strong>.</li>
+    <li>On a <strong>Pending</strong> or <strong>Confirmed</strong> enquiry open <strong>More</strong> and click <strong>Send quotation</strong>.</li>
     <li>A window asks <em>"Send conference quotation now? This sends email and WhatsApp (if enabled)."</em> Click <strong>Send quotation</strong>.</li>
     <li>You will see <em>"Conference quotation sent to [guest email]."</em> The guest gets a PDF quotation valid for 7 days. If WhatsApp is switched on and the guest's phone works you will also see <em>"WhatsApp delivered."</em></li>
   </ol>
   <div class="note"><p>The quotation uses the amount currently on the enquiry. Set the amount first, then send the quotation.</p></div>
 
   <h2 id="conf-paid">How to record payment and send the invoice</h2>
-  <p>You need the permission <strong>Conference Invoicing &amp; Pricing</strong>. The <strong>Paid</strong> button only shows on <strong>Confirmed</strong> enquiries.</p>
+  <p>You need the permission <strong>Conference Invoicing &amp; Pricing</strong>. <strong>Record payment</strong> is greyed out (<em>"Set a total amount first"</em>) until the enquiry has an amount above zero.</p>
   <ol class="steps">
-    <li>Check the amount is correct (see above). It must be more than zero.</li>
-    <li>Click <strong>Paid</strong>. A window asks <em>"Generate and send invoice for this conference?"</em>. Click <strong>Send invoice</strong>.</li>
-    <li>The system records a cash payment for the amount still owed (the full amount including VAT if nothing was paid before, or only the remaining balance if part was already paid), issues a receipt, emails the receipt and invoice to the guest, and shows <em>"Payment recorded successfully! Invoice sent to [guest email]"</em>.</li>
+    <li>Check the amount is correct (see above).</li>
+    <li>On the enquiry row open <strong>More</strong> and click <strong>Record payment</strong>.</li>
+    <li>Choose the <strong>Payment method</strong> and type the <strong>Amount received</strong> (gross, VAT included). Optional: <strong>Transaction reference</strong> and <strong>Notes</strong>. Click <strong>Record payment</strong>.</li>
+    <li>The system records the payment, issues a receipt and emails it, and shows a line such as <em>"Payment ... of MWK ... recorded. Balance still due: ..."</em> or <em>"The account is paid in full."</em> If the guest paid more than was owed, the extra becomes a credit note.</li>
   </ol>
   <ul>
-    <li>If the account is already fully paid, nothing new is recorded and you see <em>"Payment already recorded. Invoice resent to [guest email]"</em>.</li>
-    <li>The payment is always recorded as <strong>cash</strong>. For card, mobile money or part payments use the Payments screens (see the Finance guide).</li>
+    <li>Part payments are allowed: record each payment as it arrives.</li>
+    <li>To email the invoice again, open <strong>More</strong> &rarr; <strong>Send invoice</strong>. It only works once a payment has been recorded.</li>
   </ul>
 
   <h2 id="conf-finish">How to complete or cancel a conference enquiry</h2>
@@ -245,11 +246,20 @@
   <p>You cannot complete a conference before its last day. For a multi-day event that is the end date. If money is still owed, the window asks <em>"This conference still has an outstanding balance of MWK ... Mark it completed anyway?"</em> Click to confirm only if you really want to close it with the balance open. The balance is then logged.</p>
   <h3>Cancel</h3>
   <ol class="steps">
-    <li>On a <strong>Pending</strong> or <strong>Confirmed</strong> enquiry click <strong>Cancel</strong>.</li>
+    <li>On a <strong>Pending</strong> or <strong>Confirmed</strong> enquiry open <strong>More</strong> and click <strong>Cancel enquiry</strong>.</li>
     <li>A window asks <em>"Cancel this conference enquiry?"</em>. Click <strong>Cancel enquiry</strong> (or <strong>Keep enquiry</strong> to leave it).</li>
     <li>You will see <em>"Conference enquiry cancelled successfully! Cancellation email sent."</em> The guest is emailed, and the cancellation is logged.</li>
   </ol>
   <div class="warn"><p>Cancelling voids the bill (amount due becomes zero). Money the guest already paid is not lost: it stays on the account as credit owed back. You will see a line such as <em>"MWK 100,000.00 already paid stays as credit owed back - refund it from the payment Refund screen."</em> Refund it from the payment's Refund screen or issue a credit note. If your hotel's cancellation refund setting is to refund everything paid, the refund is made for you at the moment of cancelling. A cancelled enquiry cannot be re-opened.</p></div>
+
+  <h3>Delete an enquiry</h3>
+  <p>Use this only for a mistake or a test enquiry. Only <strong>administrators and managers</strong> with access to the Conference page see it.</p>
+  <ol class="steps">
+    <li>On the enquiry row open <strong>More</strong> and click <strong>Delete enquiry</strong>.</li>
+    <li>A window asks <em>"Permanently delete enquiry CONF-...? This cannot be undone."</em> Click <strong>Delete enquiry</strong>.</li>
+    <li>The enquiry and its quotation records are removed, and the deletion is written to the activity log.</li>
+  </ol>
+  <div class="warn"><p>An enquiry that has <strong>any payment recorded</strong> (or a credit note) cannot be deleted. You will see <em>"This enquiry has payments recorded — cancel it instead so the money trail stays."</em> Use <strong>Cancel enquiry</strong> instead.</p></div>
 
   <h3>Keep notes</h3>
   <ol class="steps">
@@ -337,8 +347,10 @@
   </ol>
   <h3>Record payment and send the invoice</h3>
   <ol class="steps">
-    <li>Click <strong>Record Payment &amp; Send Invoice</strong>. It is greyed out (<em>"Set a total amount first"</em>) until the amount is above zero.</li>
-    <li>The system records a cash payment for the amount still owed, issues a receipt and emails the invoice. You will see <em>"Payment recorded successfully! Invoice sent to [email]"</em>. If the booking is already fully paid you see <em>"Payment already recorded. Invoice resent to [email]"</em>.</li>
+    <li>In the booking window click <strong>Record payment</strong>. It is greyed out (<em>"Set a total amount first (not for cancelled or waitlisted bookings)"</em>) until the amount is above zero.</li>
+    <li>Choose the <strong>Payment method</strong> and type the <strong>Amount received</strong> (gross, VAT included). Optional: <strong>Transaction reference</strong> and <strong>Notes</strong>. Click <strong>Record payment</strong>.</li>
+    <li>The system records the payment, issues a receipt and emails it. You will see a line such as <em>"Payment ... of MWK ... recorded. Balance still due: ..."</em> or <em>"The account is paid in full."</em> Part payments are allowed. If the guest paid more than was owed, the extra becomes a credit note.</li>
+    <li>To email the invoice again, click <strong>Send invoice</strong> in the same window.</li>
   </ol>
   <h3>Cancel a booking</h3>
   <ol class="steps">
@@ -373,6 +385,7 @@
       <tr><td><em>"You already have a booking for this event with that email address. Check your inbox for the confirmation, or contact us if you need to change it."</em></td><td>A guest tried to book (RSVP) the same event twice: there is already a booking for this event with the same email, so the duplicate is refused.</td><td>Look for the first booking in Event Bookings. Cancel it first if the guest needs to rebook.</td></tr>
       <tr><td><em>"Capacity cannot be set to 20: 25 seat(s) are already held by pending or confirmed bookings. Cancel or move some bookings first, or choose a capacity of at least 25."</em></td><td>The new capacity is lower than the seats already taken.</td><td>Cancel some bookings, or enter at least the number of seats shown.</td></tr>
       <tr><td><em>"This conference is on Oct 20, 2026 and has not taken place yet - it cannot be marked completed."</em> / <em>"This conference runs until ... and has not taken place yet - it cannot be marked completed."</em></td><td>Complete was pressed before the event's last day.</td><td>Wait until the event has taken place, then complete it.</td></tr>
+      <tr><td><em>"This enquiry has payments recorded — cancel it instead so the money trail stays."</em></td><td>You tried <strong>Delete enquiry</strong> on an enquiry that has a payment or credit note.</td><td>Open <strong>More</strong> &rarr; <strong>Cancel enquiry</strong> instead.</td></tr>
       <tr><td><em>"This conference still has an outstanding balance of ... Confirm the completion explicitly to proceed."</em></td><td>Money is still owed on the enquiry.</td><td>Record the payment first, or confirm the window to complete with the balance open.</td></tr>
       <tr><td><em>"An event cannot be rescheduled to a date in the past."</em> / <em>"The end date cannot be before the event date."</em> / <em>"Multi-day events can span at most 14 days."</em> / <em>"End time must be after start time."</em></td><td>The new dates or times are not valid.</td><td>Correct the dates or times and click Update Dates again.</td></tr>
       <tr><td><em>"This room is already confirmed for those dates under CONF-... Choose different dates or times."</em></td><td>Another confirmed enquiry holds the room on those days.</td><td>Pick other dates or times.</td></tr>

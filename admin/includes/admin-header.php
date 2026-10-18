@@ -26,6 +26,11 @@ if (!isset($user) || !is_array($user)) {
     ];
 }
 
+// No admin page links a user to a page they cannot open (see rhStripDeniedLinks).
+if (($_SESSION['admin_role'] ?? '') !== 'admin') {
+    ob_start('rhStripDeniedLinks');
+}
+
 // Get the current user's permissions (cached for this request)
 $_user_permissions = getUserPermissions((int)($user['id'] ?? 0));
 
@@ -48,26 +53,44 @@ if (!function_exists('_canShowNavItem')) {
     }
 }
 
+if (!function_exists('_navItemVisible')) {
+    /**
+     * One rule for "does this menu entry show for this user": the item's own
+     * permission, the permission of the page it opens (the page gate), the
+     * station-only restriction and the module(s) it belongs to. Used for both
+     * the group counts and the rendered links so they can never disagree.
+     */
+    function _navItemVisible(string $href, ?string $permission_key, $moduleKey = null): bool
+    {
+        if (!_canShowNavItem($permission_key)) return false;
+        $_hrefBase = basename((string)(parse_url($href, PHP_URL_PATH) ?: $href));
+        if (!empty($GLOBALS['_rh_station_only'])) {
+            $_allowed = str_starts_with($href, '../')
+                ? in_array($_hrefBase, $GLOBALS['_rh_station_guides'] ?? [], true)
+                : in_array($_hrefBase, rhStationSidePages(), true);
+            if (!$_allowed) return false;
+        }
+        if (!str_starts_with($href, '../') && str_ends_with($_hrefBase, '.php')) {
+            $_pagePerm = getPermissionForPage($_hrefBase);
+            if ($_pagePerm !== null && $_pagePerm !== $permission_key && !_canShowNavItem($_pagePerm)) return false;
+        }
+        if ($moduleKey !== null && function_exists('rh_module_key_enabled')) {
+            $keys = is_array($moduleKey) ? $moduleKey : [(string)$moduleKey];
+            foreach ($keys as $_mk) {
+                if (!rh_module_key_enabled((string)$_mk)) return false;
+            }
+        }
+        return true;
+    }
+}
+
 if (!function_exists('_renderNavLink')) {
     /**
      * Render a single nav <li> if the user has permission and the module is enabled.
      */
     function _renderNavLink(string $href, string $icon, string $label, ?string $perm, string $current_page, string $iconStyle = '', $moduleKey = null): void
     {
-        if (!_canShowNavItem($perm)) return;
-        if (!empty($GLOBALS['_rh_station_only'])) {
-            $_hrefBase = basename((string)(parse_url($href, PHP_URL_PATH) ?: $href));
-            $_allowed = str_starts_with($href, '../')
-                ? in_array($_hrefBase, $GLOBALS['_rh_station_guides'] ?? [], true)
-                : in_array($_hrefBase, rhStationSidePages(), true);
-            if (!$_allowed) return;
-        }
-        if ($moduleKey !== null && function_exists('rh_module_key_enabled')) {
-            $keys = is_array($moduleKey) ? $moduleKey : [(string)$moduleKey];
-            foreach ($keys as $_mk) {
-                if (!rh_module_key_enabled((string)$_mk)) return;
-            }
-        }
+        if (!_navItemVisible($href, $perm, $moduleKey)) return;
         $hrefPath   = (string)(parse_url($href, PHP_URL_PATH) ?: $href);
         $isActive   = (strpos($href, '../') !== 0 && basename($hrefPath) === $current_page) ? ' active' : '';
         $iconAttr   = $iconStyle !== '' ? ' style="' . htmlspecialchars($iconStyle) . '"' : '';
@@ -384,14 +407,7 @@ if ($_admin_back_target !== null) {
             $visibleCount = 0;
             $isActiveGroup = false;
             foreach ($items as $it) {
-                if (!_canShowNavItem($it[3] ?? null)) continue;
-                $_modKeys = $it[5] ?? null;
-                if ($_modKeys !== null && function_exists('rh_module_key_enabled')) {
-                    $_mkList = is_array($_modKeys) ? $_modKeys : [(string)$_modKeys];
-                    $_mkOk = true;
-                    foreach ($_mkList as $_mk) { if (!rh_module_key_enabled((string)$_mk)) { $_mkOk = false; break; } }
-                    if (!$_mkOk) continue;
-                }
+                if (!_navItemVisible((string)$it[0], $it[3] ?? null, $it[5] ?? null)) continue;
                 $visibleCount++;
                 if (basename($it[0]) === $current_page) {
                     $isActiveGroup = true;

@@ -145,7 +145,7 @@
     <li>Check the <strong>Refund Summary</strong> and click <strong>Process Refund</strong>, then confirm.</li>
     <li>You will see <em>"Refund processed"</em> and <em>"Refund created successfully! Reference: REF-..."</em>. A box shows whether the customer was emailed. If not, it says <em>"Email not sent — notify the customer manually"</em>.</li>
   </ol>
-  <div class="warn"><p>Mobile money refunds cannot be saved as Completed. They must start as Pending or Processing until the provider confirms.</p></div>
+  <div class="warn"><p>Mobile money refunds cannot be saved as Completed. They must start as Pending or Processing until the provider confirms. A pending mobile-money refund must be moved to <strong>Processing</strong> first and then to <strong>Completed</strong> once the provider confirms; it cannot jump straight to Completed (<em>"A mobile money refund cannot go straight to completed - mark it processing first and complete it once the provider confirms."</em>).</p></div>
   <p>Example: a guest paid MWK 200,000 and leaves a day early. Refund MWK 60,000, reason Early Checkout, status Pending. Later, when the money is sent, settle it (next section).</p>
 
   <h2 id="settle">How to settle a pending refund</h2>
@@ -155,7 +155,7 @@
     <li>Add a <strong>Note (optional)</strong> such as a provider reference.</li>
     <li>Click <strong>Update refund</strong> and confirm. You will see <em>"Refund REF-... is now completed."</em> (or the status you chose).</li>
   </ol>
-  <p>A Pending refund can go to Processing, Completed or Failed. A Processing refund can go to Completed or Failed. Nothing else is allowed. Store-credit refunds cannot be settled here; void the credit note to reverse one.</p>
+  <p>The person who settles the refund is recorded as the one who paid it out, and when it is a till refund (for example an 86'd item on a paid order, settled from the POS notice with <strong>Settle refund</strong>) it is counted on that person's shift. A Pending refund can go to Processing, Completed or Failed (a mobile-money refund goes to Processing before Completed). A Processing refund can go to Completed or Failed. Nothing else is allowed. Store-credit refunds cannot be settled here; void the credit note to reverse one.</p>
 
   <h2 id="owing">How to see who still owes money</h2>
   <ol class="steps">

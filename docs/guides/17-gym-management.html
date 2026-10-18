@@ -112,10 +112,11 @@
     <li>Click <strong>View</strong> on the inquiry. Look at the <strong>Accounting</strong> part: <strong>Total Amount</strong>, <strong>Amount Paid</strong>, <strong>Amount Due</strong> and <strong>Payment Status</strong>.</li>
     <li>Type the price (for example 30000) in <strong>Set Total Amount</strong> and click <strong>Save Amount</strong>. You will see <em>"Total amount updated successfully!"</em> The amount must be a number, 0 or more.</li>
     <li>To send a price quote first, type the number of days it stays valid (default 7) and click <strong>Send Quotation</strong>. A PDF quotation is emailed to the guest. You will see <em>"Gym membership quotation sent to name@example.com."</em> The system also tries to send it by WhatsApp and adds <em>"WhatsApp delivered."</em> when that works.</li>
-    <li>When the guest pays in the gym, click <strong>Record Payment &amp; Send Invoice</strong>. The button is greyed out until a total amount is set.</li>
-    <li>The system records a payment of the outstanding balance as <strong>cash</strong>, issues a receipt, and emails the invoice. You will see <em>"Payment recorded successfully! Invoice sent to name@example.com"</em>.</li>
+    <li>When the guest pays in the gym, click <strong>Record payment</strong> in the inquiry window. The button is greyed out (<em>"Set a total amount first"</em>) until a total amount is set.</li>
+    <li>Choose the <strong>Payment method</strong> and type the <strong>Amount received</strong> (gross, VAT included). Optional: <strong>Transaction reference</strong> and <strong>Notes</strong>. Click <strong>Record payment</strong>.</li>
+    <li>The system records the payment, issues a receipt and emails it. You will see a line such as <em>"Payment ... of MWK ... recorded. Balance still due: ..."</em> or <em>"The account is paid in full."</em> To email the invoice again, click <strong>Send invoice</strong> in the same window.</li>
   </ol>
-  <div class="warn"><p>This button always records a <strong>cash</strong> payment for the full amount still owed. It cannot be used for card, mobile money or part payments. For those, record the payment on the Payments screen instead (see the finance guide). If the inquiry is already fully paid, the button only resends the invoice: <em>"Payment already recorded. Invoice resent to ..."</em></p></div>
+  <div class="note"><p>You choose the payment method (cash, card, mobile money and so on) and the amount, so part payments are fine: record each payment as it arrives. If the guest pays more than is owed, the extra becomes a credit note.</p></div>
 
   <h2 id="inquiry-cancel">How to cancel or delete an inquiry</h2>
   <ol class="steps">

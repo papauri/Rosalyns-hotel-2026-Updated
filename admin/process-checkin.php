@@ -26,6 +26,21 @@ $booking_id = (int)($_POST['booking_id'] ?? 0);
 $admin_user_id = (int)($user['id'] ?? ($_SESSION['admin_user_id'] ?? 0));
 $bookingScopedActions = ['checkin', 'cancel_checkin', 'checkout', 'cancel'];
 
+// Same rule as the buttons: check-in/out and cancel need their own permission; the room-status
+// actions need Housekeeping or Room Maintenance.
+$_pcNeed = rhBookingActionPermission((string)$action);
+$_pcAllowed = true;
+if ($_pcNeed !== null) {
+    $_pcAllowed = hasPermission($admin_user_id, $_pcNeed);
+} elseif (in_array($action, ['mark_room_clean', 'pass_inspection', 'fail_inspection', 'update_room_status'], true)) {
+    $_pcAllowed = hasPermission($admin_user_id, 'housekeeping') || hasPermission($admin_user_id, 'room_maintenance');
+}
+if (!$_pcAllowed) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'You do not have permission to do that.']);
+    exit;
+}
+
 if (in_array($action, $bookingScopedActions, true) && $booking_id <= 0) {
     http_response_code(400);
     echo json_encode(['success' => false, 'message' => 'Invalid booking ID']);

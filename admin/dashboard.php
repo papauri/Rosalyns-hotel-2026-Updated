@@ -101,23 +101,52 @@ try {
 }
 
 // Resolve module flags once — used by both queries and HTML
-$mod_bookings    = moduleEnabled('bookings');
-$mod_housekeeping= moduleEnabled('housekeeping');
-$mod_pos         = moduleEnabled('pos');
-$mod_stock       = moduleEnabled('stock');
-$mod_conference  = moduleEnabled('conference');
-$mod_gym         = moduleEnabled('gym');
-$mod_finance     = moduleEnabled('finance');
-$mod_website_cms = moduleEnabled('website_cms');
-$mod_station_kds = moduleEnabled('station_kds');
-$mod_station_bds = moduleEnabled('station_bds');
-$mod_station_cds = moduleEnabled('station_cds');
-$mod_station_room_service = moduleEnabled('station_room_service');
-$mod_events      = function_exists('isEventsEnabled') && isEventsEnabled();
+// Every $mod_* flag below means "this module is on AND this user holds a permission
+// for it": the widget, its query and its insight card all follow the flag, so a
+// bookings-only receptionist gets bookings and a POS user gets POS, nothing else.
+// $raw_* are the plain module switches, used where a figure must stay complete
+// regardless of the viewer's other permissions (money totals).
+$dash_uid = (int)$user['id'];
+$dash_perm = static function (string ...$keys) use ($dash_uid): bool {
+    foreach ($keys as $k) {
+        if (hasPermission($dash_uid, $k)) { return true; }
+    }
+    return false;
+};
+$raw_bookings   = moduleEnabled('bookings');
+$raw_pos        = moduleEnabled('pos');
+$raw_conference = moduleEnabled('conference');
+$raw_gym        = moduleEnabled('gym');
+$raw_events     = function_exists('isEventsEnabled') && isEventsEnabled();
+
+$mod_bookings    = $raw_bookings && $dash_perm('bookings');
+$mod_housekeeping= moduleEnabled('housekeeping') && $dash_perm('housekeeping', 'room_maintenance');
+$mod_roomboard   = ($raw_bookings || moduleEnabled('housekeeping')) && $dash_perm('room_dashboard');
+$mod_pos         = $raw_pos && $dash_perm('pos_till', 'stock_orders', 'pos_accounting', 'pos_stations_overview', 'room_service_view', 'kds_view', 'bds_view', 'cds_view', 'kds_reports');
+$mod_orders      = moduleEnabled('stock') && $dash_perm('stock_orders', 'pos_till');
+$mod_stock       = moduleEnabled('stock') && $dash_perm('stock_dashboard', 'stock_management', 'stock_batches', 'stock_count', 'stock_wastage', 'stock_reports');
+$mod_conference  = $raw_conference && $dash_perm('conference', 'conference_rooms', 'conference_financials');
+$mod_gym         = $raw_gym && $dash_perm('gym', 'gym_checkin', 'gym_packages', 'gym_reports', 'gym_financials');
+$mod_finance     = moduleEnabled('finance') && $dash_perm('accounting', 'payments', 'reports', 'invoices', 'receipts', 'pos_accounting', 'payment_add', 'refund_payment');
+$mod_website_cms = moduleEnabled('website_cms') && $dash_perm('reviews', 'contact', 'events_bookings', 'events');
+$mod_station_kds = moduleEnabled('station_kds') && $dash_perm('kds_view', 'kds_reports');
+$mod_station_bds = moduleEnabled('station_bds') && $dash_perm('bds_view', 'kds_reports');
+$mod_station_cds = moduleEnabled('station_cds') && $dash_perm('cds_view', 'kds_reports');
+$mod_station_room_service = moduleEnabled('station_room_service') && $dash_perm('room_service_view');
+$mod_events      = $raw_events && $dash_perm('events', 'events_bookings');
+// Room service lives in the POS module but needs bookings (rooms) to exist.
+$mod_roomsvc     = $raw_pos && $raw_bookings && $dash_perm('room_service_view');
+// Till sales are money: shown to the people who run or audit the till, and to finance.
+$pos_sales       = $mod_pos && $dash_perm('pos_till', 'pos_accounting', 'pos_take_payment', 'accounting', 'reports');
 // Presets that invoice a named client in advance and can therefore carry an
 // outstanding balance. Pure-POS presets (bar, retail, supermarket) settle at
 // the till, so an "Outstanding Balances" tile would always read zero for them.
-$mod_receivables = $mod_bookings || $mod_conference || $mod_gym || $mod_events;
+// Computed from the plain module switches so the total is the same for every
+// finance viewer whatever else they may open.
+$mod_receivables = $raw_bookings || $raw_conference || $raw_gym || $raw_events;
+// Till revenue must still reach the finance totals when the viewer has finance
+// but no till permission.
+$pos_rev_needed  = $raw_pos && ($pos_sales || $mod_finance);
 
 if (!$is_card_insight_ajax) {
 
@@ -213,7 +242,7 @@ if (!$is_card_insight_ajax) {
             $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status='placed'")->fetch(PDO::FETCH_ASSOC);
             $ops['open_tabs'] = (int)$r['c'];
             $ops['open_tabs_value'] = (float)$r['v'];
-            if ($mod_bookings) {
+            if ($mod_roomsvc) {
                 $ops['room_service_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type='room_service' AND status IN ('placed','pending','confirmed')")->fetchColumn();
                 $ops['room_service_reminder_pending'] = (int)$pdo->query("SELECT COUNT(*)
                     FROM bookings b
@@ -234,6 +263,12 @@ if (!$is_card_insight_ajax) {
             $ops['orders_today'] = (int)$r['c'];
             $ops['restaurant_rev_today'] = (float)$r['v'];
         } catch (Throwable $e) { /* legacy schema — keep zeros */ }
+    }
+
+    if (!$mod_pos && $pos_rev_needed) {
+        try {
+            $ops['restaurant_rev_today'] = (float)$pdo->query("SELECT COALESCE(SUM(total_amount),0) FROM stock_orders WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at))=CURDATE()")->fetchColumn();
+        } catch (Throwable $e) { /* legacy schema */ }
     }
 
     if ($mod_stock) {
@@ -258,10 +293,10 @@ if (!$is_card_insight_ajax) {
             // Outstanding receivables from every module this preset actually runs —
             // a gym must not be shown "bookings with amount due" it can never have.
             $outstandingSql = [];
-            if ($mod_bookings)   { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
-            if ($mod_conference) { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
-            if ($mod_gym)        { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
-            if ($mod_events)     { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+            if ($raw_bookings)   { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
+            if ($raw_conference) { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+            if ($raw_gym)        { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
+            if ($raw_events)     { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
             foreach ($outstandingSql as $q) {
                 try {
                     $r = $pdo->query($q)->fetch(PDO::FETCH_ASSOC);
@@ -297,7 +332,7 @@ if (!$is_card_insight_ajax) {
         }
     } catch (Throwable $e) { /* fine */ }
 
-    if ($mod_pos && $mod_bookings) {
+    if ($mod_roomsvc) {
         try {
             $roomServiceQueue = $pdo->query("
                 SELECT o.id, o.reference, o.room_number, o.customer_name, o.total_amount, o.created_at, o.status,
@@ -377,7 +412,7 @@ if (!$is_card_insight_ajax) {
             }
         } catch (Throwable $e) { /* fine */ }
     }
-    if ($mod_pos) {
+    if ($pos_rev_needed) {
         try {
             $st = $pdo->prepare("SELECT DATE(COALESCE(paid_at, created_at)) d, COALESCE(SUM(total_amount),0) v FROM stock_orders
                 WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at)) BETWEEN ? AND ?
@@ -407,19 +442,19 @@ if ($is_card_insight_ajax) {
         'pending_conference'        => $mod_conference,
         'today_conferences'         => $mod_conference,
         'outstanding_balances'      => $mod_finance && $mod_receivables,
-        'open_tabs'                 => $mod_stock,
-        'room_service_reminders_due'=> $mod_pos && $mod_bookings,
-        'room_service_pending'      => $mod_pos && $mod_bookings,
+        'open_tabs'                 => $mod_orders,
+        'room_service_reminders_due'=> $mod_roomsvc,
+        'room_service_pending'      => $mod_roomsvc,
         'kitchen_tickets'           => $mod_pos && $mod_station_kds,
         'bar_tickets'               => $mod_pos && $mod_station_bds,
         'coffee_tickets'            => $mod_pos && $mod_station_cds,
-        'restaurant_revenue_today'  => $mod_pos,
+        'restaurant_revenue_today'  => $pos_sales,
         'total_revenue_today'       => $mod_finance,
         'refunds_pending'           => $mod_finance,
         'stock_health'              => $mod_stock,
         'guest_services_queue'      => $mod_website_cms || $mod_gym || $mod_bookings,
         'operations_facilities'     => $mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance,
-        'room_status_overview'      => $mod_bookings || $mod_housekeeping,
+        'room_status_overview'      => $mod_roomboard,
     ];
     $gateKey = str_starts_with($card, 'room_status_') ? 'room_status_overview' : $card;
     if (isset($insightCardGates[$gateKey]) && !$insightCardGates[$gateKey]) {
@@ -840,10 +875,10 @@ if ($is_card_insight_ajax) {
                 // exceed Total — total_amount alone is the NET base and would read
                 // lower than the gross balance due.
                 $ob_union = [];
-                if ($mod_bookings)   { $ob_union[] = "SELECT id, booking_reference AS ref, guest_name AS who, status, amount_paid, amount_due, 'booking' AS src FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
-                if ($mod_conference) { $ob_union[] = "SELECT id, inquiry_reference AS ref, COALESCE(NULLIF(company_name,''), contact_person) AS who, status, amount_paid, amount_due, 'conference' AS src FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
-                if ($mod_gym)        { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'gym' AS src FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
-                if ($mod_events)     { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'event' AS src FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+                if ($raw_bookings)   { $ob_union[] = "SELECT id, booking_reference AS ref, guest_name AS who, status, amount_paid, amount_due, 'booking' AS src FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
+                if ($raw_conference) { $ob_union[] = "SELECT id, inquiry_reference AS ref, COALESCE(NULLIF(company_name,''), contact_person) AS who, status, amount_paid, amount_due, 'conference' AS src FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+                if ($raw_gym)        { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'gym' AS src FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
+                if ($raw_events)     { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'event' AS src FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
                 $rows = [];
                 foreach ($ob_union as $obSql) {
                     try {
@@ -895,7 +930,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'age', 'label' => 'Age'],
                     ['key' => 'status', 'label' => 'Status'],
                 ];
-                $payload['link'] = $mod_stock
+                $payload['link'] = $mod_orders
                     ? ['href' => 'stock-orders.php?status=placed', 'label' => 'Open full tabs list']
                     : ['href' => 'pos.php', 'label' => 'Open POS till'];
                 $stmt = $pdo->query("SELECT o.id AS order_id,
@@ -1265,7 +1300,7 @@ if ($is_card_insight_ajax) {
 
             case 'total_revenue_today':
                 $payload['title'] = 'Total Revenue Today';
-                $payload['subtitle'] = $mod_pos
+                $payload['subtitle'] = $pos_rev_needed
                     ? ('Payments ledger plus settled ' . (isRestaurantEnabled() ? 'restaurant' : 'POS') . ' orders')
                     : 'Payments ledger';
                 $payload['columns'] = [
@@ -1306,7 +1341,7 @@ if ($is_card_insight_ajax) {
                     ];
                 }
 
-                if ($mod_pos) {
+                if ($pos_rev_needed) {
                 $restStmt = $pdo->query("SELECT id AS order_id, reference, order_type, payment_method, total_amount, COALESCE(paid_at, created_at) AS ts
                                           FROM stock_orders
                                           WHERE status IN ('paid','completed')
@@ -1474,8 +1509,8 @@ if ($is_card_insight_ajax) {
                         : ['href' => 'bookings.php', 'label' => 'Open bookings']);
 
                 if ($mod_website_cms) {
+                    if ($dash_perm('reviews')) {
                     $pendingReviews = (int)$pdo->query("SELECT COUNT(*) FROM reviews WHERE status = 'pending'")->fetchColumn();
-                    $unreadContact = (int)$pdo->query("SELECT COUNT(*) FROM contact_inquiries WHERE status = 'new'")->fetchColumn();
                     $payload['rows'][] = [
                         'queue' => 'Reviews awaiting moderation',
                         'count' => (string)$pendingReviews,
@@ -1483,6 +1518,9 @@ if ($is_card_insight_ajax) {
                         'detail' => ($mod_bookings ? 'Guest' : 'Customer') . ' feedback waiting publication decision',
                         'action' => ['href' => 'reviews.php?status=pending', 'label' => 'Reviews', 'target' => '_blank'],
                     ];
+                    }
+                    if ($dash_perm('contact')) {
+                    $unreadContact = (int)$pdo->query("SELECT COUNT(*) FROM contact_inquiries WHERE status = 'new'")->fetchColumn();
                     $payload['rows'][] = [
                         'queue' => 'Unread contact inquiries',
                         'count' => (string)$unreadContact,
@@ -1490,6 +1528,7 @@ if ($is_card_insight_ajax) {
                         'detail' => 'Website contact messages awaiting first response',
                         'action' => ['href' => 'contact-inquiries.php', 'label' => 'Contacts', 'target' => '_blank'],
                     ];
+                    }
                 }
                 if ($mod_gym) {
                     $pendingGym = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status IN ('pending', 'new')")->fetchColumn();
@@ -1501,7 +1540,7 @@ if ($is_card_insight_ajax) {
                         'action' => ['href' => 'gym-inquiries.php', 'label' => 'Gym', 'target' => '_blank'],
                     ];
                 }
-                if ($mod_website_cms && $mod_events) {
+                if ($mod_website_cms && $mod_events && $dash_perm('events_bookings')) {
                     try {
                         $pendingEventsQueue = (int)$pdo->query("SELECT COUNT(*) FROM event_inquiries WHERE status = 'pending'")->fetchColumn();
                         $payload['rows'][] = [
@@ -1551,7 +1590,7 @@ if ($is_card_insight_ajax) {
                 ];
                 $payload['link'] = $mod_housekeeping
                     ? ['href' => 'room-maintenance.php', 'label' => 'Open operations tools']
-                    : ($mod_stock
+                    : ($mod_orders
                         ? ['href' => 'stock-orders.php', 'label' => 'Open orders']
                         : ['href' => 'payments.php', 'label' => 'Open payments']);
 
@@ -1571,7 +1610,7 @@ if ($is_card_insight_ajax) {
                         'action' => ['href' => 'housekeeping.php', 'label' => 'Housekeeping', 'target' => '_blank'],
                     ];
                 }
-                if ($mod_pos && $mod_bookings) {
+                if ($mod_roomsvc) {
                     $roomServiceOpen = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type = 'room_service' AND status IN ('placed', 'pending', 'confirmed')")->fetchColumn();
                     $roomServiceReminderPending = (int)$pdo->query("SELECT COUNT(*)
                                         FROM bookings b
@@ -1620,10 +1659,10 @@ if ($is_card_insight_ajax) {
                     $outstandingCount = 0;
                     $outstandingValue = 0.0;
                     $ofUnion = [];
-                    if ($mod_bookings)   { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
-                    if ($mod_conference) { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
-                    if ($mod_gym)        { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
-                    if ($mod_events)     { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+                    if ($raw_bookings)   { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
+                    if ($raw_conference) { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
+                    if ($raw_gym)        { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
+                    if ($raw_events)     { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
                     foreach ($ofUnion as $ofSql) {
                         try {
                             $ofRow = $pdo->query($ofSql)->fetch(PDO::FETCH_ASSOC);
@@ -1888,10 +1927,10 @@ $currency_symbol = getSetting('currency_symbol');
             } catch (Throwable $e) { $checkin_bookings = []; }
         }
 
-        $roomSummary = ($mod_bookings || $mod_housekeeping) ? getRoomDashboardSummary() : [];
-        $roomStatuses = ($mod_bookings || $mod_housekeeping) ? getRoomStatuses() : [];
+        $roomSummary = ($mod_bookings || $mod_roomboard || $mod_housekeeping) ? getRoomDashboardSummary() : [];
+        $roomStatuses = $mod_roomboard ? getRoomStatuses() : [];
         $statusCounts = $roomSummary['status_counts'] ?? [];
-        $totalRooms = array_sum($statusCounts);
+        $totalRooms = $mod_roomboard ? array_sum($statusCounts) : 0;
         $occupiedRooms = (int)($statusCounts['occupied'] ?? 0);
         $occupancy = (float)($roomSummary['occupancy_rate'] ?? 0);
         $noShows = (int)($roomSummary['no_show_candidates'] ?? 0);
@@ -1912,20 +1951,20 @@ $currency_symbol = getSetting('currency_symbol');
         $add($attn, $mod_bookings, $overdueDepartures, 'Overdue departures', 'fa-person-walking-luggage', 'red', 'bookings.php?filter=checked_in', null, 'Checkout date passed, still checked in');
         $add($attn, $mod_bookings, (int)$pending_bookings, 'Bookings awaiting confirmation', 'fa-hourglass-half', 'amber', 'bookings.php?status=pending', 'pending_bookings');
         $add($attn, $mod_bookings, $departuresOwing, 'Departures with a balance', 'fa-sack-dollar', 'red', 'bookings.php?filter=checkout_today', 'checkouts_today', 'Collect before they leave');
-        $add($attn, $mod_finance, (int)$finance['refunds_pending'], 'Refunds to approve', 'fa-rotate-left', 'red', 'payments.php?refund_status=pending', 'refunds_pending');
+        $add($attn, $mod_finance && $dash_perm('payments', 'refund_payment'), (int)$finance['refunds_pending'], 'Refunds to approve', 'fa-rotate-left', 'red', 'payments.php?refund_status=pending', 'refunds_pending');
         $add($attn, $mod_conference, (int)$pending_conference, 'Conference enquiries to answer', 'fa-users-gear', 'amber', 'conference-management.php?status=pending', 'pending_conference');
-        $add($attn, $mod_website_cms, (int)$guestSvc['unread_contact'], 'Unread contact messages', 'fa-envelope', 'red', 'contact-inquiries.php');
-        $add($attn, $mod_website_cms, (int)$guestSvc['pending_reviews'], 'Reviews to moderate', 'fa-star', 'amber', 'reviews.php?status=pending');
-        $add($attn, $mod_website_cms && $mod_events, (int)$guestSvc['pending_events'], 'Event bookings pending', 'fa-calendar-check', 'amber', 'events-inquiries.php');
-        $add($attn, $mod_gym, (int)$guestSvc['pending_gym'], 'Gym enquiries to answer', 'fa-dumbbell', 'amber', 'gym-inquiries.php');
-        $add($attn, $mod_gym, (int)$gymDash['expiring_members'], 'Gym memberships expiring (30d)', 'fa-id-card', 'amber', 'gym-members.php?filter=expiring');
-        $add($attn, $mod_housekeeping, (int)$guestSvc['maintenance_open'], 'Rooms out of service', 'fa-screwdriver-wrench', 'red', 'room-maintenance.php');
-        $add($attn, $mod_housekeeping, (int)$guestSvc['housekeeping_due'], 'Housekeeping tasks due', 'fa-broom', 'amber', 'housekeeping.php');
-        $add($attn, $mod_pos && $mod_bookings, (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', 'stock-orders.php?type=room_service', 'room_service_pending');
-        $add($attn, $mod_pos && $mod_bookings, (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', 'stock-orders.php?type=room_service', 'room_service_reminders_due', 'Rooms with no order served today');
-        $add($attn, $mod_stock && $mod_bookings, (int)$ops['open_tabs'], isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Orders awaiting payment', 'fa-receipt', 'amber', 'stock-orders.php?status=placed', 'open_tabs');
-        $add($attn, $mod_stock, (int)$stock['expired_batches'], 'Expired stock batches', 'fa-skull-crossbones', 'red', 'stock-batches.php');
-        $add($attn, $mod_stock, (int)$stock['low_stock'], 'Items below minimum stock', 'fa-box-open', 'amber', 'stock-reorder.php');
+        $add($attn, $mod_website_cms && $dash_perm('contact'), (int)$guestSvc['unread_contact'], 'Unread contact messages', 'fa-envelope', 'red', 'contact-inquiries.php');
+        $add($attn, $mod_website_cms && $dash_perm('reviews'), (int)$guestSvc['pending_reviews'], 'Reviews to moderate', 'fa-star', 'amber', 'reviews.php?status=pending');
+        $add($attn, $mod_website_cms && $mod_events && $dash_perm('events_bookings'), (int)$guestSvc['pending_events'], 'Event bookings pending', 'fa-calendar-check', 'amber', 'events-inquiries.php');
+        $add($attn, $mod_gym && $dash_perm('gym'), (int)$guestSvc['pending_gym'], 'Gym enquiries to answer', 'fa-dumbbell', 'amber', 'gym-inquiries.php');
+        $add($attn, $mod_gym && $dash_perm('gym'), (int)$gymDash['expiring_members'], 'Gym memberships expiring (30d)', 'fa-id-card', 'amber', 'gym-members.php?filter=expiring');
+        $add($attn, $mod_housekeeping && $dash_perm('room_maintenance'), (int)$guestSvc['maintenance_open'], 'Rooms out of service', 'fa-screwdriver-wrench', 'red', 'room-maintenance.php');
+        $add($attn, $mod_housekeeping && $dash_perm('housekeeping'), (int)$guestSvc['housekeeping_due'], 'Housekeeping tasks due', 'fa-broom', 'amber', 'housekeeping.php');
+        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', 'stock-orders.php?type=room_service', 'room_service_pending');
+        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', 'stock-orders.php?type=room_service', 'room_service_reminders_due', 'Rooms with no order served today');
+        $add($attn, $mod_orders && $mod_bookings, (int)$ops['open_tabs'], isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Orders awaiting payment', 'fa-receipt', 'amber', 'stock-orders.php?status=placed', 'open_tabs');
+        $add($attn, $mod_stock && $dash_perm('stock_batches'), (int)$stock['expired_batches'], 'Expired stock batches', 'fa-skull-crossbones', 'red', 'stock-batches.php');
+        $add($attn, $mod_stock && $dash_perm('stock_management'), (int)$stock['low_stock'], 'Items below minimum stock', 'fa-box-open', 'amber', 'stock-reorder.php');
         $attnOpen = array_values(array_filter($attn, static fn($a) => $a['count'] > 0));
         $attnClear = array_values(array_filter($attn, static fn($a) => $a['count'] <= 0));
         usort($attnOpen, static fn($a, $b) => [$a['tone'] === 'red' ? 0 : 1, -$a['count']] <=> [$b['tone'] === 'red' ? 0 : 1, -$b['count']]);
@@ -1951,7 +1990,7 @@ $currency_symbol = getSetting('currency_symbol');
         $weekMax = max(1, ...array_values($weekAhead ?: [0]));
         $confByDay = [];
         foreach ($upcoming_conferences as $c) { $confByDay[$c['event_date']] = ($confByDay[$c['event_date']] ?? 0) + 1; }
-        $hasMoney = $mod_finance || $mod_pos;
+        $hasMoney = $mod_finance || $pos_sales;
         $roomColors = [
             'occupied' => '#231F1C', 'available' => '#3f8f5a', 'cleaning' => '#c9a227',
             'inspection' => '#2f6fad', 'maintenance' => '#b4632f', 'out_of_order' => '#9aa1ab',
@@ -1977,7 +2016,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <?php if ($mod_pos && $can('pos.php')): ?>
                     <a class="ck-btn<?php echo $mod_bookings ? '' : ' ck-btn--primary'; ?>" href="pos.php" target="_blank" rel="noopener"><i class="fas fa-cash-register"></i><span>POS</span></a>
                 <?php endif; ?>
-                <?php if ($mod_gym && !$mod_bookings && $can('gym-checkin.php')): ?>
+                <?php if ($raw_gym && !$mod_bookings && $can('gym-checkin.php')): ?>
                     <a class="ck-btn ck-btn--primary" href="gym-checkin.php"><i class="fas fa-id-badge"></i><span>Member check-in</span></a>
                 <?php endif; ?>
                 <?php if ($can('end-of-day-report.php')): ?>
@@ -1993,14 +2032,14 @@ $currency_symbol = getSetting('currency_symbol');
                         <a href="../docs/guides/99-admin-dashboard-full-guide.html" target="_blank" rel="noopener"><i class="fas fa-scroll"></i> Admin reference</a>
                         <?php if ($mod_bookings): ?><a href="../docs/guides/07-reception-bookings.html" target="_blank" rel="noopener"><i class="fas fa-calendar-check"></i> Reception</a><?php endif; ?>
                         <?php if ($mod_pos): ?><a href="../docs/guides/01-pos-till.html" target="_blank" rel="noopener"><i class="fas fa-cash-register"></i> POS till</a><?php endif; ?>
-                        <?php if ($mod_pos && $mod_station_kds): ?><a href="../docs/guides/02-kds-kitchen.html" target="_blank" rel="noopener"><i class="fas fa-utensils"></i> Kitchen (KDS)</a><?php endif; ?>
-                        <?php if ($mod_pos && $mod_station_bds): ?><a href="../docs/guides/03-bds-bar.html" target="_blank" rel="noopener"><i class="fas fa-martini-glass"></i> Bar (BDS)</a><?php endif; ?>
-                        <?php if ($mod_pos && $mod_station_cds): ?><a href="../docs/guides/04-cds-coffee.html" target="_blank" rel="noopener"><i class="fas fa-mug-hot"></i> Coffee (CDS)</a><?php endif; ?>
-                        <?php if ($mod_pos && $mod_station_room_service): ?><a href="../docs/guides/05-room-service.html" target="_blank" rel="noopener"><i class="fas fa-bell-concierge"></i> Room service</a><?php endif; ?>
+                        <?php if ($mod_station_kds): ?><a href="../docs/guides/02-kds-kitchen.html" target="_blank" rel="noopener"><i class="fas fa-utensils"></i> Kitchen (KDS)</a><?php endif; ?>
+                        <?php if ($mod_station_bds): ?><a href="../docs/guides/03-bds-bar.html" target="_blank" rel="noopener"><i class="fas fa-martini-glass"></i> Bar (BDS)</a><?php endif; ?>
+                        <?php if ($mod_station_cds): ?><a href="../docs/guides/04-cds-coffee.html" target="_blank" rel="noopener"><i class="fas fa-mug-hot"></i> Coffee (CDS)</a><?php endif; ?>
+                        <?php if ($mod_station_room_service): ?><a href="../docs/guides/05-room-service.html" target="_blank" rel="noopener"><i class="fas fa-bell-concierge"></i> Room service</a><?php endif; ?>
                         <?php if ($mod_housekeeping): ?><a href="../docs/guides/06-housekeeping.html" target="_blank" rel="noopener"><i class="fas fa-broom"></i> Housekeeping</a><?php endif; ?>
-                        <?php if ($mod_stock): ?><a href="../docs/guides/08-stock-orders.html" target="_blank" rel="noopener"><i class="fas fa-boxes-stacked"></i> Stock</a><?php endif; ?>
-                        <a href="../docs/guides/13-finance-payments.html" target="_blank" rel="noopener"><i class="fas fa-money-bill-wave"></i> Finance</a>
-                        <a href="../docs/guides/14-reports-eod.html" target="_blank" rel="noopener"><i class="fas fa-chart-column"></i> Reports &amp; EOD</a>
+                        <?php if ($mod_stock || $mod_orders): ?><a href="../docs/guides/08-stock-orders.html" target="_blank" rel="noopener"><i class="fas fa-boxes-stacked"></i> Stock</a><?php endif; ?>
+                        <?php if ($mod_finance): ?><a href="../docs/guides/13-finance-payments.html" target="_blank" rel="noopener"><i class="fas fa-money-bill-wave"></i> Finance</a><?php endif; ?>
+                        <?php if ($mod_finance && $dash_perm('reports')): ?><a href="../docs/guides/14-reports-eod.html" target="_blank" rel="noopener"><i class="fas fa-chart-column"></i> Reports &amp; EOD</a><?php endif; ?>
                     </div>
                 </details>
             </nav>
@@ -2025,7 +2064,7 @@ $currency_symbol = getSetting('currency_symbol');
         <!-- ============ KPI STRIP ============ -->
         <section class="ck-kpis" aria-label="Key figures">
             <?php if ($mod_bookings): ?>
-                <?php if ($totalRooms > 0): ?>
+                <?php if ($mod_roomboard && $totalRooms > 0): ?>
                 <a class="ck-kpi ck-kpi--dark js-dashboard-insight" data-insight-card="room_status_overview" data-insight-label="Room status" href="room-dashboard.php">
                     <span class="ck-kpi__icon"><i class="fas fa-bed"></i></span>
                     <span class="ck-kpi__label">Occupancy</span>
@@ -2061,13 +2100,15 @@ $currency_symbol = getSetting('currency_symbol');
                     <span class="ck-kpi__value"><?php echo (int)$ops['orders_today']; ?></span>
                     <span class="ck-kpi__sub">Settled through the till</span>
                 </a>
+                <?php if ($pos_sales): ?>
                 <a class="ck-kpi js-dashboard-insight" data-insight-card="restaurant_revenue_today" data-insight-label="<?php echo isRestaurantEnabled() ? 'Restaurant revenue today' : 'POS revenue today'; ?>" href="reports.php?type=accounting&range=today">
                     <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
                     <span class="ck-kpi__label"><?php echo isRestaurantEnabled() ? 'Restaurant sales' : 'POS sales'; ?></span>
                     <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($ops['restaurant_rev_today']); ?></span>
                     <span class="ck-kpi__sub">Gross settled today</span>
                 </a>
-                <?php if ($mod_stock): ?>
+                <?php endif; ?>
+                <?php if ($mod_orders): ?>
                 <a class="ck-kpi<?php echo $ops['open_tabs'] > 0 ? ' ck-kpi--warn' : ''; ?> js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="<?php echo isRestaurantEnabled() ? 'Open tabs' : 'Pending orders'; ?>" href="stock-orders.php?status=placed">
                     <span class="ck-kpi__icon"><i class="fas fa-hourglass-half"></i></span>
                     <span class="ck-kpi__label"><?php echo isRestaurantEnabled() ? 'Open tabs' : 'Pending orders'; ?></span>
@@ -2113,6 +2154,10 @@ $currency_symbol = getSetting('currency_symbol');
             <?php endif; ?>
         </section>
 
+        <?php if (!($mod_bookings || $mod_pos || $mod_stock || $mod_orders || $mod_conference || $mod_gym || $mod_finance || $mod_website_cms || $mod_housekeeping || $mod_roomboard)): ?>
+        <section class="ck-panel"><div class="ck-empty"><i class="fas fa-circle-info"></i><p>Your account has no dashboard widgets. Use the menu on the left to open the pages you have access to.</p></div></section>
+        <?php endif; ?>
+
         <!-- ============ BENTO ============ -->
         <div class="ck-bento">
 
@@ -2123,7 +2168,7 @@ $currency_symbol = getSetting('currency_symbol');
                 $todayTabs['departures'] = ['Departures', count($departureList)];
             }
             if ($mod_conference) { $todayTabs['events'] = ['Events', count($today_conference_events)]; }
-            if ($mod_pos && $mod_bookings) { $todayTabs['roomservice'] = ['Room service', count($roomServiceQueue)]; }
+            if ($mod_roomsvc) { $todayTabs['roomservice'] = ['Room service', count($roomServiceQueue)]; }
             ?>
             <?php if ($todayTabs): ?>
             <!-- Today: the front-desk worklist -->
@@ -2166,7 +2211,7 @@ $currency_symbol = getSetting('currency_symbol');
                                 <?php endif; ?>
                             </span>
                             <span class="ck-row__act">
-                                <?php if (in_array($booking['status'], ['checked-in', 'checked-out'], true)): ?>
+                                <?php if (in_array($booking['status'], ['checked-in', 'checked-out'], true) || !$dash_perm('checkin_guest')): ?>
                                 <a class="ck-btn ck-btn--sm" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>"><i class="fas fa-eye"></i> View</a>
                                 <?php else: ?>
                                 <button type="button" id="checkin-btn-<?php echo (int)$booking['id']; ?>"
@@ -2209,7 +2254,7 @@ $currency_symbol = getSetting('currency_symbol');
                                 <?php endif; ?>
                             </span>
                             <span class="ck-row__act">
-                                <?php if ($dState === 'departed'): ?>
+                                <?php if ($dState === 'departed' || !$dash_perm('checkout_guest')): ?>
                                 <a class="ck-btn ck-btn--sm" href="booking-details.php?id=<?php echo (int)$d['id']; ?>"><i class="fas fa-eye"></i> View</a>
                                 <?php else: ?>
                                 <a class="ck-btn ck-btn--sm <?php echo $owes ? '' : 'ck-btn--primary'; ?>" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
@@ -2247,7 +2292,7 @@ $currency_symbol = getSetting('currency_symbol');
                 </div>
                 <?php endif; ?>
 
-                <?php if ($mod_pos && $mod_bookings): ?>
+                <?php if ($mod_roomsvc): ?>
                 <div class="ck-pane" role="tabpanel" data-ck-pane="roomservice" hidden>
                     <?php if ($roomServiceQueue): ?>
                     <ul class="ck-rows">
@@ -2261,7 +2306,11 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="ck-pill ck-pill--<?php echo $ageTone; ?>"><i class="far fa-clock"></i> <?php echo rh_format_age($age); ?></span>
                             <span class="ck-row__meta"><span class="badge badge-<?php echo htmlspecialchars($rs['status']); ?>"><?php echo ucfirst(htmlspecialchars($rs['status'])); ?></span></span>
                             <span class="ck-row__act">
+                                <?php if ($dash_perm('pos_take_payment') && $can('pos.php')): ?>
                                 <a href="pos.php?settle=<?php echo (int)$rs['id']; ?>" target="_blank" rel="noopener" class="ck-btn ck-btn--sm ck-btn--primary"><i class="fas fa-credit-card"></i> Take payment</a>
+                                <?php elseif ($can('stock-orders.php')): ?>
+                                <a href="stock-orders.php?id=<?php echo (int)$rs['id']; ?>" class="ck-btn ck-btn--sm"><i class="fas fa-eye"></i> View</a>
+                                <?php endif; ?>
                             </span>
                         </li>
                         <?php endforeach; ?>
@@ -2274,6 +2323,7 @@ $currency_symbol = getSetting('currency_symbol');
             </section>
             <?php endif; ?>
 
+            <?php if ($attn): ?>
             <!-- Needs attention -->
             <section class="ck-panel ck-attn<?php echo $todayTabs ? ' ck-rows-2' : ''; ?>">
                 <header class="ck-panel__head">
@@ -2321,6 +2371,7 @@ $currency_symbol = getSetting('currency_symbol');
                 </details>
                 <?php endif; ?>
             </section>
+            <?php endif; ?>
 
             <?php if ($hasMoney): ?>
             <!-- Money -->
@@ -2350,23 +2401,23 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php endforeach; ?>
                 </div>
                 <ul class="ck-kv">
-                    <?php if ($mod_finance && $mod_pos): ?>
+                    <?php if ($mod_finance && $pos_rev_needed): ?>
                         <li><span><i class="fas fa-bed"></i> <?php echo $mod_bookings ? 'Rooms &amp; services' : 'Invoiced sales'; ?> today</span><strong><?php echo $money(max(0, $finance['revenue_today'] - $ops['restaurant_rev_today'])); ?></strong></li>
                     <?php endif; ?>
-                    <?php if ($mod_pos): ?>
+                    <?php if ($pos_sales): ?>
                         <li><a class="js-dashboard-insight" data-insight-card="restaurant_revenue_today" data-insight-label="Till sales today" href="reports.php?type=accounting&range=today"><span><i class="fas fa-cash-register"></i> <?php echo isRestaurantEnabled() ? 'Restaurant &amp; bar' : 'Till sales'; ?> today · <?php echo (int)$ops['orders_today']; ?> order(s)</span><strong><?php echo $money($ops['restaurant_rev_today']); ?></strong></a></li>
                     <?php endif; ?>
-                    <?php if ($mod_stock && $mod_bookings): ?>
+                    <?php if ($mod_orders && $mod_bookings): ?>
                         <li><a class="js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="Open tabs" href="stock-orders.php?status=placed"><span><i class="fas fa-receipt"></i> <?php echo (int)$ops['open_tabs']; ?> open tab(s)</span><strong><?php echo $money($ops['open_tabs_value']); ?></strong></a></li>
                     <?php endif; ?>
-                    <?php if ($mod_finance): ?>
+                    <?php if ($mod_finance && $dash_perm('payments', 'refund_payment')): ?>
                         <li><a class="js-dashboard-insight" data-insight-card="refunds_pending" data-insight-label="Refunds pending" href="payments.php?refund_status=pending"><span><i class="fas fa-rotate-left"></i> Refunds pending</span><strong><?php echo (int)$finance['refunds_pending']; ?></strong></a></li>
                     <?php endif; ?>
                 </ul>
             </section>
             <?php endif; ?>
 
-            <?php if ($totalRooms > 0): ?>
+            <?php if ($mod_roomboard && $totalRooms > 0): ?>
             <!-- Rooms -->
             <section class="ck-panel ck-rooms">
                 <header class="ck-panel__head">
@@ -2447,7 +2498,7 @@ $currency_symbol = getSetting('currency_symbol');
                             <?php if ((float)$booking['amount_due'] > 0.01): ?><small class="ck-due">Due <?php echo $money($booking['amount_due']); ?></small><?php else: ?><small class="ck-paid"><i class="fas fa-check"></i> Paid</small><?php endif; ?>
                         </span>
                         <span class="ck-row__act">
-                            <?php if ($booking['status'] === 'pending'): ?>
+                            <?php if ($booking['status'] === 'pending' && $dash_perm('edit_booking')): ?>
                                 <a href="booking-details.php?id=<?php echo (int)$booking['id']; ?>&action=confirm" class="ck-btn ck-btn--sm ck-btn--primary">Confirm</a>
                             <?php else: ?>
                                 <a href="booking-details.php?id=<?php echo (int)$booking['id']; ?>" class="ck-btn ck-btn--sm">View</a>
@@ -2485,13 +2536,13 @@ $currency_symbol = getSetting('currency_symbol');
                     </div>
                     <div class="ck-panel__tools">
                         <button type="button" class="ck-icon-btn js-dashboard-insight" data-insight-card="stock_health" data-insight-label="Stock health" title="Stock health overview"><i class="fas fa-chart-simple"></i></button>
-                        <a class="ck-link" href="stock-orders.php?view=stock">Manage <i class="fas fa-arrow-right"></i></a>
+                        <?php if ($can('stock-orders.php')): ?><a class="ck-link" href="stock-orders.php?view=stock">Manage <i class="fas fa-arrow-right"></i></a><?php elseif ($can('stock-dashboard.php')): ?><a class="ck-link" href="stock-dashboard.php">Stock overview <i class="fas fa-arrow-right"></i></a><?php endif; ?>
                     </div>
                 </header>
                 <div class="ck-stock__trio">
-                    <a href="stock-reorder.php" class="ck-mini<?php echo $stock['low_stock'] ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$stock['low_stock']; ?></strong><span>Low</span></a>
-                    <a href="stock-batches.php" class="ck-mini<?php echo $stock['expiring_batches'] ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$stock['expiring_batches']; ?></strong><span>Expiring 7d</span></a>
-                    <a href="stock-batches.php" class="ck-mini<?php echo $stock['expired_batches'] ? ' ck-mini--red' : ''; ?>"><strong><?php echo (int)$stock['expired_batches']; ?></strong><span>Expired</span></a>
+                    <a <?php echo $can('stock-reorder.php') ? 'href="stock-reorder.php"' : ''; ?> class="ck-mini<?php echo $stock['low_stock'] ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$stock['low_stock']; ?></strong><span>Low</span></a>
+                    <a <?php echo $can('stock-batches.php') ? 'href="stock-batches.php"' : ''; ?> class="ck-mini<?php echo $stock['expiring_batches'] ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$stock['expiring_batches']; ?></strong><span>Expiring 7d</span></a>
+                    <a <?php echo $can('stock-batches.php') ? 'href="stock-batches.php"' : ''; ?> class="ck-mini<?php echo $stock['expired_batches'] ? ' ck-mini--red' : ''; ?>"><strong><?php echo (int)$stock['expired_batches']; ?></strong><span>Expired</span></a>
                 </div>
                 <?php if (!empty($stock['low_items'])): ?>
                 <ul class="ck-levels">

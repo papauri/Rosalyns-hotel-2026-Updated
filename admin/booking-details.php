@@ -76,6 +76,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: booking-details.php?id=' . $booking_id);
         exit;
     }
+    // Each action needs the permission its button is shown for (the buttons are hidden without it).
+    $_bdNeed = null;
+    if (isset($_POST['booking_action'])) {
+        $_bdNeed = rhBookingActionPermission((string)$_POST['booking_action']);
+    } elseif (isset($_POST['adjust_dates'])) {
+        $_bdNeed = rhBookingActionPermission('adjust_dates');
+    } elseif (isset($_POST['update_payment'])) {
+        $_bdNeed = rhBookingActionPermission('payment');
+    }
+    if ($_bdNeed !== null && !hasPermission((int)($user['id'] ?? 0), $_bdNeed)) {
+        $_bdMsg = 'You do not have permission to do that (' . (getAllPermissions()[$_bdNeed]['label'] ?? $_bdNeed) . ').';
+        if ($isAjax) {
+            http_response_code(403);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['success' => false, 'message' => $_bdMsg]);
+            exit;
+        }
+        $_SESSION['error_message'] = $_bdMsg;
+        header('Location: booking-details.php?id=' . $booking_id);
+        exit;
+    }
 }
 
 // Handle charge actions (POST-only)
@@ -1271,6 +1292,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         $can_adjust_dates = !$bd_deleted && !$bd_closed;
         $bd_perm_delete = hasPermission((int)($user['id'] ?? 0), 'delete_booking');
         $bd_perm_edit = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
+        $bd_perm_checkin = hasPermission((int)($user['id'] ?? 0), 'checkin_guest');
+        $bd_perm_checkout = hasPermission((int)($user['id'] ?? 0), 'checkout_guest');
+        $bd_perm_cancel = hasPermission((int)($user['id'] ?? 0), 'cancel_booking');
+        $bd_perm_pay = hasPermission((int)($user['id'] ?? 0), 'payment_add');
         // Room-type change (upgrade / downgrade): before departure, never on a missed arrival.
         $bd_can_change_type = !$bd_deleted && $bd_perm_edit
             && (in_array($booking['status'], ['pending', 'tentative', 'confirmed'], true) && (string)$booking['check_in_date'] >= date('Y-m-d')
@@ -1373,13 +1398,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         </a>
                     <?php endif; ?>
 
-                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo $ci_room_override ? htmlspecialchars($ci_room_gate['message'], ENT_QUOTES) : 'Check in this guest and mark the assigned room occupied?'; ?>" data-admin-confirm-title="<?php echo $ci_room_override ? 'Room not marked clean' : 'Check in guest'; ?>" data-admin-confirm-ok="<?php echo $ci_room_override ? 'Check in anyway' : 'Check in'; ?>" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in...">
+                    <?php if ($bd_perm_checkin): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo $ci_room_override ? htmlspecialchars($ci_room_gate['message'], ENT_QUOTES) : 'Check in this guest and mark the assigned room occupied?'; ?>" data-admin-confirm-title="<?php echo $ci_room_override ? 'Room not marked clean' : 'Check in guest'; ?>" data-admin-confirm-ok="<?php echo $ci_room_override ? 'Check in anyway' : 'Check in'; ?>" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in...">
                         <input type="hidden" name="booking_action" value="checkin">
                         <?php if ($ci_room_override): ?><input type="hidden" name="confirm_checkin_room_not_ready" value="1"><?php endif; ?>
                         <button type="submit" class="action-btn checkin" data-help="Check In|Check the guest into their assigned room and mark the room occupied. Requires payment recorded, a room assigned, and the check-in date to have arrived." <?php echo ($can_checkin && $room_assigned && $checkin_date_reached) ? '' : 'disabled title="' . htmlspecialchars($checkin_disabled_reason) . '"'; ?>>
                             <i class="fas fa-right-to-bracket"></i> Check In
                         </button>
-                    </form>
+                    </form><?php endif; ?>
                     <?php if ($checkin_disabled_reason): ?>
                         <p class="booking-action-inline-hint booking-action-inline-hint--error">
                             <i class="fas fa-info-circle"></i> <?php echo htmlspecialchars($checkin_disabled_reason); ?>
@@ -1402,13 +1427,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         ? 'This guest still owes ' . $currency_symbol . ' ' . number_format($co_balance, 2) . '. Check out anyway with the outstanding balance? This will be recorded in the booking timeline.'
                         : 'Check out this guest and generate the final invoice where applicable?';
                 ?>
-                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars($co_confirm_text, ENT_QUOTES); ?>" data-admin-confirm-title="Check out guest" data-admin-confirm-ok="<?php echo $co_can_override ? 'Check out with balance' : 'Check out'; ?>" data-admin-confirm-icon="fa-right-from-bracket" data-admin-submit-text="Checking out...">
+                    <?php if ($bd_perm_checkout): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars($co_confirm_text, ENT_QUOTES); ?>" data-admin-confirm-title="Check out guest" data-admin-confirm-ok="<?php echo $co_can_override ? 'Check out with balance' : 'Check out'; ?>" data-admin-confirm-icon="fa-right-from-bracket" data-admin-submit-text="Checking out...">
                         <input type="hidden" name="booking_action" value="checkout">
                         <?php if ($co_can_override): ?><input type="hidden" name="confirm_checkout_with_balance" value="1"><?php endif; ?>
                         <button type="submit" class="action-btn checkout" data-help="Check Out|Check the guest out, release the room, and generate the final invoice where applicable."<?php echo ($co_has_balance && !$co_can_override) ? ' disabled title="Outstanding balance ' . htmlspecialchars($currency_symbol . ' ' . number_format($co_balance, 2), ENT_QUOTES) . ' - record payment before checkout"' : ''; ?>>
                             <i class="fas fa-right-from-bracket"></i> Check Out
                         </button>
-                    </form>
+                    </form><?php endif; ?>
                     <?php if ($co_has_balance): ?>
                         <p class="booking-action-inline-hint booking-action-inline-hint--error">
                             <i class="fas fa-info-circle"></i> Outstanding balance: <?php echo htmlspecialchars($currency_symbol . ' ' . number_format($co_balance, 2)); ?><?php echo $co_can_override ? ' - you may check out with the balance after confirming.' : ' - payment must be recorded before checkout.'; ?>
@@ -1417,10 +1442,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <?php endif; ?>
 
                 <?php if (in_array($booking['status'], ['confirmed', 'pending'], true) && strtotime($booking['check_in_date']) < strtotime('today')): ?>
-                    <form method="POST" class="booking-action-form" data-admin-confirm="Mark this booking as no-show and release the assigned room?" data-admin-confirm-title="Mark no-show" data-admin-confirm-ok="Mark no-show" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-user-slash" data-admin-submit-text="Updating...">
+                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" data-admin-confirm="Mark this booking as no-show and release the assigned room?" data-admin-confirm-title="Mark no-show" data-admin-confirm-ok="Mark no-show" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-user-slash" data-admin-submit-text="Updating...">
                         <input type="hidden" name="booking_action" value="noshow">
                         <button type="submit" class="action-btn noshow"><i class="fas fa-user-slash"></i> Mark No-Show</button>
-                    </form>
+                    </form><?php endif; ?>
                 <?php endif; ?>
 
                 <?php if ($bd_perm_edit): ?>
@@ -1429,7 +1454,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <?php if ($bd_can_change_type): ?>
                     <a href="bookings.php?action=room-change&amp;booking_id=<?php echo $booking_id; ?>" class="action-btn change-room" data-help="Upgrade / Change Room Type|Move the booking to another room type: paid upgrade, complimentary upgrade, or downgrade. The bill and audit trail are updated for you."><i class="fas fa-arrow-up-right-dots"></i> Upgrade / Change Type</a>
                 <?php endif; ?>
-                <?php if ($can_adjust_dates): ?>
+                <?php if ($can_adjust_dates && $bd_perm_edit): ?>
                     <button type="button" class="action-btn adjust-dates" onclick="openDateAdjustModal()">
                         <i class="fas fa-calendar-alt"></i> Adjust Stay Dates
                     </button>
@@ -1441,11 +1466,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <?php endif; /* quotation is offered only while it is relevant */ ?>
 
                 <?php if ($can_cancel): ?>
-                    <form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking, release the room, and send the guest cancellation email? Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking, release the room, and send the guest cancellation email? Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
                         <input type="hidden" name="booking_action" value="cancel">
                         <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
                         <button type="submit" class="action-btn cancel" aria-label="Cancel booking"><i class="fas fa-ban"></i> Cancel Booking</button>
-                    </form>
+                    </form><?php endif; ?>
                 <?php endif; ?>
 
                 <?php if ($bd_can_delete): ?>
@@ -1813,14 +1838,14 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
                         <?php if ($booking['payment_status'] !== 'paid'): ?>
                             <div class="payment-form">
-                                <form method="POST" data-admin-confirm="Mark this booking payment as paid and send the payment invoice email?" data-admin-confirm-title="Record payment" data-admin-confirm-ok="Mark paid" data-admin-confirm-icon="fa-money-bill-wave" data-admin-submit-text="Recording payment...">
+                                <?php if ($bd_perm_pay): ?><form method="POST" data-admin-confirm="Mark this booking payment as paid and send the payment invoice email?" data-admin-confirm-title="Record payment" data-admin-confirm-ok="Mark paid" data-admin-confirm-icon="fa-money-bill-wave" data-admin-submit-text="Recording payment...">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                                     <input type="hidden" name="update_payment" value="1">
                                     <input type="hidden" name="payment_status" value="paid">
                                     <button type="submit" class="payment-mark-paid-btn">
                                         <i class="fas fa-check-circle"></i> Mark as Paid
                                     </button>
-                                </form>
+                                </form><?php endif; ?>
                             </div>
                         <?php else: ?>
                             <p class="bd-paid-note"><i class="fas fa-check-circle"></i> Payment received.</p>

@@ -1926,10 +1926,49 @@ function rhCanOpenPage(int $user_id, string $page): bool
     return $cache[$key] = $ok;
 }
 
-/** Admin-portal access: the Dashboard permission. */
+/**
+ * Permission keys that belong to the station family (POS till, KDS/BDS/CDS,
+ * room service, Orders & Tabs). A user holding only these works at a station;
+ * holding anything else (bookings, stock, money, gym...) makes them an
+ * admin-portal user even without the Dashboard permission.
+ */
+function rhStationPermissionKeys(): array
+{
+    return [
+        'pos_till', 'pos_take_payment', 'pos_float', 'pos_discount', 'pos_86', 'pos_refund',
+        'pos_force_serve', 'pos_all_tabs', 'pos_void', 'pos_delete_order', 'pos_stations_overview',
+        'pos_shift_override', 'restaurant_table_settle', 'kds_view', 'bds_view', 'cds_view',
+        'kds_reports', 'room_service_view', 'room_service_manage', 'stock_orders', 'offline_log_view',
+        'dashboard',
+    ];
+}
+
+/**
+ * Admin-portal access: the Dashboard permission, or any other openable page
+ * outside the station family (so a receptionist given only Bookings is not
+ * locked out of the menu just because Dashboard was not ticked).
+ */
 function rhHasAdminPortal(int $user_id): bool
 {
-    return rhCanOpenPage($user_id, 'dashboard.php');
+    static $cache = [];
+    if (array_key_exists($user_id, $cache)) {
+        return $cache[$user_id];
+    }
+    if (rhCanOpenPage($user_id, 'dashboard.php')) {
+        return $cache[$user_id] = true;
+    }
+    $family = rhStationPermissionKeys();
+    $all = getAllPermissions();
+    foreach (getUserPermissions($user_id) as $key => $granted) {
+        if (!$granted || in_array($key, $family, true)) {
+            continue;
+        }
+        $page = (string)($all[$key]['page'] ?? '');
+        if ($page !== '' && rhCanOpenPage($user_id, $page)) {
+            return $cache[$user_id] = true;
+        }
+    }
+    return $cache[$user_id] = false;
 }
 
 /**
@@ -1967,6 +2006,28 @@ function rhUserHomePage(int $user_id, string $role = ''): ?string
             return $page;
         }
     }
+
+    // No dashboard and no station: the first menu page they can open, in menu order.
+    if (rhHasAdminPortal($user_id)) {
+        if (!function_exists('rh_admin_nav_groups')) {
+            require_once __DIR__ . '/admin-nav-items.php';
+        }
+        foreach (rh_admin_nav_groups() as $items) {
+            foreach ($items as $it) {
+                $page = (string)($it[0] ?? '');
+                if ($page === '' || str_starts_with($page, '../') || $page === 'dashboard.php') {
+                    continue;
+                }
+                $needs = $it[3] ?? null;
+                if ($needs !== null && !hasPermission($user_id, (string)$needs)) {
+                    continue;
+                }
+                if (rhCanOpenPage($user_id, $page)) {
+                    return $page;
+                }
+            }
+        }
+    }
     return null;
 }
 
@@ -1994,4 +2055,62 @@ function rhDenyAndRedirectHome(int $user_id, string $role, string $current_page,
         . '<a href="logout.php" style="display:inline-block;background:#7E684B;color:#fff;padding:10px 22px;border-radius:4px;text-decoration:none;font-size:.9rem;">Sign out</a>'
         . '</div></body></html>';
     exit;
+}
+
+/**
+ * Output filter for the dashboards: every in-page link to an admin page the
+ * signed-in user cannot open is removed. Button-like links (shortcuts, "manage",
+ * "view all", quick-nav tiles) disappear; card and row links stay but go inert,
+ * so no dashboard ever offers a door that bounces the user to "no access".
+ * Admins are never filtered. Only plain relative page links are touched.
+ */
+function rhStripDeniedLinks(string $html): string
+{
+    $uid = (int)($_SESSION['admin_user_id'] ?? 0);
+    if ($uid <= 0 || ($_SESSION['admin_role'] ?? '') === 'admin') {
+        return $html;
+    }
+    $out = preg_replace_callback(
+        '#<a\b([^>]*?)(?<![\w-])href="([a-z0-9][a-z0-9_-]*\.php)(?:[?\#][^"]*)?"([^>]*)>(.*?)</a>#is',
+        function ($m) use ($uid) {
+            if (in_array(strtolower($m[2]), ['logout.php', 'login.php', 'change-password.php', 'index.php', 'manifest.php'], true)
+                || rhCanLinkTo($uid, strtolower($m[2]))) {
+                return $m[0];
+            }
+            $attrs = $m[1] . $m[3];
+            if (preg_match('#class="[^"]*(?:-btn|btn-|-link|qn-item|__action|ck-menu)[^"]*"#i', $attrs)) {
+                return '';
+            }
+            return '<a' . $m[1] . 'aria-disabled="true" tabindex="-1" style="pointer-events:none;cursor:default"' . $m[3] . '>' . $m[4] . '</a>';
+        },
+        $html
+    );
+    return $out === null ? $html : $out;
+}
+
+/**
+ * Server-side permission for a booking action, matching the buttons the UI
+ * shows. Returns the permission key the action needs, or null when the action
+ * is open to anyone who can open the booking screens (e.g. confirming a
+ * pending booking, adding a note).
+ *
+ * $action  : checkin | cancel_checkin | checkout | noshow | cancel | payment | adjust_dates
+ *            (or a booking status for status changes: checked-in, checked-out, cancelled, no-show)
+ */
+function rhBookingActionPermission(string $action, string $status = ''): ?string
+{
+    $key = $action === 'update_status' ? $status : $action;
+    switch ($key) {
+        case 'checkin': case 'checked-in': case 'cancel_checkin': case 'cancel-checkin':
+            return 'checkin_guest';
+        case 'checkout': case 'checked-out': case 'checkout_assess': case 'checkout_settle':
+            return 'checkout_guest';
+        case 'cancel': case 'cancelled': case 'noshow': case 'no-show':
+            return 'cancel_booking';
+        case 'payment': case 'update_payment': case 'consolidation_record':
+            return 'payment_add';
+        case 'adjust_dates': case 'admin_update_checkout_date':
+            return 'edit_booking';
+    }
+    return null;
 }

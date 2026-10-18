@@ -41,6 +41,9 @@
       <li><a href="#cancel-void">How to cancel or void an order</a></li>
       <li><a href="#refund">How to refund a paid order</a></li>
       <li><a href="#86">How to 86 an item (mark it unavailable)</a></li>
+      <li><a href="#notices">What to do with cancellation, void and 86 notices</a></li>
+      <li><a href="#today-orders">How to use Today's orders</a></li>
+      <li><a href="#delete-order">How to delete an order</a></li>
       <li><a href="#force-serve">How to settle a tab whose food was never served</a></li>
       <li><a href="#notes">How to chat with the stations and send them a note</a></li>
       <li><a href="#receipts">How to print a kitchen ticket or send a receipt</a></li>
@@ -60,6 +63,7 @@
   <p><strong>Top bar</strong></p>
   <ul>
     <li><strong>Recent</strong> &mdash; your last 10 orders in the current business day, with the amount, payment method, time and status. Click an order to open its receipt. A <strong>Refund</strong> button shows next to paid orders if you have the <strong>POS Refunds</strong> permission.</li>
+    <li><strong>Today's orders</strong> &mdash; every order of today's business day from all cashiers, in a table. Only shown to people with <strong>POS All Cashiers' Tabs</strong> (see <a href="#today-orders">How to use Today's orders</a>).</li>
     <li><strong>Tabs</strong> &mdash; the open (unpaid) tabs. The number on the button is how many are open.</li>
     <li><strong>Note</strong> &mdash; send a short note to the Kitchen, Bar or Coffee Bar.</li>
     <li><strong>My orders</strong> &mdash; every order you rang up today, with kitchen and payment status.</li>
@@ -96,6 +100,8 @@
       <tr><td>86 or re-enable a menu item from the till</td><td><strong>POS Quick-86 Items</strong></td></tr>
       <tr><td>Refund a paid order</td><td><strong>POS Refunds</strong></td></tr>
       <tr><td>Void a tab or order (single or bulk)</td><td><strong>POS Void Tabs</strong> and <strong>Restaurant Orders (POS)</strong></td></tr>
+      <tr><td>See <strong>Today's orders</strong> on the till</td><td><strong>POS All Cashiers' Tabs</strong></td></tr>
+      <tr><td>Delete any order for good (with a reason)</td><td><strong>Delete Orders</strong>. Administrators have it by default. An administrator can give it to anyone in Staff &amp; Access.</td></tr>
       <tr><td>Settle a tab whose food was never served without asking a manager</td><td><strong>POS Force-Serve Tab</strong></td></tr>
       <tr><td>See, add to and settle other cashiers' tabs</td><td><strong>POS All Cashiers' Tabs</strong> (Managers and admins). Without it you only see and work on tabs you opened. "Ready" alerts always go only to the person who placed the order, whatever their permissions.</td></tr>
       <tr><td>See the live Kitchen, Bar and Coffee boards, today's order list and order timelines from the till</td><td><strong>POS Station Overview</strong></td></tr>
@@ -250,6 +256,7 @@
 
   <h2 id="cancel-void">How to cancel or void an order</h2>
   <p><strong>Cancel</strong> is for an unpaid tab where nobody has started the food or drink. <strong>Void</strong> reverses an order even after work has started, or after it is paid.</p>
+  <p>You can start a cancellation from three places: the <strong>More</strong> menu on a tab card, the order's details window, and the <strong>Today's orders</strong> table. The button is called <strong>Cancel order</strong> while the kitchen or bar has not started. Once they have started, it reads <strong>Cancel order (void)</strong> if you have <strong>POS Void Tabs</strong>, and <strong>Cancel order (kitchen started)</strong> if you do not (you then need a manager).</p>
   <h3>Cancel an unpaid tab</h3>
   <ol class="steps">
     <li>Click <strong>Tabs</strong>, then <strong>More</strong> on the tab card, then <strong>Cancel</strong>. The Cancel button only appears while every item is still pending.</li>
@@ -287,6 +294,50 @@
   </ol>
   <p>86'd items disappear from the till for staff who cannot 86. You can also change availability on the Menu page (see <a href="#menu">How to add or change a menu item</a>).</p>
   <div class="note"><p>This is different from "86 this item" on a Kitchen, Bar or Coffee Bar ticket. That removes one line from one order and alerts the cashier. See the <a href="02-kds-kitchen.html">Kitchen guide</a>.</p></div>
+
+  <h2 id="notices">What to do with cancellation, void and 86 notices</h2>
+  <p>When an order is cancelled or voided, or a Kitchen or Bar station 86's an item that is on an order, the till shows a notice (<em>Order cancelled</em>, <em>Order voided</em> or <em>Item 86'd</em>). A notice stays until someone marks it as read, and the read mark is shared by everyone on the till. Each notice has buttons for what you can still do:</p>
+  <ul>
+    <li><strong>Mark as read</strong> &mdash; clears the notice. <strong>Mark all as read</strong> clears every notice at once.</li>
+    <li><strong>Open order</strong> &mdash; opens the order's details so you can see what happened.</li>
+    <li><strong>Replace item</strong> &mdash; for an 86'd item on an open tab: choose another item for the guest.</li>
+    <li><strong>Remove from tab</strong> &mdash; for an 86'd item on an open tab: takes the item off the tab. Its price comes off the bill and any stock taken for it goes back. Needs <strong>POS Void Tabs</strong>.</li>
+    <li><strong>Refund</strong> &mdash; on a paid order, if you have <strong>POS Refunds</strong>.</li>
+    <li><strong>Settle refund</strong> &mdash; shown when an 86'd item on an order that is already paid leaves the guest owed money. The button shows the amount. Click it and confirm <em>"Hand ... back to the guest"</em> with <strong>Refund paid</strong> once you have given the guest the money.</li>
+  </ul>
+  <h3>How to settle a refund from a notice</h3>
+  <ol class="steps">
+    <li>Find the <em>Item 86'd</em> notice. It shows <em>refund pending</em> and a <strong>Settle refund (MWK ...)</strong> button.</li>
+    <li>Hand the money back to the guest.</li>
+    <li>Click <strong>Settle refund</strong>, then <strong>Refund paid</strong>.</li>
+  </ol>
+  <p>Money: the refund is recorded as paid out on <strong>your</strong> shift, so take the money from your own drawer. It is counted in your shift close report, and the notice is marked as read.</p>
+
+  <h2 id="today-orders">How to use Today's orders</h2>
+  <p>You need <strong>POS All Cashiers' Tabs</strong>. Without it the button is not shown.</p>
+  <ol class="steps">
+    <li>On the top bar of the till, tap <strong>Today's orders</strong>.</li>
+    <li>A window lists every order of today's business day from all cashiers: <strong>Order</strong>, <strong>Time</strong>, <strong>Type / table</strong>, <strong>Staff</strong>, <strong>Items</strong>, <strong>Total</strong>, <strong>Paid</strong>, <strong>Status</strong> and <strong>Actions</strong>. On a phone each order is a card.</li>
+    <li>Type in the search box (<em>Search reference, table, staff...</em>) or pick a status in the filter: <strong>Open (unpaid)</strong>, <strong>Paid</strong>, <strong>Cancelled</strong>, <strong>Voided</strong>, <strong>Refunded</strong> or <strong>Delivered (room service)</strong>. Tap <strong>Refresh</strong> to reload.</li>
+    <li>Use the buttons on the row. <strong>View</strong> is always there. The others show only if you have the permission for them: <strong>Settle</strong> and <strong>Add items</strong> (open orders), <strong>Refund</strong> (paid orders), <strong>Cancel</strong> (open orders), <strong>Void</strong> (paid orders) and <strong>Delete</strong> (see <a href="#delete-order">How to delete an order</a>). When there are more than three buttons, the extra ones are in the <strong>More</strong> menu at the end of the row.</li>
+  </ol>
+
+  <h2 id="delete-order">How to delete an order</h2>
+  <p>Use this for an order that should never have existed, for example a test order or a duplicate. You need the <strong>Delete Orders</strong> permission. Administrators have it by default. An administrator can give it to anyone in <a href="18-staff-access.html">Staff &amp; Access</a>. You can delete any order, open or paid, even from a closed shift.</p>
+  <ol class="steps">
+    <li>Open <strong>Today's orders</strong> and click <strong>Delete</strong> on the order (it may be in <strong>More</strong>). You can also use <strong>More</strong> &rarr; <strong>Delete</strong> on the order's row in <strong>Orders &amp; Tabs</strong> (see the <a href="08-stock-orders.html#orders">Stock guide</a>).</li>
+    <li>Type a <strong>reason</strong> of at least 8 characters.</li>
+    <li>Click <strong>Delete order</strong>. You will see <em>"Order ORD-... deleted."</em> with a short summary of what was undone.</li>
+  </ol>
+  <p>What happens when you delete:</p>
+  <ul>
+    <li><strong>Payments:</strong> the order's payments and refunds are removed, so today's takings, shift reports and End of Day reports change.</li>
+    <li><strong>Room-service orders:</strong> the charges are taken off the guest's bill. If the guest had already paid for them, a credit note is raised.</li>
+    <li><strong>Stock:</strong> stock is put back only for items the kitchen or bar had <strong>not</strong> started. Food and drink already prepared is recorded as wastage (<em>Deleted order ORD-...</em>).</li>
+    <li><strong>Cash drawer:</strong> the drawer is <strong>not</strong> changed. Cash that was taken or handed back is not moved, so settle the drawer separately.</li>
+    <li>A permanent record of the deletion, with your name and reason, is kept.</li>
+  </ul>
+  <div class="warn"><p>A delete cannot be undone. It is refused if a credit note is linked to the order (<em>"Credit note ... is linked to ... Void that credit note first, then delete the order."</em>) or if a payment was already sent to MRA (<em>"... was already fiscalised with MRA - it cannot be deleted. Void or refund the order instead."</em>). Then void or refund the order instead.</p></div>
 
   <h2 id="force-serve">How to settle a tab whose food was never served</h2>
   <p>A tab cannot be settled while it has food that the Kitchen has not marked served. If the food was never bumped (for example from an earlier shift), a manager can force it.</p>
@@ -450,6 +501,8 @@
       <tr><td><em>"A table called ... already exists. Use a different name or edit the existing one."</em> / <em>"Table name must be between 1 and 50 characters."</em></td><td>Two tables share a name, or a name is empty or too long.</td><td>Give each table its own name of 1 to 50 characters.</td></tr>
       <tr><td><em>"Table 5 already has active order ORD-... (...). Settle, serve, cancel, or use the existing order before opening another."</em></td><td>The table or room is in use.</td><td>Use <strong>Add items</strong> on the existing tab, or settle or cancel it first.</td></tr>
       <tr data-module="bookings"><td><em>"Room 12 has no checked-in guest booking."</em></td><td>No checked-in guest in that room.</td><td>Check the guest in first.</td></tr>
+      <tr><td><em>"A reason of at least 8 characters is required to delete an order."</em></td><td>The reason was too short.</td><td>Type a longer reason.</td></tr>
+      <tr><td><em>"You do not have permission to delete orders."</em></td><td>You do not have <strong>Delete Orders</strong>.</td><td>Ask an administrator.</td></tr>
       <tr><td><em>"Menu item not found or unavailable."</em></td><td>The item was switched off or 86'd after the till page loaded.</td><td>Refresh the till and choose another item.</td></tr>
       <tr><td><em>"Tendered 5,000.00 &lt; amount due 6,500.00"</em></td><td>Cash handed over is less than the total plus tip.</td><td>Enter the right amount.</td></tr>
       <tr><td><em>"Mobile money requires provider + transaction reference."</em></td><td>A field is empty.</td><td>Choose the provider and type the reference.</td></tr>

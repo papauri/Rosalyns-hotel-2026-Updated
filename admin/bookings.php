@@ -140,6 +140,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // so the later bookings_log_status_change() calls never hit a missing table.
         ensureBookingStatusLogTable($pdo);
 
+        // Each action needs the permission its button is shown for.
+        $_bkNeed = rhBookingActionPermission((string)$action, (string)($_POST['status'] ?? ''));
+        if ($_bkNeed !== null && !hasPermission((int)($user['id'] ?? 0), $_bkNeed)) {
+            throw new Exception('You do not have permission to do that (' . (getAllPermissions()[$_bkNeed]['label'] ?? $_bkNeed) . ').');
+        }
+
         if ($action === 'delete_booking' || $action === 'restore_booking') {
             // Recoverable delete / restore (permission delete_booking; see includes/booking-soft-delete.php).
             if (!isAjaxRequest()) {
@@ -3654,7 +3660,7 @@ $today_str = $today->format('Y-m-d');
                                                 || (in_array($bk_status, ['cancelled', 'no-show', 'expired'], true) && $bk_paid > BALANCE_TOLERANCE)
                                             );
                                             // One-click "mark as paid" settles the FULL total, so only when nothing is paid yet.
-                                            $can_mark_paid = in_array($bk_status, ['pending', 'confirmed'], true)
+                                            $can_mark_paid = $_perm_pay && in_array($bk_status, ['pending', 'confirmed'], true)
                                                 && !in_array($booking['payment_status'], ['paid', 'partial', 'completed'], true);
                                             $can_modify = $bk_holding || $bk_inhouse;
                                             $can_change_room_type = ($bk_holding && !$is_missed_checkin) || $bk_inhouse;

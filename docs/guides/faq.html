@@ -94,7 +94,7 @@
 
   <details class="faq" id="faq-signed-out">
     <summary>Why was I signed out?</summary>
-    <p>You are signed out after 8 hours without activity. Sign in again; you go back to the page you asked for.</p>
+    <p>Staff stay signed in for a whole shift: you are signed out only after 8 hours without activity. Sign in again; you go back to the page you asked for. After a system update everyone signs in once more, one time only. If you are signed out sooner than 8 hours, tell the administrator.</p>
   </details>
 
   <details class="faq" id="faq-change-password">
@@ -126,7 +126,7 @@
 
   <details class="faq" id="faq-checkout-other-day">
     <summary>The guest is leaving early or late. How do I check them out?</summary>
-    <p>A plain checkout only works on the booked departure day. On any other day use <strong>Check Out &amp; Settle</strong> on the booking page (or the checkout button on the list). The settlement window charges the extra nights or refunds the unused ones before checking the guest out. See <a href="07-reception-bookings.html#checkout">How to check a guest out</a>.</p>
+    <p>A plain checkout only works on the booked departure day. On any other day use <strong>Check Out &amp; Settle</strong> on the booking page (or the checkout button on the list). The settlement window charges the extra nights or refunds the unused ones before checking the guest out. A late checkout extends the stay at the guest's booked nightly rate, exactly like <strong>Extend stay</strong>; there is no separate late-checkout charge. See <a href="07-reception-bookings.html#checkout">How to check a guest out</a>.</p>
   </details>
 
   <details class="faq" id="faq-checkout-owes">
@@ -146,7 +146,7 @@
 
   <details class="faq" id="faq-joined-rooms">
     <summary>How do I sell two adjoining rooms as one family room (joined rooms)?</summary>
-    <p>Admin menu &rarr; <strong>Front Desk</strong> &rarr; <strong>Individual Rooms</strong> &rarr; <strong>Room Combinations</strong>. Name the pair, choose the room type it is booked as and the two rooms, then choose whether the rooms are sold on their own as well or only as the joined room. A room can be in only one active pair. Use <strong>Deactivate</strong> to stop selling a pair that bookings have used, and <strong>Delete</strong> only for one nobody has booked. A joined booking is assigned a whole pair in the Assign Room window. See <a href="07-reception-bookings.html#rooms">Individual rooms</a>.</p>
+    <p>Admin menu &rarr; <strong>Front Desk</strong> &rarr; <strong>Individual Rooms</strong> &rarr; <strong>Room Combinations</strong>. Name the pair, choose the room type it is booked as and the two rooms, then choose whether the rooms are sold on their own as well or only as the joined room. A room can be in only one active pair. Use <strong>Deactivate</strong> to stop selling a pair that bookings have used, and <strong>Delete</strong> only for one nobody has booked. New combinations are set to <strong>Only as the joined room</strong> by default, which makes the pair count as one room everywhere. A joined booking is assigned a whole pair in the Assign Room window. See <a href="07-reception-bookings.html#rooms">Individual rooms</a>.</p>
   </details>
 
   <details class="faq" id="faq-delete-booking">
@@ -164,6 +164,21 @@
   <details class="faq" id="faq-pos-chat" data-module="pos">
     <summary>How do I reply to the kitchen, or message a station, from the till?</summary>
     <p>Click <strong>Messages</strong> in the till's top bar. It is a chat with tabs for <strong>All</strong>, <strong>Kitchen</strong>, <strong>Bar</strong> and <strong>Coffee Bar</strong>. Click <strong>Got it</strong> or a quick reply to answer a waiting note, or type in the box at the bottom and click <strong>Send</strong>. Notes you have acknowledged stay in today's history. See <a href="01-pos-till.html#notes">How to chat with the stations and send them a note</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-delete-order" data-module="pos">
+    <summary>How do I delete a POS order (a test or duplicate order)?</summary>
+    <p>You need the <strong>Delete Orders</strong> permission (administrators have it; an administrator can give it to anyone in Staff &amp; Access). Open the till's <strong>Today's orders</strong> and click <strong>Delete</strong> on the order, or use <strong>More</strong> &rarr; <strong>Delete</strong> on the row in <strong>Orders &amp; Tabs</strong>. Type a reason of at least 8 characters. Payments are removed, room-service charges come off the guest bill, stock is put back only for items the kitchen had not started, prepared food is recorded as wastage, and the cash drawer is not changed. It is refused if a credit note is linked or a payment went to MRA. See <a href="01-pos-till.html#delete-order">How to delete an order</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-todays-orders" data-module="pos">
+    <summary>Where do I see all of today's orders on the till?</summary>
+    <p>Tap <strong>Today's orders</strong> on the till's top bar. It needs the <strong>POS All Cashiers' Tabs</strong> permission. It lists every order of today from all cashiers, with <strong>View</strong>, <strong>Settle</strong>, <strong>Add items</strong>, <strong>Refund</strong>, <strong>Cancel</strong>, <strong>Void</strong> and <strong>Delete</strong> as your permissions allow, and a <strong>More</strong> menu on each row. See <a href="01-pos-till.html#today-orders">How to use Today's orders</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-pos-notices" data-module="pos">
+    <summary>The till shows an "Order cancelled", "Order voided" or "Item 86'd" notice. What do I do?</summary>
+    <p>Use the buttons on the notice: <strong>Mark as read</strong> (or <strong>Mark all as read</strong>), <strong>Open order</strong>, <strong>Replace item</strong> or <strong>Remove from tab</strong> for an 86'd item, and <strong>Settle refund</strong> to hand money back for an 86'd item on a paid order. A settled refund is counted on your shift. See <a href="01-pos-till.html#notices">cancellation, void and 86 notices</a>.</p>
   </details>
 
   <details class="faq" id="faq-table-rename" data-module="stock">
@@ -193,7 +208,7 @@
 
   <details class="faq" id="faq-end-of-day">
     <summary>Where do I see today's takings and what still needs doing?</summary>
-    <p><strong>Money &rarr; End of Day</strong> shows the day's net takings, cash to bank, what is still owed and a close score with the items that need attention. See <a href="14-reports-eod.html#eod">End of Day report</a>.</p>
+    <p><strong>Money &rarr; End of Day</strong> shows the day's <strong>Revenue earned</strong> (what the hotel earned that day: nights stayed, charges on guest bills, till sales, conferences and events on their event date), <strong>Cash collected</strong> on its own line, cash to bank, what is still owed and a close score with the items that need attention. See <a href="14-reports-eod.html#eod">End of Day report</a>.</p>
   </details>
 
   </div>

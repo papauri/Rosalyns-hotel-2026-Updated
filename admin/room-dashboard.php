@@ -21,6 +21,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: ' . basename($_SERVER['PHP_SELF'])); exit;
     }
     $action = $_POST['action'] ?? '';
+    $canRoomWork = hasPermission((int)$user['id'], 'housekeeping') || hasPermission((int)$user['id'], 'room_maintenance');
+    if (!$canRoomWork) {
+        $action = ''; // view-only: changing room status needs Housekeeping or Room Maintenance
+        $error = 'You do not have permission to change room status.';
+    }
 
     try {
         switch ($action) {
@@ -69,6 +74,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Error: ' . $e->getMessage();
     }
 }
+
+$rdCanWork = hasPermission((int)$user['id'], 'housekeeping') || hasPermission((int)$user['id'], 'room_maintenance');
 
 // Get dashboard data
 $summary = getRoomDashboardSummary();
@@ -262,6 +269,7 @@ $roomStatuses = getRoomStatuses();
                 </div>
                 <?php endif; ?>
                 <div class="room-actions">
+                    <?php if ($rdCanWork): ?>
                     <form method="POST" style="display: inline;">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                         <input type="hidden" name="action" value="mark_clean">
@@ -270,6 +278,7 @@ $roomStatuses = getRoomStatuses();
                             <i class="fas fa-check"></i> Mark Clean
                         </button>
                     </form>
+                    <?php endif; ?>
                 </div>
             </div>
             <?php endforeach; ?>
@@ -309,6 +318,7 @@ $roomStatuses = getRoomStatuses();
                 </div>
                 <span class="badge badge-inspection">Inspection Pending</span>
                 <div class="room-actions">
+                    <?php if ($rdCanWork): ?>
                     <form method="POST" style="display: inline;" onsubmit="return confirmPass(this)">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                         <input type="hidden" name="action" value="pass_inspection">
@@ -321,6 +331,7 @@ $roomStatuses = getRoomStatuses();
                     <button type="button" class="btn-danger" onclick="openFailModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['room_number']); ?>')">
                         <i class="fas fa-times"></i> Fail
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
             <?php endforeach; ?>
