@@ -17,11 +17,82 @@ $GLOBALS['__h_cfg'] = $cfg;
 
 require $root . '/config/database.php';
 
+/**
+ * Tests run against the LIVE database (owner's choice), so nothing a page does may survive:
+ * commit() is a no-op, and every statement that would make MySQL commit implicitly
+ * (CREATE/ALTER/DROP/TRUNCATE/RENAME, LOCK/UNLOCK TABLES, autocommit, COMMIT/BEGIN) is
+ * skipped and reported as `ddl_skipped`. Pages' "ensure schema" DDL used to commit the
+ * harness transaction half-way and leak test rows into the live data. Temporary tables are
+ * allowed (no implicit commit). A page's own beginTransaction()/commit()/rollBack() become
+ * SAVEPOINT / RELEASE / ROLLBACK TO inside the harness transaction, so a page rolling back
+ * its own work never ends the outer transaction (which would put the connection in
+ * autocommit and let later writes reach the live DB). __h_finish() checks a marker row from
+ * a second connection (`leak`) and on the harness connection (`marker_lost`).
+ * Never point the harness at anything that spawns a subprocess or opens its own PDO
+ * (backup/restore in admin/backup-management.php, scripts/restore_database.php).
+ */
 class TxSafePdo extends PDO
 {
-    public function beginTransaction(): bool { if (!$this->inTransaction()) { return parent::beginTransaction(); } return true; }
-    public function commit(): bool { return true; }
+    private $savepoints = 0;
+    public static function commitsImplicitly(string $sql): bool
+    {
+        $s = ltrim((string)preg_replace('#^(\s+|/\*(?!!).*?\*/|(--|\#)[^\n]*\n)+#s', '', $sql));
+        // A second statement in the same string, or a MySQL executable comment, is not inspected: refuse it.
+        $bare = (string)preg_replace('#\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*"|`[^`]*`#s', "''", $s); // ignore ; inside literals
+        if (preg_match('#;\s*\S#', rtrim($bare, "; \t\r\n")) || strpos($bare, '/*!') !== false) {
+            return true;
+        }
+        if (preg_match('#^(CREATE|DROP)\s+TEMPORARY\s#i', $s)) {
+            return false;
+        }
+        return (bool)preg_match('#^(CREATE|ALTER|DROP|TRUNCATE|RENAME|LOCK\s+TABLES|UNLOCK\s+TABLES|COMMIT|START\s+TRANSACTION|BEGIN|ANALYZE|OPTIMIZE|REPAIR|CHECK\s+TABLE|FLUSH|RESET|CACHE\s+INDEX|LOAD\s+INDEX|GRANT|REVOKE|SET\s+PASSWORD|INSTALL|UNINSTALL)\b#i', $s)
+            || (bool)preg_match('#^SET\s+(GLOBAL\s+|SESSION\s+|LOCAL\s+)?(@@(global\.|session\.|local\.)?)?autocommit\b#i', $s);
+    }
+    private function skip(string $sql): void { $GLOBALS['__h_ddl'][] = substr(preg_replace('/\s+/', ' ', trim($sql)), 0, 120); }
+    public function beginTransaction(): bool
+    {
+        if (!$this->inTransaction()) {
+            return parent::beginTransaction();
+        }
+        $this->savepoints++;
+        parent::exec('SAVEPOINT h_sp' . $this->savepoints);
+        return true;
+    }
+    public function commit(): bool
+    {
+        if ($this->savepoints > 0) {
+            parent::exec('RELEASE SAVEPOINT h_sp' . $this->savepoints);
+            $this->savepoints--;
+        }
+        return true;
+    }
+    #[\ReturnTypeWillChange]
+    public function rollBack()
+    {
+        if ($this->savepoints > 0) {
+            parent::exec('ROLLBACK TO SAVEPOINT h_sp' . $this->savepoints);
+            parent::exec('RELEASE SAVEPOINT h_sp' . $this->savepoints);
+            $this->savepoints--;
+        } else {
+            $GLOBALS['__h_ddl'][] = 'rollBack() with no open page transaction - ignored';
+        }
+        return true;
+    }
     public function harnessRollback(): void { if ($this->inTransaction()) { parent::rollBack(); } }
+    #[\ReturnTypeWillChange]
+    public function exec($statement) { if (self::commitsImplicitly((string)$statement)) { $this->skip((string)$statement); return 0; } return parent::exec($statement); }
+    #[\ReturnTypeWillChange]
+    public function query($statement, $mode = null, ...$args)
+    {
+        if (self::commitsImplicitly((string)$statement)) { $this->skip((string)$statement); return parent::query('SELECT 0'); }
+        return $mode === null ? parent::query($statement) : parent::query($statement, $mode, ...$args);
+    }
+    #[\ReturnTypeWillChange]
+    public function prepare($statement, $options = [])
+    {
+        if (self::commitsImplicitly((string)$statement)) { $this->skip((string)$statement); return parent::prepare('SELECT 0'); }
+        return parent::prepare($statement, $options);
+    }
 }
 $opts = [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false, PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true];
 $pdo = new TxSafePdo("mysql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET, DB_USER, DB_PASS, $opts);
@@ -33,6 +104,8 @@ if (stripos($sqlMode, 'STRICT_TRANS_TABLES') === false) {
 $pdo->beginTransaction();
 // Cache off for this process only (rolled back with everything else): no uncommitted value can reach the file cache.
 $pdo->exec("INSERT INTO site_settings (setting_key, setting_value) VALUES ('cache_global_enabled','0'),('automated_email_master','0') ON DUPLICATE KEY UPDATE setting_value='0'"); // master off: the web scheduler (which can send emails) never runs
+$GLOBALS['__h_marker'] = '__harness_marker_' . bin2hex(random_bytes(6)); // leak probe, see __h_finish()
+$pdo->prepare("INSERT INTO site_settings (setting_key, setting_value) VALUES (?, '1')")->execute([$GLOBALS['__h_marker']]);
 
 function __h_finish(): void
 {
@@ -48,6 +121,35 @@ function __h_finish(): void
     if (preg_match('#^\s*[\[{].*[\]}]\s*$#s', $buf)) { $res['json'] = json_decode(trim($buf), true); }
     foreach (($GLOBALS['__h_cfg']['verify'] ?? []) as $sql) {
         try { $res['verify'][] = $pdo->query($sql)->fetchAll(); } catch (Throwable $e) { $res['verify'][] = 'ERR ' . $e->getMessage(); }
+    }
+    $res['ddl_skipped'] = $GLOBALS['__h_ddl'] ?? [];
+    // The marker must still be visible on the harness connection; if not, the outer transaction
+    // ended mid-run and anything written afterwards was autocommitted.
+    try {
+        $own = $pdo->prepare('SELECT COUNT(*) FROM site_settings WHERE setting_key = ?');
+        $own->execute([$GLOBALS['__h_marker']]);
+        $res['marker_lost'] = (int)$own->fetchColumn() === 0;
+        if ($res['marker_lost']) {
+            fwrite(STDERR, "HARNESS LEAK: the harness transaction ended during the page run - later writes may have reached the live DB\n");
+        }
+    } catch (Throwable $e) {
+        $res['marker_lost'] = null;
+    }
+    // Leak check from a SECOND connection: the marker row written inside the harness transaction
+    // must be invisible to it. If it is visible, something committed the transaction mid-run.
+    $res['leak'] = null;
+    try {
+        $probe = new PDO("mysql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET, DB_USER, DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $chk = $probe->prepare('SELECT COUNT(*) FROM site_settings WHERE setting_key = ?');
+        $chk->execute([$GLOBALS['__h_marker']]);
+        $res['leak'] = (int)$chk->fetchColumn() > 0;
+        if ($res['leak']) {
+            $probe->prepare('DELETE FROM site_settings WHERE setting_key = ?')->execute([$GLOBALS['__h_marker']]);
+            fwrite(STDERR, "HARNESS LEAK: the transaction was committed during the page run - rows may have reached the live DB
+");
+        }
+    } catch (Throwable $e) {
+        $res['leak_check_error'] = $e->getMessage();
     }
     $pdo->harnessRollback();
     $res['rolled_back'] = !$pdo->inTransaction();

@@ -51,9 +51,15 @@ finish, say `NEEDS_UI_DECISION: <question>` and carry on with the rest.
   and Liwonde (`C:\Users\john-paul.chirwa\OneDrive\MSP\Liwonde_Sun_Hotel_2026`) share all
   admin/api/includes/config/scripts code. Work in Rosalyn's; the orchestrator ports to
   Liwonde unless your brief says you port.
-- The database is LIVE and shared. Test only inside transactions you roll back, or with
-  `scripts/tests/page_harness.php` (runs an admin page POST as admin, rolled back).
-  Never leave rows behind.
+- The database is LIVE and shared, and tests run against it (owner's choice). Test only inside
+  transactions you roll back, or with `scripts/tests/page_harness.php` (admin page POST as
+  admin, rolled back). The harness skips statements that would commit implicitly (DDL, LOCK,
+  autocommit) and reports them as `ddl_skipped`; if it prints `HARNESS LEAK` or `"leak":true`,
+  stop and report it. Never point it at backup/restore actions or anything that spawns a
+  subprocess or opens its own DB connection (those bypass the rollback). Never leave rows behind.
+- Leads that touch the same files run one after another, never in parallel (shared hot spots:
+  `config/database.php`, `admin/pos.php`, `admin/bookings.php`, `admin/reports.php`,
+  `admin/includes/*`). Read-only AUDITs may run in parallel.
 - Never run git. Never edit `.env`. No DDL (schema changes are owner decisions).
 - `php -l` every changed PHP file; `node --check` every changed inline script (extract it).
 - Run `php scripts/run_tests.php` at the end of a FIX pass (never in parallel with another
@@ -63,3 +69,17 @@ finish, say `NEEDS_UI_DECISION: <question>` and carry on with the rest.
   not re-run. Guest-site navigation keeps only `<main>`.
 - Output: files changed (paths only) · ≤6-line outcome · findings/UI_REQUEST/BLOCKED lines ·
   lint and test results. No code blocks.
+
+## Ship gate (every change, no exceptions)
+
+1. The lead's own checks: `php -l`, `node --check`, `php scripts/run_tests.php`.
+2. **Independent code review is mandatory before every commit**: `qa-auditor` (sonnet for
+   logic/money/security) reads the diff and must PASS; money changes also need
+   `dept-accounting-lead`, stock changes `dept-stock-lead`.
+3. **Browser check before anything ships** that touches a screen — no MCP browser tools
+   (too many tokens). Serve the repo with `php -S 0.0.0.0:8000 -t . scripts/tests/dev-router.php`
+   and drive it with `node scripts/tests/browser_check.mjs steps.json` (headless Chrome;
+   `{base}/__devlogin?to=page.php` signs in as admin). Check desktop and 390px phone width.
+   If port 8000 is already taken by a plain `php -S` (no router), use another port and set
+   `BASE=http://localhost:<port>`.
+4. Then port to Liwonde, re-run its tests, commit and push both.

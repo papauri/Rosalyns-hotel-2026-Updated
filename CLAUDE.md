@@ -43,8 +43,10 @@ do not re-derive plans or re-scan the repo ad hoc.
   SQL; never edit `.env`; park owner decisions as `blocked:` in BUILD_PLAN.md and continue
   with the next task.
 - **Git**: commit and push to `origin/main` directly — no feature branches, no waiting for
-  the owner to trigger it. Commit only work that has passed its QA gate (`php -l` on every
-  changed file, plus the relevant smoke test). One commit per completed task, message
+  the owner to trigger it. Commit only work that has passed the ship gate in `.claude/DEPARTMENTS.md`:
+  `php -l`, tests, a mandatory independent `qa-auditor` review of the diff, and a headless
+  browser check (`php -S 0.0.0.0:8000` + `scripts/tests/browser_check.mjs`, never MCP) for
+  anything with a screen. One commit per completed task, message
   stating what changed and why. Check the diff for secrets and stray files before staging;
   `.env` is untracked and stays that way. Never force-push, never rewrite pushed history.
 - **Reporting**: STATUS block after every task (finished / in-progress / next 3 / blocked);
