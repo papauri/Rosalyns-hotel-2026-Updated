@@ -142,6 +142,10 @@ function buildEodPdf(
     $rev     = (array)($d['rev'] ?? []);
     $gross   = (float)($d['gross'] ?? 0);
     $net     = (float)($d['net']   ?? 0);
+    // Headline = revenue EARNED that day (shared calc, admin/includes/eod-revenue.php). $gross / $net stay the
+    // cash view (payments received less refunds). Without 'earned' the report falls back to the cash view.
+    $earned       = (isset($d['earned']) && is_array($d['earned'])) ? $d['earned'] : null;
+    $earned_total = $earned !== null ? (float)($earned['total'] ?? 0) : $net;
     $adr     = (float)($d['adr']   ?? 0);
     $revpar  = (float)($d['revpar'] ?? 0);
     $methods = (array)($d['methods'] ?? []);
@@ -334,8 +338,8 @@ function buildEodPdf(
 
     $kpis = [
         [
-            'label' => 'NET REVENUE',
-            'value' => $m($net),
+            'label' => $earned !== null ? 'REVENUE EARNED' : 'NET REVENUE',
+            'value' => $m($earned_total),
             'sub'   => ($net_change >= 0 ? '+' : '') . $m($net_change) . ' vs yday',
             'sub_c' => $net_sub_c,
         ],
@@ -438,6 +442,57 @@ function buildEodPdf(
     };
 
     // ── LEFT: Revenue by Source ───────────────────────────────────────────────
+    if ($earned !== null) {
+        // Revenue EARNED that day, by source.
+        $secL('Revenue Earned by Source');
+        $i = 0;
+        $eNz = static function ($k) use ($earned): bool { return abs((float)($earned[$k] ?? 0)) > 0.004; };
+        if ($eodModBookings)   { $rowL('Rooms (nights stayed)', $m((float)($earned['rooms_total_gross'] ?? 0)), false, $i++); }
+        if ($eNz('extras_gross')) { $rowL('Other guest-bill charges', $m((float)$earned['extras_gross']), false, $i++); }
+        if ($eodModConference || $eNz('conf_gross')) { $rowL('Conferences (when paid)', $m((float)($earned['conf_gross'] ?? 0)), false, $i++); }
+        $rowL(isRestaurantEnabled() ? 'F&B / POS' : 'POS', $m((float)($earned['fnb_gross'] ?? 0)), false, $i++);
+        if ($eodModGym    || $eNz('gym_gross'))    { $rowL('Gym (when paid)',    $m((float)($earned['gym_gross'] ?? 0)),    false, $i++); }
+        if ($eodModEvents || $eNz('events_gross')) { $rowL('Events (when paid)', $m((float)($earned['events_gross'] ?? 0)), false, $i++); }
+
+        // Revenue earned gold bar
+        $pdf->SetFillColorArray($GOLD);
+        $pdf->SetFont('helvetica', 'B', 7.5);
+        $pdf->SetTextColorArray($WHITE);
+        $pdf->SetXY($LM, $yL);
+        $pdf->Cell(58, $ROW, '  REVENUE EARNED', 0, 0, 'L', true);
+        $pdf->Cell(33, $ROW, $m($earned_total), 0, 0, 'R', true);
+        $yL += $ROW;
+        $pdf->SetFont('helvetica', 'I', 6);
+        $pdf->SetTextColorArray($TEXT2);
+        $pdf->SetXY($LM, $yL);
+        $pdf->MultiCell($COL, 3.2, '"When paid" lines are counted on the day the payment is received. Rooms are nights stayed at each booking\'s booked rate.', 0, 'L', false, 1);
+        $yL = $pdf->GetY() + 1;
+
+        // Cash collected (separate, cash basis)
+        $secL('Cash Collected');
+        $i = 0;
+        $rowL('Payments received', $m($gross), false, $i++);
+        if ((float)($rev['refunds'] ?? 0) > 0) {
+            $pdf->SetFillColorArray($CREAM);
+            $pdf->SetDrawColorArray($DIVIDER);
+            $pdf->SetFont('helvetica', '', 7.5);
+            $pdf->SetTextColorArray($RED);
+            $pdf->SetXY($LM, $yL);
+            $pdf->Cell(58, $ROW, '  Less Refunds paid out', 'B', 0, 'L', true);
+            $pdf->Cell(33, $ROW, '-' . $m((float)$rev['refunds']), 'B', 0, 'R', true);
+            $yL += $ROW;
+            $i++;
+        }
+        $pdf->SetFillColorArray($CHARCOAL);
+        $pdf->SetFont('helvetica', 'B', 7.5);
+        $pdf->SetTextColorArray($CREAM);
+        $pdf->SetXY($LM, $yL);
+        $pdf->Cell(58, $ROW, '  CASH COLLECTED (NET)', 0, 0, 'L', true);
+        $pdf->Cell(33, $ROW, $m($net), 0, 0, 'R', true);
+        $yL += $ROW;
+        $i = 0;
+        $rowL('VAT in cash collected', $m((float)($rev['total_vat'] ?? 0)), false, $i++);
+    } else {
     $secL('Revenue by Source');
     $i = 0;
     if ($eodModBookings)   { $rowL('Rooms',       $m((float)($rev['room_gross'] ?? 0)), false, $i++); }
@@ -479,6 +534,7 @@ function buildEodPdf(
     $i = 0;
 
     $rowL('VAT Collected', $m((float)($rev['total_vat'] ?? 0)), false, $i++);
+    }
     $rowL('Transactions',  (string)(int)($rev['txn_count'] ?? 0), false, $i++);
     if ((float)($rev['pending'] ?? 0) > 0) {
         $rowL('Pending / Partial', $m((float)$rev['pending']), false, $i++);
@@ -765,7 +821,7 @@ function buildEodPdf(
     // ══════════════════════════════════════════════════════════════════════════
     if (!empty($room_type_perf)) {
         $pb(10 + $ROW * count($room_type_perf));
-        $fwSec('Room Type Revenue', $BROWN);
+        $fwSec('Room Payments by Type (cash)', $BROWN);
         $maxRev = max(array_column($room_type_perf, 'revenue') ?: [1]);
         foreach ($room_type_perf as $ri => $rt) {
             $bg = $ri % 2 === 0 ? $LIGHT_BG : $CREAM;

@@ -17,6 +17,7 @@ require_once 'admin-init.php';
 require_once '../config/credit-notes.php';
 require_once '../includes/station-hours.php';
 require_once __DIR__ . '/includes/pos-shift-totals.php';
+require_once __DIR__ . '/includes/eod-revenue.php';
 
 // This page reuses one named placeholder (:d) several times per statement. The shared connection
 // prepares natively, which rejects a repeated name (HY093), so those queries threw, were swallowed
@@ -200,9 +201,22 @@ $gross_revenue = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)
 $net_revenue   = $gross_revenue - (float)$rev['refunds'];
 $total_vat     = (float)$rev['room_vat'] + (float)$rev['conf_vat'] + (float)$rev['fnb_vat'] + (float)$rev['gym_vat'] + (float)$rev['events_vat'] - (float)($rev['refund_vat'] ?? 0);
 
-// ADR / RevPAR — based on room payments today
-$adr    = $rooms_occupied > 0 ? ((float)$rev['room_gross'] / $rooms_occupied) : 0;
-$revpar = $rooms_total > 0 ? ((float)$rev['room_gross'] / $rooms_total) : 0;
+// ---------------------------------------------------------------------------
+// 2b) REVENUE EARNED (the headline) — owner decision 2026-10-18: what was earned on the day.
+// One shared calculation (admin/includes/eod-revenue.php) also used by the PDF and e-mail:
+// room nights stayed at each booking's booked nightly rate + guest-folio charges posted today
+// + POS sales paid today (room service already on a folio is not counted twice) + conference /
+// gym / event payments received. Cash collected (above) stays its own cash-basis line.
+// ---------------------------------------------------------------------------
+$earnedModules = ['bookings' => $mod_bookings, 'pos' => $mod_pos];
+$earned        = rh_eod_earned_revenue($pdo, $report_date, $earnedModules);
+$earned_total  = (float)$earned['total'];
+$cash_collected = $net_revenue; // payments received today less refunds paid out today
+
+// ADR / RevPAR — room revenue EARNED for the night (levy and VAT included) over rooms occupied
+// (joined-room factor already in $rooms_occupied) / over rooms available.
+$adr    = $rooms_occupied > 0 ? ((float)$earned['rooms_gross'] / $rooms_occupied) : 0;
+$revpar = $rooms_total > 0 ? ((float)$earned['rooms_gross'] / $rooms_total) : 0;
 
 // ---------------------------------------------------------------------------
 // 3) Payment method mix (from payments + stock_orders settled today)
@@ -425,6 +439,9 @@ $previous = [
     'rooms_occupied' => 0,
     'occupancy_pct'  => 0.0,
 ];
+// Previous day on the same earned basis as the headline.
+$previousEarned = rh_eod_earned_revenue($pdo, $previous_day, $earnedModules);
+$previous['earned_total'] = (float)$previousEarned['total'];
 try {
     $prevPay = $pdo->prepare("
         SELECT
@@ -507,22 +524,30 @@ $revenue_per_transaction = (int)$rev['txn_count'] > 0 ? $gross_revenue / (int)$r
 $fnb_per_occupied_room = $rooms_occupied > 0 ? (float)$pos_totals['gross'] / $rooms_occupied : 0;
 $unpaid_risk = (float)$rev['pending'] + $outstanding_folio;
 
+// Revenue EARNED by source (same figures as the headline). A source whose module is off is hidden
+// unless it actually earned something, so the rows always add up to the headline.
+$has = static function (bool $module, float $v): bool { return $module || abs($v) > 0.004; };
 $revenue_sources = [];
-if ($mod_bookings)   { $revenue_sources[] = ['label' => 'Rooms',       'value' => (float)$rev['room_gross']]; }
-if ($mod_conference) { $revenue_sources[] = ['label' => 'Conferences',  'value' => (float)$rev['conf_gross']]; }
-if ($mod_pos)        { $revenue_sources[] = ['label' => rh_pos_category_label(), 'value' => (float)$rev['fnb_gross']]; }
-if ($mod_gym)        { $revenue_sources[] = ['label' => 'Gym',          'value' => (float)$rev['gym_gross']]; }
-if ($mod_events)     { $revenue_sources[] = ['label' => 'Events',       'value' => (float)$rev['events_gross']]; }
-if (empty($revenue_sources)) { $revenue_sources[] = ['label' => 'Revenue', 'value' => $gross_revenue]; }
+if ($has($mod_bookings, (float)$earned['rooms_total_gross']))   { $revenue_sources[] = ['label' => 'Rooms (nights stayed)', 'value' => (float)$earned['rooms_total_gross'], 'key' => 'rooms']; }
+if (abs((float)$earned['extras_gross']) > 0.004)                { $revenue_sources[] = ['label' => 'Other guest-bill charges', 'value' => (float)$earned['extras_gross'], 'key' => 'extras']; }
+if ($has($mod_conference, (float)$earned['conf_gross']))        { $revenue_sources[] = ['label' => 'Conferences', 'value' => (float)$earned['conf_gross'], 'key' => 'conf']; }
+if ($has($mod_pos, (float)$earned['fnb_gross']))                { $revenue_sources[] = ['label' => rh_pos_category_label(), 'value' => (float)$earned['fnb_gross'], 'key' => 'fnb']; }
+if ($has($mod_gym, (float)$earned['gym_gross']))                { $revenue_sources[] = ['label' => 'Gym', 'value' => (float)$earned['gym_gross'], 'key' => 'gym']; }
+if ($has($mod_events, (float)$earned['events_gross']))          { $revenue_sources[] = ['label' => 'Events', 'value' => (float)$earned['events_gross'], 'key' => 'events']; }
+if (empty($revenue_sources)) { $revenue_sources[] = ['label' => 'Revenue', 'value' => $earned_total, 'key' => 'all']; }
+$revenue_sources_table = $revenue_sources; // display order for the Revenue tab
 usort($revenue_sources, fn($a, $b) => $b['value'] <=> $a['value']);
 $top_revenue_source = $revenue_sources[0];
-$top_revenue_source_share = $gross_revenue > 0 ? ((float)$top_revenue_source['value'] / $gross_revenue) * 100 : 0;
+$top_revenue_source_share = $earned_total > 0.004 ? ((float)$top_revenue_source['value'] / $earned_total) * 100 : 0;
 
 $top_item_name = !empty($top_items) ? (string)$top_items[0]['item_name'] : 'No POS winner yet';
 $top_item_revenue = !empty($top_items) ? (float)$top_items[0]['revenue'] : 0;
 
-$net_change = $net_revenue - $previous['net_revenue'];
-$net_change_pct = $previous['net_revenue'] > 0 ? ($net_change / $previous['net_revenue']) * 100 : ($net_revenue > 0 ? 100 : 0);
+// Headline day-over-day: revenue EARNED against the previous day's revenue earned.
+$net_change = $earned_total - $previous['earned_total'];
+$net_change_pct = $previous['earned_total'] > 0 ? ($net_change / $previous['earned_total']) * 100 : ($earned_total > 0 ? 100 : 0);
+// Cash collected against the previous day's cash collected (its own, secondary comparison).
+$cash_change = $cash_collected - $previous['net_revenue'];
 $occupancy_change = $occupancy_pct - $previous['occupancy_pct'];
 $pos_change = (float)$pos_totals['gross'] - $previous['pos_gross'];
 $pos_change_pct = $previous['pos_gross'] > 0 ? ($pos_change / $previous['pos_gross']) * 100 : ((float)$pos_totals['gross'] > 0 ? 100 : 0);
@@ -644,19 +669,7 @@ try {
         $trend_rev_by_day[$row['day']] = ['gross' => (float)$row['gross'], 'refunds' => (float)$row['refunds']];
     }
 
-    $tPosStmt = $pdo->prepare("
-        SELECT DATE(paid_at) AS day,
-               COALESCE(SUM(total_amount), 0) AS pos_gross
-        FROM stock_orders
-        WHERE paid_at BETWEEN :a AND :b
-          AND status IN ('paid','completed','refunded','voided')
-        GROUP BY DATE(paid_at)
-    ");
-    $tPosStmt->execute([':a' => $trend_start_dt, ':b' => $trend_end_dt]);
     $trend_pos_by_day = [];
-    foreach ($tPosStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $trend_pos_by_day[$row['day']] = ['pos_gross' => (float)$row['pos_gross'], 'voids' => 0];
-    }
     // Voids count on the day they were voided, never the day the order was opened.
     $tVoidStmt = $pdo->prepare("
         SELECT DATE(voided_at) AS day, COUNT(*) AS voids
@@ -669,16 +682,20 @@ try {
         $trend_pos_by_day[$row['day']] = array_merge($trend_pos_by_day[$row['day']] ?? ['pos_gross' => 0.0], ['voids' => (int)$row['voids']]);
     }
 
+    // Same accrual basis as the headline: revenue EARNED each day (rh_eod_earned_revenue);
+    // 'cash' keeps the old payments-minus-refunds figure for the secondary column.
+    $trend_earned = rh_eod_earned_series($pdo, $trend_start, $report_date, $earnedModules);
     for ($i = 6; $i >= 0; $i--) {
         $day     = date('Y-m-d', strtotime($report_date . " -$i days"));
         $rev_row = $trend_rev_by_day[$day] ?? ['gross' => 0.0, 'refunds' => 0.0];
-        $pos_row = $trend_pos_by_day[$day] ?? ['pos_gross' => 0.0, 'voids' => 0];
+        $pos_row = $trend_pos_by_day[$day] ?? ['voids' => 0];
         $trend_days[] = [
             'day'       => $day,
             'label'     => date('D j', strtotime($day)),
             'gross'     => $rev_row['gross'],
-            'net'       => $rev_row['gross'] - $rev_row['refunds'],
-            'pos_gross' => $pos_row['pos_gross'],
+            'net'       => (float)($trend_earned[$day]['total'] ?? 0),
+            'cash'      => $rev_row['gross'] - $rev_row['refunds'],
+            'pos_gross' => (float)($trend_earned[$day]['pos_net'] ?? 0),
             'voids'     => $pos_row['voids'],
             'is_today'  => $day === $report_date,
         ];
@@ -686,9 +703,9 @@ try {
 } catch (Throwable $e) {
     error_log('EOD 7-day trend: ' . $e->getMessage());
 }
-// POS sales are payments rows too (so already inside 'net'): the momentum figure is net alone -
-// adding pos_gross would count every POS sale twice. The POS column is shown as a subset.
-$trend_max_total = max(array_map(fn($r) => $r['net'], $trend_days ?: [['net' => 0]])) ?: 1;
+// 'net' here is revenue EARNED that day; POS sales earned are part of it (the POS column is a subset,
+// never added on top).
+$trend_max_total = max(1.0, (float)max(array_map(fn($r) => $r['net'], $trend_days ?: [['net' => 0]])));
 
 // ---------------------------------------------------------------------------
 // ENHANCEMENT B — Room type revenue breakdown today
@@ -770,35 +787,21 @@ $lead_time_label   = $guest_intel['avg_lead_days'] <= 1 ? 'Same-day / walk-in' :
 // ---------------------------------------------------------------------------
 // ENHANCEMENT E — Previous day per-source revenue for segment comparison
 // ---------------------------------------------------------------------------
-$prev_sources = ['room_gross' => 0.0, 'conf_gross' => 0.0, 'fnb_gross' => 0.0, 'gym_gross' => 0.0, 'events_gross' => 0.0];
-try {
-    $psStmt = $pdo->prepare("
-        SELECT
-            COALESCE(SUM(CASE WHEN booking_type='room'       AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS room_gross,
-            COALESCE(SUM(CASE WHEN booking_type='conference' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS conf_gross,
-            COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_gross,
-            COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gym_gross,
-            COALESCE(SUM(CASE WHEN booking_type='event'      AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS events_gross
-        FROM payments
-        WHERE DATE(payment_date) = :d
-          AND deleted_at IS NULL
-    ");
-    $psStmt->execute([':d' => $previous_day]);
-    $psRow = $psStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-    $prev_sources = array_merge($prev_sources, $psRow);
-    // Same department reclass as today so the day-over-day change compares like with like.
-    $prevFolioFnb = rh_eod_folio_fnb($pdo, $previous_day);
-    $prevMoved = max(0.0, min((float)$prevFolioFnb['gross'], (float)$prev_sources['room_gross']));
-    $prev_sources['room_gross'] = (float)$prev_sources['room_gross'] - $prevMoved;
-    $prev_sources['fnb_gross']  = (float)$prev_sources['fnb_gross'] + $prevMoved;
-} catch (Throwable $e) {
-    error_log('EOD prev sources: ' . $e->getMessage());
-}
-$room_rev_change = (float)$rev['room_gross'] - (float)$prev_sources['room_gross'];
-$conf_rev_change = (float)$rev['conf_gross'] - (float)$prev_sources['conf_gross'];
-$fnb_rev_change  = (float)$rev['fnb_gross']  - (float)$prev_sources['fnb_gross'];
-$gym_rev_change  = (float)$rev['gym_gross']  - (float)$prev_sources['gym_gross'];
-$events_rev_change = (float)$rev['events_gross'] - (float)$prev_sources['events_gross'];
+// Same earned basis as today's figures, so each day-over-day change compares like with like.
+$prev_sources = [
+    'room_gross'   => (float)$previousEarned['rooms_total_gross'],
+    'extras_gross' => (float)$previousEarned['extras_gross'],
+    'conf_gross'   => (float)$previousEarned['conf_gross'],
+    'fnb_gross'    => (float)$previousEarned['fnb_gross'],
+    'gym_gross'    => (float)$previousEarned['gym_gross'],
+    'events_gross' => (float)$previousEarned['events_gross'],
+];
+$room_rev_change   = (float)$earned['rooms_total_gross'] - $prev_sources['room_gross'];
+$extras_rev_change = (float)$earned['extras_gross'] - $prev_sources['extras_gross'];
+$conf_rev_change   = (float)$earned['conf_gross'] - $prev_sources['conf_gross'];
+$fnb_rev_change    = (float)$earned['fnb_gross'] - $prev_sources['fnb_gross'];
+$gym_rev_change    = (float)$earned['gym_gross'] - $prev_sources['gym_gross'];
+$events_rev_change = (float)$earned['events_gross'] - $prev_sources['events_gross'];
 
 // ---------------------------------------------------------------------------
 // ENHANCEMENT F — Maintenance snapshot
@@ -876,16 +879,19 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     fputcsv($out, [
         'Date',
         'Hotel',
-        // Revenue
-        'Gross Revenue',
-        'Refunds',
-        'Net Revenue',
-        'VAT Collected',
-        'Room Revenue',
-        'Conference Revenue',
-        rh_pos_short_label() . ' Revenue',
-        'Gym Revenue',
-        'Events Revenue',
+        // Revenue EARNED that day (headline)
+        'Revenue Earned',
+        'Room Revenue Earned (nights stayed)',
+        'Other Guest-Bill Charges Earned',
+        'Conference Revenue (payments received)',
+        rh_pos_short_label() . ' Revenue Earned',
+        'Gym Revenue (payments received)',
+        'Events Revenue (payments received)',
+        // Cash collected that day
+        'Cash Collected (gross)',
+        'Refunds Paid Out',
+        'Cash Collected (net)',
+        'VAT In Cash Collected',
         // Rooms
         'Rooms Total',
         'Rooms Occupied',
@@ -942,15 +948,17 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     fputcsv($out, [
         $report_date,
         $site_name,
+        number_format($earned_total, 2, '.', ''),
+        number_format((float)$earned['rooms_total_gross'], 2, '.', ''),
+        number_format((float)$earned['extras_gross'], 2, '.', ''),
+        number_format((float)$earned['conf_gross'], 2, '.', ''),
+        number_format((float)$earned['fnb_gross'], 2, '.', ''),
+        number_format((float)$earned['gym_gross'], 2, '.', ''),
+        number_format((float)$earned['events_gross'], 2, '.', ''),
         number_format($gross_revenue, 2, '.', ''),
         number_format((float)$rev['refunds'], 2, '.', ''),
-        number_format($net_revenue, 2, '.', ''),
+        number_format($cash_collected, 2, '.', ''),
         number_format($total_vat, 2, '.', ''),
-        number_format((float)$rev['room_gross'], 2, '.', ''),
-        number_format((float)$rev['conf_gross'], 2, '.', ''),
-        number_format((float)$rev['fnb_gross'], 2, '.', ''),
-        number_format((float)$rev['gym_gross'], 2, '.', ''),
-        number_format((float)$rev['events_gross'], 2, '.', ''),
         $rooms_total,
         $rooms_occupied,
         ($rooms_total - $rooms_occupied),
@@ -1047,7 +1055,7 @@ $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
         // Day-over-day arrow for the headline tiles
         $netTone = $trendTone($net_change);
         $netArrow = $net_change > 0.01 ? 'fa-arrow-trend-up' : ($net_change < -0.01 ? 'fa-arrow-trend-down' : 'fa-minus');
-        $prevHasTakings = $previous['net_revenue'] > 0.01;
+        $prevHasTakings = $previous['earned_total'] > 0.01;
 $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format(abs($net_change_pct), 1) . '%' : 'new');
 
         // Alerts: warn = red, watch = amber, good = clean
@@ -1069,10 +1077,11 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
         $alertCount = count($alertsOpen);
 
         // Verdict sentence
-        $verdict = $daily_health_label . '. Net takings ' . $plain($net_revenue);
-        if ($previous['net_revenue'] > 0.01 || $net_revenue > 0.01) {
-            $verdict .= abs($net_change) < 0.01 ? ', level with yesterday' : ($prevHasTakings ? ', ' . ($net_change > 0 ? 'up ' : 'down ') . number_format(abs($net_change_pct), 1) . '% on yesterday' : ', with no takings yesterday to compare');
+        $verdict = $daily_health_label . '. Revenue earned ' . $plain($earned_total);
+        if ($previous['earned_total'] > 0.01 || $earned_total > 0.01) {
+            $verdict .= abs($net_change) < 0.01 ? ', level with yesterday' : ($prevHasTakings ? ', ' . ($net_change > 0 ? 'up ' : 'down ') . number_format(abs($net_change_pct), 1) . '% on yesterday' : ', with no revenue yesterday to compare');
         }
+        $verdict .= '; cash collected ' . $plain($cash_collected);
         $verdict .= '. ' . ($alertCount ? $alertCount . ' item' . ($alertCount === 1 ? '' : 's') . ' need' . ($alertCount === 1 ? 's' : '') . ' attention before you close.' : 'Nothing needs attention.');
 
         $scoreMeter = $daily_health_score >= 90 ? 'good' : ($daily_health_score >= 55 ? 'amber' : 'red');
@@ -1159,10 +1168,10 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
 
         <!-- ============ KPI STRIP: the verdict ============ -->
         <section class="ck-kpis" aria-label="Day summary">
-            <a class="ck-kpi ck-kpi--dark" href="payments.php?date=<?php echo htmlspecialchars($report_date); ?>">
+            <a class="ck-kpi ck-kpi--dark" href="#eodEarned" title="What was earned on this day: room nights stayed, guest-bill charges posted, restaurant / POS sales paid, plus conference, gym and event payments received. Cash banked is shown separately.">
                 <span class="ck-kpi__icon"><i class="fas fa-coins"></i></span>
-                <span class="ck-kpi__label">Net takings</span>
-                <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($net_revenue); ?></span>
+                <span class="ck-kpi__label">Revenue earned</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($earned_total); ?></span>
                 <?php if ($trend_days): ?>
                 <span class="ck-spark" aria-hidden="true">
                     <?php foreach ($trend_days as $td0): ?><span style="height:<?php echo max(6, round(max(0, (float)$td0['net']) / $chartMax * 100)); ?>%"<?php echo $td0['is_today'] ? ' class="is-today"' : ''; ?>></span><?php endforeach; ?>
@@ -1170,7 +1179,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 <?php endif; ?>
                 <span class="ck-kpi__sub">
                     <span class="ck-pill ck-pill--<?php echo $pillTone[$netTone]; ?> eod-pill-on-dark"><i class="fas <?php echo $netArrow; ?>"></i> <?php echo $netPctTxt; ?></span>
-                    vs yesterday &middot; gross <?php echo $money($gross_revenue); ?><?php if ((float)$rev['refunds'] > 0): ?> &middot; refunds &minus;<?php echo $money($rev['refunds']); ?><?php endif; ?>
+                    vs yesterday &middot; cash collected <?php echo $money($cash_collected); ?>
                 </span>
             </a>
 
@@ -1187,9 +1196,9 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
             </a>
             <div class="ck-kpi">
                 <span class="ck-kpi__icon"><i class="fas fa-chart-line"></i></span>
-                <span class="ck-kpi__label" title="Room cash collected today divided by rooms occupied. A cash ratio, not a published room rate.">Room cash per occupied room</span>
+                <span class="ck-kpi__label" title="Room revenue earned for the night (each booking's booked nightly rate, VAT and tourism levy included) divided by rooms occupied.">Average room rate (ADR)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($adr); ?></span>
-                <span class="ck-kpi__sub">Room cash per available room <strong><?php echo $money($revpar); ?></strong> &middot; room cash <?php echo $money($rev['room_gross']); ?></span>
+                <span class="ck-kpi__sub">Per available room (RevPAR) <strong><?php echo $money($revpar); ?></strong> &middot; room revenue <?php echo $money($earned['rooms_gross']); ?></span>
             </div>
             <?php endif; ?>
 
@@ -1281,6 +1290,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 </ul>
                 <?php endif; ?>
                 <ul class="ck-kv eod-kv">
+                    <?php echo $kv('Cash collected (all methods, after refunds)', $money($cash_collected)); ?>
                     <?php echo $kv('Non-cash collected', $money($non_cash_total)); ?>
                     <?php echo $kv('Pending today', $money($rev['pending']), (float)$rev['pending'] > 0 ? 'eod-warn' : ''); ?>
                     <?php echo $kv('Collection rate', number_format($payment_capture_rate, 1) . '%'); ?>
@@ -1291,8 +1301,8 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
             <section class="ck-panel ck-money eod-takings">
                 <header class="ck-panel__head">
                     <div>
-                        <h2 class="ck-panel__title">Takings, 7 days</h2>
-                        <p class="ck-panel__sub"><?php echo htmlspecialchars($plain($trendNetTotal)); ?> net &middot; avg <?php echo htmlspecialchars($plain($trendAvg)); ?>/day</p>
+                        <h2 class="ck-panel__title">Revenue earned, 7 days</h2>
+                        <p class="ck-panel__sub"><?php echo htmlspecialchars($plain($trendNetTotal)); ?> earned &middot; avg <?php echo htmlspecialchars($plain($trendAvg)); ?>/day</p>
                     </div>
                 </header>
                 <?php if ($trend_days): ?>
@@ -1301,7 +1311,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                     <span class="ck-money__value" data-ck-trend-value><?php echo htmlspecialchars($plain($lastTrend['net'])); ?></span>
                     <span class="eod-sub" data-ck-trend-sub><?php echo $mod_pos ? htmlspecialchars($posShort . ' ' . $plain($lastTrend['pos_gross'])) . ' &middot; ' : ''; ?><?php echo (int)$lastTrend['voids']; ?> void<?php echo (int)$lastTrend['voids'] === 1 ? '' : 's'; ?></span>
                 </div>
-                <div class="ck-bars" role="list" aria-label="Net takings, last 7 days">
+                <div class="ck-bars" role="list" aria-label="Revenue earned, last 7 days">
                     <?php foreach ($trend_days as $td0):
                         $isLast = $td0['is_today'];
                         $subTxt = ($mod_pos ? $posShort . ' ' . $plain($td0['pos_gross']) . ' · ' : '') . (int)$td0['voids'] . ' void' . ((int)$td0['voids'] === 1 ? '' : 's');
@@ -1334,12 +1344,14 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                     $mv = static function (string $label, float $delta, string $valueHtml, string $extra = '') use ($trendTone): string {
                         return '<li><span>' . $label . '</span><strong class="eod-trend eod-trend--' . $trendTone($delta) . '">' . $valueHtml . $extra . '</strong></li>';
                     };
-                    echo $mv('Net revenue', $net_change, $trendLabel($net_change, true), ' <small>' . $trendLabel($net_change_pct, false, '%') . '</small>');
+                    echo $mv('Revenue earned', $net_change, $trendLabel($net_change, true), ' <small>' . $trendLabel($net_change_pct, false, '%') . '</small>');
+                    echo $mv('Cash collected', $cash_change, $trendLabel($cash_change, true));
                     if ($mod_bookings) { echo $mv('Rooms revenue', $room_rev_change, $trendLabel($room_rev_change, true)); }
-                    if ($mod_conference && ((float)$rev['conf_gross'] > 0 || (float)$prev_sources['conf_gross'] > 0)) { echo $mv('Conference revenue', $conf_rev_change, $trendLabel($conf_rev_change, true)); }
+                    if (abs((float)$earned['extras_gross']) > 0.004 || abs($prev_sources['extras_gross']) > 0.004) { echo $mv('Other guest-bill charges', $extras_rev_change, $trendLabel($extras_rev_change, true)); }
+                    if ($mod_conference && ((float)$earned['conf_gross'] > 0 || (float)$prev_sources['conf_gross'] > 0)) { echo $mv('Conference revenue', $conf_rev_change, $trendLabel($conf_rev_change, true)); }
                     if ($mod_pos) { echo $mv(htmlspecialchars($posShort), $fnb_rev_change, $trendLabel($fnb_rev_change, true)); }
-                    if ($mod_gym && ((float)$rev['gym_gross'] > 0 || (float)$prev_sources['gym_gross'] > 0)) { echo $mv('Gym revenue', $gym_rev_change, $trendLabel($gym_rev_change, true)); }
-                    if ($mod_events && ((float)$rev['events_gross'] > 0 || (float)$prev_sources['events_gross'] > 0)) { echo $mv('Event revenue', $events_rev_change, $trendLabel($events_rev_change, true)); }
+                    if ($mod_gym && ((float)$earned['gym_gross'] > 0 || (float)$prev_sources['gym_gross'] > 0)) { echo $mv('Gym revenue', $gym_rev_change, $trendLabel($gym_rev_change, true)); }
+                    if ($mod_events && ((float)$earned['events_gross'] > 0 || (float)$prev_sources['events_gross'] > 0)) { echo $mv('Event revenue', $events_rev_change, $trendLabel($events_rev_change, true)); }
                     if ($mod_bookings) { echo $mv('Occupancy', $occupancy_change, $trendLabel($occupancy_change, false, ' pts')); }
                     if ($mod_pos) {
                         echo $mv('POS sales', $pos_change, $trendLabel($pos_change, true), ' <small>' . $trendLabel($pos_change_pct, false, '%') . '</small>');
@@ -1429,7 +1441,52 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
 
                 <!-- Revenue -->
                 <div class="ck-pane" role="tabpanel" data-ck-pane="revenue">
-                    <h3 class="eod-pane-title">Revenue</h3>
+                    <h3 class="eod-pane-title" id="eodEarned">Revenue earned</h3>
+                    <p class="eod-sub">What the hotel earned on <?php echo htmlspecialchars(date('j M', strtotime($report_date))); ?>, VAT and levy included: room nights stayed that night, charges posted to guest bills, <?php echo htmlspecialchars($posShort); ?> sales paid that day, and conference, gym and event payments received.</p>
+                    <div class="eod-table-wrap">
+                        <table class="eod-table no-auto-pagination no-card-mobile">
+                            <thead>
+                                <tr>
+                                    <th>Source</th>
+                                    <th class="num">Earned</th>
+                                    <th class="num">Mix</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($revenue_sources_table as $r):
+                                    $share = $earned_total > 0.004 ? ($r['value'] / $earned_total) * 100 : 0;
+                                ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars((string)$r['label']); ?></td>
+                                        <td class="num"><?php echo $money($r['value']); ?></td>
+                                        <td class="num eod-mixcell"><span class="ck-meter ck-meter--gold"><span style="width:<?php echo number_format(max(0, min(100, $share)), 1, '.', ''); ?>%"></span></span><?php echo number_format($share, 1); ?>%</td>
+                                    </tr>
+                                <?php endforeach; ?>
+                                <tr class="eod-table__net">
+                                    <td><strong>Revenue earned</strong></td>
+                                    <td class="num"><strong><?php echo $money($earned_total); ?></strong></td>
+                                    <td class="num">100%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <ul class="ck-kv eod-kv eod-kv--cols">
+                        <?php
+                        if ($mod_bookings) {
+                            echo $kv('Room nights stayed', $money($earned['rooms_gross']) . $sub((int)$earned['in_house_bookings'] . ' booking' . ((int)$earned['in_house_bookings'] === 1 ? '' : 's') . ' in-house'));
+                            if ((float)$earned['package_gross'] > 0.004) { echo $kv('Packages (spread over the stay)', $money($earned['package_gross'])); }
+                        }
+                        echo $kv('Charges posted to guest bills', $money((float)$earned['folio_fnb_gross'] + (float)$earned['folio_other_gross']) . $sub('food, drink and other, not voided'));
+                        if ($mod_pos) {
+                            echo $kv(htmlspecialchars($posShort) . ' sales paid', $money($earned['pos_sales_gross'] - $earned['pos_room_folio_gross']) . $sub('room service on a guest bill is not counted twice'));
+                            if ((float)$earned['pos_reversed'] > 0.004) { echo $kv('Sales voided or refunded today', '&minus;' . $money($earned['pos_reversed']), 'eod-warn'); }
+                        }
+                        ?>
+                    </ul>
+                    <p class="eod-sub"><?php echo htmlspecialchars($earned['cash_basis_note']); ?></p>
+
+                    <h3 class="eod-pane-title">Cash collected</h3>
+                    <p class="eod-sub">Money received on this day (payments by date received, less refunds paid out). Used for cash to bank and the payment method mix.</p>
                     <div class="eod-table-wrap">
                         <table class="eod-table no-auto-pagination no-card-mobile">
                             <thead>
@@ -1459,7 +1516,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                                     </tr>
                                 <?php endforeach; ?>
                                 <tr class="eod-table__total">
-                                    <td>Total</td>
+                                    <td>Total received</td>
                                     <td class="num"><?php echo $money($gross_revenue); ?></td>
                                     <td class="num"><?php echo $money($total_vat); ?></td>
                                     <td class="num">100%</td>
@@ -1473,8 +1530,8 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                                     </tr>
                                 <?php endif; ?>
                                 <tr class="eod-table__net">
-                                    <td><strong>Net</strong></td>
-                                    <td class="num"><strong><?php echo $money($net_revenue); ?></strong></td>
+                                    <td><strong>Cash collected (net)</strong></td>
+                                    <td class="num"><strong><?php echo $money($cash_collected); ?></strong></td>
                                     <td class="num">&mdash;</td>
                                     <td class="num">&mdash;</td>
                                 </tr>
@@ -1596,13 +1653,13 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 <?php if ($mod_bookings): ?>
                 <!-- Room types -->
                 <div class="ck-pane" role="tabpanel" data-ck-pane="rooms" hidden>
-                    <h3 class="eod-pane-title">Room type revenue</h3>
+                    <h3 class="eod-pane-title">Room payments by room type <span class="eod-sub">cash received that day</span></h3>
                     <?php if (empty($room_type_perf)): ?>
                         <div class="ck-empty"><i class="fas fa-bed"></i><p>No room payments recorded <?php echo $isToday ? 'today' : 'on this day'; ?>.</p></div>
                     <?php else: ?>
                     <div class="eod-table-wrap">
                         <table class="eod-table no-auto-pagination no-card-mobile">
-                            <thead><tr><th>Room type</th><th class="num">Bookings</th><th class="num">Revenue</th><th class="num">Share</th></tr></thead>
+                            <thead><tr><th>Room type</th><th class="num">Bookings</th><th class="num">Received</th><th class="num">Share</th></tr></thead>
                             <tbody>
                                 <?php foreach ($room_type_perf as $rt):
                                     $rt_share = $rev['room_gross'] > 0 ? min(100, ((float)$rt['revenue'] / (float)$rev['room_gross']) * 100) : 0;
@@ -1629,15 +1686,15 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                             <thead>
                                 <tr>
                                     <th>Day</th>
-                                    <th class="num">Net rev</th>
-                                    <?php if ($mod_pos): ?><th class="num" title="Already included in Net rev, not added on top">of which <?php echo htmlspecialchars($posShort); ?></th><?php endif; ?>
-                                    <th title="Net revenue only">Momentum (net rev)</th>
+                                    <th class="num">Revenue earned</th>
+                                    <?php if ($mod_pos): ?><th class="num" title="Already included in Revenue earned, not added on top">of which <?php echo htmlspecialchars($posShort); ?></th><?php endif; ?>
+                                    <th title="Revenue earned only">Momentum (earned)</th><th class="num" title="Payments received less refunds paid out that day">Cash collected</th>
                                     <th class="num">Voids</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($trend_days as $td):
-                                    $combined   = $td['net']; // POS is a subset of net, never added on top
+                                    $combined   = $td['net']; // POS is a subset of revenue earned, never added on top
                                     $bar_width  = $trend_max_total > 0 ? max(1, ($combined / $trend_max_total) * 100) : 0;
                                     $is_today   = $td['is_today'];
                                 ?>
@@ -1650,7 +1707,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                                                 <div class="eod-trend-bar__fill<?php echo $is_today ? ' eod-trend-bar__fill--today' : ''; ?>" style="width:<?php echo number_format($bar_width, 1, '.', ''); ?>%"></div>
                                                 <span class="eod-trend-bar__val"><?php echo $money($combined); ?></span>
                                             </div>
-                                        </td>
+                                        </td><td class="num"><?php echo $money($td['cash'] ?? 0); ?></td>
                                         <td class="num<?php echo $td['voids'] > 0 ? ' eod-warn' : ''; ?>"><?php echo $td['voids'] > 0 ? (int)$td['voids'] : '—'; ?></td>
                                     </tr>
                                 <?php endforeach; ?>

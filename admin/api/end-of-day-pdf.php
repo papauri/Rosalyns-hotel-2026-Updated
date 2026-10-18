@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/api-init.php';
 require_once __DIR__ . '/../includes/pos-shift-totals.php';
+require_once __DIR__ . '/../includes/eod-revenue.php';
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -119,8 +120,15 @@ try {
 
     $gross  = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'] + (float)$rev['gym_gross'] + (float)$rev['events_gross'];
     $net    = $gross - (float)$rev['refunds'];
-    $adr    = $rooms_occupied > 0 ? ((float)$rev['room_gross'] / $rooms_occupied) : 0;
-    $revpar = $rooms_total    > 0 ? ((float)$rev['room_gross'] / $rooms_total)    : 0;
+
+    // Headline: revenue EARNED that day (same shared calculation as the page and the e-mail).
+    // $gross / $net above stay the cash view (payments received, less refunds paid out).
+    $earnedModules = ['bookings' => !function_exists('moduleEnabled') || moduleEnabled('bookings'), 'pos' => !function_exists('moduleEnabled') || moduleEnabled('pos')];
+    $earned        = rh_eod_earned_revenue($pdo, $date, $earnedModules);
+    $earned_total  = (float)$earned['total'];
+    // ADR / RevPAR on room revenue earned for the night (VAT and levy included).
+    $adr    = $rooms_occupied > 0 ? ((float)$earned['rooms_gross'] / $rooms_occupied) : 0;
+    $revpar = $rooms_total    > 0 ? ((float)$earned['rooms_gross'] / $rooms_total)    : 0;
 
     // 4) Payment mix
     $mStmt = $pdo->prepare("
@@ -198,7 +206,9 @@ try {
 
     $prev_pos_gross = (float)(rh_pos_eod_summary($pdo, $prevDay)['totals']['gross'] ?? 0);
 
-    $net_change = $net - $prev_net;
+    // Day-over-day on the earned basis (the cash comparison is $net - $prev_net).
+    $prev_earned_total = (float)rh_eod_earned_revenue($pdo, $prevDay, $earnedModules)['total'];
+    $net_change = $earned_total - $prev_earned_total;
     $occ_change = $occupancy_pct - $prev_occ_pct;
     $pos_change = (float)$pos['gross'] - $prev_pos_gross;
 
@@ -332,6 +342,7 @@ $d = [
     'rev'                    => $rev,
     'gross'                  => $gross,
     'net'                    => $net,
+    'earned'                 => $earned,
     'adr'                    => $adr,
     'revpar'                 => $revpar,
     'methods'                => $methods,

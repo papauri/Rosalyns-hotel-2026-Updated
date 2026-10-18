@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/api-init.php';
 require_once __DIR__ . '/../includes/pos-shift-totals.php';
+require_once __DIR__ . '/../includes/eod-revenue.php';
 require_once __DIR__ . '/../../includes/report-mailer.php';
 require_once __DIR__ . '/../../includes/whatsapp-functions.php';
 
@@ -133,15 +134,22 @@ try {
 
     $gross =(float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'] + (float)$rev['gym_gross'] + (float)$rev['events_gross'];
     $net   = $gross - (float)$rev['refunds'];
-    $adr   = $rooms_occupied > 0 ? ((float)$rev['room_gross'] / $rooms_occupied) : 0;
-    $revpar = $rooms_total    > 0 ? ((float)$rev['room_gross'] / $rooms_total)    : 0;
+
+    // Headline: revenue EARNED that day (same shared calculation as the page and the PDF).
+    // $gross / $net above stay the cash view (payments received, less refunds paid out).
+    $earnedModules = ['bookings' => !function_exists('moduleEnabled') || moduleEnabled('bookings'), 'pos' => !function_exists('moduleEnabled') || moduleEnabled('pos')];
+    $earned        = rh_eod_earned_revenue($pdo, $date, $earnedModules);
+    $earned_total  = (float)$earned['total'];
+    // ADR / RevPAR on room revenue earned for the night (VAT and levy included).
+    $adr   = $rooms_occupied > 0 ? ((float)$earned['rooms_gross'] / $rooms_occupied) : 0;
+    $revpar = $rooms_total    > 0 ? ((float)$earned['rooms_gross'] / $rooms_total)    : 0;
 
     // Payment mix
     $methods = [];
     try {
         $mStmt = $pdo->prepare("
             SELECT COALESCE(NULLIF(payment_method,''),'unassigned') AS method,
-                   COALESCE(SUM(total_amount),0) AS total
+                   COUNT(*) AS cnt, COALESCE(SUM(total_amount),0) AS total
             FROM payments
             WHERE DATE(payment_date) = :d AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' AND deleted_at IS NULL
             GROUP BY method ORDER BY total DESC
@@ -261,7 +269,9 @@ try {
     $rooms_unsold = max(0, $rooms_total - $rooms_occupied);
     $empty_room_opportunity = $adr > 0 ? $rooms_unsold * $adr : 0;
     $payment_capture_rate = ($gross + (float)($rev['pending'] ?? 0)) > 0 ? ($gross / ($gross + (float)($rev['pending'] ?? 0))) * 100 : 100;
-    $net_change = $net - $previous['net'];
+    // Day-over-day on the earned basis (the cash comparison is $net - $previous['net']).
+    $previous['earned'] = (float)rh_eod_earned_revenue($pdo, $previous_day, $earnedModules)['total'];
+    $net_change = $earned_total - $previous['earned'];
     $pos_change = (float)$pos['gross'] - $previous['pos_gross'];
     $occupancy_change = $occupancy_pct - $previous['occupancy_pct'];
 
@@ -312,6 +322,12 @@ try {
     $net = $net ?? 0.0;
     $adr = $adr ?? 0.0;
     $revpar = $revpar ?? 0.0;
+    $earned = $earned ?? [
+        'rooms_gross' => 0.0, 'package_gross' => 0.0, 'rooms_total_gross' => 0.0, 'extras_gross' => 0.0,
+        'fnb_gross' => 0.0, 'conf_gross' => 0.0, 'gym_gross' => 0.0, 'events_gross' => 0.0, 'total' => 0.0,
+        'cash_basis_note' => '',
+    ];
+    $earned_total = $earned_total ?? 0.0;
 
     $methods = $methods ?? [];
     $method_totals = $method_totals ?? ['cash' => 0.0, 'non_cash' => 0.0, 'unassigned' => 0.0];
@@ -449,19 +465,18 @@ if ($channel === 'whatsapp') {
     $lines[] = $healthEmoji . " *Closeout Health: " . $daily_health_score . "/100 — " . $daily_health_label . "*";
     $lines[] = '';
     $lines[] = "━━━━━━━━━━ 💰 REVENUE ━━━━━━━━━━";
-    $lines[] = "Net Revenue:    *" . _money($currency_symbol, (float)$net) . "*";
+    $lines[] = "Revenue earned: *" . _money($currency_symbol, $earned_total) . "*";
     $lines[] = "  " . $netArrow . " vs yesterday: " . ($net_change >= 0 ? '+' : '') . _money($currency_symbol, $net_change);
-    $lines[] = "Gross:          " . _money($currency_symbol, (float)$gross);
-    if ((float)$rev['refunds'] > 0) {
-        $lines[] = "Refunds:        -" . _money($currency_symbol, (float)$rev['refunds']);
-    }
-    $lines[] = "VAT Collected:  " . _money($currency_symbol, (float)$rev['total_vat']);
+    if ($eodModBookings)   { $lines[] = "  🏨 Rooms (nights stayed): " . _money($currency_symbol, (float)$earned['rooms_total_gross']); }
+    if (abs((float)$earned['extras_gross']) > 0.004) { $lines[] = "  🧾 Other guest-bill charges: " . _money($currency_symbol, (float)$earned['extras_gross']); }
+    if ($eodModConference || abs((float)$earned['conf_gross']) > 0.004) { $lines[] = "  🎪 Conference (when paid): " . _money($currency_symbol, (float)$earned['conf_gross']); }
+    $lines[] = (isRestaurantEnabled() ? "  🍽️ F&B:         " : "  🛒 POS:         ") . _money($currency_symbol, (float)$earned['fnb_gross']);
+    if ($eodModGym    || abs((float)$earned['gym_gross']) > 0.004)    { $lines[] = "  🏋️ Gym (when paid): " . _money($currency_symbol, (float)$earned['gym_gross']); }
+    if ($eodModEvents || abs((float)$earned['events_gross']) > 0.004) { $lines[] = "  🎟️ Events (when paid): " . _money($currency_symbol, (float)$earned['events_gross']); }
+    $lines[] = "  (when paid) = counted when the payment is received";
     $lines[] = '';
-    if ($eodModBookings)   { $lines[] = "  🏨 Rooms:       " . _money($currency_symbol, (float)$rev['room_gross']); }
-    if ($eodModConference) { $lines[] = "  🎪 Conference:  " . _money($currency_symbol, (float)$rev['conf_gross']); }
-    $lines[] = (isRestaurantEnabled() ? "  🍽️ F&B:         " : "  🛒 POS:         ") . _money($currency_symbol, (float)$rev['fnb_gross']);
-    if ($eodModGym    || (float)$rev['gym_gross'] > 0)    { $lines[] = "  🏋️ Gym:         " . _money($currency_symbol, (float)$rev['gym_gross']); }
-    if ($eodModEvents || (float)$rev['events_gross'] > 0) { $lines[] = "  🎟️ Events:      " . _money($currency_symbol, (float)$rev['events_gross']); }
+    $lines[] = "Cash collected: *" . _money($currency_symbol, (float)$net) . "*  (received " . _money($currency_symbol, (float)$gross) . ((float)$rev['refunds'] > 0 ? ", refunds -" . _money($currency_symbol, (float)$rev['refunds']) : '') . ")";
+    $lines[] = "VAT in cash collected: " . _money($currency_symbol, (float)$rev['total_vat']);
     $lines[] = '';
     if ($eodModBookings) {
     $lines[] = "━━━━━━━━━━ 🛏️ ROOMS ━━━━━━━━━━";
@@ -628,10 +643,10 @@ $html .= '</table>';
 $html .= '<table style="width:100%;border-collapse:collapse;border-bottom:2px solid #e5d9c9;">';
 $html .= '<tr>';
 
-// Net Revenue
+// Revenue earned
 $html .= '<td style="padding:16px;text-align:center;background:#F3ECE4;border-right:1px solid #e5d9c9;">';
-$html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">Net Revenue</div>';
-$html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . _money($currency_symbol, $net) . '</div>';
+$html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">Revenue Earned</div>';
+$html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . _money($currency_symbol, $earned_total) . '</div>';
 $html .= '<div style="font-size:11px;color:' . $net_color . ';margin-top:3px;">' . $net_sign . _money($currency_symbol, $net_change) . ' vs yesterday</div>';
 $html .= '</td>';
 
@@ -690,23 +705,27 @@ if (!empty($email_alerts)) {
 // ── MAIN DATA: 2-column layout ────────────────────────────────────────────────
 $html .= '<table style="width:100%;border-collapse:collapse;">';
 
-// REVENUE section
-$html .= $section_head('Revenue by Source');
+// REVENUE section - revenue EARNED that day, then cash collected as its own block.
+$html .= $section_head('Revenue Earned by Source');
 $revSrcRows = [];
-if ($eodModBookings)   { $revSrcRows[] = ['Rooms',       _money($currency_symbol, (float)$rev['room_gross'])]; }
-if ($eodModConference) { $revSrcRows[] = ['Conferences', _money($currency_symbol, (float)$rev['conf_gross'])]; }
-$revSrcRows[] = [isRestaurantEnabled() ? 'F&amp;B / POS' : 'POS', _money($currency_symbol, (float)$rev['fnb_gross'])];
-if ($eodModGym    || (float)$rev['gym_gross'] > 0)    { $revSrcRows[] = ['Gym',    _money($currency_symbol, (float)$rev['gym_gross'])]; }
-if ($eodModEvents || (float)$rev['events_gross'] > 0) { $revSrcRows[] = ['Events', _money($currency_symbol, (float)$rev['events_gross'])]; }
+if ($eodModBookings)   { $revSrcRows[] = ['Rooms (nights stayed)', _money($currency_symbol, (float)$earned['rooms_total_gross'])]; }
+if (abs((float)$earned['extras_gross']) > 0.004) { $revSrcRows[] = ['Other guest-bill charges', _money($currency_symbol, (float)$earned['extras_gross'])]; }
+if ($eodModConference || abs((float)$earned['conf_gross']) > 0.004) { $revSrcRows[] = ['Conferences (when paid)', _money($currency_symbol, (float)$earned['conf_gross'])]; }
+$revSrcRows[] = [isRestaurantEnabled() ? 'F&B / POS' : 'POS', _money($currency_symbol, (float)$earned['fnb_gross'])]; // $row() escapes the label
+if ($eodModGym    || abs((float)$earned['gym_gross']) > 0.004)    { $revSrcRows[] = ['Gym (when paid)',    _money($currency_symbol, (float)$earned['gym_gross'])]; }
+if ($eodModEvents || abs((float)$earned['events_gross']) > 0.004) { $revSrcRows[] = ['Events (when paid)', _money($currency_symbol, (float)$earned['events_gross'])]; }
 foreach ($revSrcRows as $rr) {
     $html .= $row($rr[0], $rr[1]);
 }
-$html .= '<tr style="background:#F3ECE4;"><td style="padding:8px 12px;font-weight:700;border-bottom:1px solid #e5d9c9;">Gross Total</td><td style="padding:8px 12px;text-align:right;font-weight:700;border-bottom:1px solid #e5d9c9;">' . _money($currency_symbol, $gross) . '</td></tr>';
+$html .= '<tr style="background:#231F1C;"><td style="padding:10px 12px;font-weight:700;color:#ffffff;font-size:14px;">REVENUE EARNED</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#B18247;font-size:14px;">' . _money($currency_symbol, $earned_total) . '</td></tr>';
+$html .= '<tr><td colspan="2" style="padding:6px 12px;border-bottom:1px solid #eee;font-size:11px;color:#8A775F;">Rooms are the nights stayed at each booking&rsquo;s booked rate; guest-bill charges and sales count on the day they were posted or paid. &ldquo;When paid&rdquo; lines are counted on the day the payment is received.</td></tr>';
+$html .= $section_head('Cash Collected');
+$html .= '<tr style="background:#F3ECE4;"><td style="padding:8px 12px;font-weight:700;border-bottom:1px solid #e5d9c9;">Payments received</td><td style="padding:8px 12px;text-align:right;font-weight:700;border-bottom:1px solid #e5d9c9;">' . _money($currency_symbol, $gross) . '</td></tr>';
 if ((float)$rev['refunds'] > 0) {
-    $html .= '<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#b91c1c;">Less: Refunds</td><td style="padding:8px 12px;text-align:right;color:#b91c1c;border-bottom:1px solid #eee;">&minus;' . _money($currency_symbol, (float)$rev['refunds']) . '</td></tr>';
+    $html .= '<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#b91c1c;">Less: Refunds paid out</td><td style="padding:8px 12px;text-align:right;color:#b91c1c;border-bottom:1px solid #eee;">&minus;' . _money($currency_symbol, (float)$rev['refunds']) . '</td></tr>';
 }
-$html .= '<tr style="background:#231F1C;"><td style="padding:10px 12px;font-weight:700;color:#ffffff;font-size:14px;">NET REVENUE</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#B18247;font-size:14px;">' . _money($currency_symbol, $net) . '</td></tr>';
-$html .= $row('VAT Collected', _money($currency_symbol, (float)$rev['total_vat']));
+$html .= '<tr style="background:#F3ECE4;"><td style="padding:8px 12px;font-weight:700;border-bottom:1px solid #e5d9c9;">CASH COLLECTED (NET)</td><td style="padding:8px 12px;text-align:right;font-weight:700;border-bottom:1px solid #e5d9c9;">' . _money($currency_symbol, $net) . '</td></tr>';
+$html .= $row('VAT in Cash Collected', _money($currency_symbol, (float)$rev['total_vat']));
 $html .= $row('Total Transactions', (string)(int)$rev['txn_count']);
 $html .= $row('Pending / Partial', _money($currency_symbol, (float)($rev['pending'] ?? 0)));
 $html .= $row('Outstanding Folio', _money($currency_symbol, (float)$outstanding));
@@ -815,6 +834,7 @@ try {
         'rev'                    => $rev,
         'gross'                  => $gross,
         'net'                    => $net,
+        'earned'                 => $earned,
         'adr'                    => $adr,
         'revpar'                 => $revpar,
         'methods'                => $methods,
