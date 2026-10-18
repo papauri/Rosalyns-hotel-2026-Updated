@@ -130,23 +130,40 @@ if (!function_exists('rh_staff_invite_send')) {
         $roles = function_exists('getAllRoles') ? getAllRoles() : [];
         $roleLabel = (string)($roles[$u['role']]['label'] ?? ucwords(str_replace('_', ' ', (string)$u['role'])));
 
-        $tok = rh_staff_invite_issue_token($pdo, (int)$u['id']);
-        $expiresText = date('l j F Y, H:i', strtotime($tok['expires_at'])) . ' (' . date_default_timezone_get() . ' time)';
-        global $email_site_name;
-        $subject = 'You’re invited to ' . $email_site_name . ' — accept your staff account';
+        // Sending must never abort the caller: the account / permissions are already stored, so a
+        // mail problem (bad SMTP login, unreachable host, any error) comes back as a plain reason.
+        // One attempt and a short timeout keep the request well inside the web server's time limit.
+        global $smtp_timeout;
+        $prevTimeout = $smtp_timeout ?? null;
+        $prevFast = $GLOBALS['rh_email_fast_fail'] ?? null;
+        $smtp_timeout = min((int)($smtp_timeout ?: 15), 15);
+        $GLOBALS['rh_email_fast_fail'] = true;
+        @set_time_limit(120);
+        try {
+            $tok = rh_staff_invite_issue_token($pdo, (int)$u['id']);
+            $expiresText = date('l j F Y, H:i', strtotime($tok['expires_at'])) . ' (' . date_default_timezone_get() . ' time)';
+            global $email_site_name;
+            $subject = 'You’re invited to ' . $email_site_name . ' — accept your staff account';
 
-        $html = rh_staff_invite_html($u, $roleLabel, rh_staff_invite_url($tok['token']), $expiresText, $invitedBy);
-        $r = sendEmail((string)$u['email'], (string)$u['full_name'], $subject, $html);
-        if (empty($r['success'])) {
-            return ['success' => false, 'message' => 'Invitation email failed: ' . (string)($r['message'] ?? 'unknown error')];
-        }
+            $html = rh_staff_invite_html($u, $roleLabel, rh_staff_invite_url($tok['token']), $expiresText, $invitedBy);
+            $r = sendEmail((string)$u['email'], (string)$u['full_name'], $subject, $html);
+            if (empty($r['success'])) {
+                return ['success' => false, 'message' => 'Invitation email failed: ' . (string)($r['message'] ?? 'unknown error')];
+            }
 
-        $copies = [];
-        foreach (array_unique(array_filter($copyTo, static fn($c) => filter_var($c, FILTER_VALIDATE_EMAIL) && strcasecmp($c, (string)$u['email']) !== 0)) as $cc) {
-            $copyHtml = rh_staff_invite_html($u, $roleLabel, null, $expiresText, $invitedBy, (string)$u['email']);
-            $cr = sendEmail($cc, null, '[Copy] ' . $subject, $copyHtml);
-            $copies[$cc] = !empty($cr['success']) ? 'sent' : ('failed: ' . (string)($cr['message'] ?? ''));
+            $copies = [];
+            foreach (array_unique(array_filter($copyTo, static fn($c) => filter_var($c, FILTER_VALIDATE_EMAIL) && strcasecmp($c, (string)$u['email']) !== 0)) as $cc) {
+                $copyHtml = rh_staff_invite_html($u, $roleLabel, null, $expiresText, $invitedBy, (string)$u['email']);
+                $cr = sendEmail($cc, null, '[Copy] ' . $subject, $copyHtml);
+                $copies[$cc] = !empty($cr['success']) ? 'sent' : ('failed: ' . (string)($cr['message'] ?? ''));
+            }
+            return ['success' => true, 'message' => 'Invitation sent to ' . $u['email'] . '.', 'expires_at' => $tok['expires_at'], 'copies' => $copies];
+        } catch (Throwable $e) {
+            error_log('Staff invitation error for user #' . $userId . ': ' . $e->getMessage());
+            return ['success' => false, 'message' => 'Invitation email failed: ' . $e->getMessage()];
+        } finally {
+            $smtp_timeout = $prevTimeout;
+            if ($prevFast === null) { unset($GLOBALS['rh_email_fast_fail']); } else { $GLOBALS['rh_email_fast_fail'] = $prevFast; }
         }
-        return ['success' => true, 'message' => 'Invitation sent to ' . $u['email'] . '.', 'expires_at' => $tok['expires_at'], 'copies' => $copies];
     }
 }

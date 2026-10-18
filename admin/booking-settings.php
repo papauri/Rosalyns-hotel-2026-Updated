@@ -30,7 +30,7 @@ if (!$rh_templates_only && ($_GET['section'] ?? '') === 'email-templates') {
     exit;
 }
 if ($rh_templates_only && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $rh_template_posts = ['booking_email_template_preview', 'send_test_email', 'reset_all_booking_templates_to_defaults', 'booking_email_templates'];
+    $rh_template_posts = ['booking_email_template_preview', 'send_test_email', 'reset_all_booking_templates_to_defaults', 'booking_email_templates', 'save_receipt_whatsapp'];
     if (!array_intersect($rh_template_posts, array_keys($_POST))) {
         $_SERVER['REQUEST_METHOD'] = '__BLOCKED__';
     }
@@ -1119,6 +1119,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $updated = (int)($resetResult['updated'] ?? 0);
             $message = "All booking email and PDF templates were reset to the default design ({$updated} templates).";
+        } elseif (isset($_POST['save_receipt_whatsapp'])) {
+            // The WhatsApp wording sent with a receipt (admin/receipts.php reads this same setting).
+            if (!$canEditTemplates) {
+                throw new Exception('You do not have permission to edit message templates.');
+            }
+            $receiptWhatsapp = trim((string)($_POST['receipt_whatsapp_template'] ?? ''));
+            if ($receiptWhatsapp === '') {
+                throw new Exception('The receipt WhatsApp message cannot be empty.');
+            }
+            if (mb_strlen($receiptWhatsapp) > 2000) {
+                throw new Exception('The receipt WhatsApp message is too long (max 2000 characters).');
+            }
+            $stmtWa = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES (?, ?, 'finance') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()");
+            $stmtWa->execute(['receipt_whatsapp_template', $receiptWhatsapp]);
+            if (function_exists('deleteCache')) {
+                deleteCache('setting_receipt_whatsapp_template');
+            }
+            if (function_exists('rh_log_event')) {
+                rh_log_event('receipts', 'info', 'Receipt WhatsApp message updated', ['by' => $user['username'] ?? null]);
+            }
+            $message = 'Receipt WhatsApp message saved.';
         } elseif (isset($_POST['booking_email_templates'])) {
             if (!$canEditTemplates) {
                 throw new Exception('You do not have permission to edit message templates.');
@@ -2441,6 +2462,65 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <?php endif; ?>
                 </form>
             </div><!-- /tpl-editor-card -->
+
+            <?php
+            // WhatsApp wording that goes with a receipt (moved here from the Receipts page; the
+            // setting key is unchanged and the Receipts page keeps using it for its WhatsApp links).
+            $rcptWaText = (string)getSetting('receipt_whatsapp_template', '');
+            $rcptWaCur = (string)getSetting('currency_symbol', 'MWK');
+            $rcptWaPreview = [
+                '{{site_name}}' => (string)getSetting('site_name', 'Hotel'),
+                '{{guest_name}}' => 'Jane Mwale',
+                '{{receipt_number}}' => 'RCP-20260521-0042',
+                '{{payment_reference}}' => 'PAY-20260521-0874',
+                '{{booking_reference}}' => 'BK-2026-1048',
+                '{{payment_date}}' => date('d M Y'),
+                '{{payment_method}}' => 'Mobile Money',
+                '{{payment_type}}' => 'Full Payment',
+                '{{payment_status}}' => 'Completed',
+                '{{payment_amount}}' => $rcptWaCur . ' 200,000.00',
+                '{{vat_amount}}' => $rcptWaCur . ' 45,000.00',
+                '{{total_amount}}' => $rcptWaCur . ' 245,000.00',
+                '{{description}}' => 'Room booking payment for Deluxe Ocean Suite',
+                '{{contact_email}}' => (string)(getEmailSetting('email_from_email', '') ?: 'reservations@example.com'),
+            ];
+            ?>
+            <div class="rh-panel settings-card" id="receipt-whatsapp">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Receipt WhatsApp message</h2></div>
+                <p class="help-text">The message pre-filled when staff share a receipt on WhatsApp from the Receipts page. The receipt <em>email</em> is the &ldquo;Receipt Email&rdquo; tab above.</p>
+                <p class="help-text">Placeholders: <?php echo htmlspecialchars(implode(', ', array_keys($rcptWaPreview)), ENT_QUOTES, 'UTF-8'); ?>.</p>
+                <form method="POST" action="<?php echo $rh_self; ?>" id="receipt-whatsapp-form">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="save_receipt_whatsapp" value="1">
+                    <div class="form-group">
+                        <label for="receiptWhatsappTemplate">WhatsApp message</label>
+                        <textarea id="receiptWhatsappTemplate" name="receipt_whatsapp_template" rows="3" maxlength="2000" <?php echo $canEditTemplates ? 'required' : 'readonly'; ?> style="width:100%;"><?php echo htmlspecialchars($rcptWaText, ENT_QUOTES, 'UTF-8'); ?></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Preview</label>
+                        <p id="receiptWhatsappPreview" data-map="<?php echo htmlspecialchars((string)json_encode($rcptWaPreview), ENT_QUOTES, 'UTF-8'); ?>" style="margin:0;padding:10px 12px;border:1px solid #e8e3d7;border-radius:6px;background:#fff;white-space:pre-wrap;font-size:13.5px;"></p>
+                    </div>
+                    <?php if ($canEditTemplates): ?>
+                    <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save WhatsApp message</button>
+                    <?php endif; ?>
+                </form>
+            </div><!-- /receipt-whatsapp -->
+            <script>
+                (function() {
+                    var ta = document.getElementById('receiptWhatsappTemplate');
+                    var out = document.getElementById('receiptWhatsappPreview');
+                    if (!ta || !out) { return; }
+                    var map = {};
+                    try { map = JSON.parse(out.dataset.map || '{}') || {}; } catch (e) { map = {}; }
+                    function render() {
+                        var t = ta.value || '';
+                        Object.keys(map).forEach(function(k) { t = t.split(k).join(String(map[k] || '')); });
+                        out.textContent = t;
+                    }
+                    ta.addEventListener('input', render);
+                    render();
+                })();
+            </script>
 
             <div class="info-box" style="background:#fff8ed;border-left:3px solid #f59e0b;">
                 <p style="color:#92400e;margin:0;font-size:12.5px;"><i class="fas fa-lock"></i> <strong>SMTP passwords are encrypted in the database.</strong> No credentials are stored in config files.</p>

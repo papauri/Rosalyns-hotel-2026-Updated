@@ -139,7 +139,10 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
         return createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
     }
 
-    $maxAttempts = 3; // 1 initial attempt + 2 retries for transient SMTP failures
+    // 1 initial attempt + 2 retries for transient SMTP failures. A caller that is answering a
+    // person (e.g. the staff invitation) sets $GLOBALS['rh_email_fast_fail'] to try only once so a
+    // dead SMTP host cannot run the page past the web server's time limit (3 x timeout + pauses).
+    $maxAttempts = empty($GLOBALS['rh_email_fast_fail']) ? 3 : 1;
     $lastException = null;
     for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
         try {
@@ -202,7 +205,14 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
                 'success' => true,
                 'message' => 'Email sent successfully via SMTP'
             ];
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
+            // Any non-PHPMailer error (template build, logging, a TypeError) is a failed send,
+            // never a fatal that aborts the caller after its data was already saved.
+            if (!($e instanceof Exception)) {
+                error_log('sendEmail error: ' . $e->getMessage());
+                return ['success' => false, 'message' => 'Failed to send email: ' . $e->getMessage()];
+            }
+            // PHPMailer exception: retry / report below.
             $lastException = $e;
             if ($attempt < $maxAttempts) {
                 // Brief pause before retry to allow transient SMTP issues to resolve

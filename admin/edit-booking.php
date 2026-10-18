@@ -560,6 +560,33 @@ $back_url = 'booking-details.php?id=' . $booking_id;
         .eb-price-row { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 6px; }
         .eb-price-row div { display: flex; flex-direction: column; font-size: 12px; color: #666; }
         .eb-price-row strong { font-size: 16px; color: #222; }
+        /* Room picker: one card per room (or joined pair), two columns on wide screens */
+        .individual-room-section { margin: 20px 0; }
+        .individual-room-section h4, .price-info h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 15px; font-weight: 600; color: #2a2723; }
+        #roomOptionsContainer { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+        .room-option { background: #fff; border: 1px solid #e2dbd2; border-radius: 10px; padding: 12px 14px; cursor: pointer; }
+        .room-option:hover:not(.disabled) { border-color: #766550; }
+        .room-option.selected { border-color: #766550; background: #f4efe9; box-shadow: inset 0 0 0 1px #766550; }
+        .room-option.disabled { background: #f7f5f1; opacity: .65; cursor: not-allowed; }
+        .room-option-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+        .room-option-title { font-weight: 600; color: #2a2723; }
+        .room-option-details { font-size: 12px; color: #6b655d; margin-top: 2px; }
+        .room-option-status { flex: 0 0 auto; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+        .room-option-status.status-available { background: #e8f5e9; color: #1b5e20; }
+        .room-option-status.status-unavailable { background: #fdecea; color: #8a1c1c; }
+        .room-option.selected .room-option-status { background: #766550; color: #fff; }
+        /* Price box and the Save / Cancel row */
+        .price-info { background: #fff; border: 1px solid #e2dbd2; border-radius: 10px; padding: 14px 16px; margin: 20px 0; }
+        .btn-bar { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2dbd2; }
+        .btn-bar .btn-save, .btn-bar .btn-back { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 20px; border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer; box-sizing: border-box; }
+        .btn-bar .btn-save { order: 2; background: #766550; border: 1px solid #766550; color: #fff; }
+        .btn-bar .btn-save:hover { background: #655642; border-color: #655642; }
+        .btn-bar .btn-back { order: 1; background: #fff; border: 1px solid #d3cbc1; color: #2a2723; }
+        .btn-bar .btn-back:hover { background: #f4efe9; }
+        @media (max-width: 480px) {
+            .btn-bar { flex-direction: column; align-items: stretch; }
+            #roomOptionsContainer { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 

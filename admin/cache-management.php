@@ -489,7 +489,7 @@ $cache_types = [
 
     <link rel="icon" href="../favicon.ico" sizes="any">
     <link rel="shortcut icon" href="../favicon.ico">
-    <link rel="manifest" href="../manifest.php">
+    <link rel="manifest" href="../manifest.php" crossorigin="use-credentials">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

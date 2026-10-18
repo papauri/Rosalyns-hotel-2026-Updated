@@ -668,7 +668,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 <option value="expiring">Expiring soon</option>
                 <option value="archived">Archived</option>
             </select>
-            <span style="color:#6c757d;font-size:13px;"><?php echo count($ingredients); ?> ingredient(s)</span>
+            <span id="filter-count" data-total="<?php echo count($ingredients); ?>" style="color:#6c757d;font-size:13px;"><?php echo count($ingredients); ?> ingredient(s)</span>
         </div>
 
         <div class="table-responsive">
@@ -1356,7 +1356,9 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             const q = document.getElementById('filter-search').value.toLowerCase();
             const cat = document.getElementById('filter-category').value;
             const st = document.getElementById('filter-status').value;
-            document.querySelectorAll('.ing-row').forEach(row => {
+            let shown = 0;
+            const rows = document.querySelectorAll('.ing-row');
+            rows.forEach(row => {
                 const name = row.dataset.name || '';
                 const c = row.dataset.category || '';
                 const s = row.dataset.status || '';
@@ -1364,8 +1366,23 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 if (q && name.indexOf(q) === -1) show = false;
                 if (cat && c !== cat) show = false;
                 if (st && s !== st) show = false;
+                // data-filter-hidden tells the table pager (admin-section-pagination.js) to leave this
+                // row out of its pages and counts; display covers a table too short to have a pager.
+                row.dataset.filterHidden = show ? '' : '1';
                 row.style.display = show ? '' : 'none';
+                if (show) shown++;
             });
+            const table = document.getElementById('stock-table');
+            if (table && typeof table.rhPagerRefresh === 'function') {
+                table.rhPagerRefresh(true);
+            } else if (table) {
+                rows.forEach(row => { row.hidden = false; });
+            }
+            const counter = document.getElementById('filter-count');
+            if (counter) {
+                const total = parseInt(counter.dataset.total || '0', 10);
+                counter.textContent = shown === total ? total + ' ingredient(s)' : shown + ' of ' + total + ' ingredient(s)';
+            }
         }
     </script>
 </body>

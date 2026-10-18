@@ -10,6 +10,7 @@ require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
 require_once __DIR__ . '/includes/restaurant-order-serve.php';
+require_once __DIR__ . '/includes/bulk-actions.php';
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -758,6 +759,44 @@ if (($_GET['ajax'] ?? '') === 'table_status') {
     exit;
 }
 
+/**
+ * Delete table rows by id. A table with an open order or tab is skipped (same "open" rule the POS uses to
+ * lock a table); past orders keep their own table_number text, so history is untouched.
+ * Returns [deletedCount, skipped reasons, deleted table names]. Runs in its own transaction.
+ */
+function rt_delete_tables(PDO $pdo, array $ids): array {
+    $done = 0;
+    $skipped = [];
+    $names = [];
+    $pdo->beginTransaction();
+    try {
+        $find = $pdo->prepare("SELECT id, table_number FROM restaurant_tables WHERE id = ? FOR UPDATE");
+        $del = $pdo->prepare("DELETE FROM restaurant_tables WHERE id = ?");
+        foreach ($ids as $id) {
+            $find->execute([(int)$id]);
+            $row = $find->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                adminBulkSkip($skipped, 'not found');
+                continue;
+            }
+            // The row lock above also serialises with the POS, which locks the table row before opening an order.
+            $conflict = rh_restaurant_find_active_order_conflict($pdo, 'dine_in', (string)$row['table_number'], true);
+            if ($conflict) {
+                adminBulkSkip($skipped, 'open order or tab');
+                continue;
+            }
+            $del->execute([(int)$row['id']]);
+            $done += $del->rowCount();
+            $names[] = (string)$row['table_number'];
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
+    return [$done, $skipped, $names];
+}
+
 if (!rh_restaurant_tables_exist($pdo)) {
     $error = 'Restaurant table registry is not installed. Run migration 034 first.';
 } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -916,6 +955,25 @@ if (!rh_restaurant_tables_exist($pdo)) {
                     'rows' => count($tableIds),
                 ]);
                 $message = 'Table capacities and active flags saved.';
+            } elseif ($action === 'delete_table' || ($action === 'bulk_tables' && (string)($_POST['bulk_op'] ?? '') === 'delete')) {
+                // Same permission as editing tables (stock_management, checked at the top of the page).
+                $ids = $action === 'delete_table' ? adminBulkIds('table_ids', 1) : adminBulkIds();
+                if (empty($ids)) throw new RuntimeException('No table selected.');
+                [$done, $skipped, $deletedNames] = rt_delete_tables($pdo, $ids);
+                rh_log_event('admin/restaurant-tables', 'info', 'Restaurant tables deleted', [
+                    'user' => $user['username'] ?? '',
+                    'tables' => $deletedNames,
+                    'skipped' => $skipped,
+                ]);
+                if ($action === 'delete_table') {
+                    if ($done === 1) {
+                        $message = 'Table ' . $deletedNames[0] . ' deleted. Past orders keep their table name.';
+                    } else {
+                        $error = 'This table was not deleted (' . implode('; ', array_keys($skipped)) . '). Settle or cancel its open order first.';
+                    }
+                } else {
+                    [$message, $error] = adminBulkOutcome('tables deleted', $done, $skipped);
+                }
             } elseif ($action === 'settle_table_order') {
                 if (!$canSettleTableOrders) {
                     throw new RuntimeException('You do not have permission to settle tables from this page.');
@@ -1104,13 +1162,24 @@ foreach ($tables as $table) {
             </section>
         </div>
 
+        <?php if (!empty($tables)): ?>
+            <?php adminBulkBarStart('bulk_tables', '#rtTableWrap', $csrf_token); ?>
+            <?php adminBulkButton('delete', 'Delete tables', 'fa-trash', 'Delete {n} selected tables? A table with an open order or tab is skipped. Past orders keep their table name.', 'btn-danger', '', 'Delete', 'danger'); ?>
+            <?php adminBulkBarEnd(); ?>
+            <?php /* One-row delete form lives outside the save form (forms cannot nest); the row menu buttons point at it with form="rtDeleteForm". */ ?>
+            <form method="post" action="restaurant-tables.php" id="rtDeleteForm" hidden>
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                <input type="hidden" name="action" value="delete_table">
+            </form>
+        <?php endif; ?>
         <form method="post" action="restaurant-tables.php" data-admin-loader-form>
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
             <input type="hidden" name="action" value="save_tables">
-            <div class="rt-table-wrap">
+            <div class="rt-table-wrap" id="rtTableWrap">
                 <table class="rt-table">
                     <thead>
                         <tr>
+                            <th><?php echo adminBulkAllBox('Select all tables'); ?></th>
                             <th>Table</th>
                             <th>Live Status</th>
                             <th>Current Order</th>
@@ -1119,16 +1188,18 @@ foreach ($tables as $table) {
                             <th>Notes</th>
                             <th>Active</th>
                             <th>Updated</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if (empty($tables)): ?>
                             <tr>
-                                <td data-label="Tables" colspan="8">No table rows yet. Generate a range above.</td>
+                                <td data-label="Tables" colspan="10">No table rows yet. Generate a range above.</td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($tables as $idx => $table): ?>
                                 <tr>
+                                    <td data-label="Select"><?php echo adminBulkRowBox((int)$table['id'], 'Select table ' . (string)$table['table_number']); ?></td>
                                     <td data-label="Table">
                                         <input type="text" name="table_name[]" maxlength="50" required aria-label="Table name" value="<?php echo htmlspecialchars((string)$table['table_number']); ?>">
                                         <input type="hidden" name="table_id[]" value="<?php echo (int)$table['id']; ?>">
@@ -1154,6 +1225,22 @@ foreach ($tables as $table) {
                                         <label class="rt-active"><input type="checkbox" name="is_active[<?php echo (int)$table['id']; ?>]" value="1" <?php echo (int)$table['is_active'] === 1 ? 'checked' : ''; ?>> Active</label>
                                     </td>
                                     <td data-label="Updated"><span class="rt-muted"><?php echo htmlspecialchars(date('d M Y H:i', strtotime((string)$table['updated_at']))); ?></span></td>
+                                    <td data-label="Actions">
+                                        <div class="actions-more">
+                                            <button type="button" class="btn btn-secondary btn-sm actions-more-toggle" title="More actions" aria-label="More actions for table <?php echo htmlspecialchars((string)$table['table_number']); ?>" aria-haspopup="true" onclick="toggleRtActionsMore(this, event)">
+                                                <i class="fas fa-ellipsis-vertical"></i>
+                                            </button>
+                                            <div class="actions-more-menu">
+                                                <button type="submit" form="rtDeleteForm" name="table_ids[]" value="<?php echo (int)$table['id']; ?>" class="text-danger"
+                                                    data-admin-confirm="<?php echo htmlspecialchars('Delete table "' . (string)$table['table_number'] . '"?', ENT_QUOTES); ?>"
+                                                    data-admin-confirm-title="Delete table"
+                                                    data-admin-confirm-details="Past orders keep their table name.|A table with an open order or tab cannot be deleted.|Generate Range recreates numbered tables if you need them back."
+                                                    data-admin-confirm-ok="Delete" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-trash">
+                                                    <i class="fas fa-trash"></i> Delete table
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         <?php endif; ?>
@@ -1273,7 +1360,30 @@ foreach ($tables as $table) {
             });
         });
 
-        const tableStatusEndpoint = 'restaurant-tables.php?ajax=table_status';
+        function closeRtActionMenus() {
+            document.querySelectorAll('.rt-table .actions-more.open').forEach(function (el) {
+                el.classList.remove('open');
+                var m = el.querySelector('.actions-more-menu');
+                if (m) m.removeAttribute('style');
+            });
+        }
+        function toggleRtActionsMore(btn, e) {
+            if (e) e.stopPropagation();
+            var wrap = btn.closest('.actions-more');
+            var menu = wrap ? wrap.querySelector('.actions-more-menu') : null;
+            if (!menu) return;
+            var wasOpen = wrap.classList.contains('open');
+            closeRtActionMenus();
+            if (wasOpen) return;
+            wrap.classList.add('open');
+            if (window.rhPlaceActionMenu) window.rhPlaceActionMenu(btn, menu);
+        }
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.actions-more')) closeRtActionMenus();
+        });
+        document.addEventListener('scroll', closeRtActionMenus, true);
+
+        const tableStatusEndpoint ='restaurant-tables.php?ajax=table_status';
         const rtCurrencySymbol = <?php echo json_encode($currency_symbol); ?>;
         const rtCanSettleTableOrders = <?php echo $canSettleTableOrders ? 'true' : 'false'; ?>;
         const rtSettleModal = document.getElementById('rtSettleModal');

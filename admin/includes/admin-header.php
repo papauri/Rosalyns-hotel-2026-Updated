@@ -261,6 +261,7 @@ if ($_admin_back_target !== null) {
 
         var manifestLink = document.createElement('link');
         manifestLink.rel = 'manifest';
+        manifestLink.crossOrigin = 'use-credentials'; // host bot-protection answers 428 to cookieless manifest fetches
 
         var candidates = [];
         try {

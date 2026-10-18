@@ -306,7 +306,7 @@ $site_name = getSetting('site_name');
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="manifest" href="manifest.php">
+    <link rel="manifest" href="manifest.php" crossorigin="use-credentials">
     <!-- Keep login page lean: do not load full frontend bundle to avoid duplicate imports -->
     <link rel="stylesheet" href="css/admin-login.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-login.css'); ?>">
 </head>

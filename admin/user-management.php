@@ -19,6 +19,13 @@ if (!hasPermission($user['id'], 'user_management')) {
     exit;
 }
 
+/** The reason part of a failed send, without the layers of "Invitation email failed: Failed to send email:". */
+function rh_invite_failure_reason(string $message): string
+{
+    $m = trim(preg_replace('/^(Invitation email failed:\s*)?(Failed to send email:\s*)?/i', '', $message));
+    return $m !== '' ? rtrim($m, '. ') . '.' : 'unknown error.';
+}
+
 $site_name = getSetting('site_name');
 $success_msg = '';
 $error_msg = '';
@@ -63,6 +70,8 @@ $relevant_roles = array_filter($all_roles, static fn($k) => $rh_role_is_relevant
 
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Finish the whole request even if the browser gives up while the mail server is slow.
+    ignore_user_abort(true);
     // Verify CSRF token
     if (!isset($_POST['csrf_token']) || !validateCsrfToken($_POST['csrf_token'])) {
         $error_msg = 'Invalid security token. Please try again.';
@@ -145,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $success_msg .= ' Invitation sent to ' . htmlspecialchars($email) . ' (link valid ' . RH_STAFF_INVITE_HOURS . ' h).';
                             } else {
                                 error_log('Invitation failed for ' . $email . ': ' . $invite['message']);
-                                $success_msg .= ' (The invitation email could not be sent - use "Resend invitation".)';
+                                $success_msg .= ' The email could not be sent: ' . rh_invite_failure_reason((string)$invite['message']) . ' Use "Resend invitation" once that is fixed.';
                             }
                         }
                     }
@@ -267,7 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     $success_msg .= ' ' . $invite['message'] . ' (link valid ' . RH_STAFF_INVITE_HOURS . ' h).';
                                 } else {
                                     error_log('Invitation failed for user #' . $uid . ': ' . $invite['message']);
-                                    $error_msg = 'Permissions saved, but the invitation could not be sent: ' . $invite['message'] . ' Use "Resend invitation".';
+                                    $error_msg = 'Permissions saved. The invitation email could not be sent: ' . rh_invite_failure_reason((string)$invite['message']) . ' Use "Resend invitation" once that is fixed.';
                                 }
                             }
                         } else {
@@ -319,7 +328,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             logActivity($user['id'], 'user_invited', "Resent invitation to '{$target['username']}'");
                             $success_msg = 'Invitation sent to ' . htmlspecialchars((string)$target['email']) . ' (link valid ' . RH_STAFF_INVITE_HOURS . ' h).';
                         } else {
-                            $error_msg = $invite['message'];
+                            $error_msg = 'The invitation email could not be sent: ' . rh_invite_failure_reason((string)$invite['message']);
                         }
                     }
                 }
@@ -694,15 +703,15 @@ $nav_categories = getNavCategories();
             <div class="modal-body">
                 <div class="form-row">
                     <label for="add-fullname">Full Name</label>
-                    <input type="text" id="add-fullname" name="full_name" required placeholder="e.g. Jane Banda">
+                    <input type="text" id="add-fullname" name="full_name" autocomplete="off" required placeholder="e.g. Jane Banda">
                 </div>
                 <div class="form-row">
                     <label for="add-username">Username</label>
-                    <input type="text" id="add-username" name="username" required placeholder="e.g. jane.b" pattern="[a-zA-Z0-9._-]+" title="Letters, numbers, dots, dashes, underscores only">
+                    <input type="text" id="add-username" name="username" autocomplete="off" required placeholder="e.g. jane.b" pattern="[a-zA-Z0-9._-]+" title="Letters, numbers, dots, dashes, underscores only">
                 </div>
                 <div class="form-row">
                     <label for="add-email">Email</label>
-                    <input type="email" id="add-email" name="email" required placeholder="e.g. jane@example.com">
+                    <input type="email" id="add-email" name="email" autocomplete="off" required placeholder="e.g. jane@example.com">
                 </div>
                 <div class="form-row">
                     <label for="add-role">Role</label>
@@ -715,7 +724,7 @@ $nav_categories = getNavCategories();
                 </div>
                 <div class="form-row">
                     <label for="add-password">Password <span style="font-weight:400;color:#888;">(optional)</span></label>
-                    <input type="password" id="add-password" name="password" minlength="8" placeholder="Leave blank - they set it from the invitation">
+                    <input type="password" id="add-password" name="password" autocomplete="new-password" minlength="8" placeholder="Leave blank - they set it from the invitation">
                     <div class="hint">With "Send invitation" ticked, the person gets a one-time link (valid 72 h) to choose their own password. No password is ever emailed.</div>
                 </div>
                 <div class="form-row">
@@ -767,7 +776,7 @@ $nav_categories = getNavCategories();
                 </div>
                 <div class="form-row">
                     <label for="edit-email">Email</label>
-                    <input type="email" id="edit-email" name="email" required>
+                    <input type="email" id="edit-email" name="email" autocomplete="off" required>
                 </div>
                 <div class="form-row">
                     <label for="edit-role">Role</label>
@@ -788,7 +797,7 @@ $nav_categories = getNavCategories();
                 </div>
                 <div class="form-row">
                     <label for="edit-password">New Password <span style="font-weight:400; color:#888;">(leave blank to keep current)</span></label>
-                    <input type="password" id="edit-password" name="new_password" minlength="8" placeholder="Leave blank to keep unchanged">
+                    <input type="password" id="edit-password" name="new_password" autocomplete="new-password" minlength="8" placeholder="Leave blank to keep unchanged">
                 </div>
             </div>
             <div class="modal-footer">
@@ -910,12 +919,20 @@ function submitDeleteUser() {
     document.getElementById('deleteForm').submit();
 }
 
+<?php
+// Each role's real default permission keys (same source the server uses when no explicit grant exists).
+$rh_role_defaults = [];
+foreach (array_keys($all_roles) as $rh_rk) {
+    $rh_role_defaults[$rh_rk] = array_values(getDefaultPermissionsForRole((string)$rh_rk));
+}
+?>
 // Permission data (embedded for client-side rendering)
 const permissionData = <?php echo json_encode([
     'categories' => $nav_categories,
     'permissionsByCategory' => $permission_categories,
     'allPermissions' => getAllPermissions(),
-    'roles' => $all_roles
+    'roles' => $all_roles,
+    'roleDefaults' => $rh_role_defaults
 ]); ?>;
 
 // Open permissions modal
@@ -1031,15 +1048,7 @@ function populatePermissionsForm(permissions, role) {
 
 // Get default permissions for a role
 function getDefaultPermissionsForRole(role) {
-    const defaults = {
-        'admin': [],
-        'manager': ['bookings_view', 'bookings_create', 'bookings_edit', 'room_service', 'kds_view', 'stock_view', 'reports_view'],
-        'receptionist': ['bookings_view', 'bookings_create', 'bookings_edit', 'room_service'],
-        'housekeeping': ['housekeeping_view', 'housekeeping_edit'],
-        'accountant': ['payments_view', 'payments_edit', 'reports_view', 'invoices_view'],
-        'viewer': ['bookings_view', 'reports_view']
-    };
-    return defaults[role] || [];
+    return (permissionData.roleDefaults && permissionData.roleDefaults[role]) || [];
 }
 
 // Permission toggle

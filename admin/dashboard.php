@@ -1842,7 +1842,7 @@ $currency_symbol = getSetting('currency_symbol');
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="RH Admin">
-    <link rel="manifest" href="manifest.php">
+    <link rel="manifest" href="manifest.php" crossorigin="use-credentials">
     <link rel="icon" href="../favicon.ico" sizes="any">
     <link rel="shortcut icon" href="../favicon.ico">
     <title>Dashboard | <?php echo htmlspecialchars($site_name); ?> Admin</title>

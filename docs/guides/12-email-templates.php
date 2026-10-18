@@ -217,7 +217,7 @@ $groups = [
     ],
     [
         'title' => 'Receipt Email (and the receipt WhatsApp message)',
-        'applies' => 'The Receipt Email tab. The same tags work in the receipt WhatsApp message, which is edited on the Receipts page.',
+        'applies' => 'The Receipt Email tab. The same tags work in the Receipt WhatsApp message card on this page.',
         'tags' => ['site_name', 'guest_name', 'guest_email', 'guest_phone', 'receipt_number', 'booking_type', 'payment_reference', 'booking_reference', 'payment_date', 'payment_method', 'payment_type', 'payment_status', 'payment_amount', 'vat_amount', 'total_amount', 'description', 'contact_email', 'contact_phone', 'address', 'hotel_address', 'vat_number', 'vat_rate', 'vat_number_html', 'logo_html'],
     ],
     [
@@ -311,7 +311,13 @@ $totalShown = 0;
   </ol>
   <p><strong>Load Default</strong> puts the built-in wording for that one tab into the boxes (you are asked to confirm). Nothing changes until you click Save All Templates. <strong>Reset All to Defaults</strong> overwrites every template with the built-in wording after you confirm, and shows <em>"All booking email and PDF templates were reset to the default design (N templates)."</em></p>
   <div class="warn"><p>Preview fills in every tag with sample details, but a real message fills in only the tags listed for that template below. A tag that is not on the list for that template stays on the email as plain <code>{{text}}</code>. Always check the list before you use a tag.</p></div>
-  <div class="note"><p>The receipt WhatsApp message is edited on <strong>Money</strong> &rarr; <strong>Receipts</strong>, not here.</p></div>
+  <h3 id="receipt-whatsapp">How to edit the receipt WhatsApp message</h3>
+  <ol class="steps">
+    <li>Open <strong>Settings</strong> &rarr; <strong>Email Templates</strong> and scroll to the card called <strong>Receipt WhatsApp message</strong>.</li>
+    <li>Change the text in <strong>WhatsApp message</strong>. The <strong>Preview</strong> under it shows how it reads with sample details.</li>
+    <li>Click <strong>Save WhatsApp message</strong>. You will see <em>"Receipt WhatsApp message saved."</em></li>
+  </ol>
+  <p>This message is pre-filled when staff share a receipt on WhatsApp from the <strong>Money</strong> &rarr; <strong>Receipts</strong> page. That page only has a link to this card. Needs <strong>Edit message templates</strong>; without it the text is view-only.</p>
 
   <h2 id="tags">Tag reference</h2>
   <form method="get" action="">

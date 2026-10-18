@@ -2643,7 +2643,7 @@ if ($posCanStations) {
         .pos-mobile-action.is-scan { color: #4ade80; }
         .pos-mobile-action.is-scan.is-active { background: rgba(74,222,128,0.15); }
     </style>
-    <link rel="manifest" href="manifest.php">
+    <link rel="manifest" href="manifest.php" crossorigin="use-credentials">
     <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link rel="stylesheet" href="css/pos-overrides.css?v=<?php echo @filemtime(__DIR__ . '/css/pos-overrides.css'); ?>">

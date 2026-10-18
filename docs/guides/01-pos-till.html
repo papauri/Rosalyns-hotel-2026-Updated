@@ -466,6 +466,24 @@
   <p>Two tables cannot have the same name (<em>"A table called ... already exists. Use a different name or edit the existing one."</em>). A table that has an open order cannot be renamed or switched off until the order is settled or cancelled (<em>"Cannot rename Table 5 while order ... is still active."</em> / <em>"Cannot deactivate Table 5 while order ... is still active."</em>). The open-order check for switching off applies only to a table that is active and being switched off now; a table that is already inactive does not stop the rest of the list from saving.</p>
   <p>The list shows each table's <strong>Live Status</strong> (Available, or Pending, Preparing, Ready, Collecting, Served, Awaiting Payment, Recalled, Active), its <strong>Current Order</strong> and its <strong>Last Payment</strong>. A summary shows total rows, active tables and total capacity. <strong>Open POS</strong> takes you to the till.</p>
 
+  <h3>How to delete one table</h3>
+  <p>Permission: <strong>Ingredients &amp; Recipes</strong>. Past orders keep the table name they had.</p>
+  <ol class="steps">
+    <li>On the <strong>Tables</strong> page, find the table and click the <strong>More actions</strong> button (three dots) at the end of its row.</li>
+    <li>Click <strong>Delete table</strong>. A window asks <em>"Delete table &quot;5&quot;?"</em>. Click <strong>Delete</strong>.</li>
+    <li>You will see <em>"Table 5 deleted. Past orders keep their table name."</em></li>
+  </ol>
+
+  <h3>How to delete several tables at once</h3>
+  <ol class="steps">
+    <li>Tick the box at the start of each table's row. To tick every table on the page you are looking at, tick the box in the header row (<strong>Select all tables</strong>). Tables on other pages are not ticked.</li>
+    <li>The bar at the bottom shows <em>N selected</em>. Click <strong>Delete tables</strong>.</li>
+    <li>Click <strong>Delete</strong> in the window. You will see <em>"3 tables deleted."</em></li>
+    <li>To clear all ticks, click <strong>Clear</strong> on the bar.</li>
+  </ol>
+  <p>A table with an open order or tab is skipped, not deleted. The rest are still deleted, and you will see for example <em>"2 tables deleted, 1 skipped (open order or tab x1)."</em> Settle or cancel the order first (see <a href="#table-pay">How to take payment for a table from the Tables page</a>), then delete the table again.</p>
+  <div class="note"><p>Deleted numbered tables can come back. Fill in <strong>From</strong> and <strong>To</strong> and click <strong>Generate / Update Range</strong> to recreate them. Their names are numbers again, so rename them afterwards if needed.</p></div>
+
   <h2 id="table-pay">How to take payment for a table from the Tables page</h2>
   <p>You need <strong>Settle Restaurant Tables</strong>.</p>
   <ol class="steps">
@@ -498,6 +516,7 @@
       <tr><td><em>"Enter a table number before sending the order."</em> / <em>"Enter a room number before sending the order."</em></td><td>Dine-in or Room chosen but no table or room picked.</td><td>Pick one from <strong>Select table...</strong> or <strong>Select checked-in room...</strong>.</td></tr>
       <tr><td><em>"No active restaurant tables are configured. Ask an admin to set Restaurant Tables first."</em></td><td>The Tables page has no active tables.</td><td>Set up tables (see <a href="#tables">above</a>).</td></tr>
       <tr><td><em>"Cannot rename Table 5 while order ... is still active."</em> / <em>"Cannot deactivate Table 5 while order ... is still active."</em></td><td>The table has an open order.</td><td>Settle or cancel the order, then save the table list again.</td></tr>
+      <tr><td><em>"This table was not deleted (open order or tab). Settle or cancel its open order first."</em> / <em>"2 tables deleted, 1 skipped (open order or tab x1)."</em></td><td>The table has an open order or tab, so the system skips it.</td><td>Settle or cancel the order first, then delete the table again.</td></tr>
       <tr><td><em>"A table called ... already exists. Use a different name or edit the existing one."</em> / <em>"Table name must be between 1 and 50 characters."</em></td><td>Two tables share a name, or a name is empty or too long.</td><td>Give each table its own name of 1 to 50 characters.</td></tr>
       <tr><td><em>"Table 5 already has active order ORD-... (...). Settle, serve, cancel, or use the existing order before opening another."</em></td><td>The table or room is in use.</td><td>Use <strong>Add items</strong> on the existing tab, or settle or cancel it first.</td></tr>
       <tr data-module="bookings"><td><em>"Room 12 has no checked-in guest booking."</em></td><td>No checked-in guest in that room.</td><td>Check the guest in first.</td></tr>

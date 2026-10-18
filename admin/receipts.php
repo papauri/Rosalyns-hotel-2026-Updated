@@ -12,11 +12,6 @@ if (!hasPermission((int)($user['id'] ?? 0), 'receipts')) {
     exit;
 }
 
-/* Seeing receipts is not the same as rewriting the wording every guest gets.
-   Without this, the templates panel is preview-only: no fields, no Save, and
-   the save_templates action is refused server-side. */
-$canEditTemplates = hasPermission((int)($user['id'] ?? 0), 'edit_templates');
-
 receipt_ensure_schema($pdo);
 $currency_symbol = getSetting('currency_symbol', 'MWK');
 $message = '';
@@ -123,34 +118,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $count++;
                 }
                 $message = 'Generated receipts for ' . $count . ' completed payment(s).';
-            } elseif ($action === 'save_templates') {
-                if (!$canEditTemplates) {
-                    throw new RuntimeException('You do not have permission to edit receipt templates.');
-                }
-                $subject = trim((string)($_POST['receipt_email_subject'] ?? ''));
-                $html = trim((string)($_POST['receipt_email_template'] ?? ''));
-                $whatsapp = trim((string)($_POST['receipt_whatsapp_template'] ?? ''));
-                if ($subject === '' || $html === '' || $whatsapp === '') {
-                    throw new RuntimeException('All receipt template fields are required.');
-                }
-                if (function_exists('upsertBookingEmailTemplateConfig')) {
-                    $existingReceiptTemplate = getBookingEmailTemplateConfig('payment_receipt', [
-                        'text_body' => '',
-                        'is_active' => 1,
-                    ]);
-                    upsertBookingEmailTemplateConfig(
-                        'payment_receipt',
-                        'Payment Receipt Email',
-                        $subject,
-                        $html,
-                        (string)($existingReceiptTemplate['text_body'] ?? ''),
-                        (int)($existingReceiptTemplate['is_active'] ?? 1)
-                    );
-                }
-                $stmt = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES (?, ?, 'finance') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()");
-                $stmt->execute(['receipt_whatsapp_template', $whatsapp]);
-                rh_log_event('receipts', 'info', 'Receipt templates updated', ['by' => $user['username'] ?? null]);
-                $message = 'Receipt templates saved.';
             }
         } catch (Throwable $e) {
             $error = $e->getMessage();
@@ -234,36 +201,9 @@ $payments = $listStmt->fetchAll(PDO::FETCH_ASSOC);
 $eventsStmt = $pdo->query("SELECT re.*, p.payment_reference FROM receipt_events re LEFT JOIN payments p ON p.id = re.payment_id ORDER BY re.created_at DESC, re.id DESC LIMIT 20");
 $recentEvents = $eventsStmt ? $eventsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
-$receiptEmailTemplate = function_exists('getBookingEmailTemplateConfig')
-    ? getBookingEmailTemplateConfig('payment_receipt', [
-        'subject' => 'Receipt {{receipt_number}} - {{site_name}}',
-        'html_body' => '',
-    ])
-    : [
-        'subject' => 'Receipt {{receipt_number}} - {{site_name}}',
-        'html_body' => '',
-    ];
-$templateSubject = (string)($receiptEmailTemplate['subject'] ?? 'Receipt {{receipt_number}} - {{site_name}}');
-$templateHtml = (string)($receiptEmailTemplate['html_body'] ?? '');
+// The receipt wording (email, PDF, WhatsApp) is edited on the Email Templates page; only the WhatsApp text is read here, for the share links.
 $templateWhatsapp = getSetting('receipt_whatsapp_template', '');
 $site_name = getSetting('site_name', 'Hotel');
-$templatePreviewMap = [
-    '{{site_name}}' => $site_name,
-    '{{guest_name}}' => 'Jane Mwale',
-    '{{receipt_number}}' => 'RCP-20260521-0042',
-    '{{payment_reference}}' => 'PAY-20260521-0874',
-    '{{booking_reference}}' => 'BK-2026-1048',
-    '{{payment_date}}' => date('d M Y'),
-    '{{payment_method}}' => 'Mobile Money',
-    '{{payment_type}}' => 'Full Payment',
-    '{{payment_status}}' => 'Completed',
-    '{{payment_amount}}' => $currency_symbol . ' 200,000.00',
-    '{{vat_amount}}' => $currency_symbol . ' 45,000.00',
-    '{{total_amount}}' => $currency_symbol . ' 245,000.00',
-    '{{description}}' => 'Room booking payment for Deluxe Ocean Suite',
-    '{{contact_email}}' => (string)(getEmailSetting('email_from_email', '') ?: 'reservations@example.com'),
-];
-$receiptPlaceholderTokens = array_keys($templatePreviewMap);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -529,69 +469,13 @@ $receiptPlaceholderTokens = array_keys($templatePreviewMap);
             </div>
         </div>
 
-        <!-- Templates panel -->
-        <section class="rh-panel">
-            <div class="rh-panel__head">
-                <h2 class="rh-panel__title"><?php echo $canEditTemplates ? 'Editable receipt templates' : 'Receipt templates'; ?></h2>
-                <div class="rh-panel__actions">
-                    <button type="button" class="btn btn--ghost btn--sm" id="receiptsPreviewToggle"><i class="fas fa-eye"></i> Preview</button>
-                </div>
-            </div>
-            <div class="rh-panel__body">
-            <?php if ($canEditTemplates): ?>
-            <p class="rh-page-head__meta receipts-placeholders">Placeholders: {{site_name}}, {{guest_name}}, {{receipt_number}}, {{payment_reference}}, {{booking_reference}}, {{payment_date}}, {{payment_method}}, {{payment_type}}, {{total_amount}}, {{contact_email}}.</p>
-            <form method="post" class="receipts-template-form" id="receiptTemplateForm" data-receipt-placeholder-tokens="<?php echo htmlspecialchars((string)json_encode($receiptPlaceholderTokens), ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="action" value="save_templates">
-                <div class="receipts-template-fields">
-                    <div class="form-group">
-                        <label class="form-label">Email Subject</label>
-                        <input class="form-control" id="receiptEmailSubject" name="receipt_email_subject" value="<?php echo htmlspecialchars($templateSubject); ?>">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Email HTML Body</label>
-                        <textarea class="form-control" id="receiptEmailTemplate" name="receipt_email_template" rows="8"><?php echo htmlspecialchars($templateHtml); ?></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">WhatsApp Message</label>
-                        <textarea class="form-control" id="receiptWhatsappTemplate" name="receipt_whatsapp_template" rows="3"><?php echo htmlspecialchars($templateWhatsapp); ?></textarea>
-                    </div>
-                </div>
-                <button class="btn btn--primary" type="submit"><i class="fas fa-save"></i> Save Templates</button>
-            </form>
-            <?php else: ?>
-            <p class="rh-page-head__meta receipts-placeholders">
-                <i class="fas fa-lock" aria-hidden="true"></i>
-                These are the templates guests receive. Editing them needs the
-                &ldquo;Edit receipt templates&rdquo; permission &mdash; use Preview to see how they read.
-            </p>
-            <?php endif; ?>
-
-            <?php /* The read-only view has no inputs for the preview to read, so the
-                     filled-in template is handed to the script as data instead. */ ?>
-            <div class="receipts-template-preview" id="receiptsTemplatePreview" hidden
-                 data-preview-map="<?php echo htmlspecialchars((string)json_encode($templatePreviewMap), ENT_QUOTES, 'UTF-8'); ?>"
-                 <?php if (!$canEditTemplates): ?>
-                 data-readonly="1"
-                 data-static-subject="<?php echo htmlspecialchars($templateSubject, ENT_QUOTES, 'UTF-8'); ?>"
-                 data-static-html="<?php echo htmlspecialchars($templateHtml, ENT_QUOTES, 'UTF-8'); ?>"
-                 data-static-whatsapp="<?php echo htmlspecialchars($templateWhatsapp, ENT_QUOTES, 'UTF-8'); ?>"
-                 <?php endif; ?>>
-                <div class="receipts-template-preview__section">
-                    <h4 class="receipts-template-preview__title">Subject Preview</h4>
-                    <p class="receipts-template-preview__subject" id="receiptPreviewSubject"></p>
-                </div>
-                <div class="receipts-template-preview__section">
-                    <h4 class="receipts-template-preview__title">Email Body Preview</h4>
-                    <iframe class="receipts-template-preview__frame" id="receiptPreviewFrame" title="Receipt email preview" sandbox="allow-same-origin"></iframe>
-                </div>
-                <div class="receipts-template-preview__section">
-                    <h4 class="receipts-template-preview__title">WhatsApp Preview</h4>
-                    <p class="receipts-template-preview__whatsapp" id="receiptPreviewWhatsapp"></p>
-                </div>
-            </div>
-            </div>
-        </section>
+        <!-- Receipt wording lives on the Email Templates page -->
+        <?php if (hasPermission((int)($user['id'] ?? 0), 'edit_templates') || hasPermission((int)($user['id'] ?? 0), 'booking_settings')): ?>
+        <p class="receipts-scope-note">
+            <span><i class="fas fa-envelope-open-text" aria-hidden="true"></i> Receipt wording (email, PDF and WhatsApp message) is edited on the Email Templates page.</span>
+            <a href="email-templates.php#email-templates">Open Email Templates</a>
+        </p>
+        <?php endif; ?>
 
         <!-- Recent Activity panel -->
         <section class="rh-panel">

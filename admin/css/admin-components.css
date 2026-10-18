@@ -3549,3 +3549,8 @@ body:not(.pos-screen) .modal-content:has(> .modal-header, > form > .modal-header
     clip-path: inset(50%) !important;
     white-space: nowrap !important;
 }
+
+/* Auto pager with one page (or an empty filter result): summary only, no disabled page buttons. */
+html :is(#rh-admin-page, body) nav.admin-auto-pagination.admin-auto-pagination--single :is(.pg-btn, .pg-current, .pg-ellipsis) {
+    display: none !important;
+}

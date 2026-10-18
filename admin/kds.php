@@ -211,7 +211,7 @@ $bootstrap['fingerprint'] = md5(
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="RH KDS">
-    <link rel="manifest" href="manifest.php">
+    <link rel="manifest" href="manifest.php" crossorigin="use-credentials">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link rel="stylesheet" href="css/admin-kpi.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-kpi.css'); ?>">
     <link rel="stylesheet" href="css/kds.css?v=<?php echo @filemtime(__DIR__ . '/css/kds.css'); ?>">

@@ -27,9 +27,9 @@ html.page-zoomed .modal-container {
     max-height: calc(90vh / var(--page-zoom)) !important;
 }
 
-html.page-zoomed .modal-content {
-    max-width: calc(96vw / var(--page-zoom));
-}
+/* No max-width override here: it beat every dialog's own width (560px forms, 880px tables) and
+   stretched them across the whole screen at a display size below 100%. Each dialog keeps the
+   width its page gives it; the default .modal-content already caps at 96vw. */
 
 html.page-zoomed .booking-details-page {
     min-height: calc((100vh - 60px) / var(--page-zoom));

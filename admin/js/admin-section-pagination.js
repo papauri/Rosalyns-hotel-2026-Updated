@@ -216,9 +216,20 @@
 
         table.dataset.adminAutoPaginationBound = '1';
 
+        // Rows a page script has filtered out (data-filter-hidden="1") do not count: pages, the
+        // "Showing x-y of n" summary and the pager all follow the rows that match the filter.
         var totalRows = rows.length;
         var totalPages = Math.ceil(totalRows / PAGE_SIZE);
         var currentPage = 1;
+
+        function matchingRows() {
+            return rows.filter(function (row) { return row.dataset.filterHidden !== '1'; });
+        }
+
+        function syncTotals() {
+            totalRows = matchingRows().length;
+            totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+        }
 
         var nav = document.createElement('nav');
         nav.className = 'bookings-pagination admin-auto-pagination';
@@ -246,8 +257,11 @@
         function showRows(page) {
             var from = (page - 1) * PAGE_SIZE;
             var to = from + PAGE_SIZE;
-            rows.forEach(function (row, index) {
+            var index = 0;
+            rows.forEach(function (row) {
+                if (row.dataset.filterHidden === '1') { row.hidden = true; return; }
                 row.hidden = !(index >= from && index < to);
+                index++;
             });
         }
 
@@ -290,6 +304,7 @@
         window.setTimeout(remeasure, 1200);
 
         function renderPage(targetPage, shouldScroll) {
+            syncTotals();
             currentPage = Math.max(1, Math.min(totalPages, targetPage));
             var from = (currentPage - 1) * PAGE_SIZE;
             var to = from + PAGE_SIZE;
@@ -339,13 +354,22 @@
 
             var summary = document.createElement('span');
             summary.className = 'pg-summary';
-            summary.textContent = 'Showing ' + (from + 1) + '–' + Math.min(to, totalRows) + ' of ' + totalRows;
+            summary.textContent = totalRows === 0 ? 'Showing 0 of 0' : 'Showing ' + (from + 1) + '–' + Math.min(to, totalRows) + ' of ' + totalRows;
+            // One page or none: the page buttons would only be disabled, so show just the summary.
+            nav.classList.toggle('admin-auto-pagination--single', totalRows <= PAGE_SIZE);
             nav.appendChild(summary);
 
             if (shouldScroll) {
                 window.requestAnimationFrame(scrollHostIntoView);
             }
         }
+
+        // Page scripts that filter rows call table.rhPagerRefresh(true) after flagging rows with
+        // data-filter-hidden: back to page 1 (or stay on the current page) with fresh counts.
+        table.rhPagerRefresh = function (resetPage) {
+            tallestPage = 0;
+            renderPage(resetPage ? 1 : currentPage, false);
+        };
 
         renderPage(1, false);
     }
