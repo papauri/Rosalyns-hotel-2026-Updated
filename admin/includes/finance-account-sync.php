@@ -569,6 +569,116 @@ if (!function_exists('rh_apply_refund_side_effects')) {
     }
 }
 
+if (!function_exists('rh_settle_refund_row')) {
+    /**
+     * Move ONE refund row through its states: pending -> processing/completed/failed,
+     * processing -> completed/failed. The single implementation behind the payment page's
+     * "Settle refund" and the POS "Settle refund" (86 refunds), so both write identical rows.
+     *
+     * Lock order (matches payment-refund.php): stock_orders (restaurant) -> original payment -> refund row.
+     * Store-credit ('credit_note') refunds are refused - they settle when the credit note is issued -
+     * and a mobile-money refund never jumps pending -> completed: it must pass through 'processing'
+     * (provider confirmation) first. On 'completed' the row is stamped refund_date_processed = NOW() and
+     * recorded_by = the SETTLING user, so the payout lands on the shift of whoever handed the money
+     * back (the person who raised it stays in refund_notes / the audit trail). The original payment's
+     * status and the account / restaurant order state are resynced in the same transaction.
+     *
+     * Runs in the caller's transaction when there is one, otherwise in its own.
+     *
+     * @return array{id:int,reference:string,from:string,to:string,amount:float,booking_type:string,booking_id:int}
+     * @throws RuntimeException with a user-facing message
+     */
+    function rh_settle_refund_row(PDO $pdo, int $refundId, string $targetStatus, int $settlerUserId, string $note = ''): array
+    {
+        if (!in_array($targetStatus, ['processing', 'completed', 'failed'], true)) {
+            throw new RuntimeException('Choose a valid refund status.');
+        }
+        $ownTx = !$pdo->inTransaction();
+        try {
+            if ($ownTx) {
+                $pdo->beginTransaction();
+            }
+            $pre = $pdo->prepare("SELECT booking_type, booking_id, original_payment_id FROM payments WHERE id = ? AND payment_type = 'refund' AND deleted_at IS NULL");
+            $pre->execute([$refundId]);
+            $preRow = $pre->fetch(PDO::FETCH_ASSOC);
+            if (!$preRow) {
+                throw new RuntimeException('Refund record not found.');
+            }
+            if ((string)$preRow['booking_type'] === 'restaurant') {
+                $pdo->prepare("SELECT id FROM stock_orders WHERE id = ? FOR UPDATE")->execute([(int)$preRow['booking_id']]);
+            }
+            if (!empty($preRow['original_payment_id'])) {
+                $pdo->prepare("SELECT id FROM payments WHERE id = ? FOR UPDATE")->execute([(int)$preRow['original_payment_id']]);
+            }
+            $lock = $pdo->prepare("SELECT id, booking_type, booking_id, original_payment_id, payment_reference, payment_method, refund_status, COALESCE(refund_amount, total_amount) AS amt FROM payments WHERE id = ? AND payment_type = 'refund' AND deleted_at IS NULL FOR UPDATE");
+            $lock->execute([$refundId]);
+            $row = $lock->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                throw new RuntimeException('Refund record not found.');
+            }
+            if ((string)$row['payment_method'] === 'credit_note') {
+                throw new RuntimeException('Store-credit refunds are settled when the credit note is issued. Void the credit note to reverse one.');
+            }
+            $from = (string)$row['refund_status'];
+            $allowed = [
+                'pending'    => ['processing', 'completed', 'failed'],
+                'processing' => ['completed', 'failed'],
+            ];
+            if (!isset($allowed[$from]) || !in_array($targetStatus, $allowed[$from], true)) {
+                throw new RuntimeException('A ' . $from . ' refund cannot be moved to ' . $targetStatus . '.');
+            }
+            if ((string)$row['payment_method'] === 'mobile_money' && $from === 'pending' && $targetStatus === 'completed') {
+                throw new RuntimeException('A mobile money refund cannot go straight to completed - mark it processing first and complete it once the provider confirms.');
+            }
+            $actor = '';
+            if ($settlerUserId > 0) {
+                $an = $pdo->prepare("SELECT COALESCE(NULLIF(username, ''), CAST(id AS CHAR)) FROM admin_users WHERE id = ?");
+                $an->execute([$settlerUserId]);
+                $actor = (string)($an->fetchColumn() ?: $settlerUserId);
+            }
+            $line = ' [' . date('Y-m-d H:i') . ' ' . ($actor !== '' ? $actor : 'staff') . ': ' . $from . ' -> ' . $targetStatus . ($note !== '' ? ' - ' . mb_substr($note, 0, 250) : '') . ']';
+            $newPaymentStatus = $targetStatus === 'completed' ? 'completed' : ($targetStatus === 'failed' ? 'cancelled' : 'pending');
+            $newRowStatus = $targetStatus === 'completed' ? 'completed' : ($targetStatus === 'failed' ? 'failed' : 'pending');
+            $pdo->prepare("
+                UPDATE payments
+                   SET refund_status = ?, payment_status = ?, status = ?,
+                       refund_date_processed = CASE WHEN ? IN ('completed','failed') THEN NOW() ELSE refund_date_processed END,
+                       recorded_by = CASE WHEN ? = 'completed' AND ? > 0 THEN ? ELSE recorded_by END,
+                       refund_notes = CONCAT(COALESCE(refund_notes, ''), ?), updated_at = NOW()
+                 WHERE id = ?
+            ")->execute([$targetStatus, $newPaymentStatus, $newRowStatus, $targetStatus, $targetStatus, $settlerUserId, $settlerUserId, $line, $refundId]);
+
+            rh_apply_refund_side_effects(
+                $pdo,
+                (string)$row['booking_type'],
+                (int)$row['booking_id'],
+                !empty($row['original_payment_id']) ? (int)$row['original_payment_id'] : null,
+                (strncmp((string)$row['payment_reference'], 'REF86-', 6) === 0 ? '86 refund settled' : 'Refund ' . $row['payment_reference'] . ' ' . $targetStatus)
+            );
+            if ($ownTx) {
+                $pdo->commit();
+            }
+            return [
+                'id' => (int)$row['id'],
+                'reference' => (string)$row['payment_reference'],
+                'from' => $from,
+                'to' => $targetStatus,
+                'amount' => (float)$row['amt'],
+                'booking_type' => (string)$row['booking_type'],
+                'booking_id' => (int)$row['booking_id'],
+            ];
+        } catch (Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if ($e instanceof RuntimeException) {
+                throw $e;
+            }
+            throw new RuntimeException($e->getMessage(), 0, $e);
+        }
+    }
+}
+
 if (!function_exists('rh_cancel_auto_refund_account')) {
     /**
      * Refund-on-cancel for conference/event/gym accounts when the "nonroom_cancel_mode"

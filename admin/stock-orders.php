@@ -366,6 +366,8 @@ $soCanSettleHere  = $soCanTakePayment && hasPermission((int)$user['id'], 'pos_ti
 $soCanDiscount    = hasPermission((int)$user['id'], 'pos_discount');
 $soCanForceServe  = hasPermission((int)$user['id'], 'pos_force_serve');
 $soCanVoid        = in_array($user['role'] ?? '', ['admin', 'manager'], true);
+/* Permanent delete of any order (api/delete-order.php re-checks this and the CSRF token). */
+$soCanDelete      = hasPermission((int)$user['id'], 'pos_delete_order');
 $soIsAjax         = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -2366,6 +2368,9 @@ $csrf_token = generateCsrfToken();
             <?php if ($canReconcile): ?>
                 <button type="button" class="mini-action warn" onclick="soBulk('reconcile')" title="Reconcile the selected orders that need review"><i class="fas fa-scale-balanced"></i> Reconcile</button>
             <?php endif; ?>
+            <?php if ($soCanDelete): ?>
+                <button type="button" class="mini-action danger" onclick="soBulk('delete')" title="Permanently delete the selected orders (any status). Stock is put back, payments removed, a deletion record is kept."><i class="fas fa-trash-can"></i> Delete</button>
+            <?php endif; ?>
             <button type="button" class="mini-action" onclick="soBulk('export')" title="Download the selected rows as CSV"><i class="fas fa-file-csv"></i> Export</button>
             <button type="button" class="mini-action" onclick="soBulkClear()">Clear</button>
         </div>
@@ -2519,45 +2524,82 @@ $csrf_token = generateCsrfToken();
                             </td>
                             <td style="font-size:12px;"><?php echo htmlspecialchars($o['created_by_name'] ?: '—'); ?></td>
                             <td style="font-size:12px;"><?php echo htmlspecialchars(date('Y-m-d H:i', strtotime($o['created_at']))); ?></td>
-                            <td>
-                                <button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" class="mini-action"><i class="fas fa-stream"></i> Timeline</button>
-                                <button type="button" class="mini-action"
-                                    onclick="showOrderItems(<?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode($o['reference']), ENT_QUOTES, 'UTF-8'); ?>)"
-                                    title="View line items for this order">
-                                    <i class="fas fa-list-ul"></i> Items
-                                </button>
-                                <?php if (in_array($o['status'], ['paid', 'voided', 'cancelled'], true) || $o['order_type'] === 'room_service'): ?>
-                                    <a href="stock-receipt.php?id=<?php echo (int)$o['id']; ?>" class="mini-action primary"><i class="fas fa-receipt"></i> Receipt</a>
-                                <?php endif; ?>
-                                <?php if (empty($health['is_balanced'])): ?>
-                                    <button class="mini-action warn" type="button"
-                                        onclick="showOrderReview(<?php echo (int)$o['id']; ?>, <?php echo $canReconcile ? "'rf-" . (int)$o['id'] . "'" : 'null'; ?>)"
-                                        title="View full payment review: timeline, accounting impact, and reconciliation tips">
-                                        <i class="fas fa-magnifying-glass"></i> Review
+                            <?php
+                            /* Row actions: Timeline + Items always, ONE contextual primary (Settle, else Receipt, else Review);
+                               Open, the other of Receipt/Review and the danger actions (Cancel, Void, Delete) sit in the shared More menu. */
+                            $soIsPlaced    = ($o['status'] === 'placed');
+                            $soShowSettle  = $soIsPlaced && ($o['order_type'] ?? '') !== 'room_service' && $soCanSettleHere;
+                            $soShowReceipt = in_array($o['status'], ['paid', 'voided', 'cancelled'], true) || $o['order_type'] === 'room_service';
+                            $soShowReview  = empty($health['is_balanced']);
+                            $soPrimary     = $soShowSettle ? 'settle' : ($soShowReceipt ? 'receipt' : ($soShowReview ? 'review' : ''));
+                            $soMoreReceipt = $soShowReceipt && $soPrimary !== 'receipt';
+                            $soMoreReview  = $soShowReview && $soPrimary !== 'review';
+                            $soCanVoidRow  = $soCanVoid && ($soIsPlaced || in_array($o['status'], ['paid', 'completed'], true));
+                            $soMorePlain   = $soIsPlaced || $soMoreReceipt || $soMoreReview;
+                            $soMoreDanger  = $soIsPlaced || $soCanVoidRow || $soCanDelete;
+                            ?>
+                            <td class="so-actions-cell">
+                                <div class="so-actions">
+                                    <button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" class="mini-action"><i class="fas fa-stream"></i> Timeline</button>
+                                    <button type="button" class="mini-action"
+                                        onclick="showOrderItems(<?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode($o['reference']), ENT_QUOTES, 'UTF-8'); ?>)"
+                                        title="View line items for this order">
+                                        <i class="fas fa-list-ul"></i> Items
                                     </button>
-                                    <?php if ($canReconcile): ?>
-                                        <form method="POST" id="rf-<?php echo (int)$o['id']; ?>" style="display:none;">
-                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
-                                            <input type="hidden" name="action" value="reconcile_order">
-                                            <input type="hidden" name="order_id" value="<?php echo (int)$o['id']; ?>">
-                                        </form>
-                                    <?php endif; ?>
-                                <?php endif; ?>
-                                <?php if ($o['status'] === 'placed'): ?>
-                                    <button type="button" onclick="rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" class="mini-action primary" title="View live order status, items, and kitchen progress"><i class="fas fa-hourglass-half"></i> Open</button>
-                                    <?php if (($o['order_type'] ?? '') !== 'room_service' && $soCanSettleHere): ?>
+                                    <?php if ($soPrimary === 'settle'): ?>
                                         <button type="button" class="mini-action success"
                                             onclick="soOpenSettle(<?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(json_encode((float)$o['total_amount']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo (int)($o['split_count'] ?? 1); ?>, <?php echo (int)($o['split_paid_count'] ?? 0); ?>)"
                                             title="Take payment and close this order (deals, discount, split bill and tip as on the till)">
                                             <i class="fas fa-circle-check"></i> Settle<?php echo (int)($o['split_paid_count'] ?? 0) > 0 ? ' (' . (int)$o['split_paid_count'] . '/' . (int)$o['split_count'] . ' paid)' : ''; ?>
                                         </button>
+                                    <?php elseif ($soPrimary === 'receipt'): ?>
+                                        <a href="stock-receipt.php?id=<?php echo (int)$o['id']; ?>" class="mini-action primary"><i class="fas fa-receipt"></i> Receipt</a>
+                                    <?php elseif ($soPrimary === 'review'): ?>
+                                        <button class="mini-action warn" type="button"
+                                            onclick="showOrderReview(<?php echo (int)$o['id']; ?>, <?php echo $canReconcile ? "'rf-" . (int)$o['id'] . "'" : 'null'; ?>)"
+                                            title="View full payment review: timeline, accounting impact, and reconciliation tips">
+                                            <i class="fas fa-magnifying-glass"></i> Review
+                                        </button>
                                     <?php endif; ?>
-                                    <button class="mini-action danger" type="button" onclick="soRowAction('cancel', <?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>)">Cancel</button>
-                                    <?php if ($soCanVoid): ?>
-                                        <button class="mini-action danger" type="button" onclick="soRowAction('void', <?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>)" title="Void an open order whose preparation has started (stock restored, payments reversed)"><i class="fas fa-ban"></i> Void</button>
+                                    <?php if ($soMorePlain || $soMoreDanger): ?>
+                                        <div class="actions-more">
+                                            <button type="button" class="mini-action actions-more-toggle" title="More actions" aria-label="More actions" aria-haspopup="true" onclick="toggleSoActionsMore(this, event)">
+                                                <i class="fas fa-ellipsis-vertical"></i> More
+                                            </button>
+                                            <div class="actions-more-menu">
+                                                <?php if ($soIsPlaced): ?>
+                                                    <button type="button" onclick="closeSoActionMenus(); rhOpenLifecycle(<?php echo (int)$o['id']; ?>)" title="View live order status, items, and kitchen progress"><i class="fas fa-hourglass-half"></i> Open</button>
+                                                <?php endif; ?>
+                                                <?php if ($soMoreReceipt): ?>
+                                                    <a href="stock-receipt.php?id=<?php echo (int)$o['id']; ?>"><i class="fas fa-receipt"></i> Receipt</a>
+                                                <?php endif; ?>
+                                                <?php if ($soMoreReview): ?>
+                                                    <button type="button"
+                                                        onclick="closeSoActionMenus(); showOrderReview(<?php echo (int)$o['id']; ?>, <?php echo $canReconcile ? "'rf-" . (int)$o['id'] . "'" : 'null'; ?>)"
+                                                        title="View full payment review: timeline, accounting impact, and reconciliation tips">
+                                                        <i class="fas fa-magnifying-glass"></i> Review
+                                                    </button>
+                                                <?php endif; ?>
+                                                <?php if ($soMorePlain && $soMoreDanger): ?><hr class="menu-divider"><?php endif; ?>
+                                                <?php if ($soIsPlaced): ?>
+                                                    <button class="text-danger" type="button" onclick="closeSoActionMenus(); soRowAction('cancel', <?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>)"><i class="fas fa-circle-xmark"></i> Cancel</button>
+                                                <?php endif; ?>
+                                                <?php if ($soCanVoidRow): ?>
+                                                    <button class="text-danger" type="button" onclick="closeSoActionMenus(); soRowAction('void', <?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>)"<?php if ($soIsPlaced): ?> title="Void an open order whose preparation has started (stock restored, payments reversed)"<?php endif; ?>><i class="fas fa-ban"></i> Void</button>
+                                                <?php endif; ?>
+                                                <?php if ($soCanDelete): ?>
+                                                    <button class="text-danger" type="button" onclick="closeSoActionMenus(); soRowAction('delete', <?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>)" title="Permanently delete this order (any status). Stock is put back, payments removed, a deletion record is kept."><i class="fas fa-trash-can"></i> Delete</button>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
                                     <?php endif; ?>
-                                <?php elseif (in_array($o['status'], ['paid', 'completed'], true) && $soCanVoid): ?>
-                                    <button class="mini-action danger" type="button" onclick="soRowAction('void', <?php echo (int)$o['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$o['reference']), ENT_QUOTES, 'UTF-8'); ?>)"><i class="fas fa-ban"></i> Void</button>
+                                </div>
+                                <?php if ($soShowReview && $canReconcile): ?>
+                                    <form method="POST" id="rf-<?php echo (int)$o['id']; ?>" style="display:none;">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                        <input type="hidden" name="action" value="reconcile_order">
+                                        <input type="hidden" name="order_id" value="<?php echo (int)$o['id']; ?>">
+                                    </form>
                                 <?php endif; ?>
                             </td>
                         </tr>
@@ -2927,6 +2969,36 @@ $csrf_token = generateCsrfToken();
             soSyncBulk();
         }
 
+        // ── Row "More" menu (shared placement from admin-components.js) ─────
+        function closeSoActionMenus() {
+            document.querySelectorAll('#soOrdersTable .actions-more.open').forEach(function (el) {
+                el.classList.remove('open');
+                var m = el.querySelector('.actions-more-menu');
+                if (m) m.removeAttribute('style');
+            });
+        }
+
+        function toggleSoActionsMore(btn, e) {
+            if (e) e.stopPropagation();
+            var wrap = btn.closest('.actions-more');
+            var menu = wrap ? wrap.querySelector('.actions-more-menu') : null;
+            if (!menu) return;
+            var wasOpen = wrap.classList.contains('open');
+            closeSoActionMenus();
+            if (wasOpen) return;
+            wrap.classList.add('open');
+            if (window.rhPlaceActionMenu) window.rhPlaceActionMenu(btn, menu);
+        }
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.actions-more')) closeSoActionMenus();
+        });
+        document.addEventListener('scroll', function (e) {
+            if (!(e.target && e.target.closest && e.target.closest('.actions-more-menu'))) closeSoActionMenus();
+        }, true);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') closeSoActionMenus();
+        });
+
         // ── Row actions (cancel / void / reconcile) ─────────────────────────
         var _soVoidIds = [];
 
@@ -2939,6 +3011,44 @@ $csrf_token = generateCsrfToken();
                 if (j.ok) soRefresh();
             } else if (kind === 'void') {
                 promptVoid([id], ref);
+            } else if (kind === 'delete') {
+                soDeleteOrders([id], ref);
+            }
+        }
+
+        /* Delete = permanent. One reason (>= 8 characters) for the whole selection; the server
+           (api/delete-order.php) re-checks the pos_delete_order permission and the CSRF token and
+           does stock / money / audit in one transaction per order. */
+        async function soAskDeleteReason(count, ref) {
+            var label = count > 1 ? count + ' orders' : ref;
+            var details = [
+                'Stock the order still holds is put back; stock already written off as wastage stays wasted.',
+                'Its payments, refunds and (room service) folio charges are removed, so shift totals, End of Day and reports change - including closed shifts.',
+                'A permanent deletion record is kept. This cannot be undone.',
+                'Cash already taken or handed back is not moved - settle the drawer separately.'
+            ];
+            while (true) {
+                var reason = await (window.AdminConfirm && AdminConfirm.prompt
+                    ? AdminConfirm.prompt({ title: 'Delete ' + label, message: 'Permanently delete ' + label + '?', details: details, inputLabel: 'Reason (min 8 characters)', inputPlaceholder: 'Why is this order being deleted?', confirmText: 'Delete order' + (count > 1 ? 's' : ''), tone: 'danger', icon: 'fa-trash-can' })
+                    : Promise.resolve(window.prompt('Reason for deleting ' + label + ' (min 8 characters)')));
+                if (reason === null) return null;
+                reason = String(reason).trim();
+                if (reason.length >= 8) return reason;
+                soToast('Please give a reason of at least 8 characters.', 'warning');
+            }
+        }
+
+        async function soDeleteOrders(ids, ref) {
+            ids = (ids || []).filter(function(v) { return v; });
+            if (!ids.length) return;
+            var reason = await soAskDeleteReason(ids.length, ref);
+            if (reason === null) return;
+            var res = await soRunEach(ids, function(id) { return soPost({ order_id: id, delete_reason: reason }, '../api/delete-order.php'); });
+            if (ids.length === 1 && res.done === 1) {
+                soToast('Order ' + ref + ' deleted.', 'success');
+                soRefresh();
+            } else {
+                soReportBulk('deleted', res);
             }
         }
 
@@ -3063,6 +3173,8 @@ $csrf_token = generateCsrfToken();
                 var v = pick(['placed', 'paid']);
                 if (!v.length) { soToast('Only open or paid orders can be voided.', 'warning'); return; }
                 promptVoid(v.map(function(tr) { return tr.dataset.soId; }), '');
+            } else if (kind === 'delete') {
+                soDeleteOrders(rows.map(function(tr) { return tr.dataset.soId; }), rows.length === 1 ? rows[0].dataset.soRef : '');
             } else if (kind === 'reconcile') {
                 var rc = rows.filter(function(tr) { return tr.dataset.soReview === '1'; });
                 if (!rc.length) { soToast('None of the selected orders needs reconciling.', 'warning'); return; }

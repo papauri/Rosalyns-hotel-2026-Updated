@@ -78,7 +78,7 @@ $rolePerm = match ($role) {
 $STATION = $reqStation ?: $defaultStation;
 
 // Permission check: privileged users see/act on any station; staff are pinned to their station's permission
-if (in_array($action, ['send_message', 'get_pos_inbox', 'get_order_station_messages', 'station_reply', 'get_my_orders', 'send_to_pos', 'ack_pos_message', 'update_order_note', 'toggle_priority_pos'], true)) {
+if (in_array($action, ['send_message', 'get_pos_inbox', 'get_order_station_messages', 'station_reply', 'get_my_orders', 'send_to_pos', 'ack_pos_message', 'ack_pos_messages', 'update_order_note', 'toggle_priority_pos'], true)) {
     $canSendStationNote = hasPermission((int)$user['id'], 'pos_till')
         || hasPermission((int)$user['id'], 'stock_orders')
         || hasPermission((int)$user['id'], 'kds_view')
@@ -441,6 +441,9 @@ function kds_ensure_station_messages_table(PDO $pdo): void
     kds_ensure_column($pdo, 'station_messages', 'pos_acknowledged',    "TINYINT(1) NOT NULL DEFAULT 0");
     kds_ensure_column($pdo, 'station_messages', 'pos_acknowledged_at', "DATETIME NULL");
     kds_ensure_column($pdo, 'station_messages', 'pos_acknowledged_by', "INT UNSIGNED NULL");
+    /* v6 - actionable till notices (order cancelled / voided / line 86'd): see admin/includes/pos-notices.php */
+    kds_ensure_column($pdo, 'station_messages', 'notice_type',         "VARCHAR(30) NULL");
+    kds_ensure_column($pdo, 'station_messages', 'notice_item_id',      "INT UNSIGNED NULL");
 }
 
 function kds_recent_station_messages(PDO $pdo, string $station): array
@@ -649,11 +652,24 @@ try {
         $stmt = $pdo->prepare("SELECT sm.id, sm.station, sm.message, sm.source, sm.sent_by_name, sm.priority,
                 sm.order_id, sm.order_ref, sm.created_at, sm.seen_at, sm.is_acknowledged, sm.acknowledged_at,
                 sm.reply_message, sm.replied_at, sm.replied_by_name, sm.to_user_id,
-                sm.pos_acknowledged, sm.pos_acknowledged_at,
+                sm.pos_acknowledged, sm.pos_acknowledged_at, sm.notice_type, sm.notice_item_id,
                 o.order_type, o.table_number, o.room_number, o.customer_name,
+                o.status AS order_status, o.total_amount AS order_total, o.created_by AS order_created_by,
+                ni.kds_status AS notice_item_status, ni.item_name AS notice_item_name,
+                (SELECT COALESCE(SUM(CASE WHEN COALESCE(pr.refund_amount, 0) > 0 THEN pr.refund_amount ELSE pr.total_amount END), 0)
+                   FROM payments pr
+                  WHERE pr.booking_type = 'restaurant' AND pr.booking_id = sm.order_id
+                    AND pr.payment_type = 'refund' AND pr.refund_status IN ('pending','processing') AND pr.deleted_at IS NULL
+                    AND pr.payment_method <> 'credit_note' AND pr.payment_reference LIKE 'REF86-%') AS pending_refund,
+                (SELECT COUNT(*)
+                   FROM payments pm
+                  WHERE pm.booking_type = 'restaurant' AND pm.booking_id = sm.order_id
+                    AND pm.payment_type = 'refund' AND pm.refund_status IN ('pending','processing') AND pm.deleted_at IS NULL
+                    AND pm.payment_method = 'mobile_money' AND pm.payment_reference LIKE 'REF86-%') AS pending_refund_mobile,
                 oi.order_items_summary
             FROM station_messages sm
             LEFT JOIN stock_orders o ON o.id = sm.order_id
+            LEFT JOIN stock_order_items ni ON ni.id = sm.notice_item_id
             LEFT JOIN (
                 SELECT soi.order_id,
                     GROUP_CONCAT(CONCAT(soi.quantity, 'x ', soi.item_name) ORDER BY soi.id SEPARATOR ', ') AS order_items_summary
@@ -711,7 +727,7 @@ try {
         $userId = (int)$user['id'];
 
         $stmt = $pdo->prepare("UPDATE station_messages
-            SET pos_acknowledged = 1, pos_acknowledged_at = NOW(), pos_acknowledged_by = ?
+            SET pos_acknowledged = 1, pos_acknowledged_at = NOW(), pos_acknowledged_by = ?, seen_at = COALESCE(seen_at, NOW())
             WHERE id = ? AND to_user_id = ? AND source = 'station'");
         $stmt->execute([$userId, $messageId, $userId]);
 
@@ -729,6 +745,37 @@ try {
             ]);
         }
         jok(['message_id' => $messageId, 'pos_acknowledged' => true]);
+    }
+
+    if ($action === 'ack_pos_messages') {
+        /* Mark several of THIS cashier's notices as read in one go ("Mark all as read" / "Dismiss
+           all"): ids[] for a chosen set, or all=1 for every notice still waiting. Server-side, so the
+           notices disappear on every till and the stations see them as handled. Only the notices
+           addressed to the caller are touched. notice_only=1 leaves ordinary chat notes alone. */
+        kds_ensure_station_messages_table($pdo);
+        $userId = (int)$user['id'];
+        $ids = array_slice(array_values(array_filter(array_map('intval', (array)($_POST['ids'] ?? [])), static fn($v) => $v > 0)), 0, 200);
+        $all = !empty($_POST['all']);
+        $noticeOnly = !empty($_POST['notice_only']);
+        if (!$all && !$ids) jok(['acked' => 0]);
+        $sql = "UPDATE station_messages
+                   SET pos_acknowledged = 1, pos_acknowledged_at = NOW(), pos_acknowledged_by = ?, seen_at = COALESCE(seen_at, NOW())
+                 WHERE to_user_id = ? AND source = 'station' AND COALESCE(pos_acknowledged, 0) = 0";
+        $args = [$userId, $userId];
+        if ($noticeOnly) {
+            // Typed notices, plus cancel/void notices sent before notice_type existed.
+            $sql .= " AND (notice_type IS NOT NULL OR (order_id IS NOT NULL AND (message LIKE BINARY '%was CANCELLED%' OR message LIKE BINARY '%was VOIDED%')))";
+        }
+        if (!$all) {
+            $sql .= ' AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')';
+            $args = array_merge($args, $ids);
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($args);
+        if (function_exists('rh_log_event')) {
+            rh_log_event('api/kds-action', 'info', 'POS marked notices read', ['count' => $stmt->rowCount(), 'user' => $user['username'] ?? '']);
+        }
+        jok(['acked' => $stmt->rowCount()]);
     }
 
     if ($action === 'send_to_pos') {
@@ -1192,8 +1239,8 @@ try {
             if ($ord && (int)($ord['created_by'] ?? 0) > 0) {
                 $stnLbl = kds_station_label($STATION);
                 $notifMsg = '86 ' . $it['item_name'] . ' on order ' . ($ord['reference'] ?? '') . ' (' . ($ord['table_number'] ?: strtoupper($STATION)) . ') — inform guest and offer alternative.' . ($refundInfo['rows'] > 0 ? ' A refund of ' . number_format($refundInfo['allocated'], 2) . ' is pending - settle it through the refund flow.' : '');
-                $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, to_user_id, is_acknowledged, acknowledged_at) VALUES (?, ?, ?, ?, 'station', 'urgent', ?, ?, ?, 0, NULL)")
-                    ->execute([$STATION, $notifMsg, (int)$user['id'], $user['full_name'] ?? $user['username'] ?? '', $orderId, $ord['reference'] ?? '', (int)$ord['created_by']]);
+                $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, to_user_id, is_acknowledged, acknowledged_at, notice_type, notice_item_id) VALUES (?, ?, ?, ?, 'station', 'urgent', ?, ?, ?, 0, NULL, 'item_86', ?)")
+                    ->execute([$STATION, $notifMsg, (int)$user['id'], $user['full_name'] ?? $user['username'] ?? '', $orderId, $ord['reference'] ?? '', (int)$ord['created_by'], $itemId]);
             }
         } catch (Throwable $e) {
             error_log('void_item station msg: ' . $e->getMessage());

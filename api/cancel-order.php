@@ -26,6 +26,7 @@ require_once __DIR__ . '/../config/security.php';
 require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../admin/includes/offline-log.php';
 require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
+require_once __DIR__ . '/../admin/includes/pos-notices.php';
 require_once __DIR__ . '/../includes/admin-session.php';
 rh_admin_session_start(); // 8h idle sign-out
 
@@ -54,43 +55,6 @@ function c_column_exists(PDO $pdo, string $table, string $column): bool
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?");
     $stmt->execute([$table, $column]);
     return (int)$stmt->fetchColumn() > 0;
-}
-
-function c_ensure_column(PDO $pdo, string $table, string $column, string $definition): void
-{
-    if (!c_column_exists($pdo, $table, $column)) {
-        $pdo->exec("ALTER TABLE `{$table}` ADD COLUMN `{$column}` {$definition}");
-    }
-}
-
-function c_ensure_station_messages_table(PDO $pdo): void
-{
-    $pdo->exec("CREATE TABLE IF NOT EXISTS station_messages (
-        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        station VARCHAR(30) NOT NULL,
-        message VARCHAR(255) NOT NULL,
-        sent_by INT UNSIGNED NULL,
-        sent_by_name VARCHAR(120) NOT NULL DEFAULT '',
-        source VARCHAR(20) NOT NULL DEFAULT 'pos',
-        is_acknowledged TINYINT(1) NOT NULL DEFAULT 0,
-        acknowledged_by INT UNSIGNED NULL,
-        acknowledged_at DATETIME NULL,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_station_messages_station_created (station, created_at),
-        INDEX idx_station_messages_ack (is_acknowledged)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
-    c_ensure_column($pdo, 'station_messages', 'priority', "ENUM('normal','urgent') NOT NULL DEFAULT 'normal'");
-    c_ensure_column($pdo, 'station_messages', 'seen_at', 'DATETIME NULL');
-    c_ensure_column($pdo, 'station_messages', 'reply_message', 'VARCHAR(255) NULL');
-    c_ensure_column($pdo, 'station_messages', 'replied_at', 'DATETIME NULL');
-    c_ensure_column($pdo, 'station_messages', 'replied_by_name', 'VARCHAR(120) NULL');
-    c_ensure_column($pdo, 'station_messages', 'order_id', 'INT UNSIGNED NULL');
-    c_ensure_column($pdo, 'station_messages', 'order_ref', 'VARCHAR(40) NULL');
-    c_ensure_column($pdo, 'station_messages', 'to_user_id', 'INT UNSIGNED NULL');
-    c_ensure_column($pdo, 'station_messages', 'pos_acknowledged', 'TINYINT(1) NOT NULL DEFAULT 0');
-    c_ensure_column($pdo, 'station_messages', 'pos_acknowledged_at', 'DATETIME NULL');
-    c_ensure_column($pdo, 'station_messages', 'pos_acknowledged_by', 'INT UNSIGNED NULL');
 }
 
 function c_void_room_service_folio_charges(PDO $pdo, int $orderId, string $reason, int $voidedBy): int
@@ -278,23 +242,26 @@ try {
 
     $pdo->commit();
 
-    // Notify POS cashier that their order was cancelled from a station
+    /* Tell the cashier who opened the order that it was cancelled from another screen. The notice is
+     * actionable on the till (Mark as read / Open order / ...): see admin/includes/pos-notices.php. */
     if ((int)($order['created_by'] ?? 0) > 0 && (int)$order['created_by'] !== $userId) {
         try {
-            c_ensure_station_messages_table($pdo);
             $cancellerName = (string)($user['full_name'] ?? $user['username'] ?? 'station');
-            $roleLabel = match ($userRole) {
-                'chef'         => 'Kitchen',
-                'bar_staff'    => 'Bar',
-                'coffee_staff' => 'Coffee Bar',
-                default        => ucfirst($userRole),
-            };
-            $notifMsg = 'Order ' . (string)$order['reference'] . ' was CANCELLED by ' . $roleLabel . ' (' . $cancellerName . '): ' . $reason;
-            $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, to_user_id, is_acknowledged, acknowledged_at) VALUES ('kitchen', ?, ?, ?, 'station', 'urgent', ?, ?, ?, 0, NULL)")
-                ->execute([mb_substr($notifMsg, 0, 255), $userId, $cancellerName, $orderId, (string)$order['reference'], (int)$order['created_by']]);
+            $notifMsg = 'Order ' . (string)$order['reference'] . ' was CANCELLED by ' . rh_pos_notice_actor_label($userRole) . ' (' . $cancellerName . '): ' . $reason;
+            rh_pos_notice_send($pdo, [
+                'station'      => 'kitchen',
+                'message'      => $notifMsg,
+                'sent_by'      => $userId,
+                'sent_by_name' => $cancellerName,
+                'order_id'     => $orderId,
+                'order_ref'    => (string)$order['reference'],
+                'to_user_id'   => (int)$order['created_by'],
+                'priority'     => 'urgent',
+                'notice_type'  => 'order_cancelled',
+            ]);
         } catch (Throwable $e) {
             error_log('cancel-order POS notify: ' . $e->getMessage());
-            // Non-fatal — cancel is committed, notification is best-effort
+            // Non-fatal - cancel is committed, notification is best-effort
         }
     }
 

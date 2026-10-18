@@ -21,6 +21,7 @@ require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../admin/includes/offline-log.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
+require_once __DIR__ . '/../admin/includes/pos-notices.php';
 require_once __DIR__ . '/../includes/admin-session.php';
 rh_admin_session_start(); // 8h idle sign-out
 
@@ -90,7 +91,7 @@ function v_voidRoomServiceFolioCharges(PDO $pdo, int $orderId, string $reason, i
 
 try {
     $pdo->beginTransaction();
-    $oh = $pdo->prepare("SELECT id, reference, status, order_type, booking_id FROM stock_orders WHERE id=? FOR UPDATE");
+    $oh = $pdo->prepare("SELECT id, reference, status, order_type, booking_id, created_by FROM stock_orders WHERE id=? FOR UPDATE");
     $oh->execute([$orderId]);
     $order = $oh->fetch(PDO::FETCH_ASSOC);
     if (!$order) { $pdo->rollBack(); vjerr('Order not found', 404); }
@@ -147,7 +148,7 @@ try {
     // earlier refund. The original rows are never mutated. An order that was never paid simply has
     // nothing to reverse. 'cancellation' is the closest member of the refund_reason ENUM; the
     // operator's wording goes to notes.
-    rh_reverse_restaurant_payments(
+    $reversal = rh_reverse_restaurant_payments(
         $pdo,
         $orderId,
         (string)($order['reference'] ?? ('ORD' . $orderId)),
@@ -178,6 +179,41 @@ try {
 
     $pdo->commit();
     if (function_exists('deleteCache')) { try { deleteCache('stock_dashboard_metrics_v1'); } catch (Throwable $e) {} }
+
+    /* Tell the cashier who opened the order that it was voided from another screen (actionable
+     * notice on the till). When a payment was reversed the notice says the guest is owed the money. */
+    if ((int)($order['created_by'] ?? 0) > 0 && (int)$order['created_by'] !== (int)$user['id']) {
+        try {
+            $voiderName = (string)($user['full_name'] ?? $user['username'] ?? 'manager');
+            /* The money sentence comes BEFORE the reason and is never cut: the reason is what gets truncated
+             * to fit the 255-character note. The payout is booked on the voider's shift (voided_by), so the
+             * cashier is told whose drawer the guest's money comes back from. */
+            $voidHead = 'Order ' . (string)$order['reference'] . ' was VOIDED by ' . rh_pos_notice_actor_label((string)($user['role'] ?? '')) . ' (' . $voiderName . ').';
+            $voidMoney = '';
+            if (!empty($reversal['reversed_gross']) && (float)$reversal['reversed_gross'] > 0) {
+                $voidMoney = ' Payment of ' . number_format((float)$reversal['reversed_gross'], 2) . ' (excl. tip) was reversed and counted as paid out on ' . $voiderName . "'s shift - hand the guest their money back from that drawer.";
+            }
+            if (mb_strlen($voidHead . $voidMoney) > 235) {
+                $voidHead = 'Order ' . (string)$order['reference'] . ' was VOIDED.';
+            }
+            $reasonRoom = 255 - mb_strlen($voidHead . $voidMoney) - 9; // ' Reason: '
+            $reasonText = $reasonRoom >= 12 ? (mb_strlen($reason) > $reasonRoom ? mb_substr($reason, 0, $reasonRoom - 1) . '…' : $reason) : '';
+            $voidMsg = $voidHead . $voidMoney . ($reasonText !== '' ? ' Reason: ' . $reasonText : '');
+            rh_pos_notice_send($pdo, [
+                'station'      => 'kitchen',
+                'message'      => $voidMsg,
+                'sent_by'      => (int)$user['id'],
+                'sent_by_name' => $voiderName,
+                'order_id'     => $orderId,
+                'order_ref'    => (string)$order['reference'],
+                'to_user_id'   => (int)$order['created_by'],
+                'priority'     => 'urgent',
+                'notice_type'  => 'order_voided',
+            ]);
+        } catch (Throwable $e) {
+            error_log('void-order POS notify: ' . $e->getMessage()); // best-effort; the void is committed
+        }
+    }
     if (function_exists('rh_log_offline_replay')) {
         rh_log_offline_replay($pdo, '/api/void-order.php', [
             'action' => 'void_order',

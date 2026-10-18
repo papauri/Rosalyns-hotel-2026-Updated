@@ -90,49 +90,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
             if (!in_array($targetStatus, ['processing', 'completed', 'failed'], true)) {
                 throw new Exception('Choose a valid refund status.');
             }
-            $pdo->beginTransaction();
-            // Lock order matches payment-refund.php: order row -> original payment -> refund row.
-            if ((string)$payment['booking_type'] === 'restaurant') {
-                $pdo->prepare("SELECT id FROM stock_orders WHERE id = ? FOR UPDATE")->execute([(int)$payment['booking_id']]);
-            }
-            if (!empty($payment['original_payment_id'])) {
-                $pdo->prepare("SELECT id FROM payments WHERE id = ? FOR UPDATE")->execute([(int)$payment['original_payment_id']]);
-            }
-            $lockStmt = $pdo->prepare("SELECT id, booking_type, booking_id, original_payment_id, payment_reference, payment_method, refund_status, refund_reason, COALESCE(refund_amount, total_amount) AS amt FROM payments WHERE id = ? AND payment_type = 'refund' AND deleted_at IS NULL FOR UPDATE");
-            $lockStmt->execute([$paymentId]);
-            $refundRow = $lockStmt->fetch(PDO::FETCH_ASSOC);
-            if (!$refundRow) {
-                throw new Exception('Refund record not found.');
-            }
-            if ((string)$refundRow['payment_method'] === 'credit_note') {
-                throw new Exception('Store-credit refunds are settled when the credit note is issued. Void the credit note to reverse one.');
-            }
-            $from = (string)$refundRow['refund_status'];
-            $allowed = [
-                'pending'    => ['processing', 'completed', 'failed'],
-                'processing' => ['completed', 'failed'],
-            ];
-            if (!isset($allowed[$from]) || !in_array($targetStatus, $allowed[$from], true)) {
-                throw new Exception('A ' . $from . ' refund cannot be moved to ' . $targetStatus . '.');
-            }
-            $newPaymentStatus = $targetStatus === 'completed' ? 'completed' : ($targetStatus === 'failed' ? 'cancelled' : 'pending');
-            $settleLine = ' [' . date('Y-m-d H:i') . ' ' . ($user['username'] ?? 'staff') . ': ' . $from . ' -> ' . $targetStatus . ($settleNote !== '' ? ' - ' . mb_substr($settleNote, 0, 250) : '') . ']';
-            $pdo->prepare("
-                UPDATE payments
-                SET refund_status = ?, payment_status = ?, status = ?,
-                    refund_date_processed = CASE WHEN ? IN ('completed','failed') THEN NOW() ELSE refund_date_processed END,
-                    refund_notes = CONCAT(COALESCE(refund_notes, ''), ?), updated_at = NOW()
-                WHERE id = ?
-            ")->execute([$targetStatus, $newPaymentStatus, $targetStatus === 'completed' ? 'completed' : ($targetStatus === 'failed' ? 'failed' : 'pending'), $targetStatus, $settleLine, $paymentId]);
-
-            rh_apply_refund_side_effects(
-                $pdo,
-                (string)$refundRow['booking_type'],
-                (int)$refundRow['booking_id'],
-                !empty($refundRow['original_payment_id']) ? (int)$refundRow['original_payment_id'] : null,
-                'Refund ' . $refundRow['payment_reference'] . ' ' . $targetStatus
-            );
-            $pdo->commit();
+            // Shared with the POS "Settle refund": locks stock_orders -> original payment -> refund row, validates
+            // the move, stamps the settler as recorded_by and resyncs the original / account / order.
+            $settled = rh_settle_refund_row($pdo, $paymentId, $targetStatus, (int)$user['id'], $settleNote);
+            $from = $settled['from'];
+            $refundRow = ['payment_reference' => $settled['reference'], 'amt' => $settled['amount']];
 
             rh_log_event('payment-details', 'info', 'Refund settled', [
                 'refund_id' => $paymentId, 'from' => $from, 'to' => $targetStatus,
@@ -551,7 +513,9 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                                     <?php if ((string)$payment['refund_status'] === 'pending'): ?>
                                         <option value="processing">Processing (sent to provider)</option>
                                     <?php endif; ?>
-                                    <option value="completed">Completed (money paid out)</option>
+                                    <?php if (!((string)$payment['refund_status'] === 'pending' && (string)$payment['payment_method'] === 'mobile_money')): // mobile money goes through Processing first (rh_settle_refund_row) ?>
+                                        <option value="completed">Completed (money paid out)</option>
+                                    <?php endif; ?>
                                     <option value="failed">Failed (money not paid out)</option>
                                 </select>
                             </div>

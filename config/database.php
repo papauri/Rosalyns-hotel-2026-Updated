@@ -10260,8 +10260,15 @@ function deductStockBatchFIFO(int $ingredientId, float $qty, string $sourceType,
  * but stock_tracked got set somehow), fall back to deducting by recipe and
  * adding back to general stock without batch attribution.
  */
-function restoreStockForMenuItem(int $menuItemId, string $menuType, float $portions, string $reason, ?int $doneBy, ?int $originalChargeId, string $originalSourceType = 'room_service'): bool
+function restoreStockForMenuItem(int $menuItemId, string $menuType, float $portions, string $reason, ?int $doneBy, ?int $originalChargeId, string $originalSourceType = 'room_service', array $opts = []): bool
 {
+    /* Optional behaviour (used by the order-delete helper; every other caller passes nothing):
+     *  - skip_voided_wastage: deductions already reclassified as wastage ('Voided to wastage ...')
+     *    count as already dealt with, so the un-wasted rest of a mixed line can still be restored.
+     *  - trail_not_before: only trust adjustment rows created at/after this time, so a legacy row
+     *    keyed on a reused id from an OLDER order is never mistaken for this line's trail. */
+    $skipVoidedWastage = !empty($opts['skip_voided_wastage']);
+    $trailNotBefore = isset($opts['trail_not_before']) && $opts['trail_not_before'] !== '' ? (string)$opts['trail_not_before'] : null;
     global $pdo;
     if ($portions <= 0) return true;
     if (!ensureStockTablesExist()) return false;
@@ -10291,10 +10298,10 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
             if ($hasRestoreCol) {
                 $restCnt = $pdo->prepare("
                     SELECT ingredient_id, COUNT(*) AS n FROM stock_adjustments
-                    WHERE source_type = 'void_restore' AND restore_of_type = ? AND source_id = ?
+                    WHERE source_type = 'void_restore' AND restore_of_type = ? AND source_id = ?" . ($trailNotBefore !== null ? " AND created_at >= ?" : "") . "
                     GROUP BY ingredient_id
                 ");
-                $restCnt->execute([$sourceType, $originalChargeId]);
+                $restCnt->execute($trailNotBefore !== null ? [$sourceType, $originalChargeId, $trailNotBefore] : [$sourceType, $originalChargeId]);
                 foreach ($restCnt->fetchAll(PDO::FETCH_ASSOC) as $rc) {
                     $restoredByIngredient[(int)$rc['ingredient_id']] = (int)$rc['n'];
                 }
@@ -10318,14 +10325,19 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
 
         if ($originalChargeId !== null) {
             $sel = $pdo->prepare("
-                SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted
+                SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted, COALESCE(sa.reason, '') AS adj_reason
                 FROM stock_adjustments sa
                 LEFT JOIN stock_batch_deductions sbd ON sbd.adjustment_id = sa.id
-                WHERE sa.source_type = ? AND sa.source_id = ? AND sa.quantity_change < 0
+                WHERE sa.source_type = ? AND sa.source_id = ? AND sa.quantity_change < 0" . ($trailNotBefore !== null ? " AND sa.created_at >= ?" : "") . "
                 ORDER BY sa.id ASC
             ");
-            $sel->execute([$sourceType, $originalChargeId]);
+            $sel->execute($trailNotBefore !== null ? [$sourceType, $originalChargeId, $trailNotBefore] : [$sourceType, $originalChargeId]);
             $hits = $sel->fetchAll(PDO::FETCH_ASSOC);
+            $hadAnyHit = !empty($hits);
+            if ($skipVoidedWastage && $hits) {
+                // Already reclassified as wastage: treated as dealt with, and kept out of the restore pairing.
+                $hits = array_values(array_filter($hits, static fn(array $h): bool => strncasecmp((string)$h['adj_reason'], 'Voided to wastage', 17) !== 0));
+            }
 
             // Adjustments per ingredient, oldest first; the oldest N are already restored.
             $adjOrder = [];
@@ -10343,7 +10355,7 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                     }
                 }
             }
-            if ($hits) {
+            if ($hits || $hadAnyHit) {
                 $hadDeductionTrail = true;
             }
 
@@ -10405,6 +10417,14 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                     $byIngredient[(int)$row['ingredient_id']] = ($byIngredient[(int)$row['ingredient_id']] ?? 0) + $rawNeeded;
                 }
             }
+        }
+
+        // Lock order: ingredient rows (by id) before any batch row, so concurrent restores / deductions
+        // of overlapping ingredients cannot deadlock.
+        if (!empty($byIngredient)) {
+            $lockIds = array_map('intval', array_keys($byIngredient));
+            sort($lockIds);
+            $pdo->prepare("SELECT id FROM stock_ingredients WHERE id IN (" . implode(',', array_fill(0, count($lockIds), '?')) . ") ORDER BY id FOR UPDATE")->execute($lockIds);
         }
 
         if ($usedRecipeFallback && !empty($byIngredient) && empty($byBatch)) {

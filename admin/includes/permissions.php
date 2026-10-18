@@ -699,6 +699,14 @@ function getAllPermissions()
             'page' => 'pos.php',
             'group' => 'stations'
         ],
+        'pos_delete_order' => [
+            'label' => 'Delete Orders',
+            'description' => 'Permanently delete ANY restaurant/POS order at any time (open, paid, voided, cancelled, even in a closed shift). Stock is put back, payments and folio charges are removed, past Z-reports / End of Day change, and a permanent deletion record is kept. Administrators only by default - grant to named people only.',
+            'icon' => 'fa-trash-can',
+            'category' => 'Stations',
+            'page' => 'stock-orders.php',
+            'group' => 'stations'
+        ],
         'pos_stations_overview' => [
             'label' => 'POS Station Overview',
             'description' => 'From the till: live Kitchen, Bar and Coffee boards, today\'s order list and order timelines',

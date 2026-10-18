@@ -23,6 +23,8 @@ require_once __DIR__ . '/../includes/station-hours.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
 require_once __DIR__ . '/includes/restaurant-order-serve.php';
+require_once __DIR__ . '/includes/finance-account-sync.php';
+require_once __DIR__ . '/includes/pos-order-delete.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 
 /* Granular till permissions. These used to be hard-wired to role names
@@ -33,6 +35,8 @@ $posCanVoid        = hasPermission($user['id'], 'pos_void');
 // Without it the till only places orders and runs tabs; payment is taken from Orders & Tabs.
 $posCanTakePayment = hasPermission($user['id'], 'pos_take_payment');
 $posCanStations    = hasPermission($user['id'], 'pos_stations_overview');
+// Permanent delete of any order (Today's orders window; api/delete-order.php re-checks it).
+$posCanDelete      = hasPermission($user['id'], 'pos_delete_order');
 $posCanOverrideShift = hasPermission($user['id'], 'pos_shift_override');
 $posHasAdminPortal = rhHasAdminPortal((int)$user['id']);
 
@@ -180,6 +184,10 @@ function pos_buildOrderFromPost(PDO $pdo, array $user, string $orderType, ?strin
             // Idempotent replay: 5th element flags it so the caller returns the stored result
             // immediately — no discount re-application, no payment, no re-fire.
             return [(int)$prior['id'], (string)$prior['reference'], (float)$prior['total_amount'], 0, true];
+        }
+        // An offline-queued copy of a sale that a manager has since DELETED must not bring it back.
+        if ($gone = rh_pos_deleted_client_uuid($pdo, $clientUuid)) {
+            throw new RuntimeException('Order ' . $gone['reference'] . ' from this submission was deleted by a manager - it was not recreated and nothing was charged.');
         }
     }
 
@@ -548,7 +556,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $orderNote = trim($_POST['notes'] ?? '');
 
             // Tills without "POS Take Payment & Settle" fire orders and tabs only.
-            if (!$posCanTakePayment && !in_array($action, ['park', 'add_to_tab', 'close_shift', 'set_float', 'refund_order'], true)) {
+            if (!$posCanTakePayment && !in_array($action, ['park', 'add_to_tab', 'close_shift', 'set_float', 'refund_order', 'settle_refund'], true)) {
                 throw new RuntimeException('This till does not take payments. Fire the order as a tab - it is settled from Orders & Tabs.');
             }
 
@@ -1166,6 +1174,83 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 }
                 pos_redirectWithFlash(['message' => 'Refund processed for ' . $refRow['reference'] . ' — ' . $currency_symbol . ' ' . number_format($refundTotal, 2)]);
+            } elseif ($action === 'settle_refund') {
+                /* === Settle the pending refund(s) an 86 raised on a paid / part-paid order ===
+                 * Same gate as refund_order (pos_refund or one-use manager authorisation). Each pending
+                 * REF86 row goes through the SAME routine as the payment page's "Settle refund"
+                 * (rh_settle_refund_row), so the payout is stamped on the shift of the person who hands
+                 * the money back (recorded_by = this user); who raised it stays in the audit trail. */
+                $mgrAuthToken = trim($_POST['mgr_auth_token'] ?? '');
+                $mgrActorId = null;
+                $mgrActorName = null;
+                if (!hasPermission($user['id'], 'pos_refund')) {
+                    $mgrAuth = $_SESSION['pos_mgr_auth'] ?? null;
+                    if (!$mgrAuth
+                        || $mgrAuth['token'] !== $mgrAuthToken
+                        || $mgrAuth['expires'] < time()
+                        || !in_array('pos_refund', $mgrAuth['permissions'], true)
+                    ) {
+                        throw new RuntimeException('Settling a refund requires manager authorisation. Please use the manager auth overlay.');
+                    }
+                    $mgrActorId = $mgrAuth['manager_id'];
+                    $mgrActorName = $mgrAuth['manager_name'];
+                    unset($_SESSION['pos_mgr_auth']);
+                }
+                $srOrderId = (int)($_POST['order_id'] ?? 0);
+                $srNote = mb_substr(trim((string)($_POST['settle_note'] ?? '')), 0, 200);
+                $srNoticeId = (int)($_POST['notice_id'] ?? 0);
+                if ($srOrderId <= 0) throw new RuntimeException('Invalid order ID.');
+
+                $pdo->beginTransaction();
+                $srOrd = $pdo->prepare("SELECT id, reference, status FROM stock_orders WHERE id = ? FOR UPDATE");
+                $srOrd->execute([$srOrderId]);
+                $srRow = $srOrd->fetch(PDO::FETCH_ASSOC);
+                if (!$srRow) throw new RuntimeException('Order not found.');
+                $srPend = $pdo->prepare("SELECT id, payment_reference, payment_method, refund_status, COALESCE(refund_amount, total_amount) AS amt
+                                           FROM payments
+                                          WHERE booking_type = 'restaurant' AND booking_id = ? AND payment_type = 'refund'
+                                            AND refund_status IN ('pending','processing') AND deleted_at IS NULL
+                                            AND payment_method <> 'credit_note' AND payment_reference LIKE 'REF86-%'
+                                       ORDER BY id ASC");
+                $srPend->execute([$srOrderId]);
+                $srRefunds = $srPend->fetchAll(PDO::FETCH_ASSOC);
+                if (!$srRefunds) throw new RuntimeException('There is no pending refund to settle on ' . $srRow['reference'] . '.');
+
+                $srTotal = 0.0;
+                $srLines = [];
+                foreach ($srRefunds as $rf) {
+                    $rfNote = ($srNote !== '' ? $srNote : 'handed back at the till') . ($mgrActorName ? ' [authorised by ' . $mgrActorName . ']' : '');
+                    if ((string)$rf['payment_method'] === 'mobile_money') {
+                        // Never straight to completed: the cashier confirms the transfer with its provider reference.
+                        if (mb_strlen($srNote) < 3) throw new RuntimeException('A mobile money refund needs the provider transaction reference.');
+                        if ((string)$rf['refund_status'] === 'pending') {
+                            rh_settle_refund_row($pdo, (int)$rf['id'], 'processing', (int)$user['id'], $rfNote);
+                        }
+                    }
+                    rh_settle_refund_row($pdo, (int)$rf['id'], 'completed', (int)$user['id'], $rfNote);
+                    $srTotal += (float)$rf['amt'];
+                    $srLines[] = $rf['payment_reference'] . ' ' . number_format((float)$rf['amt'], 2) . ' ' . $rf['payment_method'];
+                }
+                $srTotal = round($srTotal, 2);
+                pos_logAudit($pdo, $srOrderId, $user['id'], $user['full_name'], 'refund_settled', json_encode([
+                    'amount' => $srTotal, 'rows' => $srLines, 'note' => $srNote,
+                    'authorised_by_id' => $mgrActorId, 'authorised_by_name' => $mgrActorName,
+                ]));
+                logActivity($user['id'], 'pos_refund', 'Settled 86 refund on order ' . $srRow['reference'] . ' (' . $currency_symbol . ' ' . number_format($srTotal, 2) . ': ' . implode('; ', $srLines) . ')' . ($mgrActorName ? ' [Authorised by: ' . $mgrActorName . ']' : ''));
+                if ($srNoticeId > 0) {
+                    try {
+                        $pdo->prepare("UPDATE station_messages SET pos_acknowledged = 1, pos_acknowledged_at = NOW(), pos_acknowledged_by = ?, seen_at = COALESCE(seen_at, NOW())
+                                        WHERE id = ? AND to_user_id = ? AND source = 'station' AND COALESCE(pos_acknowledged, 0) = 0")
+                            ->execute([(int)$user['id'], $srNoticeId, (int)$user['id']]);
+                    } catch (Throwable $noticeEx) {
+                        error_log('settle_refund notice ack: ' . $noticeEx->getMessage());
+                    }
+                }
+                $pdo->commit();
+                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['ok' => true, 'reference' => $srRow['reference'], 'amount' => $srTotal, 'message' => 'Refund of ' . $currency_symbol . ' ' . number_format($srTotal, 2) . ' settled for ' . $srRow['reference'] . ' - counted as paid out on your shift.']);
+                exit;
             } else {
                 /* === Default: place + pay (single transaction) === */
                 $paymentMethod = $_POST['payment_method'] ?? '';
@@ -1261,7 +1346,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = $e->getMessage();
             // Return JSON error for XHR requests so the JS can show inline messages
             $isXhrErr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
-            if ($isXhrErr && in_array(($_POST['action'] ?? ''), ['park', 'pay_existing', 'add_to_tab', 'refund_order'], true)) {
+            if ($isXhrErr && in_array(($_POST['action'] ?? ''), ['park', 'pay_existing', 'add_to_tab', 'refund_order', 'settle_refund'], true)) {
                 header('Content-Type: application/json; charset=utf-8');
                 echo json_encode(['ok' => false, 'error' => $error]);
                 exit;
@@ -2036,6 +2121,75 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'tab_deals') {
 }
 
 /* ============================================================
+ * GET ?ajax=orders_today - every order of the current business day for the "Today's orders"
+ * window (pos_all_tabs, the same permission that opens every cashier's tabs). Read-only: each
+ * row action in that window posts to the same server action Orders & Tabs uses, and the server
+ * re-checks that action's own permission.
+ * ============================================================ */
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'orders_today') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!$posCanAllTabs) {
+        http_response_code(403);
+        echo json_encode(['ok' => false, 'error' => 'forbidden']);
+        exit;
+    }
+    try {
+        $todaySt = $pdo->prepare("
+            SELECT o.id, o.reference, o.order_type, o.status, o.total_amount, o.created_at,
+                   o.table_number, o.room_number, o.customer_name, o.created_by,
+                   COALESCE(o.split_count, 1) AS split_count, COALESCE(o.split_paid_count, 0) AS split_paid_count,
+                   COALESCE(NULLIF(u.full_name, ''), u.username, '') AS staff_name,
+                   (SELECT COUNT(*) FROM stock_order_items i WHERE i.order_id = o.id AND i.kds_status <> 'void') AS item_count,
+                   (SELECT COUNT(*) FROM stock_order_items i WHERE i.order_id = o.id AND i.kds_status = 'pending') AS pending_count,
+                   (SELECT COUNT(*) FROM stock_order_items i WHERE i.order_id = o.id AND i.kds_status IN ('preparing','ready','collection','served')) AS started_count,
+                   (SELECT COALESCE(SUM(p.total_amount), 0) FROM payments p
+                     WHERE p.booking_type = 'restaurant' AND p.booking_id = o.id AND COALESCE(p.payment_type, '') <> 'refund'
+                       AND p.deleted_at IS NULL AND COALESCE(p.payment_status, 'completed') IN ('completed','paid','refunded','partially_refunded')) AS paid_gross,
+                   (SELECT COALESCE(SUM(CASE WHEN COALESCE(p.refund_amount, 0) > 0 THEN p.refund_amount ELSE p.total_amount END), 0) FROM payments p
+                     WHERE p.booking_type = 'restaurant' AND p.booking_id = o.id AND p.payment_type = 'refund'
+                       AND p.deleted_at IS NULL AND COALESCE(p.refund_status, 'completed') IN ('pending','processing','completed')) AS refunded
+            FROM stock_orders o
+            LEFT JOIN admin_users u ON u.id = o.created_by
+            WHERE o.created_at >= ? AND o.created_at < ?
+            ORDER BY o.created_at DESC, o.id DESC
+            LIMIT 400
+        ");
+        $todaySt->execute([$restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+        $todayRows = [];
+        foreach ($todaySt->fetchAll(PDO::FETCH_ASSOC) as $tr) {
+            $isRoom = ((string)$tr['order_type'] === 'room_service');
+            $loc = $isRoom
+                ? ('Room ' . trim((string)($tr['room_number'] ?: preg_replace('/^Room\s+/i', '', (string)$tr['table_number']))))
+                : (trim((string)$tr['table_number']) !== '' ? 'Table ' . trim((string)preg_replace('/^Table\s+/i', '', (string)$tr['table_number'])) : '');
+            $todayRows[] = [
+                'id'          => (int)$tr['id'],
+                'reference'   => (string)$tr['reference'],
+                'created_at'  => (string)$tr['created_at'],
+                'type'        => ucfirst(str_replace('_', ' ', (string)$tr['order_type'])),
+                'order_type'  => (string)$tr['order_type'],
+                'location'    => trim($loc) === 'Room' ? '' : $loc,
+                'customer'    => (string)($tr['customer_name'] ?? ''),
+                'staff'       => (string)$tr['staff_name'],
+                'items'       => (int)$tr['item_count'],
+                'pending'     => (int)$tr['pending_count'],
+                'started'     => (int)$tr['started_count'],
+                'total'       => round((float)$tr['total_amount'], 2),
+                'paid'        => round(max(0.0, (float)$tr['paid_gross'] - (float)$tr['refunded']), 2),
+                'status'      => (string)$tr['status'],
+                'split_count' => (int)$tr['split_count'],
+                'split_paid'  => (int)$tr['split_paid_count'],
+            ];
+        }
+        echo json_encode(['ok' => true, 'orders' => $todayRows, 'window_start' => $restaurantWindow['start_sql'], 'now' => date('c')]);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => 'Could not load today\'s orders.']);
+        error_log('pos orders_today: ' . $e->getMessage());
+    }
+    exit;
+}
+
+/* ============================================================
  * Admin/manager live "All Stations" JSON poll endpoint.
  * GET ?ajax=stations — returns counts + ticket details across
  * Kitchen / Bar / Coffee Bar plus open tabs and today's revenue.
@@ -2601,6 +2755,9 @@ if ($posCanStations) {
                     <!-- Till ops -->
                     <button class="recent-toggle" onclick="toggleRecent()" data-help="Recent orders|Last 10 orders you rang up."><i class="fas fa-receipt"></i> Recent</button>
                     <button class="recent-toggle" onclick="openTabsTray()" data-help="Open tabs|Unpaid kitchen orders."><i class="fas fa-utensils"></i> Tabs <span id="tabBadge" <?php echo empty($openTabs) ? ' style="display:none;"' : ''; ?>><?php echo count($openTabs); ?></span></button>
+                    <?php if ($posCanAllTabs): ?>
+                    <button type="button" class="recent-toggle" id="todayOrdersBtn" onclick="openTodayOrders()" data-help="Today's orders|Every order of today's business day, all cashiers. Search, filter, view, settle, cancel, void, refund or delete - each action needs its own permission."><i class="fas fa-clipboard-list"></i> Today's orders</button>
+                    <?php endif; ?>
                     <button class="recent-toggle" onclick="openStationNoteModal()" data-help="Station note|Quick note to Kitchen/Bar/Coffee."><i class="fas fa-paper-plane"></i> Note</button>
                     <?php /* My orders and Messages used to be two small floating pills in the
                               bottom-left corner, over the menu grid. They now sit on the bar with
@@ -3124,6 +3281,39 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             </div>
         </div>
     </div>
+
+    <?php if ($posCanAllTabs): ?>
+    <!-- Today's orders: every order of the current business day (pos_all_tabs). Printed before the
+         tab detail / reason / refund / manager-auth overlays so those open on top of it. The table
+         and the phone card layout are both drawn by renderTodayOrders() from ?ajax=orders_today. -->
+    <div class="overlay modal-overlay" data-modal id="todayOrdersOverlay">
+        <div class="modal modal-content to-modal" role="dialog" aria-modal="true" aria-labelledby="toTitle">
+            <div class="modal-head modal-header to-head">
+                <h3 id="toTitle"><i class="fas fa-clipboard-list"></i> Today's orders <span class="to-count" id="toCount"></span></h3>
+                <button class="close modal-close" onclick="closeTodayOrders()" aria-label="Close">&times;</button>
+            </div>
+            <div class="to-tools">
+                <div class="to-search">
+                    <i class="fas fa-search" aria-hidden="true"></i>
+                    <input type="search" id="toSearch" placeholder="Search reference, table, staff…" aria-label="Search today's orders" oninput="todayOrdersFilterChanged()" autocomplete="off">
+                </div>
+                <select id="toStatus" aria-label="Filter by status" onchange="todayOrdersFilterChanged()">
+                    <option value="">All statuses</option>
+                    <option value="open">Open (unpaid)</option>
+                    <option value="paid">Paid</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="voided">Voided</option>
+                    <option value="refunded">Refunded</option>
+                    <option value="completed">Delivered (room service)</option>
+                </select>
+                <button type="button" class="to-refresh" onclick="loadTodayOrders(true)" title="Refresh"><i class="fas fa-rotate"></i> <span>Refresh</span></button>
+            </div>
+            <div class="modal-body to-body" id="toBody">
+                <p class="tabs-empty">Loading orders…</p>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- Tab Detail Overlay -->
     <div class="overlay modal-overlay" data-modal id="tabDetailOverlay">
@@ -3747,6 +3937,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const posUserId = <?php echo (int)$user['id']; ?>;
         const posCurrentUserName = <?php echo json_encode($user['full_name'] ?: $user['username']); ?>;
         const posCanVoid = <?php echo $posCanVoid ? 'true' : 'false'; ?>;
+        const posCanAllTabs = <?php echo $posCanAllTabs ? 'true' : 'false'; ?>;
+        const posCanDelete = <?php echo $posCanDelete ? 'true' : 'false'; ?>;
         const posCanTakePayment = <?php echo $posCanTakePayment ? 'true' : 'false'; ?>;
         function posPaymentsBlocked() {
             if (posCanTakePayment) return false;
@@ -4215,6 +4407,33 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             return text.includes('ready for collection') || text.includes('for collection');
         }
 
+        /* Actionable till notices (order cancelled / voided / line 86'd): the same station_messages
+           rows, tagged with notice_type by api/cancel-order.php, api/void-order.php and the KDS 86.
+           Each offers Mark as read, Open order and the follow-ups that still make sense for the
+           order's CURRENT state (the server returns it with the message). Read state is server-side. */
+        const POS_NOTICE_LABEL = {
+            order_cancelled: 'Order cancelled',
+            order_voided: 'Order voided',
+            item_86: "Item 86'd"
+        };
+        let _posNoticeAfterRefund = 0; // notice to mark read once its refund goes through
+
+        function posNoticeType(message) {
+            const t = String(message?.notice_type || '');
+            if (t !== '') return t;
+            // Notices sent before notice_type existed: recognise them by their text so they get
+            // the same actions (Mark as read, Open order, ...) instead of a dead-end alert.
+            if (!(parseInt(message?.order_id, 10) > 0)) return '';
+            const text = String(message?.message || '');
+            if (/\bwas CANCELLED\b/.test(text)) return 'order_cancelled';
+            if (/\bwas VOIDED\b/.test(text)) return 'order_voided';
+            return '';
+        }
+
+        function isPosNotice(message) {
+            return isPosInboxDirectMessage(message) && posNoticeType(message) !== '';
+        }
+
         /* The Messages window is a chat: acknowledged notes stay in the history
            (acknowledging only clears the alert and the badge). */
         function normalizePosInboxMessages(messages) {
@@ -4469,7 +4688,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         ref,
                         text: m.message || '',
                         urgent: m.priority === 'urgent' || isCollectionDirectMessage(m),
-                        pending
+                        pending,
+                        notice: isPosNotice(m) ? m : null
                     });
                     if (m.reply_message) {
                         out.push({ at: m.replied_at || m.created_at, station, mine: true, who: 'You', text: m.reply_message });
@@ -4519,6 +4739,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             return `<div class="pos-chat__msg${b.mine ? ' is-mine' : ''}${b.urgent ? ' is-urgent' : ''}${b.pending ? ' is-pending' : ''}">
                 <span class="pos-chat__who">${escHtml(who)}${b.ref ? ' · ' + escHtml(b.ref) : ''}${b.urgent ? ' · urgent' : ''}</span>
                 <div class="pos-chat__bubble">${escHtml(b.text || '')}</div>
+                ${b.notice && b.pending ? posNoticeActionsBlock(b.notice, false) : ''}
                 <span class="pos-chat__time">${escHtml(stationNoteFmtTime(b.at))}</span>
             </div>`;
         }
@@ -4527,15 +4748,16 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const latest = pending[pending.length - 1];
             const label = posInboxStationLabel(latest.station);
             const n = pending.length;
+            const allNotices = pending.every(isPosNotice);
+            const ackLabel = allNotices ? (n > 1 ? 'Mark all as read' : 'Mark as read') : 'Got it';
             const chips = POS_QUICK_REPLIES.map(r =>
                 `<button type="button" class="svc-chip" onclick="posChatQuick(${escHtml(JSON.stringify(String(latest.station)))}, ${escHtml(JSON.stringify(r))}, this)">${escHtml(r)}</button>`
             ).join('');
             return `<div class="pos-chat__waiting"><span class="svc-tag svc-tag--wait">Needs you</span>
                     <strong>${n} note${n === 1 ? '' : 's'} waiting</strong></div>
                 <div class="pos-chat__quick">
-                    <button type="button" class="svc-btn svc-btn--primary" onclick="posChatAckAll(this)"><i class="fas fa-check"></i> Got it${n > 1 ? ' (' + n + ')' : ''}</button>
-                    <span class="pos-chat__quick-label">Quick reply to ${escHtml(label)}:</span>
-                    ${chips}
+                    <button type="button" class="svc-btn svc-btn--primary" onclick="posChatAckAll(this)"><i class="fas fa-check"></i> ${ackLabel}${n > 1 ? ' (' + n + ')' : ''}</button>
+                    ${allNotices ? '' : `<span class="pos-chat__quick-label">Quick reply to ${escHtml(label)}:</span>${chips}`}
                 </div>`;
         }
 
@@ -4575,7 +4797,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 input.placeholder = scoped.length ? 'Reply to ' + posInboxStationLabel(target) + '…' : 'Message ' + posInboxStationLabel(target) + '…';
             }
 
-            const sig = JSON.stringify([filter, bubbles.map(b => [b.at, b.text, b.status, b.pending]), scoped.map(m => m.id)]);
+            const sig = JSON.stringify([filter, bubbles.map(b => [b.at, b.text, b.status, b.pending, b.notice ? [b.notice.order_status, b.notice.notice_item_status, b.notice.pending_refund] : null]), scoped.map(m => m.id)]);
             if (sig === _posChatSig) return;
             _posChatSig = sig;
 
@@ -4796,7 +5018,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             document.getElementById('posAlertBody').innerHTML = body;
 
             const replies = document.getElementById('posAlertReplies');
-            if (a.kind === 'direct') {
+            if (a.noticeType) {
+                /* An order notice: follow-up actions instead of quick replies. */
+                replies.innerHTML = posNoticeActionsBlock(posInboxFindMessage(a.msgId) || a.msg, true);
+                replies.hidden = !replies.innerHTML;
+            } else if (a.kind === 'direct') {
                 replies.innerHTML = `<span class="pos-alert__replies-label">Quick reply to ${escHtml(a.station || a.kicker)}:</span>` +
                     POS_QUICK_REPLIES.map(r => `<button type="button" class="svc-chip" onclick="posAlertReply(${escHtml(JSON.stringify(r))}, this)">${escHtml(r)}</button>`).join('');
                 replies.hidden = false;
@@ -4843,7 +5069,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function posAlertPrimary() {
             const a = _posAlerts[0];
             if (!a) return;
-            if (a.kind === 'direct' && a.msgId) ackPosInboxMessage(a.msgId);
+            if (a.kind === 'direct' && a.msgId) ackPosInboxMessage(a.msgId, null, a.noticeType ? { message: 'Marked as read.' } : {});
             posAlertNext();
         }
 
@@ -4885,27 +5111,215 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         function posAlertFromDirect(m) {
             const station = posInboxStationLabel(m.station);
-            const collection = isCollectionDirectMessage(m);
+            const noticeType = posNoticeType(m);
+            const collection = !noticeType && isCollectionDirectMessage(m);
             const urgent = m.priority === 'urgent' || collection;
+            const refSuffix = m.order_ref ? ' — ' + m.order_ref : '';
+            const noticeTitle = noticeType === 'item_86' ?
+                "86'd" + (m.notice_item_name ? ' — ' + m.notice_item_name : '') + refSuffix :
+                (noticeType === 'order_voided' ? 'Order voided' : 'Order cancelled') + refSuffix;
             return {
                 key: 'direct:' + m.id,
                 kind: 'direct',
                 station,
                 stationKey: String(m.station || ''),
                 msgId: parseInt(m.id, 10) || 0,
+                msg: m,
+                noticeType,
                 tone: urgent ? 'urgent' : 'note',
                 urgent,
-                icon: collection ? 'fa-bell-concierge' : (urgent ? 'fa-triangle-exclamation' : posInboxStationIcon(m.station)),
-                kicker: station + (urgent && !collection ? ' · urgent' : ''),
-                title: collection ? 'Ready for collection' + (m.order_ref ? ' — ' + m.order_ref : '') : 'Message from ' + station + (m.order_ref ? ' — ' + m.order_ref : ''),
+                icon: noticeType ? (noticeType === 'item_86' ? 'fa-ban' : 'fa-circle-xmark') : (collection ? 'fa-bell-concierge' : (urgent ? 'fa-triangle-exclamation' : posInboxStationIcon(m.station))),
+                kicker: noticeType ? station + ' · ' + (POS_NOTICE_LABEL[noticeType] || 'Order update') : station + (urgent && !collection ? ' · urgent' : ''),
+                title: noticeType ? noticeTitle : (collection ? 'Ready for collection' + refSuffix : 'Message from ' + station + refSuffix),
                 where: posInboxOrderContext(m),
                 items: posCompactItemsSummary(m.order_items_summary || '', 6),
                 message: m.message || '',
                 orderId: parseInt(m.order_id, 10) || 0,
-                primaryLabel: collection ? 'On my way' : 'Got it',
+                primaryLabel: noticeType ? 'Mark as read' : (collection ? 'On my way' : 'Got it'),
                 secondaryLabel: 'Later',
                 secondaryAction: ''
             };
+        }
+
+        /* Buttons for one notice, built from the order's current state. */
+        function posNoticeActionsBlock(m, inAlert) {
+            if (!m) return '';
+            const id = parseInt(m.id, 10) || 0;
+            const orderId = parseInt(m.order_id, 10) || 0;
+            const status = String(m.order_status || '');
+            const type = posNoticeType(m);
+            const pending = isPosInboxDirectPending(m);
+            const btn = (act, icon, label, cls) => `<button type="button" class="svc-btn ${cls || 'svc-btn--ghost'} pos-notice-btn" onclick="posNoticeAct('${act}', ${id}, ${inAlert ? 'true' : 'false'}, this)"><i class="fas ${icon}" aria-hidden="true"></i> ${escHtml(label)}</button>`;
+            const out = [];
+            if (pending && !inAlert) out.push(btn('read', 'fa-check', 'Mark as read', 'svc-btn--primary'));
+            if (orderId > 0 && status) out.push(btn('open', 'fa-receipt', 'Open order'));
+            if (type === 'item_86' && status === 'placed') {
+                out.push(btn('replace', 'fa-right-left', 'Replace item'));
+                if (parseInt(m.notice_item_id, 10) > 0 && m.notice_item_status && m.notice_item_status !== 'void' && posCanVoid) {
+                    out.push(btn('remove', 'fa-trash', 'Remove from tab'));
+                }
+            }
+            const pendingRefund = parseFloat(m.pending_refund) || 0;
+            if (pendingRefund > 0) {
+                // The 86 (or a partial refund) raised a refund the guest is still owed: settle it, whatever the order status.
+                out.push(btn('settle', 'fa-hand-holding-dollar', 'Settle refund (' + currencySymbol + ' ' + fmtMoney(pendingRefund) + ')', 'svc-btn--primary'));
+            } else if (status === 'paid' && posCanRefund) {
+                out.push(btn('refund', 'fa-rotate-left', 'Refund'));
+            }
+            const chip = status ? `<span class="pos-notice-chip">Order is ${escHtml(status)}${(parseFloat(m.pending_refund) || 0) > 0 ? ' · refund pending ' + escHtml(currencySymbol + ' ' + fmtMoney(parseFloat(m.pending_refund))) : ''}</span>` : '';
+            return out.length || chip ? `<div class="pos-notice-actions">${chip}${out.join('')}</div>` : '';
+        }
+
+        async function posNoticeAct(action, msgId, fromAlert, btn) {
+            const a0 = fromAlert ? _posAlerts[0] : null;
+            const m = posInboxFindMessage(msgId) || (a0 && a0.msgId === msgId ? a0.msg : null);
+            if (!m) {
+                posToastReady('That notice is no longer available.', true);
+                return;
+            }
+            const orderId = parseInt(m.order_id, 10) || 0;
+            const ref = String(m.order_ref || '');
+            const total = parseFloat(m.order_total) || 0;
+            const done = () => {
+                if (fromAlert && _posAlerts[0] === a0) posAlertNext();
+            };
+            if (btn) btn.disabled = true;
+            try {
+                if (action === 'read') {
+                    if (await ackPosInboxMessage(msgId, null, { message: 'Marked as read.' })) done();
+                } else if (action === 'open') {
+                    done();
+                    openTabDetail(orderId);
+                } else if (action === 'replace') {
+                    await ackPosInboxMessage(msgId, null, { suppressToast: true, skipRepoll: true });
+                    done();
+                    closePosService();
+                    startAddToTab(orderId, ref, total);
+                } else if (action === 'remove') {
+                    const ok = await posConfirm('Remove from tab', 'Remove ' + (m.notice_item_name || 'this item') + ' from ' + ref + '? Its price comes off the tab and any stock taken for it goes back.', 'Remove item', 'Keep item');
+                    if (!ok) return;
+                    const fd = new FormData();
+                    fd.append('csrf_token', posCsrfToken);
+                    fd.append('action', 'void_item');
+                    fd.append('station', String(m.station || 'kitchen'));
+                    fd.append('item_id', String(parseInt(m.notice_item_id, 10) || 0));
+                    const r = await fetch('../api/kds-action.php', { method: 'POST', body: fd, credentials: 'same-origin' });
+                    const j = await r.json().catch(() => null);
+                    if (!j || !j.ok) {
+                        posToastReady((j && j.error) || 'Could not remove the item.', true);
+                        return;
+                    }
+                    posToastReady('Removed from the tab.', false);
+                    await ackPosInboxMessage(msgId, null, { suppressToast: true });
+                    done();
+                    refreshOpenTabs(true);
+                    if (_tdiOrderId === orderId) refreshTabDetail();
+                    todayOrdersRefreshIfOpen();
+                } else if (action === 'refund') {
+                    done();
+                    closePosService();
+                    _posNoticeAfterRefund = msgId;
+                    openRefundModal(orderId, ref, total);
+                } else if (action === 'settle') {
+                    if (await posSettleRefund(m)) done();
+                }
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        /* Settle the pending 86 refund(s) of a notice's order. Needs pos_refund, else a manager signs it off
+           (same gate as the full refund). A mobile money refund asks for the provider reference. The server
+           books the payout on THIS user's shift and marks the notice read. */
+        async function posSettleRefund(m, mgrToken) {
+            const orderId = parseInt(m.order_id, 10) || 0;
+            const ref = String(m.order_ref || '');
+            const amount = parseFloat(m.pending_refund) || 0;
+            if (!posCanRefund && !mgrToken) {
+                openMgrAuthOverlay('pos_refund', token => { posSettleRefund(m, token); });
+                return false;
+            }
+            let note = '';
+            if ((parseInt(m.pending_refund_mobile, 10) || 0) > 0) {
+                note = await posAskReason({
+                    title: 'Mobile money refund',
+                    prompt: `Enter the provider transaction reference of the mobile money refund you sent for <strong>${escHtml(ref)}</strong> (${escHtml(currencySymbol)} ${fmtMoney(amount)}).`,
+                    warn: 'The refund is recorded as paid out on your shift.',
+                    confirmLabel: 'Record refund',
+                    confirmColor: '#6f42c1',
+                    hasNotes: false,
+                });
+                if (!note) return false;
+            } else if (!(await posConfirm('Settle refund', 'Hand ' + currencySymbol + ' ' + fmtMoney(amount) + ' back to the guest for ' + ref + '? It is recorded as paid out on YOUR shift, so take it from your drawer.', 'Refund paid', 'Not yet'))) {
+                return false;
+            }
+            const fd = new FormData();
+            fd.append('csrf_token', posCsrfToken);
+            fd.append('action', 'settle_refund');
+            fd.append('order_id', String(orderId));
+            fd.append('notice_id', String(parseInt(m.id, 10) || 0));
+            fd.append('settle_note', note || '');
+            if (mgrToken) fd.append('mgr_auth_token', mgrToken);
+            try {
+                const r = await fetch('pos.php', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd, credentials: 'same-origin' });
+                const j = await r.json().catch(() => null);
+                if (!j || !j.ok) {
+                    posToastReady((j && j.error) || 'Could not settle the refund.', true);
+                    return false;
+                }
+                posToastReady(j.message || 'Refund settled.', false);
+                pollStationReplies();
+                refreshShiftStats(true);
+                refreshOpenTabs(true);
+                if (_tdiOrderId === orderId) refreshTabDetail();
+                todayOrdersRefreshIfOpen();
+                return true;
+            } catch (e) {
+                posToastReady('Network error - check the order before trying again.', true);
+                return false;
+            }
+        }
+
+        /* Mark several notices read on the server in one request (alert "Got them all"). */
+        async function posNoticesAck(ids) {
+            ids = (ids || []).map(id => parseInt(id, 10) || 0).filter(Boolean);
+            if (!ids.length) return true;
+            const set = new Set(ids);
+            const prev = (_inboxLastMsgs || []).slice();
+            const ts = (window.rhNowSql ? window.rhNowSql() : new Date().toISOString().slice(0, 19).replace('T', ' '));
+            _inboxLastMsgs = prev.map(m => set.has(parseInt(m.id, 10) || 0) ? { ...m, pos_acknowledged: 1, pos_acknowledged_at: ts, pos_acknowledged_by: posUserId } : m);
+            if (_inboxVisible) renderPosInbox(_inboxLastMsgs);
+            updatePosInboxBadgesFromMessages(_inboxLastMsgs);
+            _syncPosMobileBadges();
+            const fd = new FormData();
+            fd.append('csrf_token', posCsrfToken);
+            fd.append('action', 'ack_pos_messages');
+            fd.append('station', 'kitchen');
+            fd.append('notice_only', '1');
+            ids.forEach(id => fd.append('ids[]', String(id)));
+            try {
+                const r = await fetch('../api/kds-action.php', { method: 'POST', body: fd, credentials: 'same-origin' });
+                const j = await r.json();
+                if (!j.ok) throw new Error(j.error || 'failed');
+                posToastReady('Marked as read.', false);
+                setTimeout(pollStationReplies, 300);
+                return true;
+            } catch (e) {
+                _inboxLastMsgs = prev;
+                if (_inboxVisible) renderPosInbox(_inboxLastMsgs);
+                updatePosInboxBadgesFromMessages(_inboxLastMsgs);
+                _syncPosMobileBadges();
+                posToastReady('Could not mark the notices as read - they are still waiting.', true);
+                return false;
+            }
+        }
+
+        /* "Got them all": order notices in the queue are marked read on the server; ordinary
+           station notes are only closed (they stay under Needs you until someone answers them). */
+        async function posAlertAckAll() {
+            const ids = _posAlerts.filter(a => a.kind === 'direct' && a.noticeType && a.msgId).map(a => a.msgId);
+            posAlertDismissAll();
+            if (ids.length) await posNoticesAck(ids);
         }
 
         function posAlertFromReply(m) {
@@ -5034,6 +5448,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         async function ackPosInboxMessage(messageId, triggerButton = null, options = {}) {
             const suppressToast = !!(options && options.suppressToast);
+            const doneMessage = (options && options.message) || 'FOH action recorded.';
             const skipRepoll = !!(options && options.skipRepoll);
             const msgId = parseInt(messageId, 10) || 0;
             if (msgId <= 0) return false;
@@ -5066,7 +5481,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     if (!suppressToast) posToastReady(j.error || 'Could not save action — restored.', true);
                     return false;
                 }
-                if (!suppressToast) posToastReady('FOH action recorded.', false);
+                if (!suppressToast) posToastReady(doneMessage, false);
                 if (!skipRepoll) setTimeout(pollStationReplies, 300);
                 return true;
             } catch (e) {
@@ -7785,6 +8200,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             };
         }
 
+        /* Which rule applies when this tab is cancelled: pre_prep (plain cancel), part_paid or started (void). */
+        function tabCancelState(t) {
+            const n = key => parseInt(t[key] || 0, 10) || 0;
+            if (n('split_paid_count') > 0) return 'part_paid';
+            return tabCancelBlockReason(t) === '' ? 'pre_prep' : 'started';
+        }
+
         /* Why Cancel (the pre-preparation, unpaid-only action) is not available; '' when it is. */
         function tabCancelBlockReason(t) {
             const n = key => parseInt(t[key] || 0, 10) || 0;
@@ -7831,8 +8253,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 menuItem('', 'fa-receipt', 'Details', `openTabDetail(${orderId})`),
                 menuItem('', 'fa-print', 'Print KOT', `openPosPageModal('stock-receipt.php?id=${orderId}&print=1&kot=1','Print KOT','fas fa-print')`),
                 posCanSeeTimeline ? menuItem('', 'fa-stream', 'Timeline', `openPosPageModal('order-lifecycle.php?embed=1&id=${orderId}','Timeline','fas fa-stream')`) : '',
-                cancelBlock === '' ? menuItem('tc-menu__item--danger', 'fa-circle-xmark', 'Cancel tab', `cancelOpenOrder(${orderId}, ${actionRef})`) : '',
-                posCanVoid ? menuItem('tc-menu__item--danger', 'fa-ban', 'Void tab', `adminVoidTab(${orderId}, ${actionRef})`) : ''
+                menuItem('tc-menu__item--danger', 'fa-circle-xmark', cancelBlock === '' ? 'Cancel order' : (posCanVoid ? 'Cancel order (void)' : 'Cancel order (kitchen started)'), `posCancelOrder(${orderId}, ${actionRef}, '${tabCancelState(t)}')`)
             ].join('');
 
             return `<article class="tab-card${isStale ? ' stale' : ''}" data-order-id="${orderId}" data-is-stale="${isStale ? '1' : '0'}" data-search="${escHtml(search)}">
@@ -8447,7 +8868,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         let activePosConfirm = null;
 
-        function posConfirm(title, message, confirmLabel) {
+        function posConfirm(title, message, confirmLabel, cancelLabel) {
             if (activePosConfirm) activePosConfirm(false);
 
             return new Promise(resolve => {
@@ -8483,6 +8904,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 titleNode.textContent = title;
                 messageNode.textContent = message;
                 acceptButton.textContent = confirmLabel || 'Confirm';
+                cancelButton.textContent = cancelLabel || 'Keep cart';
 
                 const finish = confirmed => {
                     overlay.classList.remove('show');
@@ -8533,8 +8955,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         async function cancelOpenOrder(orderId, ref) {
             const reason = await posAskReason({
                 title: 'Cancel order',
-                prompt: `Cancel <strong>${escHtml(ref)}</strong>? This only works while all items are still pending (not yet cooking). No stock has been deducted yet.`,
-                warn: 'Once the kitchen or bar starts any item, Cancel is blocked. Use Void instead.',
+                prompt: `Cancel <strong>${escHtml(ref)}</strong>? Nothing has been started yet, so any stock already taken for it goes back on the shelf.`,
+                warn: 'Once the kitchen or bar starts any item, the order can only be voided (food already made is recorded as wastage).',
                 confirmLabel: 'Cancel order',
                 confirmColor: '#7c2d12',
                 hasNotes: false,
@@ -8560,18 +8982,36 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 await refreshOpenTabs(true);
                 refreshShiftStats(true);
                 if (_tdiOrderId === (parseInt(orderId, 10) || 0)) refreshTabDetail();
+                todayOrdersRefreshIfOpen();
             } catch (e) {
                 posToast('Network error: ' + e.message, 'err');
             }
         }
 
-        // Admin/manager-only: void an open or paid order from the tabs tray.
-        async function adminVoidTab(orderId, ref) {
+        /* Cancel order on the till (tab card menu, order detail, Today's orders). Same rules as the
+           server: while the kitchen has not started anything it is a plain Cancel (stock restored);
+           once any line is started it is a Void, which needs pos_void - started food is recorded as
+           wastage, items not yet started go back to stock. state: pre_prep | started | part_paid. */
+        function posCancelOrder(orderId, ref, state) {
+            if (state === 'pre_prep') return cancelOpenOrder(orderId, ref);
+            if (posCanVoid) return adminVoidTab(orderId, ref, state);
+            posAlert('Kitchen has already started', ref + ' ' + (state === 'part_paid' ? 'is part-paid' : 'is already being prepared') + ', so it can no longer be cancelled from the till. A manager with the Void permission can void it (food already made is recorded as wastage, anything not started goes back to stock).');
+            return null;
+        }
+
+        // Void an open or paid order (pos_void). Also the way to cancel once preparation has started.
+        async function adminVoidTab(orderId, ref, state) {
+            const stateText = state === 'started' ?
+                `The kitchen has already started on <strong>${escHtml(ref)}</strong>, so cancelling it is a void: items not yet started go back to stock; items already preparing, ready or served are recorded as wastage.` :
+                state === 'part_paid' ?
+                `<strong>${escHtml(ref)}</strong> is part-paid, so cancelling it is a void: the payments taken so far are reversed, items not yet started go back to stock and anything already made is recorded as wastage.` :
+                `Void <strong>${escHtml(ref)}</strong>? Items the kitchen has not started go back to stock; items already preparing, ready or served are recorded as wastage. Any payment is reversed and the order leaves every station board.`;
+            const isCancel = state === 'started' || state === 'part_paid';
             const reason = await posAskReason({
-                title: 'Void order',
-                prompt: `Void <strong>${escHtml(ref)}</strong>? Stock will be restored for any items already marked Ready. The order will be removed from all station boards and any payment cancelled.`,
+                title: isCancel ? 'Cancel order (void)' : 'Void order',
+                prompt: stateText,
                 warn: 'Void is permanent. This action is fully audit-logged.',
-                confirmLabel: 'Void order',
+                confirmLabel: isCancel ? 'Cancel order' : 'Void order',
                 confirmColor: '#c82333',
                 hasNotes: true,
             });
@@ -8599,6 +9039,50 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 refreshShiftStats(true);
                 // Voided from the tab window: show the voided state straight away.
                 if (_tdiOrderId === (parseInt(orderId, 10) || 0)) refreshTabDetail();
+                todayOrdersRefreshIfOpen();
+            } catch (e) {
+                posToast('Network error: ' + e.message, 'err');
+            }
+        }
+
+        /* Permanent delete (pos_delete_order). The server (api/delete-order.php) re-checks the
+           permission and does stock, payments, folio, child rows and the audit record in one
+           transaction - the same action Orders & Tabs uses. */
+        async function posDeleteOrder(orderId, ref) {
+            if (!posCanDelete) {
+                posToast('You do not have permission to delete orders.', 'err');
+                return;
+            }
+            const reason = await posAskReason({
+                title: 'Delete order',
+                prompt: `Permanently delete <strong>${escHtml(ref)}</strong>, whatever its status? Stock it still holds is put back (stock already written off as wastage stays wasted), its payments, refunds and room-folio charges are removed, and today's takings and past shift / End of Day reports change.`,
+                warn: 'This cannot be undone. A permanent deletion record is kept with your name and this reason. Cash already taken or handed back is not moved - settle the drawer separately.',
+                confirmLabel: 'Delete order',
+                confirmColor: '#991b1b',
+                hasNotes: false,
+            });
+            if (!reason) return;
+            const fd = new FormData();
+            fd.append('csrf_token', '<?php echo $csrf_token; ?>');
+            fd.append('order_id', orderId);
+            fd.append('delete_reason', reason);
+            try {
+                const resp = await fetch(posApiUrl('delete-order.php'), {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'include'
+                });
+                const j = await resp.json().catch(() => null);
+                if (!j || !j.ok) {
+                    posToast((j && j.error) || 'Delete failed', 'err');
+                    return;
+                }
+                posToast(j.message || 'Order deleted.', 'ok');
+                _selectedOpenTabIds.delete(parseInt(orderId, 10) || 0);
+                if (_tdiOrderId === (parseInt(orderId, 10) || 0)) closeTabDetailOverlay();
+                await refreshOpenTabs(true);
+                refreshShiftStats(true);
+                todayOrdersRefreshIfOpen();
             } catch (e) {
                 posToast('Network error: ' + e.message, 'err');
             }
@@ -8855,6 +9339,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             /* ── Summary ── */
             const statusBadge = o.status === 'paid' ? `<span class="tdi-status paid"><i class="fas fa-check-circle"></i> Paid</span>` :
                 o.status === 'voided' ? `<span class="tdi-status voided"><i class="fas fa-ban"></i> Voided</span>` :
+                o.status === 'cancelled' ? `<span class="tdi-status voided"><i class="fas fa-circle-xmark"></i> Cancelled</span>` :
+                o.status === 'refunded' ? `<span class="tdi-status voided"><i class="fas fa-rotate-left"></i> Refunded</span>` :
                 `<span class="tdi-status placed"><i class="fas fa-clock"></i> Open tab</span>`;
             let metaRows = '';
             if (o.table_number) metaRows += `<span>Table <strong>${escH(o.table_number)}</strong></span>  &nbsp;·&nbsp; `;
@@ -8911,11 +9397,20 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             }
             detailActions.push(`<button type="button" class="tc-btn tc-btn-kot tdi-action" onclick="openPosPageModal('stock-receipt.php?id=${parseInt(o.id, 10) || 0}&print=1&kot=1','Print KOT','fas fa-print')"><i class="fas fa-print"></i> Print KOT</button>`);
             detailActions.push(`<button type="button" class="tc-btn tc-btn-log tdi-action" onclick="openPosPageModal('order-lifecycle.php?embed=1&id=${parseInt(o.id, 10) || 0}','Timeline','fas fa-stream')"><i class="fas fa-stream"></i> Timeline</button>`);
-            if (canCancelBeforePrep) {
-                detailActions.push(`<button type="button" class="tc-btn tc-btn-cancel tdi-action" onclick="cancelOpenOrder(${parseInt(o.id, 10) || 0}, ${escHtml(JSON.stringify(String(o.reference || 'TAB')))})"><i class="fas fa-circle-xmark"></i> Cancel</button>`);
+            if (o.status === 'placed') {
+                const cancelState = (parseInt(o.split_paid_count || 0, 10) || 0) > 0 ? 'part_paid' : (canCancelBeforePrep ? 'pre_prep' : 'started');
+                const cancelLabel = cancelState === 'pre_prep' ? 'Cancel order' : (posCanVoid ? 'Cancel order (void)' : 'Cancel order');
+                const cancelTitle = cancelState === 'pre_prep' ? 'Cancel before the kitchen starts: stock is restored' :
+                    (posCanVoid ? 'Kitchen started: this voids the order (started food is recorded as wastage)' : 'Kitchen has started - a manager with the Void permission must void it');
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-cancel tdi-action" title="${escHtml(cancelTitle)}" onclick="posCancelOrder(${parseInt(o.id, 10) || 0}, ${escHtml(JSON.stringify(String(o.reference || 'TAB')))}, '${cancelState}')"><i class="fas fa-circle-xmark"></i> ${cancelLabel}</button>`);
+            } else if (o.status === 'paid' && posCanVoid) {
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-void tdi-action" onclick="adminVoidTab(${parseInt(o.id, 10) || 0}, ${escHtml(JSON.stringify(String(o.reference || 'TAB')))}, 'paid')"><i class="fas fa-ban"></i> Void order</button>`);
             }
-            if (posCanVoid) {
-                detailActions.push(`<button type="button" class="tc-btn tc-btn-void tdi-action" onclick="adminVoidTab(${parseInt(o.id, 10) || 0}, ${escHtml(JSON.stringify(String(o.reference || 'TAB')))})"><i class="fas fa-ban"></i> Void</button>`);
+            if (o.status === 'paid' && posCanRefund) {
+                detailActions.push(`<button type="button" class="tc-btn tdi-action" onclick="closeTabDetailOverlay(); openRefundModal(${parseInt(o.id, 10) || 0}, ${escHtml(JSON.stringify(String(o.reference || 'TAB')))}, ${grossTotal})"><i class="fas fa-rotate-left"></i> Refund</button>`);
+            }
+            if (posCanDelete) {
+                detailActions.push(`<button type="button" class="tc-btn tc-btn-void tdi-action" onclick="posDeleteOrder(${parseInt(o.id, 10) || 0}, ${escHtml(JSON.stringify(String(o.reference || 'TAB')))})"><i class="fas fa-trash-can"></i> Delete</button>`);
             }
 
             html += `<div class="tdi-actions">${detailActions.join('')}</div>`;
@@ -10281,6 +10776,193 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             btn.innerHTML = origHtml;
         }
 
+        <?php if ($posCanAllTabs): ?>
+        /* ── Today's orders (pos_all_tabs) ──────────────────────────────────
+           Every order of the current business day, all cashiers. The list comes from
+           pos.php?ajax=orders_today; each row button calls the same server action as Orders & Tabs
+           (cancel-order / void-order / delete-order APIs, the till's refund and settle paths), and
+           the server re-checks that action's own permission. */
+        let _toOrders = [];
+        let _toTimer = null;
+        const TO_STATUS_LABEL = {
+            placed: 'Open',
+            paid: 'Paid',
+            cancelled: 'Cancelled',
+            voided: 'Voided',
+            refunded: 'Refunded',
+            completed: 'Delivered',
+            pending: 'Pending',
+            confirmed: 'Confirmed'
+        };
+
+        function todayOrdersIsOpen() {
+            return !!document.getElementById('todayOrdersOverlay')?.classList.contains('show');
+        }
+
+        function openTodayOrders() {
+            const ov = document.getElementById('todayOrdersOverlay');
+            if (!ov) return;
+            closePosService();
+            ov.classList.add('show');
+            loadTodayOrders(true);
+            if (!_toTimer) {
+                _toTimer = window.setInterval(() => {
+                    if (todayOrdersIsOpen()) loadTodayOrders(false);
+                }, 20000);
+            }
+        }
+
+        function closeTodayOrders() {
+            document.getElementById('todayOrdersOverlay')?.classList.remove('show');
+            if (_toTimer) {
+                window.clearInterval(_toTimer);
+                _toTimer = null;
+            }
+        }
+
+        function todayOrdersRefreshIfOpen() {
+            if (todayOrdersIsOpen()) loadTodayOrders(true);
+        }
+
+        async function loadTodayOrders(force) {
+            const body = document.getElementById('toBody');
+            if (!body) return;
+            if (force && !_toOrders.length) body.innerHTML = '<p class="tabs-empty">Loading orders…</p>';
+            try {
+                const r = await fetch('pos.php?ajax=orders_today', { credentials: 'same-origin', cache: 'no-store', headers: { 'Accept': 'application/json' } });
+                const j = await r.json();
+                if (!j || !j.ok) throw new Error((j && j.error) || 'Could not load');
+                _toOrders = Array.isArray(j.orders) ? j.orders : [];
+                renderTodayOrders();
+            } catch (e) {
+                if (force || !_toOrders.length) body.innerHTML = '<p class="tabs-empty">Could not load today\'s orders. Tap Refresh to try again.</p>';
+            }
+        }
+
+        function todayOrdersFilterChanged() {
+            renderTodayOrders();
+        }
+
+        function toTime(ts) {
+            if (!ts) return '—';
+            const d = window.rhHotelDate ? window.rhHotelDate(ts) : new Date(String(ts).replace(' ', 'T'));
+            return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function toRowActions(o) {
+            const id = parseInt(o.id, 10) || 0;
+            const ref = escHtml(JSON.stringify(String(o.reference || '')));
+            const total = parseFloat(o.total) || 0;
+            // Each action is { cls, icon, label, handler }; the first 3 stay on the row, or 2 + a More menu when there are more than 3.
+            const act = (cls, icon, label, handler) => ({ cls, icon, label, handler });
+            const acts = [act('', 'fa-eye', 'View', `openTabDetail(${id})`)];
+            const isOpen = o.status === 'placed';
+            if (isOpen && o.order_type !== 'room_service') {
+                if (posCanTakePayment) acts.push(act('to-act--primary', 'fa-credit-card', 'Settle', `todayOrdersSettle(${id}, ${total}, ${ref}, ${parseInt(o.items, 10) || 0}, ${parseInt(o.split_count, 10) || 1}, ${parseInt(o.split_paid, 10) || 0})`));
+                if ((parseInt(o.split_paid, 10) || 0) === 0) acts.push(act('', 'fa-plus', 'Add items', `todayOrdersAdd(${id}, ${ref}, ${total})`));
+            }
+            if (posCanRefund && o.status === 'paid') acts.push(act('', 'fa-rotate-left', 'Refund', `openRefundModal(${id}, ${ref}, ${total})`));
+            if (isOpen) {
+                const state = (parseInt(o.split_paid, 10) || 0) > 0 ? 'part_paid' : ((parseInt(o.pending, 10) || 0) > 0 && (parseInt(o.started, 10) || 0) === 0 ? 'pre_prep' : 'started');
+                if (state === 'pre_prep' || posCanVoid) acts.push(act('to-act--danger', 'fa-circle-xmark', 'Cancel', `posCancelOrder(${id}, ${ref}, '${state}')`));
+            }
+            if (posCanVoid && (o.status === 'paid' || (o.status === 'completed' && o.order_type === 'room_service'))) {
+                acts.push(act('to-act--danger', 'fa-ban', 'Void', `adminVoidTab(${id}, ${ref}, 'paid')`));
+            }
+            if (posCanDelete) acts.push(act('to-act--danger', 'fa-trash-can', 'Delete', `posDeleteOrder(${id}, ${ref})`));
+            const btn = a => `<button type="button" class="to-act${a.cls ? ' ' + a.cls : ''}" onclick="${a.handler}"><i class="fas ${a.icon}" aria-hidden="true"></i> ${a.label}</button>`;
+            if (acts.length <= 3) return acts.map(btn).join('');
+            const shown = acts.slice(0, 2);
+            const more = acts.slice(2).map(a => `<button type="button" role="menuitem" class="to-menu-item${a.cls === 'to-act--danger' ? ' to-menu-item--danger' : ''}" onclick="closeToMenus(); ${a.handler}"><i class="fas ${a.icon}" aria-hidden="true"></i> ${a.label}</button>`).join('');
+            return shown.map(btn).join('') + `<div class="to-more"><button type="button" class="to-act to-more-toggle" aria-haspopup="true" aria-expanded="false" aria-label="More actions" onclick="toggleToMenu(this, event)"><i class="fas fa-ellipsis-vertical" aria-hidden="true"></i> More</button><div class="to-more-menu" role="menu">${more}</div></div>`;
+        }
+
+        /* Row "More" menu for Today's orders. The till does not load admin-components.js, so this is the
+           same behaviour in miniature: fixed placement below the button (above when short of room). */
+        function closeToMenus() {
+            document.querySelectorAll('#toBody .to-more.open').forEach(el => {
+                el.classList.remove('open');
+                el.querySelector('.to-more-toggle')?.setAttribute('aria-expanded', 'false');
+                el.querySelector('.to-more-menu')?.removeAttribute('style');
+            });
+        }
+
+        function toggleToMenu(btn, e) {
+            if (e) e.stopPropagation();
+            const wrap = btn.closest('.to-more');
+            const menu = wrap ? wrap.querySelector('.to-more-menu') : null;
+            if (!menu) return;
+            const wasOpen = wrap.classList.contains('open');
+            closeToMenus();
+            if (wasOpen) return;
+            wrap.classList.add('open');
+            btn.setAttribute('aria-expanded', 'true');
+            const vw = window.innerWidth, vh = window.innerHeight, pad = 8, gap = 4;
+            menu.style.cssText = 'visibility:hidden;left:0;top:0;';
+            const probe = menu.getBoundingClientRect();   // non-zero left/top = a transformed ancestor
+            const b = btn.getBoundingClientRect();
+            const w = Math.min(Math.max(probe.width, 200), vw - pad * 2);
+            const left = Math.min(Math.max(b.right - w, pad), vw - pad - w);
+            const below = vh - pad - (b.bottom + gap), above = b.top - gap - pad;
+            const natural = probe.height;
+            const useBelow = natural <= below || below >= above;
+            const maxH = Math.max(120, Math.floor(useBelow ? below : above));
+            const top = useBelow ? b.bottom + gap : b.top - gap - Math.min(natural, maxH);
+            menu.style.cssText = 'left:' + Math.round(left - probe.left) + 'px;top:' + Math.round(top - probe.top) + 'px;width:' + Math.round(w) + 'px;max-height:' + maxH + 'px;';
+            menu.querySelector('button')?.focus();
+        }
+        document.addEventListener('click', e => { if (!e.target.closest('.to-more')) closeToMenus(); });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeToMenus(); });
+        document.addEventListener('scroll', e => { if (!(e.target && e.target.closest && e.target.closest('.to-more-menu'))) closeToMenus(); }, true);
+
+        function renderTodayOrders() {
+            const body = document.getElementById('toBody');
+            if (!body) return;
+            if (body.querySelector('.to-more.open')) return;   // an open More menu would be wiped by the 20s refresh; the next poll redraws
+            const q = (document.getElementById('toSearch')?.value || '').trim().toLowerCase();
+            const f = document.getElementById('toStatus')?.value || '';
+            const rows = _toOrders.filter(o => {
+                if (f === 'open' ? o.status !== 'placed' : (f && o.status !== f)) return false;
+                if (!q) return true;
+                return [o.reference, o.location, o.customer, o.staff, o.type, TO_STATUS_LABEL[o.status] || o.status].join(' ').toLowerCase().includes(q);
+            });
+            const count = document.getElementById('toCount');
+            if (count) count.textContent = rows.length === _toOrders.length ? '(' + rows.length + ')' : '(' + rows.length + ' of ' + _toOrders.length + ')';
+            if (!rows.length) {
+                body.innerHTML = '<p class="tabs-empty">' + (_toOrders.length ? 'No orders match your search.' : 'No orders yet today.') + '</p>';
+                return;
+            }
+            const tr = rows.map(o => {
+                const where = [o.type, o.location, o.customer].filter(Boolean).join(' · ');
+                return `<tr>
+                    <td data-label="Order"><strong>${escHtml(o.reference)}</strong></td>
+                    <td data-label="Time">${escHtml(toTime(o.created_at))}</td>
+                    <td data-label="Type / table">${escHtml(where)}</td>
+                    <td data-label="Staff">${escHtml(o.staff || '—')}</td>
+                    <td data-label="Items" class="to-num">${parseInt(o.items, 10) || 0}</td>
+                    <td data-label="Total" class="to-num">${escHtml(currencySymbol)} ${fmtMoney(o.total)}</td>
+                    <td data-label="Paid" class="to-num">${escHtml(currencySymbol)} ${fmtMoney(o.paid)}</td>
+                    <td data-label="Status"><span class="to-pill to-pill--${escHtml(o.status)}">${escHtml(TO_STATUS_LABEL[o.status] || o.status)}</span></td>
+                    <td data-label="Actions" class="to-actions-cell"><div class="to-actions">${toRowActions(o)}</div></td>
+                </tr>`;
+            }).join('');
+            body.innerHTML = `<table class="to-table"><thead><tr><th>Order</th><th>Time</th><th>Type / table</th><th>Staff</th><th class="to-num">Items</th><th class="to-num">Total</th><th class="to-num">Paid</th><th>Status</th><th>Actions</th></tr></thead><tbody>${tr}</tbody></table>`;
+        }
+
+        function todayOrdersAdd(id, ref, total) {
+            closeTodayOrders();
+            startAddToTab(id, ref, total);
+        }
+
+        function todayOrdersSettle(id, total, ref, items, splitCount, splitPaid) {
+            if (posPaymentsBlocked()) return;
+            closeTodayOrders();
+            openPayForTab(id, total, ref, items > 0, splitCount, splitPaid);
+        }
+        <?php else: ?>
+        function todayOrdersRefreshIfOpen() {}
+        <?php endif; ?>
+
         /* ── Refund modal ────────────────────────────────────────────────── */
         function openRefundModal(orderId, ref, total) {
             if (!posCanRefund) {
@@ -10313,6 +10995,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         function closeRefundModal() {
             document.getElementById('refundOverlay').classList.remove('show');
+            _posNoticeAfterRefund = 0; // cancelled: the notice stays waiting
         }
 
         async function submitRefund(e) {
@@ -10320,6 +11003,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const form = e.target;
             const btn = form.querySelector('button[type="submit"]');
             const origHtml = btn.innerHTML;
+            const noticeToClose = _posNoticeAfterRefund;
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing…';
             try {
@@ -10332,6 +11016,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 const j = await r.json();
                 if (j.ok) {
                     closeRefundModal();
+                    if (noticeToClose) await ackPosInboxMessage(noticeToClose, null, { suppressToast: true, skipRepoll: true });
                     posToastReady(j.message || 'Refund processed.', false);
                     setTimeout(() => location.reload(), 1800);
                 } else {
@@ -10696,7 +11381,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <button type="button" class="svc-btn svc-btn--ghost" id="posAlertChat" hidden><i class="fas fa-comments" aria-hidden="true"></i> Open chat</button>
                 <button type="button" class="svc-btn svc-btn--primary" id="posAlertPrimary"></button>
             </div>
-            <button type="button" class="pos-alert__all" id="posAlertAll" onclick="posAlertDismissAll()" hidden>Got them all — close</button>
+            <button type="button" class="pos-alert__all" id="posAlertAll" onclick="posAlertAckAll()" hidden>Got them all — close</button>
         </div>
     </div>
 
@@ -10729,6 +11414,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openPosMobileRecentView')"><i class="fas fa-receipt"></i><span>Recent</span></button>
                     <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openTabsTray')"><i class="fas fa-utensils"></i><span>Tabs</span><span class="mobile-action-badge" id="mobileTabBadge" <?php echo empty($openTabs) ? ' style="display:none;"' : ''; ?>><?php echo count($openTabs); ?></span></button>
                     <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openStationNoteModal')"><i class="fas fa-paper-plane"></i><span>Note</span></button>
+                    <?php if ($posCanAllTabs): ?>
+                    <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openTodayOrders')"><i class="fas fa-clipboard-list"></i><span>Today</span></button>
+                    <?php endif; ?>
                     <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openPosMobileInboxView')"><i class="fas fa-inbox"></i><span>Inbox</span><span class="mobile-action-badge" id="mobileInboxBadge" style="display:none;"></span></button>
                     <button type="button" class="pos-mobile-action is-primary" onclick="runPosMobileMenuAction('toggleCartDrawer')"><i class="fas fa-shopping-cart"></i><span>Cart</span><span class="mobile-action-badge" id="mobileCartBadge" style="display:none;"></span></button>
                     <button type="button" class="pos-mobile-action" onclick="runPosMobileMenuAction('openPosMobileOrdersView')"><i class="fas fa-list-check"></i><span>My Orders</span><span class="mobile-action-badge" id="mobileMyOrdersBadge" style="display:none;"></span></button>
