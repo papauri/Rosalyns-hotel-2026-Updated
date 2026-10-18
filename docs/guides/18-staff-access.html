@@ -90,12 +90,13 @@
     <li><strong>Full Name</strong> — e.g. <em>Jane Banda</em>. This appears in the invitation and on records they create.</li>
     <li><strong>Username</strong> — what they type to sign in, e.g. <em>jane.b</em>. At least 3 characters: letters, numbers, dots, dashes and underscores only, no spaces. It must not already be used (capitals don't matter: <em>Jane.B</em> and <em>jane.b</em> are the same) and it cannot be changed later.</li>
     <li><strong>Email</strong> — their own working email address. The invitation is sent here and password resets go here.</li>
-    <li><strong>Role</strong> — choose the closest role (see the table above).</li>
+    <li><strong>Role</strong> — choose the closest role (see the table above). Nothing is chosen for you: the form will not save until you pick one.</li>
     <li><strong>Password</strong> — leave this <strong>blank</strong>. The person will choose their own from the invitation. (Only type one if you must give it to them in person; it must be at least 8 characters.)</li>
     <li>Leave <strong>Send invitation email</strong> ticked.</li>
     <li>If the role's normal permissions are fine, leave <strong>Set their permissions before the invitation goes out</strong> unticked and click <strong>Create User</strong>. You will see <em>"User '…' created successfully. Invitation sent to … (link valid 72 h)."</em></li>
     <li>If you want to choose their permissions first, tick it and follow the next section.</li>
   </ol>
+  <div class="note"><p>A username or email that is already in use shows a red message under the box as soon as you finish typing it, and <strong>Create User</strong> will not go through until you change it. While the account is being created and the invitation sent, the button reads <em>"Creating and sending invitation..."</em> — wait for it; do not click again. If anything stops the save, the form opens again with what you typed and the reason in red at the top.</p></div>
   <div class="note"><p>No password is ever emailed. The invitation contains their username, role and a one-time <strong>Accept invitation &amp; set your password</strong> button.</p></div>
 
   <h2 id="perms-first">How to set permissions before the invitation goes out</h2>
@@ -106,7 +107,7 @@
     <li>Tick or untick permissions (see <a href="#perms">How to change what someone can open</a>).</li>
     <li>Click <strong>Save &amp; send invitation</strong>. The permissions are saved first, then the invitation is sent. You will see <em>"Permissions updated successfully. Invitation sent to …"</em></li>
   </ol>
-  <div class="warn"><p>If you close the window without saving, the account exists but <strong>no invitation has been sent</strong> and nobody can sign in to it. Open <strong>Permissions</strong> later, save, then use the envelope button to send the invitation.</p></div>
+  <div class="warn"><p>If you close the window without saving, the account exists but <strong>no invitation has been sent</strong> and nobody can sign in to it. Open <strong>Permissions</strong> later, save, then use the <strong>Resend invitation</strong> button to send the invitation.</p></div>
 
   <h2 id="accept">What the new person does with the invitation</h2>
   <ol class="steps">
@@ -192,7 +193,7 @@
   <h2 id="resend">How to resend an invitation</h2>
   <p>Use this when the first email was lost, the 72 hours passed, or you created the account with "set permissions first" and closed the window.</p>
   <ol class="steps">
-    <li>Click the envelope button on their row and confirm.</li>
+    <li>Click the <strong>Resend invitation</strong> button on their row and confirm.</li>
     <li>You will see <em>"Invitation sent to … (link valid 72 h)."</em> Any earlier unused link stops working.</li>
   </ol>
   <p>Resending does not change their current password. It also works as a "set a new password" link for someone who has forgotten theirs.</p>
@@ -228,7 +229,7 @@
     <li>Administrator permissions cannot be changed — an Administrator always has everything.</li>
     <li>The <strong>last active Administrator</strong> cannot be deactivated, demoted or deleted.</li>
     <li>You cannot delete your own account.</li>
-    <li>Usernames and email addresses must be unique.</li>
+    <li>Usernames and email addresses must be unique. A duplicate is flagged under the box while you type, and again when you save.</li>
     <li>After <strong>5 wrong passwords</strong> an account is locked for <strong>15 minutes</strong>. Too many failures from one location also blocks sign-in from there for 15 minutes.</li>
     <li>Deactivated accounts cannot sign in or reset their password.</li>
   </ul>
@@ -239,9 +240,9 @@
     <tbody>
       <tr><td><em>Set a password, or tick "Send invitation" so they choose their own.</em></td><td>Password blank and invitation unticked.</td><td>Tick <strong>Send invitation email</strong>.</td></tr>
       <tr><td><em>The username "…" is already taken. Choose a different username.</em> or <em>The email "…" already belongs to another user.</em></td><td>Someone already has that username or email (capitals do not matter).</td><td>Use another username; if the email belongs to an old account, edit or delete that account first.</td></tr>
-      <tr><td><em>User '…' created successfully. The email could not be sent: &lt;reason&gt;. Use "Resend invitation" once that is fixed.</em></td><td>The account was created, but the invitation email failed. The reason is shown in the message.</td><td>Read the reason. Fix it (see <a href="#invite-checklist">If invitations don't arrive</a>), then click the envelope button on their row. The account and its permissions are kept.</td></tr>
-      <tr><td><em>Permissions saved. The invitation email could not be sent: &lt;reason&gt;. Use "Resend invitation" once that is fixed.</em></td><td>Same as above, after "Save &amp; send invitation".</td><td>Permissions are kept. Fix the reason, then click the envelope button on their row.</td></tr>
-      <tr><td>New person says the link shows <em>"This reset link is invalid or has expired."</em></td><td>Link already used, older than 72 hours, or replaced by a newer invitation.</td><td>Send a new invitation with the envelope button.</td></tr>
+      <tr><td><em>User '…' created successfully. The email could not be sent: &lt;reason&gt;. Use "Resend invitation" once that is fixed.</em></td><td>The account was created, but the invitation email failed. The reason is shown in the message.</td><td>Read the reason. Fix it (see <a href="#invite-checklist">If invitations don't arrive</a>), then click the <strong>Resend invitation</strong> button on their row. The account and its permissions are kept.</td></tr>
+      <tr><td><em>Permissions saved. The invitation email could not be sent: &lt;reason&gt;. Use "Resend invitation" once that is fixed.</em></td><td>Same as above, after "Save &amp; send invitation".</td><td>Permissions are kept. Fix the reason, then click the <strong>Resend invitation</strong> button on their row.</td></tr>
+      <tr><td>New person says the link shows <em>"This reset link is invalid or has expired."</em></td><td>Link already used, older than 72 hours, or replaced by a newer invitation.</td><td>Send a new invitation with the <strong>Resend invitation</strong> button.</td></tr>
       <tr><td><em>Invalid security token. Please try again.</em></td><td>The page was open too long, or your session ended.</td><td>Sign out, sign in again, then try the invitation again.</td></tr>
       <tr><td><em>Account temporarily locked due to too many failed attempts.</em></td><td>5 wrong passwords.</td><td>Wait the minutes shown, or use <strong>Forgot Password?</strong></td></tr>
       <tr><td><em>This account has been deactivated. Contact your administrator.</em></td><td><strong>Active Account</strong> is unticked.</td><td>An administrator ticks it again in <strong>Edit</strong>.</td></tr>
@@ -258,7 +259,7 @@
     <li>Open <strong>Settings</strong> &rarr; <strong>Hotel Settings</strong> and find the <strong>Email Settings</strong> card. Check <strong>SMTP Host</strong>, <strong>SMTP Port</strong>, <strong>SMTP Security</strong> (SSL, TLS or None), <strong>SMTP Username</strong> and <strong>SMTP Password</strong>. The password box is always empty. Type a password only to change it. Click <strong>Save Email Settings</strong>.</li>
     <li>Ask your web host or email provider whether outgoing port <strong>465</strong> is open. If it is blocked, ask which port and security setting they give you, and enter those in <strong>Email Settings</strong>.</li>
     <li>If you see <em>"Invalid security token. Please try again."</em>, sign out, sign in again, and repeat the step that failed.</li>
-    <li>Click the envelope button on the person's row to send a fresh invitation. Any earlier link stops working.</li>
+    <li>Click the <strong>Resend invitation</strong> button on the person's row to send a fresh invitation. Any earlier link stops working.</li>
   </ol>
 
   <h2 id="related">Related guides</h2>

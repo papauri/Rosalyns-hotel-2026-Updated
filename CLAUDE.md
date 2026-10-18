@@ -51,6 +51,8 @@ do not re-derive plans or re-scan the repo ad hoc.
   anything with a screen. One commit per completed task, message
   stating what changed and why. Check the diff for secrets and stray files before staging;
   `.env` is untracked and stays that way. Never force-push, never rewrite pushed history.
+- **Task tracker**: `.claude/TASKS.md` is the live list of open/shipped work. Read it first when a
+  session resumes; the orchestrator updates it whenever a task starts, an agent reports, or work ships.
 - **Reporting**: STATUS block after every task (finished / in-progress / next 3 / blocked);
   SESSION SUMMARY at end of every run (completed, remaining by phase, blockers,
   one-line recommendation).

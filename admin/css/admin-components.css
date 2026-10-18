@@ -651,8 +651,6 @@ body.modal-open {
     border-left: 4px solid var(--rh-toast-accent, #2f6fad);
     box-shadow: var(--rh-toast-shadow, 0 4px 24px rgba(0,0,0,0.11), 0 1px 6px rgba(0,0,0,0.07));
     pointer-events: auto;
-    opacity: 0;
-    transform: translateX(18px);
     transition: opacity 0.28s ease, transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
     position: relative;
     overflow: hidden;
@@ -660,12 +658,20 @@ body.modal-open {
     box-sizing: border-box;
 }
 
-.alert.show {
+/* Only toasts (built by Alert.show inside .alert-wrapper) start hidden and slide in.
+   A message the page prints itself (<div class="alert alert-error">) must always be visible:
+   hiding it here made every server-side success/error message on admin pages invisible. */
+.alert-wrapper > .alert {
+    opacity: 0;
+    transform: translateX(18px);
+}
+
+.alert-wrapper > .alert.show {
     opacity: 1;
     transform: translateX(0);
 }
 
-.alert.hide {
+.alert-wrapper > .alert.hide {
     opacity: 0;
     transform: translateX(18px);
     transition: opacity 0.2s ease, transform 0.2s ease;

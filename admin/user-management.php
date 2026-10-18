@@ -30,6 +30,7 @@ $site_name = getSetting('site_name');
 $success_msg = '';
 $error_msg = '';
 $open_permissions_for = 0; // new user whose invitation waits for "Save & send invitation"
+$action = '';
 
 // Get all roles for use throughout the page
 $all_roles = getAllRoles();
@@ -86,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $username = rh_clean_text($_POST['username'] ?? '');
                 $email = strtolower(rh_clean_text($_POST['email'] ?? ''));
                 $full_name = rh_clean_text($_POST['full_name'] ?? '');
-                $role = (string)($_POST['role'] ?? 'receptionist');
+                $role = (string)($_POST['role'] ?? '');
                 $password = $_POST['password'] ?? '';
                 $send_welcome = !empty($_POST['send_welcome']);
                 // Hold the invitation until permissions are saved (admins have every permission,
@@ -107,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } elseif (strlen($username) < 3 || preg_match('/\s/', $username)) {
                     $error_msg = 'Username must be at least 3 characters with no spaces.';
                 } elseif (!isset($all_roles[$role])) {
-                    $error_msg = 'Invalid role selected.';
+                    $error_msg = 'Choose a role for this user.';
                 } else {
                     // Check for duplicate username/email
                     // (case-insensitive, under a lock so a double-click cannot create two)
@@ -276,6 +277,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     $success_msg .= ' ' . $invite['message'] . ' (link valid ' . RH_STAFF_INVITE_HOURS . ' h).';
                                 } else {
                                     error_log('Invitation failed for user #' . $uid . ': ' . $invite['message']);
+                                    $success_msg = '';
                                     $error_msg = 'Permissions saved. The invitation email could not be sent: ' . rh_invite_failure_reason((string)$invite['message']) . ' Use "Resend invitation" once that is fixed.';
                                 }
                             }
@@ -411,6 +413,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
+}
+
+// A failed Add / Edit reopens its form with what was typed and the reason inside it,
+// so the person sees why nothing was saved (passwords are never sent back).
+$rh_reopen_form = null;
+if ($error_msg !== '' && in_array($action, ['add_user', 'update_user'], true)) {
+    $rh_reopen_form = [
+        'form' => $action === 'add_user' ? 'add' : 'edit',
+        'error' => $error_msg,
+        'user_id' => (int)($_POST['user_id'] ?? 0),
+        'full_name' => (string)($_POST['full_name'] ?? ''),
+        'username' => (string)($_POST['username'] ?? ''),
+        'email' => (string)($_POST['email'] ?? ''),
+        'role' => (string)($_POST['role'] ?? ''),
+        'is_active' => !empty($_POST['is_active']),
+        'send_welcome' => !empty($_POST['send_welcome']),
+        'customize_first' => !empty($_POST['customize_first']),
+    ];
 }
 
 // Fetch all users with last activity
@@ -614,7 +634,7 @@ $nav_categories = getNavCategories();
                             <?php if ($u['id'] != $user['id'] && !empty($u['email']) && hasPermission($user['id'], 'user_edit') && canManageUser($user['id'], $u['id'])): ?>
                             <button type="button" class="btn-sm btn-edit" title="Resend the invitation (a fresh one-time link to set their password)"
                                 onclick="if (confirm('Resend the invitation to <?php echo htmlspecialchars($u['full_name'], ENT_QUOTES); ?>? They get a fresh one-time link to set their password; earlier links stop working.')) { submitResendWelcome(<?php echo (int)$u['id']; ?>); }">
-                                <i class="fas fa-envelope"></i>
+                                <i class="fas fa-envelope"></i> Resend invitation
                             </button>
                             <?php endif; ?>
 
@@ -635,7 +655,7 @@ $nav_categories = getNavCategories();
     <?php if (hasPermission($user['id'], 'user_permissions')): ?>
     <div class="modal-overlay" id="permissionsModal">
         <div class="modal-content">
-            <form method="POST" id="permissionsForm" class="permissions-modal__form">
+            <form method="POST" id="permissionsForm" class="permissions-modal__form" data-busy-text="Saving...">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                 <input type="hidden" name="action" value="save_permissions">
                 <input type="hidden" name="user_id" id="perm-user-id">
@@ -692,7 +712,7 @@ $nav_categories = getNavCategories();
 <?php if (hasPermission($user['id'], 'user_create')): ?>
 <div class="modal-overlay" id="addUserModal">
     <div class="modal-content">
-        <form method="POST">
+        <form method="POST" id="addUserForm" data-busy-text="Creating user...">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
             <input type="hidden" name="action" value="add_user">
 
@@ -701,21 +721,27 @@ $nav_categories = getNavCategories();
                 <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('addUserModal')">&times;</button>
             </div>
             <div class="modal-body">
+                <div class="um-form-error" id="add-form-error" role="alert" hidden></div>
                 <div class="form-row">
                     <label for="add-fullname">Full Name</label>
-                    <input type="text" id="add-fullname" name="full_name" autocomplete="off" required placeholder="e.g. Jane Banda">
+                    <input type="text" id="add-fullname" name="full_name" autocomplete="off" required maxlength="255" placeholder="e.g. Jane Banda">
                 </div>
                 <div class="form-row">
                     <label for="add-username">Username</label>
-                    <input type="text" id="add-username" name="username" autocomplete="off" required placeholder="e.g. jane.b" pattern="[a-zA-Z0-9._-]+" title="Letters, numbers, dots, dashes, underscores only">
+                    <input type="text" id="add-username" name="username" autocomplete="off" required placeholder="e.g. jane.b" minlength="3" maxlength="100" pattern="[a-zA-Z0-9._-]+" title="At least 3 characters: letters, numbers, dots, dashes, underscores only" data-unique="username">
+                    <div class="um-field-error" id="add-username-error" hidden></div>
                 </div>
                 <div class="form-row">
                     <label for="add-email">Email</label>
-                    <input type="email" id="add-email" name="email" autocomplete="off" required placeholder="e.g. jane@example.com">
+                    <input type="email" id="add-email" name="email" autocomplete="off" required maxlength="255" placeholder="e.g. jane@example.com" data-unique="email">
+                    <div class="um-field-error" id="add-email-error" hidden></div>
                 </div>
                 <div class="form-row">
                     <label for="add-role">Role</label>
-                    <select id="add-role" name="role">
+                    <?php /* No preselected role: the first option used to be Administrator, so a
+                             missed dropdown created a full-access account. */ ?>
+                    <select id="add-role" name="role" required>
+                        <option value="" selected disabled>Choose a role...</option>
                         <?php foreach ($relevant_roles as $role_key => $role_data): ?>
                         <option value="<?php echo $role_key; ?>"><?php echo $role_data['label']; ?> - <?php echo $role_data['description']; ?></option>
                         <?php endforeach; ?>
@@ -756,7 +782,7 @@ $nav_categories = getNavCategories();
 <?php if (hasPermission($user['id'], 'user_edit')): ?>
 <div class="modal-overlay" id="editUserModal">
     <div class="modal-content">
-        <form method="POST">
+        <form method="POST" id="editUserForm" data-busy-text="Saving...">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
             <input type="hidden" name="action" value="update_user">
             <input type="hidden" name="user_id" id="edit-user-id">
@@ -766,17 +792,19 @@ $nav_categories = getNavCategories();
                 <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('editUserModal')">&times;</button>
             </div>
             <div class="modal-body">
+                <div class="um-form-error" id="edit-form-error" role="alert" hidden></div>
                 <div class="form-row">
                     <label for="edit-username">Username <span style="font-weight:400; color:#888;">(read-only)</span></label>
                     <input type="text" id="edit-username" disabled style="background:#f8f9fb; color:#888; cursor:not-allowed;">
                 </div>
                 <div class="form-row">
                     <label for="edit-fullname">Full Name</label>
-                    <input type="text" id="edit-fullname" name="full_name" required>
+                    <input type="text" id="edit-fullname" name="full_name" required maxlength="255">
                 </div>
                 <div class="form-row">
                     <label for="edit-email">Email</label>
-                    <input type="email" id="edit-email" name="email" autocomplete="off" required>
+                    <input type="email" id="edit-email" name="email" autocomplete="off" required maxlength="255" data-unique="email">
+                    <div class="um-field-error" id="edit-email-error" hidden></div>
                 </div>
                 <div class="form-row">
                     <label for="edit-role">Role</label>
@@ -870,6 +898,7 @@ function openEditModal(userData) {
     document.getElementById('edit-role').value = userData.role;
     document.getElementById('edit-active').checked = userData.is_active == 1;
     document.getElementById('edit-password').value = '';
+    umClearFormErrors('editUserForm');
     openModal('editUserModal');
 }
 
@@ -908,6 +937,145 @@ if ($rh_pending_invite_user): ?>
 document.addEventListener('DOMContentLoaded', function () {
     openPermissionsModal(<?php echo json_encode($rh_pending_invite_user, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>, true);
 });
+<?php endif; ?>
+
+// Form checks: a duplicate username / email is flagged while typing, reasons show inside the
+// form, and the button shows it is busy so a slow save (the invitation email) never looks
+// like nothing happened. The server checks everything again on save.
+function umShowFieldError(input, message) {
+    const box = document.getElementById(input.id + '-error');
+    input.setCustomValidity(message || '');
+    input.classList.toggle('um-input-invalid', !!message);
+    if (box) {
+        box.textContent = message || '';
+        box.hidden = !message;
+    }
+}
+
+function umShowFormError(formId, message) {
+    const box = document.getElementById(formId === 'addUserForm' ? 'add-form-error' : 'edit-form-error');
+    if (!box) return;
+    box.textContent = message || '';
+    box.hidden = !message;
+}
+
+function umClearFormErrors(formId) {
+    const form = document.getElementById(formId);
+    if (!form) return;
+    form.querySelectorAll('[data-unique]').forEach(function (input) { umShowFieldError(input, ''); });
+    umShowFormError(formId, '');
+}
+
+(function () {
+    const timers = new WeakMap();
+
+    function checkUnique(input) {
+        const value = input.value.trim();
+        input.setCustomValidity('');
+        // Format problems are the browser's job; only ask the server about well-formed values.
+        if (value === '' || !input.validity.valid) return;
+        const excludeId = input.form && input.form.id === 'editUserForm' ? document.getElementById('edit-user-id').value : '';
+        const url = 'api/user-check-unique.php?field=' + encodeURIComponent(input.dataset.unique)
+            + '&value=' + encodeURIComponent(value)
+            + (excludeId ? '&exclude_id=' + encodeURIComponent(excludeId) : '');
+        fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (input.value.trim() !== value) return; // typed on since
+                umShowFieldError(input, data && data.taken ? data.message : '');
+            })
+            .catch(function () { /* the server checks again on save */ });
+    }
+
+    document.querySelectorAll('#addUserForm [data-unique], #editUserForm [data-unique]').forEach(function (input) {
+        input.addEventListener('input', function () {
+            umShowFieldError(input, '');
+            clearTimeout(timers.get(input));
+            timers.set(input, setTimeout(function () { checkUnique(input); }, 450));
+        });
+        input.addEventListener('blur', function () {
+            clearTimeout(timers.get(input));
+            checkUnique(input);
+        });
+    });
+
+    ['addUserForm', 'editUserForm', 'permissionsForm'].forEach(function (formId) {
+        const form = document.getElementById(formId);
+        if (!form) return;
+        // Back button restores the page from cache with the button still busy: free it again.
+        window.addEventListener('pageshow', function (e) {
+            if (!e.persisted || form.dataset.submitting !== '1') return;
+            form.dataset.submitting = '';
+            const btn = form.querySelector('button[type="submit"]');
+            if (btn && window.ButtonLoader) window.ButtonLoader.hide(btn);
+        });
+        form.addEventListener('submit', function (e) {
+            const invalid = form.querySelector('.um-input-invalid');
+            if (invalid) {
+                e.preventDefault();
+                invalid.focus();
+                return;
+            }
+            if (form.dataset.submitting === '1') {
+                e.preventDefault(); // second click while the first save is still running
+                return;
+            }
+            form.dataset.submitting = '1';
+            let text = form.dataset.busyText || 'Saving...';
+            const send = document.getElementById('add-send-welcome');
+            const first = document.getElementById('add-customize-first');
+            if (formId === 'addUserForm' && send && send.checked && !(first && first.checked)) {
+                text = 'Creating and sending invitation...';
+            }
+            if (formId === 'permissionsForm' && document.getElementById('perm-send-invite').value === '1') {
+                text = 'Saving and sending invitation...';
+            }
+            const btn = form.querySelector('button[type="submit"]');
+            if (btn && window.ButtonLoader) {
+                window.ButtonLoader.show(btn, { text: text });
+            } else if (btn) {
+                btn.disabled = true;
+            }
+        });
+    });
+})();
+
+<?php
+if ($rh_reopen_form && $rh_reopen_form['form'] === 'edit') {
+    foreach ($all_users as $u) {
+        if ((int)$u['id'] === $rh_reopen_form['user_id']) {
+            $rh_reopen_form['username'] = (string)$u['username'];
+            break;
+        }
+    }
+}
+if ($rh_reopen_form): ?>
+// The last Add / Edit was not saved: reopen it with what was typed and the reason.
+(function () {
+    const r = <?php echo json_encode($rh_reopen_form, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    if (r.form === 'add' && document.getElementById('addUserForm')) {
+        document.getElementById('add-fullname').value = r.full_name;
+        document.getElementById('add-username').value = r.username;
+        document.getElementById('add-email').value = r.email;
+        if (r.role) document.getElementById('add-role').value = r.role;
+        const send = document.getElementById('add-send-welcome');
+        const first = document.getElementById('add-customize-first');
+        if (send) { send.checked = r.send_welcome; send.dispatchEvent(new Event('change')); }
+        if (first && !first.disabled) first.checked = r.customize_first;
+        umShowFormError('addUserForm', r.error);
+        openModal('addUserModal');
+    } else if (r.form === 'edit' && document.getElementById('editUserForm')) {
+        document.getElementById('edit-user-id').value = r.user_id;
+        document.getElementById('edit-username').value = r.username;
+        document.getElementById('edit-fullname').value = r.full_name;
+        document.getElementById('edit-email').value = r.email;
+        if (r.role) document.getElementById('edit-role').value = r.role;
+        document.getElementById('edit-active').checked = r.is_active;
+        document.getElementById('edit-password').value = '';
+        umShowFormError('editUserForm', r.error);
+        openModal('editUserModal');
+    }
+})();
 <?php endif; ?>
 
 function submitResendWelcome(userId) {

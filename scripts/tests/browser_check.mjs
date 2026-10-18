@@ -2,6 +2,9 @@
 // 1. Serve the repo:   php -S 0.0.0.0:8000 -t . scripts/tests/dev-router.php
 // 2. Run steps:        node scripts/tests/browser_check.mjs steps.json  [BASE=http://localhost:8000]
 // steps: [{viewport:[w,h]} | {nav:"{base}/__devlogin?to=pos.php", after:ms} | {eval:"js", label} | {wait:ms} | {shot:"file.png"} | {init:"js"}]
+// Real pointer input: {click:[x,y]} | {clickSel:"css", label} (scrolls into view, clicks the centre, prints the element
+// actually under the pointer so overlays that swallow clicks show up) | {type:"text"} (Input.insertText into the focused field)
+// | {key:"Tab"|"Enter"|...}.
 // "{base}" in nav is replaced by $BASE (default http://localhost:8000). /__devlogin signs in as the
 // first active admin (dev-router.php only, built-in server only). Console errors/exceptions print.
 import { spawn } from 'node:child_process';
@@ -41,6 +44,21 @@ for (const s of steps) {
   if (s.viewport) { await send('Emulation.setDeviceMetricsOverride', { width: s.viewport[0], height: s.viewport[1], deviceScaleFactor: 1, mobile: s.viewport[0] < 700 }); }
   if (s.init) { await send('Page.addScriptToEvaluateOnNewDocument', { source: s.init }); }
   if (s.wait) await sleep(s.wait);
+  if (s.clickSel) {
+    const r = await send('Runtime.evaluate', { returnByValue: true, expression: `(() => { const e = document.querySelector(${JSON.stringify(s.clickSel)}); if (!e) return null; e.scrollIntoView({block:'center'}); const b = e.getBoundingClientRect(); const x = b.x + b.width/2, y = b.y + b.height/2; const t = document.elementFromPoint(x, y); return {x, y, hit: t ? (t.tagName + (t.id ? '#' + t.id : '') + (t.className && t.className.baseVal === undefined ? '.' + String(t.className).split(' ').join('.') : '')) : null, inside: !!t && (t === e || e.contains(t) || t.contains(e))}; })()` });
+    const v = r.result?.result?.value;
+    if (!v) { console.log('CLICKSEL', s.clickSel, '=> NOT FOUND'); }
+    else { console.log('CLICKSEL', s.clickSel, '=>', JSON.stringify(v)); s.click = [v.x, v.y]; }
+  }
+  if (s.click) {
+    const [x, y] = s.click; const base = { x, y, button: 'left', clickCount: 1 };
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    await send('Input.dispatchMouseEvent', { ...base, type: 'mousePressed' });
+    await send('Input.dispatchMouseEvent', { ...base, type: 'mouseReleased' });
+    await sleep(s.after ?? 400);
+  }
+  if (s.type !== undefined) { await send('Input.insertText', { text: s.type }); await sleep(150); }
+  if (s.key) { const k = s.key; const code = { Enter: 13, Tab: 9, Escape: 27 }[k] || 0; for (const t of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type: t, key: k, code: k, windowsVirtualKeyCode: code }); await sleep(150); }
   if (s.eval) {
     const r = await send('Runtime.evaluate', { expression: s.eval, awaitPromise: true, returnByValue: true });
     console.log('EVAL', s.label || '', '=>', JSON.stringify(r.result?.result?.value ?? r.result?.exceptionDetails?.exception?.description ?? r.result));

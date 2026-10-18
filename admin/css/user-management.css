@@ -659,6 +659,30 @@
     margin-top: 4px;
 }
 
+/* Why a user form was not saved: one line at the top of the form, one under the field */
+.um-form-error {
+    background: #fbeeee;
+    border: 1px solid #e3b4b4;
+    border-left: 4px solid #b42318;
+    color: #7a1c14;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.um-field-error {
+    font-size: 12px;
+    color: #b42318;
+    margin-top: 4px;
+    font-weight: 500;
+}
+
+.form-row input.um-input-invalid {
+    border-color: #b42318;
+}
+
 /* Admin Info Panel */
 .admin-info-panel {
     background: linear-gradient(135deg, rgba(212, 168, 67, 0.1) 0%, rgba(212, 168, 67, 0.05) 100%);
