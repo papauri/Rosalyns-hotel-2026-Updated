@@ -6374,3 +6374,19 @@ th.admin-bulk-col, td.admin-bulk-col { width: 38px; text-align: center; padding-
 body.rh-pwa-bar-on .admin-bulk-bar {
     bottom: 76px;
 }
+
+/* #rh-admin-page is an overflow container that never scrolls itself (the window does), so
+   position:sticky could not pin the bar - it sat below the list, off screen. While it is shown
+   it is pinned to the viewport beside the sidebar, and the page gets room so nothing hides under it. */
+.admin-bulk-bar:not([hidden]) {
+    position: fixed;
+    left: calc(var(--admin-current-sidebar-width, 0px) + 16px);
+    right: 16px;
+    margin: 0;
+}
+@media (max-width: 1024px) {
+    .admin-bulk-bar:not([hidden]) { left: 12px; right: 12px; }
+}
+#rh-admin-page:has(.admin-bulk-bar:not([hidden])) {
+    padding-bottom: 104px;
+}

@@ -6,6 +6,7 @@
  */
 require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/includes/bulk-actions.php';
 /** @var string $csrf_token */
 
 /** Common field checks for an individual room (add + edit). Returns an error string or null. */
@@ -504,7 +505,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = 'Individual room deleted successfully!';
             }
         } elseif ($action === 'bulk_status_change') {
-            $room_ids = $_POST['room_ids'] ?? [];
+            $room_ids = adminBulkIds('bulk_ids') ?: adminBulkIds('room_ids');
             $new_status = $_POST['bulk_status'] ?? '';
 
             if (empty($room_ids) || empty($new_status)) {
@@ -1308,34 +1309,12 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             </form>
         </div>
 
-        <!-- Bulk Actions -->
-        <div class="admin-bulk-bar bulk-actions hidden" id="bulkActions">
-            <span class="admin-bulk-bar__count"><i class="fas fa-check-square" aria-hidden="true"></i> <span id="selectedCount">0 selected</span></span>
-            <div class="admin-bulk-bar__controls">
-            <select id="bulkStatus" data-help="Select Status|Choose a new status to apply to all selected rooms at once.">
-                <option value="">Change status to...</option>
-                <option value="available">Available</option>
-                <option value="occupied">Occupied</option>
-                <option value="cleaning">Cleaning</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="out_of_order">Out of Order</option>
-            </select>
-            <button class="btn btn-primary btn-sm" onclick="applyBulkStatus()"
-                data-help="Apply Bulk Status Change|Change the status of all selected rooms at once to the value chosen above. Select rooms using the checkboxes in the table.">
-                <i class="fas fa-check"></i> Apply
-            </button>
-            </div>
-        </div>
-
         <!-- Rooms Table -->
         <div class="rooms-table">
-            <form method="POST" id="bulkForm">
-                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
-                <input type="hidden" name="action" value="bulk_status_change">
                 <table>
                     <thead>
                         <tr>
-                            <th><input type="checkbox" class="admin-bulk-check" id="selectAll" onchange="toggleSelectAll()"></th>
+                            <th><?php echo adminBulkAllBox('Select all visible rooms'); ?></th>
                             <th class="sortable" data-col="1" onclick="sortTable(this)"
                                 data-help="Sort by Room|Click to sort rooms by room number or name. Click again to reverse the order.">
                                 Room <span class="sort-icon">⇅</span>
@@ -1471,7 +1450,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                 ?>
                                 <tr data-room-status="<?php echo $displayStatus; ?>" id="room-<?php echo (int)$room['id']; ?>" data-focus="room-<?php echo (int)$room['id']; ?>">
                                     <td>
-                                        <input type="checkbox" class="admin-bulk-check" name="room_ids[]" value="<?php echo $room['id']; ?>" onchange="updateBulkActions()"<?php echo $isPair ? ' data-joined-room="1" title="Joined room - both rooms change together"' : ''; ?>>
+                                        <input type="checkbox" class="admin-bulk-check" data-bulk-row aria-label="Select room" value="<?php echo (int)$room['id']; ?>"<?php echo $isPair ? ' data-joined-room="1" title="Joined room - both rooms change together"' : ''; ?>>
                                     </td>
                                     <td>
                                         <button type="button" class="room-number-btn"
@@ -1665,8 +1644,20 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                         <?php endif; ?>
                     </tbody>
                 </table>
-            </form>
         </div>
+
+        <!-- Bulk Actions (shared bar: sticky bottom, count, Clear) -->
+        <?php adminBulkBarStart('bulk_status_change', '.rooms-table', $csrf_token); ?>
+            <select id="bulkStatus" name="bulk_status" data-bulk-field data-help="Select Status|Choose a new status to apply to all selected rooms at once.">
+                <option value="">Change status to...</option>
+                <option value="available">Available</option>
+                <option value="occupied">Occupied</option>
+                <option value="cleaning">Cleaning</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="out_of_order">Out of Order</option>
+            </select>
+            <?php adminBulkButton('status', 'Apply', 'fa-check', 'Change status of {n} room(s)?', 'btn-primary', 'bulk_status', 'Apply'); ?>
+        <?php adminBulkBarEnd(); ?>
     </div>
 
     <!-- ══ JOINED ROOM COMBINATIONS MODAL ══ -->
@@ -2426,58 +2417,27 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             });
         }
 
-        // Bulk Actions
-        function toggleSelectAll() {
-            const checkboxes = document.querySelectorAll('input[name="room_ids[]"]');
-            const selectAll = document.getElementById('selectAll').checked;
-            checkboxes.forEach(cb => cb.checked = selectAll);
-            updateBulkActions();
-        }
-
-        function updateBulkActions() {
-            const checkboxes = document.querySelectorAll('input[name="room_ids[]"]:checked');
-            const count = checkboxes.length;
-            document.getElementById('selectedCount').textContent = count + ' selected';
-            document.getElementById('bulkActions').classList.toggle('hidden', count === 0);
-        }
-
-        function applyBulkStatus() {
-            const status = document.getElementById('bulkStatus').value;
-            if (!status) {
-                showRoomNotify('Please select a status.', 'error');
-                return;
+        // Bulk status change uses the shared bulk bar (admin-bulk.js); this only words its confirm.
+        function syncBulkStatusConfirm() {
+            const btn = document.querySelector('[data-bulk-bar] button[value="status"]');
+            const sel = document.getElementById('bulkStatus');
+            if (!btn || !sel) return;
+            const picked = document.querySelectorAll('.rooms-table input[data-bulk-row]:checked');
+            const joined = document.querySelectorAll('.rooms-table input[data-bulk-row][data-joined-room]:checked').length;
+            const label = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
+            const tpl = 'Change status of {n} room(s) to "' + label + '"?';
+            btn.setAttribute('data-bulk-confirm', tpl);
+            btn.setAttribute('data-admin-confirm', tpl.replace(/\{n\}/g, String(picked.length)));
+            if (joined) {
+                btn.setAttribute('data-admin-confirm-details', joined + ' joined room(s) selected: both rooms of each change together.');
+            } else {
+                btn.removeAttribute('data-admin-confirm-details');
             }
-            const checkboxes = document.querySelectorAll('input[name="room_ids[]"]:checked');
-            if (checkboxes.length === 0) {
-                showRoomNotify('Please select at least one room.', 'error');
-                return;
-            }
-            const joinedSelected = document.querySelectorAll('input[name="room_ids[]"][data-joined-room]:checked').length;
-            const statusLabels = {
-                available: 'Available',
-                occupied: 'Occupied',
-                cleaning: 'Cleaning',
-                maintenance: 'Maintenance',
-                out_of_order: 'Out of Order'
-            };
-            window.AdminConfirm.request({
-                title: 'Bulk Status Change',
-                message: 'Change status of ' + checkboxes.length + ' room(s) to "' + (statusLabels[status] || status) + '"?',
-                details: joinedSelected ? joinedSelected + ' joined room(s) selected: both rooms of each change together.' : undefined,
-                confirmText: 'Apply',
-                tone: 'warning',
-                icon: 'fa-exchange-alt'
-            }).then(function(confirmed) {
-                if (!confirmed) return;
-                document.getElementById('bulkStatus').value = status;
-                document.querySelector('#bulkForm input[name="bulk_status"]')?.remove();
-                const input = document.createElement('input');
-                input.type = 'hidden';
-                input.name = 'bulk_status';
-                input.value = status;
-                document.getElementById('bulkForm').appendChild(input);
-                document.getElementById('bulkForm').submit();
-            });
+        }
+        if (!window.__irBulkConfirmBound) {
+            window.__irBulkConfirmBound = true;
+            document.addEventListener('change', syncBulkStatusConfirm, true);
+            document.addEventListener('click', syncBulkStatusConfirm, true);
         }
 
         // Assign Booking Modal Functions
