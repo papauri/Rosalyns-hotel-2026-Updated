@@ -1093,8 +1093,8 @@
             }
 
             section.style.display = '';
-            // Guide the user's eye to the newly-revealed packages section
-            scrollToSection(section, 450);
+            // No auto-scroll here: packages load right after a room is picked, and jumping to them
+            // dragged guests past Guest Information. The step flow (advanceToStep) guides them.
             list.innerHTML = currentPackages.map(pkg => {
                 const isComplimentary = parseFloat(pkg.price_amount) === 0;
                 let cost = 0;
