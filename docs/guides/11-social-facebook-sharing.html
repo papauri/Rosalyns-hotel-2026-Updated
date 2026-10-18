@@ -32,7 +32,7 @@
     <ol>
       <li><a href="#screen">What is on the screen</a></li>
       <li><a href="#connect">How to connect the Facebook Page</a></li>
-      <li><a href="#test">How to send a test post</a></li>
+      <li><a href="#test">How to check the connection</a></li>
       <li><a href="#post">How to post one item to Facebook</a></li>
       <li><a href="#postall">How to post several items together</a></li>
       <li><a href="#whatsapp">How to set up WhatsApp</a></li>
@@ -45,33 +45,44 @@
   <table>
     <thead><tr><th>Facebook Settings part</th><th>What it holds</th></tr></thead>
     <tbody>
-      <tr><td><strong>Page Credentials</strong></td><td><strong>Enable Facebook Page Posting</strong>, <strong>Facebook Page ID</strong> with a <strong>Fetch from Token</strong> button, <strong>Page Display Name</strong> (a label for staff only), <strong>Page Access Token</strong>, and a short <strong>Token Setup Guide</strong>.</td></tr>
-      <tr><td><strong>Posting Options</strong></td><td><strong>Default Hashtags</strong>, and ticks: <strong>Show share button on Rooms</strong>, <strong>Show share button on Events</strong>, <strong>Show share button on Conference rooms</strong>, <strong>Show share button on Gym packages</strong>, <strong>Show share button on Menu items</strong>, <strong>Log all post attempts to system log</strong>.</td></tr>
-      <tr><td><strong>Test Post</strong></td><td>A message box and the button <strong>Send Test Post to Facebook Page</strong>.</td></tr>
+      <tr><td><strong>Connection</strong></td><td>The status card. It says <strong>Connected as</strong> your Page name, <strong>Not connected</strong>, or <strong>Connection needs attention</strong>. When connected it also shows the Page ID, when the token expires, who connected and when, and the buttons <strong>Test connection</strong>, <strong>Reconnect</strong> and <strong>Disconnect</strong>. When not connected it shows <strong>Connect with Facebook</strong>.</td></tr>
+      <tr><td><strong>Facebook App</strong></td><td>The address to copy into Facebook, <strong>App ID</strong>, <strong>App Secret</strong>, <strong>Login configuration ID</strong> (only for "Facebook Login for Business" apps) and the button <strong>Save and connect with Facebook</strong>.</td></tr>
+      <tr><td><strong>Posting</strong></td><td><strong>Enable Facebook Page Posting</strong>, <strong>Default Hashtags</strong>, and ticks: <strong>Show share button on Rooms</strong>, <strong>Show share button on Events</strong>, <strong>Show share button on Conference rooms</strong>, <strong>Show share button on Gym packages</strong>, <strong>Show share button on Menu items</strong>, <strong>Log all post attempts to system log</strong>.</td></tr>
+      <tr><td><strong>Advanced: paste a token by hand</strong></td><td>For emergencies only: <strong>Facebook Page ID</strong>, <strong>Fetch from token</strong>, <strong>Page Access Token</strong> and <strong>Publish test post</strong>. Pasted tokens run out within hours, so use <strong>Connect with Facebook</strong> instead.</td></tr>
     </tbody>
   </table>
 
   <h2 id="connect">How to connect the Facebook Page</h2>
+  <p>You do this once. You need a Facebook app (made at developers.facebook.com) and a Facebook login that has full control of the hotel Page.</p>
   <ol class="steps">
     <li>Open <strong>Website</strong> &rarr; <strong>Facebook Settings</strong>.</li>
-    <li>Paste the <strong>Page Access Token</strong>. Follow the on-screen <strong>Token Setup Guide</strong> (Graph API Explorer, permissions pages_manage_posts, pages_read_engagement and pages_show_list). A saved token is never shown again; to keep it, leave the box blank.</li>
-    <li>Click <strong>Save Facebook Settings</strong> once so the token is stored.</li>
-    <li>Click <strong>Fetch from Token</strong>. If your token covers several Pages, pick the right one. The Page ID and name fill in.</li>
-    <li>Tick <strong>Enable Facebook Page Posting</strong>.</li>
-    <li>Set <strong>Default Hashtags</strong>. Each one must start with # and be separated by spaces, for example <code>#hotel #malawi</code>. They are added to the end of every post and can be changed before posting.</li>
-    <li>Tick the areas where you want share buttons.</li>
+    <li>In the blue box <strong>Add this address to your Facebook app</strong>, copy the address shown.</li>
+    <li>In a new tab open developers.facebook.com &rarr; your app &rarr; <strong>Facebook Login</strong> &rarr; <strong>Settings</strong>. Paste the address into <strong>Valid OAuth Redirect URIs</strong> exactly as shown. Keep <strong>Client OAuth Login</strong> and <strong>Web OAuth Login</strong> switched on. Save in Facebook.</li>
+    <li>Still in Facebook, open <strong>Settings</strong> &rarr; <strong>Basic</strong> and copy the <strong>App ID</strong> and <strong>App Secret</strong>.</li>
+    <li>Back in Facebook Settings, paste them into <strong>App ID</strong> and <strong>App Secret</strong>. Leave <strong>Login configuration ID</strong> empty unless your app is a "Facebook Login for Business" app.</li>
+    <li>Click <strong>Save and connect with Facebook</strong>. Facebook opens.</li>
+    <li>Log in and approve the three permissions it asks for: <code>pages_show_list</code>, <code>pages_read_engagement</code> and <code>pages_manage_posts</code>. Choose your hotel Page when Facebook asks (or "Opt in to all current and future Pages").</li>
+    <li>You return to Facebook Settings. If you have more than one Page you will see <strong>Choose the Page to post to</strong>. Click your hotel Page.</li>
+    <li>The Connection card now says <strong>Connected as</strong> and your Page name.</li>
+    <li>Tick <strong>Enable Facebook Page Posting</strong>, set <strong>Default Hashtags</strong> (each starts with # and they are separated by spaces, for example <code>#hotel #malawi</code>), and tick the areas where you want share buttons.</li>
     <li>Click <strong>Save Facebook Settings</strong>. You will see <em>"Facebook settings saved successfully."</em></li>
   </ol>
-  <div class="note"><p>If posting is switched off, every <strong>Post to Facebook</strong> button disappears from the admin. The Page ID must be numbers only. The Page ID and token are needed before posting can be switched on.</p></div>
+  <div class="note"><p>The App Secret is saved scrambled and never shown again. To keep it, leave the box blank. If posting is switched off, every <strong>Post to Facebook</strong> button disappears from the admin. If posting is on but the Page is not connected, the buttons stay on screen but are greyed out, with a hint: <em>"Facebook is not connected yet. Open Facebook Settings and click Connect with Facebook."</em> Nothing can be posted until you connect.</p></div>
 
-  <h2 id="test">How to send a test post</h2>
+  <h2 id="test">How to check the connection</h2>
   <ol class="steps">
-    <li>Save a token first. Until then the test button and <strong>Fetch from Token</strong> are greyed out.</li>
-    <li>Type a message, or leave it blank for a standard test line.</li>
-    <li>Click <strong>Send Test Post to Facebook Page</strong>.</li>
-    <li>You will see <strong>Success!</strong> with a <strong>View post on Facebook</strong> link, or <strong>Failed.</strong> with the reason.</li>
+    <li>Open <strong>Website</strong> &rarr; <strong>Facebook Settings</strong>.</li>
+    <li>On the Connection card click <strong>Test connection</strong>.</li>
+    <li>Read the result. A green line means all is well. A warning tells you what is missing.</li>
   </ol>
-  <div class="warn"><p>The test publishes a real post on your Page. Delete it on Facebook afterwards if you do not want it to stay.</p></div>
+  <p><strong>Test connection</strong> only reads from Facebook. It never posts anything.</p>
+  <p>Other buttons on the card:</p>
+  <ul>
+    <li><strong>Reconnect</strong>: signs in again with Facebook and replaces the saved token. Use it when the token has expired or a permission is missing.</li>
+    <li><strong>Disconnect</strong>: removes the saved token after you confirm. Share buttons stay greyed out until you connect again. Your App ID and App Secret are kept.</li>
+  </ul>
+  <p>If you really want to see a post go out, open <strong>Advanced: paste a token by hand</strong> and click <strong>Publish test post</strong>.</p>
+  <div class="warn"><p>Publish test post puts a real post on your Page. Delete it on Facebook afterwards if you do not want it to stay.</p></div>
 
   <h2 id="post">How to post one item to Facebook</h2>
   <p>The button appears on these pages when posting is enabled, a token is saved, and the matching share tick is on:</p>
@@ -124,13 +135,21 @@
   <table>
     <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
     <tbody>
-      <tr><td><em>Add the Page ID and an access token before enabling Facebook posting.</em></td><td>One of them is missing.</td><td>Add both, then tick Enable.</td></tr>
+      <tr><td><em>Connect with Facebook (or add a Page ID and token under Advanced) before enabling Facebook posting.</em></td><td>You ticked Enable but the Page is not connected.</td><td>Connect first (see "How to connect"), then tick Enable.</td></tr>
+      <tr><td><em>Enter the Facebook App ID and App Secret first &hellip;</em></td><td>You clicked Connect with an empty App ID or App Secret.</td><td>Copy both from Facebook &rarr; Settings &rarr; Basic, then click Save and connect with Facebook.</td></tr>
+      <tr><td>Facebook says the redirect address is not allowed (the message mentions "redirect URI")</td><td>The address in your Facebook app does not match the one on this page.</td><td>Copy the address from the blue box again. Paste it exactly into Facebook Login &rarr; Settings &rarr; Valid OAuth Redirect URIs. Save in Facebook and try again.</td></tr>
+      <tr><td><em>The saved access token has expired or was revoked. Open Facebook Settings and click Reconnect.</em></td><td>The token ran out, or the Facebook password was changed or the app was removed.</td><td>Open Facebook Settings and click <strong>Reconnect</strong>.</td></tr>
+      <tr><td><em>The token is missing a permission, or this Facebook user cannot publish to the Page.</em> or <em>The token is missing: &hellip;</em></td><td>One of the three permissions was not allowed, or the Facebook user does not have full control of the Page.</td><td>Click <strong>Reconnect</strong> and allow every permission. Check the Facebook user has full control of the Page.</td></tr>
+      <tr><td><em>Signed in, but Facebook returned no Pages. &hellip;</em></td><td>No Page was chosen on the Facebook permission screen.</td><td>Click <strong>Reconnect</strong> and choose your Page.</td></tr>
+      <tr><td><em>The Facebook sign-in could not be verified (it expired or was not started here).</em> or <em>That choice expired.</em></td><td>The sign-in took too long.</td><td>Click <strong>Connect with Facebook</strong> again and finish without a long pause.</td></tr>
+      <tr><td><strong>Saved token cannot be read</strong> on the Connection card</td><td>The server's secret key changed.</td><td>Click <strong>Reconnect</strong> to save a fresh token.</td></tr>
+      <tr><td>Share buttons are greyed out</td><td>Posting is on but Facebook is not connected, or the connection needs attention.</td><td>Hover over the button to read the hint. Then open Facebook Settings and click Connect with Facebook or Reconnect.</td></tr>
       <tr><td><em>Facebook Page ID must be numeric.</em></td><td>Letters in the ID.</td><td>Use the number only, or use Fetch from Token.</td></tr>
       <tr><td><em>Hashtags must each start with # and be separated by spaces, e.g. #hotel #malawi.</em></td><td>Wrong format.</td><td>Fix the hashtags.</td></tr>
       <tr><td><em>The access token looks invalid (no spaces, 1000 characters maximum).</em></td><td>Token has spaces or is too long.</td><td>Paste it again without spaces.</td></tr>
-      <tr><td><em>No access token is saved. Paste and save a token first.</em></td><td>Fetch from Token used before saving.</td><td>Save the token first.</td></tr>
-      <tr><td><em>No Pages found for this token.</em></td><td>Token lacks pages_show_list.</td><td>Create the token again with that permission.</td></tr>
-      <tr><td><em>Facebook posting is not enabled.</em></td><td>The main switch is off.</td><td>Turn it on in Facebook Settings.</td></tr>
+      <tr><td><em>No access token is saved. Paste and save a token first.</em></td><td>Fetch from token used before connecting.</td><td>Connect first.</td></tr>
+      <tr><td><em>No Pages found for this token.</em></td><td>Token lacks pages_show_list.</td><td>Click Reconnect and allow every permission.</td></tr>
+      <tr><td><em>Facebook posting is not enabled.</em></td><td>The main switch is off.</td><td>Tick Enable Facebook Page Posting in Facebook Settings and save.</td></tr>
       <tr><td><em>Room posting is disabled in Facebook settings.</em> (also Event, Conference, Menu)</td><td>The share tick for that area is off.</td><td>Tick it in Posting Options and save.</td></tr>
       <tr><td><em>You do not have permission to post to Facebook.</em></td><td>You lack the permission for that page.</td><td>Ask an administrator.</td></tr>
       <tr><td><em>Invalid security token.</em></td><td>The page was open too long, or your session ended.</td><td>Reload the page (F5) and post again.</td></tr>

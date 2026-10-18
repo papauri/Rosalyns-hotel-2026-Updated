@@ -35,6 +35,9 @@
       <li><a href="#perms-first">How to set permissions before the invitation goes out</a></li>
       <li><a href="#accept">What the new person does with the invitation</a></li>
       <li><a href="#perms">How to change what someone can open</a></li>
+      <li><a href="#follow">What each person sees</a></li>
+      <li><a href="#actions">What each booking action needs</a></li>
+      <li><a href="#receptionist">Example: set up a receptionist</a></li>
       <li><a href="#edit">How to edit, deactivate or change someone's role</a></li>
       <li><a href="#resend">How to resend an invitation</a></li>
       <li><a href="#delete">How to delete a staff member</a></li>
@@ -139,6 +142,43 @@
     </tbody>
   </table>
 
+  <h2 id="follow">What each person sees</h2>
+  <p>The dashboard, the menu, favourites, search and the links inside pages all follow two things: the person's <strong>Permissions</strong> and the parts of the system switched on in <strong>Modules</strong>. A link to a page they cannot open is simply not shown. For example, a receptionist without finance permissions sees no takings, balances or money figures, and a POS-only user sees only the POS.</p>
+  <ul>
+    <li>If someone does not have the <strong>Dashboard</strong> permission, they land on the first page they are allowed to open (for example Bookings, POS Till or Payments) when they sign in.</li>
+    <li>If they are allowed no page at all, they see <strong>No accessible pages</strong> with a <strong>Sign out</strong> button. Ask an administrator to tick their permissions.</li>
+    <li>Administrators always see everything.</li>
+  </ul>
+
+  <h2 id="actions">What each booking action needs</h2>
+  <p>Buttons the person may not use are hidden or greyed out. The system also refuses the action if they try it another way, with <em>"You do not have permission to do that (Edit Bookings)."</em> (the name in brackets is the permission they are missing).</p>
+  <table>
+    <thead><tr><th>Booking action</th><th>Permission to tick</th></tr></thead>
+    <tbody>
+      <tr><td>Check a guest in (and undo a check-in)</td><td><strong>Check-in Guests</strong></td></tr>
+      <tr><td>Check a guest out</td><td><strong>Check-out Guests</strong> (and <strong>Check-out With Balance</strong> if they still owe money)</td></tr>
+      <tr><td>Cancel a booking, or mark a no-show</td><td><strong>Cancel Bookings</strong></td></tr>
+      <tr><td>Mark a booking paid, or change a payment</td><td><strong>Add Payments</strong></td></tr>
+      <tr><td>Change the dates, <strong>Confirm Booking</strong>, <strong>Convert to Confirmed</strong> (tentative bookings), add or void a charge on the guest's bill</td><td><strong>Edit Bookings</strong></td></tr>
+      <tr><td>Change a room's status on the Room Dashboard</td><td><strong>Housekeeping</strong> or <strong>Room Maintenance</strong> (either one)</td></tr>
+    </tbody>
+  </table>
+  <p>Charges that come in from POS or room-service orders are added by those orders and do not need <strong>Edit Bookings</strong>.</p>
+  <div class="note"><p>The normal Receptionist role has <strong>Check-in Guests</strong> and <strong>Check-out Guests</strong>, but not <strong>Cancel Bookings</strong>, <strong>Add Payments</strong> or <strong>Edit Bookings</strong>. Tick those only for receptionists you trust with them.</p></div>
+
+  <h2 id="receptionist">Example: set up a receptionist</h2>
+  <p>Goal: a front-desk person who checks guests in and out, confirms bookings and takes payments, but cannot see the company's finance reports.</p>
+  <ol class="steps">
+    <li>Open <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong> and click <strong>Add New User</strong>.</li>
+    <li>Fill in the name, username and email. Choose the role <strong>Receptionist</strong>.</li>
+    <li>Tick <strong>Set their permissions before the invitation goes out</strong> and click <strong>Create User</strong>.</li>
+    <li>In the permissions window the Receptionist ticks are already set (Dashboard, View Bookings, Calendar View, Check-in Guests, Check-out Guests and more). Leave them.</li>
+    <li>Also tick <strong>Edit Bookings</strong> (to confirm bookings and change dates), <strong>Add Payments</strong> (to mark a booking paid) and, if they may cancel, <strong>Cancel Bookings</strong>.</li>
+    <li>Leave the Finance permissions unticked.</li>
+    <li>Click <strong>Save &amp; send invitation</strong>.</li>
+  </ol>
+  <p>When they sign in, their menu shows only the front-desk pages, and no money figures appear on their dashboard.</p>
+
   <h2 id="edit">How to edit, deactivate or change someone's role</h2>
   <ol class="steps">
     <li>Click <strong>Edit</strong> on their row.</li>
@@ -205,6 +245,9 @@
       <tr><td><em>Account temporarily locked due to too many failed attempts.</em></td><td>5 wrong passwords.</td><td>Wait the minutes shown, or use <strong>Forgot Password?</strong></td></tr>
       <tr><td><em>This account has been deactivated. Contact your administrator.</em></td><td><strong>Active Account</strong> is unticked.</td><td>An administrator ticks it again in <strong>Edit</strong>.</td></tr>
       <tr><td><em>Cannot change role or deactivate: this is the last active admin.</em></td><td>The system must always keep one active Administrator.</td><td>Make another person an Administrator first.</td></tr>
+      <tr><td><em>You do not have permission to do that (Edit Bookings).</em> (or Check-in Guests, Check-out Guests, Cancel Bookings, Add Payments)</td><td>The person does not have the permission named in brackets.</td><td>An administrator or manager ticks it in <strong>Permissions</strong> (see "What each booking action needs").</td></tr>
+      <tr><td>A button is greyed out with <em>Needs the Edit Booking permission.</em></td><td>Adding or voiding a guest-bill charge needs Edit Bookings.</td><td>Tick <strong>Edit Bookings</strong> for that person.</td></tr>
+      <tr><td><strong>No accessible pages</strong></td><td>The person has no permission for any page.</td><td>Tick their permissions, or check <strong>Modules</strong>.</td></tr>
       <tr><td>A menu item they need is missing</td><td>The permission is not ticked, or that part of the system is switched off in <strong>Modules</strong>.</td><td>Tick it in <strong>Permissions</strong>; ask an Administrator to check <strong>Modules</strong>.</td></tr>
     </tbody>
   </table>

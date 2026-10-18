@@ -76,7 +76,7 @@
   <ul>
     <li>Two buttons, <strong>Restaurant</strong> and <strong>Room Service</strong>, choose which items are shown. Choosing <strong>Room Service</strong> also sets the order type to <strong>Room</strong>.</li>
     <li>A category list (<strong>All</strong> plus one entry per menu category), a <strong>Search menu&hellip;</strong> box, and a tile for each item.</li>
-    <li>Each tile shows the price and a stock line: <strong>N avail</strong>, <strong>N left</strong> (5 or fewer), <strong>Out of stock</strong>, <strong>Untracked</strong> (the item has no recipe, so no stock is counted) or <strong>86'd</strong> (only people with the 86 permission see 86'd items).</li>
+    <li>Each tile shows the price and a stock line: <strong>N avail</strong>, <strong>N left</strong> (5 or fewer), <strong>Low / none on record</strong> (the recipe ingredients show no stock; you can still sell it), <strong>Untracked</strong> (the item has no recipe, so no stock is counted) or <strong>86'd</strong> (only people with the 86 permission see 86'd items).</li>
   </ul>
   <p><strong>Current order side</strong></p>
   <ul>
@@ -512,7 +512,7 @@
       <tr><td><em>"This tab is already ... Refreshing open tabs so it cannot be charged twice."</em></td><td>Someone else settled the tab.</td><td>Check <strong>Recent</strong> and <strong>Tabs</strong>. Do not take payment again.</td></tr>
       <tr><td><em>"You can only settle tabs you opened."</em> / <em>"You can only add to tabs you opened."</em></td><td>The tab belongs to another cashier.</td><td>Ask them or a manager with <strong>POS All Cashiers' Tabs</strong>.</td></tr>
       <tr><td><em>"This tab still has N food item(s) not yet served ..."</em></td><td>The Kitchen has not marked the food served.</td><td>Ask the Kitchen to bump it, or use the manager force-serve step.</td></tr>
-      <tr><td><em>"Stock check stopped this action: Chicken short by 2.500 kg ..."</em></td><td>Not enough ingredient in stock for the recipe.</td><td>Receive stock or fix the recipe, or 86 the item.</td></tr>
+      <tr><td>The tile says <strong>Low / none on record</strong></td><td>The recipe ingredients show no stock. Selling is never blocked at zero stock.</td><td>Sell as normal. Stock goes below zero and a manager fixes it at the next delivery or stock count (see the <a href="08-stock-orders.html">Stock guide</a>). Use 86 only when the dish is really finished.</td></tr>
       <tr><td><em>"This tab is mid split-payment - only the next split leg can be paid."</em> / <em>"This bill is split 3 ways (1 paid) &mdash; continue with leg 2 of 3. Refresh the page."</em></td><td>A split has started.</td><td>Refresh the till and pay the next leg.</td></tr>
       <tr data-module="bookings"><td><em>"Room-service orders are settled via the guest folio at check-out &mdash; they cannot be paid directly at the till."</em></td><td>You tried to pay a room order.</td><td>The room bill is paid at check-out or in Payments.</td></tr>
       <tr data-module="bookings"><td><em>"Could not post the room-service charge to the guest folio ... the order was not placed."</em></td><td>The charge failed, so the order was stopped.</td><td>Check the booking is checked in and try again.</td></tr>

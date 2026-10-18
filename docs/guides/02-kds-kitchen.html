@@ -93,7 +93,7 @@
   <ol class="steps">
     <li>Watch the board for a new ticket. Its timer starts as soon as the cashier sends it.</li>
     <li>To cook the whole ticket at once, click <strong>Start all</strong>. This appears only while the ticket still has pending lines for your station. Or tap each line to start it.</li>
-    <li>When a dish is plated, tap its line (tag <strong>Ready</strong>). If the ingredients are not in stock you see <em>"Stock check stopped this action: Chicken short by 2.500 kg. Receive stock, adjust the recipe, or 86 the item before marking it ready."</em> and the line does not move. Tell your manager to receive stock, or 86 the item.</li>
+    <li>When a dish is plated, tap its line (tag <strong>Ready</strong>). If the stock on record is too low, the line still moves to Ready. The ingredient's stock goes below zero and the system records it for a manager to fix at the next delivery or stock count. Tell your manager if you know the stock count is wrong.</li>
     <li>When the runner takes it, tap the line again (tag <strong>Collect</strong>), and when it reaches the guest tap it once more (tag <strong>Serve</strong>).</li>
     <li>You can tap lines in any order. A line can also be served directly from Pending or Cooking; the stock still comes off at that moment.</li>
   </ol>
@@ -105,7 +105,7 @@
     <li>Click <strong>Bump</strong> at the bottom of the ticket. It turns into the main button once all your lines are ready.</li>
     <li>Every remaining line for your station is marked served and the ticket clears from your board. The ingredients for any line that had not yet been deducted come off stock now.</li>
   </ol>
-  <p>If stock is short the bump is refused with the same <em>"Stock check stopped this action ..."</em> message and nothing changes. <strong>Bump</strong> is greyed out if the ticket has no lines for your station.</p>
+  <p>Low stock never stops a bump. <strong>Bump</strong> is greyed out if the ticket has no lines for your station.</p>
 
   <h2 id="rush">How to mark a ticket as a rush</h2>
   <ol class="steps">
@@ -201,7 +201,6 @@
   <table>
     <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
     <tbody>
-      <tr><td><em>"Stock check stopped this action: ... short by ... Receive stock, adjust the recipe, or 86 the item before marking it ready."</em></td><td>Not enough of an ingredient in stock.</td><td>Ask the manager to receive stock (see the <a href="08-stock-orders.html">Stock guide</a>), fix the recipe, or 86 the item.</td></tr>
       <tr><td><em>"Cannot mark ready from served"</em> / <em>"Already served"</em> / <em>"Cannot serve a voided item"</em></td><td>The line has already moved on or was cancelled.</td><td>Nothing to do. The board refreshes by itself.</td></tr>
       <tr><td><em>"Can only collect from ready state (current: preparing)"</em></td><td>Collect was used before Ready.</td><td>Tap the line to mark Ready first.</td></tr>
       <tr><td><em>"This order was voided - refresh the board."</em> (the word depends on the order's state)</td><td>The order changed (for example it was voided at the till) while your board was open.</td><td>Wait for the board to refresh.</td></tr>

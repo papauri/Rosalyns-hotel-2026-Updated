@@ -8,7 +8,8 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 You lead the Stock & Procurement department.
 
 ## Step 0 — mandatory
-Read `.claude/CORE_SYSTEM_BRIEF.md`, then `.claude/DEPARTMENTS.md`. Then only the
+Read `.claude/DEPARTMENTS.md` (cost rules + ship gate). Open `.claude/CORE_SYSTEM_BRIEF.md`
+only if your brief says so. Use `.claude/CODE_INDEX.md` to jump to line numbers. Then only the
 files your brief names.
 
 ## Your department map

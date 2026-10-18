@@ -86,3 +86,26 @@ finish, say `NEEDS_UI_DECISION: <question>` and carry on with the rest.
 5. **Guides and KB**: once a change that staff will notice has shipped, `guides-kb-lead` updates the
    matching pages in `docs/guides/` in plain, easy-to-follow English and checks the KB search finds
    them; that update goes through the same review and is committed to both hotels.
+
+## Cost rules (owner, 2026-10-19: build fast and cheap)
+
+1. **No agent for small work.** A change of one file / ~30 lines, a lint fix, a one-line QA
+   finding, a data check: the orchestrator does it directly.
+2. **Model by task, not by habit.** haiku: guides/KB, index/mapping, lint-only or small QA
+   (diff < ~150 lines, no money/stock/auth), read-only audits that only list facts.
+   sonnet: logic changes, and QA/review of money, stock, auth or security. Opus: planning
+   only when the owner asks. Never Fable unless told.
+3. **Never read whole big files.** Grep `.claude/CODE_INDEX.md` for the file or function you need
+   (it is ~100 KB — never read it whole; regenerate with
+   `php scripts/code-index.php`) + Grep, then Read with offset/limit around the lines you need.
+   Briefs name exact files and functions/line ranges; no open-ended "explore".
+4. **Fresh small agent over a big resume.** For a fix round, start a new agent with just the
+   finding list unless the original agent's context is small; resuming re-sends its whole history.
+5. **One QA per ship**, covering the whole change; re-gate only for non-trivial fixes —
+   one-line fixes of a finding are verified by the orchestrator.
+6. **Short output.** Reports ≤ 25 lines; list problems, not everything that was fine.
+7. **Tests by area while building** (`php scripts/ship.php --tests=pos` etc.); the full suite
+   once at ship time. Browser checks only for the screens that changed.
+8. **Ship with one command:** `php scripts/ship.php` (lint, tests, port to Liwonde, commit and
+   push both) instead of hand steps. See `scripts/README-SHIP.md`.
+9. Max 2 builders at once; read-only audits may run beside them.

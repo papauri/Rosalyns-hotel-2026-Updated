@@ -32,6 +32,7 @@
       <li><a href="#signin">Signing in</a></li>
       <li><a href="#topbar">The top bar</a></li>
       <li><a href="#sidebar">The sidebar menu</a></li>
+      <li><a href="#devices">Using the admin on a phone or tablet</a></li>
       <li><a href="#dashboard">The Dashboard</a></li>
       <li><a href="#menu-table">Every menu item</a></li>
       <li><a href="#backups">Backups</a></li>
@@ -87,7 +88,7 @@
       <tr><td><strong>Help</strong> button</td><td>Opens help for the page you are on, in a new tab: where it is in the menu, the permission it needs and who has it, and the guide sections and common problems for that page. See the <a href="system-map.php">System map</a>.</td></tr>
       <tr><td><strong>Display size</strong></td><td>Minus and plus buttons with a percentage. Steps are 50%, 60%, 70%, 80%, 90% and 100%. The setting is remembered on that device and applies to the admin, POS and station screens. A touch tablet starts at 60%; everything else starts at 100%.</td></tr>
       <tr><td>Your name and role</td><td>Shows who is signed in.</td></tr>
-      <tr><td>Menu button (three lines)</td><td>Opens and closes the sidebar on small screens.</td></tr>
+      <tr><td>Menu button (three lines)</td><td>Opens and closes the menu on phones, tablets held upright and iPads held sideways, where the menu is a drawer that slides over the page.</td></tr>
       <tr><td>Key button</td><td>Opens <strong>Change Password</strong> (see below).</td></tr>
       <tr><td><strong>Logout</strong></td><td>Signs you out.</td></tr>
     </tbody>
@@ -115,14 +116,24 @@
   <ul>
     <li>The menu is split into groups: <strong>Front Desk</strong>, <strong>Conference &amp; Events</strong>, <strong>Restaurant &amp; Bar</strong>, <strong>Stock</strong>, <strong>Money</strong>, <strong>Gym</strong>, <strong>Website</strong>, <strong>Settings</strong>, <strong>Help</strong> and <strong>External</strong>. Click a group name to fold or open it. The number beside a group is how many items you can see in it.</li>
     <li>You only see the items you have permission for. A group you have nothing in is hidden. Items that belong to a module that is switched off are hidden too (see <a href="16-business-presets.html">Modules and business presets</a>).</li>
-    <li>If you do not have the <strong>Dashboard</strong> permission, your menu only offers your station screens and the guides for them.</li>
+    <li>Your Dashboard, menu, favourites, search and the links inside pages all follow your permissions and the modules switched on. Money figures only show if you have the finance permissions.</li>
+    <li>If you do not have the <strong>Dashboard</strong> permission, you land on the first page you are allowed to open. If you are allowed no page at all you see <strong>No accessible pages</strong>; ask the administrator.</li>
     <li><strong>Help</strong> starts folded, unless the page you are on is inside it. The guides are there.</li>
     <li><strong>Search menus</strong> box: type part of a menu name to filter the list. If nothing matches you see <em>"No matching menus."</em></li>
     <li><strong>Favorites</strong>: click the star at the right of any menu item to add it to the <strong>Favorites</strong> group at the top. Click the star again to remove it. When it is empty it says <em>"Star menus you use often and they will stay here."</em></li>
-    <li>The double-arrow button at the top of the menu collapses it to a narrow strip. Your choice is remembered. On a tablet the menu starts collapsed.</li>
+    <li>The double-arrow button at the top of the menu collapses it to a narrow strip. Your choice is remembered. This button is for wider screens. On phones and tablets use the <strong>Menu</strong> button in the top bar (see <a href="#devices">Using the admin on a phone or tablet</a>).</li>
     <li>POS Till, Kitchen, Bar, Coffee Bar and the guide links open in a new browser tab.</li>
     <li><strong>View Website</strong> (group <strong>External</strong>) opens the guest website.</li>
   </ul>
+
+  <h2 id="devices">Using the admin on a phone or tablet</h2>
+  <p>The admin works on phones, tablets and computers. Buttons are bigger on touch screens.</p>
+  <ol class="steps">
+    <li><strong>Open the menu:</strong> on a phone, a tablet held upright, or an iPad held sideways, the menu is hidden. Tap the <strong>Menu</strong> button (three lines) in the top bar. The menu slides in over the page. Tap an item, or tap outside the menu, to close it. On wider screens the menu stays docked at the left.</li>
+    <li><strong>Pop-up windows:</strong> the title at the top and the <strong>Save</strong> and <strong>Cancel</strong> buttons at the bottom stay in view. Only the middle of the window scrolls, so you never have to scroll to find Save.</li>
+    <li><strong>The More menu (more actions on a row):</strong> a row shows at most two buttons. Anything else, such as <strong>Edit</strong>, <strong>Delete</strong> or <strong>Process refund</strong>, is behind the <strong>More</strong> button (three dots). Tap it to open a short list under it, then tap the action you want. Tap outside the list to close it.</li>
+    <li><strong>Install-app bar:</strong> if your browser can install the admin as an app, a slim bar <strong>Install Admin App</strong> appears at the bottom of the screen. Tap <strong>Install</strong> to install, or the cross to hide it. It stays hidden for a while (14 days unless your administrator changed it). It never covers the menu or a pop-up window. See <a href="15-pwa-install-guide.html">Installing the admin as an app</a>.</li>
+  </ol>
 
   <h2 id="dashboard">The Dashboard</h2>
   <p>Admin menu &rarr; <strong>Front Desk</strong> &rarr; <strong>Dashboard</strong> (<code>/admin/dashboard.php</code>). Permission: <strong>Dashboard</strong>. What you see depends on which modules are on and what you may open. Click any figure to open a window with the records behind it; the window has an <strong>Open full page</strong> button.</p>
@@ -499,6 +510,8 @@
   <table>
     <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
     <tbody>
+      <tr><td>The menu is not on screen on my tablet or phone</td><td>On small screens, and on an iPad held sideways, the menu is a drawer.</td><td>Tap the <strong>Menu</strong> button (three lines) in the top bar.</td></tr>
+      <tr><td>I cannot find <strong>Edit</strong> or <strong>Delete</strong> on a row</td><td>Extra actions sit behind the <strong>More</strong> button.</td><td>Tap <strong>More</strong> (three dots) on that row.</td></tr>
       <tr><td>A menu item you expect is missing</td><td>You lack the permission, or the module is off.</td><td>Ask the administrator to check Staff &amp; Access and Settings &rarr; Modules.</td></tr>
       <tr><td><em>"Account temporarily locked due to too many failed attempts. Try again in N minute(s)."</em></td><td>5 wrong passwords.</td><td>Wait, or use <strong>Forgot Password?</strong> Ask the administrator if it continues.</td></tr>
       <tr><td><em>"Your session expired. Please try signing in again."</em></td><td>The sign-in page was open too long.</td><td>Sign in again.</td></tr>

@@ -1,7 +1,7 @@
 ---
 name: guides-kb-lead
 description: Lead for the staff guides and the in-app knowledge base (KB) of Rosalyn's / Liwonde. After any change ships, updates the matching guide pages in docs/guides/ so staff can follow them, and keeps the KB search (includes/guide-knowledge-base.php, built from those guides) answering correctly. Use after every shipped feature or rule change, or when a guide is wrong or hard to follow.
-model: sonnet
+model: haiku
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 

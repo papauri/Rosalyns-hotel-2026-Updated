@@ -41,6 +41,7 @@
       <li><a href="#buying">How to see what to buy (Buying)</a></li>
       <li><a href="#po">How to raise and receive a purchase order</a></li>
       <li><a href="#count">How to do a stock count</a></li>
+      <li><a href="#opening">How to do the Opening stock count (first-time set-up)</a></li>
       <li><a href="#wastage">How to record wastage</a></li>
       <li><a href="#batches">How to deal with expiring and recalled batches</a></li>
       <li><a href="#reports">How to read Stock Reports</a></li>
@@ -75,7 +76,7 @@
     <li><strong>Room service:</strong> stock comes off when the charge is posted to the guest's bill, at the moment the order is placed.</li>
     <li><strong>How much comes off:</strong> the recipe quantity for one portion, times the number sold, divided by the yield %. For example 150 g of chicken at 75% yield takes off 200 g.</li>
     <li><strong>Which batch:</strong> the oldest batch is used first. The ingredient's total and its average cost update.</li>
-    <li><strong>If there is not enough:</strong> the station action is refused with <em>"Stock check stopped this action: (ingredient) short by (amount) ..."</em></li>
+    <li><strong>If there is not enough:</strong> the sale is never stopped. The tile on the till stays tappable and shows <strong>Low / none on record</strong>. The Kitchen, Bar and Coffee Bar can still mark the line Ready or Served. The ingredient's stock goes below zero, and the system records it as an oversell so a manager can reconcile it. The next delivery fills the shortfall first, or fix it at the next stock count.</li>
     <li><strong>Put back:</strong> cancelling before work starts, voiding an order, and 86 of an item that was not started all put the stock back. A refund does <em>not</em> put stock back.</li>
     <li><strong>Voided or 86'd after cooking started:</strong> the ingredients are already gone, so the dish is counted as <strong>wastage</strong> once. It is not also counted as usage in Stock Reports. Waste is only recorded when stock actually came off the shelf.</li>
     <li><strong>Other ways stock goes down:</strong> wastage, expired or recalled batches, approved stock count shortages, and manual adjustments by a manager.</li>
@@ -90,6 +91,7 @@
     <li><strong>Recipe Coverage</strong> for the Food menu and Drinks menu: how many items have a recipe. More coverage means more accurate stock and cost figures.</li>
     <li><strong>Top Items Sold Today</strong>, <strong>Most Wasted Ingredients (30 days)</strong>, and quick links to Ingredients, Recipes, Batches, Orders, Wastage and Reports.</li>
   </ul>
+  <p><strong>Out of Stock</strong> and <strong>Running Low</strong> only list ingredients that have had stock before. An ingredient is Low when it is at or below its reorder point (or its minimum quantity if no reorder point is set). Ingredients that never had any stock are not alerts. They appear as one blue line, <strong>Opening stock not recorded (N items)</strong>, with a link <strong>record a stock count</strong> that opens the <a href="#opening">Opening stock count</a>. Selling is not affected by that line. The same rule is used on the dashboard, Buying, Ingredients, Stock Reports and the emailed report.</p>
   <p>The buttons in <strong>Needs Attention</strong> (<strong>View</strong>, <strong>Review</strong>, <strong>Dispose</strong>, <strong>Process</strong>) open the matching page. The <strong>Order</strong> button on an out-of-stock or low item opens <strong>Purchase Orders</strong>, where you can create a purchase order to restock. For the full buying steps see <a href="#buying">Buying</a>.</p>
 
   <h2 id="ingredients">How to add and change ingredients</h2>
@@ -185,7 +187,8 @@
     <li>While it is a draft, use <strong>Add line</strong>: choose an <strong>Ingredient</strong> (or <strong>&mdash; Custom / non-stock &mdash;</strong>), a <strong>Description</strong>, <strong>Unit</strong>, <strong>Qty</strong> and <strong>Unit cost</strong>, then <strong>Add</strong>. <em>"Line added."</em> The bin icon removes a line.</li>
     <li>Click <strong>Mark as sent</strong> (<em>"Mark this PO as sent to the supplier?"</em>). It needs at least one line. <em>"Purchase order marked as sent."</em></li>
     <li>When goods arrive, fill in <strong>Receive now</strong> (and <strong>Expiry</strong>) on each line you received, then click <strong>Receive stock</strong> (<em>"Receive the entered quantities into stock?"</em>). <em>"Stock received against purchase order."</em></li>
-    <li>The order becomes partly received until every line is complete, then received. A line cannot receive more than is outstanding.</li>
+    <li>If more arrived than was ordered, you can still type the larger number, because the stock is really there. Fill in the box <strong>Over-delivery note (needed if above outstanding)</strong> under that line, at least 5 characters, saying why. The line is then flagged <strong>over-delivered</strong> with your note.</li>
+    <li>The order becomes partly received until every line is complete, then received.</li>
     <li>Click <strong>Close</strong> when finished (outstanding lines will not be received) or <strong>Cancel</strong> for a draft or sent order. <strong>Print</strong> prints the order.</li>
   </ol>
   <p>A draft order has not gone to the supplier yet, so it cannot be received and it does not count as <strong>On order</strong> in Buying. Only <strong>Sent</strong> and <strong>Partially received</strong> orders count as on order and accept stock. Receiving creates stock batches linked to the supplier and the order. Lines for custom or non-stock items are recorded but add no stock. Once an order is received, closed or cancelled its lines cannot be changed.</p>
@@ -211,6 +214,20 @@
     <li><strong>Write-offs are capped:</strong> if a shortage is bigger than the stock still on the shelf, only what is there is written off, and the note on the stock record says how much was uncovered.</li>
   </ul>
   <p>The page also shows <strong>Theft Radar (last 30d)</strong>, the ingredients losing stock to shortages or manual adjustments that no sale or wastage explains, and <strong>Recent Counts</strong>. Surpluses need no reason.</p>
+
+  <h2 id="opening">How to do the Opening stock count (first-time set-up)</h2>
+  <p>Do this once, when you start using stock, so every ingredient has a starting quantity and cost. Until then, ingredients that never had stock show as <strong>Opening stock not recorded (N items)</strong>. You need <strong>Stock Count &amp; Variance</strong>, and a different manager or admin must approve it. It sets stock quantities and costs only. No supplier receipts are made.</p>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; Stock &rarr; <strong>Stock Count</strong>. (Or click <strong>record a stock count</strong> in the blue line on Stock Overview.)</li>
+    <li>Under <strong>Start a Count</strong> tick <strong>This is the opening stock count</strong>. It counts every ingredient, so the scope is set for you.</li>
+    <li>Click <strong>Start count</strong>. You will see <em>"Opening stock count ... started. Enter the physical quantity AND the unit cost for every item you have; a different manager must approve it."</em></li>
+    <li>For each ingredient, type what you physically have in <strong>Actual Qty</strong>. Type 0 for an empty shelf.</li>
+    <li>For every ingredient you have in stock, type the price you paid per unit in <strong>Unit cost</strong>. Without a cost, stock value and food cost would start at zero.</li>
+    <li>Click <strong>Save readings</strong>.</li>
+    <li>Click <strong>Submit for approval</strong>. It is refused until every counted line has a unit cost above zero.</li>
+    <li>Ask a different manager or admin (not the person who counted) to open the count and click <strong>Approve &amp; post variances</strong>. If costs are missing, they click <strong>Reject &amp; send back</strong> with a reason, and the counter adds the costs and submits again.</li>
+    <li>After approval the quantities and costs are in stock, and the <strong>Opening stock not recorded</strong> line goes away for those items.</li>
+  </ol>
 
   <h2 id="wastage">How to record wastage</h2>
   <ol class="steps">
@@ -270,7 +287,11 @@
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>
-    <li>Stock never goes below what exists: wastage, adjustments and station actions are refused if there is not enough.</li>
+    <li>Selling is never blocked by stock. Sales and station actions go ahead at zero stock, and the stock goes below zero until the next delivery or count. Wastage and manual subtractions are still refused if they are more than the stock on record.</li>
+    <li>Out of Stock and Running Low alerts only appear for ingredients that have had stock. Never-stocked ingredients show as <strong>Opening stock not recorded (N items)</strong>.</li>
+    <li>An opening stock count needs a unit cost on every counted line and a different approver than the counter.</li>
+    <li>Receiving more than a purchase order line expects needs a written over-delivery note.</li>
+    <li>Items with no cost cannot be received by barcode, and a count that adds stock for an ingredient with no cost cannot be approved. Set the cost first.</li>
     <li>Manual adjustments are for Admin and Manager roles only and need a reason of at least 8 characters.</li>
     <li>Every stock count shortage needs a reason and a manager's approval. The approved count cannot be undone.</li>
     <li>An ingredient used in a recipe cannot be deleted; archive it instead.</li>
@@ -313,6 +334,13 @@
       <tr><td><em>"Only a rejected count can be reopened."</em></td><td>The count is draft, submitted or approved.</td><td>Nothing to reopen.</td></tr>
       <tr><td><em>"Count reopened with a fresh stock snapshot - re-enter every reading and resubmit."</em></td><td>Not an error: reopening starts the readings again.</td><td>Count every line again.</td></tr>
       <tr><td><em>"Enter a unit cost - this ingredient has no average cost yet, so a zero-cost receipt cannot be recorded."</em></td><td>Cost was blank or 0 and the ingredient has no average cost.</td><td>Type the real cost per unit.</td></tr>
+      <tr><td><em>"... receiving 2 more than ordered needs an over-delivery note (at least 5 characters) explaining why."</em></td><td>You entered more than is outstanding on a purchase order line without a note.</td><td>Type the reason in <strong>Over-delivery note</strong> under the line and receive again.</td></tr>
+      <tr><td><em>"Nothing was received. These items have no unit cost and no average cost yet: ... Enter a cost for each and receive again."</em></td><td>A barcode delivery included items that have never had a cost.</td><td>Type the cost on each line and click <strong>Receive into Stock</strong> again.</td></tr>
+      <tr><td><em>"Cannot approve: 2 line(s) add stock for ingredients with no unit cost (...)."</em></td><td>A count would add stock to an ingredient that has no cost.</td><td>Set a cost on the ingredient in Ingredients, or reject the count and add the cost, then approve.</td></tr>
+      <tr><td><em>"Opening stock needs a unit cost above zero on every line you counted (3 missing: ...). Enter the costs, save readings, then submit."</em></td><td>The opening count has lines without a unit cost.</td><td>Type the unit cost on each named line, save readings and submit again.</td></tr>
+      <tr><td><em>"An opening stock count must be approved by a different manager or admin than the person who counted it."</em></td><td>The counter tried to approve their own opening count.</td><td>Ask another manager or admin to approve.</td></tr>
+      <tr><td>A till tile says <strong>Low / none on record</strong>, or stock shows below zero</td><td>The item was sold when no stock was on record. Selling is never blocked.</td><td>Receive the delivery, or fix it at the next stock count. Check <strong>Pending Reconciliation</strong> on Stock Overview.</td></tr>
+      <tr><td>The blue line <strong>Opening stock not recorded (N items)</strong></td><td>N ingredients have never had stock recorded.</td><td>Do the <a href="#opening">Opening stock count</a>, or archive ingredients you do not use.</td></tr>
       <tr><td><em>"Stock can only be received against a sent or partially-received purchase order (current status: draft)."</em></td><td>The order is still a draft, or is finished.</td><td>Click <strong>Mark as sent</strong> first, or raise a new order.</td></tr>
       <tr><td><em>"Discarding a batch is restricted to managers and admins."</em></td><td>Wrong role.</td><td>Ask a manager.</td></tr>
       <tr><td><em>"A reason of at least 8 characters is required to discard a batch."</em></td><td>Reason too short.</td><td>Write a fuller reason.</td></tr>

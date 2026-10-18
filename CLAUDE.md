@@ -35,7 +35,9 @@ do not re-derive plans or re-scan the repo ad hoc.
 
 ## Standing rails (apply to ALL sessions and agents)
 
-- **Cost**: /compact every 3 completed tasks; /clear on phase switch; haiku for read-only/
+- **Cost**: follow the Cost rules in `.claude/DEPARTMENTS.md` (no agent for small work, haiku
+  for docs/lint/small QA, CODE_INDEX + offset reads instead of whole files, one QA per ship,
+  `scripts/ship.php` to ship). Also: /compact every 3 completed tasks; /clear on phase switch; haiku for read-only/
   lint, sonnet for build execution; Fable 5/Opus only for setup and planning, never routine
   execution; max 2 concurrent specialists; /cost checkpoint after every loop cycle; every
   subagent brief carries exact file paths — no open-ended "explore".

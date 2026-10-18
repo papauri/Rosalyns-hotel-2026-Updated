@@ -72,7 +72,7 @@
   <ol class="steps">
     <li>Watch for a new ticket. Its timer starts when the cashier sends it.</li>
     <li>Click <strong>Start all</strong> to mark every pending drink as being made, or tap each line. <strong>Start all</strong> only shows while the ticket still has pending lines for the bar.</li>
-    <li>When a drink is ready, tap its line (tag <strong>Ready</strong>). If an ingredient is short you see <em>"Stock check stopped this action: Gin short by 750.000 ml. Receive stock, adjust the recipe, or 86 the item before marking it ready."</em> and the line does not move.</li>
+    <li>When a drink is ready, tap its line (tag <strong>Ready</strong>). If the stock on record is too low, the line still moves to Ready. The ingredient's stock goes below zero and a manager fixes it at the next delivery or stock count.</li>
     <li>When the runner takes it, tap again (<strong>Collect</strong>), then once more when it is delivered (<strong>Serve</strong>).</li>
   </ol>
   <p>The timer changes at 5 minutes (warning) and 10 minutes (late). A ticket waiting more than 12 minutes without being ready is flagged urgent. The small icons on your lines are <strong>Recipe card</strong> and <strong>86 this item</strong>. The eye icon (<strong>View whole order</strong>) shows all stations' lines and the stream icon (<strong>Order log</strong>) shows the order's history.</p>
@@ -144,7 +144,6 @@
   <table>
     <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
     <tbody>
-      <tr><td><em>"Stock check stopped this action: ... short by ..."</em></td><td>Not enough of an ingredient.</td><td>Ask the manager to receive stock (<a href="08-stock-orders.html">Stock guide</a>), fix the recipe, or 86 the item.</td></tr>
       <tr><td><em>"Can only collect from ready state (current: preparing)"</em></td><td>Collect used before Ready.</td><td>Mark the line Ready first.</td></tr>
       <tr><td><em>"Already served"</em> / <em>"Cannot serve a voided item"</em></td><td>The line is already finished.</td><td>Nothing to do.</td></tr>
       <tr><td><em>"This order was voided - refresh the board."</em> (or another status)</td><td>The order changed at the till.</td><td>Wait for the board to refresh.</td></tr>

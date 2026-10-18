@@ -1656,7 +1656,12 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                                     }, $rooms ?? []), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
 
             // ===== TOGGLE & DELETE =====
-            function toggleActive(id) {
+            function rhConfirmToggle(msg, fn) { // a mis-tap must not switch a live room/conference status
+                if (!window.AdminConfirm) { fn(); return; }
+                window.AdminConfirm.request({ title: 'Please confirm', message: msg, confirmText: 'Yes, change it', cancelText: 'Cancel', tone: 'warning', icon: 'fa-toggle-on' }).then(function (ok) { if (ok) fn(); });
+            }
+            function toggleActive(id) { rhConfirmToggle('Switch this room type on or off for guests?', function () { _toggleActiveNow(id); }); }
+            function _toggleActiveNow(id) {
                 var fd = new FormData();
                 fd.append('action', 'toggle_active');
                 fd.append('id', id);
@@ -1677,7 +1682,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                     });
             }
 
-            function toggleFeatured(id) {
+            function toggleFeatured(id) { rhConfirmToggle('Change whether this room is featured on the website?', function () { _toggleFeaturedNow(id); }); }
+            function _toggleFeaturedNow(id) {
                 var fd = new FormData();
                 fd.append('action', 'toggle_featured');
                 fd.append('id', id);

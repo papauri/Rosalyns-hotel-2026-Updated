@@ -1587,7 +1587,12 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         }
 
         // ===== TOGGLE & DELETE =====
-        function toggleActive(id) {
+        function rhConfirmToggle(msg, fn) { // a mis-tap must not switch a live room/conference status
+            if (!window.AdminConfirm) { fn(); return; }
+            window.AdminConfirm.request({ title: 'Please confirm', message: msg, confirmText: 'Yes, change it', cancelText: 'Cancel', tone: 'warning', icon: 'fa-toggle-on' }).then(function (ok) { if (ok) fn(); });
+        }
+        function toggleActive(id) { rhConfirmToggle('Switch this conference room on or off for guests?', function () { _toggleActiveNow(id); }); }
+        function _toggleActiveNow(id) {
             return postConferenceAction('toggle_active', id, 'Updating conference room...');
         }
 

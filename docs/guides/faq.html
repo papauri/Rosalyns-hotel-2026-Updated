@@ -55,6 +55,11 @@
     <p>Each role starts with a set of permissions, listed under <a href="system-map.php#roles">Roles</a> on the System map. An administrator can add or remove single permissions for one person in <a href="18-staff-access.html#perms">Staff &amp; access</a>. Search <em>"what can a receptionist do"</em> (or any role) for the list.</p>
   </details>
 
+  <details class="faq" id="faq-phone-tablet">
+    <summary>On a phone or tablet: how do I open the menu, find Edit or Delete in the More menu, or hide the install bar?</summary>
+    <p><strong>Menu:</strong> on phones, tablets held upright and iPads held sideways, tap the <strong>Menu</strong> button (three lines) in the top bar. The menu slides in; tap outside it to close. <strong>Edit, Delete and other extras:</strong> a row shows at most two buttons, and the rest are behind <strong>More</strong> (three dots). <strong>Pop-ups:</strong> <strong>Save</strong> and <strong>Cancel</strong> always stay in view; only the middle scrolls. <strong>Install bar:</strong> the <strong>Install Admin App</strong> bar at the bottom can be hidden with the cross, and it stays hidden for a while. See <a href="99-admin-dashboard-full-guide.html#devices">Using the admin on a phone or tablet</a>.</p>
+  </details>
+
   <details class="faq" id="faq-menu-missing">
     <summary>A page I need is missing from my menu. Why?</summary>
     <p>You only see the pages your permissions allow, and pages for parts of the system that are switched off are hidden for everyone. Ask an administrator to tick the permission in <a href="18-staff-access.html#perms">Staff &amp; access</a>, or to check <a href="16-business-presets.html#toggle">Settings &rarr; Modules</a>. The <a href="system-map.php#menu">System map</a> shows the permission and module behind every menu page.</p>
@@ -199,6 +204,31 @@
   <details class="faq" id="faq-room-charge" data-module="bookings">
     <summary>How do I charge food or drinks to a guest's room?</summary>
     <p>On the till choose <strong>Room Service</strong> (or the Room order type), pick the checked-in room, add the items and click <strong>Fire</strong>. Each item goes on the guest's bill straight away. Do not use Pay for a room order. See <a href="01-pos-till.html#room">How to charge an order to a guest's room</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-zero-stock" data-module="stock">
+    <summary>The till says "Low / none on record" for an item. Can I still sell it?</summary>
+    <p>Yes. Selling is never blocked at zero stock. Tap the item as normal. The ingredient's stock goes below zero, and a manager fixes it at the next delivery or stock count. See <a href="08-stock-orders.html#how">How a sale takes stock off the shelf</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-opening-stock" data-module="stock">
+    <summary>What does "Opening stock not recorded (N items)" mean, and how do I fix it?</summary>
+    <p>N ingredients have never had a quantity recorded, so they are not counted as out of stock or low. To fix it: open <strong>Stock</strong> &rarr; <strong>Stock Count</strong>, tick <strong>This is the opening stock count</strong>, click <strong>Start count</strong>, type the quantity and the unit cost for every item, click <strong>Save readings</strong> and <strong>Submit for approval</strong>. A different manager then clicks <strong>Approve &amp; post variances</strong>. See <a href="08-stock-orders.html#opening">How to do the Opening stock count</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-receive-no-cost" data-module="stock">
+    <summary>Why will it not let me receive or approve an item with no cost, or receive more than I ordered?</summary>
+    <p>An item with no cost cannot be received by barcode, and a count that adds stock for an item with no cost cannot be approved. Type the cost first. If more arrived than a purchase order says, you can receive it, but you must type an <strong>Over-delivery note</strong> of at least 5 characters. See <a href="08-stock-orders.html#po">How to raise and receive a purchase order</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-receptionist-cant" data-module="bookings">
+    <summary>A receptionist cannot confirm, cancel, or mark a booking paid. Why?</summary>
+    <p>Each booking action needs its own permission in <a href="18-staff-access.html#actions">Staff &amp; Access</a>: <strong>Check-in Guests</strong>, <strong>Check-out Guests</strong>, <strong>Cancel Bookings</strong> (cancel and no-show), <strong>Add Payments</strong> (mark paid), and <strong>Edit Bookings</strong> (change dates, <strong>Confirm Booking</strong>, <strong>Convert to Confirmed</strong>, charges on the guest bill). Changing a room's status needs <strong>Housekeeping</strong> or <strong>Room Maintenance</strong>. An administrator ticks them in <strong>Permissions</strong>. See <a href="18-staff-access.html#receptionist">Example: set up a receptionist</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-facebook-connect">
+    <summary>The Facebook share buttons are greyed out. How do I connect Facebook?</summary>
+    <p>Open <strong>Website</strong> &rarr; <strong>Facebook Settings</strong>. Add the redirect address shown there to your Facebook app (<strong>Facebook Login</strong> &rarr; <strong>Settings</strong> &rarr; <strong>Valid OAuth Redirect URIs</strong>), type the <strong>App ID</strong> and <strong>App Secret</strong>, click <strong>Save and connect with Facebook</strong> and approve the three permissions. If it was connected before and stopped, click <strong>Reconnect</strong>. See <a href="11-social-facebook-sharing.html#connect">How to connect the Facebook Page</a>.</p>
   </details>
 
   <details class="faq" id="faq-refund">
