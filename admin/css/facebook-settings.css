@@ -78,3 +78,112 @@
     font-size: 0.875rem;
     color: var(--color-text-secondary, #5E554D);
 }
+
+/* ── Connection status card ─────────────────────────────────────────────── */
+.fb-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 1rem;
+    margin-bottom: 8px;
+}
+
+.fb-status--ok {
+    background: #e6f4ea;
+    color: #1a6b32;
+}
+
+.fb-status--warn {
+    background: #fff4d6;
+    color: #7a5a00;
+}
+
+.fb-status--error {
+    background: #fdecea;
+    color: #a52a1f;
+}
+
+.fb-status--none,
+.fb-status--busy {
+    background: #eef1f4;
+    color: #4a5560;
+}
+
+.fb-status-detail {
+    margin: 4px 0 14px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--color-text-secondary, #5E554D);
+    overflow-wrap: anywhere;
+}
+
+.fb-status-detail:empty {
+    display: none;
+}
+
+.fb-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px 20px;
+    margin: 0 0 16px;
+}
+
+.fb-facts[hidden] {
+    display: none;
+}
+
+.fb-facts dt {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-secondary, #5E554D);
+}
+
+.fb-facts dd {
+    margin: 2px 0 0;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.fb-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.fb-actions .btn,
+.fb-actions .fb-btn {
+    min-height: 44px;
+}
+
+.fb-default-submit {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}
+
+.fb-advanced summary {
+    cursor: pointer;
+    font-weight: 600;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Share buttons are shown but unusable until Facebook is connected (title carries the hint). */
+.btn-facebook:disabled,
+.btn-action.btn-facebook:disabled,
+.gmc-icon-btn--facebook:disabled,
+.cmc-icon-btn--facebook:disabled,
+.fb-gym-all-btn:disabled,
+.fb-conf-all-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: auto;
+}

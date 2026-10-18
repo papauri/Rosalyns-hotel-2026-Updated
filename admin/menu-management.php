@@ -26,8 +26,8 @@ if (function_exists('isRestaurantEnabled') && !isRestaurantEnabled()) {
 
 // Facebook sharing
 require_once '../includes/facebook-functions.php';
-$fb_menu_posting_on = isFacebookPostingEnabled()
-    && getSetting('facebook_menu_enabled', '1') === '1';
+$fb_menu_posting_on = facebookShareVisible('menu');
+$fb_share_attrs     = facebookShareButtonAttrs('Feature on Facebook'); // title, or disabled + hint when not connected
 
 // Handle menu item actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -407,7 +407,7 @@ if ($stockReady) {
                 </div>
                 <button type="button"
                     style="background:#0d47a1;color:#fff;border:2px solid rgba(255,255,255,0.55);border-radius:8px;padding:10px 22px;font-family:inherit;font-size:0.9rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:background 0.18s,border-color 0.18s;white-space:nowrap;"
-                    onclick="openFbMenuShareAllModal()">
+                    onclick="openFbMenuShareAllModal()"<?php echo facebookShareButtonAttrs('Share the full menu on Facebook'); ?>>
                     <i class="fab fa-facebook-f"></i> Share Full Menu
                 </button>
             </div>
@@ -524,7 +524,7 @@ if ($stockReady) {
                                                     <?php if ($fb_menu_posting_on): ?>
                                                         <button class="btn-action btn-facebook"
                                                             onclick='openFbMenuModal(<?php echo (int)$item["id"]; ?>, <?php echo htmlspecialchars(json_encode($item["item_name"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode((float)$item["price"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($item["category"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, "food")'
-                                                            title="Feature on Facebook">
+                                                            <?php echo $fb_share_attrs; ?>>
                                                             <i class="fab fa-facebook-f"></i> Feature
                                                         </button>
                                                     <?php endif; ?>
@@ -647,7 +647,7 @@ if ($stockReady) {
                                                     <?php if ($fb_menu_posting_on): ?>
                                                         <button class="btn-action btn-facebook"
                                                             onclick='openFbMenuModal(<?php echo (int)$item["id"]; ?>, <?php echo htmlspecialchars(json_encode($item["item_name"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode((float)$item["price"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($item["category"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, "drink")'
-                                                            title="Feature on Facebook">
+                                                            <?php echo $fb_share_attrs; ?>>
                                                             <i class="fab fa-facebook-f"></i> Feature
                                                         </button>
                                                     <?php endif; ?>

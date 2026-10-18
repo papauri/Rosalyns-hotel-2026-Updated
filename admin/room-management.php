@@ -705,9 +705,9 @@ try {
 }
 
 $currency = htmlspecialchars(getSetting('currency_symbol'));
-$fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
-    && getSetting('facebook_rooms_enabled', '1') === '1'
-    && getSetting('facebook_page_access_token', '') !== '';
+require_once __DIR__ . '/../includes/facebook-functions.php';
+// Same rule as gym/menu/events: shown when posting is on, greyed with a hint when not connected.
+$fb_rooms_posting_on = facebookShareVisible('rooms');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -768,7 +768,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                     <div class="fb-share-all-banner__title">Share All Rooms on Facebook</div>
                     <div class="fb-share-all-banner__sub">Compose one post showcasing all your rooms — pick which to include, preview exactly how it'll look, then post.</div>
                 </div>
-                <button class="fb-share-all-btn" type="button" onclick="openFbAllRoomsModal()">
+                <button class="fb-share-all-btn" type="button" onclick="openFbAllRoomsModal()"<?php echo facebookShareButtonAttrs('Share all rooms on Facebook'); ?>>
                     <i class="fab fa-facebook-f"></i> Compose &amp; Preview Post
                 </button>
             </div>
@@ -870,8 +870,7 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
 
                                     <?php if ($fb_rooms_posting_on): ?>
                                         <span class="rmc-toolbar-sep"></span>
-                                        <button class="rmc-icon-btn rmc-icon-btn--facebook" type="button"
-                                            title="Preview &amp; post this room to your Facebook Page"
+                                        <button class="rmc-icon-btn rmc-icon-btn--facebook" type="button"<?php echo facebookShareButtonAttrs('Preview & post this room to your Facebook Page'); ?>
                                             onclick='openFbShareModal(<?php echo (int)$room["id"]; ?>, <?php echo htmlspecialchars(json_encode($room["name"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["image_url"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode(number_format((float)($room["price_per_night"] ?? 0))), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["slug"] ?? ""), ENT_QUOTES, "UTF-8"); ?>)'>
                                             <i class="fab fa-facebook-f"></i>
                                         </button>

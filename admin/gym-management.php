@@ -14,8 +14,8 @@ $site_name  = $site_name  ?? getSetting('site_name', 'Hotel');
 require_once '../includes/facebook-functions.php';
 require_once '../includes/form-validation.php';
 require_once __DIR__ . '/includes/gym-analytics-lib.php'; // gymDurationLabelFromDays()
-$fb_gym_posting_on = isFacebookPostingEnabled()
-    && getSetting('facebook_gym_enabled', '1') === '1';
+$fb_gym_posting_on = facebookShareVisible('gym');
+$fb_share_attrs    = facebookShareButtonAttrs('Share on Facebook'); // title, or disabled + hint when not connected
 
 $message = '';
 $error   = '';
@@ -408,7 +408,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                                             <!-- Share on Facebook -->
                                             <button type="button"
                                                 class="gmc-icon-btn gmc-icon-btn--facebook"
-                                                title="Share on Facebook"
+                                                <?php echo $fb_share_attrs; ?>
                                                 onclick='openFbGymModal(<?php echo $pkgJson; ?>)'>
                                                 <i class="fab fa-facebook-f"></i>
                                             </button>
@@ -447,7 +447,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                         <div class="fb-gym-all-banner__title">Share Our Wellness Packages on Facebook</div>
                         <div class="fb-gym-all-banner__sub">Select packages to include and post a promotional update to your Facebook Page.</div>
                     </div>
-                    <button type="button" class="fb-gym-all-btn" onclick="openFbAllGymModal()">
+                    <button type="button" class="fb-gym-all-btn" onclick="openFbAllGymModal()"<?php echo facebookShareButtonAttrs('Share all packages on Facebook'); ?>>
                         <i class="fab fa-facebook-f"></i> Share All Packages
                     </button>
                 </div>

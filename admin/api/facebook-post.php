@@ -31,7 +31,7 @@ if (!isset($_POST['csrf_token']) || !validateCsrfToken($_POST['csrf_token'])) {
 
 if (getSetting('facebook_posting_enabled', '0') !== '1') {
     http_response_code(403);
-    echo json_encode(['success' => false, 'error' => 'Facebook posting is not enabled.', 'code' => 403]);
+    echo json_encode(['success' => false, 'error' => 'Facebook posting is not enabled. Turn it on in Facebook Settings.', 'code' => 403]);
     exit;
 }
 
@@ -202,7 +202,7 @@ try {
             if ($price !== '0') $parts[] = "{$currency} {$price}/night";
             if (!empty($rec['size_sqm']))   $parts[] = "{$rec['size_sqm']} sqm";
             if (!empty($rec['max_guests'])) $parts[] = "Max {$rec['max_guests']} guests";
-            if (!empty($parts)) $lines[] = '   ' . implode(' \u00B7 ', $parts);
+            if (!empty($parts)) $lines[] = '   ' . implode(" \u{00B7} ", $parts);
             $lines[] = '';
         }
         $lines[] = "\u{1F4C5} Book now: {$baseUrl}/rooms-showcase.php";
@@ -278,7 +278,7 @@ try {
             if ($rate !== '0')                  $parts[] = "{$currency} {$rate}/day";
             if (!empty($rec['capacity']))        $parts[] = "Up to {$rec['capacity']} guests";
             if (!empty($rec['size_sqm']))        $parts[] = "{$rec['size_sqm']} sqm";
-            if (!empty($parts)) $lines[] = '   ' . implode(' \u00B7 ', $parts);
+            if (!empty($parts)) $lines[] = '   ' . implode(" \u{00B7} ", $parts);
             $lines[] = '';
         }
         $lines[] = "\u{1F4CB} Enquire now: {$baseUrl}/conference.php";
@@ -440,7 +440,8 @@ try {
         http_response_code(502);
         echo json_encode([
             'success' => false,
-            'error'   => $result['message'],
+            // The share modals print this with innerHTML, so escape Facebook's wording.
+            'error'   => htmlspecialchars((string) $result['message'], ENT_QUOTES, 'UTF-8'),
             'code'    => 502,
         ]);
     }

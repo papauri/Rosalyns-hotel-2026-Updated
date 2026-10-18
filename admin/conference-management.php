@@ -837,8 +837,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
 
 // Facebook sharing
 require_once '../includes/facebook-functions.php';
-$fb_conference_posting_on = isFacebookPostingEnabled()
-    && getSetting('facebook_conference_enabled', '1') === '1';
+$fb_conference_posting_on = facebookShareVisible('conference');
+$fb_share_attrs           = facebookShareButtonAttrs('Post to Facebook Page'); // title, or disabled + hint when not connected
 
 $conference_css_version = (string)@filemtime(__DIR__ . '/css/conference-management.css');
 if ($conference_css_version === '' || $conference_css_version === '0') {
@@ -899,7 +899,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     <div class="fb-conf-all-banner__title">Share All Conference Rooms on Facebook</div>
                     <div class="fb-conf-all-banner__sub">Pick rooms, edit the caption, and preview before you post — all in one place.</div>
                 </div>
-                <button class="fb-conf-all-btn" type="button" onclick="openFbAllConferenceModal()">
+                <button class="fb-conf-all-btn" type="button" onclick="openFbAllConferenceModal()"<?php echo facebookShareButtonAttrs('Compose a Facebook post'); ?>>
                     <i class="fab fa-facebook-f"></i> Compose &amp; Preview Post
                 </button>
             </div>
@@ -966,7 +966,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                         <button class="cmc-icon-btn cmc-icon-btn--facebook"
                                             type="button"
                                             onclick='openFbConferenceModal(<?php echo (int)$room["id"]; ?>, <?php echo htmlspecialchars(json_encode($room["name"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["image_path"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode(number_format((float)($room["daily_rate"] ?? 0))), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode((int)($room["capacity"] ?? 0)), ENT_QUOTES, "UTF-8"); ?>)'
-                                            title="Post to Facebook Page">
+                                            <?php echo $fb_share_attrs; ?>>
                                             <i class="fab fa-facebook-f"></i>
                                         </button>
                                     <?php endif; ?>

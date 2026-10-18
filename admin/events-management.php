@@ -547,9 +547,9 @@ try {
     $error = 'Error fetching events: ' . $e->getMessage();
     $events = [];
 }
-$fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
-    && getSetting('facebook_events_enabled', '1') === '1'
-    && getSetting('facebook_page_access_token', '') !== '';
+require_once '../includes/facebook-functions.php';
+$fb_events_posting_on = facebookShareVisible('events');
+$fb_share_attrs       = facebookShareButtonAttrs('Post to Facebook'); // title, or disabled + hint when not connected
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -784,7 +784,7 @@ $fb_events_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                                         <i class="fas fa-bullhorn"></i> Upcoming
                                     </button>
                                     <?php if ($fb_events_posting_on): ?>
-                                        <button class="btn-action btn-facebook" type="button" title="Post to Facebook"
+                                        <button class="btn-action btn-facebook" type="button"<?php echo $fb_share_attrs; ?>
                                             onclick='openFbEventShareModal(<?php echo (int)$event["id"]; ?>, <?php echo htmlspecialchars(json_encode($event["title"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($event["image_path"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($event["event_date"] ?? ""), ENT_QUOTES, "UTF-8"); ?>)'>
                                             <i class="fab fa-facebook-f"></i>
                                         </button>
