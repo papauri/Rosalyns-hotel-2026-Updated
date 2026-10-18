@@ -55,12 +55,59 @@ function check(bool $cond, string $label, string $detail = ''): void
 
 /* Remove fixtures even if a later section throws. Reads $createdOrderIds by
    reference so it sees ids pushed after registration. */
-register_shutdown_function(function () use (&$createdOrderIds, $pdo) {
+/* Stock snapshot taken before the order (see section 1): the run must leave the live stock
+   exactly as it found it - quantities, batch levels/status and movement history. The restore
+   writes the snapshot values back, so run this while the till/KDS is idle: a real sale or a
+   goods receipt on the same ingredient during the few seconds of the run would be overwritten. */
+$stockSnap = ['ingredients' => [], 'batches' => [], 'max_batch_id' => 0];
+$runStartedAt = date('Y-m-d H:i:s');
+register_shutdown_function(function () use (&$createdOrderIds, &$stockSnap, $pdo, $runStartedAt) {
+    // 1) Read the test lines first (needed to find their stock movements), then undo stock.
+    $itemIds = [];
+    try {
+        if ($createdOrderIds) {
+            $ph = implode(',', array_fill(0, count($createdOrderIds), '?'));
+            $items = $pdo->prepare("SELECT id FROM stock_order_items WHERE order_id IN ($ph)");
+            $items->execute($createdOrderIds);
+            $itemIds = $items->fetchAll(PDO::FETCH_COLUMN);
+        }
+        if ($itemIds) {
+            $iph = implode(',', array_fill(0, count($itemIds), '?'));
+            $adj = $pdo->prepare("SELECT id FROM stock_adjustments WHERE source_type IN ('pos_order','void_restore') AND source_id IN ($iph) AND created_at >= ?");
+            $adj->execute(array_merge($itemIds, [$runStartedAt]));
+            $adjIds = $adj->fetchAll(PDO::FETCH_COLUMN);
+            if ($adjIds) {
+                $aph = implode(',', array_fill(0, count($adjIds), '?'));
+                $pdo->prepare("DELETE FROM stock_batch_deductions WHERE adjustment_id IN ($aph)")->execute($adjIds);
+                $pdo->prepare("DELETE FROM stock_adjustments WHERE id IN ($aph)")->execute($adjIds);
+            }
+        }
+        if ($stockSnap['ingredients']) {
+            $setIng = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = ? WHERE id = ?");
+            foreach ($stockSnap['ingredients'] as $ingId => $q) { $setIng->execute([$q, $ingId]); }
+            $setBatch = $pdo->prepare("UPDATE stock_batches SET quantity_remaining = ?, status = ? WHERE id = ?");
+            foreach ($stockSnap['batches'] as $bId => $b) { $setBatch->execute([$b['quantity_remaining'], $b['status'], $bId]); }
+            $gph = implode(',', array_fill(0, count($stockSnap['ingredients']), '?'));
+            $pdo->prepare("DELETE FROM stock_batches WHERE id > ? AND ingredient_id IN ($gph) AND created_at >= ?")
+                ->execute(array_merge([(int)$stockSnap['max_batch_id']], array_keys($stockSnap['ingredients']), [$runStartedAt]));
+            // A portion bigger than the stock on hand logs a "went negative" stock event; drop the run's own.
+            try {
+                $pdo->prepare("DELETE FROM system_event_log WHERE source = 'stock' AND created_at >= ? AND message LIKE '%negative%'")
+                    ->execute([$runStartedAt]);
+            } catch (Throwable $e) { /* log table shape differs */ }
+        }
+    } catch (Throwable $e) {
+        echo "\nStock cleanup warning: " . $e->getMessage() . "\n";
+    }
+    // 2) Remove the test order rows, independently of the stock step.
     if (!$createdOrderIds) {
         return;
     }
     try {
         $ph = implode(',', array_fill(0, count($createdOrderIds), '?'));
+        foreach (['stock_kds_events', 'stock_order_audit', 'pos_ready_notifications'] as $t) {
+            try { $pdo->prepare("DELETE FROM $t WHERE order_id IN ($ph)")->execute($createdOrderIds); } catch (Throwable $e) { /* table absent */ }
+        }
         $pdo->prepare("DELETE FROM stock_order_items WHERE order_id IN ($ph)")->execute($createdOrderIds);
         $pdo->prepare("DELETE FROM station_messages  WHERE order_id IN ($ph)")->execute($createdOrderIds);
         $pdo->prepare("DELETE FROM stock_orders      WHERE id       IN ($ph)")->execute($createdOrderIds);
@@ -114,16 +161,29 @@ $pick = $pdo->query("
      WHERE mi.is_available = 1
        AND sri.quantity_per_portion > 0
      GROUP BY mi.id
-    HAVING MIN(si.current_quantity) > 0
+     ORDER BY MIN(si.current_quantity) > 0 DESC, mi.id
      LIMIT 1
 ")->fetch(PDO::FETCH_ASSOC);
 
 if (!$pick) {
-    bad('Found a recipe-backed, in-stock menu item', 'none available — cannot run lifecycle test');
+    bad('Found a recipe-backed menu item', 'none available — cannot run lifecycle test');
     echo "\nResult: $pass passed, $fail failed\n";
     exit(1);
 }
 ok("Fixture menu item: #{$pick['id']} {$pick['name']} ({$pick['menu_type']})");
+
+/* Snapshot the item's stock; with an empty store (opening stock not counted yet) top its
+   ingredients up for the run. The shutdown handler puts every figure back. */
+$stockSnap['ingredients'] = ingredient_levels($pdo, (int)$pick['id'], (string)$pick['menu_type']);
+if ($stockSnap['ingredients']) {
+    $gph = implode(',', array_fill(0, count($stockSnap['ingredients']), '?'));
+    $bs = $pdo->prepare("SELECT id, quantity_remaining, status FROM stock_batches WHERE ingredient_id IN ($gph)");
+    $bs->execute(array_keys($stockSnap['ingredients']));
+    foreach ($bs->fetchAll(PDO::FETCH_ASSOC) as $b) { $stockSnap['batches'][(int)$b['id']] = $b; }
+    $stockSnap['max_batch_id'] = (int)$pdo->query("SELECT COALESCE(MAX(id), 0) FROM stock_batches")->fetchColumn();
+    $topUp = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity + 1000 WHERE id = ? AND current_quantity < 1000");
+    foreach (array_keys($stockSnap['ingredients']) as $ingId) { $topUp->execute([$ingId]); }
+}
 
 /* Mirrors pos_appendCartItemsToOrder()'s routing: whitelist, else kitchen. */
 $station = in_array($pick['station'] ?? '', ['kitchen', 'bar', 'coffee_bar'], true)
