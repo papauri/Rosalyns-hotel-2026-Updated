@@ -152,6 +152,10 @@ function syncConferenceEnquiryPaymentSnapshot(PDO $pdo, int $enquiryId): ?array
 
 $is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
+// Who may delete a conference enquiry (row menu + server gate): conference permission and admin/manager role.
+$confCanDeleteEnquiry = in_array((string)($user['role'] ?? ''), ['admin', 'manager'], true)
+    && hasPermission((int)($user['id'] ?? 0), 'conference');
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -399,6 +403,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
 
         if (in_array($action, ['record_payment', 'resend_invoice', 'send_quotation', 'update_amount'], true) && !hasPermission((int)($user['id'] ?? 0), 'conference_financials')) {
             throw new Exception('You do not have permission to handle conference invoicing or pricing.');
+        }
+
+        // Deleting an enquiry is destructive: conference page permission AND an admin/manager role.
+        if ($action === 'delete_enquiry' && !($confCanDeleteEnquiry)) {
+            throw new Exception('Only an administrator or manager can delete conference enquiries.');
         }
 
         $paymentSnapshot = syncConferenceEnquiryPaymentSnapshot($pdo, $enquiry_id);
@@ -750,6 +759,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             $stmt = $pdo->prepare("UPDATE conference_inquiries SET notes = ? WHERE id = ?");
             $stmt->execute([$notes, $enquiry_id]);
             $message = 'Notes updated successfully!';
+        } elseif ($action === 'delete_enquiry') {
+            // Money trail is never deleted: any live payment row (receipt/invoice number lives on it) or any
+            // credit note against this enquiry blocks deletion - cancel it instead. Checked again under a row
+            // lock so a payment recorded at the same moment cannot slip in between the check and the delete.
+            $delRef = (string)($enquiry['inquiry_reference'] ?? ('#' . $enquiry_id));
+            $delBlocked = 'This enquiry has payments recorded — cancel it instead so the money trail stays.';
+            $pdo->beginTransaction();
+            try {
+                $delLock = $pdo->prepare("SELECT id FROM conference_inquiries WHERE id = ? FOR UPDATE");
+                $delLock->execute([$enquiry_id]);
+                if (!$delLock->fetchColumn()) {
+                    throw new Exception('Enquiry not found!');
+                }
+                $payChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'conference' AND booking_id = ? AND deleted_at IS NULL");
+                $payChk->execute([$enquiry_id]);
+                if ((int)$payChk->fetchColumn() > 0) {
+                    throw new Exception($delBlocked);
+                }
+                $cnChk = $pdo->prepare("SELECT COUNT(*) FROM credit_notes WHERE booking_type = 'conference' AND booking_id = ?");
+                $cnChk->execute([$enquiry_id]);
+                if ((int)$cnChk->fetchColumn() > 0) {
+                    throw new Exception($delBlocked);
+                }
+                // Rows that belong only to this enquiry (sent-quotation log entries), then the enquiry itself.
+                $pdo->prepare("DELETE FROM quotations WHERE booking_type = 'conference' AND booking_id = ?")->execute([$enquiry_id]);
+                $pdo->prepare("DELETE FROM conference_inquiries WHERE id = ?")->execute([$enquiry_id]);
+                $pdo->commit();
+            } catch (Throwable $delEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $delEx;
+            }
+            logActivity((int)($user['id'] ?? 0), 'conference_enquiry_deleted', 'Deleted conference enquiry ' . $delRef . ' (id ' . $enquiry_id . ', status ' . (string)($enquiry['status'] ?? '') . ')');
+            $message = 'Conference enquiry ' . $delRef . ' deleted.';
         }
     } catch (PDOException $e) {
         $error = 'Error updating enquiry: ' . $e->getMessage();
@@ -1053,7 +1097,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                             $confCanResend = $confCanRecordPay && (float)$enquiry['rp_paid'] > BALANCE_TOLERANCE && filter_var((string)($enquiry['email'] ?? ''), FILTER_VALIDATE_EMAIL);
                                             $confCanCancel = in_array($enquiry['status'], ['pending', 'confirmed'], true);
                                             ?>
-                                            <?php if ($confCanRecordPay || $confCanQuote || $confCanCancel): ?>
+                                            <?php if ($confCanRecordPay || $confCanQuote || $confCanCancel || $confCanDeleteEnquiry): ?>
                                                 <div class="actions-more">
                                                     <button type="button" class="btn btn-secondary btn-sm actions-more-toggle" title="More actions" aria-label="More actions" onclick="toggleConfActionsMore(this, event)">
                                                         <i class="fas fa-ellipsis-vertical"></i> More
@@ -1112,6 +1156,22 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                                                     data-admin-confirm-tone="danger"
                                                                     data-admin-confirm-icon="fa-times">
                                                                     <i class="fas fa-times"></i> Cancel enquiry
+                                                                </button>
+                                                            </form>
+                                                        <?php endif; ?>
+                                                        <?php if ($confCanDeleteEnquiry): ?>
+                                                            <form method="POST" style="margin:0;">
+                                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                                                <input type="hidden" name="enquiry_action" value="delete_enquiry">
+                                                                <input type="hidden" name="enquiry_id" value="<?php echo (int)$enquiry['id']; ?>">
+                                                                <button type="submit" class="text-danger"
+                                                                    data-admin-confirm="Permanently delete enquiry <?php echo htmlspecialchars((string)$enquiry['inquiry_reference'], ENT_QUOTES, 'UTF-8'); ?>? This cannot be undone. An enquiry with payments recorded cannot be deleted - cancel it instead."
+                                                                    data-admin-confirm-title="Delete enquiry"
+                                                                    data-admin-confirm-ok="Delete enquiry"
+                                                                    data-admin-confirm-cancel="Keep enquiry"
+                                                                    data-admin-confirm-tone="danger"
+                                                                    data-admin-confirm-icon="fa-trash-alt">
+                                                                    <i class="fas fa-trash-alt"></i> Delete enquiry
                                                                 </button>
                                                             </form>
                                                         <?php endif; ?>
