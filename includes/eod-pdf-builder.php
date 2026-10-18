@@ -449,10 +449,11 @@ function buildEodPdf(
         $eNz = static function ($k) use ($earned): bool { return abs((float)($earned[$k] ?? 0)) > 0.004; };
         if ($eodModBookings)   { $rowL('Rooms (nights stayed)', $m((float)($earned['rooms_total_gross'] ?? 0)), false, $i++); }
         if ($eNz('extras_gross')) { $rowL('Other guest-bill charges', $m((float)$earned['extras_gross']), false, $i++); }
-        if ($eodModConference || $eNz('conf_gross')) { $rowL('Conferences (when paid)', $m((float)($earned['conf_gross'] ?? 0)), false, $i++); }
+        if ($eNz('cancel_kept_gross')) { $rowL('Kept on cancellations', $m((float)$earned['cancel_kept_gross']), false, $i++); }
+        if ($eodModConference || $eNz('conf_gross')) { $rowL('Conferences (on event date)', $m((float)($earned['conf_gross'] ?? 0)), false, $i++); }
         $rowL(isRestaurantEnabled() ? 'F&B / POS' : 'POS', $m((float)($earned['fnb_gross'] ?? 0)), false, $i++);
         if ($eodModGym    || $eNz('gym_gross'))    { $rowL('Gym (when paid)',    $m((float)($earned['gym_gross'] ?? 0)),    false, $i++); }
-        if ($eodModEvents || $eNz('events_gross')) { $rowL('Events (when paid)', $m((float)($earned['events_gross'] ?? 0)), false, $i++); }
+        if ($eodModEvents || $eNz('events_gross')) { $rowL('Events (on event date)', $m((float)($earned['events_gross'] ?? 0)), false, $i++); }
 
         // Revenue earned gold bar
         $pdf->SetFillColorArray($GOLD);
@@ -465,7 +466,7 @@ function buildEodPdf(
         $pdf->SetFont('helvetica', 'I', 6);
         $pdf->SetTextColorArray($TEXT2);
         $pdf->SetXY($LM, $yL);
-        $pdf->MultiCell($COL, 3.2, '"When paid" lines are counted on the day the payment is received. Rooms are nights stayed at each booking\'s booked rate.', 0, 'L', false, 1);
+        $pdf->MultiCell($COL, 3.2, 'Conferences and events count on their event date; gym when paid. Rooms are nights stayed at each booking\'s booked rate.', 0, 'L', false, 1);
         $yL = $pdf->GetY() + 1;
 
         // Cash collected (separate, cash basis)

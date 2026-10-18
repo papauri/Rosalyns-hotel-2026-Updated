@@ -206,7 +206,7 @@ $total_vat     = (float)$rev['room_vat'] + (float)$rev['conf_vat'] + (float)$rev
 // One shared calculation (admin/includes/eod-revenue.php) also used by the PDF and e-mail:
 // room nights stayed at each booking's booked nightly rate + guest-folio charges posted today
 // + POS sales paid today (room service already on a folio is not counted twice) + conference /
-// gym / event payments received. Cash collected (above) stays its own cash-basis line.
+// gym payments received, conferences and events on their event date, and the first night kept on cancellations. Cash collected (above) stays its own cash-basis line.
 // ---------------------------------------------------------------------------
 $earnedModules = ['bookings' => $mod_bookings, 'pos' => $mod_pos];
 $earned        = rh_eod_earned_revenue($pdo, $report_date, $earnedModules);
@@ -530,6 +530,7 @@ $has = static function (bool $module, float $v): bool { return $module || abs($v
 $revenue_sources = [];
 if ($has($mod_bookings, (float)$earned['rooms_total_gross']))   { $revenue_sources[] = ['label' => 'Rooms (nights stayed)', 'value' => (float)$earned['rooms_total_gross'], 'key' => 'rooms']; }
 if (abs((float)$earned['extras_gross']) > 0.004)                { $revenue_sources[] = ['label' => 'Other guest-bill charges', 'value' => (float)$earned['extras_gross'], 'key' => 'extras']; }
+if (abs((float)$earned['cancel_kept_gross']) > 0.004)          { $revenue_sources[] = ['label' => 'Kept on cancellations', 'value' => (float)$earned['cancel_kept_gross'], 'key' => 'kept']; }
 if ($has($mod_conference, (float)$earned['conf_gross']))        { $revenue_sources[] = ['label' => 'Conferences', 'value' => (float)$earned['conf_gross'], 'key' => 'conf']; }
 if ($has($mod_pos, (float)$earned['fnb_gross']))                { $revenue_sources[] = ['label' => rh_pos_category_label(), 'value' => (float)$earned['fnb_gross'], 'key' => 'fnb']; }
 if ($has($mod_gym, (float)$earned['gym_gross']))                { $revenue_sources[] = ['label' => 'Gym', 'value' => (float)$earned['gym_gross'], 'key' => 'gym']; }
@@ -791,6 +792,7 @@ $lead_time_label   = $guest_intel['avg_lead_days'] <= 1 ? 'Same-day / walk-in' :
 $prev_sources = [
     'room_gross'   => (float)$previousEarned['rooms_total_gross'],
     'extras_gross' => (float)$previousEarned['extras_gross'],
+    'kept_gross'   => (float)$previousEarned['cancel_kept_gross'],
     'conf_gross'   => (float)$previousEarned['conf_gross'],
     'fnb_gross'    => (float)$previousEarned['fnb_gross'],
     'gym_gross'    => (float)$previousEarned['gym_gross'],
@@ -798,6 +800,7 @@ $prev_sources = [
 ];
 $room_rev_change   = (float)$earned['rooms_total_gross'] - $prev_sources['room_gross'];
 $extras_rev_change = (float)$earned['extras_gross'] - $prev_sources['extras_gross'];
+$kept_rev_change   = (float)$earned['cancel_kept_gross'] - $prev_sources['kept_gross'];
 $conf_rev_change   = (float)$earned['conf_gross'] - $prev_sources['conf_gross'];
 $fnb_rev_change    = (float)$earned['fnb_gross'] - $prev_sources['fnb_gross'];
 $gym_rev_change    = (float)$earned['gym_gross'] - $prev_sources['gym_gross'];
@@ -883,10 +886,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         'Revenue Earned',
         'Room Revenue Earned (nights stayed)',
         'Other Guest-Bill Charges Earned',
-        'Conference Revenue (payments received)',
+        'Kept On Cancellations',
+        'Conference Revenue (by event date)',
         rh_pos_short_label() . ' Revenue Earned',
         'Gym Revenue (payments received)',
-        'Events Revenue (payments received)',
+        'Events Revenue (by event date)',
         // Cash collected that day
         'Cash Collected (gross)',
         'Refunds Paid Out',
@@ -951,6 +955,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         number_format($earned_total, 2, '.', ''),
         number_format((float)$earned['rooms_total_gross'], 2, '.', ''),
         number_format((float)$earned['extras_gross'], 2, '.', ''),
+        number_format((float)$earned['cancel_kept_gross'], 2, '.', ''),
         number_format((float)$earned['conf_gross'], 2, '.', ''),
         number_format((float)$earned['fnb_gross'], 2, '.', ''),
         number_format((float)$earned['gym_gross'], 2, '.', ''),
@@ -1168,7 +1173,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
 
         <!-- ============ KPI STRIP: the verdict ============ -->
         <section class="ck-kpis" aria-label="Day summary">
-            <a class="ck-kpi ck-kpi--dark" href="#eodEarned" title="What was earned on this day: room nights stayed, guest-bill charges posted, restaurant / POS sales paid, plus conference, gym and event payments received. Cash banked is shown separately.">
+            <a class="ck-kpi ck-kpi--dark" href="#eodEarned" title="What was earned on this day: room nights stayed, guest-bill charges posted, restaurant / POS sales paid, kept cancellation charges, conferences and events on their event date, and gym payments received. Cash banked is shown separately.">
                 <span class="ck-kpi__icon"><i class="fas fa-coins"></i></span>
                 <span class="ck-kpi__label">Revenue earned</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($earned_total); ?></span>
@@ -1348,6 +1353,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                     echo $mv('Cash collected', $cash_change, $trendLabel($cash_change, true));
                     if ($mod_bookings) { echo $mv('Rooms revenue', $room_rev_change, $trendLabel($room_rev_change, true)); }
                     if (abs((float)$earned['extras_gross']) > 0.004 || abs($prev_sources['extras_gross']) > 0.004) { echo $mv('Other guest-bill charges', $extras_rev_change, $trendLabel($extras_rev_change, true)); }
+                    if (abs((float)$earned['cancel_kept_gross']) > 0.004 || abs($prev_sources['kept_gross']) > 0.004) { echo $mv('Kept on cancellations', $kept_rev_change, $trendLabel($kept_rev_change, true)); }
                     if ($mod_conference && ((float)$earned['conf_gross'] > 0 || (float)$prev_sources['conf_gross'] > 0)) { echo $mv('Conference revenue', $conf_rev_change, $trendLabel($conf_rev_change, true)); }
                     if ($mod_pos) { echo $mv(htmlspecialchars($posShort), $fnb_rev_change, $trendLabel($fnb_rev_change, true)); }
                     if ($mod_gym && ((float)$earned['gym_gross'] > 0 || (float)$prev_sources['gym_gross'] > 0)) { echo $mv('Gym revenue', $gym_rev_change, $trendLabel($gym_rev_change, true)); }
@@ -1442,7 +1448,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 <!-- Revenue -->
                 <div class="ck-pane" role="tabpanel" data-ck-pane="revenue">
                     <h3 class="eod-pane-title" id="eodEarned">Revenue earned</h3>
-                    <p class="eod-sub">What the hotel earned on <?php echo htmlspecialchars(date('j M', strtotime($report_date))); ?>, VAT and levy included: room nights stayed that night, charges posted to guest bills, <?php echo htmlspecialchars($posShort); ?> sales paid that day, and conference, gym and event payments received.</p>
+                    <p class="eod-sub">What the hotel earned on <?php echo htmlspecialchars(date('j M', strtotime($report_date))); ?>, VAT and levy included: room nights stayed that night, charges posted to guest bills, the first night kept on cancellations, <?php echo htmlspecialchars($posShort); ?> sales paid that day, conferences and events held that day, and gym payments received.</p>
                     <div class="eod-table-wrap">
                         <table class="eod-table no-auto-pagination no-card-mobile">
                             <thead>
@@ -1483,7 +1489,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                         }
                         ?>
                     </ul>
-                    <p class="eod-sub"><?php echo htmlspecialchars($earned['cash_basis_note']); ?></p>
+                    <?php if ($mod_gym || abs((float)$earned['gym_gross']) > 0.004): ?><p class="eod-sub"><?php echo htmlspecialchars($earned['cash_basis_note']); ?></p><?php endif; ?>
 
                     <h3 class="eod-pane-title">Cash collected</h3>
                     <p class="eod-sub">Money received on this day (payments by date received, less refunds paid out). Used for cash to bank and the payment method mix.</p>

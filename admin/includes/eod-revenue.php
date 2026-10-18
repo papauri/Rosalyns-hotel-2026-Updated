@@ -22,9 +22,12 @@
  *   3. POS       sales paid on the business date (rh_pos_eod_summary, station business window) EXCLUDING
  *                room-service orders that were charged to a guest folio (already counted in (2)), less
  *                paid orders voided / refunded on the date (reversal on its own day, as the till does).
- *   4. CONFERENCE / GYM / EVENTS   no service-date earned basis exists in the app (reports.php uses the
- *                inquiry created_at, which is a booking date), so these stay on payments received on
- *                the date less refunds of that type paid out on the date. Flagged in the result.
+ *   1b. KEPT ON CANCELLATIONS   a cancelled booking under "keep first night" earns its
+ *                cancellation_retained_amount (gross) on its check-in date, as its own line. Not in ADR / RevPAR.
+ *   4. CONFERENCE / EVENTS   confirmed and completed bookings earn their total including VAT
+ *                (total_with_vat, else total_amount + vat_amount) on the event date: conference_inquiries.event_date,
+ *                and events.event_date for event_inquiries (joined by event_id). Cancelled / pending earn nothing.
+ *      GYM     no service date exists, so gym stays on payments received on the date less gym refunds paid out.
  *
  * Only positional placeholders are used, so this runs the same with emulated or native prepares.
  */
@@ -39,7 +42,7 @@ if (!function_exists('rh_eod_earned_revenue')) {
      *   date:string, rooms_gross:float, package_gross:float, rooms_total_gross:float,
      *   folio_fnb_gross:float, folio_other_gross:float, pos_sales_gross:float, pos_room_folio_gross:float,
      *   pos_reversed:float, pos_net:float, fnb_gross:float, extras_gross:float,
-     *   conf_gross:float, gym_gross:float, events_gross:float, in_house_bookings:int,
+     *   conf_gross:float, gym_gross:float, events_gross:float, cancel_kept_gross:float, in_house_bookings:int,
      *   total:float, cash_basis_note:string
      * }
      */
@@ -62,7 +65,8 @@ if (!function_exists('rh_eod_earned_revenue')) {
             'conf_gross' => 0.0, 'gym_gross' => 0.0, 'events_gross' => 0.0,
             'in_house_bookings' => 0,
             'total' => 0.0,
-            'cash_basis_note' => 'Conference, gym and event revenue is counted when the payment is received (less refunds paid out), because those bookings have no stay or service date to earn it on.',
+            'cancel_kept_gross' => 0.0,
+            'cash_basis_note' => 'Gym revenue is counted when the payment is received (less refunds paid out), because gym fees have no service date to earn them on.',
         ];
         $dayStart = $date . ' 00:00:00';
         $dayEnd = date('Y-m-d', strtotime($date . ' +1 day')) . ' 00:00:00';
@@ -83,6 +87,20 @@ if (!function_exists('rh_eod_earned_revenue')) {
                 }
             } catch (Throwable $e) {
                 error_log('rh_eod_earned_revenue rooms: ' . $e->getMessage());
+            }
+
+            // 1b) Kept on cancellations: a cancelled booking under "keep first night" keeps
+            // cancellation_retained_amount (gross, VAT included). It is earned on the booking's check-in
+            // date (the night that was kept) and is its own line, so it never enters ADR / RevPAR.
+            try {
+                $st = $pdo->prepare("SELECT COALESCE(SUM(cancellation_retained_amount),0)
+                    FROM bookings
+                    WHERE deleted_at IS NULL AND status = 'cancelled'
+                      AND cancellation_retained_amount > 0 AND check_in_date = ?");
+                $st->execute([$date]);
+                $out['cancel_kept_gross'] = (float)$st->fetchColumn();
+            } catch (Throwable $e) {
+                error_log('rh_eod_earned_revenue cancellations: ' . $e->getMessage());
             }
 
             // 2) Folio charges posted on this date (not voided).
@@ -145,37 +163,54 @@ if (!function_exists('rh_eod_earned_revenue')) {
             }
         }
 
-        // 4) Conference / gym / events: payments received on the date less refunds paid out on it.
+        // 4a) Gym: payments received on the date less gym refunds paid out on it (no service date exists).
         try {
-            $st = $pdo->prepare("SELECT booking_type,
+            $st = $pdo->prepare("SELECT
                     COALESCE(SUM(CASE WHEN COALESCE(payment_type,'') <> 'refund' AND payment_status IN ('completed','paid','refunded','partially_refunded') THEN total_amount ELSE 0 END),0) AS received,
                     COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END),0) AS refunded
                 FROM payments
                 WHERE payment_date >= ? AND payment_date < ? AND deleted_at IS NULL
-                  AND booking_type IN ('conference','gym','event')
-                GROUP BY booking_type");
+                  AND booking_type = 'gym'");
             $st->execute([$dayStart, $dayEnd]);
-            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                $net = (float)$r['received'] - (float)$r['refunded'];
-                if ($r['booking_type'] === 'conference') {
-                    $out['conf_gross'] = $net;
-                } elseif ($r['booking_type'] === 'gym') {
-                    $out['gym_gross'] = $net;
-                } else {
-                    $out['events_gross'] = $net;
-                }
-            }
+            $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+            $out['gym_gross'] = (float)($r['received'] ?? 0) - (float)($r['refunded'] ?? 0);
         } catch (Throwable $e) {
-            error_log('rh_eod_earned_revenue other: ' . $e->getMessage());
+            error_log('rh_eod_earned_revenue gym: ' . $e->getMessage());
         }
 
-        foreach (['rooms_gross', 'package_gross', 'folio_fnb_gross', 'folio_other_gross', 'pos_sales_gross', 'pos_room_folio_gross', 'pos_reversed', 'pos_net', 'conf_gross', 'gym_gross', 'events_gross'] as $k) {
+        // 4b) Conferences: confirmed / completed bookings earn their total (total_with_vat, falling back to
+        // total_amount + vat_amount when it is empty) on conference_inquiries.event_date. Cancelled and
+        // pending bookings earn nothing.
+        try {
+            $st = $pdo->prepare("SELECT COALESCE(SUM(COALESCE(NULLIF(total_with_vat,0), COALESCE(total_amount,0) + COALESCE(vat_amount,0))),0)
+                FROM conference_inquiries
+                WHERE status IN ('confirmed','completed') AND event_date = ?");
+            $st->execute([$date]);
+            $out['conf_gross'] = (float)$st->fetchColumn();
+        } catch (Throwable $e) {
+            error_log('rh_eod_earned_revenue conference: ' . $e->getMessage());
+        }
+
+        // 4c) Events: event_inquiries has no date of its own, so the date is events.event_date (via event_id).
+        // Same statuses and amount rule as conferences.
+        try {
+            $st = $pdo->prepare("SELECT COALESCE(SUM(COALESCE(NULLIF(ei.total_with_vat,0), COALESCE(ei.total_amount,0) + COALESCE(ei.vat_amount,0))),0)
+                FROM event_inquiries ei
+                INNER JOIN events ev ON ev.id = ei.event_id
+                WHERE ei.status IN ('confirmed','completed') AND ev.event_date = ?");
+            $st->execute([$date]);
+            $out['events_gross'] = (float)$st->fetchColumn();
+        } catch (Throwable $e) {
+            error_log('rh_eod_earned_revenue events: ' . $e->getMessage());
+        }
+
+        foreach (['rooms_gross', 'package_gross', 'folio_fnb_gross', 'folio_other_gross', 'pos_sales_gross', 'pos_room_folio_gross', 'pos_reversed', 'pos_net', 'conf_gross', 'gym_gross', 'events_gross', 'cancel_kept_gross'] as $k) {
             $out[$k] = round((float)$out[$k], 2);
         }
         $out['rooms_total_gross'] = round($out['rooms_gross'] + $out['package_gross'], 2);
         $out['fnb_gross'] = round($out['pos_net'] + $out['folio_fnb_gross'], 2);
         $out['extras_gross'] = $out['folio_other_gross'];
-        $out['total'] = round($out['rooms_total_gross'] + $out['extras_gross'] + $out['fnb_gross'] + $out['conf_gross'] + $out['gym_gross'] + $out['events_gross'], 2);
+        $out['total'] = round($out['rooms_total_gross'] + $out['extras_gross'] + $out['cancel_kept_gross'] + $out['fnb_gross'] + $out['conf_gross'] + $out['gym_gross'] + $out['events_gross'], 2);
 
         return $memo[$key] = $out;
     }
