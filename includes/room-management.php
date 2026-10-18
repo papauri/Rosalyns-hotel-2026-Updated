@@ -1033,16 +1033,11 @@ function getRoomDashboardSummary(): array
     global $pdo;
 
     try {
-        // Room status counts
-        $statusStmt = $pdo->query("
-            SELECT status, COUNT(*) as count
-            FROM individual_rooms
-            WHERE is_active = 1
-            GROUP BY status
-        ");
+        // Room status counts. A joined-only pair is ONE room (its status is the most restrictive of
+        // its two physical rooms), so occupancy and inventory count the pair once.
         $statusCounts = [];
-        foreach ($statusStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $statusCounts[$row['status']] = (int)$row['count'];
+        foreach (rh_room_unit_statuses() as $unitStatus) {
+            $statusCounts[$unitStatus] = ($statusCounts[$unitStatus] ?? 0) + 1;
         }
 
         // Housekeeping queue
@@ -1091,12 +1086,7 @@ function getRoomDashboardSummary(): array
         $checkinsToday = (int)$checkinStmt->fetchColumn();
 
         // Rooms available for check-in
-        $availableStmt = $pdo->query("
-            SELECT COUNT(*) as count
-            FROM individual_rooms
-            WHERE status = 'available' AND is_active = 1
-        ");
-        $availableNow = (int)$availableStmt->fetchColumn();
+        $availableNow = rh_room_units_count(['available']); // a joined room counts once
 
         // No-show candidates: confirmed/pending bookings whose arrival date has
         // passed without a check-in. These silently hold room availability, so

@@ -78,6 +78,52 @@ try {
     $individualRooms = [];
 }
 
+// A joined-only pair is ONE room: one lane ("101A + 101B") on room A's row, room B is dropped.
+// $laneOfRoom maps every room id to the lane (room) id its nights are drawn on.
+$laneOfRoom = [];
+$laneRoomIds = []; // lane id => all room ids on that lane
+try {
+    $pairsByA = [];
+    foreach (rh_joined_only_pairs(true) as $jp) {
+        $pairsByA[$jp['room_a_id']] = $jp;
+    }
+    $rowsById = [];
+    foreach ($individualRooms as $irRow) {
+        $rowsById[(int)$irRow['id']] = $irRow;
+    }
+    $lanes = [];
+    foreach ($individualRooms as $irRow) {
+        $rid = (int)$irRow['id'];
+        $laneOfRoom[$rid] = $laneOfRoom[$rid] ?? $rid;
+        $laneRoomIds[$laneOfRoom[$rid]] = $laneRoomIds[$laneOfRoom[$rid]] ?? [$rid];
+        if (isset($pairsByA[$rid]) && isset($rowsById[$pairsByA[$rid]['room_b_id']])) {
+            $jp = $pairsByA[$rid];
+            $bRow = $rowsById[$jp['room_b_id']];
+            $laneOfRoom[$jp['room_b_id']] = $rid;
+            $laneRoomIds[$rid] = [$rid, $jp['room_b_id']];
+            $irRow['room_number'] = $jp['label'];
+            $irRow['room_name'] = (string)$jp['combined_name'];
+            $irRow['status'] = rh_joined_pair_status((string)$irRow['status'], (string)$bRow['status']);
+            $floorsPair = array_values(array_unique(array_filter([trim((string)($irRow['floor'] ?? '')), trim((string)($bRow['floor'] ?? ''))], static fn($v) => $v !== '')));
+            $irRow['floor'] = implode(' / ', $floorsPair);
+            if ($jp['price_override'] !== null && $jp['price_override'] !== '') {
+                $irRow['price_per_night'] = $jp['price_override'];
+            }
+            $irRow['is_joined_lane'] = true;
+        }
+        $lanes[$rid] = $irRow;
+    }
+    // Drop room B of each joined pair (it is drawn on room A's lane).
+    $individualRooms = array_values(array_filter($lanes, static function ($row) use ($laneOfRoom) {
+        return $laneOfRoom[(int)$row['id']] === (int)$row['id'];
+    }));
+    if ($filterRoomId && isset($laneOfRoom[$filterRoomId])) {
+        $filterRoomId = $laneOfRoom[$filterRoomId];
+    }
+} catch (Throwable $e) {
+    error_log('calendar joined lanes: ' . $e->getMessage());
+}
+
 // Collect unique floors for filter dropdown
 $allFloors = [];
 foreach ($individualRooms as $ir) {
@@ -109,10 +155,24 @@ try {
     $blockedDates = getBlockedDates(null, $startDate, $endDate);
 
     // Group blocked dates by date
+    $blockLaneSeen = [];
     foreach ($blockedDates as $blocked) {
         $dateKey = $blocked['block_date'];
         if (!isset($blockedDatesByDate[$dateKey])) {
             $blockedDatesByDate[$dateKey] = [];
+        }
+        if (($blocked['block_scope'] ?? 'type') === 'individual') {
+            // A block on a joined room is stored on both rooms but is ONE block on its lane.
+            $blockedRid = (int)($blocked['individual_room_id'] ?? 0);
+            $lane = $laneOfRoom[$blockedRid] ?? $blockedRid;
+            $laneKeySeen = $lane . '|' . $dateKey;
+            if ($lane !== $blockedRid || count($laneRoomIds[$lane] ?? []) > 1) {
+                if (isset($blockLaneSeen[$laneKeySeen])) {
+                    continue;
+                }
+                $blockLaneSeen[$laneKeySeen] = true;
+                $blocked['individual_room_id'] = $lane;
+            }
         }
         $blockedDatesByDate[$dateKey][] = $blocked;
     }
@@ -172,8 +232,9 @@ try {
         if (!empty($booking['individual_room_id'])) {
             $roomIdsHeld[(int)$booking['individual_room_id']] = true;
         }
+        // A joined room is one lane: a booking holding both rooms is drawn once, on room A's lane.
         $roomKeys = $roomIdsHeld
-            ? array_map(static fn ($rid) => 'ir_' . $rid, array_keys($roomIdsHeld))
+            ? array_values(array_unique(array_map(static fn ($rid) => 'ir_' . ($laneOfRoom[$rid] ?? $rid), array_keys($roomIdsHeld))))
             : ['rt_' . $booking['room_id']];
         // A joined-room booking shows on both rooms; say which pair it is.
         $booking['pair_label'] = count($roomIdsHeld) > 1 ? getBookingRoomLabel((int)$booking['id']) : '';

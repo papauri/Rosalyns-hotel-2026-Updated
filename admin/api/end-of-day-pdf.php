@@ -74,9 +74,10 @@ try {
     $ops = $opsStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
     // 2) Occupancy
-    $rooms_total    = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status <> 'out_of_order'")->fetchColumn();
-    $rooms_oo       = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status = 'out_of_order'")->fetchColumn();
-    $occStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE status IN ('checked-in','checked-out') AND check_in_date <= ? AND check_out_date > ?");
+    // A joined-only pair is ONE room (out of order when either of its rooms is).
+    $rooms_total    = rh_room_units_count(['out_of_order'], true);
+    $rooms_oo       = rh_room_units_count(['out_of_order']);
+    $occStmt = $pdo->prepare("SELECT COALESCE(SUM(" . rh_booking_rooms_factor_sql('b') . "), 0) FROM bookings b WHERE b.deleted_at IS NULL AND b.status IN ('checked-in','checked-out') AND b.check_in_date <= ? AND b.check_out_date > ?");
     $occStmt->execute([$date, $date]);
     $rooms_occupied = (int)$occStmt->fetchColumn();
     $occupancy_pct  = $rooms_total > 0 ? ($rooms_occupied / $rooms_total) * 100 : 0;
@@ -106,7 +107,7 @@ try {
 
     // Department revenue from posted charges: food / drink / room-service charges posted to
     // guest folios today are F&B, not room revenue (so ADR / RevPAR use room charges only).
-    $folioFnb = rh_eod_folio_fnb($pdo, $date);
+    $folioFnb = rh_eod_folio_fnb_allocation($pdo, $date);
     $folioFnbMoved = max(0.0, min((float)$folioFnb['gross'], (float)$rev['room_gross']));
     if ($folioFnbMoved > 0) {
         $folioFnbVat = (float)$folioFnb['gross'] > 0 ? min((float)$rev['room_vat'], (float)$folioFnb['vat'] * ($folioFnbMoved / (float)$folioFnb['gross'])) : 0.0;
@@ -190,7 +191,7 @@ try {
     $pr       = $prevPay->fetch(PDO::FETCH_ASSOC) ?: ['gross' => 0, 'refunds' => 0];
     $prev_net = (float)$pr['gross'] - (float)$pr['refunds'];
 
-    $prevOcc = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE status IN ('checked-in','checked-out') AND check_in_date <= ? AND check_out_date > ?");
+    $prevOcc = $pdo->prepare("SELECT COALESCE(SUM(" . rh_booking_rooms_factor_sql('b') . "), 0) FROM bookings b WHERE b.deleted_at IS NULL AND b.status IN ('checked-in','checked-out') AND b.check_in_date <= ? AND b.check_out_date > ?");
     $prevOcc->execute([$prevDay, $prevDay]);
     $prev_occ_count = (int)$prevOcc->fetchColumn();
     $prev_occ_pct   = $rooms_total > 0 ? ($prev_occ_count / $rooms_total) * 100 : 0;

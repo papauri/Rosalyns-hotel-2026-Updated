@@ -455,24 +455,49 @@ try {
     // OCCUPANCY TAB QUERIES
     // ============================================
 
+    // Period-clipped stay maths (F1/F2). A stay only counts for the nights that fall inside the
+    // reporting window [start, end] (inclusive), and its revenue is pro-rated by those nights.
+    // Named placeholders must be unique per use (native prepares), hence the key suffix $k.
+    $rhOverlapNights = function (string $a, string $k): string {
+        return "GREATEST(0, DATEDIFF(LEAST({$a}.check_out_date, DATE_ADD(:{$k}e, INTERVAL 1 DAY)), GREATEST({$a}.check_in_date, :{$k}s)))";
+    };
+    $rhOverlapParams = function (string $k, string $s, string $e): array {
+        return [":{$k}s" => $s, ":{$k}e" => $e];
+    };
+    // Rooms occupied per booking-night: a joined-room booking occupies both rooms of its pair,
+    // except a joined-ONLY pair which is one room in the inventory (counts once).
+    $rhRoomsFactor = function (string $a): string {
+        return rh_booking_rooms_factor_sql($a);
+    };
+    // Revenue of a stay that falls inside the window (total_amount is net + levy, excludes VAT).
+    $rhOverlapRevenue = function (string $a, string $k) use ($rhOverlapNights): string {
+        return "({$a}.total_amount * " . $rhOverlapNights($a, $k) . " / NULLIF({$a}.number_of_nights, 0))";
+    };
+
     // 14. Occupancy Data by Room Type
+    // (per type the table counts a joined pair as one unit: nights are per pair, matching total_rooms)
     $occupancyStmt = $pdo->prepare("
-        SELECT r.name as room_name, r.total_rooms,
+        SELECT r.id as room_type_id, r.name as room_name, r.total_rooms,
                COUNT(DISTINCT b.id) as bookings,
-               COALESCE(SUM(b.number_of_nights), 0) as nights_booked,
+               COALESCE(SUM(" . $rhOverlapNights('b', 'o1') . "), 0) as nights_booked,
                COALESCE(SUM(b.number_of_guests), 0) as total_guests,
                COALESCE(SUM(COALESCE(b.adult_guests, GREATEST(b.number_of_guests - COALESCE(b.child_guests, 0), 1))), 0) as total_adults,
                COALESCE(SUM(COALESCE(b.child_guests, 0)), 0) as total_children
         FROM rooms r
         LEFT JOIN bookings b ON r.id = b.room_id AND b.deleted_at IS NULL
-            AND b.check_in_date <= ? AND b.check_out_date >= ?
+            AND b.check_in_date <= :oe AND b.check_out_date > :os
             AND b.status IN ('confirmed', 'checked-in', 'checked-out')
         WHERE r.is_active = 1
         GROUP BY r.id, r.name, r.total_rooms
         ORDER BY nights_booked DESC
     ");
-    $occupancyStmt->execute([$end_date, $start_date]);
+    $occupancyStmt->execute([':oe' => $end_date, ':os' => $start_date] + $rhOverlapParams('o1', $start_date, $end_date));
     $occupancyData = $occupancyStmt->fetchAll(PDO::FETCH_ASSOC);
+    // A joined room type is sold as pairs: its inventory is the number of pairs, not member rooms.
+    foreach ($occupancyData as &$occRow) {
+        $occRow['total_rooms'] = rh_room_type_unit_total((int)$occRow['room_type_id'], (int)$occRow['total_rooms']);
+    }
+    unset($occRow);
 
     // Calculate days in period for occupancy rate
     $daysInPeriod = max(1, (strtotime($end_date) - strtotime($start_date)) / 86400 + 1);
@@ -481,22 +506,23 @@ try {
     $overallOccupancyStmt = $pdo->prepare("
         SELECT
             COUNT(DISTINCT b.id) as total_bookings,
-            -- room-nights: a joined-room booking occupies both rooms of its pair
-            COALESCE(SUM(b.number_of_nights * (CASE WHEN b.room_combination_id IS NOT NULL THEN 2 ELSE 1 END)), 0) as total_nights_booked,
+            -- room-nights inside the window: a joined-room booking occupies both rooms of its pair
+            -- (a joined-ONLY pair is one room in the inventory below so it counts once; a shared-mode pair is two rooms)
+            COALESCE(SUM(" . $rhOverlapNights('b', 'o2') . " * " . $rhRoomsFactor('b') . "), 0) as total_nights_booked,
             COALESCE(SUM(b.number_of_guests), 0) as total_guests,
             COALESCE(SUM(COALESCE(b.adult_guests, GREATEST(b.number_of_guests - COALESCE(b.child_guests, 0), 1))), 0) as total_adults,
             COALESCE(SUM(COALESCE(b.child_guests, 0)), 0) as total_children,
             COALESCE(AVG(b.number_of_guests), 0) as avg_guests_per_booking
         FROM bookings b
-        WHERE b.deleted_at IS NULL AND b.check_in_date <= ? AND b.check_out_date >= ?
+        WHERE b.deleted_at IS NULL AND b.check_in_date <= :oe AND b.check_out_date > :os
         AND b.status IN ('confirmed', 'checked-in', 'checked-out')
     ");
-    $overallOccupancyStmt->execute([$end_date, $start_date]);
+    $overallOccupancyStmt->execute([':oe' => $end_date, ':os' => $start_date] + $rhOverlapParams('o2', $start_date, $end_date));
     $overallOccupancy = $overallOccupancyStmt->fetch(PDO::FETCH_ASSOC);
 
     // Total room inventory
-    $totalRoomsStmt = $pdo->query("SELECT COUNT(*) as total FROM individual_rooms WHERE status NOT IN ('out_of_order','maintenance')");
-    $totalRoomInventory = $totalRoomsStmt->fetch(PDO::FETCH_ASSOC)['total'];
+    // A joined-only pair is ONE room: count it once.
+    $totalRoomInventory = rh_room_units_count(['out_of_order', 'maintenance'], true);
     $totalRoomNightsAvailable = $totalRoomInventory * $daysInPeriod;
     $overallOccupancyRate = $totalRoomNightsAvailable > 0
         ? round(($overallOccupancy['total_nights_booked'] / $totalRoomNightsAvailable) * 100, 1)
@@ -657,15 +683,16 @@ try {
     // ADVANCED HOTEL KPI METRICS
     // ============================================
 
-    // 23. ADR (Average Daily Rate) = Total Room Revenue / Number of Room Nights Sold
+    // 23. ADR (Average Daily Rate) = Room Revenue in period / Room Nights Sold in period
+    // (stays clipped to the period; a joined booking is sold as two rooms, same basis as occupancy)
     $adrStmt = $pdo->prepare("
-        SELECT COALESCE(SUM(b.total_amount), 0) as total_room_revenue,
-               COALESCE(SUM(b.number_of_nights), 0) as total_nights_sold
+        SELECT COALESCE(SUM(" . $rhOverlapRevenue('b', 'a1') . "), 0) as total_room_revenue,
+               COALESCE(SUM(" . $rhOverlapNights('b', 'a2') . " * " . $rhRoomsFactor('b') . "), 0) as total_nights_sold
         FROM bookings b
         WHERE b.deleted_at IS NULL AND b.status IN ('confirmed', 'checked-in', 'checked-out')
-        AND b.check_in_date <= ? AND b.check_out_date >= ?
+        AND b.check_in_date <= :ae AND b.check_out_date > :as
     ");
-    $adrStmt->execute([$end_date, $start_date]);
+    $adrStmt->execute([':ae' => $end_date, ':as' => $start_date] + $rhOverlapParams('a1', $start_date, $end_date) + $rhOverlapParams('a2', $start_date, $end_date));
     $adrData = $adrStmt->fetch(PDO::FETCH_ASSOC);
     $adr = $adrData['total_nights_sold'] > 0
         ? round($adrData['total_room_revenue'] / $adrData['total_nights_sold'], 0)
@@ -702,23 +729,41 @@ try {
     ");
     $forecastData = $forecastStmt->fetch(PDO::FETCH_ASSOC);
 
-    // 27. Monthly ADR trend
+    // 27. Monthly ADR trend - bucketed by STAY month: each calendar month in the window is
+    // queried with the stay clipped to that month, so a stay straddling two months is split
+    // by nights rather than landing whole in the booking-created month.
+    $monthlyAdr = [];
     $monthlyAdrStmt = $pdo->prepare("
-        SELECT DATE_FORMAT(b.created_at, '%Y-%m') as month,
-               DATE_FORMAT(b.created_at, '%b %Y') as month_label,
-               COALESCE(SUM(b.total_amount), 0) as revenue,
-               COALESCE(SUM(b.number_of_nights), 0) as nights_sold,
-               CASE WHEN SUM(b.number_of_nights) > 0
-                    THEN ROUND(SUM(b.total_amount) / SUM(b.number_of_nights), 0)
-                    ELSE 0 END as adr
+        SELECT COALESCE(SUM(" . $rhOverlapRevenue('b', 'm1') . "), 0) as revenue,
+               COALESCE(SUM(" . $rhOverlapNights('b', 'm2') . " * " . $rhRoomsFactor('b') . "), 0) as nights_sold
         FROM bookings b
         WHERE b.deleted_at IS NULL AND b.status IN ('confirmed', 'checked-in', 'checked-out')
-        AND b.created_at >= ? AND b.created_at <= DATE_ADD(?, INTERVAL 1 DAY)
-        GROUP BY month, month_label
-        ORDER BY month ASC
+        AND b.check_in_date <= :me AND b.check_out_date > :ms
     ");
-    $monthlyAdrStmt->execute([$start_date, $end_date]);
-    $monthlyAdr = $monthlyAdrStmt->fetchAll(PDO::FETCH_ASSOC);
+    $maCursor = new DateTime(date('Y-m-01', strtotime($start_date)));
+    $maLast   = new DateTime($end_date);
+    $maGuard  = 0;
+    while ($maCursor <= $maLast && $maGuard++ < 36) {
+        $maMonthStart = $maCursor->format('Y-m-01');
+        $maMonthEnd   = $maCursor->format('Y-m-t');
+        $maFrom = max($maMonthStart, $start_date);
+        $maTo   = min($maMonthEnd, $end_date);
+        $monthlyAdrStmt->execute([':me' => $maTo, ':ms' => $maFrom]
+            + $rhOverlapParams('m1', $maFrom, $maTo) + $rhOverlapParams('m2', $maFrom, $maTo));
+        $maRow = $monthlyAdrStmt->fetch(PDO::FETCH_ASSOC);
+        $maRev = (float)($maRow['revenue'] ?? 0);
+        $maNights = (int)round((float)($maRow['nights_sold'] ?? 0));
+        if ($maNights > 0) {
+            $monthlyAdr[] = [
+                'month'       => $maCursor->format('Y-m'),
+                'month_label' => $maCursor->format('M Y'),
+                'revenue'     => $maRev,
+                'nights_sold' => $maNights,
+                'adr'         => round($maRev / $maNights, 0),
+            ];
+        }
+        $maCursor->modify('first day of next month');
+    }
 
     // ============================================
     // P&L / GROSS PROFIT CALCULATIONS
@@ -782,8 +827,24 @@ try {
     ");
     $vatRegisterStmt->execute([$start_date, $end_date]);
     $vatRegister = $vatRegisterStmt->fetchAll(PDO::FETCH_ASSOC);
-    $vatRegisterTotal = array_sum(array_column($vatRegister, 'vat_amount'));
-    $vatRegisterGross = array_sum(array_column($vatRegister, 'total_amount'));
+    // Footer totals come from an un-limited aggregate over the SAME rows (the listing above is
+    // capped at 500), so the register Total always agrees with the quarter table / VAT collected.
+    $vatRegisterTotStmt = $pdo->prepare("
+        SELECT COUNT(*) AS n,
+               COALESCE(SUM(CASE WHEN p.payment_type = 'refund' THEN -p.vat_amount ELSE p.vat_amount END), 0) AS vat,
+               COALESCE(SUM(CASE WHEN p.payment_type = 'refund' THEN -p.total_amount ELSE p.total_amount END), 0) AS gross
+        FROM payments p
+        WHERE p.payment_date >= ? AND p.payment_date <= ?
+        AND ((COALESCE(p.payment_type, '') != 'refund' AND p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
+             OR (p.payment_type = 'refund' AND p.refund_status IN ('completed', 'processing')))
+        AND p.deleted_at IS NULL
+        AND p.vat_amount > 0
+    ");
+    $vatRegisterTotStmt->execute([$start_date, $end_date]);
+    $vatRegisterTot = $vatRegisterTotStmt->fetch(PDO::FETCH_ASSOC);
+    $vatRegisterCount = (int)($vatRegisterTot['n'] ?? 0);
+    $vatRegisterTotal = (float)($vatRegisterTot['vat'] ?? 0);
+    $vatRegisterGross = (float)($vatRegisterTot['gross'] ?? 0);
 
     $vatByTypeStmt = $pdo->prepare("
         SELECT booking_type, COUNT(*) AS count,
@@ -965,22 +1026,29 @@ try {
     $roomTypeAdr = [];
     try {
         $rtAdrStmt = $pdo->prepare("
-            SELECT r.name as room_name, r.total_rooms,
-                   COALESCE(SUM(b.total_amount), 0) as revenue,
-                   COALESCE(SUM(b.number_of_nights), 0) as nights_sold,
-                   CASE WHEN SUM(b.number_of_nights) > 0
-                        THEN ROUND(SUM(b.total_amount) / SUM(b.number_of_nights), 0)
+            SELECT r.id as room_type_id, r.name as room_name, r.total_rooms,
+                   COALESCE(SUM(" . $rhOverlapRevenue('b', 't1') . "), 0) as revenue,
+                   COALESCE(SUM(" . $rhOverlapNights('b', 't2') . "), 0) as nights_sold,
+                   CASE WHEN SUM(" . $rhOverlapNights('b', 't3') . ") > 0
+                        THEN ROUND(SUM(" . $rhOverlapRevenue('b', 't4') . ") / SUM(" . $rhOverlapNights('b', 't5') . "), 0)
                         ELSE 0 END as adr
             FROM rooms r
             LEFT JOIN bookings b ON r.id = b.room_id AND b.deleted_at IS NULL
-                AND b.check_in_date <= ? AND b.check_out_date >= ?
+                AND b.check_in_date <= :te AND b.check_out_date > :ts
                 AND b.status IN ('confirmed','checked-in','checked-out')
             WHERE r.is_active = 1
             GROUP BY r.id, r.name, r.total_rooms
             ORDER BY revenue DESC
         ");
-        $rtAdrStmt->execute([$end_date, $start_date]);
+        $rtAdrStmt->execute([':te' => $end_date, ':ts' => $start_date]
+            + $rhOverlapParams('t1', $start_date, $end_date) + $rhOverlapParams('t2', $start_date, $end_date)
+            + $rhOverlapParams('t3', $start_date, $end_date) + $rhOverlapParams('t4', $start_date, $end_date)
+            + $rhOverlapParams('t5', $start_date, $end_date));
         $roomTypeAdr = $rtAdrStmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($roomTypeAdr as &$adrRow) {
+            $adrRow['total_rooms'] = rh_room_type_unit_total((int)$adrRow['room_type_id'], (int)$adrRow['total_rooms']);
+        }
+        unset($adrRow);
     } catch (Throwable $rtEx) { /* safe fallback */
     }
 } catch (PDOException $e) {
@@ -991,6 +1059,7 @@ try {
     $grossProfit = $netRevenue = $grossMarginPct = 0.0;
     $vatRegister = $vatByType = [];
     $vatRegisterTotal = $vatRegisterGross = 0.0;
+    $vatRegisterCount = 0;
     $agingDetail = [];
     $totalAgingAmount = 0.0;
     $agingBuckets = ['0-30' => ['count' => 0, 'amount' => 0.0], '31-60' => ['count' => 0, 'amount' => 0.0], '61-90' => ['count' => 0, 'amount' => 0.0], '90+' => ['count' => 0, 'amount' => 0.0]];
@@ -1141,7 +1210,7 @@ try {
                             </div>
                             <div>
                                 <h4>🔁 Credit Notes</h4>
-                                <p>Credit notes reduce reported revenue. If a guest paid but you issued a credit note for a service failure, the credit note is a liability until used. <strong>Issued</strong> = total value created. <strong>Redeemed</strong> = used against a future payment.</p>
+                                <p>Credit notes are not deducted from Net Revenue: the cash is still held, so they appear as an italic memo line under it. If a guest paid but you issued a credit note for a service failure, the credit note is a liability until used. <strong>Issued</strong> = total value created. <strong>Redeemed</strong> = used against a future payment.</p>
                             </div>
                             <div>
                                 <h4>📅 Prior Period Comparison</h4>
@@ -1266,13 +1335,6 @@ try {
                                     <td style="text-align:right">(<?php echo number_format($totalRefunds, 2); ?>)</td>
                                     <td style="text-align:right"></td>
                                 </tr>
-                                <?php if ($totalCreditNotesIssued > 0): ?>
-                                    <tr style="color: var(--color-text-secondary)">
-                                        <td title="Credit Notes issued in this period reduce gross revenue. They represent value promised to guests but not yet paid in cash.">– Credit Notes Issued</td>
-                                        <td style="text-align:right">(<?php echo number_format($totalCreditNotesIssued, 2); ?>)</td>
-                                        <td style="text-align:right"><span class="acct-muted" style="font-size:0.8em"><?php echo number_format($totalCreditNotesRedeemed, 2); ?> redeemed</span></td>
-                                    </tr>
-                                <?php endif; ?>
                                 <tr style="color: var(--color-text-secondary)">
                                     <td>– VAT Collected</td>
                                     <td style="text-align:right">(<?php echo number_format($totalVatCollected, 2); ?>)</td>
@@ -1283,6 +1345,14 @@ try {
                                     <td style="text-align:right; color: <?php echo $netRevenue >= 0 ? 'var(--color-lux-gold)' : '#c82333'; ?>"><?php echo number_format($netRevenue, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
+                                <?php if ($totalCreditNotesIssued > 0): ?>
+                                    <?php /* Memo only: not subtracted above, so the rows foot to Net Revenue. */ ?>
+                                    <tr class="acct-memo-row">
+                                        <td title="Credit notes are value promised to guests, not money paid out, so they are not deducted from Net Revenue.">Memo: Credit Notes Issued (not deducted; the cash is still held)</td>
+                                        <td style="text-align:right"><?php echo number_format($totalCreditNotesIssued, 2); ?></td>
+                                        <td style="text-align:right"><?php echo number_format($totalCreditNotesRedeemed, 2); ?> redeemed</td>
+                                    </tr>
+                                <?php endif; ?>
                                 <?php if ($deferredRevenue > 0): ?>
                                     <tr style="color: var(--color-text-secondary); border-top: 1px dashed var(--color-lux-clay-50)">
                                         <td title="Deferred Revenue — payments collected for stays that have not yet occurred. Under accrual accounting these are liabilities, not earned income.">⚠ Deferred Revenue (unearned)</td>
@@ -1947,7 +2017,7 @@ try {
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Gross Revenue (VAT incl.)</span>
                         <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($vatRegisterGross, 2); ?></strong>
-                        <span class="rh-strip__sub"><?php echo count($vatRegister); ?> VAT-bearing transactions</span>
+                        <span class="rh-strip__sub"><?php echo number_format($vatRegisterCount); ?> VAT-bearing transactions</span>
                     </div>
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Net (ex-VAT)</span>
@@ -1992,7 +2062,7 @@ try {
                                 <tfoot>
                                     <tr style="font-weight:700">
                                         <td>Total</td>
-                                        <td><?php echo count($vatRegister); ?></td>
+                                        <td><?php echo number_format($vatRegisterCount); ?></td>
                                         <td><?php echo $currency_symbol . ' ' . number_format($vatRegisterGross, 2); ?></td>
                                         <td><?php echo $currency_symbol . ' ' . number_format($vatRegisterTotal, 2); ?></td>
                                         <td><?php echo $currency_symbol . ' ' . number_format($vatRegisterGross - $vatRegisterTotal, 2); ?></td>
@@ -2091,6 +2161,12 @@ try {
                     <?php if (empty($vatRegister)): ?>
                         <p class="acct-empty">No VAT-bearing transactions in this period.</p>
                     <?php else: ?>
+                        <?php if ($vatRegisterCount > count($vatRegister)): ?>
+                            <div class="acct-notice acct-notice--warn" role="status">
+                                <span><i class="fas fa-circle-info"></i> Showing first <?php echo number_format(count($vatRegister)); ?> of <?php echo number_format($vatRegisterCount); ?> VAT rows. Totals below cover all rows.</span>
+                                <a class="acct-link" href="../api/reports-export.php?start_date=<?php echo urlencode($start_date); ?>&amp;end_date=<?php echo urlencode($end_date); ?>&amp;report_type=vat" target="_blank" rel="noopener"><i class="fas fa-file-csv"></i> Download all rows (CSV)</a>
+                            </div>
+                        <?php endif; ?>
                         <table class="acct-table">
                             <thead>
                                 <tr>
@@ -2582,7 +2658,7 @@ try {
                             <tr>
                                 <th>Room Type</th>
                                 <th>Revenue</th>
-                                <th>Nights Sold</th>
+                                <th title="Per unit sold: a joined-room pair is one unit here (rooms and nights both count the pair once), so this differs from the headline ADR, which counts a joined booking as two rooms">Nights Sold</th>
                                 <th title="Average Daily Rate — revenue per room-night sold">ADR</th>
                                 <th title="Revenue Per Available Room — revenue per room-night available (including empty nights)">RevPAR</th>
                                 <th>RevPAR / ADR</th>

@@ -83,6 +83,30 @@ function ir_combo_move_blocker(PDO $pdo, array $roomIds, int $combinedTypeId): ?
         . '. Move those bookings to other rooms first, or keep the rooms sellable on their own.';
 }
 
+/**
+ * Room ids a status change / children change applies to: a room that belongs to an active
+ * joined-only pair always moves together with its partner (a joined room is ONE room).
+ * Order is kept, duplicates dropped.
+ *
+ * @param int[] $ids
+ * @return int[]
+ */
+function ir_expand_pair_ids(array $ids): array
+{
+    $pairMap = rh_joined_only_pair_map();
+    $out = [];
+    foreach ($ids as $id) {
+        $id = (int)$id;
+        if ($id <= 0) {
+            continue;
+        }
+        foreach (isset($pairMap[$id]) ? $pairMap[$id]['room_ids'] : [$id] as $rid) {
+            $out[(int)$rid] = (int)$rid;
+        }
+    }
+    return array_values($out);
+}
+
 /** How many bookings (any status) refer to a joined-room combination. */
 function ir_combo_booking_count(PDO $pdo, int $combinationId): int
 {
@@ -287,7 +311,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $is_active = isset($_POST['combination_is_active']) ? 1 : 0;
             // 'shared': both rooms keep their own type and are sold on their own AND as the pair.
             // 'joined_only': both rooms move to the "Book As" type and are sold only as the pair.
-            $sale_mode = ($_POST['combination_sale_mode'] ?? 'shared') === 'joined_only' ? 'joined_only' : 'shared';
+            $sale_mode = ($_POST['combination_sale_mode'] ?? 'joined_only') === 'shared' ? 'shared' : 'joined_only';
             $autoOpenCombinations = true; // reopen the manager to show the result or the error
 
             if ($combined_name === '' || $combined_room_type_id <= 0 || $room_a_id <= 0 || $room_b_id <= 0) {
@@ -416,8 +440,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $autoOpenCombinations = true;
         } elseif ($action === 'update_status') {
-            $id = (int)$_POST['id'];
-            $new_status = $_POST['new_status'];
+            // "id" may be a comma list: a joined room's two rooms always change together.
+            $statusIds = ir_expand_pair_ids(array_map('intval', explode(',', (string)($_POST['id'] ?? ''))));
+            $new_status = $_POST['new_status'] ?? '';
             $reason = trim($_POST['reason'] ?? '');
 
             $validStatuses = ['available', 'occupied', 'maintenance', 'cleaning', 'out_of_order'];
@@ -426,27 +451,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $pdo->beginTransaction();
                 try {
-                    // Lock the row so a concurrent status change can't race with this one
                     $currentStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ? FOR UPDATE");
-                    $currentStmt->execute([$id]);
-                    $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
-
-                    if ($current) {
-                        $old_status = $current['status'];
-
-                        // Update status
-                        $stmt = $pdo->prepare("UPDATE individual_rooms SET status = ? WHERE id = ?");
+                    $stmt = $pdo->prepare("UPDATE individual_rooms SET status = ? WHERE id = ?");
+                    $logStmt = $pdo->prepare("
+                        INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by)
+                        VALUES (?, ?, ?, ?, ?)
+                    ");
+                    $changed = 0;
+                    foreach ($statusIds as $id) {
+                        // Lock the row so a concurrent status change can't race with this one
+                        $currentStmt->execute([$id]);
+                        $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
+                        if (!$current) {
+                            continue;
+                        }
                         $stmt->execute([$new_status, $id]);
-
-                        // Log the change
-                        $logStmt = $pdo->prepare("
-                            INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by)
-                            VALUES (?, ?, ?, ?, ?)
-                        ");
-                        $logStmt->execute([$id, $old_status, $new_status, $reason, $user['id'] ?? null]);
-
+                        $logStmt->execute([$id, $current['status'], $new_status, $reason, $user['id'] ?? null]);
+                        $changed++;
+                    }
+                    if ($changed > 0) {
                         $pdo->commit();
-                        $message = 'Room status updated successfully!';
+                        $message = $changed > 1 ? 'Joined room status updated on both rooms.' : 'Room status updated successfully!';
                     } else {
                         $pdo->rollBack();
                         $error = 'Room not found.';
@@ -489,6 +514,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!in_array($new_status, $validStatuses)) {
                     $error = 'Invalid status.';
                 } else {
+                    // A joined room counts as ONE selected unit and moves both of its rooms.
+                    $bulkPairMap = rh_joined_only_pair_map();
+                    $bulkUnits = [];
+                    $bulkPairs = 0;
+                    foreach ((array)$room_ids as $selId) {
+                        $selId = (int)$selId;
+                        if ($selId <= 0) {
+                            continue;
+                        }
+                        $unitKey = isset($bulkPairMap[$selId]) ? 'p' . $bulkPairMap[$selId]['id'] : 'r' . $selId;
+                        if (!isset($bulkUnits[$unitKey]) && isset($bulkPairMap[$selId])) {
+                            $bulkPairs++;
+                        }
+                        $bulkUnits[$unitKey] = true;
+                    }
+                    $room_ids = ir_expand_pair_ids((array)$room_ids);
                     $pdo->beginTransaction();
                     try {
                         foreach ($room_ids as $room_id) {
@@ -513,7 +554,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                         }
                         $pdo->commit();
-                        $message = count($room_ids) . ' rooms updated successfully!';
+                        $message = count($bulkUnits) . ' room' . (count($bulkUnits) === 1 ? '' : 's') . ' updated successfully!'
+                            . ($bulkPairs > 0 ? ' (' . $bulkPairs . ' joined room' . ($bulkPairs === 1 ? '' : 's') . ' - both rooms of each changed together)' : '');
                     } catch (Throwable $e) {
                         $pdo->rollBack();
                         throw $e;
@@ -638,6 +680,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
+            // A joined-only room is ONE room: opening either member (or its pair id) shows the
+            // pair - both rooms, the pair's booking, blocks and history.
+            $pairId = (int)($_POST['pair_id'] ?? 0);
+            $detailPair = $pairId > 0 ? (rh_joined_only_pairs(false)[$pairId] ?? null) : null;
+            if (!$detailPair) {
+                $detailPairMap = rh_joined_only_pair_map();
+                $detailPair = $detailPairMap[$room_id] ?? null;
+            }
+            if ($detailPair) {
+                $room_id = (int)$detailPair['room_a_id'];
+            }
+            $detailIds = $detailPair ? $detailPair['room_ids'] : [$room_id];
+            $dph = implode(',', array_fill(0, count($detailIds), '?'));
+            $detailBookingPred = "(b.individual_room_id IN ($dph) OR EXISTS (
+                                        SELECT 1 FROM booking_rooms br
+                                        WHERE br.booking_id = b.id
+                                            AND br.individual_room_id IN ($dph)
+                                            AND br.released_at IS NULL
+                                ))";
+            $detailBookingParams = array_merge($detailIds, $detailIds);
+
             // Full room info
             $rStmt = $pdo->prepare("
                   SELECT ir.*, r.name AS room_type_name, r.price_per_night,
@@ -661,19 +724,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                        DATEDIFF(b.check_out_date, CURDATE()) AS nights_remaining
                 FROM bookings b
                 JOIN rooms r ON r.id = b.room_id
-                                WHERE (b.individual_room_id = ? OR EXISTS (
-                                        SELECT 1 FROM booking_rooms br
-                                        WHERE br.booking_id = b.id
-                                            AND br.individual_room_id = ?
-                                            AND br.released_at IS NULL
-                                ))
+                WHERE {$detailBookingPred}
                   AND b.status IN ('confirmed','checked-in')
                   AND b.check_in_date <= CURDATE()
                   AND (b.check_out_date >= CURDATE() OR b.status = 'checked-in')
                 ORDER BY b.check_in_date ASC
                 LIMIT 1
             ");
-            $aStmt->execute([$room_id, $room_id]);
+            $aStmt->execute($detailBookingParams);
             $active = $aStmt->fetch(PDO::FETCH_ASSOC) ?: null;
 
             // All upcoming bookings
@@ -683,51 +741,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                        b.total_amount, r.name AS room_type_name
                 FROM bookings b
                 JOIN rooms r ON r.id = b.room_id
-                                WHERE (b.individual_room_id = ? OR EXISTS (
-                                        SELECT 1 FROM booking_rooms br
-                                        WHERE br.booking_id = b.id
-                                            AND br.individual_room_id = ?
-                                            AND br.released_at IS NULL
-                                ))
+                WHERE {$detailBookingPred}
                   AND b.status IN ('confirmed','checked-in','pending','tentative')
                   AND b.check_in_date > CURDATE()
                 ORDER BY b.check_in_date ASC
                 LIMIT 10
             ");
-            $uStmt->execute([$room_id, $room_id]);
+            $uStmt->execute($detailBookingParams);
             $upcoming = $uStmt->fetchAll(PDO::FETCH_ASSOC);
 
             // Upcoming individual-room blocks (per blocked night)
             $blStmt = $pdo->prepare("
-                SELECT block_date, block_type, reason
+                SELECT DISTINCT block_date, block_type, reason
                 FROM individual_room_blocked_dates
-                WHERE individual_room_id = ? AND block_date >= CURDATE()
+                WHERE individual_room_id IN ($dph) AND block_date >= CURDATE()
                 ORDER BY block_date ASC
                 LIMIT 60
             ");
-            $blStmt->execute([$room_id]);
+            $blStmt->execute($detailIds);
             $roomBlocks = $blStmt->fetchAll(PDO::FETCH_ASSOC);
 
             // Status / maintenance log — last 8 entries
             $lStmt = $pdo->prepare("
-                SELECT ml.*, au.username AS performed_by_name
+                SELECT ml.*, au.username AS performed_by_name, lr.room_number AS log_room_number
                 FROM room_maintenance_log ml
                 LEFT JOIN admin_users au ON au.id = ml.performed_by
-                WHERE ml.individual_room_id = ?
+                LEFT JOIN individual_rooms lr ON lr.id = ml.individual_room_id
+                WHERE ml.individual_room_id IN ($dph)
                 ORDER BY ml.created_at DESC
-                LIMIT 8
+                LIMIT " . (count($detailIds) * 8) . "
             ");
-            $lStmt->execute([$room_id]);
+            $lStmt->execute($detailIds);
             $log = $lStmt->fetchAll(PDO::FETCH_ASSOC);
 
             // Amenities
             $amStmt = $pdo->prepare("
-                SELECT amenity_label FROM individual_room_amenities
-                WHERE individual_room_id = ?
+                SELECT DISTINCT amenity_label FROM individual_room_amenities
+                WHERE individual_room_id IN ($dph)
                 ORDER BY display_order ASC
             ");
-            $amStmt->execute([$room_id]);
-            $amenities = array_column($amStmt->fetchAll(PDO::FETCH_ASSOC), 'amenity_label');
+            $amStmt->execute($detailIds);
+            $amenities = array_values(array_unique(array_column($amStmt->fetchAll(PDO::FETCH_ASSOC), 'amenity_label')));
 
             // Safe currency
             $sym = getSetting('currency_symbol') ?: 'MWK';
@@ -772,25 +826,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'reason'       => $l['reason'] ?? '',
                 'performed_by' => $l['performed_by_name'] ?? 'System',
                 'date'         => $l['created_at'] ?? '',
+                'room'         => $detailPair ? (string)($l['log_room_number'] ?? '') : '',
             ], $log);
+
+            $roomJson = [
+                'id'          => (int)$roomRow['id'],
+                'room_type_id' => (int)$roomRow['room_type_id'],
+                'number'      => $roomRow['room_number'],
+                'name'        => $roomRow['room_name'] ?? '',
+                'type'        => $roomRow['room_type_name'],
+                'floor'       => $roomRow['floor'] ?? '',
+                'status'      => $roomRow['status'],
+                'notes'       => $roomRow['notes'] ?? '',
+                'price'       => $sym . ' ' . number_format((float)$roomRow['price_per_night'], 0) . '/night',
+                'max_guests'  => (int)$roomRow['max_guests'],
+                'amenities'   => $amenities,
+                'is_active'   => (bool)$roomRow['is_active'],
+                'status_ids'  => (string)(int)$roomRow['id'],
+            ];
+            if ($detailPair) {
+                $pairNotesSt = $pdo->prepare('SELECT notes FROM room_combinations WHERE id = ?');
+                $pairNotesSt->execute([(int)$detailPair['id']]);
+                $pairFloors = array_values(array_unique(array_filter([(string)($detailPair['a_floor'] ?? ''), (string)($detailPair['b_floor'] ?? '')], static fn($v) => $v !== '')));
+                $roomJson['pair_id'] = (int)$detailPair['id'];
+                $roomJson['number'] = $detailPair['label'];
+                $roomJson['name'] = (string)$detailPair['combined_name'];
+                $roomJson['status'] = rh_joined_pair_status((string)$detailPair['a_status'], (string)$detailPair['b_status']);
+                $roomJson['floor'] = implode(' / ', $pairFloors);
+                $roomJson['notes'] = (string)($pairNotesSt->fetchColumn() ?: '');
+                $roomJson['max_guests'] = (int)$detailPair['max_guests_combined'];
+                $roomJson['price'] = $sym . ' ' . number_format($detailPair['price_override'] !== null ? (float)$detailPair['price_override'] : (float)$roomRow['price_per_night'], 0) . '/night';
+                $roomJson['is_active'] = !empty($detailPair['is_active']) && !empty($detailPair['a_active']) && !empty($detailPair['b_active']);
+                $roomJson['status_ids'] = implode(',', $detailPair['room_ids']);
+                $roomJson['members'] = [
+                    ['id' => (int)$detailPair['room_a_id'], 'number' => $detailPair['a_number'], 'name' => (string)($detailPair['a_name'] ?? ''), 'floor' => (string)($detailPair['a_floor'] ?? ''), 'status' => $detailPair['a_status']],
+                    ['id' => (int)$detailPair['room_b_id'], 'number' => $detailPair['b_number'], 'name' => (string)($detailPair['b_name'] ?? ''), 'floor' => (string)($detailPair['b_floor'] ?? ''), 'status' => $detailPair['b_status']],
+                ];
+            }
 
             header('Content-Type: application/json');
             echo json_encode([
                 'success'   => true,
-                'room'      => [
-                    'id'          => (int)$roomRow['id'],
-                    'room_type_id' => (int)$roomRow['room_type_id'],
-                    'number'      => $roomRow['room_number'],
-                    'name'        => $roomRow['room_name'] ?? '',
-                    'type'        => $roomRow['room_type_name'],
-                    'floor'       => $roomRow['floor'] ?? '',
-                    'status'      => $roomRow['status'],
-                    'notes'       => $roomRow['notes'] ?? '',
-                    'price'       => $sym . ' ' . number_format((float)$roomRow['price_per_night'], 0) . '/night',
-                    'max_guests'  => (int)$roomRow['max_guests'],
-                    'amenities'   => $amenities,
-                    'is_active'   => (bool)$roomRow['is_active'],
-                ],
+                'room'      => $roomJson,
                 'active'    => $activeNorm,
                 'upcoming'  => $upcomingNorm,
                 'blocks'    => $roomBlocks,
@@ -802,7 +879,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Invalid request');
             }
 
-            $id = (int)($_POST['id'] ?? 0);
+            // "id" may be a comma list: the two rooms of a joined room share one children policy.
+            $childIds = ir_expand_pair_ids(array_map('intval', explode(',', (string)($_POST['id'] ?? ''))));
+            $id = $childIds[0] ?? 0;
             $raw = $_POST['children_allowed_override'] ?? 'null';
             $override = ($raw === 'null' || $raw === '') ? null : ((int)$raw === 1 ? 1 : 0);
 
@@ -813,7 +892,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $upd = $pdo->prepare("UPDATE individual_rooms SET children_allowed_override = ? WHERE id = ?");
-            $upd->execute([$override, $id]);
+            foreach ($childIds as $childRoomId) {
+                $upd->execute([$override, $childRoomId]);
+            }
 
             // Return the resolved effective value for UI update
             $roomRow = $pdo->prepare("SELECT ir.children_allowed_override, r.children_allowed FROM individual_rooms ir JOIN rooms r ON r.id = ir.room_type_id WHERE ir.id = ?");
@@ -846,17 +927,11 @@ $filter_floor = $_GET['floor'] ?? null;
 $whereClauses = ['1=1'];
 $params = [];
 
+// Type is filtered in SQL (both rooms of a joined pair share the joined type). Status and floor
+// are filtered after joined pairs are merged into one row, so a pair is judged as one room.
 if ($filter_room_type) {
     $whereClauses[] = 'ir.room_type_id = ?';
     $params[] = $filter_room_type;
-}
-if ($filter_status) {
-    $whereClauses[] = 'ir.status = ?';
-    $params[] = $filter_status;
-}
-if ($filter_floor) {
-    $whereClauses[] = 'ir.floor = ?';
-    $params[] = $filter_floor;
 }
 
 $stmt = $pdo->prepare("
@@ -952,6 +1027,73 @@ $stmt = $pdo->prepare("
 $stmt->execute($params);
 $individualRooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// A joined-only pair is ONE room: merge its two rows into one (label "101A + 101B", one status,
+// the pair's current / next booking). Shared-mode pairs and inactive pairs stay separate rows.
+$activeJoinedPairs = rh_joined_only_pairs(true);
+$joinedPairByRoom = [];
+foreach ($activeJoinedPairs as $jp) {
+    foreach ($jp['room_ids'] as $jrid) {
+        $joinedPairByRoom[$jrid] = $jp;
+    }
+}
+$rowsByRoomId = [];
+foreach ($individualRooms as $irRow) {
+    $rowsByRoomId[(int)$irRow['id']] = $irRow;
+}
+$mergedRooms = [];
+$mergedSeen = [];
+foreach ($individualRooms as $irRow) {
+    $irId = (int)$irRow['id'];
+    if (isset($mergedSeen[$irId])) {
+        continue;
+    }
+    $jp = $joinedPairByRoom[$irId] ?? null;
+    $rowA = $jp ? ($rowsByRoomId[$jp['room_a_id']] ?? null) : null;
+    $rowB = $jp ? ($rowsByRoomId[$jp['room_b_id']] ?? null) : null;
+    if (!$jp || !$rowA || !$rowB) {
+        $mergedRooms[] = $irRow;
+        continue;
+    }
+    $mergedSeen[$jp['room_a_id']] = $mergedSeen[$jp['room_b_id']] = true;
+    $pairRow = $rowA;
+    foreach (['active', 'reserved', 'next'] as $bk) {
+        $refKey = $bk . '_booking_ref';
+        $dateKey = $bk . '_checkin';
+        if (empty($rowA[$refKey]) && !empty($rowB[$refKey]) || (!empty($rowA[$refKey]) && !empty($rowB[$refKey]) && $bk !== 'active' && (string)$rowB[$dateKey] < (string)$rowA[$dateKey])) {
+            foreach ($rowB as $k => $v) {
+                if (strpos($k, $bk . '_') === 0) {
+                    $pairRow[$k] = $v;
+                }
+            }
+        }
+    }
+    $pairFloors = array_values(array_unique(array_filter([(string)($rowA['floor'] ?? ''), (string)($rowB['floor'] ?? '')], static fn($v) => $v !== '')));
+    $pairRow['is_pair'] = true;
+    $pairRow['pair_id'] = $jp['id'];
+    $pairRow['pair'] = $jp;
+    $pairRow['room_ids_csv'] = implode(',', $jp['room_ids']);
+    $pairRow['room_number'] = $jp['label'];
+    $pairRow['room_name'] = (string)$jp['combined_name'];
+    $pairRow['status'] = rh_joined_pair_status((string)$rowA['status'], (string)$rowB['status']);
+    $pairRow['floor'] = implode(' / ', $pairFloors);
+    $pairRow['floors'] = $pairFloors;
+    $pairRow['max_guests'] = (int)$jp['max_guests_combined'];
+    $pairRow['max_guests_override'] = null;
+    $mergedRooms[] = $pairRow;
+}
+$individualRooms = array_values(array_filter($mergedRooms, static function ($row) use ($filter_status, $filter_floor) {
+    if ($filter_status && (string)$row['status'] !== (string)$filter_status) {
+        return false;
+    }
+    if ($filter_floor) {
+        $floors = !empty($row['is_pair']) ? $row['floors'] : [(string)($row['floor'] ?? '')];
+        if (!in_array((string)$filter_floor, $floors, true)) {
+            return false;
+        }
+    }
+    return true;
+}));
+
 // Build amenities & photos maps for edit modal
 $roomAmenitiesMap = [];
 $amenitiesStmt = $pdo->query("SELECT individual_room_id, amenity_label, amenity_key FROM individual_room_amenities ORDER BY display_order ASC, id ASC");
@@ -993,6 +1135,10 @@ $roomCombinationsStmt = $pdo->query("
     ORDER BY rc.is_active DESC, r.name, rc.combined_name
 ");
 $roomCombinations = $roomCombinationsStmt->fetchAll(PDO::FETCH_ASSOC);
+$roomCombinationsById = [];
+foreach ($roomCombinations as $rcRow) {
+    $roomCombinationsById[(int)$rcRow['id']] = $rcRow;
+}
 // Room id => the joined rooms it belongs to, so the rooms list shows that a room is also sold
 // as part of a pair (its own room type does not change unless it is sold ONLY as the pair).
 $roomJoinedIn = [];
@@ -1013,18 +1159,8 @@ $floorsStmt = $pdo->query("SELECT DISTINCT floor FROM individual_rooms WHERE flo
 $floors = $floorsStmt->fetchAll(PDO::FETCH_COLUMN);
 
 // Get status summary
-$summaryStmt = $pdo->query("
-    SELECT
-        status,
-        COUNT(*) as count
-    FROM individual_rooms
-    WHERE is_active = 1
-    GROUP BY status
-");
-$statusSummary = [];
-foreach ($summaryStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-    $statusSummary[$row['status']] = $row['count'];
-}
+// A joined-only pair counts once (status = the most restrictive of its two rooms).
+$statusSummary = array_count_values(rh_room_unit_statuses());
 
 $currency = htmlspecialchars(getSetting('currency_symbol'));
 ?>
@@ -1173,8 +1309,9 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
         </div>
 
         <!-- Bulk Actions -->
-        <div class="bulk-actions hidden" id="bulkActions">
-            <span id="selectedCount">0 selected</span>
+        <div class="admin-bulk-bar bulk-actions hidden" id="bulkActions">
+            <span class="admin-bulk-bar__count"><i class="fas fa-check-square" aria-hidden="true"></i> <span id="selectedCount">0 selected</span></span>
+            <div class="admin-bulk-bar__controls">
             <select id="bulkStatus" data-help="Select Status|Choose a new status to apply to all selected rooms at once.">
                 <option value="">Change status to...</option>
                 <option value="available">Available</option>
@@ -1187,6 +1324,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 data-help="Apply Bulk Status Change|Change the status of all selected rooms at once to the value chosen above. Select rooms using the checkboxes in the table.">
                 <i class="fas fa-check"></i> Apply
             </button>
+            </div>
         </div>
 
         <!-- Rooms Table -->
@@ -1241,6 +1379,14 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                         <?php else: ?>
                             <?php foreach ($individualRooms as $room): ?>
                                 <?php
+                                // A joined-only pair is ONE row: its actions work on both rooms.
+                                $isPair = !empty($room['is_pair']);
+                                $rowIdsCsv = $isPair ? (string)$room['room_ids_csv'] : (string)(int)$room['id'];
+                                $pairMemberNote = '';
+                                if ($isPair && (string)$room['pair']['a_status'] !== (string)$room['pair']['b_status']) {
+                                    $pairMemberNote = $room['pair']['a_number'] . ': ' . ucfirst(str_replace('_', ' ', (string)$room['pair']['a_status']))
+                                        . ' / ' . $room['pair']['b_number'] . ': ' . ucfirst(str_replace('_', ' ', (string)$room['pair']['b_status']));
+                                }
                                 // Compute timeline-aware display status
                                 $displayStatus = $room['status'];
                                 $statusIcon = 'check';
@@ -1269,7 +1415,9 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                         . ' (' . htmlspecialchars($room['next_guest'] ?? '', ENT_QUOTES) . ')'
                                         . ' are already assigned. No further assignment is needed.';
                                 } else {
-                                    $assignHelp = 'Assign to Booking|Link this physical room to an unassigned booking of the same room type. The guest will be checked into this specific room number.';
+                                    $assignHelp = $isPair
+                                        ? 'Assign to Booking|Give this joined room (both rooms) to an unassigned booking of the joined room type. The guest takes both rooms.'
+                                        : 'Assign to Booking|Link this physical room to an unassigned booking of the same room type. The guest will be checked into this specific room number.';
                                 }
 
                                 // ── Status button: pass active booking context ────────────────
@@ -1323,12 +1471,13 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                 ?>
                                 <tr data-room-status="<?php echo $displayStatus; ?>" id="room-<?php echo (int)$room['id']; ?>" data-focus="room-<?php echo (int)$room['id']; ?>">
                                     <td>
-                                        <input type="checkbox" name="room_ids[]" value="<?php echo $room['id']; ?>" onchange="updateBulkActions()">
+                                        <input type="checkbox" name="room_ids[]" value="<?php echo $room['id']; ?>" onchange="updateBulkActions()"<?php echo $isPair ? ' data-joined-room="1" title="Joined room - both rooms change together"' : ''; ?>>
                                     </td>
                                     <td>
                                         <button type="button" class="room-number-btn"
-                                            onclick="openRoomDetailModal(<?php echo (int)$room['id']; ?>)">
-                                            <?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>
+                                            onclick="openRoomDetailModal(<?php echo (int)$room['id']; ?><?php echo $isPair ? ', ' . (int)$room['pair_id'] : ''; ?>)">
+                                            <?php /* "A + B": a no-break space before the plus keeps the sign with its room when a long pair label wraps. */
+                                            echo $isPair ? str_replace(' + ', "\u{00A0}+ ", htmlspecialchars($room['room_number'], ENT_QUOTES)) : htmlspecialchars($room['room_number'], ENT_QUOTES); ?>
                                         </button>
                                         <?php if ($room['room_name']): ?>
                                             <div class="room-name"><?php echo htmlspecialchars($room['room_name']); ?></div>
@@ -1336,7 +1485,12 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                     </td>
                                     <td>
                                         <?php echo htmlspecialchars($room['room_type_name'] ?? 'Unknown'); ?>
-                                        <?php foreach ($roomJoinedIn[(int)$room['id']] ?? [] as $ji): ?>
+                                        <?php if ($isPair): ?>
+                                            <small class="ir-joined-badge" title="Two rooms sold only as one joined room (2 rooms)">
+                                                <i class="fas fa-link"></i> Joined room
+                                            </small>
+                                        <?php endif; ?>
+                                        <?php foreach ($isPair ? [] : ($roomJoinedIn[(int)$room['id']] ?? []) as $ji): ?>
                                             <small class="ir-joined-badge<?php echo $ji['active'] ? '' : ' is-inactive'; ?>" title="<?php echo htmlspecialchars($ji['only'] ? 'Sold only as the joined room' : 'Sold on its own and as part of the joined room', ENT_QUOTES); ?>">
                                                 <i class="fas fa-link"></i>
                                                 <?php echo htmlspecialchars(($ji['only'] ? 'Joined only: ' : 'Also joined: ') . $ji['type'] . ' with ' . $ji['partner']); ?><?php echo $ji['active'] ? '' : ' (inactive)'; ?>
@@ -1346,6 +1500,9 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                     <td><?php echo $room['floor'] ? htmlspecialchars($room['floor']) : '-'; ?></td>
                                     <td>
                                         <?php echo (int)($room['max_guests_override'] ?? $room['max_guests']); ?> guests
+                                        <?php if ($isPair): ?>
+                                            <small style="display:block;color:#766550;">Both rooms</small>
+                                        <?php endif; ?>
                                         <?php if ($room['max_guests_override'] !== null): ?>
                                             <small style="display:block;color:#766550;">Override</small>
                                         <?php endif; ?>
@@ -1365,6 +1522,9 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                             <i class="fas fa-<?php echo $statusIcon; ?>"></i>
                                             <?php echo $statusLabel; ?>
                                         </span>
+                                        <?php if ($pairMemberNote !== ''): ?>
+                                            <small class="ir-member-note"><?php echo htmlspecialchars($pairMemberNote); ?></small>
+                                        <?php endif; ?>
                                     </td>
                                     <?php
                                     $chOverride = $room['children_allowed_override'];
@@ -1376,7 +1536,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                         <button
                                             type="button"
                                             class="children-toggle-btn"
-                                            data-room-id="<?php echo $room['id']; ?>"
+                                            data-room-id="<?php echo htmlspecialchars($rowIdsCsv, ENT_QUOTES); ?>"
                                             data-override="<?php echo $chOverride !== null ? $chOverride : 'null'; ?>"
                                             data-effective="<?php echo $chEffective; ?>"
                                             onclick="cycleChildrenPolicy(this)"
@@ -1442,41 +1602,62 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                     <td>
                                         <div class="actions-cell">
                                             <button class="btn btn-secondary btn-sm" type="button"
-                                                onclick="openRoomDetailModal(<?php echo (int)$room['id']; ?>)"
+                                                onclick="openRoomDetailModal(<?php echo (int)$room['id']; ?><?php echo $isPair ? ', ' . (int)$room['pair_id'] : ''; ?>)"
                                                 data-help="Room Details|View full occupancy details — who is staying, for how long, upcoming bookings, and status history for this room.">
                                                 <i class="fas fa-eye"></i> Details
                                             </button>
+                                            <?php if ($isPair): ?>
+                                            <button class="btn btn-info btn-sm" type="button"
+                                                onclick="openCombinationForm(_irCombos[<?php echo (int)$room['pair_id']; ?>])"
+                                                data-help="Edit Joined Room|Change the joined room's name, rate, capacity or the two rooms that make it up. Open the details to edit either physical room.">
+                                                <i class="fas fa-edit"></i> Edit
+                                            </button>
+                                            <?php else: ?>
                                             <button class="btn btn-info btn-sm" type="button"
                                                 onclick='openEditModal(<?php echo htmlspecialchars(json_encode($room), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($roomAmenitiesMap[$room['id']] ?? []), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($roomPhotosMap[$room['id']] ?? []), ENT_QUOTES, "UTF-8"); ?>)'
                                                 data-help="Edit Room|Update this room's details: name, floor, occupancy overrides, child pricing, amenities and photos.">
                                                 <i class="fas fa-edit"></i> Edit
                                             </button>
-                                            <button class="btn btn-primary btn-sm" type="button"
-                                                <?php if ($assignDisabled): ?>
-                                                disabled
-                                                style="opacity:0.45;cursor:not-allowed;"
-                                                <?php else: ?>
-                                                onclick="openAssignBookingModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>', <?php echo $room['room_type_id']; ?>)"
-                                                <?php endif; ?>
-                                                data-help="<?php echo $assignHelp; ?>">
-                                                <i class="fas fa-door-open"></i> Assign
-                                            </button>
+                                            <?php endif; ?>
                                             <button class="btn btn-success btn-sm" type="button"
-                                                onclick="openStatusModal(<?php echo $room['id']; ?>, '<?php echo $room['status']; ?>', '<?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>', '<?php echo $statusActiveGuest; ?>', '<?php echo $statusActiveRef; ?>', '<?php echo $statusActiveOut; ?>')"
-                                                data-help="Change Status|Manually update this room's physical status — e.g. set to Cleaning after a checkout, or Maintenance when repairs are needed.">
+                                                onclick="openStatusModal('<?php echo htmlspecialchars($rowIdsCsv, ENT_QUOTES); ?>', '<?php echo $room['status']; ?>', '<?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>', '<?php echo $statusActiveGuest; ?>', '<?php echo $statusActiveRef; ?>', '<?php echo $statusActiveOut; ?>')"
+                                                data-help="<?php echo $isPair ? 'Change Status|Update the status of this joined room. Both of its rooms change together.' : 'Change Status|Manually update this room\'s physical status — e.g. set to Cleaning after a checkout, or Maintenance when repairs are needed.'; ?>">
                                                 <i class="fas fa-exchange-alt"></i> Status
                                             </button>
-                                            <button class="btn btn-danger btn-sm" type="button"
-                                                <?php if ($hasActiveBooking): ?>
-                                                disabled
-                                                style="opacity:0.45;cursor:not-allowed;"
-                                                data-help="Cannot Delete|This room has an active booking in progress. Check out the guest before deleting this room."
-                                                <?php else: ?>
-                                                onclick="confirmDelete(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>')"
-                                                data-help="Delete Room|Permanently remove this room record. Rooms with active or upcoming bookings cannot be deleted."
-                                                <?php endif; ?>>
-                                                <i class="fas fa-trash"></i>
-                                            </button>
+                                            <?php /* Details, Edit and Status stay on the row; the rest sit in the shared More menu. */ ?>
+                                            <div class="actions-more">
+                                                <button type="button" class="btn btn-secondary btn-sm actions-more-toggle" title="More actions" aria-label="More actions" aria-haspopup="true" onclick="toggleRoomActionsMore(this, event)">
+                                                    <i class="fas fa-ellipsis-vertical"></i> More
+                                                </button>
+                                                <div class="actions-more-menu">
+                                                    <button type="button"
+                                                        <?php if ($assignDisabled): ?>
+                                                        disabled
+                                                        <?php else: ?>
+                                                        onclick="closeRoomActionMenus(); openAssignBookingModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>', <?php echo $room['room_type_id']; ?>)"
+                                                        <?php endif; ?>
+                                                        data-help="<?php echo $assignHelp; ?>">
+                                                        <i class="fas fa-door-open"></i> Assign to booking
+                                                    </button>
+                                                    <?php if ($isPair): ?>
+                                                    <button type="button" onclick="closeRoomActionMenus(); openCombinationsModal()"
+                                                        data-help="Remove Joined Room|A joined room is removed in Room Combinations (delete or deactivate the pairing). Its two rooms are kept.">
+                                                        <i class="fas fa-link"></i> Manage joined rooms
+                                                    </button>
+                                                    <?php else: ?>
+                                                    <button type="button" class="text-danger"
+                                                        <?php if ($hasActiveBooking): ?>
+                                                        disabled
+                                                        data-help="Cannot Delete|This room has an active booking in progress. Check out the guest before deleting this room."
+                                                        <?php else: ?>
+                                                        onclick="closeRoomActionMenus(); confirmDelete(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>')"
+                                                        data-help="Delete Room|Permanently remove this room record. Rooms with active or upcoming bookings cannot be deleted."
+                                                        <?php endif; ?>>
+                                                        <i class="fas fa-trash"></i> Delete room
+                                                    </button>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
@@ -1490,16 +1671,16 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
 
     <!-- ══ JOINED ROOM COMBINATIONS MODAL ══ -->
     <style>
-        .ir-joined-badge { display: block; margin-top: 4px; font-size: 11px; font-weight: 600; color: #0369a1; }
-        .ir-joined-badge.is-inactive { color: #9b8f85; font-weight: 500; }
         #combinationsModal .combo-modal { width: min(1180px, 96vw); max-width: none; max-height: 92vh; overflow-y: auto; }
         #combinationsModal .combo-label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #6b625a; margin-bottom: 5px; }
         #combinationsModal .combo-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin-bottom: 12px; }
         #combinationsModal .combo-grid-4 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 12px 16px; align-items: end; margin-bottom: 14px; }
+        #combinationsModal .combo-grid-2 > div, #combinationsModal .combo-grid-4 > div { min-width: 0; }
         #combinationsModal .combo-grid-2 input, #combinationsModal .combo-grid-2 select,
-        #combinationsModal .combo-grid-4 input { width: 100%; box-sizing: border-box; }
+        #combinationsModal .combo-grid-4 input { width: 100%; max-width: 100%; box-sizing: border-box; text-overflow: ellipsis; }
         #combinationsModal .combo-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
-        #combinationsModal .combo-mode label { display: flex; gap: 10px; align-items: flex-start; border: 1px solid #e0d6cb; border-radius: 8px; padding: 10px 12px; background: #fff; cursor: pointer; font-size: 13px; color: #2A2723; }
+        #combinationsModal .combo-mode label { display: flex; gap: 10px; align-items: flex-start; min-width: 0; min-height: 44px; border: 1px solid #e0d6cb; border-radius: 8px; padding: 10px 12px; background: #fff; cursor: pointer; font-size: 13px; color: #2A2723; overflow-wrap: anywhere; }
+        #combinationsModal .combo-mode label:has(input:checked) { border-color: var(--ir-gold, #766550); background: #fdf6ee; }
         #combinationsModal .combo-mode label small { display: block; color: #6b625a; font-weight: 400; margin-top: 2px; }
         #combinationsModal .combo-mode input { margin-top: 3px; }
         #combinationsModal .combo-table-wrap { overflow-x: auto; border: 1px solid #e8e0d8; border-radius: 8px; }
@@ -1599,15 +1780,15 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                         <span class="combo-label">How are these two rooms sold?</span>
                         <div class="combo-mode">
                             <label>
-                                <input type="radio" name="combination_sale_mode" value="shared" id="combo_mode_shared" checked>
-                                <span>On their own <strong>and</strong> as the joined room
-                                    <small>Each room keeps its own room type. When the pair is booked, both rooms are taken; when either room is booked, the pair is unavailable.</small>
+                                <input type="radio" name="combination_sale_mode" value="joined_only" id="combo_mode_joined" checked>
+                                <span>Only as the joined room <strong>(recommended)</strong>
+                                    <small>The two rooms become ONE room: both move to the "Book As" room type and show as a single room everywhere (rooms list, calendar, blocked dates).</small>
                                 </span>
                             </label>
                             <label>
-                                <input type="radio" name="combination_sale_mode" value="joined_only" id="combo_mode_joined">
-                                <span>Only as the joined room
-                                    <small>Both rooms move to the "Book As" room type and are no longer sold on their own.</small>
+                                <input type="radio" name="combination_sale_mode" value="shared" id="combo_mode_shared">
+                                <span>On their own <strong>and</strong> as the joined room
+                                    <small>Each room keeps its own room type. When the pair is booked, both rooms are taken; when either room is booked, the pair is unavailable.</small>
                                 </span>
                             </label>
                         </div>
@@ -1981,6 +2162,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                         <span id="statusActiveWarningText"></span>
                     </div>
                     <p style="margin-bottom:10px;">Changing status for room: <strong id="statusRoomNumber"></strong></p>
+                    <p id="statusPairNote" style="display:none;margin:-4px 0 10px;font-size:12px;color:#6b625a;"><i class="fas fa-link"></i> Joined room: both of its rooms change together.</p>
                     <div class="form-group">
                         <label for="new_status">New Status</label>
                         <select name="new_status" id="new_status" required>
@@ -2013,7 +2195,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label><i class="fas fa-hashtag"></i> Room:</label>
+                    <label><i class="fas fa-hashtag"></i> Room (a joined room takes both of its rooms):</label>
                     <input type="text" id="assign_room_number" class="form-control" readonly style="background: #f5f5f5;">
                 </div>
                 <div class="form-group">
@@ -2042,6 +2224,24 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
     </form>
 
     <script>
+        // Joined-room pairings (for editing a joined room from the list) and the physical rooms
+        // behind each joined room (so each can still be edited on its own from the details modal).
+        const _irCombos = <?php echo json_encode((object)$roomCombinationsById, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const _irMemberRooms = <?php
+            $memberRoomsJs = [];
+            foreach ($individualRooms as $mrRow) {
+                if (!empty($mrRow['is_pair'])) {
+                    foreach ($mrRow['pair']['room_ids'] as $mrId) {
+                        $mr = $rowsByRoomId[$mrId] ?? null;
+                        if ($mr) {
+                            $memberRoomsJs[$mrId] = ['room' => $mr, 'amenities' => $roomAmenitiesMap[$mrId] ?? [], 'photos' => $roomPhotosMap[$mrId] ?? []];
+                        }
+                    }
+                }
+            }
+            echo json_encode((object)$memberRoomsJs, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        ?>;
+
         // Add Modal
         function openAddModal() {
             document.getElementById('modalTitle').innerHTML = '<i class="fas fa-plus"></i> Add Individual Room';
@@ -2089,13 +2289,43 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             document.getElementById('roomModal').classList.remove('active');
         }
 
+        // ===== MORE-ACTIONS MENU (shared placement from admin-components.js) =====
+        function closeRoomActionMenus() {
+            document.querySelectorAll('.rooms-table .actions-more.open').forEach(function (el) {
+                el.classList.remove('open');
+                var m = el.querySelector('.actions-more-menu');
+                if (m) m.removeAttribute('style');
+            });
+        }
+
+        function toggleRoomActionsMore(btn, e) {
+            if (e) e.stopPropagation();
+            var wrap = btn.closest('.actions-more');
+            var menu = wrap ? wrap.querySelector('.actions-more-menu') : null;
+            if (!menu) return;
+            var wasOpen = wrap.classList.contains('open');
+            closeRoomActionMenus();
+            if (wasOpen) return;
+            wrap.classList.add('open');
+            if (window.rhPlaceActionMenu) window.rhPlaceActionMenu(btn, menu);
+        }
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.actions-more')) closeRoomActionMenus();
+        });
+        document.addEventListener('scroll', function (e) {
+            if (!(e.target && e.target.closest && e.target.closest('.actions-more-menu'))) closeRoomActionMenus();
+        }, true);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') closeRoomActionMenus();
+        });
+
         function resetCombinationForm() {
             const form = document.getElementById('combinationForm');
             if (!form) return;
             form.reset();
             document.getElementById('combination_id').value = '';
             document.getElementById('combination_is_active').checked = true;
-            document.getElementById('combo_mode_shared').checked = true;
+            document.getElementById('combo_mode_joined').checked = true;
             const title = document.getElementById('combinationFormTitle');
             if (title) title.innerHTML = '<i class="fas fa-plus-circle" style="color:#766550;margin-right:6px;"></i> Add / Edit Combination';
         }
@@ -2136,8 +2366,11 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
 
         // Status Modal
         function openStatusModal(roomId, currentStatus, roomNumber, activeGuest, activeRef, activeCheckout) {
+            // roomId is "17" for one room, or "17,18" for a joined room (both change together)
             document.getElementById('statusRoomId').value = roomId;
             document.getElementById('statusRoomNumber').textContent = roomNumber;
+            const pairNote = document.getElementById('statusPairNote');
+            if (pairNote) pairNote.style.display = String(roomId).indexOf(',') >= 0 ? '' : 'none';
 
             const sel = document.getElementById('new_status');
             sel.value = currentStatus;
@@ -2219,6 +2452,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 showRoomNotify('Please select at least one room.', 'error');
                 return;
             }
+            const joinedSelected = document.querySelectorAll('input[name="room_ids[]"][data-joined-room]:checked').length;
             const statusLabels = {
                 available: 'Available',
                 occupied: 'Occupied',
@@ -2229,6 +2463,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             window.AdminConfirm.request({
                 title: 'Bulk Status Change',
                 message: 'Change status of ' + checkboxes.length + ' room(s) to "' + (statusLabels[status] || status) + '"?',
+                details: joinedSelected ? joinedSelected + ' joined room(s) selected: both rooms of each change together.' : undefined,
                 confirmText: 'Apply',
                 tone: 'warning',
                 icon: 'fa-exchange-alt'
@@ -2555,7 +2790,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
         let _rdRoomId = null;
         let _rdRoomData = null; // cache last loaded room JSON
 
-        function openRoomDetailModal(roomId) {
+        function openRoomDetailModal(roomId, pairId) {
             _rdRoomId = roomId;
             _rdRoomData = null;
 
@@ -2574,6 +2809,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             const fd = new FormData();
             fd.append('action', 'get_room_detail');
             fd.append('room_id', roomId);
+            if (pairId) fd.append('pair_id', pairId);
 
             fetch(window.location.href, {
                     method: 'POST',
@@ -2611,7 +2847,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             const active = _rdRoomData.active;
             closeRoomDetailModal();
             openStatusModal(
-                room.id,
+                room.status_ids || room.id,
                 room.status,
                 room.number,
                 active ? active.guest_name : '',
@@ -2626,8 +2862,22 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             openAssignBookingModal(_rdRoomData.room.id, _rdRoomData.room.number, _rdRoomData.room.room_type_id);
         }
 
+        // Edit one physical room behind a joined room (its own floor, amenities, photos...).
+        function openMemberRoomEdit(roomId) {
+            const m = _irMemberRooms[roomId];
+            if (!m) return;
+            closeRoomDetailModal();
+            openEditModal(m.room, m.amenities, m.photos);
+        }
+
         function _rdEdit() {
             if (!_rdRoomData) return;
+            if (_rdRoomData.room.pair_id) {
+                // A joined room is edited as a joined room (name, rate, capacity, its two rooms)
+                closeRoomDetailModal();
+                if (_irCombos[_rdRoomData.room.pair_id]) openCombinationForm(_irCombos[_rdRoomData.room.pair_id]);
+                return;
+            }
             // Find the matching room row and trigger existing openEditModal
             const rows = document.querySelectorAll('tr[data-room-status]');
             for (const row of rows) {
@@ -2717,7 +2967,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             // Header
             const fullName = room.number + (room.name ? ' — ' + room.name : '');
             document.getElementById('rdTitle').textContent = fullName;
-            document.getElementById('rdSubtitle').textContent = room.type + (room.floor ? ' · Floor ' + room.floor : '');
+            document.getElementById('rdSubtitle').textContent = (room.pair_id ? 'Joined room · ' : '') + room.type + (room.floor ? ' · Floor ' + room.floor : '');
+            document.getElementById('rdEditBtn').innerHTML = room.pair_id ? '<i class="fas fa-edit"></i> Edit Joined Room' : '<i class="fas fa-edit"></i> Edit Room';
             document.getElementById('rdPrice').textContent = room.price;
 
             const statusBadge = document.getElementById('rdStatusBadge');
@@ -2904,7 +3155,19 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 room.amenities.map(a => `<span class="rd-amenity-tag">${_esc(a)}</span>`).join('') :
                 '<span style="color:#9ca3af;font-size:12px;">No amenities listed</span>';
 
-            infoBody.innerHTML = `
+            const membersHtml = (room.members && room.members.length) ? `
+                <div class="rd-member-list">
+                    ${room.members.map(m => `
+                        <div class="rd-member-row">
+                            <span class="rd-member-name"><strong>${_esc(m.number)}</strong>${m.name ? ' — ' + _esc(m.name) : ''}${m.floor ? ' · Floor ' + _esc(m.floor) : ''}</span>
+                            <span class="rd-up-badges">
+                                ${_badge(_statusLabels[m.status] || m.status, _statusColors[m.status] || '#6b7280')}
+                                ${_irMemberRooms[m.id] ? '<button type="button" class="btn btn-info btn-sm" onclick="openMemberRoomEdit(' + m.id + ')"><i class="fas fa-edit"></i> Edit</button>' : ''}
+                            </span>
+                        </div>`).join('')}
+                </div>` : '';
+
+            infoBody.innerHTML = membersHtml + `
                 <div class="rd-info-grid">
                     <div class="rd-info-item"><span class="rd-info-label">Type</span><span>${_esc(room.type)}</span></div>
                     <div class="rd-info-item"><span class="rd-info-label">Floor</span><span>${room.floor || '—'}</span></div>
@@ -2928,6 +3191,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             ${_badge(l.to, _statusColors[l.to] || '#6b7280')}
                         </span>
                         <span class="rd-log-meta">
+                            ${l.room ? `<span class="rd-log-by">${_esc(l.room)}</span>` : ''}
                             ${l.reason ? `<span class="rd-log-reason">${_esc(l.reason)}</span>` : ''}
                             <span class="rd-log-by">${_esc(l.performed_by)}</span>
                             <span class="rd-log-date">${_fmtDateTime(l.date)}</span>

@@ -364,6 +364,54 @@ function getIndividualRoomsAvailability(int $roomTypeId, ?string $checkIn, ?stri
         $unavailableRooms[] = $entry;
     }
 
+    // A joined-only pair is ONE room: list it once ("101A + 101B"), available only when both of
+    // its rooms are, and carry both ids so a client can assign the whole pair.
+    $joinedPairs = [];
+    foreach (rh_joined_only_pairs(true) as $jp) {
+        if ((int)$jp['combined_room_type_id'] === $roomTypeId) {
+            $joinedPairs[] = $jp;
+        }
+    }
+    if ($joinedPairs) {
+        $roomIdx = [];
+        foreach ($availableRooms as $i => $r) {
+            $roomIdx[(int)$r['id']] = ['list' => 'available', 'i' => $i];
+        }
+        foreach ($unavailableRooms as $i => $r) {
+            $roomIdx[(int)$r['id']] = ['list' => 'unavailable', 'i' => $i];
+        }
+        $dropIds = [];
+        $mergedAvailable = [];
+        $mergedUnavailable = [];
+        foreach ($joinedPairs as $jp) {
+            $a = $roomIdx[$jp['room_a_id']] ?? null;
+            $b = $roomIdx[$jp['room_b_id']] ?? null;
+            if (!$a || !$b) {
+                continue;
+            }
+            $dropIds[$jp['room_a_id']] = $dropIds[$jp['room_b_id']] = true;
+            $entryA = $a['list'] === 'available' ? $availableRooms[$a['i']] : $unavailableRooms[$a['i']];
+            $entryB = $b['list'] === 'available' ? $availableRooms[$b['i']] : $unavailableRooms[$b['i']];
+            $pairEntry = ($a['list'] === 'unavailable') ? $entryA : $entryB;
+            $pairEntry['id'] = $jp['room_a_id'];
+            $pairEntry['room_number'] = $jp['label'];
+            $pairEntry['pair_room_ids'] = $jp['room_ids'];
+            $pairEntry['joined_room'] = true;
+            $pairEntry['status'] = rh_joined_pair_status((string)$jp['a_status'], (string)$jp['b_status']);
+            if ($a['list'] === 'available' && $b['list'] === 'available') {
+                $mergedAvailable[] = $pairEntry;
+            } else {
+                $mergedUnavailable[] = $pairEntry;
+            }
+        }
+        $availableRooms = array_merge(array_values(array_filter($availableRooms, static function ($r) use ($dropIds) {
+            return !isset($dropIds[(int)$r['id']]);
+        })), $mergedAvailable);
+        $unavailableRooms = array_merge(array_values(array_filter($unavailableRooms, static function ($r) use ($dropIds) {
+            return !isset($dropIds[(int)$r['id']]);
+        })), $mergedUnavailable);
+    }
+
     // Room-type / global blocks (per night; the check-out day is free)
     $blockedStmt = $pdo->prepare("
         SELECT block_date, reason
@@ -393,7 +441,7 @@ function getIndividualRoomsAvailability(int $roomTypeId, ?string $checkIn, ?stri
         'unavailable_rooms' => $unavailableRooms,
         'blocked_dates' => $blockedDates,
         'summary' => [
-            'total_rooms' => count($individualRooms),
+            'total_rooms' => count($availableRooms) + count($unavailableRooms), // a joined room counts once
             'available_count' => count($availableRooms),
             'unavailable_count' => count($unavailableRooms)
         ]

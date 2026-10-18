@@ -103,16 +103,16 @@ $fnb = [
 /* ---------------- Stock / Inventory ---------------- */
 $stock = [
     'low_stock' => rp_safe(function() use ($pdo) {
-        $st = $pdo->query("SELECT name, current_quantity AS current_stock, min_quantity AS min_stock_level, unit FROM stock_ingredients
-            WHERE is_archived=0 AND current_quantity <= min_quantity
-            ORDER BY (current_quantity / NULLIF(min_quantity,0)) ASC LIMIT 30");
+        $st = $pdo->query("SELECT name, current_quantity AS current_stock, (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END) AS min_stock_level, unit FROM stock_ingredients
+            WHERE is_archived=0 AND current_quantity <= (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END)
+            ORDER BY (current_quantity / NULLIF((CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END),0)) ASC LIMIT 30");
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }),
     'stock_value' => rp_safe(function() use ($pdo) {
         $st = $pdo->query("SELECT
                 SUM(current_quantity * COALESCE(cost_per_unit, 0)) AS total_value,
                 COUNT(*) AS active_items,
-                SUM(CASE WHEN current_quantity <= min_quantity THEN 1 ELSE 0 END) AS low_count,
+                SUM(CASE WHEN current_quantity <= (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END) THEN 1 ELSE 0 END) AS low_count,
                 SUM(CASE WHEN current_quantity = 0 THEN 1 ELSE 0 END) AS oos_count
             FROM stock_ingredients WHERE is_archived=0");
         return $st->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -130,14 +130,17 @@ $stock = [
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }),
     'top_used' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
-        $st = $pdo->prepare("SELECT i.name, ABS(SUM(sa.quantity_change)) AS qty,
-                ABS(SUM(sa.quantity_change * COALESCE(i.cost_per_unit, 0))) AS cost
+        // Net of restores: a deduction later put back (KDS recall, pre-prep void, 86) is not consumption.
+        $st = $pdo->prepare("SELECT i.name, GREATEST(0, -SUM(sa.quantity_change)) AS qty,
+                GREATEST(0, -SUM(sa.quantity_change * COALESCE(i.cost_per_unit, 0))) AS cost
             FROM stock_adjustments sa
             JOIN stock_ingredients i ON i.id = sa.ingredient_id
-            WHERE sa.created_at BETWEEN ? AND ? AND sa.quantity_change < 0
-              AND sa.source_type IN ('pos_order','sale','consumption','recipe','room_service')
-              AND NOT " . rh_voided_wastage_sql('sa') . "
-            GROUP BY i.id ORDER BY cost DESC LIMIT 20");
+            WHERE sa.created_at BETWEEN ? AND ?
+              AND ((sa.quantity_change < 0
+                    AND sa.source_type IN ('pos_order','sale','consumption','recipe','room_service')
+                    AND NOT " . rh_voided_wastage_sql('sa') . ")
+                   OR sa.source_type = 'void_restore')
+            GROUP BY i.id HAVING qty > 0 ORDER BY cost DESC LIMIT 20");
         $st->execute([$rp_from, $rp_to]);
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }),

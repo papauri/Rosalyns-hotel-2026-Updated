@@ -479,3 +479,14 @@
         width: auto;
     }
 }
+
+/* Long joined-room labels ("101A + 101B (Joined Room)") never push a select past its column:
+   the select fills its field and clips the text with an ellipsis instead of widening. */
+.blocked-dates-page select.form-select,
+#blockSingleDateModal select.form-select,
+#blockDateRangeModal select.form-select {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    text-overflow: ellipsis;
+}

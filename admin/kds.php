@@ -231,6 +231,7 @@ $bootstrap['fingerprint'] = md5(
         }
     </style>
     <script src="js/station-sounds.js"></script>
+    <script src="js/rh-age.js?v=<?php echo @filemtime(__DIR__ . '/js/rh-age.js'); ?>"></script>
     <script src="js/kiosk-fullscreen.js" defer></script>
 </head>
 
@@ -728,23 +729,13 @@ $bootstrap['fingerprint'] = md5(
         }
 
         function fmtElapsed(s) {
-            // Human-friendly elapsed timer:
-            //   0-9s    → "just fired"
-            //   10-59s  → "45 sec"
-            //   1-4m    → "3m 12s"
-            //   5-59m   → "12 min"
-            //   1-12h   → "1h 12m"
-            //   12h+    → "stale" (anything older than half a day on the board is wrong)
+            // Ticket timer: the shared age format (js/rh-age.js) with the unit letters small.
+            //   0-9s    -> "just fired"
+            //   10s-12h -> "45s", "12m 05s", "1h 12m"
+            //   12h+    -> "check FOH" (anything older than half a day on the board is wrong)
             if (s < 10) return '<span class="u">just fired</span>';
-            if (s < 60) return s + ' <span class="u">sec</span>';
-            const m = Math.floor(s / 60),
-                ss = s % 60;
-            if (m < 5) return m + '<span class="u">m</span> ' + String(ss).padStart(2, '0') + '<span class="u">s</span>';
-            if (m < 60) return m + ' <span class="u">min</span>';
-            const h = Math.floor(m / 60),
-                mm = m % 60;
-            if (h >= 12) return '<span class="u">check FOH</span>';
-            return h + '<span class="u">h</span> ' + String(mm).padStart(2, '0') + '<span class="u">m</span>';
+            if (s >= 12 * 3600) return '<span class="u">check FOH</span>';
+            return rhFmtAge(s, u => '<span class="u">' + u + '</span>');
         }
 
         function fmtPlacedTime(iso) {
@@ -965,7 +956,7 @@ $bootstrap['fingerprint'] = md5(
             if (m.is_outbound) {
                 const replyLine = m.reply_message ? `<div class="t-foh-msg__reply"><i class="fas fa-reply"></i> ${escHtml(m.replied_by_name || 'FOH')}: ${escHtml(m.reply_message)} ${m.replied_at ? `<span style="opacity:.7;">${escHtml(fmtTime(m.replied_at))}</span>` : ''}</div>` : '';
                 return `<div class="t-foh-msg t-foh-msg--out${isUrgent ? ' is-urgent' : ''}" onclick="event.stopPropagation();">
-                <div class="t-foh-msg__from"><i class="fas fa-paper-plane"></i> You → FOH · ${escHtml(fmtTime(m.created_at))}${m.optimistic ? ' · <span class="t-foh-msg__pending">sending…</span>' : ' · <span class="t-foh-msg__sent">sent</span>'}</div>
+                <div class="t-foh-msg__from"><i class="fas fa-paper-plane"></i> You → FOH · ${escHtml(fmtTime(m.created_at))}${m.optimistic ? ' · <span class="kds-pill kds-pill--wait">sending…</span>' : ' · <span class="kds-pill kds-pill--ready">sent</span>'}</div>
                 <div class="t-foh-msg__body">${escHtml(m.message)}</div>
                 ${replyLine}
             </div>`;
@@ -982,7 +973,7 @@ $bootstrap['fingerprint'] = md5(
                 return `<div class="t-foh-msg${isUrgent ? ' is-urgent' : ''}" onclick="event.stopPropagation();">
                 <div class="t-foh-msg__from"><i class="fas fa-user-tie"></i> ${escHtml(m.sent_by_name || 'FOH')} · ${escHtml(fmtTime(m.created_at))}</div>
                 <div class="t-foh-msg__body">${escHtml(m.message)}</div>
-                <div class="t-foh-msg__reply"><i class="fas fa-check"></i> Seen</div>
+                <div class="t-foh-msg__reply"><span class="kds-pill kds-pill--done"><i class="fas fa-check"></i> Seen</span></div>
             </div>`;
             }
             const ticketQuickChips = KDS_QUICK_REPLIES.map(r =>

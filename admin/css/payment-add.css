@@ -558,6 +558,12 @@
     color: var(--finance-muted);
 }
 
+.pa-hint {
+    margin: 0.35rem 0 0;
+    font-size: 0.8rem;
+    color: #6b625a;
+}
+
 .pa-required {
     color: var(--finance-danger);
 }

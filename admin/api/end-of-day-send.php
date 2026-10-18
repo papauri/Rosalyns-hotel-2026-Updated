@@ -94,9 +94,10 @@ try {
     $ops = $opsStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
     // Occupancy
-    $rooms_total = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status <> 'out_of_order'")->fetchColumn();
-    $rooms_oo = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status = 'out_of_order'")->fetchColumn();
-    $occStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE status IN ('checked-in','checked-out') AND check_in_date <= ? AND check_out_date > ?");
+    // A joined-only pair is ONE room (out of order when either of its rooms is).
+    $rooms_total = rh_room_units_count(['out_of_order'], true);
+    $rooms_oo = rh_room_units_count(['out_of_order']);
+    $occStmt = $pdo->prepare("SELECT COALESCE(SUM(" . rh_booking_rooms_factor_sql('b') . "), 0) FROM bookings b WHERE b.deleted_at IS NULL AND b.status IN ('checked-in','checked-out') AND b.check_in_date <= ? AND b.check_out_date > ?");
     $occStmt->execute([$date, $date]);
     $rooms_occupied = (int)$occStmt->fetchColumn();
     $occupancy_pct  = $rooms_total > 0 ? ($rooms_occupied / $rooms_total) * 100 : 0;
@@ -123,7 +124,7 @@ try {
 
     // Department revenue from posted charges: food / drink / room-service charges posted to
     // guest folios today are F&B, not room revenue (so ADR / RevPAR use room charges only).
-    $folioFnb = rh_eod_folio_fnb($pdo, $date);
+    $folioFnb = rh_eod_folio_fnb_allocation($pdo, $date);
     $folioFnbMoved = max(0.0, min((float)$folioFnb['gross'], (float)$rev['room_gross']));
     if ($folioFnbMoved > 0) {
         $rev['room_gross'] = (float)$rev['room_gross'] - $folioFnbMoved;
@@ -250,7 +251,7 @@ try {
         $previous['pos_gross'] = 0.0;
     }
 
-    $prevOcc = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE status IN ('checked-in','checked-out') AND check_in_date <= ? AND check_out_date > ?");
+    $prevOcc = $pdo->prepare("SELECT COALESCE(SUM(" . rh_booking_rooms_factor_sql('b') . "), 0) FROM bookings b WHERE b.deleted_at IS NULL AND b.status IN ('checked-in','checked-out') AND b.check_in_date <= ? AND b.check_out_date > ?");
     $prevOcc->execute([$previous_day, $previous_day]);
     $previous['rooms_occupied'] = (int)$prevOcc->fetchColumn();
     $previous['occupancy_pct'] = $rooms_total > 0 ? ($previous['rooms_occupied'] / $rooms_total) * 100 : 0;

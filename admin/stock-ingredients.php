@@ -99,6 +99,29 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier]);
                         $message = "Ingredient \"{$name}\" added.";
                     } else {
+                        /* A unit change does not convert anything: quantity on hand, batches, cost per
+                         * unit, recipe quantities, par/reorder levels and pack sizes would all stay as
+                         * numbers in the OLD unit. Only an ingredient with no stock footprint may change it. */
+                        $oldRow = $pdo->prepare("SELECT unit, current_quantity FROM stock_ingredients WHERE id = ? FOR UPDATE");
+                        $oldRow->execute([$editId]);
+                        $old = $oldRow->fetch(PDO::FETCH_ASSOC);
+                        if (!$old) {
+                            throw new RuntimeException('Invalid ingredient.');
+                        }
+                        if (mb_strtolower(trim((string)$old['unit'])) !== mb_strtolower(trim($unit))) {
+                            $inUse = abs((float)$old['current_quantity']) > 0.00005;
+                            foreach (['stock_recipe_ingredients', 'stock_batches', 'stock_adjustments'] as $usedTable) {
+                                if ($inUse) {
+                                    break;
+                                }
+                                $usedChk = $pdo->prepare("SELECT COUNT(*) FROM `{$usedTable}` WHERE ingredient_id = ?");
+                                $usedChk->execute([$editId]);
+                                $inUse = ((int)$usedChk->fetchColumn() > 0);
+                            }
+                            if ($inUse) {
+                                throw new RuntimeException('Unit cannot be changed once the ingredient has stock, batches or recipes - create a new ingredient and archive this one.');
+                            }
+                        }
                         $stmt = $pdo->prepare("
                             UPDATE stock_ingredients
                             SET name = ?, category = ?, unit = ?, min_quantity = ?, yield_percent = ?, notes = ?,
@@ -127,7 +150,32 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ((int)$check->fetchColumn() > 0) {
                     throw new RuntimeException('Cannot delete: ingredient is used in one or more recipes. Archive it instead.');
                 }
-                // Cascading FKs will clean up batches/adjustments/wastage tied to this ingredient.
+                /* The FKs CASCADE, so deleting would erase this ingredient's whole usage, wastage and
+                 * stock-in ledger (past COGS, shrinkage and supplier spend would change retroactively)
+                 * and make any stock on hand vanish with no write-off. Only a never-used ingredient
+                 * may be hard-deleted; everything else is archived. */
+                $curQ = $pdo->prepare("SELECT current_quantity FROM stock_ingredients WHERE id = ? FOR UPDATE");
+                $curQ->execute([$id]);
+                $curVal = $curQ->fetchColumn();
+                if ($curVal === false) {
+                    throw new RuntimeException('Ingredient not found.');
+                }
+                $hasHistory = abs((float)$curVal) > 0.00005;
+                foreach (['stock_adjustments', 'stock_batches', 'stock_in_log', 'stock_wastage', 'stock_purchase_order_items', 'stock_count_lines'] as $histTable) {
+                    if ($hasHistory) {
+                        break;
+                    }
+                    try {
+                        $histChk = $pdo->prepare("SELECT COUNT(*) FROM `{$histTable}` WHERE ingredient_id = ?");
+                        $histChk->execute([$id]);
+                        $hasHistory = ((int)$histChk->fetchColumn() > 0);
+                    } catch (Throwable $e) {
+                        // table not installed on this schema: no history there
+                    }
+                }
+                if ($hasHistory) {
+                    throw new RuntimeException('Cannot delete: this ingredient has stock on hand or movement history (batches, adjustments, wastage, stock-in, counts or purchase orders). Archive it instead.');
+                }
                 $del = $pdo->prepare("DELETE FROM stock_ingredients WHERE id = ?");
                 $del->execute([$id]);
                 $message = 'Ingredient deleted.';
@@ -445,6 +493,29 @@ if (!$error || strpos($error, 'Stock tables not yet') === false) {
             ORDER BY i.is_archived ASC, i.category ASC, i.name ASC
         ");
         $ingredients = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        // Read-only flags for the screen, mirroring the server rules: the Unit is locked once an
+        // ingredient has stock, batches, adjustments or recipes; Delete is only offered when it
+        // has no stock and no history at all (everything else is archived).
+        $ingUnitUsed = [];
+        $ingHistoryUsed = [];
+        foreach (['stock_recipe_ingredients', 'stock_batches', 'stock_adjustments', 'stock_in_log', 'stock_wastage', 'stock_purchase_order_items', 'stock_count_lines'] as $usedTable) {
+            try {
+                foreach ($pdo->query("SELECT DISTINCT ingredient_id FROM `{$usedTable}`")->fetchAll(PDO::FETCH_COLUMN) as $usedId) {
+                    $ingHistoryUsed[(int)$usedId] = true;
+                    if (in_array($usedTable, ['stock_recipe_ingredients', 'stock_batches', 'stock_adjustments'], true)) {
+                        $ingUnitUsed[(int)$usedId] = true;
+                    }
+                }
+            } catch (Throwable $e) {
+                // table not installed on this schema: no history there
+            }
+        }
+        foreach ($ingredients as &$ingFlagRow) {
+            $hasStockQty = abs((float)$ingFlagRow['current_quantity']) > 0.00005;
+            $ingFlagRow['unit_locked'] = $hasStockQty || isset($ingUnitUsed[(int)$ingFlagRow['id']]);
+            $ingFlagRow['has_history'] = $hasStockQty || isset($ingHistoryUsed[(int)$ingFlagRow['id']]);
+        }
+        unset($ingFlagRow);
         foreach ($ingredients as $i) {
             if (!in_array($i['category'], $categories, true)) $categories[] = $i['category'];
         }
@@ -709,12 +780,16 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                                             <input type="hidden" name="id" value="<?php echo (int)$i['id']; ?>">
                                             <button><i class="fas fa-undo"></i> Restore</button>
                                         </form>
+                                        <?php if (!empty($i['has_history'])): ?>
+                                            <span class="row-note" title="Has stock or movement history, so it can only be archived.">Kept for history</span>
+                                        <?php else: ?>
                                         <form method="POST" style="display:inline;" onsubmit="return confirm('Permanently delete? This cannot be undone.');">
                                             <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                                             <input type="hidden" name="action" value="delete">
                                             <input type="hidden" name="id" value="<?php echo (int)$i['id']; ?>">
                                             <button class="btn-danger"><i class="fas fa-trash"></i> Delete</button>
                                         </form>
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                 </div>
                             </td>
@@ -765,6 +840,9 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                             <option value="tsp">Teaspoons (tsp)</option>
                             <option value="tbsp">Tablespoons (tbsp)</option>
                         </select>
+                        <?php /* Locked units are not submitted by a disabled select, so a hidden mirror carries the value. */ ?>
+                        <input type="hidden" name="unit" id="ing_unit_keep" value="" disabled>
+                        <p class="field-note" id="ing_unit_note" hidden><i class="fas fa-lock"></i> Create a new ingredient to change unit. This one has stock, batches, adjustments or recipes in its current unit.</p>
                     </div>
                     <div>
                         <label>Min quantity (low-stock threshold) <i class="help" data-tip="When current stock drops to or below this number, the <?php echo $stockNounLow; ?> turns yellow on the dashboard and appears in reorder reports. Leave at 0 if you don't want low-stock alerts.">?</i></label>
@@ -1047,6 +1125,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 document.getElementById('ing_name').value = data.name || '';
                 document.getElementById('ing_category').value = data.category || '';
                 document.getElementById('ing_unit').value = data.unit || 'g';
+                setIngredientUnitLock(!!data.unit_locked, data.unit || 'g');
                 document.getElementById('ing_min').value = data.min_quantity || 0;
                 document.getElementById('ing_yield').value = data.yield_percent || 100;
                 document.getElementById('ing_notes').value = data.notes || '';
@@ -1058,8 +1137,21 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 document.getElementById('ingredientModalTitle').textContent = 'Add <?php echo $stockNoun; ?>';
                 document.getElementById('ing_action').value = 'add';
                 document.getElementById('ing_id').value = '';
+                setIngredientUnitLock(false, 'g');
             }
             openModal('ingredientModal');
+        }
+
+        // Lock the Unit select (with a visible reason) when the ingredient already has stock,
+        // batches, adjustments or recipes: the server refuses a unit change then.
+        function setIngredientUnitLock(locked, unit) {
+            const sel = document.getElementById('ing_unit');
+            const keep = document.getElementById('ing_unit_keep');
+            const note = document.getElementById('ing_unit_note');
+            sel.disabled = locked;
+            keep.disabled = !locked;
+            keep.value = locked ? unit : '';
+            note.hidden = !locked;
         }
 
         function toggleSupplierOther(sel) {

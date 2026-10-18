@@ -175,32 +175,42 @@
     text-align: left;
 }
 
+/* Order status pill: same shape and tones as .tc-pill on the POS Open Tabs
+   (admin/css/pos-overrides.css) so a status looks the same on every screen. */
 .pill {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 600;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.3;
 }
 
 .st-placed {
-    background: #d1ecf1;
-    color: #0c5460;
+    background: #dbeafe;
+    border-color: #bfd6fb;
+    color: #1d4ed8;
 }
 
 .st-paid {
-    background: #d4edda;
-    color: #155724;
+    background: #15803d;
+    border-color: #15803d;
+    color: #fff;
 }
 
 .st-cancelled {
-    background: #f8d7da;
-    color: #721c24;
+    background: #f0f2f4;
+    border-color: #dde1e5;
+    color: #495057;
 }
 
 .st-voided {
-    background: #f5c6cb;
-    color: #721c24;
+    background: #fde8ea;
+    border-color: #f5c4ca;
+    color: #b21f2d;
     text-decoration: line-through;
 }
 
@@ -337,6 +347,13 @@ a.shift-card:hover,
     color: #6c757d;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+.shift-card__sub {
+    margin-top: 3px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #6c757d;
 }
 
 .shift-card .val {

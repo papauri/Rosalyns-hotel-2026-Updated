@@ -84,10 +84,10 @@ if (in_array($status, ['pending', 'tentative', 'confirmed'], true)) {
     $edit_mode = 'closed';
 }
 $can_edit_stay = $edit_mode === 'reservation';
-// Joined-room bookings hold a PAIR of rooms: picking one room here would split the pair, so the
-// pair is changed with Assign room on the bookings list instead.
+// Joined-room bookings hold a PAIR of rooms: the picker below offers whole pairs ("101A + 101B"),
+// never one member room, and saving a pair takes both rooms.
 $is_joined_type = $booking && roomTypeHasActiveCombinations((int)$booking['room_id']);
-$can_move_room = in_array($edit_mode, ['reservation', 'inhouse'], true) && !$is_joined_type;
+$can_move_room = in_array($edit_mode, ['reservation', 'inhouse'], true);
 $can_change_room_type = ($edit_mode === 'reservation' && (string)$booking['check_in_date'] >= date('Y-m-d'))
     || ($edit_mode === 'inhouse' && (string)$booking['check_out_date'] > date('Y-m-d'));
 
@@ -103,7 +103,71 @@ if ($booking) {
 
 // Rooms of this booking's type, with availability for its stay (in-house: from today).
 $availableIndividualRooms = [];
-if ($booking && $booking['room_id'] && $can_move_room) {
+if ($booking && $booking['room_id'] && $can_move_room && $is_joined_type) {
+    // Joined type: the choices are PAIRS. A pair's option id is its first room (room A); saving it
+    // takes both rooms. Available = both rooms free for the stay (the booking's own pair always is).
+    $checkIn = $edit_mode === 'inhouse' ? max(date('Y-m-d'), (string)$booking['check_in_date']) : $booking['check_in_date'];
+    $checkOut = $booking['check_out_date'];
+    try {
+        $heldNow = array_map('intval', getBookingRoomIds((int)$booking_id));
+        $pst = $pdo->prepare("
+            SELECT rc.id, rc.combined_name, rc.room_a_id, rc.room_b_id, rc.max_guests_combined,
+                   a.room_number AS a_number, a.floor AS a_floor, a.room_type_id AS a_type_id,
+                   b.room_number AS b_number, b.floor AS b_floor, b.room_type_id AS b_type_id
+            FROM room_combinations rc
+            JOIN individual_rooms a ON a.id = rc.room_a_id AND a.is_active = 1
+            JOIN individual_rooms b ON b.id = rc.room_b_id AND b.is_active = 1
+            WHERE rc.combined_room_type_id = ? AND rc.is_active = 1
+            ORDER BY rc.combined_name ASC, a.room_number ASC
+        ");
+        $pst->execute([(int)$booking['room_id']]);
+        foreach ($pst->fetchAll(PDO::FETCH_ASSOC) as $pair) {
+            $pairIds = [(int)$pair['room_a_id'], (int)$pair['room_b_id']];
+            $isOwnPair = count(array_intersect($pairIds, $heldNow)) === 2;
+            $isAvailable = true;
+            $reason = '';
+            foreach ($pairIds as $pid) {
+                $roomCheck = checkIndividualRoomAvailability($pid, $checkIn, $checkOut, (int)$booking_id, $edit_mode === 'inhouse' && !in_array($pid, $heldNow, true));
+                if (empty($roomCheck['available'])) {
+                    $isAvailable = false;
+                    if (!empty($roomCheck['conflicts'])) {
+                        $reason = 'Booked (' . $roomCheck['conflicts'][0]['booking_reference'] . ')';
+                    } elseif (!empty($roomCheck['blocked_dates'])) {
+                        $reason = 'Blocked';
+                    } elseif (!empty($roomCheck['maintenance'])) {
+                        $reason = 'Maintenance';
+                    } elseif (($roomCheck['error'] ?? '') === 'Selected room has not been cleaned yet') {
+                        $reason = 'Not clean yet';
+                    } else {
+                        $reason = (string)($roomCheck['error'] ?? 'Unavailable');
+                    }
+                    break;
+                }
+            }
+            if ($isAvailable && rh_combination_member_type_blocked(['room_a_type_id' => $pair['a_type_id'], 'room_b_type_id' => $pair['b_type_id']], (int)$booking['room_id'], $checkIn, $checkOut)) {
+                $isAvailable = false;
+                $reason = 'Blocked';
+            }
+            if ($isOwnPair) {
+                $isAvailable = true;
+                $reason = '';
+            }
+            $floors = array_values(array_unique(array_filter([trim((string)$pair['a_floor']), trim((string)$pair['b_floor'])], static fn($v) => $v !== '')));
+            $availableIndividualRooms[] = [
+                'id' => (int)$pair['room_a_id'],
+                'room_number' => $pair['a_number'] . ' + ' . $pair['b_number'],
+                'room_name' => (string)$pair['combined_name'],
+                'floor' => implode(' / ', $floors),
+                'available' => $isAvailable,
+                'unavailable_reason' => $reason,
+                'is_current' => $isOwnPair,
+                'is_pair' => true,
+            ];
+        }
+    } catch (PDOException $e) {
+        $availableIndividualRooms = [];
+    }
+} elseif ($booking && $booking['room_id'] && $can_move_room) {
     $checkIn = $edit_mode === 'inhouse' ? max(date('Y-m-d'), (string)$booking['check_in_date']) : $booking['check_in_date'];
     $checkOut = $booking['check_out_date'];
 
@@ -226,6 +290,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
             $individual_room_id = !empty($booking['individual_room_id']) ? (int)$booking['individual_room_id'] : null; // in-house guests always keep a room
         }
         $room_id = (int)$booking['room_id']; // room TYPE changes go through the upgrade / downgrade flow
+        // A joined type is picked as a PAIR: any member room resolves to its combination, and the
+        // booking's primary room is always the pair's first room.
+        $editPair = ($individual_room_id && $is_joined_type) ? rh_combination_for_room((int)$individual_room_id, $room_id, (int)($booking['room_combination_id'] ?? 0)) : null;
+        if ($editPair) {
+            $individual_room_id = $editPair['room_a_id'];
+        }
 
         if (empty($guest_name) || empty($guest_email)) {
             $error = 'Guest name and email are required.';
@@ -256,7 +326,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     $error = 'Children are not allowed for this room type.';
                 }
             }
-            if (empty($error) && $individual_room_id && (int)$individual_room_id !== (int)($booking['individual_room_id'] ?? 0)) {
+            if (empty($error) && $individual_room_id && $is_joined_type && !$editPair) {
+                $error = 'Pick a joined room from the list.';
+            }
+            if (empty($error) && $individual_room_id && !$editPair && (int)$individual_room_id !== (int)($booking['individual_room_id'] ?? 0)) {
                 $irPolicyStmt = $pdo->prepare("SELECT room_type_id, single_occupancy_enabled_override, double_occupancy_enabled_override, triple_occupancy_enabled_override, children_allowed_override FROM individual_rooms WHERE id = ?");
                 $irPolicyStmt->execute([$individual_room_id]);
                 $irPolicy = $irPolicyStmt->fetch(PDO::FETCH_ASSOC) ?: null;
@@ -352,7 +425,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 // Room hold table follows the chosen room.
                 if ($roomPointerChanged) {
                     $oldRoomIds = getBookingRoomIds((int)$booking_id);
-                    if ($individual_room_id) {
+                    if ($individual_room_id && $editPair) {
+                        syncBookingRooms((int)$booking_id, [$editPair['room_a_id'], $editPair['room_b_id']], $editPair['id']);
+                        $pdo->prepare("UPDATE bookings SET room_combination_id = ? WHERE id = ?")->execute([$editPair['id'], $booking_id]);
+                    } elseif ($individual_room_id) {
                         syncBookingRooms((int)$booking_id, [(int)$individual_room_id], null);
                         $pdo->prepare("UPDATE bookings SET room_combination_id = NULL WHERE id = ?")->execute([$booking_id]);
                     } else {
@@ -635,17 +711,19 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                 <?php if ($is_joined_type && in_array($edit_mode, ['reservation', 'inhouse'], true)): ?>
                     <?php $ebPairLabel = getBookingRoomLabel((int)$booking_id); ?>
                     <div class="eb-locked"><i class="fas fa-link"></i> Joined room<?php echo $ebPairLabel !== '' ? ': ' . htmlspecialchars($ebPairLabel) : ' (no rooms assigned yet)'; ?>.
-                        <?php if ($status === 'confirmed'): ?>
-                            Change the pair with <a href="bookings.php?action=assign-room&amp;booking_id=<?php echo (int)$booking_id; ?>"><?php echo $ebPairLabel !== '' ? 'Change rooms' : 'Assign rooms'; ?></a>.
+                        <?php if ($status === 'confirmed' || $edit_mode === 'inhouse'): ?>
+                            The guest takes both rooms of the pair; pick the pair below.
                         <?php else: ?>
                             The pair is assigned once the booking is confirmed.
                         <?php endif; ?>
                     </div>
                 <?php endif; ?>
 
-                <?php if (!empty($availableIndividualRooms)): ?>
+                <?php if (!empty($availableIndividualRooms) && ($status === 'confirmed' || $edit_mode === 'inhouse' || !$is_joined_type)): ?>
                     <div class="individual-room-section">
-                        <h4><i class="fas fa-door-open"></i> <?php echo $edit_mode === 'inhouse' ? 'Move to another room (same type)' : 'Specific room (optional)'; ?></h4>
+                        <h4><i class="fas fa-door-open"></i> <?php echo $is_joined_type
+                            ? ($edit_mode === 'inhouse' ? 'Move to another joined room' : 'Joined room (optional)')
+                            : ($edit_mode === 'inhouse' ? 'Move to another room (same type)' : 'Specific room (optional)'); ?></h4>
                         <p style="font-size: 13px; color: #666; margin-bottom: 12px;">
                             <?php echo $edit_mode === 'inhouse'
                                 ? 'Choose the room the guest is moving to. Their current room is sent to housekeeping.'
@@ -654,7 +732,8 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                         <input type="hidden" name="individual_room_id" id="individual_room_id" value="<?php echo htmlspecialchars((string)($booking['individual_room_id'] ?? '')); ?>">
                         <div id="roomOptionsContainer">
                             <?php foreach ($availableIndividualRooms as $room): ?>
-                                <div class="room-option <?php echo $room['available'] ? '' : 'disabled'; ?> <?php echo ($booking['individual_room_id'] == $room['id']) ? 'selected' : ''; ?>"
+                                <?php $ebIsCurrent = !empty($room['is_current']) || (empty($room['is_pair']) && $booking['individual_room_id'] == $room['id']); ?>
+                                <div class="room-option <?php echo $room['available'] ? '' : 'disabled'; ?> <?php echo $ebIsCurrent ? 'selected' : ''; ?>"
                                     data-room-id="<?php echo (int)$room['id']; ?>"
                                     onclick="<?php echo $room['available'] ? 'selectRoom(' . (int)$room['id'] . ')' : ''; ?>">
                                     <div class="room-option-header">
@@ -673,7 +752,7 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                                             </div>
                                         </div>
                                         <span class="room-option-status <?php echo $room['available'] ? 'status-available' : 'status-unavailable'; ?>">
-                                            <?php echo ($booking['individual_room_id'] == $room['id']) ? 'Current' : ($room['available'] ? 'Available' : 'Unavailable'); ?>
+                                            <?php echo $ebIsCurrent ? 'Current' : ($room['available'] ? 'Available' : 'Unavailable'); ?>
                                         </span>
                                     </div>
                                 </div>

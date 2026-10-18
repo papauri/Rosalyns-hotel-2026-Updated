@@ -615,9 +615,11 @@ function createNoShowRefund(array $booking, int $adminUserId, PDO $pdo): array
         if (!recalculateBookingFinancials((int)$booking['id'])) {
             throw new RuntimeException('Could not recalculate the booking balance.');
         }
-        $bal = $pdo->prepare("SELECT amount_paid FROM bookings WHERE id = ?");
+        $bal = $pdo->prepare("SELECT amount_paid, folio_charges_total, total_amount, vat_amount, total_with_vat, number_of_nights FROM bookings WHERE id = ?");
         $bal->execute([(int)$booking['id']]);
-        $amountPaid = round((float)$bal->fetchColumn(), 2);
+        $balRow = $bal->fetch(PDO::FETCH_ASSOC) ?: [];
+        $amountPaid = round((float)($balRow['amount_paid'] ?? 0), 2);
+        $folioCharges = round((float)($balRow['folio_charges_total'] ?? 0), 2);
         if ($amountPaid <= BALANCE_TOLERANCE) {
             if ($ownTx) {
                 $pdo->commit();
@@ -627,11 +629,21 @@ function createNoShowRefund(array $booking, int $adminUserId, PDO $pdo): array
 
         $refundAmount = 0.0;
         if ($policy === 'full') {
-            $refundAmount = $amountPaid;
+            // Folio charges stay posted, so the money that settled them is not refunded.
+            $refundAmount = max(0.0, round($amountPaid - $folioCharges, 2));
         } else {
-            $nights      = max(1, (int)($fresh['number_of_nights'] ?? 1));
-            $nightlyRate = (float)($fresh['total_amount'] ?? 0) / $nights;
-            $refundAmount = max(0.0, round($amountPaid - $nightlyRate, 2));
+            // Same basis as the cancellation 'keep first night' (cancelRoomBookingSettled): the booked
+            // nightly rate INCLUDING its VAT/levy share (total_with_vat / nights). total_amount is net
+            // + levy and excludes VAT, so using it would hand the first night's VAT back.
+            $nights = max(1, (int)($balRow['number_of_nights'] ?? $fresh['number_of_nights'] ?? 1));
+            $gross  = (float)($balRow['total_with_vat'] ?? 0);
+            if ($gross <= 0) {
+                $gross = (float)($balRow['total_amount'] ?? $fresh['total_amount'] ?? 0) + (float)($balRow['vat_amount'] ?? 0);
+            }
+            $retained = max(0.0, round(min($gross, $gross / $nights), 2));
+            // Never retain more than was actually paid after folio charges that stay posted.
+            $retained = min($retained, max(0.0, round($amountPaid - $folioCharges, 2)));
+            $refundAmount = max(0.0, round($amountPaid - $retained - $folioCharges, 2));
         }
         if ($refundAmount <= BALANCE_TOLERANCE) {
             if ($ownTx) {

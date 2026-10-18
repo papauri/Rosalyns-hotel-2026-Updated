@@ -679,6 +679,20 @@ try {
     $stmt = $pdo->query("SELECT * FROM rooms ORDER BY display_order ASC, name ASC");
     $rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+    // A joined room type is sold as pairs: its inventory is the number of pairs (not the two
+    // physical rooms behind each), so the card shows pairs in service / pairs.
+    if (!empty($rooms) && bookingAvailabilityTableExists('room_combinations')) {
+        $pairTotals = $pdo->query("SELECT combined_room_type_id, COUNT(*) FROM room_combinations WHERE is_active = 1 GROUP BY combined_room_type_id")->fetchAll(PDO::FETCH_KEY_PAIR);
+        foreach ($rooms as &$pairRoomRow) {
+            $pairTotal = (int)($pairTotals[(int)$pairRoomRow['id']] ?? 0);
+            if ($pairTotal > 0) {
+                $pairRoomRow['units_total'] = $pairTotal;
+                $pairRoomRow['units_avail'] = rh_room_type_sellable_count((int)$pairRoomRow['id'], 0);
+            }
+        }
+        unset($pairRoomRow);
+    }
+
     if (!empty($rooms) && function_exists('applyManagedMediaOverrides')) {
         foreach ($rooms as &$managedRoomRow) {
             $managedRoomRow = applyManagedMediaOverrides($managedRoomRow, 'rooms', $managedRoomRow['id'] ?? '', ['image_url', 'video_path']);
@@ -792,9 +806,9 @@ $fb_rooms_posting_on = getSetting('facebook_posting_enabled', '0') === '1'
                                 <div class="detail-item">
                                     <i class="fas fa-door-open"></i>
                                     <?php
-                                    $avail = $room['rooms_available'] ?? 0;
-                                    $total = $room['total_rooms'] ?? 0;
-                                    echo $avail . '/' . $total . ' avail';
+                                    $avail = $room['units_avail'] ?? ($room['rooms_available'] ?? 0);
+                                    $total = $room['units_total'] ?? ($room['total_rooms'] ?? 0);
+                                    echo $avail . '/' . $total . (isset($room['units_total']) ? ' joined rooms avail' : ' avail');
                                     ?>
                                 </div>
                             </div>

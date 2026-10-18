@@ -18,6 +18,12 @@ require_once '../config/credit-notes.php';
 require_once '../includes/station-hours.php';
 require_once __DIR__ . '/includes/pos-shift-totals.php';
 
+// This page reuses one named placeholder (:d) several times per statement. The shared connection
+// prepares natively, which rejects a repeated name (HY093), so those queries threw, were swallowed
+// by their try/catch and left ops, occupancy and ADR at zero. Client-side preparation for this
+// page makes the repeated name legal; no statement here binds a parameter into LIMIT.
+$pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, true);
+
 $user = [
     'id'        => $_SESSION['admin_user_id'] ?? 0,
     'username'  => $_SESSION['admin_username'] ?? '',
@@ -112,13 +118,16 @@ $rooms_occupied = 0;
 $rooms_oo = 0;
 if ($mod_bookings) {
     try {
-        $rooms_total = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status <> 'out_of_order'")->fetchColumn();
-        $rooms_oo    = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status = 'out_of_order'")->fetchColumn();
+        // A joined-only pair is ONE room (out of order when either of its rooms is).
+        $rooms_total = rh_room_units_count(['out_of_order'], true);
+        $rooms_oo    = rh_room_units_count(['out_of_order']);
+        // Rooms occupied, on the inventory's own basis: a joined-room booking of a shared-mode pair
+        // occupies BOTH its rooms; a joined-only pair is one room (see rh_booking_rooms_factor_sql).
         $occStmt = $pdo->prepare("
-            SELECT COUNT(*) FROM bookings
-            WHERE deleted_at IS NULL AND status IN ('checked-in','checked-out')
-              AND check_in_date <= :d
-              AND check_out_date > :d
+            SELECT COALESCE(SUM(" . rh_booking_rooms_factor_sql('b') . "), 0) FROM bookings b
+            WHERE b.deleted_at IS NULL AND b.status IN ('checked-in','checked-out')
+              AND b.check_in_date <= :d
+              AND b.check_out_date > :d
         ");
         $occStmt->execute([':d' => $report_date]);
         $rooms_occupied = (int)$occStmt->fetchColumn();
@@ -173,10 +182,11 @@ try {
     error_log('EOD payments: ' . $e->getMessage());
 }
 
-// Department revenue comes from what was POSTED, not from which folio the cash landed on:
-// food / drink / room-service charges posted to guest folios today are F&B, so they leave
-// room revenue (and ADR / RevPAR). Room revenue = room charges only. The total is unchanged.
-$folioFnb = rh_eod_folio_fnb($pdo, $report_date);
+// Department revenue follows what the cash SETTLES: each room payment received today is split pro
+// rata between the room charges and the F&B charges (food / drink / room service) on that booking's
+// folio (rh_eod_folio_fnb_allocation), so the F&B part leaves room revenue (and ADR / RevPAR).
+// The total is unchanged. A deposit on a stay with no F&B charges stays room revenue.
+$folioFnb = rh_eod_folio_fnb_allocation($pdo, $report_date);
 $folioFnbMoved = max(0.0, min((float)$folioFnb['gross'], (float)$rev['room_gross']));
 if ($folioFnbMoved > 0) {
     $folioFnbVat = (float)$folioFnb['gross'] > 0 ? min((float)$rev['room_vat'], (float)$folioFnb['vat'] * ($folioFnbMoved / (float)$folioFnb['gross'])) : 0.0;
@@ -444,10 +454,10 @@ try {
         $previous['new_bookings'] = (int)$prevBookings->fetchColumn();
 
         $prevOcc = $pdo->prepare("
-            SELECT COUNT(*) FROM bookings
-            WHERE deleted_at IS NULL AND status IN ('checked-in','checked-out')
-              AND check_in_date <= :d
-              AND check_out_date > :d
+            SELECT COALESCE(SUM(" . rh_booking_rooms_factor_sql('b') . "), 0) FROM bookings b
+            WHERE b.deleted_at IS NULL AND b.status IN ('checked-in','checked-out')
+              AND b.check_in_date <= :d
+              AND b.check_out_date > :d
         ");
         $prevOcc->execute([':d' => $previous_day]);
         $previous['rooms_occupied'] = (int)$prevOcc->fetchColumn();
@@ -676,7 +686,9 @@ try {
 } catch (Throwable $e) {
     error_log('EOD 7-day trend: ' . $e->getMessage());
 }
-$trend_max_total = max(array_map(fn($r) => $r['net'] + $r['pos_gross'], $trend_days ?: [['net' => 0, 'pos_gross' => 0]])) ?: 1;
+// POS sales are payments rows too (so already inside 'net'): the momentum figure is net alone -
+// adding pos_gross would count every POS sale twice. The POS column is shown as a subset.
+$trend_max_total = max(array_map(fn($r) => $r['net'], $trend_days ?: [['net' => 0]])) ?: 1;
 
 // ---------------------------------------------------------------------------
 // ENHANCEMENT B — Room type revenue breakdown today
@@ -987,6 +999,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     fclose($out);
     exit;
 }
+// The page's own queries are done; header, sidebar and later helpers get native prepares back.
+$pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1173,9 +1187,9 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
             </a>
             <div class="ck-kpi">
                 <span class="ck-kpi__icon"><i class="fas fa-chart-line"></i></span>
-                <span class="ck-kpi__label">ADR</span>
+                <span class="ck-kpi__label" title="Room cash collected today divided by rooms occupied. A cash ratio, not a published room rate.">Room cash per occupied room</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($adr); ?></span>
-                <span class="ck-kpi__sub">RevPAR <strong><?php echo $money($revpar); ?></strong> &middot; room revenue <?php echo $money($rev['room_gross']); ?></span>
+                <span class="ck-kpi__sub">Room cash per available room <strong><?php echo $money($revpar); ?></strong> &middot; room cash <?php echo $money($rev['room_gross']); ?></span>
             </div>
             <?php endif; ?>
 
@@ -1616,14 +1630,14 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                                 <tr>
                                     <th>Day</th>
                                     <th class="num">Net rev</th>
-                                    <?php if ($mod_pos): ?><th class="num"><?php echo htmlspecialchars($posShort); ?></th><?php endif; ?>
-                                    <th>Momentum</th>
+                                    <?php if ($mod_pos): ?><th class="num" title="Already included in Net rev, not added on top">of which <?php echo htmlspecialchars($posShort); ?></th><?php endif; ?>
+                                    <th title="Net revenue only">Momentum (net rev)</th>
                                     <th class="num">Voids</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($trend_days as $td):
-                                    $combined   = $td['net'] + $td['pos_gross'];
+                                    $combined   = $td['net']; // POS is a subset of net, never added on top
                                     $bar_width  = $trend_max_total > 0 ? max(1, ($combined / $trend_max_total) * 100) : 0;
                                     $is_today   = $td['is_today'];
                                 ?>

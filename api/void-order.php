@@ -68,29 +68,16 @@ function v_voidRoomServiceFolioCharges(PDO $pdo, int $orderId, string $reason, i
         return 0;
     }
 
-    // If stock was already deducted via the POS order path (source_type='pos_order'),
-    // v_restoreFromPosOrder() has already restored it. Only call restoreStockForMenuItem()
-    // for deductions recorded under source_type='room_service' to avoid double-restoration.
-    /* Same item-id keying as v_restoreFromPosOrder above. This guard MUST agree with it:
-     * it decides whether the folio path should also restore, so an order-id lookup here
-     * (always 0 rows) would let both paths credit the same stock back twice now that the
-     * POS restore actually finds its rows. */
-    $posAdjStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'pos_order' AND source_id IN (SELECT id FROM stock_order_items WHERE order_id = ?)");
-    $posAdjStmt->execute([$orderId]);
-    $stockAlreadyRestoredViaPosPath = (int)$posAdjStmt->fetchColumn() > 0;
+    // Stock booked against a tracked folio charge (source_type='room_service') is restored or written
+    // off per line by rh_restore_room_service_charge_stock(); lines whose stock came through the KDS
+    // (source_type='pos_order') were already handled by v_restoreFromPosOrder() and are skipped there.
 
     $bookingIds = [];
     $update = $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ?");
     foreach ($charges as $charge) {
         $chargeId = (int)$charge['id'];
         $update->execute([mb_substr($reason, 0, 255), $voidedBy, $chargeId]);
-        if (!$stockAlreadyRestoredViaPosPath
-            && !empty($charge['stock_tracked'])
-            && in_array((string)$charge['charge_type'], ['food', 'drink'], true)
-            && !empty($charge['source_item_id'])
-        ) {
-            restoreStockForMenuItem((int)$charge['source_item_id'], (string)$charge['charge_type'], (float)$charge['quantity'], 'Room service order voided: ' . $reason, $voidedBy, $chargeId);
-        }
+        rh_restore_room_service_charge_stock($pdo, $orderId, $charge, 'Room service order voided: ' . $reason, $voidedBy);
         $bookingIds[(int)$charge['booking_id']] = true;
     }
 

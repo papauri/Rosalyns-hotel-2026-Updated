@@ -310,7 +310,7 @@ table.count-list th {
         border: 1px solid var(--admin-surface-border, #eaecef);
         border-radius: 10px;
         padding: 0.7rem 0.78rem;
-        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        background: #fff;
         box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
     }
 
@@ -370,6 +370,69 @@ table.count-list th {
     .count-list td[data-label="Surplus"],
     .count-list td[data-label="Cost lost"] {
         font-weight: 600;
+    }
+}
+
+/* Tablet (768-1024px): the count sheet stays a table - Ingredient, Actual, Reason, Notes fit
+   on one row - with 44px inputs. Cards are for phones only. */
+@media (min-width: 48rem) and (max-width: 64rem) {
+    .lines-table {
+        display: table;
+    }
+
+    .lines-table thead {
+        display: table-header-group;
+    }
+
+    .lines-table tbody {
+        display: table-row-group;
+    }
+
+    .lines-table tr {
+        display: table-row;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        box-shadow: none;
+    }
+
+    .lines-table td,
+    .lines-table td[data-label="Ingredient"],
+    .lines-table td[data-label="Reason"],
+    .lines-table td[data-label="Notes"] {
+        display: table-cell;
+        padding: 6px 8px;
+        margin: 0;
+        border-bottom: 1px solid var(--admin-surface-border, #eaecef);
+        vertical-align: middle;
+    }
+
+    .lines-table td::before {
+        content: none;
+    }
+
+    .lines-table td[data-label="Actual Qty"],
+    .lines-table td[data-label="System Qty"],
+    .lines-table td[data-label="Expected at count time"],
+    .lines-table td[data-label="Variance"],
+    .lines-table td[data-label="Cost Impact"] {
+        text-align: right !important;
+    }
+
+    .lines-table input.qty {
+        width: 7.5rem;
+        max-width: none;
+    }
+
+    .lines-table select.reason {
+        width: 100%;
+        min-width: 9.5rem;
+        max-width: none;
+    }
+
+    .lines-table input.notes {
+        min-width: 8rem;
     }
 }
 

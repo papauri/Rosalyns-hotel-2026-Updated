@@ -85,6 +85,21 @@
     color: #856404;
 }
 
+.field-note {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: #6b625a;
+}
+
+.field-note[hidden] {
+    display: none;
+}
+
+.row-actions .row-note {
+    font-size: 12px;
+    color: #6b625a;
+}
+
 .row-actions {
     display: flex;
     gap: 6px;

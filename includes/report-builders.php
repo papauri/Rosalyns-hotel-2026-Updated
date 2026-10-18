@@ -410,10 +410,10 @@ function buildStockHealthReport(): array
 
     /* Low stock */
     $low = $pdo->query(
-        "SELECT id, name, category, unit, current_quantity, min_quantity, cost_per_unit
+        "SELECT id, name, category, unit, current_quantity, (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END) AS threshold, cost_per_unit
          FROM stock_ingredients
-         WHERE is_archived = 0 AND current_quantity <= min_quantity
-         ORDER BY (current_quantity - min_quantity) ASC"
+         WHERE is_archived = 0 AND current_quantity <= (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END)
+         ORDER BY (current_quantity - (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END)) ASC"
     );
     fputcsv($fp, ['LOW / OUT OF STOCK INGREDIENTS']);
     fputcsv($fp, ['ID', 'Name', 'Category', 'Unit', 'On Hand', 'Min', 'Cost/unit']);
@@ -421,7 +421,7 @@ function buildStockHealthReport(): array
     foreach ($low as $r) {
         fputcsv($fp, [
             $r['id'], $r['name'], $r['category'], $r['unit'],
-            (float)$r['current_quantity'], (float)$r['min_quantity'],
+            (float)$r['current_quantity'], (float)$r['threshold'],
             rh_money((float)$r['cost_per_unit']),
         ]);
         $lowCount++;

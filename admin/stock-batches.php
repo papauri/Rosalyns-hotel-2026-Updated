@@ -16,6 +16,7 @@ $user = [
     'role' => $_SESSION['admin_role'],
     'full_name' => $_SESSION['admin_full_name']
 ];
+$canWriteOffBatches = in_array($user['role'] ?? '', ['admin', 'manager'], true); // same rule the server enforces
 $message = '';
 $error = '';
 $current_page = basename($_SERVER['PHP_SELF']);
@@ -40,11 +41,20 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $action = $_POST['action'] ?? '';
         try {
+            // Writing off a whole batch is the anti-theft gate: same rule as discard_batch on
+            // stock-ingredients.php - admin/manager only, and a real reason (no default text).
+            if (in_array($action, ['mark_wasted', 'recall'], true)) {
+                if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+                    throw new RuntimeException('Writing off or recalling a batch is restricted to managers and admins.');
+                }
+                if (mb_strlen(rh_clean_text($_POST['reason'] ?? '')) < 8) {
+                    throw new RuntimeException('A reason of at least 8 characters is required to write off or recall a batch.');
+                }
+            }
             if ($action === 'mark_wasted') {
                 $batchId = (int)($_POST['batch_id'] ?? 0);
-                $reason = rh_clean_text($_POST['reason'] ?? 'Wastage');
+                $reason = rh_clean_text($_POST['reason'] ?? '');
                 if (mb_strlen($reason) > 255) throw new RuntimeException('Reason is too long (255 characters maximum).');
-                if ($reason === '') $reason = 'Wastage';
                 if ($batchId <= 0) throw new RuntimeException('Batch not found.');
 
                 $pdo->beginTransaction();
@@ -77,9 +87,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = 'Batch marked as wasted.';
             } elseif ($action === 'recall') {
                 $batchId = (int)($_POST['batch_id'] ?? 0);
-                $reason = rh_clean_text($_POST['reason'] ?? 'Supplier recall');
+                $reason = rh_clean_text($_POST['reason'] ?? '');
                 if (mb_strlen($reason) > 200) throw new RuntimeException('Reason is too long (200 characters maximum).');
-                if ($reason === '') $reason = 'Supplier recall';
                 if ($batchId <= 0) throw new RuntimeException('Batch not found.');
 
                 $pdo->beginTransaction();
@@ -420,12 +429,14 @@ function expiry_tier(?string $expiry, ?int $days): array
                             </td>
                             <td><span class="status-<?php echo htmlspecialchars($b['status']); ?>"><?php echo htmlspecialchars(ucfirst($b['status'])); ?></span></td>
                             <td>
-                                <?php if ($b['status'] === 'active' && (float)$b['quantity_remaining'] > 0): ?>
+                                <?php if ($b['status'] === 'active' && (float)$b['quantity_remaining'] > 0 && !$canWriteOffBatches): ?>
+                                    <span style="color:#6c757d;font-size:12px;" title="Writing off or recalling a batch is restricted to managers and admins.">Manager only</span>
+                                <?php elseif ($b['status'] === 'active' && (float)$b['quantity_remaining'] > 0): ?>
                                     <div class="row-actions">
-                                        <button type="button" class="btn-danger" onclick='openWasteModal(<?php echo (int)$b['id']; ?>, <?php echo json_encode($b['batch_number']); ?>, <?php echo (float)$b['quantity_remaining']; ?>, <?php echo json_encode($b['unit']); ?>)' title="Remove stock because it is spoiled, damaged or unusable.">
+                                        <button type="button" class="btn-danger" onclick='openWasteModal(<?php echo (int)$b['id']; ?>, <?php echo json_encode($b['batch_number']); ?>, <?php echo (float)$b['quantity_remaining']; ?>, <?php echo json_encode($b['unit']); ?>, <?php echo round((float)$b['quantity_remaining'] * (float)$b['cost_per_unit'], 2); ?>)' title="Remove stock because it is spoiled, damaged or unusable.">
                                             <i class="fas fa-trash-alt"></i> Mark Wasted
                                         </button>
-                                        <button type="button" onclick='openRecallModal(<?php echo (int)$b['id']; ?>, <?php echo json_encode($b['batch_number']); ?>)' title="Recall this batch from active stock due to supplier or safety issues.">
+                                        <button type="button" onclick='openRecallModal(<?php echo (int)$b['id']; ?>, <?php echo json_encode($b['batch_number']); ?>, <?php echo (float)$b['quantity_remaining']; ?>, <?php echo json_encode($b['unit']); ?>, <?php echo round((float)$b['quantity_remaining'] * (float)$b['cost_per_unit'], 2); ?>)' title="Recall this batch from active stock due to supplier or safety issues.">
                                             <i class="fas fa-undo"></i> Recall
                                         </button>
                                     </div>
@@ -468,12 +479,12 @@ function expiry_tier(?string $expiry, ?int $days): array
             </div>
             <form method="POST">
                 <div class="modal-body">
-                    <p class="stock-batch-dialog__note">Batch <strong id="wm_batch"></strong> — <span id="wm_qty"></span> will be removed from stock and logged as wastage.</p>
+                    <p class="stock-batch-dialog__note">Batch <strong id="wm_batch"></strong> — <strong id="wm_qty"></strong> (value <strong id="wm_value"></strong>) will be removed from stock and logged as wastage. This cannot be undone.</p>
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                     <input type="hidden" name="action" value="mark_wasted">
                     <input type="hidden" name="batch_id" id="wm_id">
                     <label>Reason</label>
-                    <input type="text" name="reason" required placeholder="e.g. Spoiled, contamination, expired">
+                    <input type="text" name="reason" required minlength="8" maxlength="255" placeholder="At least 8 characters, e.g. Spoiled - fridge failure">
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary" onclick="closeM('wasteModal')">Cancel</button>
@@ -491,12 +502,12 @@ function expiry_tier(?string $expiry, ?int $days): array
             </div>
             <form method="POST">
                 <div class="modal-body">
-                    <p class="stock-batch-dialog__note">Batch <strong id="rm_batch"></strong> will be removed from active stock and logged as recalled. Use this when the supplier asks for it back or the batch is not safe to keep active.</p>
+                    <p class="stock-batch-dialog__note">Batch <strong id="rm_batch"></strong> — <strong id="rm_qty"></strong> (value <strong id="rm_value"></strong>) will be removed from active stock and logged as recalled. Use this when the supplier asks for it back or the batch is not safe to keep active.</p>
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                     <input type="hidden" name="action" value="recall">
                     <input type="hidden" name="batch_id" id="rm_id">
                     <label>Recall reason</label>
-                    <input type="text" name="reason" required placeholder="e.g. Supplier recall notice">
+                    <input type="text" name="reason" required minlength="8" maxlength="200" placeholder="At least 8 characters, e.g. Supplier recall notice">
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary" onclick="closeM('recallModal')">Cancel</button>
@@ -519,15 +530,23 @@ function expiry_tier(?string $expiry, ?int $days): array
                 if (e.target === m) m.classList.remove('active');
             });
         });
-        window.openWasteModal = function(id, batch, qty, unit) {
+        const BATCH_CURRENCY = <?php echo json_encode((string)$currency_symbol, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const fmtBatchValue = value => BATCH_CURRENCY + ' ' + Number(value || 0).toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+        window.openWasteModal = function(id, batch, qty, unit, value) {
             document.getElementById('wm_id').value = id;
             document.getElementById('wm_batch').textContent = batch;
             document.getElementById('wm_qty').textContent = qty.toFixed(3) + ' ' + unit;
+            document.getElementById('wm_value').textContent = fmtBatchValue(value);
             openM('wasteModal');
         };
-        window.openRecallModal = function(id, batch) {
+        window.openRecallModal = function(id, batch, qty, unit, value) {
             document.getElementById('rm_id').value = id;
             document.getElementById('rm_batch').textContent = batch;
+            document.getElementById('rm_qty').textContent = Number(qty || 0).toFixed(3) + ' ' + (unit || '');
+            document.getElementById('rm_value').textContent = fmtBatchValue(value);
             openM('recallModal');
         };
 

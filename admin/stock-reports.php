@@ -53,6 +53,17 @@ function stock_reports_metric(string $label, string $value, string $hint = ''): 
     ];
 }
 
+/** "12.5 kg · 3 L": subtotals per unit of measure (kg, L and pcs are never added together). */
+function stock_reports_by_unit(array $totals, bool $signed = false): string
+{
+    ksort($totals);
+    $parts = [];
+    foreach ($totals as $unit => $qty) {
+        $parts[] = ($signed && $qty > 0 ? '+' : '') . rtrim(rtrim(number_format((float)$qty, 3), '0'), '.') . ' ' . $unit;
+    }
+    return $parts ? implode(' · ', $parts) : 'none';
+}
+
 function stock_reports_money(float $amount, string $currencySymbol): string
 {
     return $currencySymbol . ' ' . number_format($amount, 2);
@@ -76,7 +87,7 @@ function stock_reports_helper_content(string $tab, string $dateFrom, string $dat
     } elseif ($tab === 'yield') {
         $content['example'] = 'If Overall yield is 86.0%, then 14.0% of total output was lost to wastage/expiry; focus on ingredients with low yield badges first.';
     } elseif ($tab === 'adjustments') {
-        $content['example'] = 'If Net quantity delta is strongly negative with many decrease events, audit adjustment reasons to separate valid consumption from shrinkage risk.';
+        $content['example'] = 'If Net quantity change is strongly negative with many decrease events, audit adjustment reasons to separate valid consumption from shrinkage risk.';
     } elseif ($tab === 'expiry') {
         $content['example'] = 'If At-risk value (7d) is ' . $currencySymbol . ' 95,000.00, that is the estimated value likely to expire within 7 days unless consumed or transferred.';
     }
@@ -144,12 +155,10 @@ try {
         $activeBatchTotal = 0;
         foreach ($rows as $row) {
             $currentQty = (float)($row['current_quantity'] ?? 0);
-            $threshold = 0.0;
-            if (isset($row['min_stock_level'])) {
-                $threshold = (float)$row['min_stock_level'];
-            } elseif (isset($row['reorder_level'])) {
-                $threshold = (float)$row['reorder_level'];
-            }
+            // Same threshold as the dashboard and Reorder page: reorder_point when set, else min_quantity.
+            $threshold = (float)($row['reorder_point'] ?? 0) > 0
+                ? (float)$row['reorder_point']
+                : (float)($row['min_quantity'] ?? 0);
 
             if ($currentQty <= 0) {
                 $outOfStock++;
@@ -200,8 +209,8 @@ try {
     } elseif ($tab === 'usage') {
         $st = $pdo->prepare("
             SELECT i.id, i.name, i.unit,
-                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS total_used,
-                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) * sa.cost_at_time ELSE 0 END), 0) AS total_cost
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) ELSE 0 END), 0) AS total_used,
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) * sa.cost_at_time WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) * sa.cost_at_time ELSE 0 END), 0) AS total_cost
             FROM stock_ingredients i
             LEFT JOIN stock_adjustments sa ON sa.ingredient_id = i.id AND DATE(sa.created_at) BETWEEN ? AND ?
             WHERE i.is_archived = 0
@@ -212,14 +221,15 @@ try {
         $st->execute([$dateFrom, $dateTo]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         $summary['total_cost'] = array_sum(array_map(fn($r) => (float)$r['total_cost'], $rows));
-        $totalUsedQty = 0.0;
+        $usedByUnit = [];
         $topUsageName = 'n/a';
         $topUsageCost = 0.0;
         if (!empty($rows)) {
             $topUsageName = (string)($rows[0]['name'] ?? 'n/a');
             $topUsageCost = (float)($rows[0]['total_cost'] ?? 0);
             foreach ($rows as $row) {
-                $totalUsedQty += (float)($row['total_used'] ?? 0);
+                $usedUnit = trim((string)($row['unit'] ?? '')) !== '' ? (string)$row['unit'] : 'units';
+                $usedByUnit[$usedUnit] = ($usedByUnit[$usedUnit] ?? 0.0) + (float)($row['total_used'] ?? 0);
             }
         }
 
@@ -228,7 +238,7 @@ try {
             stock_reports_metric('Ingredients consumed', number_format(count($rows)), 'Ingredients with usage movement'),
             stock_reports_metric('Total usage cost', stock_reports_money((float)$summary['total_cost'], $currency_symbol), 'Cost of POS and room service usage'),
             stock_reports_metric('Top usage ingredient', $topUsageName, $topUsageName === 'n/a' ? 'No usage rows in range' : stock_reports_money($topUsageCost, $currency_symbol) . ' (' . number_format($topShare, 1) . '% of usage cost)'),
-            stock_reports_metric('Total used quantity', number_format($totalUsedQty, 3), 'Raw quantity sum across mixed units'),
+            stock_reports_metric('Quantity used', stock_reports_by_unit($usedByUnit), 'Subtotal per unit of measure'),
         ];
     } elseif ($tab === 'wastage') {
         $cnt = $pdo->prepare("SELECT COUNT(*) FROM stock_wastage WHERE recorded_date BETWEEN ? AND ?");
@@ -252,7 +262,7 @@ try {
         $summary['total_cost'] = (float)$r[0];
         $summary['ingredient_count'] = (int)$r[1];
         $usageCompareStmt = $pdo->prepare("
-            SELECT COALESCE(SUM(CASE WHEN source_type IN ('pos_order','room_service') AND NOT {$vwPlain} THEN ABS(quantity_change) * cost_at_time ELSE 0 END), 0)
+            SELECT COALESCE(SUM(CASE WHEN source_type IN ('pos_order','room_service') AND NOT {$vwPlain} THEN ABS(quantity_change) * cost_at_time WHEN source_type = 'void_restore' THEN -ABS(quantity_change) * cost_at_time ELSE 0 END), 0)
             FROM stock_adjustments
             WHERE DATE(created_at) BETWEEN ? AND ?
         ");
@@ -281,7 +291,7 @@ try {
     } elseif ($tab === 'yield') {
         $st = $pdo->prepare("
             SELECT i.id, i.name, i.unit, i.cost_per_unit,
-                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS used,
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) ELSE 0 END), 0) AS used,
                    COALESCE(SUM(CASE WHEN sa.source_type = 'wastage' OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS wasted,
                    COALESCE(SUM(CASE WHEN sa.source_type = 'expiry' THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS expired
             FROM stock_ingredients i
@@ -350,9 +360,19 @@ try {
         $adjustmentMixStmt->execute([$dateFrom, $dateTo]);
         $adjustmentMix = $adjustmentMixStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
-        $netQty = 0.0;
-        foreach ($rows as $row) {
-            $netQty += (float)($row['quantity_change'] ?? 0);
+        // Whole date range (not just this page), one subtotal per unit of measure.
+        $netByUnitStmt = $pdo->prepare("
+            SELECT i.unit, COALESCE(SUM(sa.quantity_change), 0) AS net_change
+            FROM stock_adjustments sa
+            INNER JOIN stock_ingredients i ON i.id = sa.ingredient_id
+            WHERE DATE(sa.created_at) BETWEEN ? AND ?
+            GROUP BY i.unit
+        ");
+        $netByUnitStmt->execute([$dateFrom, $dateTo]);
+        $netByUnit = [];
+        foreach ($netByUnitStmt->fetchAll(PDO::FETCH_ASSOC) as $netRow) {
+            $netUnit = trim((string)($netRow['unit'] ?? '')) !== '' ? (string)$netRow['unit'] : 'units';
+            $netByUnit[$netUnit] = ($netByUnit[$netUnit] ?? 0.0) + (float)$netRow['net_change'];
         }
 
         $analysis_cards = [
@@ -360,7 +380,7 @@ try {
             stock_reports_metric('Increase events', number_format((int)($adjustmentMix['increases'] ?? 0)), 'Positive quantity adjustments'),
             stock_reports_metric('Decrease events', number_format((int)($adjustmentMix['decreases'] ?? 0)), 'Negative quantity adjustments'),
             stock_reports_metric('Source types', number_format((int)($adjustmentMix['source_count'] ?? 0)), 'Distinct source types in period'),
-            stock_reports_metric('Net quantity delta', number_format($netQty, 3), 'Raw sum across mixed units'),
+            stock_reports_metric('Net quantity change', stock_reports_by_unit($netByUnit, true), 'Subtotal per unit of measure, whole date range'),
         ];
     } elseif ($tab === 'expiry') {
         $rows = $pdo->query("

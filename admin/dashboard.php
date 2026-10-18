@@ -292,7 +292,7 @@ if (!$is_card_insight_ajax) {
             } catch (Throwable $e) { $guestSvc['pending_events'] = 0; }
         }
         if ($mod_housekeeping) {
-            $guestSvc['maintenance_open'] = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status IN ('maintenance','out_of_order')")->fetchColumn();
+            $guestSvc['maintenance_open'] = rh_room_units_count(['maintenance', 'out_of_order']); // a joined room counts once
             $guestSvc['housekeeping_due'] = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE status IN ('pending','in_progress') AND (due_date IS NULL OR due_date <= CURDATE())")->fetchColumn();
         }
     } catch (Throwable $e) { /* fine */ }
@@ -1556,7 +1556,7 @@ if ($is_card_insight_ajax) {
                         : ['href' => 'payments.php', 'label' => 'Open payments']);
 
                 if ($mod_housekeeping) {
-                    $maintenanceOpen = (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE status IN ('maintenance', 'out_of_order')")->fetchColumn();
+                    $maintenanceOpen = rh_room_units_count(['maintenance', 'out_of_order']); // a joined room counts once
                     $housekeepingDue = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE status IN ('pending', 'in_progress') AND (due_date IS NULL OR due_date <= CURDATE())")->fetchColumn();
                     $payload['rows'][] = [
                         'metric' => 'Rooms in maintenance / out of order',
@@ -1652,11 +1652,8 @@ if ($is_card_insight_ajax) {
                 ];
                 $payload['link'] = ['href' => 'room-dashboard.php', 'label' => 'Open room dashboard'];
 
-                $statusRows = $pdo->query("SELECT status, COUNT(*) AS c
-                                           FROM individual_rooms
-                                           WHERE is_active = 1
-                                           GROUP BY status")->fetchAll(PDO::FETCH_KEY_PAIR);
-                $statusTotals = array_map('intval', $statusRows ?: []);
+                // A joined-only pair is ONE room: it is counted once, in its most restrictive state.
+                $statusTotals = array_map('intval', array_count_values(rh_room_unit_statuses()));
                 $totalRooms = array_sum($statusTotals);
                 $roomStatusLabels = [
                     'available' => 'Available',

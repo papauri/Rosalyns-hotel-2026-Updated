@@ -3355,7 +3355,12 @@ function rh_room_type_sellable_count(int $roomTypeId, int $fallback = 0): int
     }
     try {
         if (roomTypeHasActiveCombinations($roomTypeId)) {
-            $st = $pdo->prepare('SELECT COUNT(*) FROM room_combinations WHERE combined_room_type_id = ? AND is_active = 1');
+            // Joined rooms are sold as pairs: count pairs whose two rooms are both active and in
+            // service (a member in maintenance / out of order takes the whole pair off sale).
+            $st = $pdo->prepare("SELECT COUNT(*) FROM room_combinations rc
+                JOIN individual_rooms a ON a.id = rc.room_a_id AND a.is_active = 1 AND a.status NOT IN ('maintenance', 'out_of_order')
+                JOIN individual_rooms b ON b.id = rc.room_b_id AND b.is_active = 1 AND b.status NOT IN ('maintenance', 'out_of_order')
+                WHERE rc.combined_room_type_id = ? AND rc.is_active = 1");
             $st->execute([$roomTypeId]);
             return $memo[$roomTypeId] = (int)$st->fetchColumn();
         }
@@ -3371,6 +3376,25 @@ function rh_room_type_sellable_count(int $roomTypeId, int $fallback = 0): int
         error_log('rh_room_type_sellable_count: ' . $e->getMessage());
     }
     return $memo[$roomTypeId] = max(0, $fallback);
+}
+
+/**
+ * Total inventory of a room type for reports: the number of active joined-room pairs for a
+ * joined type (a pair is ONE room), else the stored rooms.total_rooms figure.
+ */
+function rh_room_type_unit_total(int $roomTypeId, int $storedTotal): int
+{
+    global $pdo;
+    if (roomTypeHasActiveCombinations($roomTypeId)) {
+        try {
+            $st = $pdo->prepare('SELECT COUNT(*) FROM room_combinations WHERE combined_room_type_id = ? AND is_active = 1');
+            $st->execute([$roomTypeId]);
+            return (int)$st->fetchColumn();
+        } catch (Throwable $e) {
+            error_log('rh_room_type_unit_total: ' . $e->getMessage());
+        }
+    }
+    return $storedTotal;
 }
 
 function roomTypeHasActiveCombinations(int $roomTypeId): bool
@@ -3389,6 +3413,167 @@ function roomTypeHasActiveCombinations(int $roomTypeId): bool
         error_log('roomTypeHasActiveCombinations warning: ' . $e->getMessage());
         return false;
     }
+}
+
+/**
+ * Joined-only pairs: combinations whose two rooms BOTH belong to the "Book As" room type, i.e.
+ * the rooms are sold only as the pair and behave as ONE room everywhere staff look at rooms
+ * (rooms list, blocked dates, calendar, pickers). A 'shared' pair (rooms keep their own type and
+ * are also sold alone) is not returned. Keyed by combination id; no memo (callers run after writes).
+ *
+ * @return array<int,array> id, combined_name, combined_room_type_id, type_name, room_a_id, room_b_id,
+ *                          a_number, b_number, a_name, b_name, a_status, b_status, a_floor, b_floor,
+ *                          max_guests_combined, price_override, is_active, label, room_ids
+ */
+function rh_joined_only_pairs(bool $activeOnly = true): array
+{
+    global $pdo;
+    if (!bookingAvailabilityTableExists('room_combinations')) {
+        return [];
+    }
+    try {
+        $rows = $pdo->query("SELECT rc.id, rc.combined_name, rc.combined_room_type_id, rc.room_a_id, rc.room_b_id,
+                   rc.max_guests_combined, rc.price_override, rc.is_active, rt.name AS type_name,
+                   a.room_number AS a_number, a.room_name AS a_name, a.status AS a_status, a.floor AS a_floor, a.is_active AS a_active,
+                   b.room_number AS b_number, b.room_name AS b_name, b.status AS b_status, b.floor AS b_floor, b.is_active AS b_active
+            FROM room_combinations rc
+            JOIN individual_rooms a ON a.id = rc.room_a_id AND a.room_type_id = rc.combined_room_type_id
+            JOIN individual_rooms b ON b.id = rc.room_b_id AND b.room_type_id = rc.combined_room_type_id
+            JOIN rooms rt ON rt.id = rc.combined_room_type_id
+            " . ($activeOnly ? 'WHERE rc.is_active = 1 AND a.is_active = 1 AND b.is_active = 1' : '') . "
+            ORDER BY rt.name ASC, rc.combined_name ASC")->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        error_log('rh_joined_only_pairs: ' . $e->getMessage());
+        return [];
+    }
+    $pairs = [];
+    foreach ($rows as $r) {
+        if ((int)$r['room_a_id'] === (int)$r['room_b_id']) {
+            continue;
+        }
+        $r['id'] = (int)$r['id'];
+        $r['room_a_id'] = (int)$r['room_a_id'];
+        $r['room_b_id'] = (int)$r['room_b_id'];
+        $r['label'] = $r['a_number'] . ' + ' . $r['b_number'];
+        $r['room_ids'] = [$r['room_a_id'], $r['room_b_id']];
+        $pairs[$r['id']] = $r;
+    }
+    return $pairs;
+}
+
+/**
+ * The active joined-room combination of a given "Book As" type that contains this room (either
+ * mode), or null. Used wherever a staff member picks the rooms of a joined booking: they pick the
+ * PAIR, and this resolves any member room to it.
+ *
+ * A room in more than one shared pair resolves to $preferComboId (the booking's own pair) when it
+ * is one of them, otherwise to the oldest pair.
+ *
+ * @return array{id:int,room_a_id:int,room_b_id:int,combined_name:string}|null
+ */
+function rh_combination_for_room(int $individualRoomId, int $combinedTypeId, int $preferComboId = 0): ?array
+{
+    global $pdo;
+    if ($individualRoomId <= 0 || $combinedTypeId <= 0 || !bookingAvailabilityTableExists('room_combinations')) {
+        return null;
+    }
+    try {
+        $st = $pdo->prepare("SELECT id, room_a_id, room_b_id, combined_name FROM room_combinations
+            WHERE combined_room_type_id = ? AND is_active = 1 AND (room_a_id = ? OR room_b_id = ?) ORDER BY (id = ?) DESC, id LIMIT 1");
+        $st->execute([$combinedTypeId, $individualRoomId, $individualRoomId, $preferComboId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return null;
+        }
+        return ['id' => (int)$row['id'], 'room_a_id' => (int)$row['room_a_id'], 'room_b_id' => (int)$row['room_b_id'], 'combined_name' => (string)$row['combined_name']];
+    } catch (Throwable $e) {
+        error_log('rh_combination_for_room: ' . $e->getMessage());
+        return null;
+    }
+}
+
+/** Room id => its active joined-only pair (see rh_joined_only_pairs). A room is in at most one active pair. */
+function rh_joined_only_pair_map(): array
+{
+    $map = [];
+    foreach (rh_joined_only_pairs(true) as $pair) {
+        foreach ($pair['room_ids'] as $rid) {
+            $map[$rid] = $pair;
+        }
+    }
+    return $map;
+}
+
+/** One status for a joined pair: whichever member is the most restrictive wins. */
+function rh_joined_pair_status(string $statusA, string $statusB): string
+{
+    foreach (['out_of_order', 'maintenance', 'occupied', 'cleaning'] as $s) {
+        if ($statusA === $s || $statusB === $s) {
+            return $s;
+        }
+    }
+    return 'available';
+}
+
+/**
+ * Physical status of every sellable room unit: each active room that is not part of an active
+ * joined-only pair, plus each such pair as ONE unit (its status is the most restrictive of its
+ * two rooms: see rh_joined_pair_status).
+ *
+ * @return string[]
+ */
+function rh_room_unit_statuses(): array
+{
+    global $pdo;
+    try {
+        $rooms = $pdo->query('SELECT id, status FROM individual_rooms WHERE is_active = 1')->fetchAll(PDO::FETCH_KEY_PAIR);
+    } catch (Throwable $e) {
+        return [];
+    }
+    $paired = [];
+    $units = [];
+    foreach (rh_joined_only_pairs(true) as $pair) {
+        $a = (string)($rooms[$pair['room_a_id']] ?? '');
+        $b = (string)($rooms[$pair['room_b_id']] ?? '');
+        if ($a === '' || $b === '') {
+            continue;
+        }
+        $paired[$pair['room_a_id']] = $paired[$pair['room_b_id']] = true;
+        $units[] = rh_joined_pair_status($a, $b);
+    }
+    foreach ($rooms as $rid => $st) {
+        if (!isset($paired[(int)$rid])) {
+            $units[] = (string)$st;
+        }
+    }
+    return $units;
+}
+
+/**
+ * How many sellable room units there are (a joined-only pair is ONE unit), optionally only those
+ * in / not in the given physical statuses. Inventory and occupancy denominators use this so a
+ * joined room counts once, not twice.
+ */
+function rh_room_units_count(array $statuses = [], bool $excludeStatuses = false): int
+{
+    $units = rh_room_unit_statuses();
+    if (!$statuses) {
+        return count($units);
+    }
+    return count(array_filter($units, static function ($st) use ($statuses, $excludeStatuses) {
+        return in_array($st, $statuses, true) !== $excludeStatuses;
+    }));
+}
+/**
+ * SQL expression: how many rooms ONE booking-night occupies, on the same basis as the inventory
+ * denominator (rh_room_units_count): a normal booking = 1; a joined-room booking of a joined-ONLY
+ * pair = 1 (the pair is one room); a joined-room booking of a shared-mode pair = 2 (both rooms).
+ * Occupancy numerators, ADR denominators and the EOD all use this one fragment so they agree.
+ * $alias is the bookings table alias (constant, never user input).
+ */
+function rh_booking_rooms_factor_sql(string $alias = 'b'): string
+{
+    return "(CASE WHEN {$alias}.room_combination_id IS NULL THEN 1 WHEN EXISTS (SELECT 1 FROM room_combinations rcx JOIN individual_rooms ra ON ra.id = rcx.room_a_id AND ra.room_type_id = rcx.combined_room_type_id JOIN individual_rooms rb ON rb.id = rcx.room_b_id AND rb.room_type_id = rcx.combined_room_type_id WHERE rcx.id = {$alias}.room_combination_id AND rcx.is_active = 1) THEN 1 ELSE 2 END)";
 }
 
 function getAvailableRoomCombinations(int $roomTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null, bool $requireClean = false): array
@@ -5143,10 +5328,16 @@ function rh_validate_booking_stay_change(int $bookingId, string $newCheckIn, str
         $rt = $pdo->prepare("SELECT room_type_id FROM individual_rooms WHERE id = ? AND is_active = 1");
         $rt->execute([$explicitRoom]);
         $rtype = $rt->fetchColumn();
-        if ($rtype === false || (int)$rtype !== $typeId) {
+        // A room of a joined ("Book As") type is chosen as its PAIR: the partner room is checked too.
+        $explicitPair = $rtype === false ? null : rh_combination_for_room($explicitRoom, $typeId);
+        if ($rtype === false || ((int)$rtype !== $typeId && !$explicitPair)) {
             return $fail('The selected room does not exist or does not belong to this booking\'s room type.');
         }
         $roomChecks[] = [$explicitRoom, $clip([[$newIn, $newOut]]), $inHouse]; // an in-house guest moves in now
+        if ($explicitPair) {
+            $partnerRoom = $explicitPair['room_a_id'] === $explicitRoom ? $explicitPair['room_b_id'] : $explicitPair['room_a_id'];
+            $roomChecks[] = [$partnerRoom, $clip([[$newIn, $newOut]]), $inHouse];
+        }
     } elseif (!$typeChanged) {
         $roomSegs = [];
         if ($newIn < $oldIn) {
@@ -9743,6 +9934,7 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
     }
 
     $ownTx = !$pdo->inTransaction();
+    $spName = null; // savepoint when running inside the caller's transaction
 
     try {
         if ($ownTx) $pdo->beginTransaction();
@@ -9761,6 +9953,28 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
             // No recipe — order is allowed, just no stock impact
             if ($ownTx) $pdo->commit();
             return true;
+        }
+
+        /* All-or-nothing: a failed ingredient must not leave the others deducted while the caller
+         * records the line as not deducted (it would be deducted again on retry). Inside the
+         * caller's transaction the partial work is undone back to this savepoint. */
+        if (!$ownTx) {
+            static $deductSpSeq = 0;
+            $spName = 'rh_ded_' . (++$deductSpSeq);
+            $pdo->exec('SAVEPOINT ' . $spName);
+        }
+
+        /* A recipe may list the same ingredient on several lines (stock-recipes.php rejects that, the
+         * menu-management API did not): total them per ingredient so it is deducted once, in full,
+         * and the retry guard below cannot mistake the second line for an already-done deduction. */
+        $needByIngredient = [];
+        foreach ($rows as $row) {
+            $yield = (float)$row['yield_percent'];
+            if ($yield <= 0) $yield = 100.0; // safety
+            $rawNeeded = ((float)$row['quantity_per_portion'] * $portions) / ($yield / 100.0);
+            if ($rawNeeded <= 0) continue;
+            $ingKey = (int)$row['ingredient_id'];
+            $needByIngredient[$ingKey] = ($needByIngredient[$ingKey] ?? 0.0) + $rawNeeded;
         }
 
         /* Idempotency guard: a retried request must not deduct the same line twice.
@@ -9790,30 +10004,42 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
             }
         }
 
-        foreach ($rows as $row) {
-            $yield = (float)$row['yield_percent'];
-            if ($yield <= 0) $yield = 100.0; // safety
-            $rawNeeded = ((float)$row['quantity_per_portion'] * $portions) / ($yield / 100.0);
-            if ($rawNeeded <= 0) continue;
+        foreach ($needByIngredient as $ingredientId => $rawNeeded) {
             if ($dupDeductions) {
-                $dupDeductions->execute([$sourceType, $sourceId, (int)$row['ingredient_id']]);
+                $dupDeductions->execute([$sourceType, $sourceId, $ingredientId]);
                 $priorDeductions = (int)$dupDeductions->fetchColumn();
                 $priorRestores = 0;
                 if ($dupRestores) {
-                    $dupRestores->execute([$sourceType, $sourceId, (int)$row['ingredient_id']]);
+                    $dupRestores->execute([$sourceType, $sourceId, $ingredientId]);
                     $priorRestores = (int)$dupRestores->fetchColumn();
                 }
                 if ($priorDeductions > $priorRestores) {
                     continue;
                 }
             }
-            deductStockBatchFIFO((int)$row['ingredient_id'], $rawNeeded, $sourceType, $sourceId, $doneBy);
+            // deductStockBatchFIFO() swallows its own errors and returns null (lock wait timeout,
+            // ingredient gone): that is a FAILED deduction, never a success.
+            if (deductStockBatchFIFO((int)$ingredientId, $rawNeeded, $sourceType, $sourceId, $doneBy) === null) {
+                throw new RuntimeException("stock deduction failed for ingredient {$ingredientId}");
+            }
         }
 
-        if ($ownTx) $pdo->commit();
+        if ($ownTx) {
+            $pdo->commit();
+        } elseif ($spName !== null) {
+            $pdo->exec('RELEASE SAVEPOINT ' . $spName);
+        }
         return true;
     } catch (Throwable $e) {
-        if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        } elseif ($spName !== null && $pdo->inTransaction()) {
+            try {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $spName);
+            } catch (Throwable $e2) {
+                error_log('deductStockForMenuItem savepoint rollback failed: ' . $e2->getMessage());
+            }
+        }
         error_log("deductStockForMenuItem error (item {$menuItemId}/{$menuType}): " . $e->getMessage());
         return false;
     }

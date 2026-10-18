@@ -64,9 +64,11 @@ function scHasLineCol(PDO $pdo, string $col): bool
 {
     static $cache = [];
     if (!array_key_exists($col, $cache)) {
-        $q = $pdo->prepare("SHOW COLUMNS FROM stock_count_lines LIKE ?");
-        $q->execute([$col]);
-        $cache[$col] = $q->rowCount() > 0;
+        /* information_schema, not SHOW COLUMNS ... LIKE ?: a placeholder there is a syntax error under
+         * real (non-emulated) prepares, which would fatal every count page. */
+        $q = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+        $q->execute(["stock_count_lines", $col]);
+        $cache[$col] = ((int)$q->fetchColumn() > 0);
     }
     return $cache[$col];
 }
@@ -332,7 +334,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     ->execute([(float)$t['total'], (float)$t['shortage'], (float)$t['surplus'], $countId]);
                 $pdo->commit();
 
-                $_SESSION['stock_msg'] = 'Count submitted for approval. Shortage cost: ' . $currency . ' ' . number_format(abs((float)$t['shortage']), 2) . '.';
+                $_SESSION['stock_msg'] = 'Count submitted for approval.' . ($canApprove ? ' Shortage cost: ' . $currency . ' ' . number_format(abs((float)$t['shortage']), 2) . '.' : '');
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
             }
@@ -628,7 +630,7 @@ $ingredientList = $pdo->query("SELECT id, name, category, unit FROM stock_ingred
  * to sales — that is the audit lens. */
 $theftRadar = $pdo->query("
     SELECT i.id, i.name, i.unit, i.cost_per_unit,
-           COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS sold,
+           COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') THEN ABS(sa.quantity_change) WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) ELSE 0 END), 0) AS sold,
            COALESCE(SUM(CASE WHEN sa.source_type = 'wastage' THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS wasted,
            COALESCE(SUM(CASE WHEN sa.source_type = 'variance' AND sa.quantity_change < 0 THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS shortage,
            COALESCE(SUM(CASE WHEN sa.source_type = 'manual' AND sa.quantity_change < 0 THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS manual_out
@@ -680,6 +682,14 @@ $csrf_token = generateCsrfToken();
             $uncountedTotal = 0;
             $anyOverThreshold = false;
             $pageNow = (string)$pdo->query("SELECT NOW()")->fetchColumn();
+            /* BLIND COUNT: while a count is being taken the counter must commit to a physical reading
+             * before seeing what the system expects - otherwise the anti-theft control is void (type
+             * whatever matches, or read the expected figure to hide a shortage). System / expected /
+             * variance / cost impact are therefore withheld (and never put in the page) from the counter
+             * of a draft, and from non-approvers while a count is submitted or returned. Approvers see
+             * them once the count is submitted, and everyone sees an approved count. */
+            $blindCount = ($activeCount['status'] === 'draft' && ((int)$activeCount['counted_by'] === (int)$user['id'] || !$canApprove))
+                || (!$canApprove && in_array($activeCount['status'], ['submitted', 'rejected'], true));
             foreach ($activeLines as $i => $ln) {
                 $vc = (float)$ln['variance_cost'];
                 if ($vc < 0) $pendingShort += $vc;
@@ -687,6 +697,11 @@ $csrf_token = generateCsrfToken();
                 $isCounted = scLineIsCounted($ln, $hasCountedAt);
                 $activeLines[$i]['_counted'] = $isCounted;
                 if (!$isCounted) $uncountedTotal++;
+                if ($blindCount) {
+                    $activeLines[$i]['_preview'] = 0.0;
+                    $activeLines[$i]['_expected'] = null;
+                    continue;
+                }
                 // Expected stock at the moment of counting = snapshot + movements since the count started.
                 $activeLines[$i]['_preview'] = (float)$ln['system_quantity'];
                 if (!$isCounted) {
@@ -726,6 +741,7 @@ $csrf_token = generateCsrfToken();
                     <div class="lbl">Lines</div>
                     <div class="val"><?php echo $totalLines; ?></div>
                 </div>
+                <?php if (!$blindCount): ?>
                 <div class="sum-card<?php echo $pendingShort < 0 ? ' bad' : ''; ?>">
                     <div class="lbl">Shortage Cost</div>
                     <div class="val"><?php echo $currency . ' ' . number_format(abs($pendingShort), 2); ?></div>
@@ -738,12 +754,17 @@ $csrf_token = generateCsrfToken();
                     <div class="lbl">Net</div>
                     <div class="val"><?php echo $currency . ' ' . number_format($pendingSurplus + $pendingShort, 2); ?></div>
                 </div>
+                <?php endif; ?>
                 <div class="sum-card<?php echo ($uncountedTotal > 0 && $activeCount['status'] === 'draft') ? ' bad' : ''; ?>">
                     <div class="lbl">Not counted</div>
                     <div class="val"><?php echo (int)$uncountedTotal; ?></div>
                 </div>
             </div>
-            <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;">Variance is measured against <strong>expected stock at count time</strong> (the starting snapshot plus any sales, receipts or wastage recorded while the count was open), so movements during the count are not counted twice.</p>
+            <?php if ($blindCount): ?>
+                <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;"><i class="fas fa-eye-slash"></i> <strong>Blind count.</strong> Enter what you physically count. System quantities and variances are hidden while the count is open and are shown to the approver after you submit it.</p>
+            <?php else: ?>
+                <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;">Variance is measured against <strong>expected stock at count time</strong> (the starting snapshot plus any sales, receipts or wastage recorded while the count was open), so movements during the count are not counted twice.</p>
+            <?php endif; ?>
 
             <?php if ($activeCount['status'] === 'draft' && trim((string)($activeCount['rejection_reason'] ?? '')) !== ''): ?>
                 <div style="background:#fff3cd; border:1px solid #ffe69c; padding:10px 14px; border-radius:8px; margin-bottom:14px;">
@@ -773,12 +794,14 @@ $csrf_token = generateCsrfToken();
                         <input type="text" id="scFilterSearch" placeholder="Name, category, unit..." style="min-height:38px;">
                     </label>
                     <label style="display:flex;flex-direction:column;gap:0.28rem;">
-                        <span style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Variance</span>
+                        <span style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;letter-spacing:.04em;"><?php echo $blindCount ? 'Status' : 'Variance'; ?></span>
                         <select id="scFilterVariance" style="min-height:38px;">
                             <option value="all">All rows</option>
-                            <option value="shortage">Shortage only</option>
-                            <option value="surplus">Surplus only</option>
-                            <option value="balanced">Balanced only</option>
+                            <?php if (!$blindCount): ?>
+                                <option value="shortage">Shortage only</option>
+                                <option value="surplus">Surplus only</option>
+                                <option value="balanced">Balanced only</option>
+                            <?php endif; ?>
                             <option value="uncounted">Not counted only</option>
                         </select>
                     </label>
@@ -801,11 +824,15 @@ $csrf_token = generateCsrfToken();
                         <thead>
                             <tr>
                                 <th>Ingredient</th>
+                                <?php if (!$blindCount): ?>
                                 <th style="text-align:right;">System Qty (at start)</th>
                                 <th style="text-align:right;">Expected at count time</th>
+                                <?php endif; ?>
                                 <th style="text-align:right;">Actual Qty</th>
+                                <?php if (!$blindCount): ?>
                                 <th style="text-align:right;">Variance</th>
                                 <th style="text-align:right;">Cost Impact</th>
+                                <?php endif; ?>
                                 <th>Reason</th>
                                 <th>Notes</th>
                             </tr>
@@ -820,14 +847,14 @@ $csrf_token = generateCsrfToken();
                                 $expectedAt = $ln['_expected'];
                                 $absVarPct = ($expectedAt !== null && $expectedAt > 0) ? abs($var) / $expectedAt * 100 : ($sys > 0 ? abs($var) / $sys * 100 : 0);
                                 $rowClass = '';
-                                if ($lineCounted && $var < 0 && abs($varCost) >= $minCost) {
+                                if (!$blindCount && $lineCounted && $var < 0 && abs($varCost) >= $minCost) {
                                     $rowClass = $absVarPct >= $blockPct ? 'row-block' : 'row-flag';
                                 }
                                 $varClass = (!$lineCounted || abs($var) < 0.0001) ? 'var-zero' : ($var > 0 ? 'var-pos' : 'var-neg');
                             ?>
                                 <?php
                                 $reasonCode = trim((string)($ln['reason_code'] ?? ''));
-                                $varianceBand = !$lineCounted ? 'uncounted' : (abs($var) < 0.0001 ? 'balanced' : ($var > 0 ? 'surplus' : 'shortage'));
+                                $varianceBand = !$lineCounted ? 'uncounted' : ($blindCount ? 'counted' : (abs($var) < 0.0001 ? 'balanced' : ($var > 0 ? 'surplus' : 'shortage')));
                                 $searchBlob = mb_strtolower(trim((string)$ln['ingredient_name'] . ' ' . (string)$ln['category'] . ' ' . (string)$ln['unit']));
                                 ?>
                                 <tr class="<?php echo $rowClass; ?>"
@@ -838,15 +865,18 @@ $csrf_token = generateCsrfToken();
                                         <div style="font-weight:600;"><?php echo htmlspecialchars($ln['ingredient_name']); ?></div>
                                         <div style="font-size:10px; color:#6c757d;"><?php echo htmlspecialchars($ln['category']); ?> · <?php echo htmlspecialchars($ln['unit']); ?> · <?php echo $currency; ?> <?php echo number_format((float)$ln['cost_per_unit'], 2); ?>/<?php echo htmlspecialchars($ln['unit']); ?></div>
                                     </td>
+                                    <?php if (!$blindCount): ?>
                                     <td data-label="System Qty" style="text-align:right;"><?php echo number_format($sys, 4); ?></td>
                                     <td data-label="Expected at count time" style="text-align:right;"><?php echo $expectedAt === null ? '—' : number_format($expectedAt, 4); ?></td>
+                                    <?php endif; ?>
                                     <td data-label="Actual Qty" style="text-align:right;">
                                         <?php if ($editable): ?>
                                             <input class="qty" type="number" step="0.0001" min="0"
                                                 name="line[<?php echo (int)$ln['id']; ?>][actual]"
                                                 value="<?php echo $lineCounted ? number_format($act, 4, '.', '') : ''; ?>"
                                                 placeholder="not counted"
-                                                data-system="<?php echo number_format((float)($expectedAt ?? $ln['_preview']), 4, '.', ''); ?>"
+                                                <?php if (!$blindCount): ?>data-system="<?php echo number_format((float)($expectedAt ?? $ln['_preview']), 4, '.', ''); ?>"<?php endif; ?>
+
                                                 data-cost="<?php echo number_format((float)$ln['cost_per_unit'], 4, '.', ''); ?>"
                                                 oninput="recalcRow(this)">
                                             <input type="hidden" class="touched" name="line[<?php echo (int)$ln['id']; ?>][touched]" value="0">
@@ -854,12 +884,14 @@ $csrf_token = generateCsrfToken();
                                             <?php echo $lineCounted ? number_format($act, 4) : '<span style="color:#6c757d;">not counted</span>'; ?>
                                         <?php endif; ?>
                                     </td>
+                                    <?php if (!$blindCount): ?>
                                     <td data-label="Variance" style="text-align:right;" class="var <?php echo $varClass; ?>"><?php echo $lineCounted ? number_format($var, 4) : '—'; ?></td>
                                     <td data-label="Cost Impact" style="text-align:right;" class="varCost <?php echo $varClass; ?>"><?php echo $lineCounted ? $currency . ' ' . number_format($varCost, 2) : '—'; ?></td>
+                                    <?php endif; ?>
                                     <td data-label="Reason">
                                         <?php if ($editable): ?>
                                             <select class="reason" name="line[<?php echo (int)$ln['id']; ?>][reason]">
-                                                <option value="" <?php echo $ln['reason_code'] === '' ? ' selected' : ''; ?>>—</option>
+                                                <option value="" <?php echo $ln['reason_code'] === '' ? ' selected' : ''; ?>><?php echo $blindCount ? 'Reason, if short' : '—'; ?></option>
                                                 <?php foreach (['spillage', 'expired', 'staff_meal', 'sampling', 'prep_waste', 'theft_suspected', 'correction', 'other'] as $rc): ?>
                                                     <option value="<?php echo $rc; ?>" <?php echo $ln['reason_code'] === $rc ? ' selected' : ''; ?>><?php echo ucfirst(str_replace('_', ' ', $rc)); ?></option>
                                                 <?php endforeach; ?>
@@ -936,6 +968,10 @@ $csrf_token = generateCsrfToken();
                 function syncRowFilterStateFromInputs(input) {
                     const tr = input.closest('tr');
                     if (!tr) return;
+                    if (input.dataset.system === undefined) { // blind count: no expected figure on the page
+                        tr.dataset.filterVariance = input.value.trim() === '' ? 'uncounted' : 'counted';
+                        return;
+                    }
                     const sys = parseFloat(input.dataset.system || '0') || 0;
                     if (input.value.trim() === '') {
                         tr.dataset.filterVariance = 'uncounted';
@@ -948,10 +984,15 @@ $csrf_token = generateCsrfToken();
 
                 function recalcRow(input) {
                     const tr = input.closest('tr');
-                    const sys = parseFloat(input.dataset.system) || 0;
-                    const cost = parseFloat(input.dataset.cost) || 0;
                     const touchedEl = tr.querySelector('.touched');
                     if (touchedEl) touchedEl.value = '1';
+                    if (input.dataset.system === undefined) { // blind count: nothing to compute or reveal
+                        tr.dataset.filterVariance = input.value.trim() === '' ? 'uncounted' : 'counted';
+                        applyStockLineFilters();
+                        return;
+                    }
+                    const sys = parseFloat(input.dataset.system) || 0;
+                    const cost = parseFloat(input.dataset.cost) || 0;
                     const cells = tr.querySelectorAll('.var, .varCost');
                     if (input.value.trim() === '') {
                         cells[0].textContent = '—';
@@ -1181,8 +1222,9 @@ $csrf_token = generateCsrfToken();
                                             <?php if ($c['scope_value']): ?><div style="font-size:10px; color:#6c757d;"><?php echo htmlspecialchars(mb_strimwidth($c['scope_value'], 0, 30, '…')); ?></div><?php endif; ?>
                                         </td>
                                         <td data-label="Lines"><?php echo (int)$c['line_count']; ?></td>
-                                        <td data-label="Shortage" style="text-align:right; color:#c82333;"><?php echo $currency . ' ' . number_format(abs((float)$c['shortage_cost']), 2); ?></td>
-                                        <td data-label="Surplus" style="text-align:right; color:#155724;"><?php echo $currency . ' ' . number_format((float)$c['surplus_cost'], 2); ?></td>
+                                        <?php $hideCountFigures = ($c['status'] === 'draft') || (!$canApprove && $c['status'] !== 'approved'); ?>
+                                        <td data-label="Shortage" style="text-align:right; color:#c82333;"><?php echo $hideCountFigures ? '—' : $currency . ' ' . number_format(abs((float)$c['shortage_cost']), 2); ?></td>
+                                        <td data-label="Surplus" style="text-align:right; color:#155724;"><?php echo $hideCountFigures ? '—' : $currency . ' ' . number_format((float)$c['surplus_cost'], 2); ?></td>
                                         <td data-label="Counted by" style="font-size:12px;"><?php echo htmlspecialchars($c['counted_by_name'] ?: '—'); ?></td>
                                         <td data-label="Status"><span class="pill st-<?php echo htmlspecialchars($c['status']); ?>"><?php echo htmlspecialchars($c['status']); ?></span></td>
                                     </tr>

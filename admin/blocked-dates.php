@@ -60,6 +60,39 @@ function rh_block_check_individual_room(PDO $pdo, int $roomId): ?string
     return (int)$st->fetchColumn() > 0 ? null : 'The selected room does not exist.';
 }
 
+/**
+ * Individual-room ids a posted picker value stands for. "pair:<combination id>" is a joined-only
+ * pair (ONE room to staff) and means BOTH of its rooms; a plain number (or a member of a
+ * joined-only pair) is resolved the same way, so a member room is never blocked on its own.
+ *
+ * @return int[]
+ */
+function rh_block_room_ids(string $raw): array
+{
+    $raw = trim($raw);
+    if (strpos($raw, 'pair:') === 0) {
+        $pairs = rh_joined_only_pairs(true);
+        $pair = $pairs[(int)substr($raw, 5)] ?? null;
+        return $pair ? $pair['room_ids'] : [];
+    }
+    $id = (int)$raw;
+    if ($id <= 0) {
+        return [];
+    }
+    $map = rh_joined_only_pair_map();
+    return isset($map[$id]) ? $map[$id]['room_ids'] : [$id];
+}
+
+/** Unblock one night of a room; a member of a joined room is unblocked together with its partner. */
+function rh_unblock_room_or_pair(int $roomId, string $blockDate): bool
+{
+    $ok = true;
+    foreach (rh_block_room_ids((string)$roomId) as $rid) {
+        $ok = unblockIndividualRoomDate($rid, $blockDate) && $ok;
+    }
+    return $ok;
+}
+
 /** Run a block write under a lock so two simultaneous saves cannot both insert the same night. */
 function rh_block_locked(PDO $pdo, callable $fn)
 {
@@ -101,7 +134,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($block_scope === 'individual') {
             // Individual room blocking
-            $individual_room_id = !empty($_POST['individual_room_id']) ? (int)$_POST['individual_room_id'] : null;
+            // A joined room (pair) blocks both of its rooms together.
+            $block_room_ids = rh_block_room_ids((string)($_POST['individual_room_id'] ?? ''));
+            $individual_room_id = $block_room_ids[0] ?? null;
             $block_date = $_POST['block_date'] ?? '';
             $block_type = $_POST['block_type'] ?? 'manual';
             $reason = $_POST['reason'] ?? null;
@@ -118,12 +153,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = $chkErr;
                 $messageType = 'error';
             } else {
-                $result = rh_block_locked($pdo, function () use ($individual_room_id, $clean_dates, $block_type, $reason, $created_by) {
-                    return blockIndividualRoomDate($individual_room_id, $clean_dates[0], $block_type, $reason, $created_by);
+                $result = rh_block_locked($pdo, function () use ($pdo, $block_room_ids, $clean_dates, $block_type, $reason, $created_by) {
+                    // A joined room is blocked on both its rooms or on neither.
+                    $pdo->beginTransaction();
+                    $okAll = true;
+                    foreach ($block_room_ids as $blockRoomId) {
+                        $okAll = blockIndividualRoomDate($blockRoomId, $clean_dates[0], $block_type, $reason, $created_by) && $okAll;
+                    }
+                    $okAll ? $pdo->commit() : $pdo->rollBack();
+                    return $okAll;
                 });
 
                 if ($result) {
-                    $message = 'Individual room date blocked successfully.' . rh_block_overlap_note(null, $individual_room_id, $clean_dates);
+                    $message = (count($block_room_ids) > 1 ? 'Joined room date blocked successfully (both rooms).' : 'Individual room date blocked successfully.') . rh_block_overlap_note(null, $individual_room_id, $clean_dates);
                     $messageType = 'success';
                 } else {
                     $message = 'Failed to block date';
@@ -196,7 +238,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     continue;
                 }
                 $ok = $scope === 'individual' && !empty($target['individual_room_id'])
-                    ? unblockIndividualRoomDate($target['individual_room_id'], $target['block_date'])
+                    ? rh_unblock_room_or_pair((int)$target['individual_room_id'], $target['block_date'])
                     : unblockRoomDate($target['room_id'], $target['block_date']);
                 if ($ok) {
                     $done++;
@@ -228,7 +270,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($target_date) {
                 if ($block_scope === 'individual' && !empty($target_date['individual_room_id'])) {
-                    $result = unblockIndividualRoomDate($target_date['individual_room_id'], $target_date['block_date']);
+                    $result = rh_unblock_room_or_pair((int)$target_date['individual_room_id'], $target_date['block_date']);
                 } else {
                     $result = unblockRoomDate($target_date['room_id'], $target_date['block_date']);
                 }
@@ -250,7 +292,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($block_scope === 'individual') {
             // Individual room blocking
-            $individual_room_id = !empty($_POST['individual_room_id']) ? (int)$_POST['individual_room_id'] : null;
+            $block_room_ids = rh_block_room_ids((string)($_POST['individual_room_id'] ?? ''));
+            $individual_room_id = $block_room_ids[0] ?? null;
             $dates_json = $_POST['dates'] ?? '';
             $block_type = $_POST['block_type'] ?? 'manual';
             $reason = $_POST['reason'] ?? null;
@@ -267,12 +310,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = $chkErr;
                 $messageType = 'error';
             } else {
-                $blocked_count = (int)rh_block_locked($pdo, function () use ($individual_room_id, $dates, $block_type, $reason, $created_by) {
-                    return blockIndividualRoomDates($individual_room_id, $dates, $block_type, $reason, $created_by);
+                $blocked_count = (int)rh_block_locked($pdo, function () use ($pdo, $block_room_ids, $dates, $block_type, $reason, $created_by) {
+                    // A joined room blocks both rooms; the count is nights blocked on the joined room.
+                    // Both rooms must take the same nights, otherwise nothing is kept.
+                    $pdo->beginTransaction();
+                    $counts = [];
+                    foreach ($block_room_ids as $blockRoomId) {
+                        $counts[] = blockIndividualRoomDates($blockRoomId, $dates, $block_type, $reason, $created_by);
+                    }
+                    if ($counts && min($counts) === max($counts)) {
+                        $pdo->commit();
+                        return min($counts);
+                    }
+                    $pdo->rollBack();
+                    return 0;
                 });
 
                 if ($blocked_count > 0) {
-                    $message = "Successfully blocked {$blocked_count} date(s) for individual room." . rh_block_overlap_note(null, $individual_room_id, $dates);
+                    $message = "Successfully blocked {$blocked_count} date(s) for " . (count($block_room_ids) > 1 ? 'joined room (both rooms).' : 'individual room.') . rh_block_overlap_note(null, $individual_room_id, $dates);
                     $messageType = 'success';
                 } else {
                     $message = 'Failed to block dates';
@@ -334,12 +389,35 @@ if ($isAjax && $_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'
 
 // Get filter parameters
 $filter_room_id = isset($_GET['room_id']) ? ($_GET['room_id'] === 'all' ? null : (int)$_GET['room_id']) : null;
-$filter_individual_room_id = isset($_GET['individual_room_id']) ? ($_GET['individual_room_id'] === 'all' ? null : (int)$_GET['individual_room_id']) : null;
+// The individual-room filter is a room id or "pair:<id>" (a joined room - ONE room to staff).
+$joinedPairsActive = rh_joined_only_pairs(true);
+$joinedPairByRoomId = rh_joined_only_pair_map();
+$filter_individual_token = null;
+$filter_individual_room_id = null;
+$filter_pair_room_ids = [];
+if (isset($_GET['individual_room_id']) && $_GET['individual_room_id'] !== 'all') {
+    $filter_pair_room_ids = rh_block_room_ids((string)$_GET['individual_room_id']);
+    if (count($filter_pair_room_ids) > 1) {
+        $pairHit = $joinedPairByRoomId[$filter_pair_room_ids[0]] ?? null;
+        $filter_individual_token = $pairHit ? 'pair:' . $pairHit['id'] : null;
+    } else {
+        $filter_pair_room_ids = [];
+        $filter_individual_room_id = (int)$_GET['individual_room_id'];
+        $filter_individual_token = (string)$filter_individual_room_id;
+    }
+}
 $filter_start_date = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-01'); // First day of current month
 $filter_end_date = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-t'); // Last day of current month
 
 // Get blocked dates (both type and individual level)
 $blocked_dates = getBlockedDates($filter_room_id, $filter_start_date, $filter_end_date, $filter_individual_room_id);
+if ($filter_pair_room_ids) {
+    // Filtering by a joined room: its rooms' blocks (plus the room-type / all-rooms blocks, as for any room)
+    $blocked_dates = getBlockedDates($filter_room_id, $filter_start_date, $filter_end_date, null);
+    $blocked_dates = array_values(array_filter($blocked_dates, static function ($bd) use ($filter_pair_room_ids) {
+        return ($bd['block_scope'] ?? 'type') !== 'individual' || in_array((int)$bd['individual_room_id'], $filter_pair_room_ids, true);
+    }));
+}
 
 // Get all rooms for dropdown
 $rooms = getCachedRooms();
@@ -385,17 +463,52 @@ $room_type_label = static function (array $room) use ($joined_type_ids): string 
     return (string)$room['name'] . (isset($joined_type_ids[(int)$room['id']]) ? ' - joined pairs' : '');
 };
 $individual_room_label = static function (array $ir) use ($room_joined_label): string {
+    if (!empty($ir['option_label'])) {
+        return (string)$ir['option_label'];
+    }
     $label = 'Room ' . $ir['room_number'];
     if (!empty($room_joined_label[(int)$ir['id']])) {
         $label .= ' - part of joined room ' . implode(', ', $room_joined_label[(int)$ir['id']]);
     }
     return $label;
 };
-// Individual rooms grouped by their room type for <optgroup>s.
+// Individual rooms grouped by their room type for <optgroup>s. A joined-only pair is ONE option
+// ("101A + 101B (Joined Room)", value "pair:<id>") that blocks / unblocks both of its rooms.
 $individual_rooms_by_type = [];
+$pair_seen = [];
 foreach ($individual_rooms as $ir) {
+    $pairHit = $joinedPairByRoomId[(int)$ir['id']] ?? null;
+    if ($pairHit) {
+        if (isset($pair_seen[$pairHit['id']])) {
+            continue;
+        }
+        $pair_seen[$pairHit['id']] = true;
+        $ir['option_value'] = 'pair:' . $pairHit['id'];
+        $ir['option_label'] = $pairHit['label'] . ' (Joined Room)';
+    } else {
+        $ir['option_value'] = (string)(int)$ir['id'];
+        $ir['option_label'] = null;
+    }
     $individual_rooms_by_type[(string)$ir['room_type_name']][] = $ir;
 }
+
+// The list shows a block on a joined room ONCE per night (it is stored on both of its rooms).
+$blocked_dates = array_values(array_filter($blocked_dates, static function ($bd) use ($joinedPairByRoomId) {
+    static $seen = [];
+    if (($bd['block_scope'] ?? 'type') !== 'individual') {
+        return true;
+    }
+    $pairHit = $joinedPairByRoomId[(int)($bd['individual_room_id'] ?? 0)] ?? null;
+    if (!$pairHit) {
+        return true;
+    }
+    $key = $pairHit['id'] . '|' . $bd['block_date'];
+    if (isset($seen[$key])) {
+        return false;
+    }
+    $seen[$key] = true;
+    return true;
+}));
 
 // Get blocked dates for calendar display
 $calendar_start = date('Y-m-d', strtotime('-3 months'));
@@ -495,7 +608,7 @@ $site_name = getSetting('site_name');
                             <?php foreach ($individual_rooms_by_type as $irTypeName => $irGroup): ?>
                                 <optgroup label="<?php echo htmlspecialchars($irTypeName, ENT_QUOTES); ?>">
                                     <?php foreach ($irGroup as $ir): ?>
-                                        <option value="<?php echo $ir['id']; ?>" <?php echo $filter_individual_room_id === (int)$ir['id'] ? 'selected' : ''; ?>>
+                                        <option value="<?php echo htmlspecialchars((string)$ir['option_value'], ENT_QUOTES); ?>" <?php echo $filter_individual_token !== null && $filter_individual_token === (string)$ir['option_value'] ? 'selected' : ''; ?>>
                                             <?php echo htmlspecialchars($individual_room_label($ir)); ?>
                                         </option>
                                     <?php endforeach; ?>
@@ -574,10 +687,13 @@ $site_name = getSetting('site_name');
                                         </td>
                                         <td data-label="Room">
                                             <?php if (($bd['block_scope'] ?? 'type') === 'individual'): ?>
+                                                <?php $bdPair = $joinedPairByRoomId[(int)($bd['individual_room_id'] ?? 0)] ?? null; ?>
                                                 <span class="badge badge-info">
-                                                    <?php echo htmlspecialchars($bd['room_name'] . ' - ' . $bd['individual_room_number']); ?>
+                                                    <?php echo htmlspecialchars($bdPair ? ($bd['room_name'] . ' - ' . $bdPair['label'] . ' (Joined Room)') : ($bd['room_name'] . ' - ' . $bd['individual_room_number'])); ?>
                                                 </span>
-                                                <?php if (!empty($room_joined_label[(int)($bd['individual_room_id'] ?? 0)])): ?>
+                                                <?php if ($bdPair): ?>
+                                                    <small class="blocked-dates-muted" style="display:block;margin-top:3px;"><i class="fas fa-link"></i> Blocks both rooms</small>
+                                                <?php elseif (!empty($room_joined_label[(int)($bd['individual_room_id'] ?? 0)])): ?>
                                                     <small class="blocked-dates-muted" style="display:block;margin-top:3px;"><i class="fas fa-link"></i> Also blocks joined room <?php echo htmlspecialchars(implode(', ', $room_joined_label[(int)$bd['individual_room_id']])); ?></small>
                                                 <?php endif; ?>
                                             <?php else: ?>
@@ -675,7 +791,7 @@ $site_name = getSetting('site_name');
                             <?php foreach ($individual_rooms_by_type as $irTypeName => $irGroup): ?>
                                 <optgroup label="<?php echo htmlspecialchars($irTypeName, ENT_QUOTES); ?>">
                                     <?php foreach ($irGroup as $ir): ?>
-                                        <option value="<?php echo $ir['id']; ?>">
+                                        <option value="<?php echo htmlspecialchars((string)$ir['option_value'], ENT_QUOTES); ?>">
                                             <?php echo htmlspecialchars($individual_room_label($ir)); ?>
                                         </option>
                                     <?php endforeach; ?>
@@ -761,7 +877,7 @@ $site_name = getSetting('site_name');
                             <?php foreach ($individual_rooms_by_type as $irTypeName => $irGroup): ?>
                                 <optgroup label="<?php echo htmlspecialchars($irTypeName, ENT_QUOTES); ?>">
                                     <?php foreach ($irGroup as $ir): ?>
-                                        <option value="<?php echo $ir['id']; ?>">
+                                        <option value="<?php echo htmlspecialchars((string)$ir['option_value'], ENT_QUOTES); ?>">
                                             <?php echo htmlspecialchars($individual_room_label($ir)); ?>
                                         </option>
                                     <?php endforeach; ?>

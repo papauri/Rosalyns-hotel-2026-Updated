@@ -185,6 +185,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
         exit;
     }
     try {
+        // A joined ("Book As") type is chosen as a PAIR: one card "101A + 101B", never a member
+        // room alone. The card's id is the pair's first room; the save resolves it to the pair.
+        if (roomTypeHasActiveCombinations($room_type_id)) {
+            $freeComboIds = [];
+            foreach (getAvailableRoomCombinations($room_type_id, $ci, $co) as $freeCombo) {
+                $freeComboIds[(int)$freeCombo['id']] = true;
+            }
+            $pair_stmt = $pdo->prepare("
+                SELECT rc.id, rc.combined_name, rc.room_a_id, rc.room_b_id,
+                       a.room_number AS a_number, a.floor AS a_floor, b.room_number AS b_number, b.floor AS b_floor,
+                       r.child_price_multiplier
+                FROM room_combinations rc
+                JOIN individual_rooms a ON a.id = rc.room_a_id AND a.is_active = 1
+                JOIN individual_rooms b ON b.id = rc.room_b_id AND b.is_active = 1
+                JOIN rooms r ON r.id = rc.combined_room_type_id
+                WHERE rc.combined_room_type_id = ? AND rc.is_active = 1
+                ORDER BY rc.combined_name ASC, a.room_number ASC
+            ");
+            $pair_stmt->execute([$room_type_id]);
+            $pairResult = [];
+            foreach ($pair_stmt->fetchAll(PDO::FETCH_ASSOC) as $pr) {
+                $isFree = isset($freeComboIds[(int)$pr['id']]);
+                $pfloors = array_values(array_unique(array_filter([trim((string)$pr['a_floor']), trim((string)$pr['b_floor'])], static fn($v) => $v !== '')));
+                $pairResult[] = [
+                    'id'                => (int)$pr['room_a_id'],
+                    'label'             => $pr['a_number'] . ' + ' . $pr['b_number'] . ' (Joined Room' . ($pr['combined_name'] !== '' ? ' - ' . $pr['combined_name'] : '') . ')' . ($pfloors ? ' (Floor ' . implode(' / ', $pfloors) . ')' : ''),
+                    'status'            => $isFree ? 'available' : 'unavailable',
+                    'available'         => $isFree,
+                    'conflict'          => !$isFree,
+                    'child_multiplier'  => (float)($pr['child_price_multiplier'] ?? 50),
+                    'single_override'   => null,
+                    'double_override'   => null,
+                    'triple_override'   => null,
+                    'children_override' => null,
+                    'is_pair'           => true,
+                ];
+            }
+            echo json_encode(['success' => true, 'data' => $pairResult]);
+            exit;
+        }
         $ir_stmt = $pdo->prepare("
             SELECT ir.id, ir.room_number, ir.room_name, ir.status, ir.floor, ir.view_type,
                    ir.child_price_multiplier, ir.children_allowed_override,
@@ -379,6 +419,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 }
                 if (count($combination_queue) < $qty) {
                     throw new Exception('Only ' . count($combination_queue) . ' joined room combination(s) are available for "' . $r_data['name'] . '" on those dates.');
+                }
+                // Staff picked a specific joined room (single-room booking): that pair goes first.
+                if (!$auto_assign && $individual_room_id && $qty === 1 && count($rl_room_ids) === 1) {
+                    $pickedPair = null;
+                    foreach ($combination_candidates as $candidateCombination) {
+                        if ((int)$candidateCombination['room_a_id'] === $individual_room_id || (int)$candidateCombination['room_b_id'] === $individual_room_id) {
+                            $pickedPair = $candidateCombination;
+                            break;
+                        }
+                    }
+                    if (!$pickedPair) {
+                        throw new Exception('The joined room you picked is no longer available for those dates.');
+                    }
+                    $combination_queue = [$pickedPair];
                 }
                 $pricingCombination = $combination_queue[0];
                 $combinedRate = $pricingCombination['price_override'] !== null && $pricingCombination['price_override'] !== ''
@@ -789,6 +843,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         $primary_id  = $created_bookings[0]['id'];
         $primary_ref = $created_bookings[0]['ref'];
 
+        $payment_shares = []; // booking id => ['amount' => gross collected on it, 'ref' => payment reference]
         if ($payment_received && $amount_collected > 0) {
             $payment_reference_base = 'PAY-' . date('Ymd') . '-' . str_pad($primary_id, 6, '0', STR_PAD_LEFT);
             $total_distributed      = 0.0;
@@ -839,6 +894,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 ]);
                 $pdo->prepare("UPDATE bookings SET last_payment_date = CURDATE() WHERE id = ?")->execute([$cb['id']]);
                 recalculateBookingFinancials($cb['id']);
+                $payment_shares[(int)$cb['id']] = ['amount' => $this_amount, 'ref' => $pay_ref];
             }
         }
 
@@ -846,8 +902,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             recalculateBookingFinancials((int)$cb['id']);
         }
 
+        // Overpayment lives in a credit note only (owner rule): when the amount collected exceeds what a
+        // booking owes, convert the excess into a credit note inside this same transaction so
+        // bookings.credit_balance never holds it (and it is never booked as a bigger full_payment).
+        $overpay_cns = [];
+        if ($payment_shares) {
+            require_once __DIR__ . '/../config/credit-notes.php';
+            foreach ($payment_shares as $ovBookingId => $ovShare) {
+                $ovCn = rh_auto_credit_overpayment($pdo, 'room', (int)$ovBookingId, (float)$ovShare['amount'], (string)$ovShare['ref'], (int)($user['id'] ?? 0));
+                if ($ovCn) {
+                    $overpay_cns[] = $ovCn;
+                }
+            }
+        }
+
         $pdo->commit();
         unset($_SESSION['admin_create_booking_uuid']);
+
+        $overpay_msg = '';
+        foreach ($overpay_cns as $ovCn) {
+            $overpay_msg .= ' Overpayment of ' . htmlspecialchars($currency_symbol) . number_format((float)$ovCn['excess'], 2)
+                . ' issued as credit note ' . htmlspecialchars((string)$ovCn['credit_note_number']) . '.';
+            if (!empty($ovCn['email'])) {
+                try {
+                    sendCreditNoteEmail($pdo, (int)$ovCn['credit_note_id']);
+                } catch (\Throwable $cnMailEx) {
+                    error_log('create-booking overpayment credit note email failed: ' . $cnMailEx->getMessage());
+                }
+            }
+        }
 
         // ── Individual room assignments (must run after commit — each starts its own transaction) ──
         foreach ($created_bookings as $cb) {
@@ -1190,7 +1273,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         $rooms_suffix = $total_rooms_booked > 1 ? ' (' . $total_rooms_booked . ' rooms)' : '';
         $_SESSION['flash_message'] = [
             'type' => 'success',
-            'text' => 'Booking ' . $primary_ref . $rooms_suffix . ' created successfully!' . ($credit_msg ?? '') . $email_msg,
+            'text' => 'Booking ' . $primary_ref . $rooms_suffix . ' created successfully!' . ($credit_msg ?? '') . ($overpay_msg ?? '') . $email_msg,
         ];
         header('Location: booking-details.php?id=' . $primary_id);
         exit;
@@ -3123,7 +3206,7 @@ try {
                         lbl.textContent = ir.label;
                         const st = document.createElement('span');
                         st.className = 'ir-card-status';
-                        st.textContent = ir.conflict ? 'Booked' : (ir.status !== 'available' ? ir.status.charAt(0).toUpperCase() + ir.status.slice(1) : 'Available');
+                        st.textContent = ir.is_pair ? (ir.available ? 'Available' : 'Not free') : (ir.conflict ? 'Booked' : (ir.status !== 'available' ? ir.status.charAt(0).toUpperCase() + ir.status.slice(1) : 'Available'));
                         card.appendChild(radio);
                         card.appendChild(lbl);
                         card.appendChild(st);

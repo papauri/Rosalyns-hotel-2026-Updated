@@ -1949,7 +1949,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $booking_id     = (int)($_POST['id'] ?? 0);
             $pay_amount     = (float)($_POST['amount'] ?? 0);
             $pay_method     = $_POST['payment_method'] ?? 'cash';
-            $pay_type       = $_POST['payment_type'] ?? 'partial_payment'; // partial_payment | full_payment | adjustment
+            $pay_type       = $_POST['payment_type'] ?? 'partial_payment'; // partial_payment | full_payment
             $pay_date       = $_POST['payment_date'] ?? date('Y-m-d');
             $notes          = trim($_POST['notes'] ?? '');
             $acct_notes     = trim($_POST['accountant_notes'] ?? '');
@@ -1967,19 +1967,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pay_date = date('Y-m-d');
             }
 
-            $cr_stmt = $pdo->prepare("SELECT booking_reference, guest_name, status FROM bookings WHERE id = ?");
-            $cr_stmt->execute([$booking_id]);
-            $cr_bk = $cr_stmt->fetch(PDO::FETCH_ASSOC);
-            if (!$cr_bk) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Booking not found']);
-                exit;
-            }
+            require_once __DIR__ . '/includes/booking-lifecycle.php';
+            require_once __DIR__ . '/includes/finance-account-sync.php';
+            require_once __DIR__ . '/../config/credit-notes.php';
 
-            $vatEnabled_cr = rh_vat_enabled();
-            $vatRate_cr    = $vatEnabled_cr ? (float)getSetting('vat_rate') : 0;
-            $vatAmt_cr     = round($pay_amount * ($vatRate_cr / (100 + $vatRate_cr)), 2);
-            $netAmt_cr     = $pay_amount - $vatAmt_cr;
+            // Only values the ledger understands: payment_type is limited to a partial or the
+            // final payment (an 'adjustment' is not a payment), method to the enum.
+            if (!in_array($pay_type, ['partial_payment', 'full_payment'], true)) {
+                $pay_type = 'partial_payment';
+            }
+            if (!in_array($pay_method, ['cash', 'bank_transfer', 'mobile_money', 'credit_card', 'debit_card', 'cheque', 'other'], true)) {
+                $pay_method = 'other';
+            }
 
             // Unique reference
             do {
@@ -1988,35 +1987,93 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $refChk_cr->execute([$payRef_cr]);
             } while ((int)$refChk_cr->fetchColumn() > 0);
 
+            $consolidation_pay_id = 0;
+            $overpayCn_cr = null;
+            $cr_bk = null;
             $pdo->beginTransaction();
-            $receipt_number_cr = finance_next_receipt_number($pdo, $pay_date);
+            try {
+                // Lock the booking, re-derive its balance, then apply the same lifecycle rule as every
+                // other payment path (no payment on a cancelled / no-show / expired booking, nor on a
+                // settled checked-out one).
+                $cr_stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
+                $cr_stmt->execute([$booking_id]);
+                $cr_bk = $cr_stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$cr_bk) {
+                    $pdo->rollBack();
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => 'Booking not found']);
+                    exit;
+                }
+                if (!recalculateBookingFinancials($booking_id)) {
+                    throw new RuntimeException('Could not recalculate the booking balance - nothing was recorded.');
+                }
+                $cr_stmt->execute([$booking_id]);
+                $cr_bk = $cr_stmt->fetch(PDO::FETCH_ASSOC) ?: $cr_bk;
+                $cr_guard = bookingAllowsAction($cr_bk, 'record_payment');
+                if (empty($cr_guard['allowed'])) {
+                    $pdo->rollBack();
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => $cr_guard['reason'] ?: 'A payment cannot be recorded on this booking.']);
+                    exit;
+                }
 
-            $pdo->prepare("
-                INSERT INTO payments (
-                    payment_reference, booking_type, booking_id, booking_reference,
-                    payment_date, payment_amount, vat_rate, vat_amount, total_amount,
-                    payment_method, payment_type, payment_status,
-                    receipt_number, notes, recorded_by, created_at
-                ) VALUES (?, 'room', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, NOW())
-            ")->execute([
-                $payRef_cr,
-                $booking_id,
-                $cr_bk['booking_reference'],
-                $pay_date,
-                $netAmt_cr,
-                $vatRate_cr,
-                $vatAmt_cr,
-                $pay_amount,
-                $pay_method,
-                $pay_type,
-                $receipt_number_cr,
-                $combined_notes ?: null,
-                (int)($user['id'] ?? 0),
-            ]);
-            $consolidation_pay_id = (int)$pdo->lastInsertId();
+                // VAT split pro rata to the booking's own VAT / gross ratio (levy carries no VAT).
+                $vatEnabled_cr = rh_vat_enabled();
+                $vatRate_cr    = $vatEnabled_cr ? (float)getSetting('vat_rate') : 0;
+                $cr_split      = rh_account_vat_split($pdo, 'room', $booking_id, $pay_amount, (float)$vatRate_cr);
+                $vatRate_cr    = $cr_split['rate'];
+                $vatAmt_cr     = $cr_split['vat'];
+                $netAmt_cr     = $cr_split['net'];
 
-            recalculateBookingFinancials($booking_id);
-            $pdo->commit();
+                $receipt_number_cr = finance_next_receipt_number($pdo, $pay_date);
+
+                $pdo->prepare("
+                    INSERT INTO payments (
+                        payment_reference, booking_type, booking_id, booking_reference,
+                        payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                        payment_method, payment_type, payment_status,
+                        receipt_number, notes, recorded_by, created_at
+                    ) VALUES (?, 'room', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, NOW())
+                ")->execute([
+                    $payRef_cr,
+                    $booking_id,
+                    $cr_bk['booking_reference'],
+                    $pay_date,
+                    $netAmt_cr,
+                    $vatRate_cr,
+                    $vatAmt_cr,
+                    $pay_amount,
+                    $pay_method,
+                    $pay_type,
+                    $receipt_number_cr,
+                    $combined_notes ?: null,
+                    (int)($user['id'] ?? 0),
+                ]);
+                $consolidation_pay_id = (int)$pdo->lastInsertId();
+
+                if (!recalculateBookingFinancials($booking_id)) {
+                    throw new RuntimeException('Could not recalculate the booking balance after the payment - nothing was recorded.');
+                }
+                // Overpayment lives in a credit note only (owner rule): convert any excess inside
+                // this same transaction so bookings.credit_balance never holds it.
+                $overpayCn_cr = rh_auto_credit_overpayment($pdo, 'room', $booking_id, $pay_amount, $payRef_cr, (int)($user['id'] ?? 0));
+                $pdo->commit();
+            } catch (Throwable $crEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                error_log('consolidation_record failed: ' . $crEx->getMessage());
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Could not record the payment: ' . $crEx->getMessage()]);
+                exit;
+            }
+            if ($overpayCn_cr && $overpayCn_cr['email'] !== '') {
+                try {
+                    sendCreditNoteEmail($pdo, $overpayCn_cr['credit_note_id']);
+                } catch (Throwable $cnMailEx) {
+                    error_log('Overpayment credit note email failed: ' . $cnMailEx->getMessage());
+                }
+            }
 
             // Send receipt email for this consolidation payment
             if ($consolidation_pay_id > 0) {
@@ -2053,7 +2110,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Content-Type: application/json');
             echo json_encode([
                 'success'          => true,
-                'message'          => 'Payment of ' . $currency_symbol . ' ' . number_format($pay_amount, 2) . ' recorded successfully.',
+                'message'          => 'Payment of ' . $currency_symbol . ' ' . number_format($pay_amount, 2) . ' recorded successfully.'
+                    . ($overpayCn_cr ? ' The overpayment of ' . $currency_symbol . ' ' . number_format((float)$overpayCn_cr['excess'], 2) . ' was issued as credit note ' . $overpayCn_cr['credit_note_number'] . '.' : ''),
                 'payment_reference' => $payRef_cr,
                 'new_amount_paid'  => (float)($upd['amount_paid'] ?? 0),
                 'new_amount_due'   => (float)($upd['amount_due'] ?? 0),
@@ -7379,7 +7437,7 @@ $today_str = $today->format('Y-m-d');
                     '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Payment method <span style="color:#dc3545;">*</span></label><select name="payment_method" class="form-control"><option value="cash">Cash</option><option value="bank_transfer">Bank Transfer</option><option value="credit_card">Credit Card</option><option value="debit_card">Debit Card</option><option value="mobile_money">Mobile Money</option><option value="cheque">Cheque</option><option value="other">Other</option></select></div>' +
                     '</div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">' +
-                    '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Payment type</label><select name="payment_type" class="form-control"><option value="partial_payment">Partial payment</option><option value="full_payment">Full / final payment</option><option value="adjustment">Adjustment</option></select></div>' +
+                    '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Payment type</label><select name="payment_type" class="form-control"><option value="partial_payment">Partial payment</option><option value="full_payment">Full / final payment</option></select></div>' +
                     '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Payment date</label><input type="date" name="payment_date" class="form-control" value="' + rhYmd(new Date()) + '"></div>' +
                     '</div>' +
                     '<div class="form-group" style="margin-bottom:10px;"><label>General notes</label><input type="text" name="notes" class="form-control" placeholder="e.g. Cash collected at front desk" maxlength="200"></div>' +

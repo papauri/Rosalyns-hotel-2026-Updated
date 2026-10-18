@@ -2150,7 +2150,8 @@ a.recent-toggle span {
     padding: 18px 20px;
 }
 
-.modal-body label {
+/* Form-field captions only: checkbox/toggle labels inside a modal are left alone. */
+.modal-body label.field-label {
     display: block;
     font-size: 11px;
     font-weight: 600;
@@ -3108,216 +3109,345 @@ a.recent-toggle span {
     }
 }
 
-/* ── Tab Cards ─────────────────────────────────────────── */
-.tabs-tray-tools {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    display: grid;
-    gap: 6px;
-    margin: -4px -4px 8px;
-    padding: 8px;
-    border-radius: 10px;
-    background: linear-gradient(165deg, #fcf9f5 0%, #f4eee6 100%);
-    border: 1px solid #ecdfcf;
-    box-shadow: 0 3px 14px rgba(35, 31, 28, .06);
-}
-
-.tabs-tray-tools__headline {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+/* ── Open Tabs tray ────────────────────────────────────────
+ * One simple card per tab: reference, where, age · one status pill · total ·
+ * the same three buttons on every card (Add items, Settle, More). Touch targets
+ * are 44px (tablet at the till). Cards, toolbar and bulk bar are all drawn by
+ * renderOpenTabs() in pos.php. */
+.tabs-head {
+    flex-wrap: wrap;
     gap: 8px;
 }
 
-.tabs-tray-tools__metrics {
+.tabs-head h3 {
+    flex: 1;
+    min-width: 0;
+}
+
+.tabs-head__tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tabs-search {
+    position: relative;
+}
+
+.tabs-search i {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    font-size: 12px;
+    pointer-events: none;
+}
+
+.tabs-search input {
+    min-height: 40px;
+    width: 180px;
+    padding: 0 10px 0 30px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 13px;
+    outline: none;
+}
+
+.tabs-search input:focus {
+    border-color: var(--color-primary, #766550);
+}
+
+.tabs-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: grid;
+    gap: 2px;
+    margin: 0 0 8px;
+    padding: 8px 10px 2px;
+    border-radius: 10px;
+    background: #faf7f2;
+    border: 1px solid #ecdfcf;
+    /* Sticky stops below the body's top padding; this white band hides the cards that would
+       otherwise show through that gap while scrolling. */
+    box-shadow: 0 -18px 0 0 #fff;
+}
+
+.tabs-toolbar__top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 10px;
+}
+
+.tabs-metrics {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     min-width: 0;
 }
 
-.tabs-tray-metric {
+.tabs-metric {
     display: inline-flex;
     align-items: baseline;
     gap: 5px;
-    min-width: 0;
-    padding: 4px 8px;
+    padding: 3px 10px;
     border-radius: 999px;
     background: #fff;
     border: 1px solid #e9dece;
 }
 
-.tabs-tray-metric__label {
-    font-size: 9px;
+.tabs-metric__label {
+    font-size: 10px;
     font-weight: 700;
-    letter-spacing: .08em;
+    letter-spacing: .06em;
     text-transform: uppercase;
     color: #7a7267;
 }
 
-.tabs-tray-metric strong {
-    font-size: 12px;
+.tabs-metric strong {
+    font-size: 13px;
     color: #2e2b27;
     font-weight: 700;
-    line-height: 1.15;
 }
 
-.tabs-tray-tools__status {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-    flex-shrink: 0;
+.tabs-metric--warn {
+    background: #fde8ea;
+    border-color: #f5c4ca;
 }
 
-.tabs-tray-updated {
-    font-size: 10px;
-    font-weight: 700;
+.tabs-metric--warn .tabs-metric__label,
+.tabs-metric--warn strong {
+    color: #b21f2d;
+}
+
+.tabs-live {
+    font-size: 11px;
+    font-weight: 600;
     color: #6f675d;
     white-space: nowrap;
 }
 
-.tabs-tray-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    min-height: 30px;
-    padding: 0 9px;
-    border-radius: 8px;
-    border: 1px solid #d8c9b4;
-    background: #fff;
-    color: #4d453b;
-    font-size: 10px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: border-color .14s, transform .12s;
-}
-
-.tabs-tray-toggle:hover {
-    border-color: var(--color-primary, #766550);
-    transform: translateY(-1px);
-}
-
-.tabs-tray-tools__bulk-panel {
-    display: grid;
-    gap: 6px;
-}
-
-.tabs-tray-tools.is-collapsed .tabs-tray-tools__bulk-panel {
-    display: none;
-}
-
-.tabs-tray-tools__bulk-row {
+.tabs-selectbar {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    gap: 14px;
+    border-top: 1px solid #ecdfcf;
+    margin-top: 6px;
 }
 
-.tabs-bulk-check {
+.tabs-check {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    color: #4d463f;
-    font-size: 11px;
+    gap: 8px;
+    min-height: 44px;
+    margin: 0;
+    font-size: 13px;
     font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: #4d463f;
     cursor: pointer;
 }
 
-.tabs-bulk-check input {
-    width: 14px;
-    height: 14px;
+.tabs-check input {
+    width: 20px;
+    height: 20px;
     accent-color: var(--color-primary, #766550);
     cursor: pointer;
 }
 
-.tabs-bulk-btn {
+.tabs-link {
+    min-height: 44px;
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    color: var(--color-primary, #766550);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.tabs-empty {
+    margin: 0;
+    padding: 30px 0;
+    text-align: center;
+    color: #6c757d;
+    font-size: 14px;
+}
+
+.tabs-empty[hidden] {
+    display: none;
+}
+
+/* Result of the last bulk action: done / skipped with the reason for each skipped tab. */
+.tabs-report {
+    margin: 0 0 8px;
+    padding: 6px 4px 8px 12px;
+    border-radius: 10px;
+    background: #ecfdf3;
+    border: 1px solid #b7e4c7;
+    color: #14532d;
+    font-size: 13px;
+}
+
+.tabs-report--warn {
+    background: #fffbeb;
+    border-color: #fcd34d;
+    color: #78350f;
+}
+
+.tabs-report__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.tabs-report__close {
+    min-width: 44px;
+    min-height: 44px;
+    border: 0;
+    background: none;
+    color: inherit;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.tabs-report__list {
+    margin: 0 8px 0 0;
+    padding-left: 18px;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* Bulk bar: the shared .admin-bulk-bar of the office screens (admin-styles.css), mirrored here
+   under the same class names because the till does not load admin-styles.css. Keep the two in step.
+   --tray is the only POS difference: it sticks to the bottom of the scrolling modal body. */
+.admin-bulk-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    position: sticky;
+    bottom: 12px;
+    z-index: 40;
+    margin: 12px 0;
+    padding: 10px 14px;
+    background: #231f1c;
+    color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, .22);
+}
+
+.admin-bulk-bar[hidden] {
+    display: none !important;
+}
+
+.admin-bulk-bar__count {
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+.admin-bulk-bar__count strong {
+    font-size: 16px;
+}
+
+.admin-bulk-bar__controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+}
+
+.admin-bulk-bar__btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-height: 30px;
-    padding: 0 9px;
+    min-height: 44px;
+    padding: 0 14px;
     border-radius: 8px;
-    border: 1px solid #d7c8b2;
-    background: #fff;
-    color: #4f463c;
-    font-size: 10.5px;
+    border: 1px solid rgba(255, 255, 255, .4);
+    background: transparent;
+    color: #fff;
+    font-family: inherit;
+    font-size: 13px;
     font-weight: 700;
     cursor: pointer;
-    transition: border-color .14s, background .14s, color .14s, transform .12s;
 }
 
-.tabs-bulk-btn:hover {
-    border-color: var(--color-primary, #766550);
-    color: #3c342c;
-    transform: translateY(-1px);
-}
-
-.tabs-bulk-btn:disabled {
-    opacity: .55;
-    cursor: not-allowed;
-    transform: none;
-}
-
-.tabs-tray-tools__bulk-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.tabs-bulk-btn--cancel {
-    background: #7c2d12;
-    border-color: #7c2d12;
-    color: #fff;
-}
-
-.tabs-bulk-btn--void {
+.admin-bulk-bar__btn--danger {
     background: #c82333;
     border-color: #c82333;
-    color: #fff;
 }
 
-.tabs-bulk-info {
+.admin-bulk-bar__btn:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+.admin-bulk-bar__clear {
     margin-left: auto;
-    color: #6f665d;
-    font-size: 10px;
-    font-weight: 700;
+}
+
+.admin-bulk-bar--tray {
+    bottom: 0;
+    z-index: 4;
+    margin: 10px 0 0;
+    /* second shadow: white band hiding cards under the body's bottom padding gap */
+    box-shadow: 0 6px 22px rgba(0, 0, 0, .22), 0 18px 0 0 #fff;
 }
 
 .tab-cards-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
-    gap: 6px;
+    grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+    gap: 8px;
+    padding-bottom: 4px;
 }
 
 .tab-card {
+    position: relative;
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    padding: 10px 12px;
     background: #fff;
     border: 1px solid #e6ded1;
     border-radius: 10px;
-    padding: 9px 10px;
-    transition: border-color .15s, box-shadow .15s, transform .12s;
+}
+
+.tab-card[hidden] {
+    display: none;
 }
 
 .tab-card:hover {
     border-color: var(--color-primary, #766550);
-    box-shadow: 0 6px 18px rgba(138, 119, 95, .14);
-    transform: translateY(-1px);
 }
 
 .tab-card.stale {
     border-color: #efc4c8;
-    background: linear-gradient(160deg, #fff 0%, #fff8f8 100%);
+    background: #fffafa;
 }
 
-.tc-row1 {
+/* An open More menu floats over the cards below it. */
+.tab-card.menu-open {
+    z-index: 6;
+    border-color: var(--color-primary, #766550);
+}
+
+.tc-head {
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 6px;
-    margin-bottom: 4px;
 }
 
 .tc-select-wrap {
@@ -3327,6 +3457,9 @@ a.recent-toggle span {
     justify-content: center;
     min-width: 44px;
     min-height: 44px;
+    margin: -6px 0 -6px -10px;
+    letter-spacing: 0;
+    text-transform: none;
     cursor: pointer;
 }
 
@@ -3337,8 +3470,8 @@ a.recent-toggle span {
 }
 
 .tc-select-indicator {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     border-radius: 6px;
     border: 1px solid #c9b9a3;
     background: #fff;
@@ -3346,7 +3479,7 @@ a.recent-toggle span {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
+    font-size: 11px;
     transition: border-color .12s, background .12s, color .12s;
 }
 
@@ -3356,107 +3489,124 @@ a.recent-toggle span {
     color: #fff;
 }
 
+.tc-select-input:focus-visible+.tc-select-indicator {
+    outline: 2px solid var(--color-primary, #766550);
+    outline-offset: 2px;
+}
+
+.tc-id {
+    min-width: 0;
+}
+
 .tc-ref {
     font-weight: 700;
-    font-size: 13px;
+    font-size: 14px;
     color: #1f1f24;
     line-height: 1.2;
-    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tc-where {
+    font-size: 12px;
+    color: #6b6358;
+    line-height: 1.3;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .tc-age {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
-    padding: 2px 7px;
+    padding: 2px 8px;
     border-radius: 10px;
     background: rgba(0, 0, 0, .06);
     white-space: nowrap;
-    flex-shrink: 0;
 }
 
-.tc-meta {
+/* One pill style for every status; only the tone changes. */
+.tc-status {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 6px;
+    gap: 6px;
 }
 
-.tc-meta-pill {
+.tc-pill {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 2px 6px;
+    padding: 3px 10px;
     border-radius: 999px;
-    background: #f6f3ef;
-    border: 1px solid #e6ddd1;
-    font-size: 10px;
-    color: #5f564c;
-    line-height: 1.25;
-}
-
-.tc-flow {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px;
-    margin-bottom: 6px;
-}
-
-.tc-flow-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 7px;
-    border-radius: 20px;
-    font-size: 10px;
+    border: 1px solid transparent;
+    font-size: 12px;
     font-weight: 700;
+    line-height: 1.3;
 }
 
-.tc-flow-chip.pending {
+.tc-pill--idle,
+.tc-pill--wait {
     background: #f0f2f4;
+    border-color: #dde1e5;
     color: #495057;
 }
 
-.tc-flow-chip.preparing {
+.tc-pill--prep {
     background: #dbeafe;
+    border-color: #bfd6fb;
     color: #1d4ed8;
 }
 
-.tc-flow-chip.ready {
+.tc-pill--ready {
     background: #dcfce7;
+    border-color: #b7ecc7;
     color: #166534;
 }
 
-.tc-flow-chip.collection {
+.tc-pill--collect {
     background: #ffedd5;
+    border-color: #fbd5a8;
     color: #9a3412;
 }
 
-.tc-flow-chip.served {
-    background: #e9f5ee;
-    color: #155724;
+.tc-pill--done {
+    background: #15803d;
+    border-color: #15803d;
+    color: #fff;
 }
 
-.tc-flow-chip.served-all {
-    background: #ecfdf3;
-    color: #166534;
+.tc-pill--split {
+    background: #fffbeb;
+    border-color: #fcd34d;
+    color: #92400e;
 }
 
-.tc-summary-row {
+.tc-pill--late {
+    background: #fde8ea;
+    border-color: #f5c4ca;
+    color: #b21f2d;
+}
+
+.tc-foot {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: space-between;
-    gap: 6px;
-    margin-bottom: 6px;
+    gap: 8px;
+}
+
+.tc-foot__side {
+    min-width: 0;
+    text-align: right;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #7a7267;
 }
 
 .tc-total-label {
     display: block;
-    font-size: 9px;
+    font-size: 10px;
     text-transform: uppercase;
     letter-spacing: .08em;
     color: #8b8174;
@@ -3470,62 +3620,117 @@ a.recent-toggle span {
     line-height: 1.15;
 }
 
-.tc-stale-warn {
+/* The same buttons, same order, equal width and height on every card. */
+.tc-actions {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 6px;
+}
+
+.tc-act {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    color: #b21f2d;
-    background: #fde8ea;
-    border: 1px solid #f5c4ca;
-    border-radius: 999px;
-    padding: 3px 7px;
-    font-size: 9px;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 8px;
+    border-radius: 8px;
+    border: 1px solid #d7c8b2;
+    background: #fff;
+    color: #4f463c;
+    font-family: inherit;
+    font-size: 13px;
     font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
 }
 
-.tc-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
+.tc-act:hover:not(:disabled) {
+    border-color: var(--color-primary, #766550);
 }
 
-/* Secondary actions revealed by "More". Muted so the eye still lands on Settle when
-   a card is expanded — this row is the exception, not the working surface. */
-.tc-actions--secondary {
-    margin-top: 5px;
-    padding-top: 6px;
-    border-top: 1px dashed #e6ded1;
+.tc-act:active:not(:disabled) {
+    transform: scale(.98);
 }
 
-/* The [hidden] attribute is only a low-specificity UA rule (display:none), so the
-   display:flex on .tc-actions silently overrode it and the panel rendered open no
-   matter what the attribute said. Restate it explicitly. */
-.tc-actions--secondary[hidden] {
+.tc-act:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+.tc-act--add {
+    color: var(--color-primary, #766550);
+    border-color: var(--color-primary, #766550);
+}
+
+.tc-act--settle {
+    background: #0f6c36;
+    border-color: #0f6c36;
+    color: #fff;
+}
+
+.tc-act--more[aria-expanded="true"] {
+    background: #efe9e0;
+}
+
+.tc-menu {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    top: calc(100% - 6px);
+    z-index: 7;
+    display: grid;
+    padding: 4px;
+    background: #fff;
+    border: 1px solid #d7c8b2;
+    border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(35, 31, 28, .22);
+}
+
+.tc-menu[hidden] {
     display: none;
 }
 
-.tc-actions--secondary .tc-btn {
+.tc-menu__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: #3c342c;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.tc-menu__item i {
+    width: 18px;
+    text-align: center;
+    color: #8b8174;
+}
+
+.tc-menu__item:hover {
     background: #f6f3ee;
-    border-color: #e0d7c8;
-    color: #6f665d;
 }
 
-.tc-actions--secondary .tc-btn:hover {
-    background: #efe9e0;
-    color: #4a433c;
+.tc-menu__item--danger,
+.tc-menu__item--danger i {
+    color: #b21f2d;
 }
 
-.tc-btn-more {
-    background: #f2efe9;
-    border-color: #ded5c6;
-    color: #6f665d;
+.tc-menu__item:not(.tc-menu__item--danger)+.tc-menu__item--danger {
+    margin-top: 4px;
+    border-top: 1px solid #eee6da;
+    border-radius: 0 0 8px 8px;
 }
 
-.tc-btn-more.is-open {
-    background: #e6ded1;
-    color: #4a433c;
-}
-
+/* Action buttons shared with the Tab details window (Settle, Print KOT, Timeline, Cancel, Void). */
 .tc-btn {
     display: inline-flex;
     align-items: center;
@@ -3602,29 +3807,41 @@ a.recent-toggle span {
         grid-template-columns: 1fr;
     }
 
-    .tabs-tray-tools__headline {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 6px;
-    }
-
-    .tabs-tray-tools__status {
-        margin-left: 0;
-        justify-content: space-between;
-    }
-
-    .tabs-bulk-info {
+    .tabs-head__tools {
         width: 100%;
-        margin-left: 0;
     }
 
-    .tabs-tray-tools__bulk-actions .tabs-bulk-btn {
-        flex: 1 1 calc(50% - 3px);
+    .tabs-search {
+        flex: 1;
+    }
+
+    .tabs-search input {
+        width: 100%;
+    }
+
+    .admin-bulk-bar--tray .admin-bulk-bar__controls {
+        flex: 1 1 100%;
+        order: 3;
+    }
+
+    .admin-bulk-bar--tray .admin-bulk-bar__btn {
+        flex: 1 1 0;
+    }
+
+    .admin-bulk-bar--tray .admin-bulk-bar__clear {
+        margin-left: 0;
     }
 
     .tc-btn {
         flex: 1 1 calc(50% - 3px);
         justify-content: center;
+    }
+}
+
+/* Phone: drop the button icons so "Add items" / "Settle" / "More" stay on one line. */
+@media (max-width: 420px) {
+    .tc-act i {
+        display: none;
     }
 }
 

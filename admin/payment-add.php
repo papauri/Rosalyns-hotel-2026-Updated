@@ -1019,7 +1019,12 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                         'partially_refunded' => 'Partially refunded',
                                         'cancelled' => 'Cancelled',
                                     ];
-                                    if (!$editLocked) {
+                                    // Money already collected stays collected: Pending / Partial would silently
+                                    // un-collect it, so only the two collected statuses are offered.
+                                    $collectedLock = !$editLocked && $payment && in_array((string)$payment['payment_status'], ['completed', 'paid'], true);
+                                    if ($collectedLock) {
+                                        $statuses = array_intersect_key($statuses, ['paid' => true, 'completed' => true]);
+                                    } elseif (!$editLocked) {
                                         unset($statuses['refunded'], $statuses['partially_refunded']);
                                     } else {
                                         $statuses = array_intersect_key($statuses, [(string)$payment['payment_status'] => true]);
@@ -1032,6 +1037,9 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                         </option>
                                     <?php endforeach; ?>
                                 </select>
+                                <?php if (!empty($collectedLock)): ?>
+                                    <p class="pa-hint">Use Process Refund to give money back.</p>
+                                <?php endif; ?>
                             </div>
                         </div>
 

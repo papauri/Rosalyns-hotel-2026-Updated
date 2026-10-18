@@ -795,9 +795,9 @@ function exportStockReport($output, string $start_date, string $end_date, string
     fputcsv($output, []);
 
     rpx_section($output, 'LOW STOCK (current snapshot)', ['Ingredient', 'Current', 'Minimum', 'Unit'],
-        "SELECT name, current_quantity AS current_stock, min_quantity AS min_stock_level, unit FROM stock_ingredients
-         WHERE is_archived=0 AND current_quantity <= min_quantity
-         ORDER BY (current_quantity / NULLIF(min_quantity,0)) ASC LIMIT 30", [],
+        "SELECT name, current_quantity AS current_stock, (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END) AS min_stock_level, unit FROM stock_ingredients
+         WHERE is_archived=0 AND current_quantity <= (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END)
+         ORDER BY (current_quantity / NULLIF((CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END),0)) ASC LIMIT 30", [],
         function ($r) { return [$r['name'], $r['current_stock'], $r['min_stock_level'], $r['unit']]; });
 
     rpx_section($output, 'WASTAGE', ['Ingredient', 'Qty', 'Value'],
@@ -808,12 +808,14 @@ function exportStockReport($output, string $start_date, string $end_date, string
         function ($r) use ($cs) { return [$r['ingredient'], $r['qty'], $cs . ' ' . number_format((float)$r['value'], 2)]; });
 
     rpx_section($output, 'TOP INGREDIENTS USED', ['Ingredient', 'Qty Used', 'Cost'],
-        "SELECT i.name, ABS(SUM(sa.quantity_change)) AS qty, ABS(SUM(sa.quantity_change * COALESCE(i.cost_per_unit, 0))) AS cost
+        "SELECT i.name, GREATEST(0, -SUM(sa.quantity_change)) AS qty, GREATEST(0, -SUM(sa.quantity_change * COALESCE(i.cost_per_unit, 0))) AS cost
          FROM stock_adjustments sa JOIN stock_ingredients i ON i.id = sa.ingredient_id
-         WHERE sa.created_at BETWEEN ? AND ? AND sa.quantity_change < 0
-           AND sa.source_type IN ('pos_order','sale','consumption','recipe','room_service')
-           AND NOT " . rh_voided_wastage_sql('sa') . "
-         GROUP BY i.id ORDER BY cost DESC LIMIT 20", $p,
+         WHERE sa.created_at BETWEEN ? AND ?
+           AND ((sa.quantity_change < 0
+                 AND sa.source_type IN ('pos_order','sale','consumption','recipe','room_service')
+                 AND NOT " . rh_voided_wastage_sql('sa') . ")
+                OR sa.source_type = 'void_restore')
+         GROUP BY i.id HAVING qty > 0 ORDER BY cost DESC LIMIT 20", $p,
         function ($r) use ($cs) { return [$r['name'], $r['qty'], $cs . ' ' . number_format((float)$r['cost'], 2)]; });
 }
 

@@ -470,6 +470,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
         .btn-sm { padding:5px 10px; font-size:.8rem; }
         .po-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
         .mini { width:90px; }
+        .recv-out { display:block; margin-top:3px; font-size:.74rem; color:#8a8172; white-space:nowrap; }
         .mono { font-variant-numeric:tabular-nums; }
         .po-link { color:#7E684B; text-decoration:none; font-weight:600; }
         @media (max-width:640px){ .po-table thead { display:none; } }
@@ -576,7 +577,8 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                                         <input class="mini" type="number" name="receive_qty[]" step="0.001" min="0"
                                                max="<?php echo htmlspecialchars((string)max(0, $outstanding)); ?>"
                                                value="<?php echo $outstanding > 0 ? htmlspecialchars((string)round($outstanding, 3)) : '0'; ?>"
-                                               <?php echo $outstanding <= 0 ? 'readonly title="Fully received"' : ''; ?>>
+                                               <?php echo $outstanding <= 0 ? 'readonly title="Fully received"' : 'title="At most ' . htmlspecialchars((string)round($outstanding, 3)) . ' can still be received on this line"'; ?>>
+                                        <span class="recv-out"><?php echo $outstanding > 0 ? 'max ' . number_format($outstanding, 3) . ' outstanding' : 'fully received'; ?></span>
                                         <input type="hidden" name="receive_cost[]" value="<?php echo htmlspecialchars((string)$ln['unit_cost']); ?>">
                                     </td>
                                     <td><input type="date" name="expiry_date[]"></td>

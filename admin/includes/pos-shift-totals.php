@@ -13,6 +13,12 @@
  *    The original sale is never moved or restated.
  *  - Expected per tender = sales (net of nothing) minus payouts. Split orders are read
  *    per leg tender, never from stock_orders.payment_method (last leg only).
+ *  - A refund of a STILL-PAID order (partial refund, or an 86 refund 'REF86-') is a payout
+ *    when it is SETTLED (payments.refund_status completed, at refund_date_processed), by
+ *    tender, against the user who recorded it. A refunded order whose refund is still
+ *    pending/processing is not paid out yet. An 86 lowers the order total at sale time, but
+ *    the guest paid the full amount: the REF86 value is therefore added back to the SALE
+ *    tender (never to revenue) so the sale shift is right and the settling shift pays it out.
  */
 
 if (!function_exists('rh_pos_col_exists')) {
@@ -63,6 +69,7 @@ if (!function_exists('rh_pos_tender_bucket')) {
                 return 'mobile';
             case 'card_manual':
             case 'card_pos':
+            case 'credit_card': // payments.payment_method enum value for a card
                 return 'card';
         }
         return null;
@@ -99,6 +106,62 @@ if (!function_exists('rh_pos_shift_window_start')) {
     }
 }
 
+if (!function_exists('rh_pos_settled_refund_payouts')) {
+    /**
+     * Second payout source: refund rows (payments.payment_type = 'refund', refund_status
+     * 'completed') settled in [start,end) whose order is NOT in a refunded/voided state, so the
+     * order-level payout never counts them:
+     *  - a partial refund of a still-paid order (non-86 rows), and
+     *  - 86 refunds ('REF86-' rows), on any order that was paid.
+     * Event time = refund_date_processed (fallback updated_at, created_at); actor = recorded_by
+     * (fallback the order's creator); tender = the refund row's own method. Store-credit
+     * ('credit_note') rows never touch the drawer. Rows: same shape as rh_pos_shift_reversals,
+     * id = the ORDER id, plus payment_id.
+     */
+    function rh_pos_settled_refund_payouts(PDO $pdo, string $start, string $end): array
+    {
+        $at = "COALESCE(p.refund_date_processed, p.updated_at, p.created_at)";
+        try {
+            $st = $pdo->prepare("
+                SELECT p.id AS pid, o.id AS oid, p.payment_method AS method,
+                       CASE WHEN COALESCE(p.refund_amount, 0) > 0 THEN p.refund_amount ELSE p.total_amount END AS amt,
+                       $at AS event_at,
+                       COALESCE(p.recorded_by, o.created_by) AS actor_id
+                FROM payments p
+                INNER JOIN stock_orders o ON o.id = p.booking_id
+                WHERE p.booking_type = 'restaurant' AND p.payment_type = 'refund'
+                  AND p.refund_status = 'completed' AND p.deleted_at IS NULL
+                  AND o.paid_at IS NOT NULL
+                  AND (p.payment_reference LIKE 'REF86-%' OR o.status = 'paid')
+                  AND $at >= ? AND $at < ?
+                ORDER BY p.id ASC");
+            $st->execute([$start, $end]);
+        } catch (Throwable $e) {
+            error_log('rh_pos_settled_refund_payouts: ' . $e->getMessage());
+            return [];
+        }
+        $out = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $b = rh_pos_tender_bucket($r['method']);
+            if (!$b) {
+                continue; // credit note / other: not drawer money
+            }
+            $t = ['cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0];
+            $t[$b] = (float)$r['amt'];
+            $out[] = [
+                'id' => (int)$r['oid'],
+                'payment_id' => (int)$r['pid'],
+                'kind' => 'refund',
+                'actor_id' => (int)$r['actor_id'],
+                'at' => (string)$r['event_at'],
+                'cash' => $t['cash'], 'mobile' => $t['mobile'], 'card' => $t['card'],
+                'total' => $t['cash'] + $t['mobile'] + $t['card'],
+            ];
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('rh_pos_shift_reversals')) {
     /**
      * Refund / void payouts of PAID orders whose own timestamp falls in [start,end).
@@ -109,11 +172,16 @@ if (!function_exists('rh_pos_shift_reversals')) {
         $hasRefundedAt = rh_pos_col_exists($pdo, 'stock_orders', 'refunded_at');
         $hasVoidedBy = rh_pos_col_exists($pdo, 'stock_orders', 'voided_by');
         $voidActor = $hasVoidedBy ? 'COALESCE(o.voided_by, o.created_by)' : 'o.created_by';
-        $refundCond = $hasRefundedAt ? "(o.status = 'refunded' AND o.refunded_at >= ? AND o.refunded_at < ?)" : "(1 = 0)";
+        // A refunded order counts when its money actually left the drawer: refunded_at, or the latest
+        // settlement of its (non-86) refund rows when they were raised pending and settled later.
+        // While any such row is still pending/processing nothing has been paid out yet.
+        $refundAt = "GREATEST(o.refunded_at, COALESCE((SELECT MAX(pr.refund_date_processed) FROM payments pr WHERE pr.booking_type = 'restaurant' AND pr.booking_id = o.id AND pr.payment_type = 'refund' AND pr.deleted_at IS NULL AND pr.payment_reference NOT LIKE 'REF86-%' AND pr.refund_status = 'completed'), o.refunded_at))";
+        $refundNotPending = "NOT EXISTS (SELECT 1 FROM payments pp WHERE pp.booking_type = 'restaurant' AND pp.booking_id = o.id AND pp.payment_type = 'refund' AND pp.deleted_at IS NULL AND pp.payment_reference NOT LIKE 'REF86-%' AND pp.refund_status IN ('pending','processing'))";
+        $refundCond = $hasRefundedAt ? "(o.status = 'refunded' AND $refundNotPending AND $refundAt >= ? AND $refundAt < ?)" : "(1 = 0)";
         $sql = "
             SELECT o.id, o.status, o.payment_method, o.total_amount, COALESCE(o.tip_amount,0) AS tip,
                    COALESCE(o.split_count,1) AS sc,
-                   " . ($hasRefundedAt ? "CASE WHEN o.status = 'refunded' THEN o.refunded_at ELSE o.voided_at END" : "o.voided_at") . " AS event_at,
+                   " . ($hasRefundedAt ? "CASE WHEN o.status = 'refunded' THEN $refundAt ELSE o.voided_at END" : "o.voided_at") . " AS event_at,
                    CASE WHEN o.status = 'refunded'
                         THEN COALESCE((SELECT a.actor_id FROM stock_order_audit a WHERE a.order_id = o.id AND a.event = 'refunded' ORDER BY a.id DESC LIMIT 1), o.created_by)
                         ELSE $voidActor END AS actor_id
@@ -126,7 +194,7 @@ if (!function_exists('rh_pos_shift_reversals')) {
         $st->execute($params);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
         if (!$rows) {
-            return [];
+            return rh_pos_settled_refund_payouts($pdo, $start, $end);
         }
 
         $splitIds = [];
@@ -171,7 +239,7 @@ if (!function_exists('rh_pos_shift_reversals')) {
                 'total' => $t['cash'] + $t['mobile'] + $t['card'],
             ];
         }
-        return $out;
+        return array_merge($out, rh_pos_settled_refund_payouts($pdo, $start, $end));
     }
 }
 
@@ -246,6 +314,32 @@ if (!function_exists('rh_pos_shift_totals')) {
             if ($b) {
                 $gross[$b] += (float)$r['amt'];
             }
+        }
+
+        // 86 refunds: the order total was lowered at 86 time but the guest paid the full amount, so
+        // that value is part of the SALE tender here (the settling shift pays it out via
+        // rh_pos_settled_refund_payouts). Revenue (sales_total below) stays on the lowered total.
+        // Attributed to the order's payer (not per split leg).
+        try {
+            $sql = "SELECT p.payment_method AS method,
+                           COALESCE(SUM(CASE WHEN COALESCE(p.refund_amount, 0) > 0 THEN p.refund_amount ELSE p.total_amount END), 0) AS amt
+                    FROM payments p
+                    INNER JOIN stock_orders o ON o.id = p.booking_id
+                    WHERE p.booking_type = 'restaurant' AND p.payment_type = 'refund'
+                      AND p.payment_reference LIKE 'REF86-%' AND p.deleted_at IS NULL
+                      AND COALESCE(p.refund_status, 'completed') IN ('pending','processing','completed')
+                      AND $saleWin" . ($userId !== null ? " AND $payer = ?" : '') . "
+                    GROUP BY p.payment_method";
+            $st = $pdo->prepare($sql);
+            $st->execute($userId !== null ? array_merge($saleParams, [$userId]) : $saleParams);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $b = rh_pos_tender_bucket($r['method']);
+                if ($b) {
+                    $gross[$b] += (float)$r['amt'];
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('rh_pos_shift_totals REF86 add-back: ' . $e->getMessage());
         }
 
         // Order-level metrics (count, tips, earlier-tab settlements) follow the order's payer.
@@ -438,5 +532,91 @@ if (!function_exists('rh_eod_folio_fnb')) {
         } catch (Throwable $e) {
             return ['gross' => 0.0, 'vat' => 0.0];
         }
+    }
+}
+
+if (!function_exists('rh_eod_folio_fnb_allocation')) {
+    /**
+     * The F&B part of the ROOM payments received on $date, allocated payment by payment (cash basis):
+     * for each booking paid today, fnb_share = today's room payments on it x (its non-voided F&B folio
+     * charges / its grand total from the same figures getBookingFolioSummary uses), with the VAT moved at
+     * the F&B charges' own VAT ratio. Room service posted on day 1 and paid at checkout on day 3 is
+     * therefore F&B revenue on day 3 in proportion to what the payment settles, and a deposit for a
+     * stay with no F&B charges stays room revenue.
+     * Returns ['gross' => moved gross, 'vat' => moved VAT, 'bookings' => bookings with a share].
+     */
+    function rh_eod_folio_fnb_allocation(PDO $pdo, string $date): array
+    {
+        $out = ['gross' => 0.0, 'vat' => 0.0, 'bookings' => 0];
+        try {
+            $st = $pdo->prepare("SELECT booking_id, COALESCE(SUM(total_amount),0) AS pay_gross, COALESCE(SUM(vat_amount),0) AS pay_vat
+                FROM payments
+                WHERE booking_type = 'room' AND DATE(payment_date) = ? AND deleted_at IS NULL
+                  AND payment_status IN ('completed','paid','refunded','partially_refunded')
+                  AND COALESCE(payment_type, '') <> 'refund'
+                GROUP BY booking_id");
+            $st->execute([$date]);
+            $pays = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!$pays) {
+                return $out;
+            }
+            $ids = array_map(static function ($r) { return (int)$r['booking_id']; }, $pays);
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+
+            $st = $pdo->prepare("SELECT booking_id,
+                       COALESCE(SUM(line_total),0) AS all_total,
+                       COALESCE(SUM(CASE WHEN charge_type IN ('food','drink','minibar','breakfast','room_service') THEN line_total ELSE 0 END),0) AS fnb_total,
+                       COALESCE(SUM(CASE WHEN charge_type IN ('food','drink','minibar','breakfast','room_service') THEN vat_amount ELSE 0 END),0) AS fnb_vat
+                FROM booking_charges WHERE voided = 0 AND booking_id IN ($ph) GROUP BY booking_id");
+            $st->execute($ids);
+            $folio = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $folio[(int)$r['booking_id']] = $r;
+            }
+            if (!$folio) {
+                return $out;
+            }
+
+            $st = $pdo->prepare("SELECT id, status, total_amount, vat_amount, total_with_vat, cancellation_retained_amount FROM bookings WHERE id IN ($ph)");
+            $st->execute($ids);
+            $bk = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $bk[(int)$r['id']] = $r;
+            }
+
+            foreach ($pays as $p) {
+                $bid = (int)$p['booking_id'];
+                if (empty($folio[$bid]) || empty($bk[$bid]) || (float)$folio[$bid]['fnb_total'] <= 0) {
+                    continue;
+                }
+                $b = $bk[$bid];
+                $baseGross = (float)($b['total_with_vat'] ?? 0);
+                if ($baseGross <= 0) {
+                    $baseGross = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
+                }
+                if ((string)$b['status'] === 'cancelled') {
+                    $baseGross = max(0.0, (float)($b['cancellation_retained_amount'] ?? 0));
+                }
+                $grand = $baseGross + (float)$folio[$bid]['all_total'];
+                if ($grand <= 0) {
+                    continue;
+                }
+                $payGross = (float)$p['pay_gross'];
+                $share = min($payGross, $payGross * ((float)$folio[$bid]['fnb_total'] / $grand));
+                if ($share <= 0) {
+                    continue;
+                }
+                $vatRatio = (float)$folio[$bid]['fnb_total'] > 0 ? ((float)$folio[$bid]['fnb_vat'] / (float)$folio[$bid]['fnb_total']) : 0.0;
+                $out['gross'] += $share;
+                $out['vat'] += min((float)$p['pay_vat'], $share * $vatRatio);
+                $out['bookings']++;
+            }
+            $out['gross'] = round($out['gross'], 2);
+            $out['vat'] = round($out['vat'], 2);
+        } catch (Throwable $e) {
+            error_log('rh_eod_folio_fnb_allocation: ' . $e->getMessage());
+            return ['gross' => 0.0, 'vat' => 0.0, 'bookings' => 0];
+        }
+        return $out;
     }
 }

@@ -1958,7 +1958,8 @@ $tabsSql = "SELECT o.id, o.reference, o.total_amount, o.table_number, o.customer
                    (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status IN ('preparing','in_progress')) AS preparing_count,
                    (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status = 'ready')                     AS ready_count,
                    (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status = 'collection')                AS collection_count,
-                   (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status = 'served')                    AS served_count
+                   (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status = 'served')                    AS served_count,
+                   (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id AND kds_status = 'void')                      AS void_count
             FROM stock_orders o
             LEFT JOIN admin_users u ON u.id = o.created_by
             WHERE o.status = 'placed' AND o.order_type != 'room_service' ";
@@ -2495,6 +2496,7 @@ if ($posCanStations) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link rel="stylesheet" href="css/pos-overrides.css?v=<?php echo @filemtime(__DIR__ . '/css/pos-overrides.css'); ?>">
     <script src="js/station-sounds.js"></script>
+    <script src="js/rh-age.js?v=<?php echo @filemtime(__DIR__ . '/js/rh-age.js'); ?>"></script>
     <script>
     /* Load BarcodeDetector polyfill for Firefox / Safari / older browsers.
        Dynamic import lets us catch failures so Chrome Android (native) keeps working. */
@@ -2888,7 +2890,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
                     <?php /* Payment method sits first: it is the one choice every sale needs, so on a
                               tablet it is on screen without scrolling. Receipt details and discount follow. */ ?>
-                    <label>Payment method</label>
+                    <label class="field-label">Payment method</label>
                     <div class="pay-method-grid">
                         <button type="button" data-method="cash" onclick="setMethod(this)"><i class="fas fa-money-bill-wave"></i> Cash</button>
                         <button type="button" data-method="mobile_money" onclick="setMethod(this)"><i class="fas fa-mobile-alt"></i> Mobile Money</button>
@@ -2898,7 +2900,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <input type="hidden" name="payment_method" id="payment_method" value="">
 
                     <div id="ext-cash" style="display:none;">
-                        <label>Tendered (<?php echo $currency_symbol; ?>)</label>
+                        <label class="field-label">Tendered (<?php echo $currency_symbol; ?>)</label>
                         <input type="number" step="0.01" min="0" name="tendered_amount" id="tendered" oninput="updChange()">
                         <div class="change-banner">Change: <span id="changeOut"><?php echo $currency_symbol; ?> 0.00</span></div>
                         <div class="quick-tend-row">
@@ -2910,7 +2912,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
 
                     <div id="ext-mobile_money" style="display:none;">
-                        <label>Provider</label>
+                        <label class="field-label">Provider</label>
                         <select name="mobile_wallet_provider">
                             <option value="">Select…</option>
                             <option>Airtel Money</option>
@@ -2918,21 +2920,21 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                             <option>Mo626</option>
                             <option>Other</option>
                         </select>
-                        <label>Transaction reference</label>
+                        <label class="field-label">Transaction reference</label>
                         <input type="text" name="mobile_wallet_reference" placeholder="MP25.0123.A4567">
                     </div>
 
                     <div id="ext-card_manual" style="display:none;">
-                        <label>Card last 4 digits</label>
+                        <label class="field-label">Card last 4 digits</label>
                         <input type="text" name="card_last4" maxlength="4" pattern="\d{4}" placeholder="1234">
-                        <label>Authorisation code (from slip)</label>
+                        <label class="field-label">Authorisation code (from slip)</label>
                         <input type="text" name="card_auth_code" maxlength="50">
                     </div>
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                        <div><label>Email (for receipt)</label><input type="email" name="customer_email"></div>
-                        <div><label>Phone (for WhatsApp)</label><input type="text" name="customer_phone"></div>
+                        <div><label class="field-label">Email (for receipt)</label><input type="email" name="customer_email"></div>
+                        <div><label class="field-label">Phone (for WhatsApp)</label><input type="text" name="customer_phone"></div>
                     </div>
-                    <label>Notes</label>
+                    <label class="field-label">Notes</label>
                     <input type="text" name="notes" placeholder="Allergies, special requests…">
 
                     <!-- Discount section -->
@@ -2949,11 +2951,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         </div>
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                             <div>
-                                <label style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Amount (<?php echo $currency_symbol; ?>)</label>
+                                <label class="field-label" style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Amount (<?php echo $currency_symbol; ?>)</label>
                                 <input type="number" step="0.01" min="0" id="payDiscountAmt" placeholder="0.00" oninput="onDiscountAmtInput()" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
                             </div>
                             <div>
-                                <label style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Reason</label>
+                                <label class="field-label" style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Reason</label>
                                 <select id="payDiscountReason" onchange="syncPayDiscountToForm()" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
                                     <option value="">Select…</option>
                                     <option>Staff discount</option>
@@ -3102,207 +3104,23 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         </div>
     <?php endif; ?>
 
-    <!-- Open tabs tray -->
+    <!-- Open tabs tray. The toolbar, cards and bulk bar are all drawn by renderOpenTabs() in the
+         script below (first from the list embedded in the page, then from pos.php?ajax=tabs), so
+         there is a single rendering of a tab card. -->
     <div class="overlay modal-overlay" data-modal id="tabsOverlay">
         <div class="modal modal-content">
-            <div class="modal-head modal-header" style="flex-wrap:wrap; gap:8px;">
-                <h3 id="openTabsTitle" style="flex:1; min-width:0;"><i class="fas fa-utensils"></i> Open tabs (<?php echo count($openTabs); ?>)</h3>
-                <div style="display:flex; align-items:center; gap:6px;">
-                    <div style="position:relative;">
-                        <i class="fas fa-search" style="position:absolute; left:9px; top:50%; transform:translateY(-50%); color:#9ca3af; font-size:12px; pointer-events:none;"></i>
-                        <input type="text" id="tabsSearchInput" placeholder="Search tabs…" oninput="filterOpenTabCards(this.value)" autocomplete="off"
-                            style="padding:7px 10px 7px 28px; border:1px solid #d1d5db; border-radius:7px; font-size:12px; width:160px; outline:none;">
+            <div class="modal-head modal-header tabs-head">
+                <h3 id="openTabsTitle"><i class="fas fa-utensils"></i> Open tabs (<?php echo count($openTabs); ?>)</h3>
+                <div class="tabs-head__tools">
+                    <div class="tabs-search">
+                        <i class="fas fa-search" aria-hidden="true"></i>
+                        <input type="search" id="tabsSearchInput" placeholder="Search tabs…" aria-label="Search open tabs" oninput="filterOpenTabCards(this.value)" autocomplete="off">
                     </div>
-                    <button class="close modal-close" onclick="closeTabsTray()">&times;</button>
+                    <button class="close modal-close" onclick="closeTabsTray()" aria-label="Close">&times;</button>
                 </div>
             </div>
             <div class="modal-body" id="tabsTrayBody" style="max-height:72vh; overflow-y:auto;">
-                <?php if (empty($openTabs)): ?>
-                    <div class="tabs-tray-tools is-collapsed" id="tabsTrayTools">
-                        <div class="tabs-tray-tools__headline">
-                            <div class="tabs-tray-tools__metrics">
-                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Open</span><strong>0</strong></div>
-                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Outstanding</span><strong><?php echo htmlspecialchars($currency_symbol, ENT_QUOTES, 'UTF-8'); ?> 0.00</strong></div>
-                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Stale</span><strong>0</strong></div>
-                            </div>
-                            <div class="tabs-tray-tools__status">
-                                <span class="tabs-tray-updated" id="tabsTrayUpdated">Live</span>
-                                <button type="button" class="tabs-tray-toggle" id="tabsTrayToggleBtn" onclick="toggleTabsTrayTools()" aria-expanded="false"><i class="fas fa-sliders"></i> Bulk tools</button>
-                            </div>
-                        </div>
-                        <div class="tabs-tray-tools__bulk-panel" id="tabsTrayBulkPanel" hidden>
-                            <div class="tabs-tray-tools__bulk-row">
-                                <label class="tabs-bulk-check"><input type="checkbox" id="tabsBulkAll" onchange="toggleTabsBulkAll(this.checked)" disabled> <span>Select all</span></label>
-                                <button type="button" class="tabs-bulk-btn" onclick="tabsSelectStale()" disabled><i class="fas fa-triangle-exclamation"></i> Select stale</button>
-                                <button type="button" class="tabs-bulk-btn" onclick="tabsClearSelection()" disabled><i class="fas fa-broom"></i> Clear</button>
-                                <span class="tabs-bulk-info" id="tabsBulkSelectionInfo">No tabs selected</span>
-                            </div>
-                            <div class="tabs-tray-tools__bulk-actions">
-                                <button type="button" class="tabs-bulk-btn tabs-bulk-btn--cancel" id="tabsBulkCancelBtn" onclick="bulkCancelTabs()" disabled><i class="fas fa-circle-xmark"></i> Bulk cancel</button>
-                                <?php if ($posCanVoid): ?>
-                                    <button type="button" class="tabs-bulk-btn tabs-bulk-btn--void" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()" disabled><i class="fas fa-ban"></i> Bulk void</button>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </div>
-                    <p style="text-align:center; color:#6c757d; padding:30px 0;">No open tabs.</p>
-                <?php else: ?>
-                    <?php
-                    $openTabsTotalAmount = 0.0;
-                    $staleTabsCount = 0;
-                    foreach ($openTabs as $open_tab_metric) {
-                        $openTabsTotalAmount += (float)($open_tab_metric['total_amount'] ?? 0);
-                        if (!empty($restaurantWindow['start_sql']) && (($open_tab_metric['created_at'] ?? '') < $restaurantWindow['start_sql'])) {
-                            $staleTabsCount++;
-                        }
-                    }
-                    ?>
-                    <div class="tabs-tray-tools is-collapsed" id="tabsTrayTools">
-                        <div class="tabs-tray-tools__headline">
-                            <div class="tabs-tray-tools__metrics">
-                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Open</span><strong><?php echo count($openTabs); ?></strong></div>
-                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Outstanding</span><strong><?php echo htmlspecialchars($currency_symbol, ENT_QUOTES, 'UTF-8') . ' ' . number_format($openTabsTotalAmount, 2); ?></strong></div>
-                                <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Stale</span><strong><?php echo (int)$staleTabsCount; ?></strong></div>
-                            </div>
-                            <div class="tabs-tray-tools__status">
-                                <span class="tabs-tray-updated" id="tabsTrayUpdated">Live</span>
-                                <button type="button" class="tabs-tray-toggle" id="tabsTrayToggleBtn" onclick="toggleTabsTrayTools()" aria-expanded="false"><i class="fas fa-sliders"></i> Bulk tools</button>
-                            </div>
-                        </div>
-                        <div class="tabs-tray-tools__bulk-panel" id="tabsTrayBulkPanel" hidden>
-                            <div class="tabs-tray-tools__bulk-row">
-                                <label class="tabs-bulk-check"><input type="checkbox" id="tabsBulkAll" onchange="toggleTabsBulkAll(this.checked)"> <span>Select all</span></label>
-                                <button type="button" class="tabs-bulk-btn" onclick="tabsSelectStale()"><i class="fas fa-triangle-exclamation"></i> Select stale</button>
-                                <button type="button" class="tabs-bulk-btn" onclick="tabsClearSelection()"><i class="fas fa-broom"></i> Clear</button>
-                                <span class="tabs-bulk-info" id="tabsBulkSelectionInfo">No tabs selected</span>
-                            </div>
-                            <div class="tabs-tray-tools__bulk-actions">
-                                <button type="button" class="tabs-bulk-btn tabs-bulk-btn--cancel" id="tabsBulkCancelBtn" onclick="bulkCancelTabs()" disabled><i class="fas fa-circle-xmark"></i> Bulk cancel</button>
-                                <?php if ($posCanVoid): ?>
-                                    <button type="button" class="tabs-bulk-btn tabs-bulk-btn--void" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()" disabled><i class="fas fa-ban"></i> Bulk void</button>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="tab-cards-list" id="tabsCardsList">
-                        <?php foreach ($openTabs as $t):
-                            $created   = strtotime($t['created_at']);
-                            $ageSec    = max(0, time() - $created);
-                            $ageM = floor($ageSec / 60);
-                            $ageS = $ageSec % 60;
-                            $ageStr = $ageM > 0 ? ($ageM . 'm ' . str_pad((string)$ageS, 2, '0', STR_PAD_LEFT) . 's') : ($ageS . 's');
-                            $ageColor  = $ageSec >= 1800 ? '#c82333' : ($ageSec >= 900 ? '#d4a843' : '#28a745');
-                            $isStale   = $t['created_at'] < ($restaurantWindow['start_sql'] ?? '');
-                            $pendingCount    = (int)($t['pending_count']    ?? 0);
-                            $preparingCount  = (int)($t['preparing_count']  ?? 0);
-                            $readyCount      = (int)($t['ready_count']      ?? 0);
-                            $collectionCount = (int)($t['collection_count'] ?? 0);
-                            $servedCount     = (int)($t['served_count']     ?? 0);
-                            $totalItems      = (int)($t['line_count']       ?? 0);
-                            $canCancelBeforePrep = ($pendingCount > 0)
-                                && ($preparingCount === 0) && ($readyCount === 0)
-                                && ($collectionCount === 0) && ($servedCount === 0);
-                            // Bar items auto-serve on settlement; only kitchen items block
-                            $canSettle = $totalItems > 0;
-                            $openedByOther = ((int)($t['created_by'] ?? 0) !== (int)$user['id']);
-                        ?>
-                            <article class="tab-card<?php echo $isStale ? ' stale' : ''; ?>" data-order-id="<?php echo (int)$t['id']; ?>" data-is-stale="<?php echo $isStale ? '1' : '0'; ?>">
-                                <div class="tc-row1">
-                                    <label class="tc-select-wrap" aria-label="Select <?php echo htmlspecialchars((string)($t['reference'] ?? 'TAB'), ENT_QUOTES, 'UTF-8'); ?>">
-                                        <input type="checkbox" class="tc-select-input" data-order-id="<?php echo (int)$t['id']; ?>" data-ref="<?php echo htmlspecialchars((string)($t['reference'] ?? 'TAB'), ENT_QUOTES, 'UTF-8'); ?>" data-total="<?php echo (float)($t['total_amount'] ?? 0); ?>" data-can-cancel="<?php echo $canCancelBeforePrep ? '1' : '0'; ?>" data-is-stale="<?php echo $isStale ? '1' : '0'; ?>" onchange="tabsSelectionChanged()">
-                                        <span class="tc-select-indicator"><i class="fas fa-check"></i></span>
-                                    </label>
-                                    <div class="tc-ref"><?php echo htmlspecialchars($t['reference']); ?></div>
-                                    <div class="tc-age tab-age" data-created="<?php echo (int)$created; ?>" style="color:<?php echo $ageColor; ?>;">
-                                        <i class="fas fa-stopwatch"></i> <?php echo $ageStr; ?>
-                                    </div>
-                                </div>
-                                <div class="tc-meta">
-                                    <?php if (!empty($t['table_number'])): ?><span class="tc-meta-pill"><i class="fas fa-table-cells-large"></i> Table <?php echo htmlspecialchars($t['table_number']); ?></span><?php endif; ?>
-                                    <?php if (!empty($t['customer_name'])): ?><span class="tc-meta-pill"><i class="fas fa-user"></i> <?php echo htmlspecialchars($t['customer_name']); ?></span><?php endif; ?>
-                                    <?php if ((int)($t['covers'] ?? 0) > 0): ?><span class="tc-meta-pill"><i class="fas fa-users"></i> <?php echo (int)$t['covers']; ?> cover<?php echo (int)$t['covers'] === 1 ? '' : 's'; ?></span><?php endif; ?>
-                                    <span class="tc-meta-pill"><i class="fas fa-list"></i> <?php echo $totalItems; ?> item<?php echo $totalItems === 1 ? '' : 's'; ?></span>
-                                    <span class="tc-meta-pill"><i class="fas fa-clock"></i> Opened <?php echo htmlspecialchars(rhToUserTime($t['created_at'], 'H:i')); ?></span>
-                                    <?php if ($openedByOther): ?>
-                                        <span class="tc-meta-pill"><i class="fas fa-user-tie"></i> <?php echo htmlspecialchars((string)($t['opened_by'] ?? 'staff')); ?></span>
-                                    <?php else: ?>
-                                        <span class="tc-meta-pill"><i class="fas fa-user-check"></i> You</span>
-                                    <?php endif; ?>
-                                </div>
-                                <?php if ($totalItems > 0): ?>
-                                    <div class="tc-flow">
-                                        <?php if ($pendingCount > 0):    ?><span class="tc-flow-chip pending"><i class="fas fa-clock"></i> <?php echo $pendingCount; ?> pending</span><?php endif; ?>
-                                        <?php if ($preparingCount > 0):  ?><span class="tc-flow-chip preparing"><i class="fas fa-fire-burner"></i> <?php echo $preparingCount; ?> prep</span><?php endif; ?>
-                                        <?php if ($readyCount > 0):      ?><span class="tc-flow-chip ready"><i class="fas fa-bell"></i> <?php echo $readyCount; ?> ready</span><?php endif; ?>
-                                        <?php if ($collectionCount > 0): ?><span class="tc-flow-chip collection"><i class="fas fa-hand-holding"></i> <?php echo $collectionCount; ?> collecting</span><?php endif; ?>
-                                        <?php if ($servedCount > 0):     ?><span class="tc-flow-chip served"><i class="fas fa-check"></i> <?php echo $servedCount; ?> served</span><?php endif; ?>
-                                        <?php if ($totalItems > 0 && $servedCount === $totalItems): ?><span class="tc-flow-chip served-all"><i class="fas fa-circle-check"></i> All served</span><?php endif; ?>
-                                    </div>
-                                <?php endif; ?>
-                                <div class="tc-summary-row">
-                                    <div>
-                                        <span class="tc-total-label">Total</span>
-                                        <div class="tc-total"><?php echo $currency_symbol . ' ' . number_format((float)$t['total_amount'], 2); ?></div>
-                                    </div>
-                                    <?php if ($isStale): ?><div class="tc-stale-warn" data-help="From an earlier shift|Settle it as normal — if kitchen items were never bumped, the Pay button will offer a manager force-serve override."><i class="fas fa-triangle-exclamation"></i> Previous shift</div><?php endif; ?>
-                                </div>
-                                <div class="tc-actions">
-                                    <?php if ((int)($t['split_paid_count'] ?? 0) === 0): ?>
-                                    <button type="button" onclick="startAddToTab(<?php echo (int)$t['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$t['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo (float)$t['total_amount']; ?>)"
-                                        class="tc-btn tc-btn-add"
-                                        data-help="Add items|Add another round to this tab. Returns you to the menu; the next Fire adds to this tab.">
-                                        <i class="fas fa-plus"></i> Add items
-                                    </button>
-                                    <?php endif; ?>
-                                    <?php if ($posCanTakePayment): ?>
-                                    <button type="button" onclick="openPayForTab(<?php echo (int)$t['id']; ?>, <?php echo (float)$t['total_amount']; ?>, <?php echo htmlspecialchars(json_encode((string)$t['reference']), ENT_QUOTES, 'UTF-8'); ?>, <?php echo $canSettle ? 'true' : 'false'; ?>, <?php echo (int)($t['split_count'] ?? 1); ?>, <?php echo (int)($t['split_paid_count'] ?? 0); ?>)"
-                                        class="tc-btn tc-btn-settle"
-                                        data-help="Settle tab|Close this tab — take payment and mark the order as paid.">
-                                        <i class="fas fa-credit-card"></i> Settle
-                                    </button>
-                                    <?php endif; ?>
-                                    <button type="button" class="tc-btn tc-btn-more" onclick="toggleTabCardActions(this)" aria-expanded="false">
-                                        <i class="fas fa-ellipsis"></i> More
-                                    </button>
-                                </div>
-                                <?php /* Occasional and destructive actions live behind "More": a tab card showed
-                                          seven buttons at once, which is a lot to scan mid-service when only
-                                          "Add items" and "Settle" are used routinely. Keeping Cancel and Void
-                                          one tap further back is a safety gain too. */ ?>
-                                <div class="tc-actions tc-actions--secondary" hidden>
-                                    <button type="button" onclick="openTabDetail(<?php echo (int)$t['id']; ?>)"
-                                        class="tc-btn tc-btn-detail">
-                                        <i class="fas fa-receipt"></i> Details
-                                    </button>
-                                    <button type="button"
-                                        onclick="openPosPageModal('stock-receipt.php?id=<?php echo (int)$t['id']; ?>&print=1&kot=1','Print KOT','fas fa-print')"
-                                        class="tc-btn tc-btn-kot">
-                                        <i class="fas fa-print"></i> KOT
-                                    </button>
-                                    <?php if ($canCancelBeforePrep): ?>
-                                        <button type="button"
-                                            onclick="cancelOpenOrder(<?php echo (int)$t['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$t['reference']), ENT_QUOTES, 'UTF-8'); ?>)"
-                                            class="tc-btn tc-btn-cancel">
-                                            <i class="fas fa-circle-xmark"></i> Cancel
-                                        </button>
-                                    <?php endif; ?>
-                                    <?php if ($posCanStations): ?>
-                                        <button type="button"
-                                            onclick="openPosPageModal('order-lifecycle.php?embed=1&id=<?php echo (int)$t['id']; ?>','Timeline','fas fa-stream')"
-                                            class="tc-btn tc-btn-log">
-                                            <i class="fas fa-stream"></i> Lifecycle
-                                        </button>
-                                        <button type="button"
-                                            onclick="adminVoidTab(<?php echo (int)$t['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$t['reference']), ENT_QUOTES, 'UTF-8'); ?>)"
-                                            class="tc-btn tc-btn-void">
-                                            <i class="fas fa-ban"></i> Void
-                                        </button>
-                                    <?php endif; ?>
-                                </div>
-                            </article>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
+                <p class="tabs-empty">Loading tabs…</p>
             </div>
         </div>
     </div>
@@ -3363,11 +3181,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <div>Opening float: <strong id="closeShiftFloat"><?php echo !empty($shift['float_recorded']) ? $currency_symbol . ' ' . number_format((float)($shift['float_amount'] ?? 0), 2) : $currency_symbol . ' 0.00 (no opening float recorded for this shift, counted as 0)'; ?></strong></div>
                         <div style="margin-top:4px; color:#6c757d;">Cash to count in the drawer = opening float + cash sales &minus; cash refunds. Include the float in your count.</div>
                     </div>
-                    <label>Cash counted (<?php echo $currency_symbol; ?>)</label>
+                    <label class="field-label">Cash counted (<?php echo $currency_symbol; ?>)</label>
                     <input type="number" step="0.01" min="0" name="declared_cash" id="declCash" placeholder="0.00" required oninput="updShiftVariance()">
-                    <label>Mobile money totals (<?php echo $currency_symbol; ?>)</label>
+                    <label class="field-label">Mobile money totals (<?php echo $currency_symbol; ?>)</label>
                     <input type="number" step="0.01" min="0" name="declared_mobile" id="declMobile" placeholder="0.00" required oninput="updShiftVariance()">
-                    <label>Card totals (<?php echo $currency_symbol; ?>)</label>
+                    <label class="field-label">Card totals (<?php echo $currency_symbol; ?>)</label>
                     <input type="number" step="0.01" min="0" name="declared_card" id="declCard" placeholder="0.00" required oninput="updShiftVariance()">
 
                     <div id="shiftVarianceBox" style="margin-top:10px; padding:10px 12px; border-radius:8px; font-size:13px; display:none;"></div>
@@ -3378,12 +3196,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                 <input type="checkbox" name="admin_override" value="1" id="adminOverride" onchange="document.getElementById('overrideReason').required = this.checked;">
                                 <i class="fas fa-user-shield"></i> Admin override (close despite variance)
                             </label>
-                            <label style="font-size:12px;">Reason (audit-logged)</label>
+                            <label class="field-label" style="font-size:12px;">Reason (audit-logged)</label>
                             <input type="text" name="override_reason" id="overrideReason" placeholder="e.g. drawer short — counted by JS &amp; LM, signed off" minlength="5">
                         </div>
                     <?php endif; ?>
 
-                    <label>Note (optional)</label>
+                    <label class="field-label">Note (optional)</label>
                     <input type="text" name="shift_note" placeholder="Drawer started with X, etc.">
                 </div>
                 <div class="modal-foot modal-footer">
@@ -3405,7 +3223,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <input type="hidden" name="action" value="set_float">
                 <div class="modal-body">
                     <p style="font-size:13px;color:#6c757d;margin-top:0;">Record the cash amount placed in the drawer at the start of your shift. This is logged for end-of-shift reconciliation.</p>
-                    <label>Float amount (<?php echo $currency_symbol; ?>)</label>
+                    <label class="field-label">Float amount (<?php echo $currency_symbol; ?>)</label>
                     <input type="number" step="0.01" min="0" name="float_amount" id="floatAmount" required placeholder="e.g. 5000.00" style="font-size:18px; font-weight:600;">
                     <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:8px 0;">
                         <button type="button" onclick="document.getElementById('floatAmount').value='2000'" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;">2,000</button>
@@ -3413,7 +3231,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <button type="button" onclick="document.getElementById('floatAmount').value='10000'" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;">10,000</button>
                         <button type="button" onclick="document.getElementById('floatAmount').value='20000'" style="padding:10px;border:1px solid #d6d8db;background:#fff;border-radius:6px;cursor:pointer;font-size:12px;">20,000</button>
                     </div>
-                    <label>Note <span style="font-weight:400;color:#9ca3af;">(optional)</span></label>
+                    <label class="field-label">Note <span style="font-weight:400;color:#9ca3af;">(optional)</span></label>
                     <input type="text" name="float_note" placeholder="Float handed over by manager, etc.">
                 </div>
                 <div class="modal-foot modal-footer">
@@ -3441,7 +3259,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <div id="refundOrderAmt" style="color:#374151;"></div>
                     </div>
                     <p style="font-size:13px;color:#6c757d;margin-top:0;margin-bottom:12px;">This will mark the order as <strong>refunded</strong> and create a negative payment record. Stock is not automatically restored — reverse any stock adjustments manually if needed.</p>
-                    <label>Reason for refund <span style="color:#c82333;">*</span></label>
+                    <label class="field-label">Reason for refund <span style="color:#c82333;">*</span></label>
                     <textarea name="refund_reason" id="refundReason" rows="3" placeholder="Guest complaint, overcharge, duplicate order… (min 5 characters)" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:10px;font-size:13px;font-family:inherit;" required minlength="5"></textarea>
                 </div>
                 <div class="modal-foot modal-footer">
@@ -3466,9 +3284,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <i class="fas fa-key" style="margin-right:6px;"></i>
                         Permission required: <strong id="mgrAuthPermLabel"></strong>
                     </div>
-                    <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Manager username</label>
+                    <label class="field-label" style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Manager username</label>
                     <input type="text" id="mgrAuthUsername" autocomplete="off" placeholder="Username" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:14px;margin-bottom:10px;">
-                    <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Password</label>
+                    <label class="field-label" style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Password</label>
                     <input type="password" id="mgrAuthPassword" autocomplete="new-password" placeholder="Password" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:14px;margin-bottom:6px;">
                     <div id="mgrAuthError" style="color:#c82333;font-size:12px;min-height:18px;margin-bottom:4px;"></div>
                 </div>
@@ -3558,11 +3376,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         </div>
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                             <div>
-                                <label style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Amount (<?php echo $currency_symbol; ?>)</label>
+                                <label class="field-label" style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Amount (<?php echo $currency_symbol; ?>)</label>
                                 <input type="number" step="0.01" min="0" id="payTabDiscountAmt" placeholder="0.00" oninput="ptOnDiscountAmtInput()" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
                             </div>
                             <div>
-                                <label style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Reason</label>
+                                <label class="field-label" style="font-size:11px;font-weight:600;color:#6c757d;margin-bottom:3px;display:block;">Reason</label>
                                 <select id="payTabDiscountReason" onchange="syncTabDiscountToForm()" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
                                     <option value="">Select…</option>
                                     <option>Staff discount</option>
@@ -3580,7 +3398,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <input type="hidden" name="deal_ids" id="payTabDealIdsHidden" value="">
                     </div>
 
-                    <label>Payment method</label>
+                    <label class="field-label">Payment method</label>
                     <div class="pay-method-grid">
                         <button type="button" data-method="cash" onclick="setMethodTab(this)"><i class="fas fa-money-bill-wave"></i> Cash</button>
                         <button type="button" data-method="mobile_money" onclick="setMethodTab(this)"><i class="fas fa-mobile-alt"></i> Mobile</button>
@@ -3589,7 +3407,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     </div>
                     <input type="hidden" name="payment_method" id="payTabMethod" value="">
                     <div id="ext-tab-cash" style="display:none;">
-                        <label id="payTabTenderedLabel">Tendered (<?php echo $currency_symbol; ?>)</label>
+                        <label class="field-label" id="payTabTenderedLabel">Tendered (<?php echo $currency_symbol; ?>)</label>
                         <input type="number" step="0.01" min="0" name="tendered_amount" id="payTabTendered" oninput="updTabChange()">
                         <div class="change-banner">Change: <span id="payTabChange"><?php echo $currency_symbol; ?> 0.00</span></div>
                         <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-top:8px;">
@@ -3600,7 +3418,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         </div>
                     </div>
                     <div id="ext-tab-mobile_money" style="display:none;">
-                        <label>Provider</label>
+                        <label class="field-label">Provider</label>
                         <select name="mobile_wallet_provider">
                             <option value="">Select…</option>
                             <option>Airtel Money</option>
@@ -3608,11 +3426,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                             <option>Mo626</option>
                             <option>Other</option>
                         </select>
-                        <label>Reference</label><input type="text" name="mobile_wallet_reference">
+                        <label class="field-label">Reference</label><input type="text" name="mobile_wallet_reference">
                     </div>
                     <div id="ext-tab-card_manual" style="display:none;">
-                        <label>Card last 4</label><input type="text" name="card_last4" maxlength="4" pattern="\d{4}">
-                        <label>Auth code</label><input type="text" name="card_auth_code" maxlength="50">
+                        <label class="field-label">Card last 4</label><input type="text" name="card_last4" maxlength="4" pattern="\d{4}">
+                        <label class="field-label">Auth code</label><input type="text" name="card_auth_code" maxlength="50">
                     </div>
                 </div>
                 <div class="modal-foot modal-footer">
@@ -3646,13 +3464,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
                     <div>
-                        <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">Email</label>
+                        <label class="field-label" style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">Email</label>
                         <input type="email" id="rmEmail" placeholder="guest@example.com" style="width:100%;box-sizing:border-box;min-height:36px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;margin-bottom:6px;">
                         <button type="button" id="rmEmailBtn" onclick="sendPosReceipt('email')" style="width:100%;padding:8px;background:#2563eb;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fas fa-envelope"></i> Send email</button>
                         <div id="rmEmailStatus" style="font-size:11px;margin-top:4px;min-height:14px;"></div>
                     </div>
                     <div>
-                        <label style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">WhatsApp</label>
+                        <label class="field-label" style="font-size:11px;font-weight:600;color:#6c757d;display:block;margin-bottom:4px;">WhatsApp</label>
                         <input type="tel" id="rmPhone" placeholder="+265 999 123 456" style="width:100%;box-sizing:border-box;min-height:36px;border:1px solid #d1d5db;border-radius:7px;padding:7px 10px;font-size:12px;margin-bottom:6px;">
                         <button type="button" id="rmWhatsAppBtn" onclick="sendPosReceipt('whatsapp')" style="width:100%;padding:8px;background:#1d6a3e;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;"><i class="fab fa-whatsapp"></i> Send WhatsApp</button>
                         <div id="rmWhatsAppStatus" style="font-size:11px;margin-top:4px;min-height:14px;"></div>
@@ -3761,7 +3579,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                       often it is touched, with the two that are usually left alone
                       folded away. */ ?>
             <div class="modal-body">
-                <label for="stationNoteText">Message</label>
+                <label class="field-label" for="stationNoteText">Message</label>
                 <input type="text" id="stationNoteText" maxlength="255" placeholder="Table 5 needs extra napkins" autocomplete="off">
                 <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
                     <?php foreach (['Hold last order', 'Extra napkins', 'Guest allergy', 'Rush pickup', 'Call waiter', 'Table ready'] as $t): ?>
@@ -3771,7 +3589,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
                 <div style="display:flex; align-items:flex-end; gap:10px; margin-top:14px;">
                     <div style="flex:1; min-width:0;">
-                        <label for="stationNoteTarget">Send to</label>
+                        <label class="field-label" for="stationNoteTarget">Send to</label>
                         <select id="stationNoteTarget" style="margin:0;">
                             <option value="kitchen">Kitchen</option>
                             <option value="bar">Bar</option>
@@ -6549,7 +6367,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <i class="fas fa-barcode" style="color:#4ade80;margin-right:8px;"></i>Assign Barcode
                     </h3>
                     <p style="margin:0 0 16px;color:#94a3b8;font-size:13px;">${escHtml(menuItem.name)}</p>
-                    <label style="color:#cbd5e1;font-size:13px;display:block;margin-bottom:6px;">Barcode / SKU</label>
+                    <label class="field-label" style="color:#cbd5e1;font-size:13px;display:block;margin-bottom:6px;">Barcode / SKU</label>
                     <input id="bcAssignInput" type="text" value="${escHtml(existing)}"
                         placeholder="Scan or type barcode — leave empty to clear"
                         style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#f1f5f9;font-size:15px;outline:none;"
@@ -7783,44 +7601,72 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (e.key === 'Escape') closePosMoreMenu();
         });
 
-        /* Show/hide a tab card's secondary actions (Details, KOT, Cancel, Lifecycle, Void).
-           Scoped to the card that was tapped so other open cards stay as they were. */
+        /* ─── Open tabs tray ─────────────────────────────────────────────────
+           One card per tab: reference, table/customer, age, status pill, total, then
+           the same three buttons on every card (Add items, Settle, More). Everything
+           else lives in the More menu. Selection, the bulk bar and search all work on
+           the cards currently shown. */
+        let _tabsRefreshInFlight = false;
+        let _selectedOpenTabIds = new Set();
+        let _tabsAutoRefreshTimer = null;
+        let _tabsLastSig = '';
+        let _tabsBulkBusy = false;
+        let _tabsBulkReport = null; // {title, done, skipped: [{ref, reason}]}
+        let _tabsSearchQuery = '';
+
+        function closeTabMenus(exceptCard) {
+            document.querySelectorAll('#tabsCardsList .tab-card.menu-open').forEach(card => {
+                if (card === exceptCard) return;
+                card.classList.remove('menu-open');
+                const menu = card.querySelector('.tc-menu');
+                if (menu) menu.hidden = true;
+                const more = card.querySelector('.tc-act--more');
+                if (more) more.setAttribute('aria-expanded', 'false');
+            });
+        }
+
+        /* More menu: one open at a time, scoped to the tapped card. */
         function toggleTabCardActions(btn) {
             const card = btn.closest('.tab-card');
             if (!card) return;
-            const panel = card.querySelector('.tc-actions--secondary');
-            if (!panel) return;
-            const open = panel.hasAttribute('hidden');
-            if (open) panel.removeAttribute('hidden');
-            else panel.setAttribute('hidden', '');
-            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-            btn.classList.toggle('is-open', open);
+            const menu = card.querySelector('.tc-menu');
+            if (!menu) return;
+            const willOpen = menu.hidden;
+            closeTabMenus(card);
+            menu.hidden = !willOpen;
+            card.classList.toggle('menu-open', willOpen);
+            btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            if (willOpen) {
+                try {
+                    menu.scrollIntoView({
+                        block: 'nearest'
+                    });
+                } catch (_) {
+                    /* older browsers: the menu is still reachable by scrolling */
+                }
+            }
         }
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.tc-menu') && !e.target.closest('.tc-act--more')) closeTabMenus();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeTabMenus();
+        });
 
         function openTabsTray() {
             const overlay = document.getElementById('tabsOverlay');
             if (!overlay) return;
             overlay.classList.add('show');
-            try {
-                _tabsToolsExpanded = localStorage.getItem(POS_TABS_TOOLS_STATE_KEY) === '1';
-            } catch (_) {
-                _tabsToolsExpanded = false;
-            }
             startTabsAutoRefresh();
             tabsSelectionChanged();
-            applyTabsTrayToolsState();
             updateTabsTrayUpdatedLabel();
+            // Tabs already drawn (from the page or an earlier poll) stay usable while the fresh
+            // list loads; the blocking loader is only for a tray that has nothing to show yet.
             refreshOpenTabs(true, {
-                scopedLoader: true,
+                scopedLoader: _tabsLastSig === '',
                 loaderMessage: 'Fetching open tabs...'
             });
         }
-
-        let _tabsRefreshInFlight = false;
-        let _selectedOpenTabIds = new Set();
-        let _tabsAutoRefreshTimer = null;
-        let _tabsToolsExpanded = false;
-        const POS_TABS_TOOLS_STATE_KEY = 'rh_pos_tabs_tools_expanded_v1';
 
         function tabCreatedSeconds(createdAt) {
             const ts = Date.parse(String(createdAt || '').replace(' ', 'T'));
@@ -7852,37 +7698,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             updated.textContent = 'Live · ' + stamp;
         }
 
-        function applyTabsTrayToolsState() {
-            const tools = document.getElementById('tabsTrayTools');
-            const panel = document.getElementById('tabsTrayBulkPanel');
-            const toggle = document.getElementById('tabsTrayToggleBtn');
-            if (!tools || !panel || !toggle) return;
-
-            tools.classList.toggle('is-collapsed', !_tabsToolsExpanded);
-            panel.hidden = !_tabsToolsExpanded;
-            toggle.setAttribute('aria-expanded', _tabsToolsExpanded ? 'true' : 'false');
-            toggle.innerHTML = _tabsToolsExpanded ? '<i class="fas fa-chevron-up"></i> Hide bulk' : '<i class="fas fa-sliders"></i> Bulk tools';
-        }
-
-        function toggleTabsTrayTools(forceExpanded = null) {
-            if (typeof forceExpanded === 'boolean') {
-                _tabsToolsExpanded = forceExpanded;
-            } else {
-                _tabsToolsExpanded = !_tabsToolsExpanded;
-            }
-            try {
-                localStorage.setItem(POS_TABS_TOOLS_STATE_KEY, _tabsToolsExpanded ? '1' : '0');
-            } catch (_) {
-                // localStorage unavailable in private modes — ignore.
-            }
-            applyTabsTrayToolsState();
-        }
-
         function startTabsAutoRefresh() {
             if (_tabsAutoRefreshTimer) return;
             _tabsAutoRefreshTimer = window.setInterval(() => {
                 const overlay = document.getElementById('tabsOverlay');
                 if (!overlay || !overlay.classList.contains('show')) return;
+                if (_tabsBulkBusy) return;
                 refreshOpenTabs(false);
             }, 10000);
         }
@@ -7893,85 +7714,307 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             _tabsAutoRefreshTimer = null;
         }
 
-        function renderTabsTrayTools(openCount, outstandingAmount, staleCount) {
-            const openTabs = Math.max(0, parseInt(openCount, 10) || 0);
-            const staleTabs = Math.max(0, parseInt(staleCount, 10) || 0);
-            const outstanding = parseFloat(outstandingAmount || 0) || 0;
-            const hasTabs = openTabs > 0;
-            const disabledAttr = hasTabs ? '' : ' disabled';
-            return `<div class="tabs-tray-tools${_tabsToolsExpanded ? '' : ' is-collapsed'}" id="tabsTrayTools">
-                <div class="tabs-tray-tools__headline">
-                    <div class="tabs-tray-tools__metrics">
-                        <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Open</span><strong>${openTabs}</strong></div>
-                        <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Outstanding</span><strong>${currencySymbol} ${fmtMoney(outstanding)}</strong></div>
-                        <div class="tabs-tray-metric"><span class="tabs-tray-metric__label">Stale</span><strong>${staleTabs}</strong></div>
+        /* What the tab is waiting on, from its item counts and split state.
+           Priority: split part-paid > ready > collecting > preparing > waiting > served. */
+        function tabStatusOf(t) {
+            const n = key => parseInt(t[key] || 0, 10) || 0;
+            const live = Math.max(0, n('line_count') - n('void_count'));
+            const pending = n('pending_count');
+            const preparing = n('preparing_count');
+            const ready = n('ready_count');
+            const collecting = n('collection_count');
+            const served = n('served_count');
+            const splitCount = Math.max(1, n('split_count'));
+            const splitPaid = n('split_paid_count');
+            let status;
+            if (live === 0) status = {
+                tone: 'idle',
+                icon: 'fa-box-open',
+                label: 'No active items'
+            };
+            else if (ready > 0) status = {
+                tone: 'ready',
+                icon: 'fa-bell',
+                label: 'Ready to serve'
+            };
+            else if (collecting > 0) status = {
+                tone: 'collect',
+                icon: 'fa-hand-holding',
+                label: 'Being collected'
+            };
+            else if (preparing > 0) status = {
+                tone: 'prep',
+                icon: 'fa-fire-burner',
+                label: 'Preparing'
+            };
+            else if (pending > 0) status = {
+                tone: 'wait',
+                icon: 'fa-clock',
+                label: 'Waiting for kitchen'
+            };
+            else if (served >= live) status = {
+                tone: 'done',
+                icon: 'fa-circle-check',
+                label: 'Served — ready to settle'
+            };
+            else status = {
+                tone: 'idle',
+                icon: 'fa-circle',
+                label: 'Open'
+            };
+            if (splitCount > 1 && splitPaid > 0) status = {
+                tone: 'split',
+                icon: 'fa-users',
+                label: 'Split ' + splitPaid + ' of ' + splitCount + ' paid'
+            };
+            const parts = [
+                [served, 'served'],
+                [ready, 'ready'],
+                [collecting, 'collecting'],
+                [preparing, 'preparing'],
+                [pending, 'waiting']
+            ].filter(p => p[0] > 0);
+            const progress = live + ' item' + (live === 1 ? '' : 's') +
+                (parts.length > 1 ? ' · ' + parts.map(p => p[0] + ' ' + p[1]).join(' · ') : '');
+            return {
+                status,
+                live,
+                progress,
+                splitCount,
+                splitPaid
+            };
+        }
+
+        /* Why Cancel (the pre-preparation, unpaid-only action) is not available; '' when it is. */
+        function tabCancelBlockReason(t) {
+            const n = key => parseInt(t[key] || 0, 10) || 0;
+            if (n('split_paid_count') > 0) return 'Part-paid — a manager must void it';
+            if (n('preparing_count') + n('ready_count') + n('collection_count') + n('served_count') > 0) return 'Preparation already started';
+            if (n('pending_count') === 0) return 'No pending items';
+            return '';
+        }
+
+        function renderTabCard(t, windowStart) {
+            const orderId = parseInt(t.id, 10) || 0;
+            const info = tabStatusOf(t);
+            const totalItems = parseInt(t.line_count || 0, 10) || 0;
+            const cancelBlock = tabCancelBlockReason(t);
+            const canSettle = totalItems > 0; // bar items auto-served on settle; server checks kitchen items
+            const splitStarted = info.splitPaid > 0;
+            const isStale = !!windowStart && String(t.created_at || '') < String(windowStart);
+            const byOther = parseInt(t.created_by || 0, 10) !== posUserId;
+            const coversN = parseInt(t.covers || 0, 10) || 0;
+            const refText = String(t.reference || 'TAB');
+            const ref = escHtml(refText);
+            const actionRef = escHtml(JSON.stringify(refText));
+            const createdSec = tabCreatedSeconds(t.created_at);
+            const where = [
+                t.table_number ? 'Table ' + t.table_number : '',
+                t.customer_name ? t.customer_name : '',
+                coversN > 0 ? coversN + ' cover' + (coversN === 1 ? '' : 's') : ''
+            ].filter(Boolean).join(' · ') || 'No table';
+            const owner = byOther ? String(t.opened_by || 'staff') : 'You';
+            const total = parseFloat(t.total_amount || 0) || 0;
+            const search = [refText, where, owner, info.status.label, isStale ? 'previous shift' : ''].join(' ').toLowerCase();
+            const pill = (tone, icon, label) => `<span class="tc-pill tc-pill--${tone}"><i class="fas ${icon}"></i> ${escHtml(label)}</span>`;
+            const pills = pill(info.status.tone, info.status.icon, info.status.label) +
+                (info.splitCount > 1 && !splitStarted ? pill('idle', 'fa-users', 'Split ×' + info.splitCount) : '') +
+                (isStale ? pill('late', 'fa-triangle-exclamation', 'Previous shift') : '');
+
+            const addBtn = `<button type="button" class="tc-act tc-act--add"${splitStarted ? ' disabled title="Split payment has started — no more items can be added"' : ''} onclick="startAddToTab(${orderId}, ${actionRef}, ${total})"><i class="fas fa-plus"></i> Add items</button>`;
+            const settleBtn = posCanTakePayment ?
+                `<button type="button" class="tc-act tc-act--settle" onclick="openPayForTab(${orderId}, ${total}, ${actionRef}, ${canSettle ? 'true' : 'false'}, ${info.splitCount}, ${info.splitPaid})"><i class="fas fa-credit-card"></i> Settle</button>` : '';
+            const moreBtn = '<button type="button" class="tc-act tc-act--more" aria-haspopup="true" aria-expanded="false" onclick="toggleTabCardActions(this)"><i class="fas fa-ellipsis"></i> More</button>';
+
+            const menuItem = (cls, icon, label, handler) => `<button type="button" class="tc-menu__item${cls ? ' ' + cls : ''}" onclick="closeTabMenus(); ${handler}"><i class="fas ${icon}"></i> ${label}</button>`;
+            const menu = [
+                menuItem('', 'fa-receipt', 'Details', `openTabDetail(${orderId})`),
+                menuItem('', 'fa-print', 'Print KOT', `openPosPageModal('stock-receipt.php?id=${orderId}&print=1&kot=1','Print KOT','fas fa-print')`),
+                posCanSeeTimeline ? menuItem('', 'fa-stream', 'Timeline', `openPosPageModal('order-lifecycle.php?embed=1&id=${orderId}','Timeline','fas fa-stream')`) : '',
+                cancelBlock === '' ? menuItem('tc-menu__item--danger', 'fa-circle-xmark', 'Cancel tab', `cancelOpenOrder(${orderId}, ${actionRef})`) : '',
+                posCanVoid ? menuItem('tc-menu__item--danger', 'fa-ban', 'Void tab', `adminVoidTab(${orderId}, ${actionRef})`) : ''
+            ].join('');
+
+            return `<article class="tab-card${isStale ? ' stale' : ''}" data-order-id="${orderId}" data-is-stale="${isStale ? '1' : '0'}" data-search="${escHtml(search)}">
+                <div class="tc-head">
+                    <label class="tc-select-wrap" aria-label="Select ${ref}">
+                        <input type="checkbox" class="tc-select-input" data-order-id="${orderId}" data-ref="${escHtml(refText)}" data-total="${total}" data-cancel-block="${escHtml(cancelBlock)}" data-is-stale="${isStale ? '1' : '0'}" onchange="tabsSelectionChanged()"${_selectedOpenTabIds.has(orderId) ? ' checked' : ''}>
+                        <span class="tc-select-indicator"><i class="fas fa-check"></i></span>
+                    </label>
+                    <div class="tc-id">
+                        <div class="tc-ref">${ref}</div>
+                        <div class="tc-where">${escHtml(where)}</div>
                     </div>
-                    <div class="tabs-tray-tools__status">
-                        <span class="tabs-tray-updated" id="tabsTrayUpdated">Live</span>
-                        <button type="button" class="tabs-tray-toggle" id="tabsTrayToggleBtn" onclick="toggleTabsTrayTools()" aria-expanded="${_tabsToolsExpanded ? 'true' : 'false'}">${_tabsToolsExpanded ? '<i class="fas fa-chevron-up"></i> Hide bulk' : '<i class="fas fa-sliders"></i> Bulk tools'}</button>
+                    <div class="tc-age tab-age" data-created="${createdSec}" style="color:${tabAgeColor(t.created_at)};"><i class="fas fa-stopwatch"></i> ${escHtml(tabAgeLabel(t.created_at))}</div>
+                </div>
+                <div class="tc-status">${pills}</div>
+                <div class="tc-foot">
+                    <div>
+                        <span class="tc-total-label">Total</span>
+                        <div class="tc-total">${escHtml(currencySymbol)} ${fmtMoney(total)}</div>
+                    </div>
+                    <div class="tc-foot__side">
+                        <div class="tc-progress">${escHtml(info.progress)}</div>
+                        <div class="tc-owner"><i class="fas ${byOther ? 'fa-user-tie' : 'fa-user-check'}"></i> ${escHtml(owner)}</div>
                     </div>
                 </div>
-                <div class="tabs-tray-tools__bulk-panel" id="tabsTrayBulkPanel"${_tabsToolsExpanded ? '' : ' hidden'}>
-                    <div class="tabs-tray-tools__bulk-row">
-                        <label class="tabs-bulk-check"><input type="checkbox" id="tabsBulkAll" onchange="toggleTabsBulkAll(this.checked)"${disabledAttr}> <span>Select all</span></label>
-                        <button type="button" class="tabs-bulk-btn" onclick="tabsSelectStale()"${disabledAttr}><i class="fas fa-triangle-exclamation"></i> Select stale</button>
-                        <button type="button" class="tabs-bulk-btn" onclick="tabsClearSelection()"${disabledAttr}><i class="fas fa-broom"></i> Clear</button>
-                        <span class="tabs-bulk-info" id="tabsBulkSelectionInfo">No tabs selected</span>
+                <div class="tc-actions">${addBtn}${settleBtn}${moreBtn}</div>
+                <div class="tc-menu" hidden>${menu}</div>
+            </article>`;
+        }
+
+        function renderTabsToolbar(openCount, outstandingAmount, staleCount) {
+            const hasTabs = openCount > 0;
+            return `<div class="tabs-toolbar" id="tabsToolbar">
+                <div class="tabs-toolbar__top">
+                    <div class="tabs-metrics">
+                        <span class="tabs-metric"><span class="tabs-metric__label">Open</span><strong>${openCount}</strong></span>
+                        <span class="tabs-metric"><span class="tabs-metric__label">Outstanding</span><strong>${escHtml(currencySymbol)} ${fmtMoney(outstandingAmount)}</strong></span>
+                        ${staleCount > 0 ? `<span class="tabs-metric tabs-metric--warn"><span class="tabs-metric__label">Previous shift</span><strong>${staleCount}</strong></span>` : ''}
                     </div>
-                    <div class="tabs-tray-tools__bulk-actions">
-                        <button type="button" class="tabs-bulk-btn tabs-bulk-btn--cancel" id="tabsBulkCancelBtn" onclick="bulkCancelTabs()" disabled><i class="fas fa-circle-xmark"></i> Bulk cancel</button>
-                        ${posCanVoid ? '<button type="button" class="tabs-bulk-btn tabs-bulk-btn--void" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()" disabled><i class="fas fa-ban"></i> Bulk void</button>' : ''}
-                    </div>
+                    <span class="tabs-live" id="tabsTrayUpdated">Live</span>
                 </div>
+                ${hasTabs ? `<div class="tabs-selectbar">
+                    <label class="tabs-check"><input type="checkbox" id="tabsBulkAll" onchange="toggleTabsBulkAll(this.checked)"> <span id="tabsBulkAllLabel">Select all</span></label>
+                    ${staleCount > 0 ? '<button type="button" class="tabs-link" onclick="tabsSelectStale()">Select previous shift</button>' : ''}
+                </div>` : ''}
             </div>`;
         }
 
-        function getOpenTabSelectionInputs() {
-            return Array.from(document.querySelectorAll('#tabsCardsList .tc-select-input'));
+        function renderTabsBulkBar() {
+            return `<div class="admin-bulk-bar admin-bulk-bar--tray" id="tabsBulkBar" hidden>
+                <span class="admin-bulk-bar__count"><i class="fas fa-check-square" aria-hidden="true"></i> <span id="tabsBulkCount">0 selected</span></span>
+                <div class="admin-bulk-bar__controls">
+                    <button type="button" class="admin-bulk-bar__btn" id="tabsBulkCancelBtn" onclick="bulkCancelTabs()"><i class="fas fa-circle-xmark"></i> <span>Cancel</span></button>
+                    ${posCanVoid ? '<button type="button" class="admin-bulk-bar__btn admin-bulk-bar__btn--danger" id="tabsBulkVoidBtn" onclick="bulkVoidTabs()"><i class="fas fa-ban"></i> <span>Void</span></button>' : ''}
+                </div>
+                <button type="button" class="admin-bulk-bar__btn admin-bulk-bar__clear" onclick="tabsClearSelection()">Clear</button>
+            </div>`;
         }
 
-        function getSelectedOpenTabs(filterFn = null) {
-            const selected = getOpenTabSelectionInputs().filter(input => input.checked).map(input => ({
+        function renderTabsReport() {
+            const r = _tabsBulkReport;
+            if (!r) return '';
+            const rows = (r.skipped || []).map(s => `<li><strong>${escHtml(s.ref)}</strong> — ${escHtml(s.reason)}</li>`).join('');
+            const skippedN = (r.skipped || []).length;
+            return `<div class="tabs-report${skippedN ? ' tabs-report--warn' : ''}" role="status">
+                <div class="tabs-report__head">
+                    <span>${escHtml(r.title)}: <strong>${r.done} done</strong>${skippedN ? `, <strong>${skippedN} skipped</strong>` : ''}</span>
+                    <button type="button" class="tabs-report__close" aria-label="Dismiss" onclick="tabsDismissReport()">&times;</button>
+                </div>
+                ${rows ? `<ul class="tabs-report__list">${rows}</ul>` : ''}
+            </div>`;
+        }
+
+        function tabsShowReport() {
+            const body = document.getElementById('tabsTrayBody');
+            if (!body) return;
+            const old = body.querySelector('.tabs-report');
+            if (old) old.remove();
+            const toolbar = document.getElementById('tabsToolbar');
+            if (toolbar) toolbar.insertAdjacentHTML('afterend', renderTabsReport());
+        }
+
+        function tabsDismissReport() {
+            _tabsBulkReport = null;
+            const el = document.querySelector('#tabsTrayBody .tabs-report');
+            if (el) el.remove();
+        }
+
+        function renderOpenTabs(tabs, windowStart) {
+            const title = document.getElementById('openTabsTitle');
+            const body = document.getElementById('tabsTrayBody');
+            if (title) title.innerHTML = '<i class="fas fa-utensils"></i> Open tabs (' + tabs.length + ')';
+            if (!body) return;
+            _tabsLastSig = JSON.stringify([windowStart || '', tabs]);
+            const openMenuId = (document.querySelector('#tabsCardsList .tab-card.menu-open') || {}).dataset?.orderId || '';
+            const orderedTabs = [...tabs].sort((a, b) => tabCreatedSeconds(a.created_at) - tabCreatedSeconds(b.created_at));
+            const staleCount = orderedTabs.filter(t => windowStart && String(t.created_at || '') < String(windowStart)).length;
+            const outstandingTotal = orderedTabs.reduce((sum, t) => sum + (parseFloat(t.total_amount || 0) || 0), 0);
+
+            if (!orderedTabs.length) {
+                _selectedOpenTabIds.clear();
+                body.innerHTML = renderTabsToolbar(0, 0, 0) + renderTabsReport() + '<p class="tabs-empty">No open tabs.</p>';
+            } else {
+                body.innerHTML = renderTabsToolbar(orderedTabs.length, outstandingTotal, staleCount) +
+                    renderTabsReport() +
+                    '<div class="tab-cards-list" id="tabsCardsList">' + orderedTabs.map(t => renderTabCard(t, windowStart)).join('') + '</div>' +
+                    '<p class="tabs-empty" id="tabsSearchNoMatch" hidden>No tabs match your search.</p>' +
+                    renderTabsBulkBar();
+            }
+            // Re-apply any active search (also re-syncs selection and the bulk bar)
+            filterOpenTabCards(_tabsSearchQuery);
+            if (openMenuId) {
+                const card = body.querySelector('.tab-card[data-order-id="' + openMenuId + '"]');
+                const more = card && !card.hidden && card.querySelector('.tc-act--more');
+                if (more) toggleTabCardActions(more);
+            }
+            updateTabsTrayUpdatedLabel();
+        }
+
+        function getOpenTabSelectionInputs() {
+            return Array.from(document.querySelectorAll('#tabsCardsList .tab-card'))
+                .filter(card => !card.hidden)
+                .map(card => card.querySelector('.tc-select-input'))
+                .filter(Boolean);
+        }
+
+        function getSelectedOpenTabs() {
+            return getOpenTabSelectionInputs().filter(input => input.checked).map(input => ({
                 orderId: parseInt(input.dataset.orderId || '0', 10) || 0,
                 ref: String(input.dataset.ref || 'TAB'),
                 total: parseFloat(input.dataset.total || '0') || 0,
-                canCancel: input.dataset.canCancel === '1',
+                cancelBlock: String(input.dataset.cancelBlock || ''),
                 isStale: input.dataset.isStale === '1',
             })).filter(tab => tab.orderId > 0);
-            return typeof filterFn === 'function' ? selected.filter(filterFn) : selected;
         }
 
         function tabsSelectionChanged() {
+            // A card hidden by the search can never stay selected.
+            document.querySelectorAll('#tabsCardsList .tab-card[hidden] .tc-select-input').forEach(input => {
+                input.checked = false;
+            });
             const inputs = getOpenTabSelectionInputs();
             const selectedTabs = getSelectedOpenTabs();
-            const selectedIds = selectedTabs.map(tab => tab.orderId);
-            _selectedOpenTabIds = new Set(selectedIds);
+            _selectedOpenTabIds = new Set(selectedTabs.map(tab => tab.orderId));
 
-            const totalTabs = inputs.length;
+            const shown = inputs.length;
             const selectedCount = selectedTabs.length;
-            const cancellableSelected = selectedTabs.filter(tab => tab.canCancel).length;
+            const cancellable = selectedTabs.filter(tab => tab.cancelBlock === '').length;
             const staleSelected = selectedTabs.filter(tab => tab.isStale).length;
 
             const selectAll = document.getElementById('tabsBulkAll');
             if (selectAll) {
-                selectAll.checked = totalTabs > 0 && selectedCount === totalTabs;
-                selectAll.indeterminate = selectedCount > 0 && selectedCount < totalTabs;
+                selectAll.checked = shown > 0 && selectedCount === shown;
+                selectAll.indeterminate = selectedCount > 0 && selectedCount < shown;
+                selectAll.disabled = shown === 0 || _tabsBulkBusy;
             }
+            const allLabel = document.getElementById('tabsBulkAllLabel');
+            if (allLabel) allLabel.textContent = _tabsSearchQuery ? 'Select all shown' : 'Select all';
 
-            const summary = document.getElementById('tabsBulkSelectionInfo');
-            if (summary) {
-                if (selectedCount === 0) {
-                    summary.textContent = 'No tabs selected';
-                } else {
-                    summary.textContent = selectedCount + ' selected' + (staleSelected > 0 ? (' · ' + staleSelected + ' stale') : '');
-                }
+            const bar = document.getElementById('tabsBulkBar');
+            if (bar) bar.hidden = selectedCount === 0;
+            const count = document.getElementById('tabsBulkCount');
+            if (count) {
+                count.innerHTML = '<strong>' + selectedCount + '</strong> selected' +
+                    (staleSelected > 0 ? ' · ' + staleSelected + ' previous shift' : '');
             }
 
             const cancelBtn = document.getElementById('tabsBulkCancelBtn');
-            if (cancelBtn) cancelBtn.disabled = cancellableSelected === 0;
-
+            if (cancelBtn) {
+                cancelBtn.disabled = _tabsBulkBusy || cancellable === 0;
+                const label = cancelBtn.querySelector('span');
+                if (label) label.textContent = 'Cancel' + (cancellable > 0 ? ' ' + cancellable : '');
+                cancelBtn.title = cancellable === selectedCount ?
+                    'Cancel the selected tabs (only while nothing has started and nothing is paid)' :
+                    (selectedCount - cancellable) + ' selected tab(s) cannot be cancelled and will be skipped';
+            }
             const voidBtn = document.getElementById('tabsBulkVoidBtn');
-            if (voidBtn) voidBtn.disabled = selectedCount === 0;
+            if (voidBtn) {
+                voidBtn.disabled = _tabsBulkBusy || selectedCount === 0;
+                const label = voidBtn.querySelector('span');
+                if (label) label.textContent = 'Void' + (selectedCount > 0 ? ' ' + selectedCount : '');
+            }
         }
 
         function toggleTabsBulkAll(checked) {
@@ -7982,249 +8025,142 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         }
 
         function tabsSelectStale() {
-            const inputs = getOpenTabSelectionInputs();
-            if (!inputs.length) return;
-            inputs.forEach(input => {
+            getOpenTabSelectionInputs().forEach(input => {
                 input.checked = input.dataset.isStale === '1';
             });
             tabsSelectionChanged();
         }
 
         function tabsClearSelection() {
-            getOpenTabSelectionInputs().forEach(input => {
+            document.querySelectorAll('#tabsCardsList .tc-select-input').forEach(input => {
                 input.checked = false;
             });
             _selectedOpenTabIds.clear();
             tabsSelectionChanged();
         }
 
-        async function bulkCancelTabs() {
-            const selected = getSelectedOpenTabs(tab => tab.canCancel);
-            if (!selected.length) {
-                posToast('Select tabs that are still pending to bulk-cancel.', 'err');
-                return;
-            }
-            const reason = await posAskReason({
-                title: 'Bulk cancel tabs',
-                prompt: `Cancel <strong>${selected.length}</strong> selected tab${selected.length === 1 ? '' : 's'}? This works only while all items are still pending (not yet cooking).`,
-                warn: 'Bulk cancel does not affect tabs already in preparation. Those are skipped automatically.',
-                confirmLabel: 'Cancel selected',
-                confirmColor: '#7c2d12',
-                hasNotes: false,
-            });
-            if (!reason) return;
-
-            showPosActionLoader('Bulk cancelling tabs…', 'Applying your action to selected tabs.');
-            let okCount = 0;
-            let failCount = 0;
-            const failedRefs = [];
-
-            for (const tab of selected) {
-                const fd = new FormData();
-                fd.append('csrf_token', '<?php echo $csrf_token; ?>');
-                fd.append('order_id', String(tab.orderId));
-                fd.append('cancel_reason', reason);
-                try {
-                    const resp = await fetch(posApiUrl('cancel-order.php'), {
-                        method: 'POST',
-                        body: fd,
-                        credentials: 'include'
-                    });
-                    const j = await resp.json();
-                    if (j.ok) {
-                        okCount++;
-                    } else {
-                        failCount++;
-                        failedRefs.push(tab.ref);
-                    }
-                } catch (error) {
-                    failCount++;
-                    failedRefs.push(tab.ref);
-                }
-            }
-
-            hidePosActionLoader();
-            if (okCount > 0 && failCount === 0) {
-                posToast(okCount + ' tab' + (okCount === 1 ? '' : 's') + ' cancelled.', 'ok');
-            } else if (okCount > 0) {
-                posToast(okCount + ' cancelled, ' + failCount + ' failed.', 'err');
-            } else {
-                posToast('Bulk cancel failed for selected tabs.', 'err');
-            }
-            if (failedRefs.length) {
-                posToast('Failed: ' + failedRefs.slice(0, 3).join(', ') + (failedRefs.length > 3 ? '…' : ''), 'err');
-            }
-
-            _selectedOpenTabIds.clear();
-            await refreshOpenTabs(true);
-            refreshShiftStats(true);
+        function bulkCancelTabs() {
+            return runTabsBulk('cancel');
         }
 
-        async function bulkVoidTabs() {
-            if (!posCanVoid) {
+        function bulkVoidTabs() {
+            return runTabsBulk('void');
+        }
+
+        /* One reason for the whole selection; each tab is sent to the same endpoint the
+           single-tab buttons use, so every server rule still applies per tab. The result is
+           reported as done / skipped with the reason for each skipped tab. */
+        async function runTabsBulk(kind) {
+            if (_tabsBulkBusy) return;
+            const isVoid = kind === 'void';
+            if (isVoid && !posCanVoid) {
                 posToast('You do not have permission to void tabs.', 'err');
                 return;
             }
             const selected = getSelectedOpenTabs();
             if (!selected.length) {
-                posToast('Select at least one tab to void.', 'err');
+                posToast('Select at least one tab first.', 'err');
                 return;
             }
-            const reason = await posAskReason({
-                title: 'Bulk void tabs',
-                prompt: `Void <strong>${selected.length}</strong> selected tab${selected.length === 1 ? '' : 's'}? Stock will be restored for ready items and station tickets removed.`,
-                warn: 'Bulk void is permanent and fully audit-logged.',
-                confirmLabel: 'Void selected',
+            const targets = isVoid ? selected : selected.filter(tab => tab.cancelBlock === '');
+            const skipped = isVoid ? [] : selected.filter(tab => tab.cancelBlock !== '').map(tab => ({
+                ref: tab.ref,
+                reason: tab.cancelBlock
+            }));
+            const reportTitle = isVoid ? 'Bulk void' : 'Bulk cancel';
+            if (!targets.length) {
+                _tabsBulkReport = {
+                    title: reportTitle,
+                    done: 0,
+                    skipped
+                };
+                tabsShowReport();
+                posToast('None of the selected tabs can be cancelled.', 'err');
+                return;
+            }
+            const plural = targets.length === 1 ? '' : 's';
+            const reason = await posAskReason(isVoid ? {
+                title: 'Void selected tabs',
+                prompt: `Void <strong>${targets.length}</strong> selected tab${plural}? Stock is restored for items not yet prepared and any payment is reversed.`,
+                warn: 'Void is permanent and fully audit-logged.',
+                confirmLabel: 'Void ' + targets.length + ' tab' + plural,
                 confirmColor: '#c82333',
                 hasNotes: true,
+            } : {
+                title: 'Cancel selected tabs',
+                prompt: `Cancel <strong>${targets.length}</strong> selected tab${plural}? This works only while every item is still pending and nothing is paid.` + (skipped.length ? ` ${skipped.length} other selected tab${skipped.length === 1 ? ' is' : 's are'} not eligible and will be skipped.` : ''),
+                warn: 'Tabs already in preparation are skipped automatically.',
+                confirmLabel: 'Cancel ' + targets.length + ' tab' + plural,
+                confirmColor: '#7c2d12',
+                hasNotes: false,
             });
             if (!reason) return;
+            const notes = isVoid ? (document.getElementById('prmNotes')?.value?.trim() || '') : '';
 
-            const notes = document.getElementById('prmNotes')?.value?.trim() || '';
-            showPosActionLoader('Bulk voiding tabs…', 'Applying admin action to selected tabs.');
-            let okCount = 0;
-            let failCount = 0;
-            const failedRefs = [];
-
-            for (const tab of selected) {
-                const fd = new FormData();
-                fd.append('csrf_token', '<?php echo $csrf_token; ?>');
-                fd.append('order_id', String(tab.orderId));
-                fd.append('void_reason', reason);
-                fd.append('void_notes', notes);
-                try {
-                    const resp = await fetch(posApiUrl('void-order.php'), {
-                        method: 'POST',
-                        body: fd,
-                        credentials: 'include'
-                    });
-                    const j = await resp.json();
-                    if (j.ok) {
-                        okCount++;
+            _tabsBulkBusy = true;
+            tabsSelectionChanged();
+            showPosActionLoader(isVoid ? 'Voiding tabs…' : 'Cancelling tabs…', 'Applying your action to the selected tabs.');
+            let doneCount = 0;
+            const failed = [];
+            try {
+                for (const tab of targets) {
+                    const fd = new FormData();
+                    fd.append('csrf_token', '<?php echo $csrf_token; ?>');
+                    fd.append('order_id', String(tab.orderId));
+                    if (isVoid) {
+                        fd.append('void_reason', reason);
+                        fd.append('void_notes', notes);
                     } else {
-                        failCount++;
-                        failedRefs.push(tab.ref);
+                        fd.append('cancel_reason', reason);
                     }
-                } catch (error) {
-                    failCount++;
-                    failedRefs.push(tab.ref);
+                    try {
+                        const resp = await fetch(posApiUrl(isVoid ? 'void-order.php' : 'cancel-order.php'), {
+                            method: 'POST',
+                            body: fd,
+                            credentials: 'include'
+                        });
+                        let j = null;
+                        try {
+                            j = await resp.json();
+                        } catch (_) {
+                            j = null;
+                        }
+                        if (j && j.ok) doneCount++;
+                        else failed.push({
+                            ref: tab.ref,
+                            reason: (j && j.error) ? String(j.error) : 'Server error ' + resp.status
+                        });
+                    } catch (err) {
+                        failed.push({
+                            ref: tab.ref,
+                            reason: 'Network error'
+                        });
+                    }
                 }
+            } finally {
+                hidePosActionLoader();
+                _tabsBulkBusy = false;
             }
 
-            hidePosActionLoader();
-            if (okCount > 0 && failCount === 0) {
-                posToast(okCount + ' tab' + (okCount === 1 ? '' : 's') + ' voided.', 'ok');
-            } else if (okCount > 0) {
-                posToast(okCount + ' voided, ' + failCount + ' failed.', 'err');
-            } else {
-                posToast('Bulk void failed for selected tabs.', 'err');
-            }
-            if (failedRefs.length) {
-                posToast('Failed: ' + failedRefs.slice(0, 3).join(', ') + (failedRefs.length > 3 ? '…' : ''), 'err');
-            }
+            const allSkipped = skipped.concat(failed);
+            _tabsBulkReport = {
+                title: reportTitle,
+                done: doneCount,
+                skipped: allSkipped
+            };
+            const verb = isVoid ? 'voided' : 'cancelled';
+            if (doneCount > 0 && allSkipped.length === 0) posToast(doneCount + ' tab' + (doneCount === 1 ? '' : 's') + ' ' + verb + '.', 'ok');
+            else if (doneCount > 0) posToast(doneCount + ' ' + verb + ', ' + allSkipped.length + ' skipped — see the list in Open tabs.', 'err');
+            else posToast('No tabs were ' + verb + ' — see the list in Open tabs.', 'err');
 
             _selectedOpenTabIds.clear();
+            // A refresh already in flight would swallow ours; wait for it, then force a fresh render
+            // (which also draws the report).
+            for (let i = 0; _tabsRefreshInFlight && i < 50; i++) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
             await refreshOpenTabs(true);
             refreshShiftStats(true);
-        }
-
-        function renderOpenTabs(tabs, windowStart) {
-            const title = document.getElementById('openTabsTitle');
-            const body = document.getElementById('tabsTrayBody');
-            if (title) title.innerHTML = '<i class="fas fa-utensils"></i> Open tabs (' + tabs.length + ')';
-            if (!body) return;
-            const orderedTabs = [...tabs].sort((a, b) => tabCreatedSeconds(a.created_at) - tabCreatedSeconds(b.created_at));
-            const staleCount = orderedTabs.filter(t => windowStart && String(t.created_at || '') < String(windowStart || '')).length;
-            const outstandingTotal = orderedTabs.reduce((sum, t) => sum + (parseFloat(t.total_amount || 0) || 0), 0);
-
-            if (!orderedTabs.length) {
-                _selectedOpenTabIds.clear();
-                body.innerHTML = renderTabsTrayTools(0, 0, 0) + '<p style="text-align:center; color:#6c757d; padding:30px 0;">No open tabs.</p>';
-                tabsSelectionChanged();
-                applyTabsTrayToolsState();
-                updateTabsTrayUpdatedLabel();
-                return;
-            }
-            body.innerHTML = renderTabsTrayTools(orderedTabs.length, outstandingTotal, staleCount) + `<div class="tab-cards-list" id="tabsCardsList">` + orderedTabs.map(t => {
-                const orderId = parseInt(t.id, 10) || 0;
-                const createdSec = tabCreatedSeconds(t.created_at);
-                const totalItems = parseInt(t.line_count || 0, 10) || 0;
-                const pendingCount = parseInt(t.pending_count || 0, 10) || 0;
-                const preparingCount = parseInt(t.preparing_count || 0, 10) || 0;
-                const readyCount = parseInt(t.ready_count || 0, 10) || 0;
-                const collectionCount = parseInt(t.collection_count || 0, 10) || 0;
-                const servedCount = parseInt(t.served_count || 0, 10) || 0;
-                const canCancelBeforePrep = pendingCount > 0 && preparingCount === 0 && readyCount === 0 && collectionCount === 0 && servedCount === 0;
-                const canSettle = totalItems > 0; // bar items auto-served on settle; server checks kitchen items
-                const isStale = windowStart && String(t.created_at || '') < String(windowStart || '');
-                const byOther = parseInt(t.created_by || 0, 10) !== posUserId;
-                const openedAt = createdSec ? new Date(createdSec * 1000).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                }) : '—';
-                const ref = escHtml(t.reference || 'TAB');
-                const actionRef = escHtml(JSON.stringify(String(t.reference || 'TAB')));
-                const refAttr = escHtml(String(t.reference || 'TAB'));
-                const flow = [
-                    pendingCount > 0 ? `<span class="tc-flow-chip pending"><i class="fas fa-clock"></i> ${pendingCount} pending</span>` : '',
-                    preparingCount > 0 ? `<span class="tc-flow-chip preparing"><i class="fas fa-fire-burner"></i> ${preparingCount} prep</span>` : '',
-                    readyCount > 0 ? `<span class="tc-flow-chip ready"><i class="fas fa-bell"></i> ${readyCount} ready</span>` : '',
-                    collectionCount > 0 ? `<span class="tc-flow-chip collection"><i class="fas fa-hand-holding"></i> ${collectionCount} collecting</span>` : '',
-                    servedCount > 0 ? `<span class="tc-flow-chip served"><i class="fas fa-check"></i> ${servedCount} served</span>` : '',
-                    totalItems > 0 && servedCount === totalItems ? '<span class="tc-flow-chip served-all"><i class="fas fa-circle-check"></i> All served</span>' : ''
-                ].join('');
-                const coversN = parseInt(t.covers || 0, 10) || 0;
-                const metaPills = [
-                    t.table_number ? `<span class="tc-meta-pill"><i class="fas fa-table-cells-large"></i> Table ${escHtml(t.table_number)}</span>` : '',
-                    t.customer_name ? `<span class="tc-meta-pill"><i class="fas fa-user"></i> ${escHtml(t.customer_name)}</span>` : '',
-                    coversN > 0 ? `<span class="tc-meta-pill"><i class="fas fa-users"></i> ${coversN} cover${coversN === 1 ? '' : 's'}</span>` : '',
-                    `<span class="tc-meta-pill"><i class="fas fa-list"></i> ${totalItems} item${totalItems === 1 ? '' : 's'}</span>`,
-                    `<span class="tc-meta-pill"><i class="fas fa-clock"></i> Opened ${escHtml(openedAt)}</span>`,
-                    byOther ? `<span class="tc-meta-pill"><i class="fas fa-user-tie"></i> ${escHtml(t.opened_by || 'staff')}</span>` : `<span class="tc-meta-pill"><i class="fas fa-user-check"></i> You</span>`
-                ].filter(Boolean).join('');
-                const managerTools = (posCanSeeTimeline ? `
-                    <button type="button" onclick="openPosPageModal('order-lifecycle.php?embed=1&id=${orderId}','Timeline','fas fa-stream')" class="tc-btn tc-btn-log"><i class="fas fa-stream"></i> Lifecycle</button>` : '')
-                    + (posCanVoid ? `
-                    <button type="button" onclick="adminVoidTab(${orderId}, ${actionRef})" class="tc-btn tc-btn-void"><i class="fas fa-ban"></i> Void</button>` : '');
-                return `<article class="tab-card${isStale ? ' stale' : ''}" data-order-id="${orderId}" data-is-stale="${isStale ? '1' : '0'}">
-                    <div class="tc-row1">
-                        <label class="tc-select-wrap" aria-label="Select ${ref}">
-                            <input type="checkbox" class="tc-select-input" data-order-id="${orderId}" data-ref="${refAttr}" data-total="${parseFloat(t.total_amount || 0) || 0}" data-can-cancel="${canCancelBeforePrep ? '1' : '0'}" data-is-stale="${isStale ? '1' : '0'}" onchange="tabsSelectionChanged()"${_selectedOpenTabIds.has(orderId) ? ' checked' : ''}>
-                            <span class="tc-select-indicator"><i class="fas fa-check"></i></span>
-                        </label>
-                        <div class="tc-ref">${ref}</div>
-                        <div class="tc-age tab-age" data-created="${createdSec}" style="color:${tabAgeColor(t.created_at)};"><i class="fas fa-stopwatch"></i> ${escHtml(tabAgeLabel(t.created_at))}</div>
-                    </div>
-                    <div class="tc-meta">${metaPills}</div>
-                    ${totalItems > 0 ? `<div class="tc-flow">${flow}</div>` : ''}
-                    <div class="tc-summary-row">
-                        <div>
-                            <span class="tc-total-label">Total</span>
-                            <div class="tc-total">${currencySymbol} ${fmtMoney(t.total_amount)}</div>
-                        </div>
-                        ${(parseInt(t.split_count||1) > 1 && parseInt(t.split_paid_count||0) > 0)
-                            ? `<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;color:#92400e;"><i class="fas fa-users" style="margin-right:3px;"></i>Split ${parseInt(t.split_paid_count||0)}/${parseInt(t.split_count||1)} paid</div>`
-                            : (parseInt(t.split_count||1) > 1 ? `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;color:#0369a1;"><i class="fas fa-users" style="margin-right:3px;"></i>Split ×${parseInt(t.split_count||1)}</div>` : '')}
-                        ${isStale ? '<div class="tc-stale-warn" data-help="From an earlier shift|Settle it as normal — if kitchen items were never bumped, the Pay button will offer a manager force-serve override."><i class="fas fa-triangle-exclamation"></i> Previous shift</div>' : ''}
-                    </div>
-                    <div class="tc-actions">
-                        ${parseInt(t.split_paid_count||0) === 0 ? `<button type="button" onclick="startAddToTab(${orderId}, ${actionRef}, ${parseFloat(t.total_amount || 0) || 0})" class="tc-btn tc-btn-add" data-help="Add items|Add another round to this tab. Returns you to the menu; the next Fire adds to this tab."><i class="fas fa-plus"></i> Add items</button>` : ''}
-                        ${posCanTakePayment ? `<button type="button" onclick="openPayForTab(${orderId}, ${parseFloat(t.total_amount || 0) || 0}, ${actionRef}, ${canSettle ? 'true' : 'false'}, ${parseInt(t.split_count||1)||1}, ${parseInt(t.split_paid_count||0)||0})" class="tc-btn tc-btn-settle" data-help="Settle tab|Close this tab — take payment and mark the order as paid."><i class="fas fa-credit-card"></i> Settle</button>` : ''}
-                        <button type="button" class="tc-btn tc-btn-more" onclick="toggleTabCardActions(this)" aria-expanded="false"><i class="fas fa-ellipsis"></i> More</button>
-                    </div>
-                    <div class="tc-actions tc-actions--secondary" hidden>
-                        <button type="button" onclick="openTabDetail(${orderId})" class="tc-btn tc-btn-detail"><i class="fas fa-receipt"></i> Details</button>
-                        <button type="button" onclick="openPosPageModal('stock-receipt.php?id=${orderId}&print=1&kot=1','Print KOT','fas fa-print')" class="tc-btn tc-btn-kot"><i class="fas fa-print"></i> KOT</button>
-                        ${canCancelBeforePrep ? `<button type="button" onclick="cancelOpenOrder(${orderId}, ${actionRef})" class="tc-btn tc-btn-cancel"><i class="fas fa-circle-xmark"></i> Cancel</button>` : ''}
-                        ${managerTools}
-                    </div>
-                </article>`;
-            }).join('') + '</div>';
-            tabsSelectionChanged();
-            applyTabsTrayToolsState();
-            updateTabsTrayUpdatedLabel();
-            // Re-apply any active search filter after the DOM is rebuilt
-            if (_tabsSearchQuery) filterOpenTabCards(_tabsSearchQuery);
         }
 
         async function refreshOpenTabs(force = false, options = {}) {
@@ -8241,8 +8177,14 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     credentials: 'same-origin'
                 });
                 const data = await response.json();
-                const tabs = Array.isArray(data.tabs) ? data.tabs : [];
-                renderOpenTabs(tabs, data.window_start || '');
+                if (!data || !Array.isArray(data.tabs)) throw new Error('Unexpected tabs response');
+                const tabs = data.tabs;
+                const windowStart = data.window_start || '';
+                // A background poll that found nothing new leaves the DOM alone, so an open
+                // More menu, a half-made selection or a scroll position are not thrown away.
+                if (force || JSON.stringify([windowStart, tabs]) !== _tabsLastSig) {
+                    renderOpenTabs(tabs, windowStart);
+                }
                 const setBadge = (id, n) => {
                     const el = document.getElementById(id);
                     if (!el) return;
@@ -8263,9 +8205,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
         /* Live tab-age timers (updates every 15s) */
         function fmtAgeSec(sec) {
-            const m = Math.floor(sec / 60),
-                s = sec % 60;
-            return m > 0 ? (m + 'm ' + String(s).padStart(2, '0') + 's') : (s + 's');
+            // Same format as the KDS ticket timers (js/rh-age.js).
+            return rhFmtAge(sec);
         }
 
         function tickTabAges() {
@@ -8285,36 +8226,50 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const overlay = document.getElementById('tabsOverlay');
             if (overlay) overlay.classList.remove('show');
             stopTabsAutoRefresh();
-            _selectedOpenTabIds.clear();
+            closeTabMenus();
+            tabsClearSelection();
+            _tabsBulkReport = null;
             // Clear search so next open starts fresh
             const si = document.getElementById('tabsSearchInput');
-            if (si) { si.value = ''; _tabsSearchQuery = ''; }
+            if (si) si.value = '';
+            _tabsSearchQuery = '';
+            filterOpenTabCards('');
         }
 
-        let _tabsSearchQuery = '';
+        /* Search matches each card's own data-search text (reference, table, customer,
+           opener, status), never the menu button labels. Hidden cards are always
+           deselected so a bulk action can only touch what the cashier can see. */
         function filterOpenTabCards(query) {
             _tabsSearchQuery = (query || '').trim().toLowerCase();
             const cards = document.querySelectorAll('#tabsCardsList .tab-card');
             let visible = 0;
+            closeTabMenus();
             cards.forEach(card => {
-                if (!_tabsSearchQuery) { card.style.display = ''; visible++; return; }
-                const text = (card.textContent || '').toLowerCase();
-                const match = text.includes(_tabsSearchQuery);
-                card.style.display = match ? '' : 'none';
+                const match = !_tabsSearchQuery || String(card.dataset.search || '').includes(_tabsSearchQuery);
+                card.hidden = !match;
                 if (match) visible++;
             });
-            // Show empty state if nothing matches
-            let noMatch = document.getElementById('tabsSearchNoMatch');
-            if (!noMatch) {
-                noMatch = document.createElement('p');
-                noMatch.id = 'tabsSearchNoMatch';
-                noMatch.style.cssText = 'text-align:center;color:#9ca3af;padding:20px 0;font-size:13px;';
-                noMatch.textContent = 'No tabs match your search.';
-                const list = document.getElementById('tabsCardsList');
-                if (list) list.after(noMatch);
-            }
-            noMatch.style.display = (_tabsSearchQuery && visible === 0) ? '' : 'none';
+            const noMatch = document.getElementById('tabsSearchNoMatch');
+            if (noMatch) noMatch.hidden = !(_tabsSearchQuery && cards.length > 0 && visible === 0);
+            tabsSelectionChanged();
         }
+
+        /* First paint: the page embeds the current list and renders it through the same
+           function every refresh from pos.php?ajax=tabs uses, so the two can never differ. */
+        (function initOpenTabsTray() {
+            const boot = () => {
+                try {
+                    renderOpenTabs(<?php
+                        $bootTabsJson = json_encode(array_values($openTabs), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE);
+                        echo ($bootTabsJson === false) ? '[]' : $bootTabsJson;
+                    ?>, <?php echo json_encode((string)($restaurantWindow['start_sql'] ?? '')); ?>);
+                } catch (e) {
+                    console.error('Open tabs first render failed', e);
+                }
+            };
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+            else setTimeout(boot, 0);
+        })();
 
         /* POS in-app toast notification (used by cancel/void and station note flows) */
         const POS_TOAST_MAX = 3;
@@ -8578,7 +8533,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         async function cancelOpenOrder(orderId, ref) {
             const reason = await posAskReason({
                 title: 'Cancel order',
-                prompt: `Cancel <strong>${ref}</strong>? This only works while all items are still pending (not yet cooking). No stock has been deducted yet.`,
+                prompt: `Cancel <strong>${escHtml(ref)}</strong>? This only works while all items are still pending (not yet cooking). No stock has been deducted yet.`,
                 warn: 'Once the kitchen or bar starts any item, Cancel is blocked. Use Void instead.',
                 confirmLabel: 'Cancel order',
                 confirmColor: '#7c2d12',
@@ -8614,7 +8569,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         async function adminVoidTab(orderId, ref) {
             const reason = await posAskReason({
                 title: 'Void order',
-                prompt: `Void <strong>${ref}</strong>? Stock will be restored for any items already marked Ready. The order will be removed from all station boards and any payment cancelled.`,
+                prompt: `Void <strong>${escHtml(ref)}</strong>? Stock will be restored for any items already marked Ready. The order will be removed from all station boards and any payment cancelled.`,
                 warn: 'Void is permanent. This action is fully audit-logged.',
                 confirmLabel: 'Void order',
                 confirmColor: '#c82333',

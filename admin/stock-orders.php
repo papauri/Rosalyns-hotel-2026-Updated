@@ -78,7 +78,7 @@ function logOrderAudit(PDO $pdo, int $orderId, ?int $actorId, ?string $actorName
     }
 }
 
-function syncRestaurantOrderPayment(PDO $pdo, array $order, int $recordedBy, string $paymentMethod = 'cash'): void
+function syncRestaurantOrderPayment(PDO $pdo, array $order, int $recordedBy, string $paymentMethod = 'cash', ?string $businessDate = null): void
 {
     $orderId = (int)$order['id'];
     $reference = (string)$order['reference'];
@@ -93,7 +93,8 @@ function syncRestaurantOrderPayment(PDO $pdo, array $order, int $recordedBy, str
         !empty($order['customer_name']) ? (string)$order['customer_name'] : null,
         $vat,
         $recordedBy,
-        $mappedMethod
+        $mappedMethod,
+        $businessDate
     );
 }
 
@@ -198,13 +199,7 @@ function voidRoomServiceFolioChargesForOrder(PDO $pdo, int $orderId, string $rea
     foreach ($charges as $charge) {
         $chargeId = (int)$charge['id'];
         $upd->execute([mb_substr($reason, 0, 255), $voidedBy, $chargeId]);
-        if (
-            !empty($charge['stock_tracked'])
-            && in_array($charge['charge_type'], ['food', 'drink'], true)
-            && !empty($charge['source_item_id'])
-        ) {
-            restoreStockForMenuItem((int)$charge['source_item_id'], (string)$charge['charge_type'], (float)$charge['quantity'], 'Room service order voided: ' . $reason, $voidedBy, $chargeId);
-        }
+        rh_restore_room_service_charge_stock($pdo, $orderId, $charge, 'Room service order voided: ' . $reason, $voidedBy);
         $bookingIds[(int)$charge['booking_id']] = true;
     }
 
@@ -327,7 +322,10 @@ function reconcileRestaurantOrder(PDO $pdo, int $orderId, array $user): array
             if (restaurantOrderRefundTotal($pdo, $orderId) > BALANCE_TOLERANCE) {
                 $changes[] = 'payment ledger left as recorded (refund rows exist)';
             } else {
-                syncRestaurantOrderPayment($pdo, $order, (int)$user['id'], (string)($order['payment_method'] ?: 'cash'));
+                // Reconcile corrects an existing sale; it must never re-date it. An existing ledger row
+                // keeps its own date; a missing one is booked on the order's own paid date, not today.
+                $paidDate = !empty($order['paid_at']) ? substr((string)$order['paid_at'], 0, 10) : null;
+                syncRestaurantOrderPayment($pdo, $order, (int)$user['id'], (string)($order['payment_method'] ?: 'cash'), $paidDate);
                 $changes[] = 'payment ledger synced';
             }
         }
@@ -384,6 +382,11 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                  * the order is "placed" but unpaid. Stock deducts atomically.
                  * Card POS terminal integration is a provision (disabled) for now.
                  * ============================================================ */
+                // Books a payment, so it needs the same gate as the till (Take Payment & Settle
+                // AND till access), otherwise a payment-free till could still book cash here.
+                if (!$soCanSettleHere) {
+                    throw new RuntimeException('You do not have permission to take payments (POS Take Payment & Settle with till access).');
+                }
                 $allowedOrderTypes = ['walk_in', 'dine_in', 'takeaway', 'room_service', 'other'];
                 $orderType = $_POST['order_type'] ?? 'walk_in';
                 if (!in_array($orderType, $allowedOrderTypes, true)) {
@@ -675,8 +678,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $folioVoids = 0;
                 if (($order['order_type'] ?? '') === 'room_service') {
-                    $folioVoids = voidRoomServiceFolioChargesForOrder($pdo, $orderId, 'Room-service order cancelled', (int)$user['id']);
+                    // Stock first: the POS restore skips lines whose folio charge is still live,
+                    // so voiding the charges first would waste their stock twice.
                     restoreFromPosOrder($pdo, $orderId, $user['id']);
+                    $folioVoids = voidRoomServiceFolioChargesForOrder($pdo, $orderId, 'Room-service order cancelled', (int)$user['id']);
                 } else {
                     restoreFromPosOrder($pdo, $orderId, $user['id']);
                 }
@@ -711,8 +716,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $folioVoids = 0;
                 if (($order['order_type'] ?? '') === 'room_service') {
-                    $folioVoids = voidRoomServiceFolioChargesForOrder($pdo, $orderId, $voidReason, (int)$user['id']);
+                    // Stock first: the POS restore skips lines whose folio charge is still live,
+                    // so voiding the charges first would waste their stock twice.
                     restoreFromPosOrder($pdo, $orderId, $user['id']);
+                    $folioVoids = voidRoomServiceFolioChargesForOrder($pdo, $orderId, $voidReason, (int)$user['id']);
                 } else {
                     restoreFromPosOrder($pdo, $orderId, $user['id']);
                 }
@@ -751,8 +758,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 /* SETTLE — close a placed (open) order by collecting payment.
                  * The order already exists with items; we just need to record
                  * payment and flip status to 'paid'. */
-                if (!$soCanTakePayment) {
-                    throw new RuntimeException('You do not have permission to take payments (POS Take Payment & Settle).');
+                if (!$soCanSettleHere) {
+                    throw new RuntimeException('You do not have permission to take payments (POS Take Payment & Settle with till access).');
                 }
                 $orderId = (int)($_POST['order_id'] ?? 0);
                 $paymentMethod = $_POST['payment_method'] ?? '';
@@ -1046,36 +1053,32 @@ if (!$error || strpos($error, 'not yet') === false) {
             }
         }
 
-        // Today's shift summary (for drawer reconciliation visibility — anti-cheat).
-        // Tender split reads per-leg from stock_order_splits for split orders: the order row's
-        // payment_method only ever holds the LAST leg's tender, so a mixed-tender split used to
-        // report its whole value under one tender — in the very figure meant to catch drawer
-        // discrepancies. Window is the trading window, not DATE(created_at)=CURDATE(), so
-        // after-midnight trading counts against the session it belongs to.
+        // Today's shift summary (for drawer reconciliation visibility - anti-cheat).
+        // Tender, revenue, tips and payouts come from rh_pos_shift_totals - the SAME maths as the
+        // till's Z-report and the EOD: a sale counts in the window its paid_at falls in (so a tab
+        // opened yesterday and settled today is today's cash), split bills are read per leg, tips
+        // are cash in the drawer, and a sale refunded/voided later stays in its window with the
+        // payout shown separately. Window is the trading window, not DATE(created_at)=CURDATE().
+        require_once __DIR__ . '/includes/pos-shift-totals.php';
         $soShiftWindow = rh_station_union_business_window();
-        $shiftStmt = $pdo->prepare("
-            SELECT
-                COUNT(*) AS orders_today,
-                COALESCE(SUM(CASE WHEN status='paid' THEN total_amount ELSE 0 END), 0) AS revenue_today,
-                COALESCE(SUM(CASE
-                    WHEN status='paid' AND COALESCE(split_count,1) <= 1 AND payment_method='cash' THEN total_amount
-                    WHEN status='paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='cash' THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
-                    ELSE 0 END), 0) AS cash_today,
-                COALESCE(SUM(CASE
-                    WHEN status='paid' AND COALESCE(split_count,1) <= 1 AND payment_method='mobile_money' THEN total_amount
-                    WHEN status='paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method='mobile_money' THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
-                    ELSE 0 END), 0) AS mobile_today,
-                COALESCE(SUM(CASE
-                    WHEN status='paid' AND COALESCE(split_count,1) <= 1 AND payment_method IN ('card_manual','card_pos') THEN total_amount
-                    WHEN status='paid' AND COALESCE(split_count,1) > 1 THEN COALESCE((SELECT SUM(CASE WHEN s.payment_method IN ('card_manual','card_pos') THEN s.split_amount ELSE 0 END) FROM stock_order_splits s WHERE s.order_id = stock_orders.id), 0)
-                    ELSE 0 END), 0) AS card_today,
-                COALESCE(SUM(CASE WHEN status='voided' THEN total_amount ELSE 0 END), 0) AS voided_today,
-                SUM(CASE WHEN status='voided' THEN 1 ELSE 0 END) AS void_count_today
-            FROM stock_orders
-            WHERE created_at >= ? AND created_at < ?
-        ");
+        $soShiftTotals = rh_pos_shift_totals($pdo, null, $soShiftWindow['start_sql'], $soShiftWindow['end_sql'], $soShiftWindow['start_sql']);
+        $shiftStmt = $pdo->prepare("SELECT COUNT(*) AS orders_today FROM stock_orders WHERE created_at >= ? AND created_at < ?");
         $shiftStmt->execute([$soShiftWindow['start_sql'], $soShiftWindow['end_sql']]);
         $shift = $shiftStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $shift['revenue_today']    = (float)$soShiftTotals['sales_total'];
+        $shift['cash_today']       = (float)$soShiftTotals['gross_cash'];
+        $shift['mobile_today']     = (float)$soShiftTotals['gross_mobile'];
+        $shift['card_today']       = (float)$soShiftTotals['gross_card'];
+        $shift['refund_cash']      = (float)$soShiftTotals['refund_cash'];
+        $shift['refund_mobile']    = (float)$soShiftTotals['refund_mobile'];
+        $shift['refund_card']      = (float)$soShiftTotals['refund_card'];
+        $shift['refund_amount']    = (float)$soShiftTotals['refund_amount'];
+        $shift['tips_today']       = (float)$soShiftTotals['tips_total'];
+        $shift['settled_today_n']  = (int)$soShiftTotals['orders_count'];
+        $shift['voided_today']     = (float)$soShiftTotals['voids_amount'];
+        $shift['void_count_today'] = (int)$soShiftTotals['voids_count'];
+        $shift['earlier_tabs_n']   = (int)($soShiftTotals['settled_from_tabs_count'] ?? 0);
+        $shift['earlier_tabs_amt'] = (float)($soShiftTotals['settled_from_tabs_amount'] ?? 0);
 
         $opsStmt = $pdo->query("
             SELECT
@@ -1094,22 +1097,56 @@ if (!$error || strpos($error, 'not yet') === false) {
             FROM stock_orders
         ");
         $operationsSnapshot = array_merge($operationsSnapshot, ($opsStmt->fetch(PDO::FETCH_ASSOC) ?: []));
-        $ordersToday = (float)($shift['orders_today'] ?? 0);
-        $operationsSnapshot['avg_ticket_today'] = $ordersToday > 0 ? round(((float)($shift['revenue_today'] ?? 0)) / $ordersToday, 2) : 0;
+        $ordersSettledToday = (float)($shift['settled_today_n'] ?? 0);
+        $operationsSnapshot['avg_ticket_today'] = $ordersSettledToday > 0 ? round(((float)($shift['revenue_today'] ?? 0)) / $ordersSettledToday, 2) : 0;
 
-        // Revenue by cashier today (settled orders)
-        $cashierStats = $pdo->query("
-            SELECT
-                COALESCE(u.full_name, 'Unknown') AS cashier,
-                COUNT(CASE WHEN o.status IN ('paid','completed') THEN 1 END) AS orders_settled,
-                COALESCE(SUM(CASE WHEN o.status IN ('paid','completed') THEN o.total_amount ELSE 0 END), 0) AS revenue,
-                COUNT(CASE WHEN o.status = 'placed' THEN 1 END) AS orders_open
-            FROM stock_orders o
-            LEFT JOIN admin_users u ON u.id = o.created_by
-            WHERE DATE(o.created_at) = CURDATE()
-            GROUP BY o.created_by, u.full_name
-            ORDER BY revenue DESC
-        ")->fetchAll(PDO::FETCH_ASSOC);
+        // Revenue by cashier today: attributed to who TOOK the payment (paid_by, per split leg), in the
+        // window each sale was paid - same basis as the Z-report - so the figure meant to catch drawer
+        // discrepancies agrees with it. Open orders stay with whoever opened them.
+        $soSaleWin   = rh_pos_sale_window_sql('o');
+        $soSaleParam = [$soShiftWindow['start_sql'], $soShiftWindow['end_sql'], $soShiftWindow['start_sql'], $soShiftWindow['end_sql']];
+        $soPayer     = rh_pos_payer_sql($pdo, 'o');
+        $soLegPayer  = rh_pos_leg_payer_sql($pdo, 's', 'o');
+        $cashierMap  = [];
+        $cashierAdd  = function ($uid, $settled, $revenue, $open) use (&$cashierMap) {
+            $uid = (int)$uid;
+            if (!isset($cashierMap[$uid])) {
+                $cashierMap[$uid] = ['uid' => $uid, 'orders_settled' => 0, 'revenue' => 0.0, 'orders_open' => 0];
+            }
+            $cashierMap[$uid]['orders_settled'] += (int)$settled;
+            $cashierMap[$uid]['revenue']        += (float)$revenue;
+            $cashierMap[$uid]['orders_open']    += (int)$open;
+        };
+        $cq = $pdo->prepare("SELECT $soPayer AS uid, COUNT(*) AS n, COALESCE(SUM(o.total_amount),0) AS rev
+                             FROM stock_orders o WHERE COALESCE(o.split_count,1) <= 1 AND $soSaleWin GROUP BY $soPayer");
+        $cq->execute($soSaleParam);
+        foreach ($cq->fetchAll(PDO::FETCH_ASSOC) as $r) { $cashierAdd($r['uid'], $r['n'], $r['rev'], 0); }
+        $cq = $pdo->prepare("SELECT $soLegPayer AS uid, COUNT(DISTINCT o.id) AS n, COALESCE(SUM(s.split_amount),0) AS rev
+                             FROM stock_order_splits s INNER JOIN stock_orders o ON o.id = s.order_id
+                             WHERE COALESCE(o.split_count,1) > 1 AND $soSaleWin GROUP BY $soLegPayer");
+        $cq->execute($soSaleParam);
+        foreach ($cq->fetchAll(PDO::FETCH_ASSOC) as $r) { $cashierAdd($r['uid'], $r['n'], $r['rev'], 0); }
+        $cq = $pdo->prepare("SELECT o.created_by AS uid, COUNT(*) AS n FROM stock_orders o
+                             WHERE o.status = 'placed' AND o.created_at >= ? AND o.created_at < ? GROUP BY o.created_by");
+        $cq->execute([$soShiftWindow['start_sql'], $soShiftWindow['end_sql']]);
+        foreach ($cq->fetchAll(PDO::FETCH_ASSOC) as $r) { $cashierAdd($r['uid'], 0, 0, $r['n']); }
+        $cashierNames = [];
+        if ($cashierMap) {
+            $cph = implode(',', array_fill(0, count($cashierMap), '?'));
+            $cn = $pdo->prepare("SELECT id, full_name FROM admin_users WHERE id IN ($cph)");
+            $cn->execute(array_keys($cashierMap));
+            foreach ($cn->fetchAll(PDO::FETCH_ASSOC) as $r) { $cashierNames[(int)$r['id']] = (string)$r['full_name']; }
+        }
+        $cashierStats = [];
+        foreach ($cashierMap as $uid => $c) {
+            $cashierStats[] = [
+                'cashier'        => $cashierNames[$uid] ?? 'Unknown',
+                'orders_settled' => $c['orders_settled'],
+                'revenue'        => round($c['revenue'], 2),
+                'orders_open'    => $c['orders_open'],
+            ];
+        }
+        usort($cashierStats, function ($a, $b) { return $b['revenue'] <=> $a['revenue']; });
 
         $stationQueueStmt = $pdo->query("
             SELECT
@@ -1155,18 +1192,28 @@ if (!$error || strpos($error, 'not yet') === false) {
         ");
         $stationItems = $stationItemsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $paymentMixStmt = $pdo->query("
-            SELECT
-                COALESCE(NULLIF(payment_method, ''), 'unassigned') AS payment_method,
-                COUNT(*) AS orders_count,
-                COALESCE(SUM(total_amount), 0) AS amount_total
-            FROM stock_orders
-            WHERE DATE(created_at) = CURDATE()
-              AND status IN ('paid', 'completed')
-            GROUP BY COALESCE(NULLIF(payment_method, ''), 'unassigned')
-            ORDER BY amount_total DESC
-        ");
-        $paymentMixToday = $paymentMixStmt->fetchAll(PDO::FETCH_ASSOC);
+        // Payment mix: the same sale window as the shift totals (by paid_at, any later status),
+        // split orders read per leg tender.
+        $mixMap = [];
+        $mixAdd = function ($method, $n, $amt) use (&$mixMap) {
+            $k = ($method === null || $method === '') ? 'unassigned' : (string)$method;
+            if (!isset($mixMap[$k])) {
+                $mixMap[$k] = ['payment_method' => $k, 'orders_count' => 0, 'amount_total' => 0.0];
+            }
+            $mixMap[$k]['orders_count'] += (int)$n;
+            $mixMap[$k]['amount_total'] += (float)$amt;
+        };
+        $mq = $pdo->prepare("SELECT o.payment_method AS m, COUNT(*) AS n, COALESCE(SUM(o.total_amount),0) AS amt
+                             FROM stock_orders o WHERE COALESCE(o.split_count,1) <= 1 AND $soSaleWin GROUP BY o.payment_method");
+        $mq->execute($soSaleParam);
+        foreach ($mq->fetchAll(PDO::FETCH_ASSOC) as $r) { $mixAdd($r['m'], $r['n'], $r['amt']); }
+        $mq = $pdo->prepare("SELECT s.payment_method AS m, COUNT(DISTINCT o.id) AS n, COALESCE(SUM(s.split_amount),0) AS amt
+                             FROM stock_order_splits s INNER JOIN stock_orders o ON o.id = s.order_id
+                             WHERE COALESCE(o.split_count,1) > 1 AND $soSaleWin GROUP BY s.payment_method");
+        $mq->execute($soSaleParam);
+        foreach ($mq->fetchAll(PDO::FETCH_ASSOC) as $r) { $mixAdd($r['m'], $r['n'], $r['amt']); }
+        $paymentMixToday = array_values($mixMap);
+        usort($paymentMixToday, function ($a, $b) { return $b['amount_total'] <=> $a['amount_total']; });
 
         $topItemsStmt = $pdo->query("
             SELECT
@@ -1283,18 +1330,26 @@ $csrf_token = generateCsrfToken();
             <a class="shift-card" href="accounting-dashboard.php" title="Open accounting dashboard">
                 <div class="lbl">Revenue Today</div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></div>
+                <div class="shift-card__sub">By payment time</div>
+                <?php if ((int)($shift['earlier_tabs_n'] ?? 0) > 0): ?>
+                    <div class="shift-card__sub">Settled from earlier tabs: <?php echo (int)$shift['earlier_tabs_n']; ?> &middot; <?php echo $currency_symbol . ' ' . number_format((float)$shift['earlier_tabs_amt'], 2); ?></div>
+                <?php endif; ?>
             </a>
-            <a class="shift-card<?php echo ($filterMethod === 'cash') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=cash" title="Today's cash orders">
+            <a class="shift-card<?php echo ($filterMethod === 'cash') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=cash" title="Today's cash taken (sales settled today, tips included). Refund/void payouts are shown in the detail view.">
                 <div class="lbl">Cash</div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></div>
+                <div class="shift-card__sub">By payment time</div>
+                <div class="shift-card__sub">Tips (included): <?php echo $currency_symbol . ' ' . number_format((float)($shift['tips_today'] ?? 0), 2); ?></div>
             </a>
             <a class="shift-card<?php echo ($filterMethod === 'mobile_money') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=mobile_money" title="Today's mobile-money orders">
                 <div class="lbl">Mobile Money</div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></div>
+                <div class="shift-card__sub">By payment time</div>
             </a>
             <a class="shift-card<?php echo ($filterMethod === 'card_manual') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=card_manual" title="Today's card orders">
                 <div class="lbl">Card</div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></div>
+                <div class="shift-card__sub">By payment time</div>
             </a>
             <a class="shift-card<?php echo ((int)($shift['void_count_today'] ?? 0) > 0) ? ' warn' : ''; ?><?php echo ($filterStatus === 'voided') ? ' active' : ''; ?>" href="stock-orders.php?date=today&status=voided" title="Today's voided orders">
                 <div class="lbl">Voids</div>
@@ -2600,10 +2655,14 @@ $csrf_token = generateCsrfToken();
         </template>
 
         <template id="stock-orders-insight-template-cash-collected">
-            <p class="stock-insight-note">Cash collection supports drawer reconciliation and should align with cash settlement records.</p>
+            <p class="stock-insight-note">Counted by payment time (not order created date): a tab opened earlier and paid today counts today. Supports drawer reconciliation and should align with cash settlement records.</p>
             <table class="stock-insight-table">
                 <tbody>
                     <tr><th>Cash collected today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>of which tips</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['tips_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Settled from earlier tabs</th><td><?php echo (int)($shift['earlier_tabs_n'] ?? 0); ?> &middot; <?php echo $currency_symbol . ' ' . number_format((float)($shift['earlier_tabs_amt'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Refund / void payouts</th><td>-<?php echo $currency_symbol . ' ' . number_format((float)($shift['refund_cash'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Expected after payouts</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0) - (float)($shift['refund_cash'] ?? 0), 2); ?></td></tr>
                     <tr><th>Total revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></td></tr>
                     <tr><th>Cash share of revenue</th><td><?php echo (float)($shift['revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['cash_today'] ?? 0) / (float)$shift['revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
                 </tbody>
@@ -2618,6 +2677,8 @@ $csrf_token = generateCsrfToken();
             <table class="stock-insight-table">
                 <tbody>
                     <tr><th>Mobile money today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Refund / void payouts</th><td>-<?php echo $currency_symbol . ' ' . number_format((float)($shift['refund_mobile'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Expected after payouts</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0) - (float)($shift['refund_mobile'] ?? 0), 2); ?></td></tr>
                     <tr><th>Total revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></td></tr>
                     <tr><th>Mobile share of revenue</th><td><?php echo (float)($shift['revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['mobile_today'] ?? 0) / (float)$shift['revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
                 </tbody>
@@ -2632,6 +2693,8 @@ $csrf_token = generateCsrfToken();
             <table class="stock-insight-table">
                 <tbody>
                     <tr><th>Card payments today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Refund / void payouts</th><td>-<?php echo $currency_symbol . ' ' . number_format((float)($shift['refund_card'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Expected after payouts</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0) - (float)($shift['refund_card'] ?? 0), 2); ?></td></tr>
                     <tr><th>Total revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></td></tr>
                     <tr><th>Card share of revenue</th><td><?php echo (float)($shift['revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['card_today'] ?? 0) / (float)$shift['revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
                 </tbody>

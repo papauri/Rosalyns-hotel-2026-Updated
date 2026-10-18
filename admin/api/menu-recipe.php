@@ -136,12 +136,18 @@ try {
                  VALUES (?, ?, ?, ?)"
                 );
                 $written = 0;
+                $seenIngredients = [];
                 foreach ($lines as $line) {
                     $ingId = (int)($line['ingredient_id'] ?? 0);
                     $qty   = (float)($line['quantity'] ?? 0);
                     $yld   = isset($line['yield_percent']) && $line['yield_percent'] !== ''
                         ? max(1, min(100, (float)$line['yield_percent'])) : 100;
                     if ($ingId > 0 && $qty > 0) {
+                        // Same rule as stock-recipes.php: an ingredient appears once per recipe.
+                        if (isset($seenIngredients[$ingId])) {
+                            throw new InvalidArgumentException('An ingredient can only appear once in a recipe - combine the quantities into one line.');
+                        }
+                        $seenIngredients[$ingId] = true;
                         $ins->execute([$recipeId, $ingId, $qty, $yld]);
                         $written++;
                     }

@@ -33,21 +33,29 @@ function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?
 
     $notes = trim('Restaurant order ' . $reference . ($customerName !== null && $customerName !== '' ? ' - ' . $customerName : ''));
 
-    $existing = $pdo->prepare("\n        SELECT id, receipt_number FROM payments\n        WHERE booking_type = 'restaurant'\n          AND COALESCE(payment_type, '') != 'refund'\n          AND deleted_at IS NULL\n          AND (payment_reference = ? OR booking_id = ?)\n        ORDER BY CASE WHEN payment_reference = ? THEN 0 ELSE 1 END, id DESC\n        LIMIT 1\n    ");
+    $existing = $pdo->prepare("\n        SELECT id, receipt_number, payment_date, payment_status, recorded_by FROM payments\n        WHERE booking_type = 'restaurant'\n          AND COALESCE(payment_type, '') != 'refund'\n          AND deleted_at IS NULL\n          AND (payment_reference = ? OR booking_id = ?)\n        ORDER BY CASE WHEN payment_reference = ? THEN 0 ELSE 1 END, id DESC\n        LIMIT 1\n    ");
     $existing->execute([$paymentReference, $orderId, $paymentReference]);
     $existingPayment = $existing->fetch(PDO::FETCH_ASSOC);
     $paymentId = (int)($existingPayment['id'] ?? 0);
 
     if ($paymentId > 0) {
+        // A row already booked as a completed sale keeps its original payment_date and
+        // recorded_by: re-syncing (e.g. Reconcile on an old paid order) corrects amounts/tender
+        // only, it never re-dates the sale into today's EOD / revenue report / VAT quarter.
+        $alreadyBooked = in_array((string)($existingPayment['payment_status'] ?? ''), ['completed', 'paid', 'refunded', 'partially_refunded'], true)
+            && !empty($existingPayment['payment_date']);
+        $keepDate = $alreadyBooked ? (string)$existingPayment['payment_date'] : $businessDate;
+        $keepActor = ($alreadyBooked && (int)($existingPayment['recorded_by'] ?? 0) > 0) ? (int)$existingPayment['recorded_by'] : $recordedBy;
+
         $receiptNumber = !empty($existingPayment['receipt_number'])
             ? (string)$existingPayment['receipt_number']
-            : finance_next_receipt_number($pdo, $businessDate);
+            : finance_next_receipt_number($pdo, $keepDate);
 
         $update = $pdo->prepare("\n            UPDATE payments\n            SET payment_reference = ?, booking_reference = ?, payment_date = ?,\n                payment_amount = ?, vat_rate = ?, vat_amount = ?, total_amount = ?,\n                payment_method = ?, payment_type = 'full_payment', payment_status = 'completed',\n                status = 'completed', receipt_number = COALESCE(NULLIF(receipt_number, ''), ?), notes = ?, recorded_by = ?, updated_at = NOW()\n            WHERE id = ?\n        ");
         $update->execute([
             $paymentReference,
             $reference,
-            $businessDate,
+            $keepDate,
             (float)($vatParts['net'] ?? 0),
             (float)($vatParts['vat_rate'] ?? 0),
             (float)($vatParts['vat'] ?? 0),
@@ -55,7 +63,7 @@ function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?
             $mappedMethod,
             $receiptNumber,
             $notes,
-            $recordedBy,
+            $keepActor,
             $paymentId,
         ]);
         return $paymentId;
@@ -301,7 +309,15 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
                            INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
                           WHERE sr.menu_item_id = ? AND sr.menu_type = ? AND sri.quantity_per_portion > 0");
     $rq->execute([$quantity, $menuItemId, $menuType]);
-    $reqs = $rq->fetchAll(PDO::FETCH_ASSOC);
+    $reqs = [];
+    foreach ($rq->fetchAll(PDO::FETCH_ASSOC) as $reqRow) { // one entry per ingredient even if the recipe repeats it
+        $reqKey = (int)$reqRow['ingredient_id'];
+        if (isset($reqs[$reqKey])) {
+            $reqs[$reqKey]['required_qty'] = (float)$reqs[$reqKey]['required_qty'] + (float)$reqRow['required_qty'];
+        } else {
+            $reqs[$reqKey] = $reqRow;
+        }
+    }
     if (!$reqs) {
         return 0;
     }
@@ -319,13 +335,19 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
     $costSel = $pdo->prepare("SELECT cost_per_unit FROM stock_ingredients WHERE id = ?");
     $adjCostSel = $pdo->prepare("SELECT cost_at_time FROM stock_adjustments WHERE id = ?");
     $wIns = $pdo->prepare("INSERT INTO stock_wastage (ingredient_id, batch_id, quantity, cost_per_unit, wastage_cost, reason, recorded_date, recorded_by) VALUES (?, NULL, ?, ?, ?, ?, ?, ?)");
-    $usageSel = $pdo->prepare("SELECT COALESCE(SUM(ABS(quantity_change)), 0) AS q, COALESCE(SUM(ABS(quantity_change) * cost_at_time), 0) AS c
-                                 FROM stock_adjustments
-                                WHERE source_type = ? AND source_id = ? AND ingredient_id = ? AND quantity_change < 0
-                                  AND COALESCE(reason, '') NOT LIKE 'Voided to wastage%'");
-    $usageMark = $pdo->prepare("UPDATE stock_adjustments SET reason = ?
-                                 WHERE source_type = ? AND source_id = ? AND ingredient_id = ? AND quantity_change < 0
-                                   AND COALESCE(reason, '') NOT LIKE 'Voided to wastage%'");
+    /* Usage rows to reclassify = the line's deductions that are still standing. Restores (KDS recall,
+     * pre-prep void) are paired against deductions oldest-first, so the first N deduction rows are
+     * already reversed (N = restore rows for this source/ingredient) and must not be tagged or
+     * costed again; of the rest, rows already tagged 'Voided to wastage' are skipped. */
+    $hasRestoreCol = function_exists('rh_stock_adjustments_has_restore_col') && rh_stock_adjustments_has_restore_col();
+    $dedSel = $pdo->prepare("SELECT id, ABS(quantity_change) AS q, cost_at_time, COALESCE(reason, '') AS reason
+                               FROM stock_adjustments
+                              WHERE source_type = ? AND source_id = ? AND ingredient_id = ? AND quantity_change < 0
+                           ORDER BY id ASC");
+    $restSel = $pdo->prepare($hasRestoreCol
+        ? "SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'void_restore' AND restore_of_type = ? AND source_id = ? AND ingredient_id = ?"
+        : "SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'void_restore' AND source_id = ? AND ingredient_id = ?");
+    $usageMark = $pdo->prepare("UPDATE stock_adjustments SET reason = ? WHERE id = ?");
     $recorded = 0;
     foreach ($reqs as $r) {
         $iid = (int)$r['ingredient_id'];
@@ -362,12 +384,28 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
             } else {
                 // Stock already left the shelf as usage: reclassify it as wastage at its own cost.
                 $hasUsage = false;
+                $usageIds = [];
                 if ($usageSourceId !== null && $usageSourceId > 0) {
-                    $usageSel->execute([$usageSourceType, $usageSourceId, $iid]);
-                    $u = $usageSel->fetch(PDO::FETCH_ASSOC);
-                    if ($u && (float)$u['q'] > 0.0001) {
+                    $dedSel->execute([$usageSourceType, $usageSourceId, $iid]);
+                    $restSel->execute($hasRestoreCol ? [$usageSourceType, $usageSourceId, $iid] : [$usageSourceId, $iid]);
+                    $skipRestored = (int)$restSel->fetchColumn();
+                    $uq = 0.0;
+                    $uc = 0.0;
+                    foreach ($dedSel->fetchAll(PDO::FETCH_ASSOC) as $d) {
+                        if ($skipRestored > 0) {
+                            $skipRestored--;
+                            continue;
+                        }
+                        if (strncasecmp((string)$d['reason'], 'Voided to wastage', 17) === 0) {
+                            continue;
+                        }
+                        $uq += (float)$d['q'];
+                        $uc += (float)$d['q'] * (float)$d['cost_at_time'];
+                        $usageIds[] = (int)$d['id'];
+                    }
+                    if ($uq > 0.0001) {
                         $hasUsage = true;
-                        $cost = round((float)$u['c'] / (float)$u['q'], 4);
+                        $cost = round($uc / $uq, 4);
                     }
                 }
                 if (!$hasUsage) {
@@ -381,7 +419,10 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
                 }
                 $wIns->execute([$iid, $q, $cost, round($q * $cost, 4), $reasonShort, $today, $userId]);
                 $wastageId = (int)$pdo->lastInsertId();
-                $usageMark->execute([mb_substr('Voided to wastage #' . $wastageId . ' - ' . $reasonText, 0, 255), $usageSourceType, $usageSourceId, $iid]);
+                $markReason = mb_substr('Voided to wastage #' . $wastageId . ' - ' . $reasonText, 0, 255);
+                foreach ($usageIds as $uid) {
+                    $usageMark->execute([$markReason, $uid]);
+                }
             }
             $pdo->exec('RELEASE SAVEPOINT ' . $sp);
             $recorded++;
@@ -490,9 +531,11 @@ function rh_create_pending_refund_allocation(PDO $pdo, int $orderId, string $ref
  *   - preparing/ready/served  -> the food exists / was consumed: recorded as WASTAGE, never restored
  *                                (stock already deducted -> log row only; not yet deducted -> the
  *                                wastage deduction is taken)
- * Lines an 86 already handled (kds_status='void') are skipped. Room-service orders are left to the
- * folio-void path, which owns their stock. Throws when a restore fails so the caller's
- * transaction rolls back with a clear error instead of reporting "Stock restored".
+ * Lines an 86 already handled (kds_status='void') are skipped. Room-service orders use the same
+ * per-line rule for stock taken at the KDS (source 'pos_order'); a line whose stock was booked
+ * against a stock-tracked folio charge (source 'room_service') is left to
+ * rh_restore_room_service_charge_stock(), which owns it. Throws when a restore fails so the
+ * caller's transaction rolls back with a clear error instead of reporting "Stock restored".
  *
  * @return int number of order lines processed
  */
@@ -503,8 +546,16 @@ function rh_restore_pos_order_stock(PDO $pdo, int $orderId, ?int $doneBy, string
     }
     $typeSel = $pdo->prepare("SELECT order_type FROM stock_orders WHERE id = ?");
     $typeSel->execute([$orderId]);
-    if ((string)$typeSel->fetchColumn() === 'room_service') {
-        return 0;
+    $isRoomService = ((string)$typeSel->fetchColumn() === 'room_service');
+    $trackedChargeSel = null;
+    if ($isRoomService) {
+        try {
+            $trackedChargeSel = $pdo->prepare("SELECT COUNT(*) FROM booking_charges
+                                                WHERE stock_order_id = ? AND source_item_id = ? AND ABS(quantity - ?) < 0.005
+                                                  AND stock_tracked = 1 AND voided = 0");
+        } catch (Throwable $e) {
+            $trackedChargeSel = null;
+        }
     }
     $sel = $pdo->prepare("SELECT soi.id, soi.menu_item_id, soi.menu_type, soi.quantity, soi.kds_status, soi.stock_deducted, soi.item_name,
                                  EXISTS (SELECT 1 FROM stock_adjustments sa
@@ -517,6 +568,17 @@ function rh_restore_pos_order_stock(PDO $pdo, int $orderId, ?int $doneBy, string
     $flag = $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 0 WHERE id = ?");
     foreach ($sel->fetchAll(PDO::FETCH_ASSOC) as $line) {
         $lineId = (int)$line['id'];
+        if ($trackedChargeSel && (int)$line['has_trail'] === 0) {
+            // Stock-tracked room-service charge owns this line's stock (rh_restore_room_service_charge_stock).
+            try {
+                $trackedChargeSel->execute([$orderId, (int)$line['menu_item_id'], (float)$line['quantity']]);
+                if ((int)$trackedChargeSel->fetchColumn() > 0) {
+                    continue;
+                }
+            } catch (Throwable $e) {
+                // booking_charges.stock_order_id missing on a legacy schema: nothing tracked.
+            }
+        }
         if ((string)$line['kds_status'] === 'pending') {
             if ((int)$line['has_trail'] === 1) {
                 if (!restoreStockForMenuItem((int)$line['menu_item_id'], (string)$line['menu_type'], (float)$line['quantity'], $reason, $doneBy, $lineId, 'pos_order')) {
@@ -533,4 +595,70 @@ function rh_restore_pos_order_stock(PDO $pdo, int $orderId, ?int $doneBy, string
         $done++;
     }
     return $done;
+}
+
+/**
+ * Stock side of voiding / cancelling ONE room-service folio charge whose ingredients were booked
+ * against the charge itself (booking_charges.stock_tracked = 1, source 'room_service'). Same prep
+ * rule as an 86 and as rh_restore_pos_order_stock: the charge's kitchen line decides.
+ *   - line pending                            -> deduction RESTORED to the shelf
+ *   - preparing / ready / collection / served -> the food exists: WASTAGE (usage reclassified), never restored
+ *   - line already 86'd (void)                -> skipped, the 86 handled it
+ *   - line has a KDS (pos_order) deduction    -> skipped, rh_restore_pos_order_stock owns that stock
+ *   - no kitchen line found (legacy charge)   -> restored, as before
+ * Runs inside the caller's transaction. Never throws for a stock failure (the money void must
+ * stand); failures are logged for reconciliation.
+ *
+ * @param array $charge booking_charges row: id, charge_type, source_item_id, quantity, stock_tracked
+ * @return string 'restored' | 'wastage' | 'skipped'
+ */
+function rh_restore_room_service_charge_stock(PDO $pdo, int $orderId, array $charge, string $reason, ?int $doneBy): string
+{
+    if (empty($charge['stock_tracked'])
+        || !in_array((string)($charge['charge_type'] ?? ''), ['food', 'drink'], true)
+        || empty($charge['source_item_id'])
+    ) {
+        return 'skipped';
+    }
+    $chargeId = (int)$charge['id'];
+    $itemId = (int)$charge['source_item_id'];
+    $qty = (float)$charge['quantity'];
+    $menuType = (string)$charge['charge_type'];
+    $kdsStatus = null;
+    try {
+        $ln = $pdo->prepare("SELECT soi.id, soi.menu_type, soi.kds_status,
+                                    EXISTS (SELECT 1 FROM stock_adjustments sa
+                                             WHERE sa.source_type = 'pos_order' AND sa.source_id = soi.id AND sa.quantity_change < 0) AS has_trail
+                               FROM stock_order_items soi
+                              WHERE soi.order_id = ? AND soi.menu_item_id = ? AND ABS(soi.quantity - ?) < 0.005
+                           ORDER BY (soi.kds_status = 'void') ASC, soi.id ASC");
+        $ln->execute([$orderId, $itemId, $qty]);
+        $line = $ln->fetch(PDO::FETCH_ASSOC);
+        if ($line) {
+            if ((string)$line['kds_status'] === 'void' || (int)$line['has_trail'] === 1) {
+                return 'skipped';
+            }
+            $kdsStatus = (string)$line['kds_status'];
+            if ((string)$line['menu_type'] !== '') {
+                $menuType = (string)$line['menu_type'];
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('rh_restore_room_service_charge_stock line lookup (charge ' . $chargeId . '): ' . $e->getMessage());
+    }
+
+    try {
+        if ($kdsStatus !== null && $kdsStatus !== 'pending') {
+            $n = rh_record_item_wastage($pdo, $itemId, $menuType, $qty, false, (int)$doneBy, $reason . ' - wastage (room service, ' . $kdsStatus . ')', 'room_service', $chargeId);
+            return $n > 0 ? 'wastage' : 'skipped';
+        }
+        if (!restoreStockForMenuItem($itemId, $menuType, $qty, $reason, $doneBy, $chargeId, 'room_service')) {
+            error_log('rh_restore_room_service_charge_stock: restore failed for charge ' . $chargeId);
+            return 'skipped';
+        }
+        return 'restored';
+    } catch (Throwable $e) {
+        error_log('rh_restore_room_service_charge_stock charge ' . $chargeId . ': ' . $e->getMessage());
+        return 'skipped';
+    }
 }

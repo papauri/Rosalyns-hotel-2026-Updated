@@ -4039,6 +4039,33 @@ body {
     font-size: 0.78rem;
 }
 
+/* Memo line under a table total: shown for information, not part of the sum above. */
+.acct-memo-row td {
+    font-style: italic;
+    color: var(--finance-muted);
+    font-size: 0.85em;
+}
+
+/* Inline notice above a table (for example "showing first 500 of N rows"). */
+.acct-notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    margin: 0 0 0.75rem;
+    padding: 0.65rem 0.9rem;
+    border: 1px solid var(--finance-border);
+    border-radius: 8px;
+    font-size: 0.85rem;
+}
+
+.acct-notice--warn {
+    background: var(--finance-warning-bg);
+    border-color: var(--finance-warning-border);
+    color: var(--finance-warning);
+}
+
 .acct-empty {
     text-align: center;
     color: var(--finance-muted);

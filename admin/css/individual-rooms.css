@@ -82,7 +82,6 @@
 }
 
 .filters-bar,
-.bulk-actions,
 .rooms-table {
     background: var(--ir-card);
     border: 1px solid var(--ir-border);
@@ -91,14 +90,16 @@
     margin-bottom: 14px;
 }
 
-.bulk-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
+/* The bulk bar is the shared .admin-bulk-bar (admin-styles.css); .hidden is this page's toggle. */
 .bulk-actions.hidden {
     display: none;
+}
+
+@media (max-width: 1024px), (pointer: coarse) {
+    .admin-bulk-bar select,
+    .admin-bulk-bar .btn {
+        min-height: 44px;
+    }
 }
 
 .rooms-table table {
@@ -190,6 +191,50 @@
 .actions-cell .btn-danger {
     background: #ffeceb;
     color: #a12622;
+}
+
+/* Joined-room (pair) row: a long "A + B" label wraps at the plus, never mid-number; the
+   badge and the per-room status note are small captions under their cell's main value. */
+.room-number-btn {
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.ir-joined-badge {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #0369a1;
+}
+
+.ir-joined-badge.is-inactive {
+    color: #9b8f85;
+    font-weight: 500;
+}
+
+.ir-member-note {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--ir-muted);
+}
+
+/* Touch-first: staff use this list on a tablet, so every row button is 44px tall. */
+@media (max-width: 1024px), (pointer: coarse) {
+    .actions-cell {
+        flex-wrap: wrap;
+    }
+
+    .actions-cell .btn {
+        min-height: 44px;
+        padding: 0 12px;
+        justify-content: center;
+    }
+
+    .actions-cell .actions-more {
+        display: inline-flex;
+    }
 }
 
 #roomModal .modal-content,
@@ -522,6 +567,38 @@
     gap: 4px;
     flex-wrap: wrap;
     justify-content: flex-end;
+}
+
+/* Joined room: its two rooms, same row rhythm as the upcoming-bookings rows above. */
+.rd-member-list {
+    margin-bottom: 10px;
+    border: 1px solid var(--ir-border);
+    border-radius: 8px;
+}
+
+.rd-member-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 12px;
+    flex-wrap: wrap;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--ir-border);
+    font-size: 12px;
+}
+
+.rd-member-row:last-child {
+    border-bottom: none;
+}
+
+.rd-member-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--ir-text);
+}
+
+.rd-member-row .btn {
+    min-height: 44px;
 }
 
 /* ── Room Info grid ──────────────────────── */

@@ -108,13 +108,8 @@ function c_void_room_service_folio_charges(PDO $pdo, int $orderId, string $reaso
         return 0;
     }
 
-    // If stock was already restored via the POS adjustment trail (source_type='pos_order'),
-    // don't restore again from the folio charge path.
-    /* Must agree with c_restore_from_pos_order's keying, or both paths credit the same
-     * stock back twice now that the POS restore actually finds its rows. */
-    $posAdjStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'pos_order' AND source_id IN (SELECT id FROM stock_order_items WHERE order_id = ?)");
-    $posAdjStmt->execute([$orderId]);
-    $stockAlreadyRestoredViaPosPath = (int)$posAdjStmt->fetchColumn() > 0;
+    // Tracked folio charges: per-line restore / wastage (lines the KDS already deducted under
+    // source_type='pos_order' were handled by c_restore_from_pos_order and are skipped there).
 
     $update = $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ?");
     $bookingIds = [];
@@ -122,16 +117,10 @@ function c_void_room_service_folio_charges(PDO $pdo, int $orderId, string $reaso
         $chargeId = (int)$charge['id'];
         $update->execute([mb_substr($reason, 0, 255), $voidedBy, $chargeId]);
         // Restore stock if it was deducted via the room_service path and not yet restored
-        if (!$stockAlreadyRestoredViaPosPath
-            && !empty($charge['stock_tracked'])
-            && in_array((string)$charge['charge_type'], ['food', 'drink'], true)
-            && !empty($charge['source_item_id'])
-        ) {
-            try {
-                restoreStockForMenuItem((int)$charge['source_item_id'], (string)$charge['charge_type'], (float)$charge['quantity'], 'Room service order cancelled: ' . $reason, $voidedBy, $chargeId);
-            } catch (Throwable $se) {
-                error_log("c_void_room_service_folio_charges stock restore failed for charge {$chargeId}: " . $se->getMessage());
-            }
+        try {
+            rh_restore_room_service_charge_stock($pdo, $orderId, $charge, 'Room service order cancelled: ' . $reason, $voidedBy);
+        } catch (Throwable $se) {
+            error_log("c_void_room_service_folio_charges stock restore failed for charge {$chargeId}: " . $se->getMessage());
         }
         $bookingIds[(int)$charge['booking_id']] = true;
     }
