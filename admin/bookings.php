@@ -1520,7 +1520,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $quoteUnit  = rh_stay_totals($quoteSplit['per_night'], 'final', rh_booking_has_levy($abk))['total_with_vat'];
             $ppn_a      = $quoteUnit;
             if ($nightDiff > 0) {
-                $adjAmount = round($nightDiff * $quoteUnit, 2);
+                // Late checkout extends the stay at the booked rate (same as Extend stay).
+                $quoteRp   = rh_reprice_at_booked_rate($abk, $actualNights);
+                $adjAmount = max(0.0, round($quoteRp['new_gross'] - $quoteRp['old_gross'], 2));
             } else {
                 $quoteRp   = rh_reprice_at_booked_rate($abk, $actualNights);
                 $adjAmount = max(0.0, round($quoteRp['old_gross'] - $quoteRp['new_gross'], 2));
@@ -1634,42 +1636,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $settlementPaymentReference = null;
 
                 if ($settlement_action === 'charge' && $nightDiff_s > 0) {
-                    // Late checkout = a folio charge for the extra night(s) at the guest's BOOKED
-                    // nightly rate (levy included if the booking had levy), 'final' basis so VAT
-                    // is extracted from the rate, never added on top. addBookingCharge takes the
-                    // gross unit price.
-                    if (!function_exists('rh_stay_totals')) {
-                        require_once __DIR__ . '/../includes/pricing.php';
+                    // Late checkout is repriced like Extend stay (owner, 2026-10-18): the stay runs to
+                    // today at the guest's BOOKED nightly rate, VAT and levy extracted from the gross,
+                    // and no separate late-checkout folio charge is posted.
+                    $extraNights_s = $nightDiff_s;
+                    $lockL = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
+                    $lockL->execute([$booking_id]);
+                    $lockedL = $lockL->fetch(PDO::FETCH_ASSOC);
+                    if (!$lockedL) {
+                        throw new Exception('Booking not found.');
                     }
-                    $lcoSplit       = rh_booked_stay_split($sbk);
-                    $lcoTt          = rh_stay_totals($lcoSplit['per_night'], 'final', rh_booking_has_levy($sbk));
-                    $ppn_gross_s    = $lcoTt['total_with_vat'];
-                    $ppn_s          = $ppn_gross_s;
-                    $extraNights_s  = $nightDiff_s;
-                    $chargeAmount_s = round($extraNights_s * $ppn_gross_s, 2);
-                    $chargeVat_s    = round($extraNights_s * $lcoTt['vat'], 2);
-                    $chargeDesc    = "Late checkout: {$extraNights_s} extra night(s) at {$currency_symbol} "
-                        . number_format($ppn_s, 2) . "/night"
-                        . ($settle_notes ? '. ' . $settle_notes : '');
-                    $chargeResult  = addBookingCharge(
-                        $booking_id,
-                        'late_checkout',
-                        $chargeDesc,
-                        (float)$extraNights_s,
-                        $ppn_gross_s,
-                        null,
-                        (int)($user['id'] ?? 0),
-                        $lcoTt['vat']
+                    $rpLate = rh_reprice_at_booked_rate($lockedL, $actualNights_s);
+                    rh_write_booking_stay_totals(
+                        $pdo, $booking_id, $rpLate['totals'], $actualNights_s,
+                        (string)$lockedL['check_in_date'], $todayStr_s, $rpLate['new_child_supplement']
                     );
-                    if (!$chargeResult['success']) {
-                        throw new Exception($chargeResult['message'] ?? 'Failed to add late-checkout charge');
+                    if (!recalculateBookingFinancials($booking_id)) {
+                        throw new Exception('Could not recalculate the booking balance.');
                     }
-                    // Extend booking checkout date to reflect actual stay
-                    $pdo->prepare("
-                        UPDATE bookings SET check_out_date = ?, number_of_nights = ?, updated_at = NOW() WHERE id = ?
-                    ")->execute([$todayStr_s, $actualNights_s, $booking_id]);
-                    // Recalculate so amount_due reflects the new folio charge
-                    recalculateBookingFinancials($booking_id);
+                    $ppn_s          = $rpLate['per_night'];
+                    $chargeAmount_s = max(0.0, round($rpLate['new_gross'] - $rpLate['old_gross'], 2));
+                    $lcoTt          = rh_stay_totals($chargeAmount_s, 'final', rh_booking_has_levy($lockedL));
+                    $chargeVat_s    = round((float)$lcoTt['vat'], 2);
 
                     // Record immediate payment for extra-night settlement.
                     $paymentRefBase = 'PAY-EC-' . date('Y') . '-' . str_pad((string)$booking_id, 6, '0', STR_PAD_LEFT);
