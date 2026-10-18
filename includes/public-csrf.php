@@ -123,7 +123,7 @@ if (!function_exists('pub_client_ip')) {
             return;
         }
         if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+            require_once __DIR__ . '/../includes/session-boot.php'; rh_session_start();
         }
         $list = $_SESSION['_confirm_refs'] ?? [];
         $now = time();
@@ -136,7 +136,7 @@ if (!function_exists('pub_client_ip')) {
     function pub_confirm_allowed(string $type, string $ref): bool
     {
         if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+            require_once __DIR__ . '/../includes/session-boot.php'; rh_session_start();
         }
         $now = time();
         foreach ((array)($_SESSION['_confirm_refs'] ?? []) as $e) {

@@ -16,7 +16,7 @@ require_once __DIR__ . '/../config/database.php';
 header('Content-Type: application/json');
 
 // Rate limiting: max 30 requests per minute per IP
-session_start();
+require_once __DIR__ . '/../includes/session-boot.php'; rh_session_start();
 $rate_key = 'api_site_settings';
 if (!isset($_SESSION[$rate_key])) {
     $_SESSION[$rate_key] = [];

@@ -177,14 +177,18 @@ RewriteRule ^favicon\.ico$ images/logo/logo.png [L,R=301]
 
 # ====================
 # SESSION COOKIE HARDENING (mod_php / LiteSpeed only; PHP-FPM reads .user.ini)
+# Sessions live in storage/sessions with an 8h30 lifetime (includes/session-boot.php);
+# the lifetime is repeated here so PHP's GC never uses a shorter host default.
 # ====================
 <IfModule mod_php.c>
     php_flag session.cookie_httponly on
+    php_value session.gc_maxlifetime 30600
     php_value session.cookie_samesite Lax
     php_flag session.use_strict_mode on
 </IfModule>
 <IfModule mod_lsapi.c>
     php_flag session.cookie_httponly on
+    php_value session.gc_maxlifetime 30600
     php_value session.cookie_samesite Lax
     php_flag session.use_strict_mode on
 </IfModule>

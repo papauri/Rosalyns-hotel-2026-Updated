@@ -73,3 +73,6 @@ invoices/INV-*.pdf
 invoices/receipts/*.pdf
 invoices/credit-notes/*.pdf
 receipts/*.pdf
+
+# Private runtime storage (PHP sessions) - never commit
+storage/

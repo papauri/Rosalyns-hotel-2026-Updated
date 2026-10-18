@@ -20,7 +20,7 @@ try {
     require_once __DIR__ . '/../includes/public-csrf.php';
 
     if (session_status() !== PHP_SESSION_ACTIVE) {
-        session_start();
+        require_once __DIR__ . '/../includes/session-boot.php'; rh_session_start();
     }
 
     // Lightweight rate limiting: 60 requests per 60 seconds per session

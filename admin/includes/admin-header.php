@@ -439,7 +439,7 @@ if ($_admin_back_target !== null) {
     }
 </script>
 <script src="js/admin-page-intro.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-page-intro.js'); ?>" defer></script>
-<script src="js/admin-spa.js" defer></script>
+<script src="js/admin-spa.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-spa.js'); ?>" defer></script>
 
 <?php /* Help FAB — rendered here, outside #rh-admin-page, so it survives SPA
           content swaps and position:fixed is always relative to the viewport. */ ?>

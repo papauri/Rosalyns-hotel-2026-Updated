@@ -17,6 +17,8 @@
  * an API answers 401.
  */
 
+require_once __DIR__ . '/session-boot.php';
+
 if (!defined('RH_ADMIN_IDLE_SECONDS')) {
     define('RH_ADMIN_IDLE_SECONDS', 8 * 3600);
 }
@@ -28,6 +30,10 @@ if (!function_exists('rh_admin_session_start')) {
     {
         $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
         if ($method !== 'GET' && $method !== 'HEAD') {
+            return true;
+        }
+        // Page loads inside the admin SPA are fetch() calls; admin-spa.js marks them as activity.
+        if (($_SERVER['HTTP_X_RH_ACTIVITY'] ?? '') === '1') {
             return true;
         }
         $mode = (string)($_SERVER['HTTP_SEC_FETCH_MODE'] ?? '');
@@ -42,10 +48,7 @@ if (!function_exists('rh_admin_session_start')) {
 
     function rh_admin_session_start(): void
     {
-        if (session_status() === PHP_SESSION_NONE) {
-            @ini_set('session.gc_maxlifetime', (string)(RH_ADMIN_IDLE_SECONDS + 1800));
-            session_start();
-        }
+        rh_session_start(); // private save path + 8h30 lifetime (includes/session-boot.php)
         if (session_status() !== PHP_SESSION_ACTIVE || empty($_SESSION['admin_user_id'])) {
             return;
         }

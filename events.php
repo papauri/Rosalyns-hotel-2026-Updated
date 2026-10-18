@@ -18,7 +18,7 @@ require_once 'includes/public-csrf.php';
 require_once __DIR__ . '/includes/event-capacity.php';
 
 if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+    require_once __DIR__ . '/includes/session-boot.php'; rh_session_start();
 }
 
 $events_csrf_token = pub_csrf_generate('events');

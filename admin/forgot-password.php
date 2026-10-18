@@ -13,7 +13,7 @@ if (file_exists($override_file)) {
 // Include base URL configuration for proper redirects
 require_once __DIR__ . '/../config/base-url.php';
 
-session_start();
+require_once __DIR__ . '/../includes/session-boot.php'; rh_session_start();
 
 // If already logged in, redirect to dashboard
 if (isset($_SESSION['admin_user_id'])) {

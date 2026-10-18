@@ -1080,7 +1080,9 @@
             method: 'GET',
             credentials: 'same-origin',
             headers: {
-                'X-Requested-With': 'XMLHttpRequest'
+                'X-Requested-With': 'XMLHttpRequest',
+                // A page opened in the SPA is staff activity: it resets the idle sign-out clock.
+                'X-RH-Activity': '1'
             }
         };
         if (signal) fetchOptions.signal = signal;
@@ -1205,7 +1207,9 @@
             method: 'GET',
             credentials: 'same-origin',
             headers: {
-                'X-Requested-With': 'XMLHttpRequest'
+                'X-Requested-With': 'XMLHttpRequest',
+                // A page opened in the SPA is staff activity: it resets the idle sign-out clock.
+                'X-RH-Activity': '1'
             }
         };
         if (signal) fetchOptions.signal = signal;

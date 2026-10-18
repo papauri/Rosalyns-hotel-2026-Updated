@@ -5,7 +5,7 @@
  * Static guest-facing FAQ. Dynamically pulls site name/contact details from settings.
  */
 if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
+    require_once __DIR__ . '/includes/session-boot.php'; rh_session_start();
 }
 
 require_once 'config/database.php';

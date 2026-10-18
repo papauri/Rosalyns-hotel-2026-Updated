@@ -7,7 +7,7 @@
  */
 
 if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+    require_once __DIR__ . '/includes/session-boot.php'; rh_session_start();
 }
 
 header('Cache-Control: no-store, private');

@@ -62,6 +62,7 @@ if (!$admin) { fwrite(STDERR, "no admin user\n"); exit(2); }
 $sessDir = __DIR__ . '/sessions';
 if (!is_dir($sessDir)) { mkdir($sessDir, 0777, true); }
 session_save_path($sessDir);
+define('RH_SESSION_KEEP_SAVE_PATH', true); // pages' rh_session_start() must read this harness session
 ini_set('session.use_cookies', '0');
 session_id('harness' . bin2hex(random_bytes(6)));
 session_start();
