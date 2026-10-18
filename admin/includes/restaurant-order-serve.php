@@ -75,7 +75,7 @@ function rh_recipe_requirements(PDO $pdo, int $menuItemId, string $menuType, flo
     }
 
     $stmt = $pdo->prepare("SELECT i.id AS ingredient_id, i.name, i.unit, i.current_quantity,
-                                  ((sri.quantity_per_portion * ?) / (GREATEST(sri.yield_percent, 0.1) / 100)) AS required_qty
+                                  ((sri.quantity_per_portion * ?) / " . rh_stock_yield_sql('sri.yield_percent') . ") AS required_qty
                              FROM stock_recipes sr
                              INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
                              INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id

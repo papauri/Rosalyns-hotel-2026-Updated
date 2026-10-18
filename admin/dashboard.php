@@ -52,6 +52,7 @@ $ops = [
 ];
 $stock = [
     'low_stock' => 0,
+    'never_stocked' => 0,
     'expiring_batches' => 0,
     'expired_batches' => 0,
     'wastage_today' => 0.0,
@@ -273,11 +274,17 @@ if (!$is_card_insight_ajax) {
 
     if ($mod_stock) {
         try {
-            $stock['low_stock']        = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived=0 AND min_quantity > 0 AND current_quantity <= min_quantity")->fetchColumn();
+            // ONE shared alert rule (config/database.php rh_stock_alert_summary): items never stocked add 0 here.
+            $stockAlerts               = rh_stock_alert_summary($pdo, 8);
+            $stock['low_stock']        = $stockAlerts['attention'];
+            $stock['never_stocked']    = $stockAlerts['never_stocked'];
             $stock['expiring_batches'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status='active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)")->fetchColumn();
             $stock['expired_batches']  = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status='active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date < CURDATE()")->fetchColumn();
             $stock['wastage_today']    = (float)$pdo->query("SELECT COALESCE(SUM(quantity * COALESCE(cost_per_unit,0)),0) FROM stock_wastage WHERE DATE(created_at)=CURDATE()")->fetchColumn();
-            $stock['low_items']        = $pdo->query("SELECT id, name, unit, current_quantity, min_quantity FROM stock_ingredients WHERE is_archived=0 AND min_quantity > 0 AND current_quantity <= min_quantity ORDER BY (current_quantity / NULLIF(min_quantity,0)) ASC LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
+            $stock['low_items']        = array_map(static function (array $r): array {
+                $r['min_quantity'] = $r['threshold']; // effective reorder threshold
+                return $r;
+            }, array_slice(array_merge($stockAlerts['out_items'], $stockAlerts['low_items']), 0, 8));
         } catch (Throwable $e) { /* fine */ }
     }
 
@@ -1423,16 +1430,13 @@ if ($is_card_insight_ajax) {
                 ];
                 $payload['link'] = ['href' => 'stock-orders.php?view=stock', 'label' => 'Open stock dashboard'];
 
-                $lowCount = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0 AND min_quantity > 0 AND current_quantity <= min_quantity")->fetchColumn();
+                $stockAlertsCard = rh_stock_alert_summary($pdo, 3);
+                $lowCount = $stockAlertsCard['attention'];
                 $expiringCount = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)")->fetchColumn();
                 $expiredCount = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date < CURDATE()")->fetchColumn();
                 $wastageToday = (float)$pdo->query("SELECT COALESCE(SUM(quantity * COALESCE(cost_per_unit,0)), 0) FROM stock_wastage WHERE DATE(created_at) = CURDATE()")->fetchColumn();
 
-                $lowItemRows = $pdo->query("SELECT name, current_quantity, min_quantity, unit
-                                            FROM stock_ingredients
-                                            WHERE is_archived = 0 AND min_quantity > 0 AND current_quantity <= min_quantity
-                                            ORDER BY (current_quantity / NULLIF(min_quantity, 0)) ASC
-                                            LIMIT 3")->fetchAll(PDO::FETCH_ASSOC);
+                $lowItemRows = array_slice(array_merge($stockAlertsCard['out_items'], $stockAlertsCard['low_items']), 0, 3);
                 $expiringRows = $pdo->query("SELECT i.name, b.expiry_date
                                              FROM stock_batches b
                                              INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
@@ -1450,6 +1454,9 @@ if ($is_card_insight_ajax) {
                         $lowParts[] = (string)$itemRow['name'] . ' (' . number_format((float)($itemRow['current_quantity'] ?? 0), 1) . '/' . number_format((float)($itemRow['min_quantity'] ?? 0), 1) . ')';
                     }
                     $lowDetail = implode(' · ', $lowParts);
+                }
+                if ($stockAlertsCard['never_stocked'] > 0) {
+                    $lowDetail .= ($lowItemRows !== [] ? ' · ' : ' ') . 'Opening stock not recorded for ' . $stockAlertsCard['never_stocked'] . ' items (record a stock count).';
                 }
 
                 $expiringDetail = 'No batches expiring in the next 7 days.';
@@ -2554,8 +2561,11 @@ $currency_symbol = getSetting('currency_symbol');
                     </li>
                     <?php endforeach; ?>
                 </ul>
-                <?php else: ?>
+                <?php elseif ((int)$stock['never_stocked'] === 0): ?>
                     <div class="ck-empty ck-empty--good"><i class="fas fa-circle-check"></i><p>All <?php echo isRestaurantEnabled() ? 'ingredients' : 'stock items'; ?> are above minimum.</p></div>
+                <?php endif; ?>
+                <?php if ((int)$stock['never_stocked'] > 0): ?>
+                    <div class="ck-empty"><i class="fas fa-clipboard-list"></i><p>Opening stock not recorded (<?php echo (int)$stock['never_stocked']; ?> items) &mdash; <a href="<?php echo htmlspecialchars(rh_stock_opening_count_url()); ?>">record a stock count</a>.</p></div>
                 <?php endif; ?>
             </section>
             <?php endif; ?>

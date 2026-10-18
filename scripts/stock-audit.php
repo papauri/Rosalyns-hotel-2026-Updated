@@ -12,6 +12,7 @@
  *   5. Stock adjustments balance (deductions vs restorations)
  *   6. Ingredients with negative current_quantity
  *   7. Pending reconciliation count
+ *   8. General health: shared alert rule, batch ledger drift, zero-cost recipe ingredients
  */
 
 declare(strict_types=1);
@@ -330,15 +331,48 @@ if ($expiredBatches === 0) {
     warn("Expired batches: {$expiredBatches} active batch(es) past expiry date — should be marked expired");
 }
 
-$criticalStock = (int)$pdo->query("
-    SELECT COUNT(*) FROM stock_ingredients
-    WHERE is_archived = 0 AND min_quantity > 0 AND current_quantity <= min_quantity AND current_quantity > 0
-")->fetchColumn();
-
-if ($criticalStock === 0) {
-    ok("Critical stock: no ingredients at or below critical level");
+// One shared alert rule (config/database.php rh_stock_alert_summary): out / low / never stocked.
+$alerts = rh_stock_alert_summary($pdo, 5);
+if ($alerts['out'] === 0 && $alerts['low'] === 0) {
+    ok("Stock alerts: no stocked ingredient is out or at/below its reorder threshold");
 } else {
-    warn("Critical stock: {$criticalStock} ingredient(s) at or below critical level");
+    warn("Stock alerts: {$alerts['out']} out of stock, {$alerts['low']} low (reorder_point if set, else min_quantity)");
+}
+if ($alerts['never_stocked'] > 0) {
+    warn("Opening stock not recorded: {$alerts['never_stocked']} ingredient(s) have no stock history - record an opening stock count (stock-count.php?opening=1)");
+} else {
+    ok("Opening stock: every ingredient has stock history");
+}
+if ($alerts['negative'] > 0) {
+    warn("Negative stock: {$alerts['negative']} ingredient(s) with history are below zero - reconcile with a stock count");
+}
+
+// Active batch sum must equal current_quantity when stock is positive (a negative total has no batches by design).
+$batchDrift = $pdo->query("
+    SELECT i.id, i.name, i.current_quantity, COALESCE(b.sumrem, 0) AS batch_sum
+    FROM stock_ingredients i
+    LEFT JOIN (SELECT ingredient_id, SUM(quantity_remaining) AS sumrem FROM stock_batches WHERE status = 'active' GROUP BY ingredient_id) b ON b.ingredient_id = i.id
+    WHERE i.is_archived = 0 AND ABS(GREATEST(i.current_quantity, 0) - COALESCE(b.sumrem, 0)) > 0.001
+      AND (i.current_quantity > 0 OR COALESCE(b.sumrem, 0) > 0)
+    ORDER BY ABS(GREATEST(i.current_quantity, 0) - COALESCE(b.sumrem, 0)) DESC LIMIT 10
+")->fetchAll(PDO::FETCH_ASSOC);
+if (!$batchDrift) {
+    ok("Batch ledger: active batch sums match current_quantity for every ingredient");
+} else {
+    warn("Batch ledger drift: " . count($batchDrift) . "+ ingredient(s) where active batch sum differs from current_quantity (top: " . implode(', ', array_map(static fn($r) => $r['name'] . ' qty ' . round((float)$r['current_quantity'], 3) . ' vs batches ' . round((float)$r['batch_sum'], 3), array_slice($batchDrift, 0, 3))) . ")");
+}
+
+// Ingredients used by a recipe must have a cost, or sales are costed at zero.
+$zeroCostRecipe = $pdo->query("
+    SELECT DISTINCT i.id, i.name FROM stock_ingredients i
+    INNER JOIN stock_recipe_ingredients sri ON sri.ingredient_id = i.id
+    WHERE i.is_archived = 0 AND i.cost_per_unit <= 0
+    ORDER BY i.name LIMIT 50
+")->fetchAll(PDO::FETCH_ASSOC);
+if (!$zeroCostRecipe) {
+    ok("Recipe costing: every recipe ingredient has a unit cost");
+} else {
+    warn("Recipe costing: " . count($zeroCostRecipe) . " recipe ingredient(s) have zero cost (COGS understated): " . implode(', ', array_map(static fn($r) => $r['name'], array_slice($zeroCostRecipe, 0, 8))));
 }
 
 $orphanedDeductions = (int)$pdo->query("

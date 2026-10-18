@@ -101,26 +101,29 @@ $fnb = [
 ];
 
 /* ---------------- Stock / Inventory ---------------- */
+$rpAlerts = rh_stock_alert_summary($pdo, 30); // the ONE shared alert rule (config/database.php)
 $stock = [
-    'low_stock' => rp_safe(function() use ($pdo) {
-        $st = $pdo->query("SELECT name, current_quantity AS current_stock, (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END) AS min_stock_level, unit FROM stock_ingredients
-            WHERE is_archived=0 AND current_quantity <= (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END)
-            ORDER BY (current_quantity / NULLIF((CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END),0)) ASC LIMIT 30");
-        return $st->fetchAll(PDO::FETCH_ASSOC);
+    'low_stock' => rp_safe(function() use ($rpAlerts) {
+        $rows = [];
+        foreach (array_slice(array_merge($rpAlerts['out_items'], $rpAlerts['low_items']), 0, 30) as $r) {
+            $rows[] = ['name' => $r['name'], 'current_stock' => $r['current_quantity'], 'min_stock_level' => $r['threshold'], 'unit' => $r['unit']];
+        }
+        return $rows;
     }),
-    'stock_value' => rp_safe(function() use ($pdo) {
-        $st = $pdo->query("SELECT
-                SUM(current_quantity * COALESCE(cost_per_unit, 0)) AS total_value,
-                COUNT(*) AS active_items,
-                SUM(CASE WHEN current_quantity <= (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END) THEN 1 ELSE 0 END) AS low_count,
-                SUM(CASE WHEN current_quantity = 0 THEN 1 ELSE 0 END) AS oos_count
-            FROM stock_ingredients WHERE is_archived=0");
-        return $st->fetch(PDO::FETCH_ASSOC) ?: [];
+    'stock_value' => rp_safe(function() use ($pdo, $rpAlerts) {
+        $n = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived=0")->fetchColumn();
+        return [
+            'total_value'   => rh_stock_valuation($pdo),
+            'active_items'  => $n,
+            'low_count'     => $rpAlerts['low'],
+            'oos_count'     => $rpAlerts['out'],
+            'never_stocked' => $rpAlerts['never_stocked'],
+        ];
     }, []),
     'wastage' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
         // stock_adjustments may carry waste/spoilage entries with reason='wastage' or source_type='waste'/'wastage'
         $st = $pdo->prepare("SELECT i.name AS ingredient, ABS(SUM(sa.quantity_change)) AS qty,
-                ABS(SUM(sa.quantity_change * COALESCE(i.cost_per_unit, 0))) AS value
+                ABS(SUM(sa.quantity_change * " . rh_stock_movement_cost_sql('sa', 'i') . ")) AS value
             FROM stock_adjustments sa
             JOIN stock_ingredients i ON i.id = sa.ingredient_id
             WHERE sa.created_at BETWEEN ? AND ?
@@ -132,7 +135,7 @@ $stock = [
     'top_used' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
         // Net of restores: a deduction later put back (KDS recall, pre-prep void, 86) is not consumption.
         $st = $pdo->prepare("SELECT i.name, GREATEST(0, -SUM(sa.quantity_change)) AS qty,
-                GREATEST(0, -SUM(sa.quantity_change * COALESCE(i.cost_per_unit, 0))) AS cost
+                GREATEST(0, -SUM(sa.quantity_change * " . rh_stock_movement_cost_sql('sa', 'i') . ")) AS cost
             FROM stock_adjustments sa
             JOIN stock_ingredients i ON i.id = sa.ingredient_id
             WHERE sa.created_at BETWEEN ? AND ?
@@ -314,7 +317,8 @@ $voids = [
     <div class="rx-grid-2">
         <div class="rh-panel">
             <div class="rh-panel__head"><h2 class="rh-panel__title">Low Stock Alerts</h2></div>
-            <?php if (!$stock['low_stock']): ?><div class="rx-empty">All ingredients above reorder point</div><?php else: ?>
+            <?php if (!empty($stock['stock_value']['never_stocked'])): ?><div class="rx-empty" style="color:#1e3a8a;">Opening stock not recorded (<?php echo (int)$stock['stock_value']['never_stocked']; ?> items) &mdash; <a href="stock-count.php?opening=1">record a stock count</a></div><?php endif; ?>
+            <?php if (!$stock['low_stock']): ?><div class="rx-empty">All stocked ingredients above reorder point</div><?php else: ?>
             <table class="rx-table"><thead><tr><th>Ingredient</th><th class="num">Current</th><th class="num">Min</th><th>Unit</th></tr></thead><tbody>
             <?php foreach ($stock['low_stock'] as $l): ?>
                 <tr><td><?php echo htmlspecialchars($l['name']); ?></td><td class="num" style="color:<?php echo $l['current_stock']==0 ? '#c82333' : '#d4a843'; ?>;"><?php echo number_format((float)$l['current_stock'], 2); ?></td><td class="num"><?php echo number_format((float)$l['min_stock_level'], 2); ?></td><td><?php echo htmlspecialchars($l['unit']); ?></td></tr>

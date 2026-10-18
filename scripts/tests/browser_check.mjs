@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const steps = JSON.parse(readFileSync(process.argv[2], 'utf8'));
-const port = 9333;
+const port = Number(process.env.CDP_PORT || 9333); // set CDP_PORT when two checks run at once
 const profile = mkdtempSync(join(tmpdir(), 'cdp-'));
 const chrome = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe', [
   '--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,

@@ -7761,3 +7761,16 @@ html.page-zoomed .pos-ready-card {
 @media (max-width: 420px) {
     .pos-notice-actions { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Orders list filter pills (All / Pending / Paid): 44px touch targets on tablets and phones.
+   They carry inline sizing, so this needs !important. */
+@media (max-width: 1024px), (pointer: coarse) {
+    #rfAll,
+    #rfPending,
+    #rfPaid {
+        min-height: 44px !important;
+        padding: 0 16px !important;
+        font-size: 13px !important;
+        border-radius: 22px !important;
+    }
+}

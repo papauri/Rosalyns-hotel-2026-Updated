@@ -973,7 +973,8 @@
  * Table layout: a dropdown anchored under the button, right edges aligned, as wide as its
  * longest item. Card layout (phones/tablets, where the table row becomes a card): the menu
  * spans the full width of the card's actions row, directly under it - not a narrow popover
- * floating beside the button. Always kept inside the viewport (flips above when needed) and
+ * floating beside the button. Never wider than 320px. Always kept inside the viewport, below the
+ * sticky admin header (flips above when needed, scrolls inside only when it must) and
  * corrected for transformed ancestors that shift position:fixed.
  */
 (function () {
@@ -982,10 +983,21 @@
 
     window.rhPlaceActionMenu = function (btn, menu) {
         if (!btn || !menu) return;
+        // Take the menu out of the page flow BEFORE anything is read (reading the viewport size
+        // can flush layout): an in-flow menu briefly stretches the row, and the browser's scroll
+        // anchoring then scrolls the page, which would close the menu it just opened.
+        menu.style.cssText = 'display:block;position:fixed;visibility:hidden;left:0;top:0;z-index:12050;width:max-content;min-width:0;';
         var vv = window.visualViewport;
         var vw = vv ? vv.width : window.innerWidth;
         var vh = vv ? vv.height : window.innerHeight;
         var pad = 8, gap = 6;
+
+        // Display size (html.page-zoomed): all measurements below are screen pixels, CSS lengths
+        // inside the scaled page are screen pixels / z.
+        var z = (document.documentElement.classList.contains('page-zoomed') && window.__rhPageZoom > 0) ? window.__rhPageZoom : 1;
+        var maxW = Math.min(320 * z, vw - pad * 2);
+
+        menu.style.maxWidth = Math.floor(maxW / z) + 'px';
 
         var cell = btn.closest('td, th');
         var cardMode = vw <= 640 || (cell && window.getComputedStyle(cell).display !== 'table-cell');
@@ -993,47 +1005,61 @@
         var a = anchor.getBoundingClientRect();
         var b = btn.getBoundingClientRect();
 
-        // Measure the natural size first.
-        menu.style.cssText = 'display:block;position:fixed;visibility:hidden;left:0;top:0;z-index:12050;width:max-content;min-width:0;max-width:' + Math.floor(vw - pad * 2) + 'px;';
+        // The sticky admin header covers the top of the viewport: the menu never goes under it.
+        var minTop = pad;
+        var hdr = document.querySelector('.admin-header');
+        if (hdr) {
+            var hr = window.getComputedStyle(hdr);
+            var hb = hdr.getBoundingClientRect().bottom;
+            if (hr.display !== 'none' && hb > 0 && hb < vh / 2) minTop = Math.max(minTop, Math.ceil(hb) + pad);
+        }
+
+        // Measure the natural size.
         var probe = menu.getBoundingClientRect();
         var offsetX = probe.left, offsetY = probe.top; // non-zero when an ancestor is transformed
 
         var width, left;
         if (cardMode) {
-            width = Math.min(Math.max(a.width, Math.min(probe.width, 320)), vw - pad * 2);
+            width = Math.min(Math.max(a.width, probe.width), maxW);
             left = a.left;
         } else {
-            width = Math.min(Math.max(probe.width, 220), vw - pad * 2);
+            width = Math.min(Math.max(probe.width, 220 * z), maxW);
             left = b.right - width;
         }
         left = Math.min(Math.max(left, pad), vw - pad - width);
 
-        menu.style.width = Math.round(width) + 'px';
+        menu.style.width = Math.round(width / z) + 'px';
         var natural = menu.getBoundingClientRect().height;
-        // Below the button when it fits, else above; if neither fits, use the roomier side and
-        // let the menu scroll - never cover the button itself.
+        // Below the button when it fits, else above (never higher than the header); if neither
+        // fits, use the roomier side and let the menu scroll - never cover the button itself.
         var below = vh - pad - (b.bottom + gap);
-        var above = b.top - gap - pad;
+        var above = b.top - gap - minTop;
         var top, maxH;
         if (natural <= below || below >= above) {
             maxH = Math.max(120, Math.floor(below));
-            top = b.bottom + gap;
+            top = Math.max(b.bottom + gap, minTop);
         } else {
             maxH = Math.max(120, Math.floor(above));
             top = b.top - gap - Math.min(natural, maxH);
         }
-        top = Math.max(top, pad);
+        top = Math.max(top, minTop);
+        // After clamping below the header the menu may overflow the bottom: keep it inside.
+        maxH = Math.max(120, Math.min(maxH, Math.floor(vh - pad - top)));
 
         var place = function (x, y) {
             menu.style.cssText = 'display:block;position:fixed;z-index:12050;left:' + Math.round(x) + 'px;top:' + Math.round(y) + 'px;right:auto;margin:0;transform:none;'
-                + 'width:' + Math.round(width) + 'px;max-width:' + Math.floor(vw - pad * 2) + 'px;max-height:' + maxH + 'px;overflow-y:auto;overflow-x:hidden;';
+                + 'width:' + Math.round(width / z) + 'px;max-width:' + Math.floor((vw - pad * 2) / z) + 'px;max-height:' + Math.floor(maxH / z) + 'px;overflow-y:auto;overflow-x:hidden;';
         };
-        var x = left - offsetX, y = top - offsetY;
+        var x = (left - offsetX) / z, y = (top - offsetY) / z;
         place(x, y);
-        // Correct any remaining drift (page CSS offsets, transformed ancestors).
-        var got = menu.getBoundingClientRect();
-        if (Math.abs(got.left - left) > 0.5 || Math.abs(got.top - top) > 0.5) {
-            place(x + (left - got.left), y + (top - got.top));
+        // Correct any remaining drift (page CSS offsets, transformed ancestors, display zoom).
+        for (var pass = 0; pass < 3; pass++) {
+            var got = menu.getBoundingClientRect();
+            var dx = left - got.left, dy = top - got.top;
+            if (Math.abs(dx) <= 0.5 && Math.abs(dy) <= 0.5) break;
+            x += dx / z;
+            y += dy / z;
+            place(x, y);
         }
         menu.classList.toggle('actions-more-menu--card', !!cardMode);
     };

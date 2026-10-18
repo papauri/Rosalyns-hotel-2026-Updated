@@ -837,26 +837,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             </div>
 
                             <div class="room-card-actions">
-                                <!-- Icon toolbar -->
+                                <!-- Toolbar: the two live toggles stay visible; media, share and delete sit in the shared More menu -->
                                 <div class="rmc-toolbar">
-                                    <button class="rmc-icon-btn" type="button"
-                                        title="<?php echo !empty($room['image_url']) ? 'Change featured image' : 'Add a featured image'; ?>"
-                                        onclick="openImageModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($room['image_url'] ?? '', ENT_QUOTES); ?>')">
-                                        <i class="fas fa-image"></i>
-                                    </button>
-                                    <button class="rmc-icon-btn" type="button"
-                                        title="Manage gallery photos (lightbox / photo tour)"
-                                        onclick="openPicturesModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['name'], ENT_QUOTES); ?>')">
-                                        <i class="fas fa-images"></i>
-                                    </button>
-                                    <button class="rmc-icon-btn" type="button"
-                                        title="<?php echo !empty($room['video_path']) ? 'Replace or remove the room video' : 'Upload a video tour (MP4/WebM)'; ?>"
-                                        onclick='openVideoModal(<?php echo $room["id"]; ?>, <?php echo htmlspecialchars(json_encode($room["name"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["video_path"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["video_type"] ?? ""), ENT_QUOTES, "UTF-8"); ?>)'>
-                                        <i class="fas fa-video"></i>
-                                    </button>
-
-                                    <span class="rmc-toolbar-sep"></span>
-
                                     <button class="rmc-icon-btn <?php echo $room['is_active'] ? 'rmc-icon-btn--active-on' : 'rmc-icon-btn--active-off'; ?>" type="button"
                                         title="<?php echo $room['is_active'] ? 'ACTIVE — visible to guests. Click to deactivate.' : 'INACTIVE — hidden from guests. Click to make live.'; ?>"
                                         onclick="toggleActive(<?php echo $room['id']; ?>)">
@@ -868,21 +850,42 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                                         <i class="fas fa-star"></i>
                                     </button>
 
-                                    <?php if ($fb_rooms_posting_on): ?>
-                                        <span class="rmc-toolbar-sep"></span>
-                                        <button class="rmc-icon-btn rmc-icon-btn--facebook" type="button"<?php echo facebookShareButtonAttrs('Preview & post this room to your Facebook Page'); ?>
-                                            onclick='openFbShareModal(<?php echo (int)$room["id"]; ?>, <?php echo htmlspecialchars(json_encode($room["name"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["image_url"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode(number_format((float)($room["price_per_night"] ?? 0))), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["slug"] ?? ""), ENT_QUOTES, "UTF-8"); ?>)'>
-                                            <i class="fab fa-facebook-f"></i>
-                                        </button>
-                                    <?php endif; ?>
-
                                     <span class="rmc-spacer"></span>
 
-                                    <button class="rmc-icon-btn rmc-icon-btn--danger" type="button"
-                                        title="Delete &quot;<?php echo htmlspecialchars($room['name'], ENT_QUOTES); ?>&quot; permanently — cannot be undone"
-                                        onclick="if(confirm('Delete &quot;<?php echo htmlspecialchars($room['name'], ENT_QUOTES); ?>&quot; permanently?\n\nThis removes all images, videos and data. Cannot be undone.')) deleteRoom(<?php echo $room['id']; ?>)">
-                                        <i class="fas fa-trash-alt"></i>
-                                    </button>
+                                    <div class="actions-more">
+                                        <button class="rmc-icon-btn actions-more-toggle" type="button" title="More actions" aria-label="More actions" aria-haspopup="true" onclick="toggleRoomCardMore(this, event)">
+                                            <i class="fas fa-ellipsis-vertical"></i>
+                                        </button>
+                                        <div class="actions-more-menu">
+                                            <button type="button"
+                                                title="<?php echo !empty($room['image_url']) ? 'Change featured image' : 'Add a featured image'; ?>"
+                                                onclick="closeRoomCardMenus(); openImageModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($room['image_url'] ?? '', ENT_QUOTES); ?>')">
+                                                <i class="fas fa-image"></i> Featured image
+                                            </button>
+                                            <button type="button"
+                                                title="Manage gallery photos (lightbox / photo tour)"
+                                                onclick="closeRoomCardMenus(); openPicturesModal(<?php echo $room['id']; ?>, '<?php echo htmlspecialchars($room['name'], ENT_QUOTES); ?>')">
+                                                <i class="fas fa-images"></i> Gallery photos
+                                            </button>
+                                            <button type="button"
+                                                title="<?php echo !empty($room['video_path']) ? 'Replace or remove the room video' : 'Upload a video tour (MP4/WebM)'; ?>"
+                                                onclick='closeRoomCardMenus(); openVideoModal(<?php echo $room["id"]; ?>, <?php echo htmlspecialchars(json_encode($room["name"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["video_path"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["video_type"] ?? ""), ENT_QUOTES, "UTF-8"); ?>)'>
+                                                <i class="fas fa-video"></i> Video tour
+                                            </button>
+                                            <?php if ($fb_rooms_posting_on): ?>
+                                                <button type="button"<?php echo facebookShareButtonAttrs('Preview & post this room to your Facebook Page'); ?>
+                                                    onclick='closeRoomCardMenus(); openFbShareModal(<?php echo (int)$room["id"]; ?>, <?php echo htmlspecialchars(json_encode($room["name"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["image_url"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode(number_format((float)($room["price_per_night"] ?? 0))), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($room["slug"] ?? ""), ENT_QUOTES, "UTF-8"); ?>)'>
+                                                    <i class="fab fa-facebook-f"></i> Share to Facebook
+                                                </button>
+                                            <?php endif; ?>
+                                            <hr class="menu-divider">
+                                            <button type="button" class="text-danger"
+                                                title="Delete &quot;<?php echo htmlspecialchars($room['name'], ENT_QUOTES); ?>&quot; permanently — cannot be undone"
+                                                onclick="closeRoomCardMenus(); if(confirm('Delete &quot;<?php echo htmlspecialchars($room['name'], ENT_QUOTES); ?>&quot; permanently?\n\nThis removes all images, videos and data. Cannot be undone.')) deleteRoom(<?php echo $room['id']; ?>)">
+                                                <i class="fas fa-trash-alt"></i> Delete room
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <!-- Primary CTA -->
@@ -1301,6 +1304,36 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
 
         <script>
             // ===== EDIT MODAL =====
+            // ===== MORE-ACTIONS MENU (shared placement from admin-components.js) =====
+            function closeRoomCardMenus() {
+                document.querySelectorAll('.room-card-actions .actions-more.open').forEach(function (el) {
+                    el.classList.remove('open');
+                    var m = el.querySelector('.actions-more-menu');
+                    if (m) m.removeAttribute('style');
+                });
+            }
+
+            function toggleRoomCardMore(btn, e) {
+                if (e) e.stopPropagation();
+                var wrap = btn.closest('.actions-more');
+                var menu = wrap ? wrap.querySelector('.actions-more-menu') : null;
+                if (!menu) return;
+                var wasOpen = wrap.classList.contains('open');
+                closeRoomCardMenus();
+                if (wasOpen) return;
+                wrap.classList.add('open');
+                if (window.rhPlaceActionMenu) window.rhPlaceActionMenu(btn, menu);
+            }
+            document.addEventListener('click', function (e) {
+                if (!e.target.closest('.actions-more')) closeRoomCardMenus();
+            });
+            document.addEventListener('scroll', function (e) {
+                if (!(e.target && e.target.closest && e.target.closest('.actions-more-menu'))) closeRoomCardMenus();
+            }, true);
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') closeRoomCardMenus();
+            });
+
             function openEditModal(room) {
                 document.getElementById('editModalTitle').innerHTML = '<i class="fas fa-edit"></i> Edit: ' + escapeHtml(room.name);
                 document.getElementById('editAction').value = 'update';

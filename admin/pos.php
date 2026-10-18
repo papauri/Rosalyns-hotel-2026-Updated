@@ -84,7 +84,7 @@ function pos_calculateMenuItemRecipeCost(PDO $pdo, int $menuItemId, string $menu
 {
     if ($quantity <= 0) return 0.0;
     $stmt = $pdo->prepare("
-        SELECT COALESCE(SUM((sri.quantity_per_portion / (GREATEST(sri.yield_percent, 0.1) / 100)) * i.cost_per_unit), 0)
+        SELECT COALESCE(SUM((sri.quantity_per_portion / " . rh_stock_yield_sql('sri.yield_percent') . ") * i.cost_per_unit), 0)
         FROM stock_recipes sr
         INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
         INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id
@@ -376,19 +376,17 @@ function pos_forceServeKitchenItems(PDO $pdo, int $orderId, array $actor, ?int $
     $rows = $sel->fetchAll(PDO::FETCH_ASSOC);
     if (!$rows) return 0;
 
-    /* Same pre-check the KDS bump does. Without it, force-serving a tab whose ingredients are
-     * exhausted drove stock negative, and the resulting "went negative" warning called
-     * rh_log_event() — which used to run CREATE TABLE IF NOT EXISTS and implicitly COMMIT this
-     * transaction mid-settlement, so the payment persisted while the caller reported failure.
-     * An override for un-bumped tickets must not double as an override for absent stock. */
+    /* Stock never blocks service (owner decision): when ingredients are short the sale goes through,
+     * stock goes negative (the engine logs that) and the oversell is recorded as a system event for
+     * the stock reconciliation. rh_log_event() only ever creates its log table once, so this is safe inside the
+     * settlement transaction in normal running. */
     $undeducted = array_values(array_filter($rows, static fn(array $r): bool => (int)$r['stock_deducted'] === 0));
     if ($undeducted) {
         $shortages = rh_stock_shortages_for_items($pdo, $undeducted);
-        if ($shortages) {
-            throw new RuntimeException(rh_stock_shortage_message(
-                $shortages,
-                'Receive stock or adjust the recipe before force-serving this tab.'
-            ));
+        if ($shortages && function_exists('rh_log_event')) {
+            rh_log_event('stock', 'warning', 'Force-served food with ingredients short: ' . rh_stock_shortage_message($shortages, 'Stock goes negative until reconciled.'), [
+                'order_id' => $orderId, 'actor_id' => (int)($actor['id'] ?? 0), 'shortages' => array_slice($shortages, 0, 10),
+            ]);
         }
     }
 
@@ -600,7 +598,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 pos_fireKitchen($pdo, $orderId, $user['id'], $user['full_name']);
                 pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'parked_open_tab', json_encode(['lines' => $count, 'total' => $totalAmount, 'table' => $tableNumber, 'till' => 'pos.php']));
                 $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
                 $lastOrderId = $orderId;
                 $lastOrderRef = $reference;
                 $justParked = true;
@@ -757,7 +755,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // the added lines commit (or roll back) together.
                 idem_finish($pdo, $addIdem, 200, json_encode($addResp), ['entity_type' => 'stock_order', 'entity_id' => $tabOrderId, 'entity_reference' => (string)$tab['reference']]);
                 $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
 
                 $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
                 if ($isXhr) {
@@ -920,7 +918,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $auditEvent  = $splitCount > 1 ? 'split_paid' : 'paid_from_tab';
                 pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], $auditEvent, json_encode(['method' => $paymentMethod, 'total' => $row['total_amount'], 'split_count' => $splitCount, 'split_number' => $splitNumber, 'split_amount' => $extras['split_amount'], 'tip' => $tipAmount, 'tendered' => $extras['tendered'], 'change' => $extras['change'], 'till' => 'pos.php']));
                 $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
 
                 $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
                 if ($isXhr) {
@@ -1166,7 +1164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($mgrActorName) $activityDetail .= ' [Authorised by: ' . $mgrActorName . ']';
                 logActivity($user['id'], 'pos_refund', $activityDetail);
                 $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
                 $isXhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
                 if ($isXhr) {
                     header('Content-Type: application/json; charset=utf-8');
@@ -1247,7 +1245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
                 header('Content-Type: application/json; charset=utf-8');
                 echo json_encode(['ok' => true, 'reference' => $srRow['reference'], 'amount' => $srTotal, 'message' => 'Refund of ' . $currency_symbol . ' ' . number_format($srTotal, 2) . ' settled for ' . $srRow['reference'] . ' - counted as paid out on your shift.']);
                 exit;
@@ -1329,7 +1327,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'till' => 'pos.php'
                 ]));
                 $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
                 $lastOrderId = $orderId;
                 $lastOrderRef = $reference;
                 $changeMsg = ($paymentMethod === 'cash' && $extras['change'] > 0) ? ' Change: ' . $currency_symbol . ' ' . number_format($extras['change'], 2) . '.' : '';
@@ -1426,7 +1424,7 @@ $categories['__ALL__']['count'] = $posVisibleCount;
 $stockSnapshot = [];
 $snap = $pdo->query("
     SELECT sr.menu_item_id, sr.menu_type,
-           MIN(FLOOR(GREATEST(0, i.current_quantity) / (sri.quantity_per_portion / (GREATEST(sri.yield_percent, 0.1)/100)))) AS max_portions
+           MIN(FLOOR(GREATEST(0, i.current_quantity) / (sri.quantity_per_portion / " . rh_stock_yield_sql('sri.yield_percent') . "))) AS max_portions
     FROM stock_recipes sr
     INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
     INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id
@@ -6549,7 +6547,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 const max = maxPortions(m.id, m.type);
                 const cartQty = cart.filter(c => c.id === m.id && c.type === m.type).reduce((s, c) => s + c.qty, 0);
                 const remain = max === null ? null : (max - cartQty);
-                const oos = (max !== null && remain <= 0);
+                /* Selling is NEVER blocked by stock level (owner decision): a recipe item whose ingredients show
+                 * zero is still tappable, flagged "low / none on record"; stock simply goes negative and the
+                 * engine logs it. Only the 86 toggle makes a tile unavailable. */
+                const noStock = (max !== null && remain <= 0);
                 let stockStr, low = '';
                 if (!isAvailable) {
                     stockStr = '86\'d';
@@ -6557,7 +6558,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 } else if (max === null) {
                     stockStr = 'Untracked';
                 } else if (remain <= 0) {
-                    stockStr = 'Out of stock';
+                    stockStr = 'Low / none on record';
                     low = 'low';
                 } else if (remain <= 5) {
                     stockStr = remain + ' left';
@@ -6569,7 +6570,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 const div = document.createElement('div');
                 const eightySixBadge = is86d ? `<span style="position:absolute;top:4px;right:4px;background:#c82333;color:#fff;font-size:9px;font-weight:800;padding:2px 5px;border-radius:4px;letter-spacing:.05em;">86</span>` : '';
                 const barcodeBadge = (m.barcode && posCanAssignBarcode) ? `<span title="Barcode: ${escHtml(m.barcode)}" style="position:absolute;bottom:4px;right:4px;color:#4ade80;font-size:10px;"><i class="fas fa-barcode"></i></span>` : '';
-                div.className = 'item' + ((oos && isAvailable) ? ' oos' : '') + (is86d ? ' oos' : '');
+                div.className = 'item' + (is86d ? ' oos' : '');
                 div.style.position = 'relative';
                 if (is86d) div.style.opacity = '0.6';
 
@@ -6599,7 +6600,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <div class="st ${low}">${stockStr}</div>
                 </div>
                 ${eightySixBadge}${barcodeBadge}`;
-                    if (!oos && isAvailable) bindMenuItemTap(div, m);
+                    if (isAvailable) bindMenuItemTap(div, m);
                 }
                 grid.appendChild(div);
             });
@@ -6690,22 +6691,15 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     posToast('Not available in this mode: ' + match.name, 'err', 2500);
                     if (lastEl) lastEl.textContent = '✗ mode';
                 } else {
-                    // Stock gate from the recipe snapshot baked in at page load. It is
-                    // a first filter only, not an authority: the till is not reloaded
-                    // between scans, so treat it as "known-empty at open" and let the
-                    // server re-check on order placement.
+                    // Stock never blocks a scan (owner decision): warn when the snapshot shows none on record, then add.
                     const stockKey = match.type + ':' + match.id;
                     const inStock = Object.prototype.hasOwnProperty.call(stockSnapshot, stockKey)
                         ? stockSnapshot[stockKey] : null;
                     const inCart = (cart.find(c => c.id === match.id && c.type === match.type) || {}).qty || 0;
-                    if (inStock !== null && inStock - inCart <= 0) {
-                        posToast('Out of stock: ' + match.name, 'err', 2500);
-                        if (lastEl) lastEl.textContent = '✗ no stock';
-                        return;
-                    }
+                    const noneOnRecord = (inStock !== null && inStock - inCart <= 0);
                     addToCart(match);
-                    posToast('+ ' + match.name, 'ok', 1400);
-                    if (lastEl) lastEl.textContent = '✓ ' + match.name;
+                    posToast('+ ' + match.name + (noneOnRecord ? ' (none on record)' : ''), 'ok', noneOnRecord ? 2200 : 1400);
+                    if (lastEl) lastEl.textContent = '✓ ' + match.name + (noneOnRecord ? ' (none on record)' : '');
                 }
             } else {
                 posToast('Barcode not registered: ' + code, 'err', 2800);
@@ -11772,13 +11766,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         };
 
         window.posCamBump = function (idx, d) {
+            /* Stock never blocks adding more (owner decision); the till only notes none is on record. */
             if (d > 0 && typeof cart !== 'undefined' && cart[idx]) {
                 var item = cart[idx];
                 var stockKey = item.type + ':' + item.id;
                 var inStock = Object.prototype.hasOwnProperty.call(stockSnapshot, stockKey) ? stockSnapshot[stockKey] : null;
                 if (inStock !== null && item.qty >= inStock) {
-                    posToast('Out of stock: ' + item.name, 'err', 2000);
-                    return;
+                    posToast('None on record: ' + item.name + ' (sale still allowed)', 'ok', 1600);
                 }
             }
             bump(idx, d);

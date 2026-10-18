@@ -409,16 +409,27 @@ function buildStockHealthReport(): array
     fputcsv($fp, []);
 
     /* Low stock */
-    $low = $pdo->query(
-        "SELECT id, name, category, unit, current_quantity, (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END) AS threshold, cost_per_unit
-         FROM stock_ingredients
-         WHERE is_archived = 0 AND current_quantity <= (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END)
-         ORDER BY (current_quantity - (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END)) ASC"
-    );
+    /* Low / out: the ONE shared alert rule (config/database.php rh_stock_alert_summary).
+     * Ingredients whose opening stock was never recorded are listed separately, not as alerts. */
+    $thr  = rh_stock_threshold_sql('i');
+    $hist = rh_stock_history_sql($pdo, 'i');
+    $alertRows = $pdo->query(
+        "SELECT i.id, i.name, i.category, i.unit, i.current_quantity, {$thr} AS threshold, i.cost_per_unit,
+                (CASE WHEN {$hist} THEN 0 ELSE 1 END) AS never_stocked
+         FROM stock_ingredients i
+         WHERE i.is_archived = 0
+           AND ((i.current_quantity <= 0) OR ({$thr} > 0 AND i.current_quantity <= {$thr}))
+         ORDER BY (i.current_quantity - {$thr}) ASC, i.name ASC"
+    )->fetchAll(PDO::FETCH_ASSOC);
     fputcsv($fp, ['LOW / OUT OF STOCK INGREDIENTS']);
     fputcsv($fp, ['ID', 'Name', 'Category', 'Unit', 'On Hand', 'Min', 'Cost/unit']);
     $lowCount = 0;
-    foreach ($low as $r) {
+    $neverRows = [];
+    foreach ($alertRows as $r) {
+        if ((int)$r['never_stocked'] === 1 && (float)$r['current_quantity'] <= 0) {
+            $neverRows[] = $r;
+            continue;
+        }
         fputcsv($fp, [
             $r['id'], $r['name'], $r['category'], $r['unit'],
             (float)$r['current_quantity'], (float)$r['threshold'],
@@ -427,6 +438,13 @@ function buildStockHealthReport(): array
         $lowCount++;
     }
     fputcsv($fp, ['TOTAL LOW', $lowCount]);
+    fputcsv($fp, []);
+    fputcsv($fp, ['NOT YET STOCKED (opening stock not recorded - record a stock count)']);
+    fputcsv($fp, ['ID', 'Name', 'Category', 'Unit', 'Min']);
+    foreach ($neverRows as $r) {
+        fputcsv($fp, [$r['id'], $r['name'], $r['category'], $r['unit'], (float)$r['threshold']]);
+    }
+    fputcsv($fp, ['TOTAL NOT YET STOCKED', count($neverRows)]);
     fputcsv($fp, []);
 
     /* Expiring batches (next 14 days) */

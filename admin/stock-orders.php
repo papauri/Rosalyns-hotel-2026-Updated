@@ -11,6 +11,7 @@ require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
+require_once __DIR__ . '/includes/bulk-actions.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 
 $user = [
@@ -46,7 +47,7 @@ function calculateMenuItemRecipeCost(PDO $pdo, int $menuItemId, string $menuType
 {
     if ($quantity <= 0) return 0.0;
 
-    $stmt = $pdo->prepare("\n        SELECT COALESCE(SUM((sri.quantity_per_portion / (GREATEST(sri.yield_percent, 0.1) / 100)) * i.cost_per_unit), 0)\n        FROM stock_recipes sr\n        INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id\n        INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id\n        WHERE sr.menu_item_id = ? AND sr.menu_type = ?\n    ");
+    $stmt = $pdo->prepare("\n        SELECT COALESCE(SUM((sri.quantity_per_portion / " . rh_stock_yield_sql('sri.yield_percent') . ") * i.cost_per_unit), 0)\n        FROM stock_recipes sr\n        INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id\n        INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id\n        WHERE sr.menu_item_id = ? AND sr.menu_type = ?\n    ");
     $stmt->execute([$menuItemId, $menuType]);
     return round(((float)$stmt->fetchColumn()) * $quantity, 4);
 }
@@ -556,7 +557,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $pdo->commit();
 
-                    if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
+                    if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
 
                     $roomLabel = $roomNumber ? 'Room ' . $roomNumber : 'booking ' . ($roomServiceBooking['booking_reference'] ?? '');
                     $message = "Room-service order {$reference} posted to {$roomLabel} ({$currency_symbol} " . number_format($totalAmount, 2) . "). It will appear on the guest folio for checkout accounting.";
@@ -642,7 +643,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $pdo->commit();
 
-                    if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
+                    if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
 
                     $changeMsg = '';
                     if ($paymentMethod === 'cash' && $paymentExtras['change_due'] > 0) {
@@ -694,7 +695,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 logOrderAudit($pdo, $orderId, $user['id'], $user['full_name'], 'cancelled', null);
                 $pdo->commit();
 
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
 
                 $message = "Order {$order['reference']} cancelled" . ($folioVoids > 0 ? " and {$folioVoids} folio charge(s) voided." : ' and stock restored.');
             } elseif ($action === 'void_order') {
@@ -744,7 +745,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 logOrderAudit($pdo, $orderId, $user['id'], $user['full_name'], 'voided', $voidReason);
                 $pdo->commit();
 
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
 
                 $message = "Order {$order['reference']} voided. " . ($folioVoids > 0 ? "{$folioVoids} folio charge(s) voided and stock restored." : 'Stock restored.') . ' Reason logged.';
             } elseif ($action === 'reconcile_order') {
@@ -754,7 +755,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $orderId = (int)($_POST['order_id'] ?? 0);
                 if ($orderId <= 0) throw new RuntimeException('Invalid order.');
                 $changes = reconcileRestaurantOrder($pdo, $orderId, $user);
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
                 $message = 'Order reconciled: ' . implode(', ', $changes) . '.';
             } elseif ($action === 'settle_order') {
                 /* SETTLE — close a placed (open) order by collecting payment.
@@ -835,7 +836,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]));
                 $pdo->commit();
 
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
 
                 $changeMsg = '';
                 if ($paymentMethod === 'cash' && ($paymentExtras['change_due'] ?? 0) > 0) {
@@ -2359,26 +2360,27 @@ $csrf_token = generateCsrfToken();
         </script>
 
         <h3 style="margin-top:32px;">Recent Orders</h3>
-        <div class="so-bulkbar" id="soBulkBar" hidden>
-            <strong><span id="soBulkCount">0</span> selected</strong>
-            <button type="button" class="mini-action danger" onclick="soBulk('cancel')" title="Cancel the selected open, unpaid orders whose preparation has not started"><i class="fas fa-circle-xmark"></i> Cancel</button>
+        <?php /* Shared bulk bar (admin-bulk.js shows/hides it and counts the selection). The buttons submit this
+              form only so the shared markup works; the page script below intercepts the submit and runs
+              the same cancel / void / reconcile / delete / export flows as before. */ ?>
+        <?php adminBulkBarStart('so_bulk', '#soOrdersTable', $csrf_token); ?>
+            <?php adminBulkButton('cancel', 'Cancel', 'fa-circle-xmark', '', 'btn-danger'); ?>
             <?php if ($soCanVoid): ?>
-                <button type="button" class="mini-action danger" onclick="soBulk('void')" title="Void the selected open or paid orders (one reason for all)"><i class="fas fa-ban"></i> Void</button>
+                <?php adminBulkButton('void', 'Void', 'fa-ban', '', 'btn-danger'); ?>
             <?php endif; ?>
             <?php if ($canReconcile): ?>
-                <button type="button" class="mini-action warn" onclick="soBulk('reconcile')" title="Reconcile the selected orders that need review"><i class="fas fa-scale-balanced"></i> Reconcile</button>
+                <?php adminBulkButton('reconcile', 'Reconcile', 'fa-scale-balanced', '', 'btn-warning'); ?>
             <?php endif; ?>
             <?php if ($soCanDelete): ?>
-                <button type="button" class="mini-action danger" onclick="soBulk('delete')" title="Permanently delete the selected orders (any status). Stock is put back, payments removed, a deletion record is kept."><i class="fas fa-trash-can"></i> Delete</button>
+                <?php adminBulkButton('delete', 'Delete', 'fa-trash-can', '', 'btn-danger'); ?>
             <?php endif; ?>
-            <button type="button" class="mini-action" onclick="soBulk('export')" title="Download the selected rows as CSV"><i class="fas fa-file-csv"></i> Export</button>
-            <button type="button" class="mini-action" onclick="soBulkClear()">Clear</button>
-        </div>
+            <?php adminBulkButton('export', 'Export', 'fa-file-csv', '', 'btn-secondary'); ?>
+        <?php adminBulkBarEnd(); ?>
         <div class="table-responsive">
             <table class="order-list" id="soOrdersTable">
                 <thead>
                     <tr>
-                        <th style="width:32px;"><input type="checkbox" id="soSelectAll" aria-label="Select all orders on this page" onchange="soToggleAll(this.checked)"></th>
+                        <th class="admin-bulk-col"><?php echo adminBulkAllBox('Select all orders on this page'); ?></th>
                         <th>Reference</th>
                         <th>Type</th>
                         <th>Customer</th>
@@ -2470,7 +2472,7 @@ $csrf_token = generateCsrfToken();
                             data-so-customer="<?php echo htmlspecialchars((string)($o['customer_name'] ?? ''), ENT_QUOTES); ?>"
                             data-so-created="<?php echo htmlspecialchars((string)$o['created_at'], ENT_QUOTES); ?>"
                             data-so-review="<?php echo empty($health['is_balanced']) ? '1' : '0'; ?>">
-                            <td><input type="checkbox" class="so-row-check" aria-label="Select order <?php echo htmlspecialchars((string)$o['reference'], ENT_QUOTES); ?>" onchange="soSyncBulk()"></td>
+                            <td class="admin-bulk-col"><?php echo adminBulkRowBox((int)$o['id'], 'Select order ' . (string)$o['reference']); ?></td>
                             <td><strong><?php echo htmlspecialchars($o['reference']); ?></strong></td>
                             <td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $o['order_type']))); ?></td>
                             <td><?php echo htmlspecialchars($o['customer_name'] ?: '—'); ?></td>
@@ -2840,8 +2842,6 @@ $csrf_token = generateCsrfToken();
     <!-- Settle Order Modal: the till's payment path (pos.php pay_existing) - deals, discount,
          split bill and tip are applied and recorded exactly as on the POS. -->
     <style>
-        .so-bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; padding: 10px 12px; border: 1px solid #e3d9cc; border-radius: 8px; background: #faf7f2; }
-        .so-bulkbar[hidden] { display: none; }
         .so-settle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
         .so-settle-grid label, .so-settle-field label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px; }
         .so-settle-grid input, .so-settle-grid select, .so-settle-field input, .so-settle-field select { width: 100%; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
@@ -3101,29 +3101,31 @@ $csrf_token = generateCsrfToken();
 
         // ── Bulk selection ───────────────────────────────────────────────
         function soSelectedRows() {
-            return Array.from(document.querySelectorAll('#soOrdersTable .so-row-check:checked')).map(function(cb) { return cb.closest('tr'); }).filter(Boolean);
+            return Array.from(document.querySelectorAll('#soOrdersTable input[data-bulk-row]:checked')).map(function(cb) { return cb.closest('tr'); }).filter(Boolean);
         }
 
+        // The shared admin-bulk.js owns the bar (count, hidden state, select-all); this just asks it to re-read.
         function soSyncBulk() {
-            var rows = soSelectedRows();
-            var bar = document.getElementById('soBulkBar');
-            var cnt = document.getElementById('soBulkCount');
-            if (cnt) cnt.textContent = String(rows.length);
-            if (bar) bar.hidden = rows.length === 0;
-            var all = document.getElementById('soSelectAll');
-            var boxes = document.querySelectorAll('#soOrdersTable .so-row-check');
-            if (all) {
-                all.checked = boxes.length > 0 && rows.length === boxes.length;
-                all.indeterminate = rows.length > 0 && rows.length < boxes.length;
-            }
+            if (window.AdminBulk && typeof AdminBulk.refresh === 'function') AdminBulk.refresh();
         }
 
         function soToggleAll(on) {
-            document.querySelectorAll('#soOrdersTable .so-row-check').forEach(function(cb) { cb.checked = !!on; });
+            document.querySelectorAll('#soOrdersTable input[data-bulk-row]').forEach(function(cb) { cb.checked = !!on; });
             soSyncBulk();
         }
 
         function soBulkClear() { soToggleAll(false); }
+
+        // Run the page's own bulk flows instead of posting the shared bar form. Capture phase on the document,
+        // registered before the shared handlers, so nothing else sees (or submits) this form.
+        document.addEventListener('submit', function(event) {
+            var form = event.target;
+            if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-bulk-bar') || form.getAttribute('data-bulk-scope') !== '#soOrdersTable') return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            var op = event.submitter && event.submitter.value ? event.submitter.value : '';
+            if (op) soBulk(op);
+        }, true);
 
         async function soRunEach(ids, fn) {
             var done = 0, failed = [];

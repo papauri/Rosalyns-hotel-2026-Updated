@@ -9969,9 +9969,7 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
          * and the retry guard below cannot mistake the second line for an already-done deduction. */
         $needByIngredient = [];
         foreach ($rows as $row) {
-            $yield = (float)$row['yield_percent'];
-            if ($yield <= 0) $yield = 100.0; // safety
-            $rawNeeded = ((float)$row['quantity_per_portion'] * $portions) / ($yield / 100.0);
+            $rawNeeded = ((float)$row['quantity_per_portion'] * $portions) / rh_stock_yield_factor((float)$row['yield_percent']);
             if ($rawNeeded <= 0) continue;
             $ingKey = (int)$row['ingredient_id'];
             $needByIngredient[$ingKey] = ($needByIngredient[$ingKey] ?? 0.0) + $rawNeeded;
@@ -10410,9 +10408,7 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
             ");
             $rec->execute([$menuItemId, $menuType]);
             foreach ($rec->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $yield = (float)$row['yield_percent'];
-                if ($yield <= 0) $yield = 100.0;
-                $rawNeeded = ((float)$row['quantity_per_portion'] * $portions) / ($yield / 100.0);
+                $rawNeeded = ((float)$row['quantity_per_portion'] * $portions) / rh_stock_yield_factor((float)$row['yield_percent']);
                 if ($rawNeeded > 0) {
                     $byIngredient[(int)$row['ingredient_id']] = ($byIngredient[(int)$row['ingredient_id']] ?? 0) + $rawNeeded;
                 }
@@ -10652,6 +10648,159 @@ function calculateWeightedAvgCost(float $currentQty, float $oldAvg, float $incom
     $denom = $base + $incomingQty;
     if ($denom <= 0.0001) return $incomingCost;
     return (($base * $oldAvg) + ($incomingQty * $incomingCost)) / $denom;
+}
+
+/* ============================================================================
+ * Shared stock helpers: ONE definition each of the alert rule, the reorder
+ * threshold, the yield divisor, the stock valuation and the dashboard cache key,
+ * so the dashboard, stock overview, reports, emails and audit script agree.
+ * ========================================================================== */
+
+if (!defined('RH_STOCK_DASH_CACHE_KEY')) {
+    define('RH_STOCK_DASH_CACHE_KEY', 'stock_dashboard_metrics_v5');
+}
+
+/** Drop the stock overview KPI cache (current key and every retired one). Safe when no cache layer is loaded. */
+function rh_clear_stock_dashboard_cache(): void
+{
+    if (!function_exists('deleteCache')) return;
+    foreach ([RH_STOCK_DASH_CACHE_KEY, 'stock_dashboard_metrics_v4', 'stock_dashboard_metrics_v3', 'stock_dashboard_metrics_v2', 'stock_dashboard_metrics_v1'] as $k) {
+        try { deleteCache($k); } catch (Throwable $e) { /* cache is best effort */ }
+    }
+}
+
+/**
+ * Fraction of a raw ingredient that is usable (yield_percent / 100). A missing, zero or negative
+ * yield means "no loss" (100%). Every deduction, restore, cost and pre-check path uses this, so
+ * the same recipe line always needs the same raw quantity.
+ */
+function rh_stock_yield_factor(float $yieldPercent): float
+{
+    return $yieldPercent > 0 ? ($yieldPercent / 100.0) : 1.0;
+}
+
+/** SQL twin of rh_stock_yield_factor() for a yield_percent column (static text; $column is an identifier, never user input). */
+function rh_stock_yield_sql(string $column = 'sri.yield_percent'): string
+{
+    $col = preg_replace('/[^A-Za-z0-9_.]/', '', $column);
+    return "((CASE WHEN {$col} > 0 THEN {$col} ELSE 100 END) / 100)";
+}
+
+/** Reorder threshold: reorder_point when set, otherwise min_quantity. */
+function rh_stock_threshold_sql(string $alias = ''): string
+{
+    $p = $alias !== '' ? preg_replace('/[^A-Za-z0-9_]/', '', $alias) . '.' : '';
+    return "(CASE WHEN {$p}reorder_point > 0 THEN {$p}reorder_point ELSE {$p}min_quantity END)";
+}
+
+function rh_stock_table_present(PDO $pdo, string $table): bool
+{
+    static $cache = [];
+    if (!array_key_exists($table, $cache)) {
+        try {
+            $st = $pdo->prepare('SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1');
+            $st->execute([$table]);
+            $cache[$table] = (bool)$st->fetchColumn();
+        } catch (Throwable $e) {
+            $cache[$table] = false;
+        }
+    }
+    return $cache[$table];
+}
+
+/**
+ * SQL condition: this ingredient has a stock history, meaning any stock_in_log row, any batch, or
+ * a line on an APPROVED stock count. An ingredient with none of these has never had its opening
+ * stock recorded. $alias is the stock_ingredients alias in the caller's query.
+ */
+function rh_stock_history_sql(PDO $pdo, string $alias = 'i'): string
+{
+    $a = preg_replace('/[^A-Za-z0-9_]/', '', $alias);
+    $parts = [];
+    if (rh_stock_table_present($pdo, 'stock_in_log')) {
+        $parts[] = "EXISTS (SELECT 1 FROM stock_in_log hx1 WHERE hx1.ingredient_id = {$a}.id)";
+    }
+    if (rh_stock_table_present($pdo, 'stock_batches')) {
+        $parts[] = "EXISTS (SELECT 1 FROM stock_batches hx2 WHERE hx2.ingredient_id = {$a}.id)";
+    }
+    if (rh_stock_table_present($pdo, 'stock_count_lines') && rh_stock_table_present($pdo, 'stock_counts')) {
+        $parts[] = "EXISTS (SELECT 1 FROM stock_count_lines hx3 INNER JOIN stock_counts hx4 ON hx4.id = hx3.count_id WHERE hx3.ingredient_id = {$a}.id AND hx4.status = 'approved')";
+    }
+    return $parts ? '(' . implode(' OR ', $parts) . ')' : '(0 = 1)';
+}
+
+/**
+ * The ONE stock alert rule (dashboard, stock overview, reorder page, reports, emails, audit script).
+ *   never_stocked : qty <= 0 and no stock history        -> one "opening stock not recorded" line, adds 0 to badges
+ *   out           : has history and qty <= 0             -> alert (negative stock is a subset, "needs reconciliation")
+ *   low           : qty > 0 and qty <= threshold (> 0)   -> alert; threshold = reorder_point if > 0 else min_quantity
+ *   attention     : out + low (the number alert badges use)
+ * Counts are real totals; only the returned lists are capped at $listLimit.
+ *
+ * @return array{never_stocked:int,out:int,low:int,negative:int,attention:int,out_items:array,low_items:array,negative_items:array,never_items:array}
+ */
+function rh_stock_alert_summary(PDO $pdo, int $listLimit = 10): array
+{
+    $res = ['never_stocked' => 0, 'out' => 0, 'low' => 0, 'negative' => 0, 'attention' => 0,
+            'out_items' => [], 'low_items' => [], 'negative_items' => [], 'never_items' => []];
+    $listLimit = max(1, min(500, $listLimit));
+    try {
+        $thr  = rh_stock_threshold_sql('i');
+        $hist = rh_stock_history_sql($pdo, 'i');
+        $row = $pdo->query("
+            SELECT
+              SUM(CASE WHEN i.current_quantity <= 0 AND NOT {$hist} THEN 1 ELSE 0 END) AS never_n,
+              SUM(CASE WHEN i.current_quantity <= 0 AND {$hist} THEN 1 ELSE 0 END) AS out_n,
+              SUM(CASE WHEN i.current_quantity < 0 AND {$hist} THEN 1 ELSE 0 END) AS neg_n,
+              SUM(CASE WHEN i.current_quantity > 0 AND {$thr} > 0 AND i.current_quantity <= {$thr} THEN 1 ELSE 0 END) AS low_n
+            FROM stock_ingredients i WHERE i.is_archived = 0
+        ")->fetch(PDO::FETCH_ASSOC) ?: [];
+        $res['never_stocked'] = (int)($row['never_n'] ?? 0);
+        $res['out']           = (int)($row['out_n'] ?? 0);
+        $res['negative']      = (int)($row['neg_n'] ?? 0);
+        $res['low']           = (int)($row['low_n'] ?? 0);
+        $res['attention']     = $res['out'] + $res['low'];
+
+        $res['out_items'] = $pdo->query("SELECT i.id, i.name, i.unit, i.current_quantity, i.min_quantity, {$thr} AS threshold
+            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity <= 0 AND {$hist}
+            ORDER BY i.current_quantity ASC, i.name ASC LIMIT {$listLimit}")->fetchAll(PDO::FETCH_ASSOC);
+        $res['negative_items'] = $pdo->query("SELECT i.id, i.name, i.unit, i.current_quantity
+            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity < 0 AND {$hist}
+            ORDER BY i.current_quantity ASC, i.name ASC LIMIT {$listLimit}")->fetchAll(PDO::FETCH_ASSOC);
+        $res['low_items'] = $pdo->query("SELECT i.id, i.name, i.unit, i.current_quantity, i.min_quantity, {$thr} AS threshold
+            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity > 0 AND {$thr} > 0 AND i.current_quantity <= {$thr}
+            ORDER BY (i.current_quantity / {$thr}) ASC, i.name ASC LIMIT {$listLimit}")->fetchAll(PDO::FETCH_ASSOC);
+        $res['never_items'] = $pdo->query("SELECT i.id, i.name, i.unit, i.current_quantity, i.min_quantity, {$thr} AS threshold
+            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity <= 0 AND NOT {$hist}
+            ORDER BY i.name ASC LIMIT {$listLimit}")->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        error_log('rh_stock_alert_summary: ' . $e->getMessage());
+    }
+    return $res;
+}
+
+/** Stock on hand at cost, negative quantities counted as nothing. The single valuation query. */
+function rh_stock_valuation(PDO $pdo): float
+{
+    try {
+        return (float)$pdo->query("SELECT COALESCE(SUM(GREATEST(0, current_quantity) * cost_per_unit), 0) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
+    } catch (Throwable $e) {
+        return 0.0;
+    }
+}
+
+/** Unit cost to value a stock_adjustments movement at: the cost recorded when it happened, else the ingredient current cost. */
+function rh_stock_movement_cost_sql(string $adjAlias = 'sa', string $ingAlias = 'i'): string
+{
+    $a = preg_replace('/[^A-Za-z0-9_]/', '', $adjAlias);
+    $i = preg_replace('/[^A-Za-z0-9_]/', '', $ingAlias);
+    return "COALESCE(NULLIF({$a}.cost_at_time, 0), {$i}.cost_per_unit, 0)";
+}
+
+/** Link target for the "Opening stock not recorded" line. */
+function rh_stock_opening_count_url(): string
+{
+    return 'stock-count.php?opening=1';
 }
 
 /**

@@ -972,7 +972,7 @@ if (!rh_restaurant_tables_exist($pdo)) {
                 $pdo->commit();
 
                 if (function_exists('deleteCache')) {
-                    deleteCache('stock_dashboard_metrics_v1');
+                    rh_clear_stock_dashboard_cache();
                 }
                 rh_log_event('admin/restaurant-tables', 'info', 'Restaurant table settled from table registry', [
                     'user' => $user['username'] ?? '',

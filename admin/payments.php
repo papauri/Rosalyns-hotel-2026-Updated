@@ -1007,7 +1007,14 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                     <?php endif; ?>
                                 </td>
                                 <td>
-                                    <div class="quick-actions">
+                                    <?php
+                                        $payWaPhone = !empty($payment['contact_phone']) ? preg_replace('/[^0-9]/', '', (string)$payment['contact_phone']) : '';
+                                        $payCanRefund = in_array($payment['payment_status'], ['completed', 'paid'], true) && $payment['payment_type'] != 'refund';
+                                        $payCanEdit = !in_array($payment['payment_status'], ['completed', 'paid'], true);
+                                        $payHasMore = $payCanRefund || $payCanEdit || $payWaPhone !== '';
+                                    ?>
+                                    <?php /* View + Invoice stay on the row; refund, edit and WhatsApp sit in the shared More menu. */ ?>
+                                    <div class="quick-actions actions-row">
                                         <a href="payment-details.php?id=<?php echo $payment['id']; ?>" class="btn btn-primary btn-sm" title="View Details">
                                             <i class="fas fa-eye"></i>
                                         </a>
@@ -1016,28 +1023,31 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                             <i class="fas fa-file-invoice"></i>
                                         </a>
                                         <?php endif; ?>
-                                        <?php if (in_array($payment['payment_status'], ['completed', 'paid'], true) && $payment['payment_type'] != 'refund'): ?>
-                                            <a href="payment-refund.php?id=<?php echo $payment['id']; ?>" class="btn btn-warning btn-sm" title="Process Refund"
-                                                data-admin-confirm="Open the refund form for this payment?"
-                                                data-admin-confirm-title="Confirm refund action"
-                                                data-admin-confirm-details="Payment: <?php echo htmlspecialchars($payment['payment_reference'], ENT_QUOTES); ?>|Amount: <?php echo htmlspecialchars($currency_symbol . number_format($payment['total_amount'], 0), ENT_QUOTES); ?>"
-                                                data-admin-confirm-ok="Open Refund"
-                                                data-admin-confirm-icon="fa-rotate-left">
-                                                <i class="fas fa-undo"></i>
-                                            </a>
-                                        <?php endif; ?>
-                                        <?php if (!in_array($payment['payment_status'], ['completed', 'paid'], true)): ?>
-                                            <a href="payment-add.php?edit=<?php echo $payment['id']; ?>" class="btn btn-info btn-sm" title="Edit">
-                                                <i class="fas fa-edit"></i>
-                                            </a>
-                                        <?php endif; ?>
-                                        <?php if (!empty($payment['contact_phone'])): ?>
-                                            <?php $waPhone = preg_replace('/[^0-9]/', '', (string)$payment['contact_phone']); ?>
-                                            <?php if ($waPhone !== ''): ?>
-                                                <a href="https://wa.me/<?php echo htmlspecialchars($waPhone); ?>?text=<?php echo urlencode('Hello, this is ' . $site_name . ' accounts. Payment reference: ' . $payment['payment_reference']); ?>" target="_blank" rel="noopener" class="btn btn-success btn-sm" title="WhatsApp">
-                                                    <i class="fab fa-whatsapp"></i>
-                                                </a>
-                                            <?php endif; ?>
+                                        <?php if ($payHasMore): ?>
+                                        <div class="actions-more">
+                                            <button type="button" class="btn btn-secondary btn-sm actions-more-toggle" title="More actions" aria-label="More actions" aria-haspopup="true" onclick="togglePaymentActionsMore(this, event)">
+                                                <i class="fas fa-ellipsis-vertical"></i>
+                                            </button>
+                                            <div class="actions-more-menu">
+                                                <?php if ($payCanEdit): ?>
+                                                    <a href="payment-add.php?edit=<?php echo $payment['id']; ?>"><i class="fas fa-edit"></i> Edit payment</a>
+                                                <?php endif; ?>
+                                                <?php if ($payWaPhone !== ''): ?>
+                                                    <a href="https://wa.me/<?php echo htmlspecialchars($payWaPhone); ?>?text=<?php echo urlencode('Hello, this is ' . $site_name . ' accounts. Payment reference: ' . $payment['payment_reference']); ?>" target="_blank" rel="noopener"><i class="fab fa-whatsapp"></i> WhatsApp guest</a>
+                                                <?php endif; ?>
+                                                <?php if ($payCanRefund): ?>
+                                                    <hr class="menu-divider">
+                                                    <a href="payment-refund.php?id=<?php echo $payment['id']; ?>" class="text-danger"
+                                                        data-admin-confirm="Open the refund form for this payment?"
+                                                        data-admin-confirm-title="Confirm refund action"
+                                                        data-admin-confirm-details="Payment: <?php echo htmlspecialchars($payment['payment_reference'], ENT_QUOTES); ?>|Amount: <?php echo htmlspecialchars($currency_symbol . number_format($payment['total_amount'], 0), ENT_QUOTES); ?>"
+                                                        data-admin-confirm-ok="Open Refund"
+                                                        data-admin-confirm-icon="fa-rotate-left">
+                                                        <i class="fas fa-undo"></i> Process refund
+                                                    </a>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
                                         <?php endif; ?>
                                     </div>
                                 </td>
@@ -1095,6 +1105,38 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
         <?php endif; // end !$showOutstanding payments-table branch ?>
     </div>
 
+    <script>
+        // More-actions menu (shared placement from admin-components.js)
+        function closePaymentMenus() {
+            document.querySelectorAll('.table-container .actions-more.open').forEach(function (el) {
+                el.classList.remove('open');
+                var m = el.querySelector('.actions-more-menu');
+                if (m) m.removeAttribute('style');
+            });
+        }
+
+        function togglePaymentActionsMore(btn, e) {
+            if (e) e.stopPropagation();
+            var wrap = btn.closest('.actions-more');
+            var menu = wrap ? wrap.querySelector('.actions-more-menu') : null;
+            if (!menu) return;
+            var wasOpen = wrap.classList.contains('open');
+            closePaymentMenus();
+            if (wasOpen) return;
+            wrap.classList.add('open');
+            if (window.rhPlaceActionMenu) window.rhPlaceActionMenu(btn, menu);
+        }
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.actions-more')) closePaymentMenus();
+        });
+        document.addEventListener('scroll', function (e) {
+            if (!(e.target && e.target.closest && e.target.closest('.actions-more-menu'))) closePaymentMenus();
+        }, true);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') closePaymentMenus();
+        });
+
+    </script>
     <script>
         (function initPaymentsLiveSearch() {
             const searchForm = document.querySelector('[data-live-search-form="payments"]');

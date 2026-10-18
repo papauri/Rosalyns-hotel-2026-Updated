@@ -56,7 +56,7 @@ function rs_calcCost(PDO $pdo, int $menuItemId, string $menuType, float $quantit
 {
     if ($quantity <= 0) return 0.0;
     $stmt = $pdo->prepare("
-        SELECT COALESCE(SUM((sri.quantity_per_portion / (GREATEST(sri.yield_percent, 0.1) / 100)) * i.cost_per_unit), 0)
+        SELECT COALESCE(SUM((sri.quantity_per_portion / " . rh_stock_yield_sql('sri.yield_percent') . ") * i.cost_per_unit), 0)
         FROM stock_recipes sr
         INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
         INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id

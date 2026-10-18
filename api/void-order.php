@@ -178,7 +178,7 @@ try {
     } catch (Throwable $e) { /* legacy */ }
 
     $pdo->commit();
-    if (function_exists('deleteCache')) { try { deleteCache('stock_dashboard_metrics_v1'); } catch (Throwable $e) {} }
+    if (function_exists('deleteCache')) { try { rh_clear_stock_dashboard_cache(); } catch (Throwable $e) {} }
 
     /* Tell the cashier who opened the order that it was voided from another screen (actionable
      * notice on the till). When a payment was reversed the notice says the guest is owed the money. */

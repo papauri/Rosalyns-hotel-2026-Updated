@@ -971,12 +971,19 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                         </button>
                                     <?php endif; ?>
                                     <span class="cmc-spacer"></span>
-                                    <button class="cmc-icon-btn cmc-icon-btn--danger"
-                                        type="button"
-                                        onclick="confirmDeleteRoom(<?php echo (int)$room['id']; ?>, <?php echo htmlspecialchars(json_encode($room['name'] ?? 'Conference room'), ENT_QUOTES, 'UTF-8'); ?>)"
-                                        title="Delete room">
-                                        <i class="fas fa-trash-alt"></i>
-                                    </button>
+                                    <?php /* Active toggle and Facebook share stay visible (2 max); Delete lives in the shared More menu. */ ?>
+                                    <div class="actions-more">
+                                        <button class="cmc-icon-btn actions-more-toggle" type="button" title="More actions" aria-label="More actions" aria-haspopup="true" onclick="toggleConfActionsMore(this, event)">
+                                            <i class="fas fa-ellipsis-vertical"></i>
+                                        </button>
+                                        <div class="actions-more-menu">
+                                            <button type="button" class="text-danger"
+                                                onclick="closeConfActionMenus(); confirmDeleteRoom(<?php echo (int)$room['id']; ?>, <?php echo htmlspecialchars(json_encode($room['name'] ?? 'Conference room'), ENT_QUOTES, 'UTF-8'); ?>)"
+                                                title="Delete room">
+                                                <i class="fas fa-trash-alt"></i> Delete room
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                                 <button class="cmc-edit-btn" type="button"
                                     onclick='openEditModal(<?php echo htmlspecialchars(json_encode($room), ENT_QUOTES, "UTF-8"); ?>)'>
@@ -1262,11 +1269,9 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                             </label>
                         </div>
                     </div>
-                </div>
-
-                <div class="modal-body">
                     <div id="addModalFeedback" class="admin-modal-feedback"></div>
                 </div>
+
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeAddModal()">Close</button>
                     <button type="submit" id="addFormSaveBtn" class="btn btn-primary">
@@ -1746,7 +1751,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
 
         // ===== MORE-ACTIONS MENU (shared placement from admin-components.js) =====
         function closeConfActionMenus() {
-            document.querySelectorAll('.conference-enquiries-card .actions-more.open').forEach(function(el) {
+            document.querySelectorAll('.conference-enquiries-card .actions-more.open, .conference-card-actions .actions-more.open').forEach(function(el) {
                 el.classList.remove('open');
                 var m = el.querySelector('.actions-more-menu');
                 if (m) m.removeAttribute('style');

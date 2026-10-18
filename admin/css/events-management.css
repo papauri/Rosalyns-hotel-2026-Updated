@@ -15,7 +15,7 @@
 }
 
 .btn-add {
-    background: linear-gradient(135deg, var(--gold, #7E684B) 0%, #6f5b43 100%);
+    background: var(--gold, #7E684B);
     color: #fff;
     border: none;
     padding: 12px 24px;
@@ -26,12 +26,11 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition: background-color 0.15s ease;
 }
 
 .btn-add:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(139, 115, 85, 0.3);
+    background: #6f5b43;
 }
 
 /* Events Grid */
@@ -99,7 +98,7 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    background: linear-gradient(135deg, #f6f7fb, #eceff6);
+    background: #f3f4f8;
     color: #7a8090;
 }
 
@@ -364,7 +363,7 @@
 
 /* Upcoming Events Settings Panel - Already inline styled, just add enhancement */
 .events-settings-panel {
-    background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
+    background: #eef7ee;
     border: 1px solid #c8e6c9;
     border-radius: 12px;
     padding: 20px 24px;

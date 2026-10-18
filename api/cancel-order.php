@@ -267,7 +267,7 @@ try {
 
     if (function_exists('deleteCache')) {
         try {
-            deleteCache('stock_dashboard_metrics_v1');
+            rh_clear_stock_dashboard_cache();
         } catch (Throwable $e) {
         }
     }

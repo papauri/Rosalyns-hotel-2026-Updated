@@ -156,6 +156,10 @@ if (!function_exists('ensureProcurementSchema')) {
             rh_add_column($pdo, 'stock_ingredients', 'preferred_supplier_id', "INT UNSIGNED DEFAULT NULL");
             rh_add_index($pdo, 'stock_ingredients', 'idx_ing_pref_supplier', 'preferred_supplier_id');
 
+            // ── Over-delivery flag on PO lines (supplier delivered more than ordered; note is mandatory) ──
+            rh_add_column($pdo, 'stock_purchase_order_items', 'over_received_qty', "DECIMAL(12,3) NOT NULL DEFAULT 0");
+            rh_add_column($pdo, 'stock_purchase_order_items', 'over_note', "VARCHAR(500) DEFAULT NULL");
+
             // ── Supplier linkage on receiving tables ─────────────────────────
             rh_add_column($pdo, 'stock_batches', 'supplier_id', "INT UNSIGNED DEFAULT NULL");
             rh_add_column($pdo, 'stock_batches', 'purchase_order_id', "INT UNSIGNED DEFAULT NULL");
@@ -209,7 +213,8 @@ if (!function_exists('rh_receive_stock_line')) {
         int $alertDays,
         ?int $purchaseOrderId,
         ?int $doneBy,
-        ?string $notes = null
+        ?string $notes = null,
+        ?string $adjustmentReason = null
     ): int {
         if ($qty <= 0) {
             throw new RuntimeException('Receive quantity must be greater than zero.');
@@ -234,6 +239,8 @@ if (!function_exists('rh_receive_stock_line')) {
         if ($settle['settled'] > 0) {
             $notes = trim(($notes ? $notes . ' | ' : '') . 'Settled ' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' unallocated deficit');
         }
+        // Combined batch / stock_in_log note stays short (PO ref + over-delivery note + settlement text).
+        $notes = $notes !== null ? mb_substr($notes, 0, 250) : null;
         $newAvg = function_exists('calculateWeightedAvgCost')
             ? calculateWeightedAvgCost($oldQty, $oldAvg, $qty, $cost)
             : (($oldQty + $qty) > 0 ? (($oldQty * $oldAvg) + ($qty * $cost)) / ($oldQty + $qty) : $cost);
@@ -303,9 +310,11 @@ if (!function_exists('rh_receive_stock_line')) {
         $pdo->prepare("
             INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by)
             VALUES (?, ?, ?, 'stock_in', ?, ?, ?)
-        ")->execute([$ingredientId, $qty, $settle['settled'] > 0
-            ? 'Received against purchase order (' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' settled unallocated deficit)'
-            : 'Received against purchase order', $batchId, $cost, $doneBy]);
+        ")->execute([$ingredientId, $qty, $adjustmentReason !== null && $adjustmentReason !== ''
+            ? mb_substr($adjustmentReason . ($settle['settled'] > 0 ? ' (' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' settled unallocated deficit)' : ''), 0, 255)
+            : ($settle['settled'] > 0
+                ? 'Received against purchase order (' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' settled unallocated deficit)'
+                : 'Received against purchase order'), $batchId, $cost, $doneBy]);
 
         return $batchId;
     }

@@ -1,10 +1,11 @@
 /**
  * admin-pwa-install.js — PWA install prompt for admin staff.
  *
- * Triggers after `beforeinstallprompt`; shows an unobtrusive toast-style banner
- * anchored to the bottom-right so it doesn't obscure the admin nav/content.
- * Banner appears once per session after first interaction with the admin, then
- * respects a 14-day localStorage dismiss window.
+ * Triggers after `beforeinstallprompt`; shows a slim bar docked to the bottom edge of the
+ * screen (beside the sidebar on desktop). It sits below the navigation and every modal, is
+ * hidden while the navigation drawer or any modal is open, and a dismiss is remembered
+ * (localStorage, with an in-memory fallback when storage is blocked) for the window set in
+ * Admin -> Booking Settings -> PWA Install Banner (14 days by default).
  */
 (function () {
     'use strict';
@@ -16,7 +17,10 @@
         ? window.RH_PWA_DISMISS_DAYS
         : 14;
 
+    var dismissedInMemory = false; // storage blocked (private mode): stay dismissed until reload
+
     function isDismissed() {
+        if (dismissedInMemory) return true;
         try {
             const ts = parseInt(localStorage.getItem(DISMISS_KEY) || '0', 10);
             return ts > 0 && (Date.now() - ts) < DISMISS_DAYS * 86400 * 1000;
@@ -24,6 +28,7 @@
     }
 
     function markDismissed() {
+        dismissedInMemory = true;
         try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch (e) { /* noop */ }
     }
 
@@ -68,102 +73,68 @@
         bannerEl.setAttribute('role', 'region');
         bannerEl.setAttribute('aria-label', 'Install admin app');
         bannerEl.innerHTML = [
-            '<div class="admin-pwa-banner__drag-handle" id="admin-pwa-drag" title="Drag to move" aria-hidden="true">',
-            '  <i class="fas fa-grip-lines"></i>',
-            '</div>',
             '<i class="fas fa-hotel admin-pwa-banner__icon" aria-hidden="true"></i>',
             '<div class="admin-pwa-banner__text" id="admin-pwa-body">',
             '  <strong>Install Admin App</strong>',
             '  <span>Run POS &amp; KDS without a browser tab.</span>',
             '</div>',
             '<button class="admin-pwa-banner__install" id="admin-pwa-install" type="button">Install</button>',
-            '<button class="admin-pwa-banner__minimise" id="admin-pwa-minimise" type="button" aria-label="Minimise">',
-            '  <i class="fas fa-minus" aria-hidden="true"></i>',
-            '</button>',
             '<button class="admin-pwa-banner__dismiss" id="admin-pwa-dismiss" type="button" aria-label="Dismiss">',
             '  <i class="fas fa-times" aria-hidden="true"></i>',
             '</button>',
         ].join('');
 
         document.body.appendChild(bannerEl);
-        requestAnimationFrame(function () {
-            requestAnimationFrame(function () { bannerEl.classList.add('is-visible'); });
-        });
+        syncVisibility();
+        requestAnimationFrame(function () { if (bannerEl) bannerEl.classList.add('is-visible'); });
 
         document.getElementById('admin-pwa-install').addEventListener('click', doInstall);
         document.getElementById('admin-pwa-dismiss').addEventListener('click', dismiss);
-        document.getElementById('admin-pwa-minimise').addEventListener('click', toggleMinimise);
-
-        initDrag(bannerEl);
+        watchOverlays();
     }
 
-    var _minimised = false;
-    function toggleMinimise() {
-        _minimised = !_minimised;
+    /* Hidden while the navigation drawer or any modal is open, so it never competes with them. */
+    var MODAL_SELECTOR = '.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg, .dashboard-insight-modal, .overlay';
+
+    function overlayOpen() {
+        if (document.querySelector('.admin-nav.nav-open')) return true;
+        var list = document.querySelectorAll(MODAL_SELECTOR);
+        for (var i = 0; i < list.length; i++) {
+            var el = list[i];
+            if (el === bannerEl) continue;
+            var cs = window.getComputedStyle(el);
+            if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
+            var r = el.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) return true;
+        }
+        return false;
+    }
+
+    function syncVisibility() {
         if (!bannerEl) return;
-        bannerEl.classList.toggle('is-minimised', _minimised);
-        var btn = document.getElementById('admin-pwa-minimise');
-        if (btn) {
-            btn.setAttribute('aria-label', _minimised ? 'Expand' : 'Minimise');
-            btn.querySelector('i').className = _minimised ? 'fas fa-plus' : 'fas fa-minus';
-        }
+        var open = overlayOpen();
+        if (bannerEl.hidden !== open) bannerEl.hidden = open; // no self-triggered mutation loop
+        document.body.classList.toggle('rh-pwa-bar-on', !open);
     }
 
-    function initDrag(el, handle) {
-        // Make the whole banner draggable (not just the tiny handle) —
-        // any pointerdown that isn't on a button starts a drag.
-        var startX, startY, startLeft, startTop, dragging = false, moved = false;
-
-        function onPointerDown(e) {
-            if (e.target.closest('button')) return; // don't intercept button taps
-            dragging = true;
-            moved = false;
-            var rect = el.getBoundingClientRect();
-            startLeft = rect.left;
-            startTop  = rect.top;
-            startX = e.clientX;
-            startY = e.clientY;
-            el.style.transition = 'none';
-            el.style.right  = 'auto';
-            el.style.bottom = 'auto'; // clear media-query bottom so top: works on mobile
-            el.style.left   = startLeft + 'px';
-            el.style.top    = startTop  + 'px';
-            el.setPointerCapture(e.pointerId);
-            e.preventDefault();
-        }
-
-        function onPointerMove(e) {
-            if (!dragging) return;
-            var dx = e.clientX - startX;
-            var dy = e.clientY - startY;
-            if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return; // dead zone
-            moved = true;
-            var newLeft = Math.max(0, Math.min(window.innerWidth  - el.offsetWidth,  startLeft + dx));
-            var newTop  = Math.max(0, Math.min(window.innerHeight - el.offsetHeight, startTop  + dy));
-            el.style.left = newLeft + 'px';
-            el.style.top  = newTop  + 'px';
-        }
-
-        function onPointerUp() {
-            if (!moved) { /* treat as tap — nothing extra needed */ }
-            dragging = false;
-            moved = false;
-            el.style.transition = '';
-        }
-
-        el.addEventListener('pointerdown',  onPointerDown);
-        el.addEventListener('pointermove',  onPointerMove);
-        el.addEventListener('pointerup',    onPointerUp);
-        el.addEventListener('pointercancel', onPointerUp);
+    var overlayObserver = null, syncQueued = false;
+    function queueSync() {
+        if (syncQueued) return;
+        syncQueued = true;
+        requestAnimationFrame(function () { syncQueued = false; syncVisibility(); });
+    }
+    function watchOverlays() {
+        if (overlayObserver || !window.MutationObserver) return;
+        overlayObserver = new MutationObserver(queueSync);
+        overlayObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'], subtree: true, childList: true });
     }
 
     function hideBanner() {
         if (!bannerEl) return;
-        bannerEl.classList.remove('is-visible');
-        setTimeout(function () {
-            if (bannerEl && bannerEl.parentNode) bannerEl.parentNode.removeChild(bannerEl);
-            bannerEl = null;
-        }, 350);
+        if (overlayObserver) { overlayObserver.disconnect(); overlayObserver = null; }
+        document.body.classList.remove('rh-pwa-bar-on');
+        if (bannerEl.parentNode) bannerEl.parentNode.removeChild(bannerEl);
+        bannerEl = null;
     }
 
     function dismiss() { markDismissed(); hideBanner(); }
@@ -185,85 +156,57 @@
         s.textContent = [
             '#admin-pwa-banner {',
             '  position: fixed;',
-            '  top: 20px; right: 20px;',
-            '  z-index: 9100;',
+            '  left: var(--admin-current-sidebar-width, 0px); right: 0; bottom: 0;',
+            '  z-index: 990;', // below the header (1000), the nav (999+) and every modal (9998+)
             '  display: flex;',
             '  align-items: center;',
-            '  gap: 10px;',
+            '  gap: 12px;',
+            '  box-sizing: border-box;',
             '  background: #1f1f24;',
-            '  border: 1px solid rgba(138,119,95,0.4);',
+            '  border-top: 1px solid rgba(138,119,95,0.4);',
             '  color: #F7F3EE;',
-            '  padding: 10px 12px 10px 8px;',
-            '  border-radius: 12px;',
-            '  box-shadow: 0 8px 32px rgba(0,0,0,0.5);',
-            '  max-width: 360px;',
-            '  transform: translateY(-20px);',
-            '  opacity: 0;',
-            '  transition: transform 0.3s ease, opacity 0.3s ease;',
+            '  padding: 8px 72px calc(8px + env(safe-area-inset-bottom, 0px)) 16px;', // right gap keeps the draggable help button from covering Dismiss
             '  font-family: "Inter", system-ui, sans-serif;',
             '  font-size: 13px;',
-            '  touch-action: none;',
+            '  opacity: 0;',
+            '  transition: opacity 0.2s ease;',
             '}',
-            '#admin-pwa-banner.is-visible { transform: translateY(0); opacity: 1; }',
-            '#admin-pwa-banner.is-minimised .admin-pwa-banner__text,',
-            '#admin-pwa-banner.is-minimised .admin-pwa-banner__install { display: none; }',
-            '#admin-pwa-banner.is-minimised { gap: 6px; }',
-            '.admin-pwa-banner__drag-handle {',
-            '  flex-shrink: 0;',
-            '  color: rgba(247,243,238,0.25);',
-            '  font-size: 11px;',
-            '  padding: 4px 6px;',
-            '  cursor: grab;',
-            '  line-height: 1;',
-            '  touch-action: none;',
-            '  -webkit-user-select: none; user-select: none;',
-            '}',
-            '.admin-pwa-banner__drag-handle:active { cursor: grabbing; }',
-            '.admin-pwa-banner__icon {',
-            '  flex-shrink: 0;',
-            '  font-size: 18px;',
-            '  color: #766550;',
-            '}',
-            '.admin-pwa-banner__text {',
-            '  flex: 1;',
-            '  display: flex;',
-            '  flex-direction: column;',
-            '  gap: 1px;',
-            '}',
+            '#admin-pwa-banner[hidden] { display: none; }',
+            '#admin-pwa-banner.is-visible { opacity: 1; }',
+            'body.rh-pwa-bar-on { padding-bottom: 64px; }',
+            '.admin-pwa-banner__icon { flex-shrink: 0; font-size: 18px; color: #D2AE72; }',
+            '.admin-pwa-banner__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }',
             '.admin-pwa-banner__text strong { font-size: 13px; font-weight: 600; }',
-            '.admin-pwa-banner__text span { font-size: 11px; color: rgba(247,243,238,0.55); }',
+            '.admin-pwa-banner__text span { font-size: 12px; color: rgba(247,243,238,0.7); }',
             '.admin-pwa-banner__install {',
             '  flex-shrink: 0;',
+            '  min-height: 44px;',
             '  background: #766550;',
             '  color: #fff;',
             '  border: none;',
-            '  border-radius: 7px;',
-            '  padding: 7px 14px;',
-            '  font-size: 12px;',
+            '  border-radius: 8px;',
+            '  padding: 0 18px;',
+            '  font-size: 13px;',
             '  font-weight: 600;',
             '  cursor: pointer;',
             '  font-family: inherit;',
             '  white-space: nowrap;',
-            '  transition: opacity 0.15s;',
             '}',
-            '.admin-pwa-banner__install:hover { opacity: 0.85; }',
-            '.admin-pwa-banner__minimise, .admin-pwa-banner__dismiss {',
+            '.admin-pwa-banner__install:hover { background: #655642; }',
+            '.admin-pwa-banner__dismiss {',
             '  flex-shrink: 0;',
+            '  width: 44px; min-height: 44px;',
             '  background: transparent;',
             '  border: none;',
-            '  color: rgba(247,243,238,0.35);',
-            '  font-size: 12px;',
-            '  padding: 6px 5px;',
+            '  color: rgba(247,243,238,0.7);',
+            '  font-size: 14px;',
             '  cursor: pointer;',
-            '  border-radius: 5px;',
-            '  transition: color 0.15s;',
-            '  line-height: 1;',
+            '  border-radius: 8px;',
             '}',
-            '.admin-pwa-banner__minimise:hover, .admin-pwa-banner__dismiss:hover { color: rgba(247,243,238,0.85); }',
+            '.admin-pwa-banner__dismiss:hover { color: #fff; background: rgba(255,255,255,0.08); }',
             '@media (max-width: 480px) {',
-            '  #admin-pwa-banner { top: auto; bottom: 80px; right: 12px; left: auto; max-width: calc(100vw - 24px); padding: 12px 10px; }',
-            '  .admin-pwa-banner__minimise, .admin-pwa-banner__dismiss { padding: 10px 8px; font-size: 14px; }',
-            '  .admin-pwa-banner__drag-handle { padding: 6px 8px; font-size: 14px; }',
+            '  #admin-pwa-banner { padding-left: 12px; padding-right: 68px; gap: 8px; }',
+            '  .admin-pwa-banner__text span { display: none; }',
             '}',
         ].join('\n');
         document.head.appendChild(s);

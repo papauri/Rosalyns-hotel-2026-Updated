@@ -701,14 +701,7 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
         throw new RuntimeException('Could not delete the order: ' . $e->getMessage(), 500, $e);
     }
 
-    foreach (['stock_dashboard_metrics_v1', 'stock_dashboard_metrics_v2', 'stock_dashboard_metrics_v3'] as $cacheKey) {
-        if (function_exists('deleteCache')) {
-            try {
-                deleteCache($cacheKey);
-            } catch (Throwable $ignored) {
-            }
-        }
-    }
+    rh_clear_stock_dashboard_cache();
     if (function_exists('rh_log_event')) {
         rh_log_event('pos/delete-order', 'warning', 'Order deleted', [
             'order_id' => $orderId, 'reference' => $reference, 'by' => $userId, 'record_id' => $recordId,

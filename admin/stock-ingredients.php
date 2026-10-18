@@ -327,17 +327,22 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Manual add creates a real active batch so FIFO stays consistent.
                     $tmpBatchNumber = 'TMP-M-' . date('YmdHis') . '-' . strtoupper(substr(str_replace('.', '', uniqid('', true)), -8));
                     $batchIns = $pdo->prepare("\n                        INSERT INTO stock_batches (\n                            ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,\n                            supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by\n                        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, CURDATE(), NULL, 7, 'active', ?, ?)\n                    ");
+                    // Settle any unallocated deficit (sales beyond batches) first so batch sum == current_quantity.
+                    $settle = rh_stock_receipt_settlement($pdo, $id, $currentQty, $qty);
                     $batchIns->execute([
                         $id,
                         $tmpBatchNumber,
                         $qty,
-                        $qty,
+                        $settle['remaining'],
                         max(0, $costAtTime),
-                        mb_substr('Manual adjustment add: ' . $reason, 0, 500),
+                        mb_substr('Manual adjustment add: ' . $reason . ($settle['settled'] > 0 ? ' (settled ' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' unallocated deficit)' : ''), 0, 500),
                         $user['id']
                     ]);
 
                     $batchId = (int)$pdo->lastInsertId();
+                    if ($settle['remaining'] < 0.0001) {
+                        $pdo->prepare("UPDATE stock_batches SET status = 'depleted' WHERE id = ?")->execute([$batchId]);
+                    }
                     $batchNumber = 'M' . date('Ymd') . '-' . str_pad((string)$batchId, 6, '0', STR_PAD_LEFT);
                     $pdo->prepare('UPDATE stock_batches SET batch_number = ? WHERE id = ?')->execute([$batchNumber, $batchId]);
 
@@ -459,7 +464,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($message) {
         $_SESSION['stock_msg'] = $message;
         // Invalidate stock dashboard cache
-        if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
+        if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
     }
     if ($error)   $_SESSION['stock_err'] = $error;
     header('Location: stock-ingredients.php');
@@ -486,8 +491,10 @@ try {
 } catch (Throwable $e) { $supplierOptions = []; }
 if (!$error || strpos($error, 'Stock tables not yet') === false) {
     try {
+        $histSql = rh_stock_history_sql($pdo, 'i'); // shared "has stock history" rule
         $stmt = $pdo->query("
             SELECT i.*,
+                   (CASE WHEN {$histSql} THEN 0 ELSE 1 END) AS never_stocked,
                    (SELECT MIN(b.expiry_date) FROM stock_batches b WHERE b.ingredient_id = i.id AND b.status = 'active' AND b.expiry_date IS NOT NULL AND b.quantity_remaining > 0) AS next_expiry
             FROM stock_ingredients i
             ORDER BY i.is_archived ASC, i.category ASC, i.name ASC
@@ -581,8 +588,9 @@ $csrf_token = generateCsrfToken();
 function stock_status_badge(array $i, ?int $expDays = null): string
 {
     $cur = (float)$i['current_quantity'];
-    $min = (float)$i['min_quantity'];
+    $min = (float)$i['reorder_point'] > 0 ? (float)$i['reorder_point'] : (float)$i['min_quantity']; // shared threshold rule
     if ((int)$i['is_archived'] === 1) return '<span class="badge badge-archived">Archived</span>';
+    if ($cur <= 0 && !empty($i['never_stocked'])) return '<span class="badge badge-setup" title="Opening stock has not been recorded yet">Not stocked</span>';
     if ($cur <= 0)                     return '<span class="badge badge-critical">Critical</span>';
     if ($expDays !== null && $expDays < 0)  return '<span class="badge badge-critical">Expired</span>';
     if ($min > 0 && $cur <= $min)      return '<span class="badge badge-low">Low</span>';
@@ -656,6 +664,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 <option value="ok">OK</option>
                 <option value="low">Low</option>
                 <option value="critical">Critical</option>
+                <option value="unstocked">Not stocked (opening stock not recorded)</option>
                 <option value="expiring">Expiring soon</option>
                 <option value="archived">Archived</option>
             </select>
@@ -681,7 +690,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 <tbody>
                     <?php foreach ($ingredients as $i):
                         $cur = (float)$i['current_quantity'];
-                        $min = (float)$i['min_quantity'];
+                        $min = (float)$i['reorder_point'] > 0 ? (float)$i['reorder_point'] : (float)$i['min_quantity']; // shared threshold rule
+                        $neverStocked = ($cur <= 0 && !empty($i['never_stocked']));
                         // Days until next expiry (null if no batch with expiry)
                         $expDays = null;
                         if (!empty($i['next_expiry'])) {
@@ -690,11 +700,12 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                         $isExpiringSoon = ($expDays !== null && $expDays >= 0 && $expDays <= 7);
                         $isExpired      = ($expDays !== null && $expDays < 0);
                         $rowStatus = ((int)$i['is_archived'] === 1) ? 'archived'
+                            : ($neverStocked ? 'unstocked'
                             : ($cur <= 0     ? 'critical'
                             : ($isExpired    ? 'critical'
                             : ($min > 0 && $cur <= $min ? 'low'
-                            : ($isExpiringSoon ? 'expiring' : 'ok'))));
-                        $qtyClass = $cur <= 0 ? 'qty-critical' : ($min > 0 && $cur <= $min ? 'qty-low' : '');
+                            : ($isExpiringSoon ? 'expiring' : 'ok')))));
+                        $qtyClass = $neverStocked ? '' : ($cur <= 0 ? 'qty-critical' : ($min > 0 && $cur <= $min ? 'qty-low' : ''));
 
                         // Expiry pill class
                         $expCls = 'exp-none';
@@ -753,26 +764,9 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                                         <button class="btn-stockin" onclick='openStockInModal(<?php echo (int)$i['id']; ?>, <?php echo json_encode($i['name'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>, <?php echo json_encode($i['unit'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>, <?php echo (float)$i['cost_per_unit']; ?>, <?php echo (float)$i['current_quantity']; ?>)'>
                                             <i class="fas fa-truck-loading"></i> Stock In
                                         </button>
-                                        <button onclick='openBatchesModal(<?php echo (int)$i['id']; ?>, <?php echo json_encode($i['name'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>, <?php echo json_encode($i['unit'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>)' title="View &amp; manage batches / expiry dates" style="<?php echo $hasBatches ? '' : 'opacity:0.6;'; ?>">
-                                            <i class="fas fa-boxes-stacked"></i> Batches
-                                            <?php if ($hasBatches): ?>
-                                                <span style="background:#7E684B;color:#fff;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;"><?php echo count($batchesByIngredient[(int)$i['id']]); ?></span>
-                                            <?php endif; ?>
-                                        </button>
                                         <button class="btn-adjust" onclick='openAdjustModal(<?php echo (int)$i['id']; ?>, <?php echo json_encode($i['name'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>, <?php echo json_encode($i['unit'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>)'>
                                             <i class="fas fa-balance-scale"></i> Adjust
                                         </button>
-                                    <?php endif; ?>
-                                    <button onclick='openIngredientModal(<?php echo json_encode($i, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>)'>
-                                        <i class="fas fa-edit"></i> Edit
-                                    </button>
-                                    <?php if (!$i['is_archived']): ?>
-                                        <form method="POST" style="display:inline;" onsubmit="return confirm('Archive this ingredient?');">
-                                            <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
-                                            <input type="hidden" name="action" value="archive">
-                                            <input type="hidden" name="id" value="<?php echo (int)$i['id']; ?>">
-                                            <button class="btn-danger"><i class="fas fa-archive"></i> Archive</button>
-                                        </form>
                                     <?php else: ?>
                                         <form method="POST" style="display:inline;">
                                             <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
@@ -780,16 +774,44 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                                             <input type="hidden" name="id" value="<?php echo (int)$i['id']; ?>">
                                             <button><i class="fas fa-undo"></i> Restore</button>
                                         </form>
-                                        <?php if (!empty($i['has_history'])): ?>
-                                            <span class="row-note" title="Has stock or movement history, so it can only be archived.">Kept for history</span>
-                                        <?php else: ?>
-                                        <form method="POST" style="display:inline;" onsubmit="return confirm('Permanently delete? This cannot be undone.');">
-                                            <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
-                                            <input type="hidden" name="action" value="delete">
-                                            <input type="hidden" name="id" value="<?php echo (int)$i['id']; ?>">
-                                            <button class="btn-danger"><i class="fas fa-trash"></i> Delete</button>
-                                        </form>
-                                        <?php endif; ?>
+                                        <button onclick='openIngredientModal(<?php echo json_encode($i, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>)'>
+                                            <i class="fas fa-edit"></i> Edit
+                                        </button>
+                                    <?php endif; ?>
+                                    <?php /* Stock In + Adjust (or Restore + Edit) stay on the row; the rest is in the shared More menu, Delete last. */ ?>
+                                    <?php $canDeleteIng = $i['is_archived'] && empty($i['has_history']); ?>
+                                    <?php if (!$i['is_archived'] || $canDeleteIng): ?>
+                                    <div class="actions-more">
+                                        <button type="button" class="actions-more-toggle" title="More actions" aria-label="More actions" aria-haspopup="true" onclick="toggleIngredientMore(this, event)">
+                                            <i class="fas fa-ellipsis-vertical"></i> More
+                                        </button>
+                                        <div class="actions-more-menu">
+                                            <?php if (!$i['is_archived']): ?>
+                                                <button type="button" onclick='closeIngredientMenus(); openBatchesModal(<?php echo (int)$i['id']; ?>, <?php echo json_encode($i['name'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>, <?php echo json_encode($i['unit'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>)' title="View &amp; manage batches / expiry dates">
+                                                    <i class="fas fa-boxes-stacked"></i> Batches<?php if ($hasBatches): ?> (<?php echo count($batchesByIngredient[(int)$i['id']]); ?>)<?php endif; ?>
+                                                </button>
+                                                <button type="button" onclick='closeIngredientMenus(); openIngredientModal(<?php echo json_encode($i, JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP); ?>)'>
+                                                    <i class="fas fa-edit"></i> Edit
+                                                </button>
+                                                <form method="POST" onsubmit="return confirm('Archive this ingredient?');">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                                                    <input type="hidden" name="action" value="archive">
+                                                    <input type="hidden" name="id" value="<?php echo (int)$i['id']; ?>">
+                                                    <button class="btn-danger"><i class="fas fa-archive"></i> Archive</button>
+                                                </form>
+                                            <?php else: ?>
+                                                <form method="POST" onsubmit="return confirm('Permanently delete? This cannot be undone.');">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                                                    <input type="hidden" name="action" value="delete">
+                                                    <input type="hidden" name="id" value="<?php echo (int)$i['id']; ?>">
+                                                    <button class="btn-danger"><i class="fas fa-trash"></i> Delete</button>
+                                                </form>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                    <?php endif; ?>
+                                    <?php if ($i['is_archived'] && !empty($i['has_history'])): ?>
+                                        <span class="row-note" title="Has stock or movement history, so it can only be archived.">Kept for history</span>
                                     <?php endif; ?>
                                 </div>
                             </td>
@@ -1114,6 +1136,36 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             m.addEventListener('click', e => {
                 if (e.target === m) m.classList.remove('active');
             });
+        });
+
+        // More-actions menu (shared placement from admin-components.js)
+        function closeIngredientMenus() {
+            document.querySelectorAll('.row-actions .actions-more.open').forEach(function (el) {
+                el.classList.remove('open');
+                var m = el.querySelector('.actions-more-menu');
+                if (m) m.removeAttribute('style');
+            });
+        }
+
+        function toggleIngredientMore(btn, e) {
+            if (e) e.stopPropagation();
+            var wrap = btn.closest('.actions-more');
+            var menu = wrap ? wrap.querySelector('.actions-more-menu') : null;
+            if (!menu) return;
+            var wasOpen = wrap.classList.contains('open');
+            closeIngredientMenus();
+            if (wasOpen) return;
+            wrap.classList.add('open');
+            if (window.rhPlaceActionMenu) window.rhPlaceActionMenu(btn, menu);
+        }
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.actions-more')) closeIngredientMenus();
+        });
+        document.addEventListener('scroll', function (e) {
+            if (!(e.target && e.target.closest && e.target.closest('.actions-more-menu'))) closeIngredientMenus();
+        }, true);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') closeIngredientMenus();
         });
 
         function openIngredientModal(data) {

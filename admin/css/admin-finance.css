@@ -367,8 +367,25 @@ body {
 .finance-page .quick-actions .btn:hover,
 .finance-page .action-buttons .btn:hover,
 .finance-page .action-buttons .btn-action:hover {
-    transform: translateY(-1px);
     box-shadow: var(--finance-shadow);
+}
+
+/* Row actions inside a table cell: one line, same height, same gap (View, Invoice, More). */
+#rh-admin-page .finance-page td .quick-actions.actions-row {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 0;
+}
+
+#rh-admin-page .finance-page td .quick-actions.actions-row .btn {
+    padding: 0 12px;
+}
+
+#rh-admin-page .finance-page td .quick-actions.actions-row .actions-more {
+    margin: 0;
+    padding: 0;
+    border: 0;
 }
 
 /* Default btn-action visual base — layout is set above, these add colour */

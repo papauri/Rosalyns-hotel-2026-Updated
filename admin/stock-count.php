@@ -73,6 +73,28 @@ function scHasLineCol(PDO $pdo, string $col): bool
     return $cache[$col];
 }
 
+/* stock_counts.is_opening: marks the one-off OPENING STOCK count (additive column, added on first use).
+ * Opening counts need unit costs on every counted line and a different approver than the counter. */
+function scHasOpeningCol(PDO $pdo): bool
+{
+    static $has = null;
+    if ($has === null) {
+        $q = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_counts' AND COLUMN_NAME = 'is_opening'");
+        $q->execute();
+        $has = ((int)$q->fetchColumn() > 0);
+        if (!$has) {
+            try {
+                $pdo->exec("ALTER TABLE stock_counts ADD COLUMN is_opening TINYINT(1) NOT NULL DEFAULT 0");
+                $q->execute();
+                $has = ((int)$q->fetchColumn() > 0);
+            } catch (Throwable $e) {
+                error_log('stock-count: could not add is_opening column: ' . $e->getMessage());
+            }
+        }
+    }
+    return $has;
+}
+
 /* stock_counts.snapshot_at (migration 062) cached per request; falls back to created_at when absent. */
 function scHasSnapshotCol(PDO $pdo): bool
 {
@@ -143,6 +165,19 @@ function scOverThreshold(float $variance, float $varCost, float $base, float $bl
     return $pct >= $blockPct;
 }
 
+if (!$error) {
+    scHasOpeningCol($pdo);
+}
+
+/* Counted lines of an opening count that would add stock but have no unit cost (> 0). Names, first few. */
+function scOpeningUncostedLines(PDO $pdo, int $countId): array
+{
+    $q = $pdo->prepare("SELECT i.name FROM stock_count_lines scl INNER JOIN stock_ingredients i ON i.id = scl.ingredient_id
+                        WHERE scl.count_id = ? AND scl.actual_quantity > 0.00005 AND scl.cost_per_unit <= 0.00001 ORDER BY i.name");
+    $q->execute([$countId]);
+    return $q->fetchAll(PDO::FETCH_COLUMN);
+}
+
 /* ============== POST handlers ============== */
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
@@ -152,9 +187,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? '';
         try {
             if ($action === 'start_count') {
-                $scope = $_POST['scope'] ?? 'spot';
+                $isOpeningStart = !empty($_POST['opening']);
+                if ($isOpeningStart && !scHasOpeningCol($pdo)) {
+                    throw new RuntimeException('Could not enable opening-stock counts (the stock_counts table could not be updated). Ask your administrator to add the is_opening column, then try again.');
+                }
+                $scope = $isOpeningStart ? 'full' : ($_POST['scope'] ?? 'spot');
                 if (!in_array($scope, ['full', 'category', 'spot'], true)) $scope = 'spot';
-                $scopeValue = rh_clean_text($_POST['scope_value'] ?? '');
+                $scopeValue = $isOpeningStart ? '' : rh_clean_text($_POST['scope_value'] ?? '');
                 $shift = rh_clean_text($_POST['shift'] ?? '');
                 $notes = trim((string)($_POST['notes'] ?? ''));
                 if (mb_strlen($scopeValue) > 255 || mb_strlen($shift) > 50 || mb_strlen($notes) > 1000) {
@@ -181,6 +220,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ins = $pdo->prepare("INSERT INTO stock_counts (reference, count_date, shift, scope, scope_value, status, counted_by, notes" . (scHasSnapshotCol($pdo) ? ', snapshot_at' : '') . ") VALUES (?, CURDATE(), ?, ?, ?, 'draft', ?, ?" . (scHasSnapshotCol($pdo) ? ', NOW()' : '') . ")");
                 $ins->execute([$ref, $shift ?: null, $scope, $scopeValue ?: null, $user['id'], $notes ?: null]);
                 $countId = (int)$pdo->lastInsertId();
+                if ($isOpeningStart) {
+                    $pdo->prepare("UPDATE stock_counts SET is_opening = 1 WHERE id = ?")->execute([$countId]);
+                }
 
                 // Snapshot current quantities + cost for the chosen scope
                 $sql = "SELECT id, current_quantity, cost_per_unit FROM stock_ingredients WHERE is_archived = 0";
@@ -204,7 +246,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $lineIns->execute([$countId, (int)$r['id'], (float)$r['current_quantity'], (float)$r['cost_per_unit']]);
                 }
 
-                $_SESSION['stock_msg'] = "Count {$ref} started. Enter your physical readings.";
+                $_SESSION['stock_msg'] = $isOpeningStart
+                    ? "Opening stock count {$ref} started. Enter the physical quantity AND the unit cost for every item you have; a different manager must approve it."
+                    : "Count {$ref} started. Enter your physical readings.";
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
             }
@@ -247,6 +291,16 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     $sys    = (float)$snap['system_quantity'];
                     $cost   = (float)$snap['cost_per_unit'];
+                    /* Opening count only: the counter types the unit cost the stock was bought at. */
+                    $costSet = null;
+                    if (!empty($count['is_opening']) && isset($payload['cost']) && trim((string)$payload['cost']) !== '') {
+                        $costRaw = trim((string)$payload['cost']);
+                        if (!is_numeric($costRaw) || (float)$costRaw < 0 || (float)$costRaw > 99999999) {
+                            throw new RuntimeException('Unit cost must be a number of zero or more.');
+                        }
+                        $costSet = round((float)$costRaw, 4);
+                        $cost = $costSet;
+                    }
                     $reason = (string)($payload['reason'] ?? '');
                     $notes  = trim((string)($payload['notes'] ?? ''));
                     if (mb_strlen($notes) > 500) {
@@ -261,6 +315,11 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $sql = "UPDATE stock_count_lines SET reason_code = ?, reason_notes = ?";
                     $params = [$reason, $notes ?: null];
+                    if ($costSet !== null) {
+                        // variance_cost follows the new cost; a changed reading below overrides it with the same maths.
+                        $sql .= ", cost_per_unit = ?, variance_cost = ROUND(variance * ?, 4)";
+                        array_push($params, $costSet, $costSet);
+                    }
                     $wasCounted = scLineIsCounted($snap, $hasCol);
 
                     if ($isBlank) {
@@ -318,6 +377,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException(scUncountedMessage($uncN, $uncNames));
                 }
 
+                // Opening stock: every line that adds stock needs a unit cost, or COGS and valuation start at zero.
+                if (!empty($count['is_opening'])) {
+                    $uncosted = scOpeningUncostedLines($pdo, $countId);
+                    if ($uncosted) {
+                        throw new RuntimeException('Opening stock needs a unit cost above zero on every line you counted (' . count($uncosted) . ' missing: ' . implode(', ', array_slice($uncosted, 0, 6)) . (count($uncosted) > 6 ? ', ...' : '') . '). Enter the costs, save readings, then submit.');
+                    }
+                }
+
                 // Validate every shortage line has a reason code
                 $missing = $pdo->prepare("SELECT COUNT(*) FROM stock_count_lines WHERE count_id = ? AND variance < 0 AND (reason_code = '' OR reason_code IS NULL)");
                 $missing->execute([$countId]);
@@ -366,6 +433,17 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('Stock engine helpers missing.');
                 }
 
+                // Opening stock: never self-approved, and every counted line must carry a unit cost.
+                if (!empty($count['is_opening'])) {
+                    if ((int)$count['counted_by'] === (int)$user['id']) {
+                        throw new RuntimeException('An opening stock count must be approved by a different manager or admin than the person who counted it.');
+                    }
+                    $uncosted = scOpeningUncostedLines($pdo, $countId);
+                    if ($uncosted) {
+                        throw new RuntimeException('Opening stock cannot be approved: ' . count($uncosted) . ' counted line(s) have no unit cost (' . implode(', ', array_slice($uncosted, 0, 6)) . (count($uncosted) > 6 ? ', ...' : '') . '). Reject it so the counter can add the costs.');
+                    }
+                }
+
                 $liveSel = $pdo->prepare("SELECT current_quantity, cost_per_unit FROM stock_ingredients WHERE id = ? FOR UPDATE");
                 $ingAdd = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity + ?, updated_at = NOW() WHERE id = ?");
                 $batchIns = $pdo->prepare("\n                    INSERT INTO stock_batches (\n                        ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,\n                        supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by\n                    ) VALUES (?, ?, ?, ?, ?, NULL, NULL, CURDATE(), NULL, 7, 'active', ?, ?)\n                ");
@@ -385,6 +463,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $approvalTs = (string)$pdo->query("SELECT NOW()")->fetchColumn();
                 $needsOtherApprover = false;
                 $plan = [];
+                $zeroCost = [];
                 $needReason = [];
                 $totShort = 0.0;
                 $totSurplus = 0.0;
@@ -414,7 +493,18 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         $nm->execute([$ingredientId]);
                         $needReason[] = (string)$nm->fetchColumn();
                     }
+                    if ($variance > 0.0001 && $costAtTime <= 0.00001) {
+                        $zn = $pdo->prepare("SELECT name FROM stock_ingredients WHERE id = ?");
+                        $zn->execute([$ingredientId]);
+                        $zeroCost[] = (string)$zn->fetchColumn();
+                    }
                     $plan[] = ['ln' => $ln, 'variance' => $variance, 'live' => $live, 'cost' => $costAtTime];
+                }
+
+                /* A surplus creates a stock batch. With no unit cost on the line AND no average cost on the
+                 * ingredient it would be booked at zero (COGS and valuation wrong), so it is not approvable. */
+                if (!empty($zeroCost)) {
+                    throw new RuntimeException('Cannot approve: ' . count($zeroCost) . ' line(s) add stock for ingredients with no unit cost (' . implode(', ', array_slice($zeroCost, 0, 6)) . (count($zeroCost) > 6 ? ', ...' : '') . '). Set a cost on the ingredient (Stock Ingredients), or reject the count and add the cost, then approve.');
                 }
 
                 /* Movement-aware variance can turn a line into a shortage that had no reason when it was
@@ -457,16 +547,22 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($variance > 0) {
                         // Count surplus becomes a real active batch so FIFO stays correct.
                         $tmpBatchNumber = 'TMP-C-' . date('YmdHis') . '-' . strtoupper(substr(str_replace('.', '', uniqid('', true)), -8));
+                        /* Sales beyond the batches left the ingredient total negative with no batch behind it;
+                         * settle that deficit first so the batch sum stays equal to current_quantity. */
+                        $settle = rh_stock_receipt_settlement($pdo, $ingredientId, $liveQty, $variance);
                         $batchIns->execute([
                             $ingredientId,
                             $tmpBatchNumber,
                             $variance,
-                            $variance,
+                            $settle['remaining'],
                             max(0, $costAtTime),
-                            mb_substr('Stock count surplus ' . $count['reference'], 0, 500),
+                            mb_substr('Stock count surplus ' . $count['reference'] . ($settle['settled'] > 0 ? ' (settled ' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' unallocated deficit)' : ''), 0, 500),
                             $user['id'],
                         ]);
                         $batchId = (int)$pdo->lastInsertId();
+                        if ($settle['remaining'] < 0.0001) {
+                            $pdo->prepare("UPDATE stock_batches SET status = 'depleted' WHERE id = ?")->execute([$batchId]);
+                        }
                         $batchNumber = 'C' . date('Ymd') . '-' . str_pad((string)$batchId, 6, '0', STR_PAD_LEFT);
                         $batchNumUpd->execute([$batchNumber, $batchId]);
 
@@ -515,7 +611,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     ->execute([$user['id'], $countId]);
                 $pdo->commit();
 
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
                 $_SESSION['stock_msg'] = "Count " . displayCountReference((string)$count['reference']) . " approved. Variances applied to stock.";
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
@@ -548,8 +644,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                  * so stale readings cannot be re-submitted against old stock. The snapshot time of a count is
                  * stock_counts.snapshot_at (start of the movement window at approval), set to now on reopen;
                  * created_at keeps the true start. Without the column the fallback is to move created_at. */
+                // An opening count keeps the unit costs the counter typed; every other count re-reads the live cost.
+                $costKeep = !empty($count['is_opening']) ? "CASE WHEN scl.cost_per_unit > 0 THEN scl.cost_per_unit ELSE i.cost_per_unit END" : "i.cost_per_unit";
                 $reset = "UPDATE stock_count_lines scl INNER JOIN stock_ingredients i ON i.id = scl.ingredient_id
-                          SET scl.system_quantity = i.current_quantity, scl.cost_per_unit = i.cost_per_unit,
+                          SET scl.system_quantity = i.current_quantity, scl.cost_per_unit = {$costKeep},
                               scl.actual_quantity = 0, scl.variance = 0, scl.variance_cost = 0,
                               scl.reason_code = ''";
                 if (scHasLineCol($pdo, 'counted_at')) {
@@ -720,6 +818,7 @@ $csrf_token = generateCsrfToken();
                 }
             }
             $editable = $activeCount['status'] === 'draft';
+            $isOpeningCount = !empty($activeCount['is_opening']);
             $isSubmitted = $activeCount['status'] === 'submitted';
             $isOwnCount = (int)$activeCount['counted_by'] === (int)$user['id'];
             $canWorkCount = $isOwnCount || $canApprove;
@@ -730,6 +829,7 @@ $csrf_token = generateCsrfToken();
                 <span class="count-header__meta">
                     Count <strong><?php echo htmlspecialchars(displayCountReference((string)$activeCount['reference'])); ?></strong>
                     <span class="pill st-<?php echo $activeCount['status']; ?>"><?php echo $activeCount['status']; ?></span>
+                    <?php if (!empty($activeCount['is_opening'])): ?><span class="pill" style="background:#eff6ff;color:#1e3a8a;border:1px solid #bfdbfe;">Opening stock</span><?php endif; ?>
                     ·
                     Counted by <strong><?php echo htmlspecialchars($activeCount['counted_by_name'] ?: '—'); ?></strong>
                     on <?php echo htmlspecialchars(date('Y-m-d H:i', strtotime($activeCount['created_at']))); ?>
@@ -829,6 +929,7 @@ $csrf_token = generateCsrfToken();
                                 <th style="text-align:right;">Expected at count time</th>
                                 <?php endif; ?>
                                 <th style="text-align:right;">Actual Qty</th>
+                                <?php if ($isOpeningCount): ?><th style="text-align:right;">Unit cost (<?php echo htmlspecialchars($currency); ?>)</th><?php endif; ?>
                                 <?php if (!$blindCount): ?>
                                 <th style="text-align:right;">Variance</th>
                                 <th style="text-align:right;">Cost Impact</th>
@@ -884,6 +985,15 @@ $csrf_token = generateCsrfToken();
                                             <?php echo $lineCounted ? number_format($act, 4) : '<span style="color:#6c757d;">not counted</span>'; ?>
                                         <?php endif; ?>
                                     </td>
+                                    <?php if ($isOpeningCount): ?>
+                                    <td data-label="Unit cost" style="text-align:right;">
+                                        <?php if ($editable): ?>
+                                            <input class="qty" type="number" step="0.0001" min="0" style="width:96px;" name="line[<?php echo (int)$ln['id']; ?>][cost]" value="<?php echo (float)$ln['cost_per_unit'] > 0 ? number_format((float)$ln['cost_per_unit'], 4, '.', '') : ''; ?>" placeholder="required">
+                                        <?php else: ?>
+                                            <?php echo number_format((float)$ln['cost_per_unit'], 4); ?>
+                                        <?php endif; ?>
+                                    </td>
+                                    <?php endif; ?>
                                     <?php if (!$blindCount): ?>
                                     <td data-label="Variance" style="text-align:right;" class="var <?php echo $varClass; ?>"><?php echo $lineCounted ? number_format($var, 4) : '—'; ?></td>
                                     <td data-label="Cost Impact" style="text-align:right;" class="varCost <?php echo $varClass; ?>"><?php echo $lineCounted ? $currency . ' ' . number_format($varCost, 2) : '—'; ?></td>
@@ -1054,49 +1164,6 @@ $csrf_token = generateCsrfToken();
                     applyStockLineFilters();
                 });
 
-                var _scConfirmForm = null,
-                    _scConfirmAction = null;
-
-                function scConfirm(form, actionValue, message) {
-                    _scConfirmForm = form;
-                    _scConfirmAction = actionValue;
-                    document.getElementById('scConfirmMessage').textContent = message;
-                    var modal = document.getElementById('scConfirmModal');
-                    if (modal) {
-                        modal.classList.add('active');
-                        document.body.classList.add('modal-open');
-                    }
-                }
-
-                function scCloseConfirm(resetState = true) {
-                    var modal = document.getElementById('scConfirmModal');
-                    if (modal) {
-                        modal.classList.remove('active');
-                    }
-                    if (!document.querySelector('.modal-overlay.active')) {
-                        document.body.classList.remove('modal-open');
-                    }
-                    if (resetState) {
-                        _scConfirmForm = null;
-                        _scConfirmAction = null;
-                    }
-                }
-
-                function scDoConfirm() {
-                    var form = _scConfirmForm;
-                    var actionValue = _scConfirmAction;
-                    scCloseConfirm(false);
-                    _scConfirmForm = null;
-                    _scConfirmAction = null;
-                    if (!form || !actionValue) return;
-                    const a = document.createElement('input');
-                    a.type = 'hidden';
-                    a.name = 'action';
-                    a.value = actionValue;
-                    form.appendChild(a);
-                    form.submit();
-                }
-
                 function rejectPrompt(form) {
                     const r = prompt('Reject count — reason (min 8 characters):');
                     if (!r || r.trim().length < 8) {
@@ -1127,6 +1194,12 @@ $csrf_token = generateCsrfToken();
                         <form method="POST">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                             <input type="hidden" name="action" value="start_count">
+                            <div class="form-field" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;">
+                                <label style="display:flex;gap:8px;align-items:flex-start;">
+                                    <input type="checkbox" name="opening" value="1" id="opening_cb" <?php echo !empty($_GET['opening']) ? 'checked' : ''; ?> onchange="onOpeningChange()">
+                                    <span><strong>This is the opening stock count</strong> (first-time set-up). Counts every ingredient, needs a unit cost on each line, and must be approved by a different manager. No supplier receipts are created.</span>
+                                </label>
+                            </div>
                             <div class="form-field">
                                 <label>Scope</label>
                                 <select name="scope" id="scope" onchange="onScopeChange()">
@@ -1241,6 +1314,13 @@ $csrf_token = generateCsrfToken();
             </div>
 
             <script>
+                function onOpeningChange() {
+                    const cb = document.getElementById('opening_cb');
+                    const scope = document.getElementById('scope');
+                    if (cb && cb.checked) { scope.value = 'full'; }
+                    scope.disabled = !!(cb && cb.checked);
+                    onScopeChange();
+                }
                 function onScopeChange() {
                     const v = document.getElementById('scope').value;
                     document.getElementById('scope-category').style.display = (v === 'category') ? 'block' : 'none';
@@ -1256,7 +1336,7 @@ $csrf_token = generateCsrfToken();
                     document.getElementById('scope_value_spot').value = ids;
                     document.getElementById('scope_value_spot').name = 'scope_value';
                 });
-                onScopeChange();
+                onOpeningChange();
             </script>
         <?php endif; ?>
     </div>
@@ -1276,6 +1356,51 @@ $csrf_token = generateCsrfToken();
             </div>
         </div>
     </div>
+    <script>
+        /* Confirm-modal handlers live outside the active-count branch so the modal below always has them. */
+        var _scConfirmForm = null,
+            _scConfirmAction = null;
+
+        function scConfirm(form, actionValue, message) {
+            _scConfirmForm = form;
+            _scConfirmAction = actionValue;
+            document.getElementById('scConfirmMessage').textContent = message;
+            var modal = document.getElementById('scConfirmModal');
+            if (modal) {
+                modal.classList.add('active');
+                document.body.classList.add('modal-open');
+            }
+        }
+
+        function scCloseConfirm(resetState = true) {
+            var modal = document.getElementById('scConfirmModal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+            if (!document.querySelector('.modal-overlay.active')) {
+                document.body.classList.remove('modal-open');
+            }
+            if (resetState) {
+                _scConfirmForm = null;
+                _scConfirmAction = null;
+            }
+        }
+
+        function scDoConfirm() {
+            var form = _scConfirmForm;
+            var actionValue = _scConfirmAction;
+            scCloseConfirm(false);
+            _scConfirmForm = null;
+            _scConfirmAction = null;
+            if (!form || !actionValue) return;
+            const a = document.createElement('input');
+            a.type = 'hidden';
+            a.name = 'action';
+            a.value = actionValue;
+            form.appendChild(a);
+            form.submit();
+        }
+    </script>
     <?php /* Modals sit before the footer: admin-footer.php closes #rh-admin-page, and the admin SPA
        only swaps that container, so markup printed after it is lost on in-place navigation. */ ?>
     <?php require_once 'includes/admin-footer.php'; ?>

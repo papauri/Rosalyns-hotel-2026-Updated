@@ -3981,3 +3981,14 @@ body.kds-sidebar-collapsed .drawer-zoom {
 .station-dialog__icon { font-size: 1.2rem; }
 .station-dialog__body { font-size: .95rem; }
 .station-dialog__detail { font-size: .85rem; }
+
+/* Station quick-reply chips: 44px touch targets on tablets and phones. */
+@media (max-width: 1024px), (pointer: coarse) {
+    .kds-quick-reply-chip,
+    .kds-quick-reply-chip--sm {
+        height: auto;
+        min-height: 44px;
+        padding: 0 14px;
+        font-size: 13px;
+    }
+}

@@ -585,7 +585,7 @@ footer {
     min-height: 44px;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 1025px) {
     .rh-admin-page-header {
         flex-direction: row;
         align-items: flex-start;
@@ -2787,7 +2787,7 @@ table.fit-or-card:not(.mobile-enhanced) td {
 
 /* Sticky header for desktop (header itself is already sticky in base styles;
    we just add a backdrop blur for the modern look). */
-@media (min-width: 1024px) {
+@media (min-width: 1025px) {
     .admin-header {
         backdrop-filter: blur(8px);
     }
@@ -3632,7 +3632,7 @@ body {
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, #1f2533, #14202d);
+    background: #1f2533;
     color: #fff;
     border-color: #14202d;
 }
@@ -3643,7 +3643,7 @@ body {
 
 .btn-accent,
 .btn-gold {
-    background: linear-gradient(135deg, var(--au-accent), var(--au-accent-deep));
+    background: var(--au-accent-deep, var(--color-primary, #766550));
     color: #fff;
 }
 
@@ -4730,7 +4730,7 @@ a.ops-card:focus-visible {
     --admin-sidebar-text: #f3f4f6;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 1025px) {
     body {
         --admin-current-sidebar-width: var(--admin-sidebar-width);
     }
@@ -5591,7 +5591,7 @@ a.ops-card:focus-visible {
     display: none !important;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 1025px) {
     body.admin-sidebar-collapsed .admin-nav {
         padding: 14px 8px !important;
         /* Keep icon rail controls visually centered even when a vertical
@@ -6063,7 +6063,7 @@ body>:is(.content,
     margin-top: var(--admin-header-height, 74px) !important;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 1025px) {
     body>#rh-admin-page {
         margin-left: var(--admin-current-sidebar-width) !important;
         width: calc(100% - var(--admin-current-sidebar-width)) !important;
@@ -6290,4 +6290,87 @@ th.admin-bulk-col, td.admin-bulk-col { width: 38px; text-align: center; padding-
     .admin-bulk-bar { bottom: 6px; padding: 10px; }
     .admin-bulk-bar__controls { width: 100%; }
     .admin-bulk-bar__clear { margin-left: 0; }
+}
+
+/* ==========================================================================
+   TOUCH RULE (tablets and phones, and any touch screen): 44px minimum targets for the
+   controls staff tap all shift. Sizes are CSS px at 100% display size. The POS till and the
+   station boards keep their own sizing (body.pos-screen / body.station-screen).
+   ========================================================================== */
+@media (max-width: 1024px), (pointer: coarse) {
+    body:not(.pos-screen):not(.station-screen) :is(.btn, .btn-sm, .btn-action, .quick-action, .actions-more-toggle, .ck-btn, .mm-btn, .mm-btn-sm, .mini-action, .tab-button, .rmc-icon-btn, .cmc-icon-btn) {
+        min-height: 44px !important;
+    }
+
+    body:not(.pos-screen):not(.station-screen) :is(.rmc-icon-btn, .cmc-icon-btn, .actions-more-toggle) {
+        min-width: 44px !important;
+    }
+
+    /* Header: search, help, display size, password, logout, menu toggle */
+    html .admin-header :is(.admin-gsearch-btn, .btn-logout, .admin-nav-toggle) {
+        min-height: 44px !important;
+        min-width: 44px !important;
+        box-sizing: border-box;
+    }
+
+    html .admin-header .rh-zoom__ctl button {
+        width: 44px !important;
+        height: 44px !important;
+    }
+
+    /* Bulk bar controls and row checkboxes */
+    .admin-bulk-bar :is(.btn, button, select, input[type="text"], input[type="date"]) {
+        min-height: 44px !important;
+    }
+
+    /* Row checkboxes keep their small drawn box but get a 44px hit area (22px box + 11px
+       transparent ring that still counts as the control). */
+    input.admin-bulk-check {
+        -webkit-appearance: none;
+        appearance: none;
+        box-sizing: border-box;
+        width: 44px;
+        height: 44px;
+        margin: 0;
+        padding: 0;
+        border: 11px solid transparent;
+        border-radius: 0;
+        background-color: #fff;
+        background-clip: content-box;
+        background-repeat: no-repeat;
+        background-position: center;
+        background-size: 16px 16px;
+        outline: 2px solid #8c8174;
+        outline-offset: -13px;
+    }
+
+    input.admin-bulk-check:checked {
+        background-color: var(--admin-accent, #766550);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3.2L13 4.8' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    }
+
+    input.admin-bulk-check:checked,
+    input.admin-bulk-check:focus-visible {
+        outline-color: var(--admin-accent, #766550);
+    }
+
+    th.admin-bulk-col,
+    td.admin-bulk-col {
+        width: 52px;
+        padding-left: 4px;
+        padding-right: 4px;
+    }
+}
+
+/* Phones: the Display size control is for tablets; hide it so the menu button stays on screen. */
+@media (max-width: 480px) {
+    html .admin-header .rh-zoom {
+        display: none !important;
+    }
+}
+
+/* Install prompt bar is docked at the bottom edge (admin/js/pwa-install.js): keep the sticky
+   bulk bar above it. */
+body.rh-pwa-bar-on .admin-bulk-bar {
+    bottom: 76px;
 }

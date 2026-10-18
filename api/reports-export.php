@@ -794,21 +794,32 @@ function exportStockReport($output, string $start_date, string $end_date, string
     fputcsv($output, ['Period:', $start_date . ' to ' . $end_date]);
     fputcsv($output, []);
 
-    rpx_section($output, 'LOW STOCK (current snapshot)', ['Ingredient', 'Current', 'Minimum', 'Unit'],
-        "SELECT name, current_quantity AS current_stock, (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END) AS min_stock_level, unit FROM stock_ingredients
-         WHERE is_archived=0 AND current_quantity <= (CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END)
-         ORDER BY (current_quantity / NULLIF((CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END),0)) ASC LIMIT 30", [],
-        function ($r) { return [$r['name'], $r['current_stock'], $r['min_stock_level'], $r['unit']]; });
+    global $pdo;
+    $alerts = rh_stock_alert_summary($pdo, 500); // the ONE shared alert rule (config/database.php)
+    fputcsv($output, ['LOW / OUT OF STOCK (current snapshot)']);
+    fputcsv($output, ['Ingredient', 'Current', 'Minimum', 'Unit', 'Status']);
+    foreach (array_merge($alerts['out_items'], $alerts['low_items']) as $r) {
+        fputcsv($output, [$r['name'], $r['current_quantity'], $r['threshold'], $r['unit'], ((float)$r['current_quantity'] < 0 ? 'negative - needs reconciliation' : ((float)$r['current_quantity'] <= 0 ? 'out' : 'low'))]);
+    }
+    fputcsv($output, ['TOTAL', $alerts['attention']]);
+    fputcsv($output, []);
+    fputcsv($output, ['NOT YET STOCKED (opening stock not recorded - record a stock count)']);
+    fputcsv($output, ['Ingredient', 'Unit']);
+    foreach ($alerts['never_items'] as $r) {
+        fputcsv($output, [$r['name'], $r['unit']]);
+    }
+    fputcsv($output, ['TOTAL', $alerts['never_stocked']]);
+    fputcsv($output, []);
 
     rpx_section($output, 'WASTAGE', ['Ingredient', 'Qty', 'Value'],
-        "SELECT i.name AS ingredient, ABS(SUM(sa.quantity_change)) AS qty, ABS(SUM(sa.quantity_change * COALESCE(i.cost_per_unit, 0))) AS value
+        "SELECT i.name AS ingredient, ABS(SUM(sa.quantity_change)) AS qty, ABS(SUM(sa.quantity_change * " . rh_stock_movement_cost_sql('sa', 'i') . ")) AS value
          FROM stock_adjustments sa JOIN stock_ingredients i ON i.id = sa.ingredient_id
          WHERE sa.created_at BETWEEN ? AND ? AND (sa.source_type IN ('waste','wastage') OR sa.reason LIKE '%wast%' OR sa.reason LIKE '%spoil%')
          GROUP BY i.id ORDER BY value DESC LIMIT 20", $p,
         function ($r) use ($cs) { return [$r['ingredient'], $r['qty'], $cs . ' ' . number_format((float)$r['value'], 2)]; });
 
     rpx_section($output, 'TOP INGREDIENTS USED', ['Ingredient', 'Qty Used', 'Cost'],
-        "SELECT i.name, GREATEST(0, -SUM(sa.quantity_change)) AS qty, GREATEST(0, -SUM(sa.quantity_change * COALESCE(i.cost_per_unit, 0))) AS cost
+        "SELECT i.name, GREATEST(0, -SUM(sa.quantity_change)) AS qty, GREATEST(0, -SUM(sa.quantity_change * " . rh_stock_movement_cost_sql('sa', 'i') . ")) AS cost
          FROM stock_adjustments sa JOIN stock_ingredients i ON i.id = sa.ingredient_id
          WHERE sa.created_at BETWEEN ? AND ?
            AND ((sa.quantity_change < 0

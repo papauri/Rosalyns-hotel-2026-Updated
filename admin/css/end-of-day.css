@@ -173,6 +173,16 @@
     .eod-table th, .eod-table td { padding: 9px 10px; font-size: 13px; }
     .eod-split { gap: 16px; }
     .eod-kv--cols { grid-template-columns: minmax(0, 1fr); }
+
+    /* Scroll cue: a solid edge marker shows on the side that still has columns hidden, and
+       disappears once you reach that end (flat fills, no gradients). */
+    .eod-table-wrap {
+        background:
+            linear-gradient(#fff, #fff) left center / 5px 100% no-repeat local,
+            linear-gradient(#fff, #fff) right center / 5px 100% no-repeat local,
+            linear-gradient(#b9ad9f, #b9ad9f) left center / 5px 100% no-repeat scroll,
+            linear-gradient(#b9ad9f, #b9ad9f) right center / 5px 100% no-repeat scroll;
+    }
 }
 
 /* ---- Print: one readable report, no controls, every tab visible ---- */

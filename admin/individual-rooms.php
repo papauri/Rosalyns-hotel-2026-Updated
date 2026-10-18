@@ -1335,7 +1335,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 <table>
                     <thead>
                         <tr>
-                            <th><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                            <th><input type="checkbox" class="admin-bulk-check" id="selectAll" onchange="toggleSelectAll()"></th>
                             <th class="sortable" data-col="1" onclick="sortTable(this)"
                                 data-help="Sort by Room|Click to sort rooms by room number or name. Click again to reverse the order.">
                                 Room <span class="sort-icon">⇅</span>
@@ -1471,7 +1471,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                 ?>
                                 <tr data-room-status="<?php echo $displayStatus; ?>" id="room-<?php echo (int)$room['id']; ?>" data-focus="room-<?php echo (int)$room['id']; ?>">
                                     <td>
-                                        <input type="checkbox" name="room_ids[]" value="<?php echo $room['id']; ?>" onchange="updateBulkActions()"<?php echo $isPair ? ' data-joined-room="1" title="Joined room - both rooms change together"' : ''; ?>>
+                                        <input type="checkbox" class="admin-bulk-check" name="room_ids[]" value="<?php echo $room['id']; ?>" onchange="updateBulkActions()"<?php echo $isPair ? ' data-joined-room="1" title="Joined room - both rooms change together"' : ''; ?>>
                                     </td>
                                     <td>
                                         <button type="button" class="room-number-btn"
@@ -1606,25 +1606,12 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                                 data-help="Room Details|View full occupancy details — who is staying, for how long, upcoming bookings, and status history for this room.">
                                                 <i class="fas fa-eye"></i> Details
                                             </button>
-                                            <?php if ($isPair): ?>
-                                            <button class="btn btn-info btn-sm" type="button"
-                                                onclick="openCombinationForm(_irCombos[<?php echo (int)$room['pair_id']; ?>])"
-                                                data-help="Edit Joined Room|Change the joined room's name, rate, capacity or the two rooms that make it up. Open the details to edit either physical room.">
-                                                <i class="fas fa-edit"></i> Edit
-                                            </button>
-                                            <?php else: ?>
-                                            <button class="btn btn-info btn-sm" type="button"
-                                                onclick='openEditModal(<?php echo htmlspecialchars(json_encode($room), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($roomAmenitiesMap[$room['id']] ?? []), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($roomPhotosMap[$room['id']] ?? []), ENT_QUOTES, "UTF-8"); ?>)'
-                                                data-help="Edit Room|Update this room's details: name, floor, occupancy overrides, child pricing, amenities and photos.">
-                                                <i class="fas fa-edit"></i> Edit
-                                            </button>
-                                            <?php endif; ?>
-                                            <button class="btn btn-success btn-sm" type="button"
+                                            <button class="btn btn-secondary btn-sm" type="button"
                                                 onclick="openStatusModal('<?php echo htmlspecialchars($rowIdsCsv, ENT_QUOTES); ?>', '<?php echo $room['status']; ?>', '<?php echo htmlspecialchars($room['room_number'], ENT_QUOTES); ?>', '<?php echo $statusActiveGuest; ?>', '<?php echo $statusActiveRef; ?>', '<?php echo $statusActiveOut; ?>')"
                                                 data-help="<?php echo $isPair ? 'Change Status|Update the status of this joined room. Both of its rooms change together.' : 'Change Status|Manually update this room\'s physical status — e.g. set to Cleaning after a checkout, or Maintenance when repairs are needed.'; ?>">
                                                 <i class="fas fa-exchange-alt"></i> Status
                                             </button>
-                                            <?php /* Details, Edit and Status stay on the row; the rest sit in the shared More menu. */ ?>
+                                            <?php /* Details and Status stay on the row; Edit, Assign and Delete sit in the shared More menu. */ ?>
                                             <div class="actions-more">
                                                 <button type="button" class="btn btn-secondary btn-sm actions-more-toggle" title="More actions" aria-label="More actions" aria-haspopup="true" onclick="toggleRoomActionsMore(this, event)">
                                                     <i class="fas fa-ellipsis-vertical"></i> More
@@ -1639,6 +1626,19 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                                         data-help="<?php echo $assignHelp; ?>">
                                                         <i class="fas fa-door-open"></i> Assign to booking
                                                     </button>
+                                                    <?php if ($isPair): ?>
+                                                    <button type="button"
+                                                        onclick="closeRoomActionMenus(); openCombinationForm(_irCombos[<?php echo (int)$room['pair_id']; ?>])"
+                                                        data-help="Edit Joined Room|Change the joined room's name, rate, capacity or the two rooms that make it up. Open the details to edit either physical room.">
+                                                        <i class="fas fa-edit"></i> Edit
+                                                    </button>
+                                                    <?php else: ?>
+                                                    <button type="button"
+                                                        onclick='closeRoomActionMenus(); openEditModal(<?php echo htmlspecialchars(json_encode($room), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($roomAmenitiesMap[$room['id']] ?? []), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($roomPhotosMap[$room['id']] ?? []), ENT_QUOTES, "UTF-8"); ?>)'
+                                                        data-help="Edit Room|Update this room's details: name, floor, occupancy overrides, child pricing, amenities and photos.">
+                                                        <i class="fas fa-edit"></i> Edit
+                                                    </button>
+                                                    <?php endif; ?>
                                                     <?php if ($isPair): ?>
                                                     <button type="button" onclick="closeRoomActionMenus(); openCombinationsModal()"
                                                         data-help="Remove Joined Room|A joined room is removed in Room Combinations (delete or deactivate the pairing). Its two rooms are kept.">

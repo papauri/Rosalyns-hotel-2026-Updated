@@ -304,7 +304,7 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
         $usageSourceType = 'pos_order';
     }
     $rq = $pdo->prepare("SELECT sri.ingredient_id,
-                                ((sri.quantity_per_portion * ?) / (GREATEST(sri.yield_percent, 0.1) / 100)) AS required_qty
+                                ((sri.quantity_per_portion * ?) / " . rh_stock_yield_sql('sri.yield_percent') . ") AS required_qty
                            FROM stock_recipes sr
                            INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
                           WHERE sr.menu_item_id = ? AND sr.menu_type = ? AND sri.quantity_per_portion > 0");

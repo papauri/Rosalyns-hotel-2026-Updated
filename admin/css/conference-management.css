@@ -239,7 +239,7 @@
     background: #f3f4f6;
     color: #374151;
     border-color: #d1d5db;
-    transform: translateY(-1px);
+    transform: none;
 }
 
 .cmc-icon-btn--active-on {
@@ -314,7 +314,7 @@
 
 .cmc-edit-btn:hover {
     background: #7a6347;
-    transform: translateY(-1px);
+    transform: none;
 }
 
 /* ── Share All Conference banner ────────────────────────────────────── */

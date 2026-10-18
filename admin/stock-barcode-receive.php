@@ -183,6 +183,7 @@ if (isset($_GET['ajax'])) {
             $pdo->beginTransaction();
             $created = 0;
             $skipped = [];
+            $noCost = [];
             // Line labels come back from the client, and end up in the activity log.
             $label = static function ($item, int $id): string {
                 $raw = is_array($item) ? trim((string)($item['name'] ?? '')) : '';
@@ -207,51 +208,34 @@ if (isset($_GET['ajax'])) {
                     continue;
                 }
 
-                $oldQty = (float)$ing['current_quantity'];
-                $oldAvg = (float)$ing['cost_per_unit'];
-                $newAvg = $cost > 0 ? calculateWeightedAvgCost($oldQty, $oldAvg, $qty, $cost) : $oldAvg;
-
-                // Create batch
-                $bIns = $pdo->prepare("
-                    INSERT INTO stock_batches
-                        (ingredient_id, batch_number, quantity_received, quantity_remaining,
-                         cost_per_unit, supplier_name, received_date, status, notes, created_by)
-                    VALUES (?, '', ?, ?, ?, ?, ?, 'active', ?, ?)
-                ");
-                $note = 'Received via barcode scanner' . ($supplier ? " — {$supplier}" : '');
-                $bIns->execute([$ingId, $qty, $qty, $cost ?: $oldAvg, $supplier, $receivedDate, $note, $user['id']]);
-                $batchId = (int)$pdo->lastInsertId();
-                $pdo->prepare("UPDATE stock_batches SET batch_number = ? WHERE id = ?")
-                    ->execute(['B' . str_pad((string)$batchId, 6, '0', STR_PAD_LEFT), $batchId]);
-                if ($supplierId !== null && $hasBatchSupplierCol) {
-                    $pdo->prepare("UPDATE stock_batches SET supplier_id = ? WHERE id = ?")->execute([$supplierId, $batchId]);
+                // A receipt with no cost and no average cost to fall back on would book stock at zero
+                // (COGS, valuation and supplier spend all wrong): block the delivery and say which lines.
+                if ($cost <= 0.00001 && (float)$ing['cost_per_unit'] <= 0.00001) {
+                    $noCost[] = $label($item, $ingId);
+                    continue;
                 }
 
-                // Stock-in log
-                $pdo->prepare("
-                    INSERT INTO stock_in_log
-                        (ingredient_id, batch_id, quantity, cost_per_unit, cost_total, supplier_name,
-                         avg_cost_before, avg_cost_after, notes, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ")->execute([$ingId, $batchId, $qty, $cost ?: $oldAvg, $qty * ($cost ?: $oldAvg),
-                    $supplier, $oldAvg, $newAvg, $note, $user['id']]);
-                if ($supplierId !== null && $hasLogSupplierCol) {
-                    $pdo->prepare("UPDATE stock_in_log SET supplier_id = ? WHERE id = ?")->execute([$supplierId, (int)$pdo->lastInsertId()]);
+                // Same receipt engine as the manual stock-in and PO receiving: weighted-average cost,
+                // negative-stock deficit settlement, stock_in_log and ledger row.
+                $batchId = rh_receive_stock_line(
+                    $pdo, $ingId, $qty, $cost, $supplierId, $supplier, null, null, 7, null, (int)$user['id'],
+                    'Received via barcode scanner' . ($supplier ? " - {$supplier}" : ''),
+                    'Stock received via barcode scan'
+                );
+                if ($receivedDate !== date('Y-m-d')) {
+                    $pdo->prepare("UPDATE stock_batches SET received_date = ? WHERE id = ?")->execute([$receivedDate, $batchId]);
                 }
-
-                // Update ingredient qty + avg cost
-                $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity + ?, cost_per_unit = ?, updated_at = NOW() WHERE id = ?")
-                    ->execute([$qty, $newAvg, $ingId]);
-
-                // Adjustment row
-                $pdo->prepare("
-                    INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by)
-                    VALUES (?, ?, 'Stock received via barcode scan', 'stock_in', ?, ?, ?)
-                ")->execute([$ingId, $qty, $batchId, $cost ?: $oldAvg, $user['id']]);
 
                 $created++;
             }
+            if ($noCost) {
+                $pdo->rollBack();
+                http_response_code(422);
+                echo json_encode(['error' => 'Nothing was received. These items have no unit cost and no average cost yet: ' . implode(', ', array_slice($noCost, 0, 8)) . (count($noCost) > 8 ? ', ...' : '') . '. Enter a cost for each and receive again.', 'no_cost' => $noCost]);
+                exit;
+            }
             $pdo->commit();
+            rh_clear_stock_dashboard_cache();
             if ($created > 0) {
                 $_SESSION['barcode_recv_fp'] = $recvFp;
                 $_SESSION['barcode_recv_at'] = time();

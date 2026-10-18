@@ -150,22 +150,14 @@ try {
         ")->fetchAll(PDO::FETCH_ASSOC);
         $summary['total_value'] = array_sum(array_map(fn($r) => (float)$r['stock_value'], $rows));
         $totalItems = count($rows);
-        $outOfStock = 0;
-        $lowStock = 0;
+        // Out / low / never-stocked come from the ONE shared alert rule (config/database.php);
+        // the row loop is only needed for the active-batch total.
+        $alertSummary = rh_stock_alert_summary($pdo, 1);
+        $outOfStock = $alertSummary['out'];
+        $lowStock = $alertSummary['low'];
+        $neverStocked = $alertSummary['never_stocked'];
         $activeBatchTotal = 0;
         foreach ($rows as $row) {
-            $currentQty = (float)($row['current_quantity'] ?? 0);
-            // Same threshold as the dashboard and Reorder page: reorder_point when set, else min_quantity.
-            $threshold = (float)($row['reorder_point'] ?? 0) > 0
-                ? (float)$row['reorder_point']
-                : (float)($row['min_quantity'] ?? 0);
-
-            if ($currentQty <= 0) {
-                $outOfStock++;
-            }
-            if ($threshold > 0 && $currentQty <= $threshold) {
-                $lowStock++;
-            }
             $activeBatchTotal += (int)($row['active_batches'] ?? 0);
         }
 
@@ -174,6 +166,7 @@ try {
             stock_reports_metric('Average stock value', $totalItems > 0 ? stock_reports_money(((float)$summary['total_value']) / $totalItems, $currency_symbol) : stock_reports_money(0, $currency_symbol), 'Per ingredient baseline'),
             stock_reports_metric('Low stock items', number_format($lowStock), 'At or below configured threshold'),
             stock_reports_metric('Out of stock items', number_format($outOfStock), 'Needs immediate replenishment'),
+            stock_reports_metric('Not yet stocked', number_format($neverStocked), 'Opening stock not recorded - record a stock count'),
             stock_reports_metric('Active batches', number_format($activeBatchTotal), 'Live batches across all ingredients'),
         ];
     } elseif ($tab === 'stock_in') {
@@ -293,13 +286,14 @@ try {
             SELECT i.id, i.name, i.unit, i.cost_per_unit,
                    COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) ELSE 0 END), 0) AS used,
                    COALESCE(SUM(CASE WHEN sa.source_type = 'wastage' OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS wasted,
-                   COALESCE(SUM(CASE WHEN sa.source_type = 'expiry' THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS expired
+                   COALESCE(SUM(CASE WHEN sa.source_type = 'expiry' THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS expired,
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('wastage','expiry') OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " ELSE 0 END), 0) AS loss_value
             FROM stock_ingredients i
             LEFT JOIN stock_adjustments sa ON sa.ingredient_id = i.id AND DATE(sa.created_at) BETWEEN ? AND ?
             WHERE i.is_archived = 0
             GROUP BY i.id, i.name, i.unit, i.cost_per_unit
             HAVING used + wasted + expired > 0
-            ORDER BY (wasted + expired) * i.cost_per_unit DESC
+            ORDER BY loss_value DESC
         ");
         $st->execute([$dateFrom, $dateTo]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -321,7 +315,7 @@ try {
             $totalUsed += $usedQty;
             $totalWasted += $wastedQty;
             $totalExpired += $expiredQty;
-            $lossCostTotal += ($wastedQty + $expiredQty) * (float)($row['cost_per_unit'] ?? 0);
+            $lossCostTotal += (float)($row['loss_value'] ?? 0); // valued at cost when it happened
         }
 
         $overallYield = ($totalUsed + $totalWasted + $totalExpired) > 0

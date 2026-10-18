@@ -48,9 +48,11 @@ if (!$error) {
             foreach ($rows as $r) $onOrder[(int)$r['ingredient_id']] = (float)$r['qty'];
         } catch (Throwable $e) { $onOrder = []; }
 
-        // Candidate ingredients: threshold = reorder_point, else min_quantity.
+        // Candidate ingredients: threshold = reorder_point, else min_quantity (same rule as rh_stock_threshold_sql()).
+        // never_stocked = no stock history yet (opening stock not recorded): still buyable, but tagged, not an alert.
+        $histSql = rh_stock_history_sql($pdo, 'i');
         $ingredients = $pdo->query("
-            SELECT i.id, i.name, i.unit, i.category, i.current_quantity, i.min_quantity,
+            SELECT (CASE WHEN {$histSql} THEN 0 ELSE 1 END) AS never_stocked, i.id, i.name, i.unit, i.category, i.current_quantity, i.min_quantity,
                    i.reorder_point, i.par_level, i.lead_time_days, i.cost_per_unit,
                    i.preferred_supplier_id, s.id AS supplier_exists, s.name AS supplier_name,
                    s.lead_time_days AS supplier_lead, s.is_active AS supplier_active
@@ -88,7 +90,7 @@ if (!$error) {
             }
             $groups[$key]['items'][] = [
                 'id' => (int)$i['id'], 'name' => $i['name'], 'unit' => $i['unit'],
-                'on_hand' => $onHand, 'reorder' => $reorderPoint, 'par' => $target,
+                'never' => ((int)$i['never_stocked'] === 1 && $onHand <= 0.0001), 'on_hand' => $onHand, 'reorder' => $reorderPoint, 'par' => $target,
                 'on_order' => $ord, 'suggest' => round($suggest, 3), 'cost' => (float)$i['cost_per_unit'],
                 'line_cost' => $lineCost,
             ];
@@ -149,6 +151,13 @@ $csrf_token = generateCsrfToken();
 
         <?php if ($error): showAlert($error, 'error'); endif; ?>
 
+        <?php
+        $neverListed = 0;
+        foreach ($groups as $g) { foreach ($g['items'] as $it0) { if (!empty($it0['never'])) $neverListed++; } }
+        if ($neverListed > 0): ?>
+        <p style="margin:0 0 14px;color:#1e3a8a;"><i class="fas fa-clipboard-list"></i> Opening stock not recorded (<?php echo (int)$neverListed; ?> items below) &mdash; <a href="<?php echo htmlspecialchars(rh_stock_opening_count_url()); ?>">record a stock count</a> instead of buying what you may already have.</p>
+        <?php endif; ?>
+
         <div class="ck-kpis ck-kpis--3 ro-summary">
             <div class="ck-kpi ck-kpi--warn"><span class="ck-kpi__label">Items to reorder</span><span class="ck-kpi__value"><?php echo (int)$itemCount; ?></span></div>
             <div class="ck-kpi"><span class="ck-kpi__label">Supplier orders</span><span class="ck-kpi__value"><?php echo count($groups); ?></span></div>
@@ -201,7 +210,7 @@ $csrf_token = generateCsrfToken();
                     <tbody>
                         <?php foreach ($g['items'] as $it): ?>
                             <tr>
-                                <td><strong><?php echo htmlspecialchars($it['name']); ?></strong> <span style="color:#8a8172;">(<?php echo htmlspecialchars($it['unit']); ?>)</span></td>
+                                <td><strong><?php echo htmlspecialchars($it['name']); ?></strong> <span style="color:#8a8172;">(<?php echo htmlspecialchars($it['unit']); ?>)</span><?php if (!empty($it['never'])): ?> <span style="color:#1e3a8a;font-size:.75rem;" title="Opening stock has not been recorded for this item">not yet stocked</span><?php endif; ?></td>
                                 <td class="num low"><?php echo number_format($it['on_hand'], 3); ?></td>
                                 <td class="num"><?php echo number_format($it['reorder'], 3); ?></td>
                                 <td class="num"><?php echo number_format($it['par'], 3); ?></td>

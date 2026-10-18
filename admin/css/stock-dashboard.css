@@ -21,6 +21,12 @@
     color: #92400e;
     border: 1px solid #fcd34d;
 }
+.sdash-health-banner--setup {
+    background: #eff6ff;
+    color: #1e3a8a;
+    border: 1px solid #bfdbfe;
+}
+.sdash-health-banner--setup a { color: inherit; text-decoration: underline; }
 .sdash-health-banner--critical {
     background: #fee2e2;
     color: #991b1b;
@@ -38,6 +44,8 @@
     border-radius: 6px;
     color: inherit;
     transition: opacity 0.15s;
+    min-width: 44px;
+    min-height: 44px;
 }
 .sdash-health-banner__refresh:hover { opacity: 1; }
 

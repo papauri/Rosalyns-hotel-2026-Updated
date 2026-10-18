@@ -187,7 +187,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($message) {
         $_SESSION['stock_msg'] = $message;
-        if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v3');
+        if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
     }
     if ($error)   $_SESSION['stock_err'] = $error;
     header('Location: stock-recipes.php');
@@ -211,7 +211,7 @@ if (!$error || strpos($error, 'not yet') === false) {
         $menuItems = $pdo->query("
             SELECT mc.slug AS menu_type, mi.id, mi.item_name AS name, mi.price,
                    sr.id AS recipe_id, sr.portions_per_recipe,
-                   COALESCE(SUM(sri.quantity_per_portion / (GREATEST(sri.yield_percent, 0.1)/100) * i.cost_per_unit), 0) AS recipe_cost
+                   COALESCE(SUM(sri.quantity_per_portion / " . rh_stock_yield_sql('sri.yield_percent') . " * i.cost_per_unit), 0) AS recipe_cost
             FROM menu_items mi
             JOIN menu_categories mc ON mc.id = mi.category_id
             LEFT JOIN stock_recipes sr ON sr.menu_item_id = mi.id AND sr.menu_type = mc.slug

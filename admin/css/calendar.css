@@ -747,6 +747,16 @@
     }
 }
 
+/* The booking label opens the booking: give it a 44px tap row on touch tablets and phones. */
+@media (max-width: 1024px) and (pointer: coarse) {
+    .booking-indicator {
+        display: flex;
+        align-items: center;
+        min-height: 44px;
+        margin-top: 0;
+    }
+}
+
 /* ── Booking states that need attention ─────────────────────────────────── */
 .booking-indicator.is-missed-arrival {
     color: #b42318;

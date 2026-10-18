@@ -57,6 +57,7 @@
     color: #155724;
 }
 
+.stock-ingredients-page .badge-setup { background:#eff6ff; color:#1e3a8a; border:1px solid #bfdbfe; }
 .stock-ingredients-page .badge-low {
     background: #fff3cd;
     color: #856404;
@@ -142,18 +143,27 @@
     color: #856404;
 }
 
-/* Modal overrides for top-anchor positioning */
-.modal-overlay {
-    align-items: flex-start;
-    padding-top: 60px;
-}
-
+/* Dialogs: centred, header and footer pinned, body scrolls (shell in admin-components.css) */
 .modal-content {
     width: 95%;
     max-width: 560px;
     padding: 0;
-    max-height: calc(100vh - 80px);
-    overflow-y: auto;
+}
+
+.row-actions .actions-more {
+    position: relative;
+}
+
+/* Card layout (phones): More spans the full width, like the buttons above it. */
+@media (max-width: 768px) {
+    .row-actions .actions-more {
+        flex: 1 1 100%;
+    }
+
+    .row-actions .actions-more-toggle {
+        width: 100%;
+        justify-content: center;
+    }
 }
 
 .modal-content .form-row {

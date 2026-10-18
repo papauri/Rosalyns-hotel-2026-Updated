@@ -303,7 +303,7 @@ function kds_recipe_requirements(PDO $pdo, int $menuItemId, string $menuType, fl
     }
 
     $stmt = $pdo->prepare("SELECT i.id AS ingredient_id, i.name, i.unit, i.current_quantity,
-                                  ((sri.quantity_per_portion * ?) / (GREATEST(sri.yield_percent, 0.1) / 100)) AS required_qty
+                                  ((sri.quantity_per_portion * ?) / " . rh_stock_yield_sql('sri.yield_percent') . ") AS required_qty
                              FROM stock_recipes sr
                              INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
                              INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id
@@ -350,6 +350,31 @@ function kds_stock_shortages_for_items(PDO $pdo, array $items): array
     }
 
     return $shortages;
+}
+
+/**
+ * Stock never blocks the kitchen (owner decision): when a line is marked Ready/Served/bumped with
+ * ingredients short, the action goes ahead, stock goes negative (deductStockBatchFIFO logs that), and
+ * the oversell is recorded here as a system event plus an order-audit row for stock reconciliation.
+ */
+function kds_record_oversell(PDO $pdo, int $orderId, ?int $itemId, array $shortages, array $user, ?string $ip): void
+{
+    $summary = [];
+    foreach (array_slice($shortages, 0, 5) as $sh) {
+        $summary[] = trim((string)$sh['name'] . ' short ' . number_format((float)$sh['short_qty'], 3) . ' ' . (string)($sh['unit'] ?? ''));
+    }
+    $detail = implode(', ', $summary) . (count($shortages) > 5 ? ' and ' . (count($shortages) - 5) . ' more' : '');
+    if (function_exists('rh_log_event')) {
+        rh_log_event('stock', 'warning', 'Oversell at KDS (order #' . $orderId . ($itemId ? ', line #' . $itemId : '') . '): ' . $detail . '. Stock goes negative until reconciled.', [
+            'order_id' => $orderId, 'item_id' => $itemId, 'user_id' => (int)($user['id'] ?? 0), 'shortages' => array_slice($shortages, 0, 10),
+        ]);
+    }
+    try {
+        $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, 'stock_oversell', ?, ?)")
+            ->execute([$orderId, (int)($user['id'] ?? 0), (string)($user['full_name'] ?? $user['username'] ?? ''), json_encode(['item_id' => $itemId, 'shortages' => array_slice($shortages, 0, 10)]), $ip]);
+    } catch (Throwable $e) {
+        error_log('kds_record_oversell audit: ' . $e->getMessage());
+    }
 }
 
 function kds_stock_shortage_message(array $shortages): string
@@ -995,7 +1020,7 @@ try {
            full page reload. */
         $snap = $pdo->query("
             SELECT sr.menu_item_id, sr.menu_type,
-                   MIN(FLOOR(GREATEST(0, i.current_quantity) / (sri.quantity_per_portion / (GREATEST(sri.yield_percent, 0.1)/100)))) AS max_portions
+                   MIN(FLOOR(GREATEST(0, i.current_quantity) / (sri.quantity_per_portion / " . rh_stock_yield_sql('sri.yield_percent') . "))) AS max_portions
             FROM stock_recipes sr
             INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
             INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id
@@ -1177,7 +1202,7 @@ try {
         $newService = round((float)$ordRow['service_charge'] * $scale, 2);
         $costDrop = 0.0;
         if ($stockOutcome === 'restored') {
-            $costStmt = $pdo->prepare("SELECT COALESCE(SUM((sri.quantity_per_portion / (GREATEST(sri.yield_percent, 0.1) / 100)) * i.cost_per_unit), 0) FROM stock_recipes sr INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id WHERE sr.menu_item_id = ? AND sr.menu_type = ?");
+            $costStmt = $pdo->prepare("SELECT COALESCE(SUM((sri.quantity_per_portion / " . rh_stock_yield_sql('sri.yield_percent') . ") * i.cost_per_unit), 0) FROM stock_recipes sr INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id WHERE sr.menu_item_id = ? AND sr.menu_type = ?");
             $costStmt->execute([(int)$it['menu_item_id'], (string)$it['menu_type']]);
             $costDrop = round(((float)$costStmt->fetchColumn()) * (float)$it['quantity'], 4);
         }
@@ -1351,8 +1376,7 @@ try {
             if ($shouldDeductStock) {
                 $shortages = kds_stock_shortages_for_items($pdo, [$it]);
                 if ($shortages) {
-                    $pdo->rollBack();
-                    jerr(kds_stock_shortage_message($shortages));
+                    kds_record_oversell($pdo, $orderId, $itemId, $shortages, $user, $ip); // warn-only, never blocks
                 }
             }
             // Deduct stock first (using item ID as source_id to avoid false-dup across items sharing an ingredient)
@@ -1392,8 +1416,7 @@ try {
             if (!$serveDeducted) {
                 $serveShort = kds_stock_shortages_for_items($pdo, [$it]);
                 if ($serveShort) {
-                    $pdo->rollBack();
-                    jerr(kds_stock_shortage_message($serveShort));
+                    kds_record_oversell($pdo, $orderId, $itemId, $serveShort, $user, $ip); // warn-only, never blocks
                 }
                 $serveDeducted = deductStockForMenuItem((int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], 'pos_order', $itemId, (int)$user['id']);
                 if (!$serveDeducted) {
@@ -1466,8 +1489,7 @@ try {
         $toDeduct = $undeducted->fetchAll(PDO::FETCH_ASSOC);
         $shortages = kds_stock_shortages_for_items($pdo, $toDeduct);
         if ($shortages) {
-            $pdo->rollBack();
-            jerr(kds_stock_shortage_message($shortages));
+            kds_record_oversell($pdo, $orderId, null, $shortages, $user, $ip); // warn-only, never blocks
         }
         $deductedItemIds = [];
         foreach ($toDeduct as $tdi) {

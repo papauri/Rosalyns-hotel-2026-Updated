@@ -30,18 +30,13 @@ if (!ensureStockTablesExist()) {
 // Auto-run expiry sweep
 if (!$error) runStockExpiryCheck();
 
-// Effective reorder threshold: reorder_point when set, otherwise min_quantity.
-$reorderThresholdExpr = "(CASE WHEN reorder_point > 0 THEN reorder_point ELSE min_quantity END)";
-
-$cacheKey = 'stock_dashboard_metrics_v4';
+$cacheKey = RH_STOCK_DASH_CACHE_KEY;
 $metrics = function_exists('getCache') ? getCache($cacheKey) : null;
 if (!$metrics && !$error) {
     try {
         $metrics = [];
         $metrics['ingredient_count'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
-        $metrics['low_stock'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0 AND {$reorderThresholdExpr} > 0 AND current_quantity <= {$reorderThresholdExpr} AND current_quantity > 0")->fetchColumn();
-        $metrics['critical_stock'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0 AND current_quantity <= 0")->fetchColumn();
-        $metrics['total_inventory_value'] = (float)$pdo->query("SELECT COALESCE(SUM(GREATEST(0, current_quantity) * cost_per_unit), 0) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
+        $metrics['total_inventory_value'] = rh_stock_valuation($pdo);
         $metrics['active_batches'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0")->fetchColumn();
         $metrics['expiring_3d'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)")->fetchColumn();
         $metrics['expiring_7d'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN DATE_ADD(CURDATE(), INTERVAL 4 DAY) AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)")->fetchColumn();
@@ -70,6 +65,14 @@ if (!$metrics && !$error) {
         $metrics['drink_total'] = (int)$pdo->query("SELECT COUNT(mi.id) FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE mc.slug = 'drink'")->fetchColumn();
     } catch (Throwable $e) { $metrics['drink_total'] = 0; }
     if (function_exists('setCache')) setCache($cacheKey, $metrics, 300);
+}
+
+// Stock alerts use the ONE shared rule (rh_stock_alert_summary) and are always live, never cached.
+$alertSummary = ['never_stocked' => 0, 'out' => 0, 'low' => 0, 'negative' => 0, 'attention' => 0, 'out_items' => [], 'low_items' => [], 'negative_items' => [], 'never_items' => []];
+if (!$error && $metrics) {
+    $alertSummary = rh_stock_alert_summary($pdo, 10);
+    $metrics['low_stock'] = $alertSummary['low'];
+    $metrics['critical_stock'] = $alertSummary['out'];
 }
 
 // Live operational data (always fresh — not cached)
@@ -111,11 +114,7 @@ $totalAlerts = 0;
 
 if (!$error) {
     try {
-        $criticalIng = $pdo->query("
-            SELECT name, current_quantity, unit FROM stock_ingredients
-            WHERE is_archived = 0 AND current_quantity <= 0
-            ORDER BY current_quantity ASC LIMIT 10
-        ")->fetchAll(PDO::FETCH_ASSOC);
+        $criticalIng = $alertSummary['out_items'];
 
         $expiringSoon = $pdo->query("
             SELECT b.batch_number, i.name, b.expiry_date, b.quantity_remaining, b.cost_per_unit, DATEDIFF(b.expiry_date, CURDATE()) AS days_left
@@ -134,13 +133,14 @@ if (!$error) {
             ORDER BY b.expiry_date ASC LIMIT 10
         ")->fetchAll(PDO::FETCH_ASSOC);
 
-        $lowStock = $pdo->query("
-            SELECT name, current_quantity, {$reorderThresholdExpr} AS min_quantity, unit FROM stock_ingredients
-            WHERE is_archived = 0 AND {$reorderThresholdExpr} > 0 AND current_quantity > 0 AND current_quantity <= {$reorderThresholdExpr}
-            ORDER BY (current_quantity / {$reorderThresholdExpr}) ASC LIMIT 10
-        ")->fetchAll(PDO::FETCH_ASSOC);
+        $lowStock = array_map(static function (array $r): array {
+            $r['min_quantity'] = $r['threshold']; // the list shows the effective reorder threshold
+            return $r;
+        }, $alertSummary['low_items']);
 
-        $totalAlerts = count($criticalIng) + count($expiringSoon) + count($expiredBatches) + count($lowStock);
+        // Real totals (the lists above are capped for display); never-stocked items add nothing.
+        $totalAlerts = $alertSummary['out'] + $alertSummary['low']
+            + (int)($metrics['expiring_3d'] ?? 0) + (int)($metrics['expired_batches'] ?? 0);
         if (($metrics['pending_reconcile'] ?? 0) > 0) $totalAlerts++;
     } catch (Throwable $e) {
         $totalAlerts = 0;
@@ -149,10 +149,12 @@ if (!$error) {
 
 // Health banner state
 $healthState = 'ok';
-if (count($criticalIng) > 0 || ($metrics['expiring_3d'] ?? 0) > 0 || ($metrics['expired_batches'] ?? 0) > 0) {
+if ($alertSummary['out'] > 0 || ($metrics['expiring_3d'] ?? 0) > 0 || ($metrics['expired_batches'] ?? 0) > 0) {
     $healthState = 'critical';
-} elseif (count($lowStock) > 0 || ($metrics['pending_reconcile'] ?? 0) > 0) {
+} elseif ($alertSummary['low'] > 0 || ($metrics['pending_reconcile'] ?? 0) > 0) {
     $healthState = 'warn';
+} elseif ($alertSummary['never_stocked'] > 0) {
+    $healthState = 'setup';
 }
 
 function recipe_coverage_pct(int $with, int $total): string {
@@ -197,6 +199,8 @@ $csrf_token = generateCsrfToken();
                     <i class="fas fa-check-circle"></i>
                 <?php elseif ($healthState === 'critical'): ?>
                     <i class="fas fa-exclamation-circle"></i>
+                <?php elseif ($healthState === 'setup'): ?>
+                    <i class="fas fa-clipboard-list"></i>
                 <?php else: ?>
                     <i class="fas fa-exclamation-triangle"></i>
                 <?php endif; ?>
@@ -204,11 +208,13 @@ $csrf_token = generateCsrfToken();
             <div class="sdash-health-banner__text">
                 <?php if ($healthState === 'ok'): ?>
                     <strong>All good!</strong> Inventory is healthy — no urgent alerts right now.
+                <?php elseif ($healthState === 'setup'): ?>
+                    <strong>Setup —</strong> Opening stock not recorded for <?php echo (int)$alertSummary['never_stocked']; ?> item(s). <a href="<?php echo htmlspecialchars(rh_stock_opening_count_url()); ?>">Record a stock count</a> to finish setting up stock.
                 <?php elseif ($healthState === 'critical'): ?>
                     <strong>Action needed —</strong>
                     <?php
                     $parts = [];
-                    if (count($criticalIng) > 0) $parts[] = count($criticalIng) . ' item(s) out of stock';
+                    if ($alertSummary['out'] > 0) $parts[] = $alertSummary['out'] . ' item(s) out of stock';
                     if (($metrics['expiring_3d'] ?? 0) > 0) $parts[] = ($metrics['expiring_3d']) . ' batch(es) expiring within 3 days';
                     if (($metrics['expired_batches'] ?? 0) > 0) $parts[] = ($metrics['expired_batches']) . ' expired batch(es) still active';
                     echo implode(' &amp; ', $parts) . '.';
@@ -217,7 +223,7 @@ $csrf_token = generateCsrfToken();
                     <strong>Heads up —</strong>
                     <?php
                     $parts = [];
-                    if (count($lowStock) > 0) $parts[] = count($lowStock) . ' item(s) running low';
+                    if ($alertSummary['low'] > 0) $parts[] = $alertSummary['low'] . ' item(s) running low';
                     if (($metrics['pending_reconcile'] ?? 0) > 0) $parts[] = ($metrics['pending_reconcile']) . ' charge(s) need reconciling';
                     echo implode(' &amp; ', $parts) . '.';
                     ?>
@@ -269,6 +275,15 @@ $csrf_token = generateCsrfToken();
             </a>
         </div>
 
+        <?php if ($alertSummary['never_stocked'] > 0): ?>
+        <div class="sdash-setup-note" style="margin:0 0 16px;padding:12px 16px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;border-radius:8px;">
+            <i class="fas fa-clipboard-list"></i>
+            <strong>Opening stock not recorded (<?php echo (int)$alertSummary['never_stocked']; ?> items)</strong> &mdash;
+            <a href="<?php echo htmlspecialchars(rh_stock_opening_count_url()); ?>">record a stock count</a>.
+            Selling is not affected; these items are not counted as alerts until they have stock history.
+        </div>
+        <?php endif; ?>
+
         <!-- ═══ NEEDS ATTENTION ═══ -->
         <?php if ($totalAlerts > 0): ?>
         <div class="sdash-section">
@@ -284,7 +299,7 @@ $csrf_token = generateCsrfToken();
             <div class="sdash-alert-group sdash-alert-group--critical js-sdash-alert-group" data-open="true">
                 <button type="button" class="sdash-alert-group__header" onclick="toggleAlertGroup(this)" aria-expanded="true">
                     <i class="fas fa-times-circle"></i>
-                    <span>Out of Stock <em>(<?php echo count($criticalIng); ?>)</em></span>
+                    <span>Out of Stock <em>(<?php echo (int)$alertSummary['out']; ?><?php echo $alertSummary['out'] > count($criticalIng) ? ', showing ' . count($criticalIng) : ''; ?>)</em></span>
                     <i class="fas fa-chevron-down sdash-alert-group__chevron"></i>
                 </button>
                 <div class="sdash-alert-group__body">
@@ -373,7 +388,7 @@ $csrf_token = generateCsrfToken();
             <div class="sdash-alert-group sdash-alert-group--info js-sdash-alert-group" data-open="false">
                 <button type="button" class="sdash-alert-group__header" onclick="toggleAlertGroup(this)" aria-expanded="false">
                     <i class="fas fa-arrow-down"></i>
-                    <span>Running Low <em>(<?php echo count($lowStock); ?>)</em></span>
+                    <span>Running Low <em>(<?php echo (int)$alertSummary['low']; ?><?php echo $alertSummary['low'] > count($lowStock) ? ', showing ' . count($lowStock) : ''; ?>)</em></span>
                     <i class="fas fa-chevron-down sdash-alert-group__chevron"></i>
                 </button>
                 <div class="sdash-alert-group__body" style="display:none">

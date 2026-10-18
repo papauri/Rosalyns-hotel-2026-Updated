@@ -172,25 +172,9 @@
     gap: 5px;
     padding: 7px 10px;
     border-radius: 8px;
-    border: none;
     cursor: pointer;
     font-size: 12px;
     font-weight: 600;
-}
-
-.actions-cell .btn-info {
-    background: #eaf1ff;
-    color: #164ea5;
-}
-
-.actions-cell .btn-success {
-    background: #e8f8ef;
-    color: #11653f;
-}
-
-.actions-cell .btn-danger {
-    background: #ffeceb;
-    color: #a12622;
 }
 
 /* Joined-room (pair) row: a long "A + B" label wraps at the plus, never mid-number; the
@@ -222,18 +206,26 @@
 
 /* Touch-first: staff use this list on a tablet, so every row button is 44px tall. */
 @media (max-width: 1024px), (pointer: coarse) {
+    /* Two equal columns (Details | Status) with More full width underneath. */
     .actions-cell {
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
     }
 
     .actions-cell .btn {
         min-height: 44px;
         padding: 0 12px;
         justify-content: center;
+        width: 100%;
     }
 
     .actions-cell .actions-more {
-        display: inline-flex;
+        grid-column: 1 / -1;
+        display: block;
+        margin: 0;
+        padding: 0;
+        border: 0;
     }
 }
 
@@ -253,9 +245,6 @@
         overflow-x: auto;
     }
 
-    .actions-cell {
-        flex-wrap: wrap;
-    }
 }
 
 /* ── Stat card — click-to-filter interaction ───────────────────── */

@@ -285,6 +285,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $recvQtys = $_POST['receive_qty'] ?? [];
                 $recvCosts = $_POST['receive_cost'] ?? [];
                 $expiries = $_POST['expiry_date'] ?? [];
+                $overNotes = $_POST['over_note'] ?? [];
 
                 $poStmt = $pdo->prepare("SELECT * FROM stock_purchase_orders WHERE id = ? LIMIT 1");
                 $poStmt->execute([$poId]);
@@ -326,9 +327,19 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $line = $lineSel->fetch(PDO::FETCH_ASSOC);
                     if (!$line) continue;
 
-                    $outstanding = (float)$line['ordered_qty'] - (float)$line['received_qty'];
-                    if ($rq > $outstanding + 0.0001) $rq = $outstanding;   // cap over-receipt
-                    if ($rq <= 0) continue;
+                    /* Over-delivery is allowed (the stock is physically here and must be booked), but it needs
+                     * a note saying why, and the line is flagged so the buyer can chase the supplier. */
+                    $outstanding = max(0.0, (float)$line['ordered_qty'] - (float)$line['received_qty']);
+                    $overQty = 0.0;
+                    $overNote = '';
+                    if ($rq > $outstanding + 0.0001) {
+                        $overQty = round($rq - $outstanding, 3);
+                        $overNote = trim(rh_clean_text((string)($overNotes[$k] ?? '')));
+                        if (mb_strlen($overNote) < 5) {
+                            throw new RuntimeException('"' . (string)($line['description'] ?? 'Line') . '": receiving ' . rtrim(rtrim(number_format($overQty, 3, '.', ''), '0'), '.') . ' more than ordered needs an over-delivery note (at least 5 characters) explaining why.');
+                        }
+                        $overNote = mb_substr($overNote, 0, 200);
+                    }
 
                     $cost = isset($recvCosts[$k]) && trim((string)$recvCosts[$k]) !== '' ? rh_po_number($recvCosts[$k], 'Unit cost') : (float)$line['unit_cost'];
                     $expiry = rh_po_date($expiries[$k] ?? '', 'Expiry date');
@@ -346,11 +357,15 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                             7,
                             $poId,
                             $user['id'],
-                            'PO ' . $po['reference']
+                            'PO ' . $po['reference'] . ($overQty > 0 ? ' | over-delivery +' . rtrim(rtrim(number_format($overQty, 3, '.', ''), '0'), '.') . ': ' . $overNote : '')
                         );
                     }
                     $pdo->prepare("UPDATE stock_purchase_order_items SET received_qty = received_qty + ? WHERE id = ?")
                         ->execute([$rq, $lid]);
+                    if ($overQty > 0 && rh_column_exists($pdo, 'stock_purchase_order_items', 'over_received_qty')) {
+                        $pdo->prepare("UPDATE stock_purchase_order_items SET over_received_qty = over_received_qty + ?, over_note = LEFT(CONCAT_WS(' | ', over_note, ?), 500) WHERE id = ?")
+                            ->execute([$overQty, mb_substr(date('Y-m-d') . ' +' . rtrim(rtrim(number_format($overQty, 3, '.', ''), '0'), '.') . ': ' . $overNote, 0, 300), $lid]);
+                    }
                     $received++;
                 }
 
@@ -368,7 +383,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare("UPDATE stock_purchase_orders SET status = 'partial', received_at = COALESCE(received_at, NOW()) WHERE id = ?")->execute([$poId]);
                 }
                 $pdo->commit();
-                if (function_exists('deleteCache')) deleteCache('stock_dashboard_metrics_v2');
+                if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
                 $message = 'Stock received against purchase order.';
                 $redirectTo = 'purchase-orders.php?id=' . $poId;
             }
@@ -568,17 +583,19 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                                     <?php if (empty($ln['ingredient_id'])): ?><br><span style="color:#a06a3a;font-size:.76rem;">Non-stock line (no ingredient link)</span><?php endif; ?>
                                 </td>
                                 <td class="num"><?php echo number_format((float)$ln['ordered_qty'], 3); ?></td>
-                                <td class="num"><?php echo number_format((float)$ln['received_qty'], 3); ?></td>
+                                <td class="num"><?php echo number_format((float)$ln['received_qty'], 3); ?>
+                                    <?php if ((float)($ln['over_received_qty'] ?? 0) > 0): ?><br><span style="color:#a06a3a;font-size:.76rem;" title="<?php echo htmlspecialchars((string)($ln['over_note'] ?? '')); ?>"><i class="fas fa-flag"></i> over-delivered +<?php echo number_format((float)$ln['over_received_qty'], 3); ?><?php echo !empty($ln['over_note']) ? ': ' . htmlspecialchars((string)$ln['over_note']) : ''; ?></span><?php endif; ?>
+                                </td>
                                 <td class="num"><?php echo number_format((float)$ln['unit_cost'], 4); ?></td>
                                 <td class="num"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$ln['line_total'], 2); ?></td>
                                 <?php if ($canReceive): ?>
                                     <td class="num">
                                         <input type="hidden" name="line_id[]" value="<?php echo (int)$ln['id']; ?>">
                                         <input class="mini" type="number" name="receive_qty[]" step="0.001" min="0"
-                                               max="<?php echo htmlspecialchars((string)max(0, $outstanding)); ?>"
                                                value="<?php echo $outstanding > 0 ? htmlspecialchars((string)round($outstanding, 3)) : '0'; ?>"
-                                               <?php echo $outstanding <= 0 ? 'readonly title="Fully received"' : 'title="At most ' . htmlspecialchars((string)round($outstanding, 3)) . ' can still be received on this line"'; ?>>
-                                        <span class="recv-out"><?php echo $outstanding > 0 ? 'max ' . number_format($outstanding, 3) . ' outstanding' : 'fully received'; ?></span>
+                                               title="<?php echo $outstanding > 0 ? htmlspecialchars((string)round($outstanding, 3)) . ' still outstanding. Entering more is an over-delivery and needs a note.' : 'Fully received. Entering a quantity is an over-delivery and needs a note.'; ?>">
+                                        <span class="recv-out"><?php echo $outstanding > 0 ? number_format($outstanding, 3) . ' outstanding' : 'fully received'; ?></span>
+                                        <input type="text" name="over_note[]" maxlength="200" placeholder="Over-delivery note (needed if above outstanding)" style="margin-top:4px;width:100%;font-size:.76rem;">
                                         <input type="hidden" name="receive_cost[]" value="<?php echo htmlspecialchars((string)$ln['unit_cost']); ?>">
                                     </td>
                                     <td><input type="date" name="expiry_date[]"></td>
