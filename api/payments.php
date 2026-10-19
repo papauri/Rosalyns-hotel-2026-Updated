@@ -936,6 +936,7 @@ function deletePayment(PDO $pdo, int $paymentId)
     // Only an unreceipted pending draft may be removed.
     $receivedMsg = "Payments that have been received can't be deleted. Use a refund or credit note instead.";
     $payStatus = (string)($payment['payment_status'] ?? '');
+    // mra_status stays 'pending' today (there is no MRA integration); this check only matters once one exists.
     $mraStatus = (string)($payment['mra_status'] ?? '');
     if (!in_array($payStatus, ['pending', 'cancelled', 'failed'], true)
         || trim((string)($payment['receipt_number'] ?? '')) !== ''
@@ -952,6 +953,8 @@ function deletePayment(PDO $pdo, int $paymentId)
             ApiResponse::error($receivedMsg, 409);
         }
     }
+    // Dormant guard: nothing in this system sends payments to MRA and the queue is always empty.
+    // It only takes effect once a real MRA integration exists and starts writing to the queue.
     $mraQ = $pdo->prepare("SELECT COUNT(*) FROM mra_submission_queue WHERE payment_id = ? AND status NOT IN ('pending')");
     $mraQ->execute([$paymentId]);
     if ((int)$mraQ->fetchColumn() > 0) {

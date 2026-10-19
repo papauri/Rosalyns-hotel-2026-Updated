@@ -32,6 +32,7 @@
       <li><a href="#signin">Signing in</a></li>
       <li><a href="#topbar">The top bar</a></li>
       <li><a href="#sidebar">The sidebar menu</a></li>
+      <li><a href="#lists">Lists, number cards, tabs and times</a></li>
       <li><a href="#devices">Using the admin on a phone or tablet</a></li>
       <li><a href="#dashboard">The Dashboard</a></li>
       <li><a href="#menu-table">Every menu item</a></li>
@@ -124,6 +125,14 @@
     <li>The double-arrow button at the top of the menu collapses it to a narrow strip. Your choice is remembered. This button is for wider screens. On phones and tablets use the <strong>Menu</strong> button in the top bar (see <a href="#devices">Using the admin on a phone or tablet</a>).</li>
     <li>POS Till, Kitchen, Bar, Coffee Bar and the guide links open in a new browser tab.</li>
     <li><strong>View Website</strong> (group <strong>External</strong>) opens the guest website.</li>
+  </ul>
+
+  <h2 id="lists">Lists, number cards, tabs and times</h2>
+  <ul>
+    <li><strong>Number cards, tabs and chips filter the list.</strong> On most list pages the cards at the top (for example <strong>Pending</strong>, <strong>Awaiting moderation</strong>, <strong>Maintenance</strong>), the tabs and the small filter chips show only the matching rows when you click them. The page now takes you straight to the filtered list, so you do not have to scroll down. Click the same card again, <strong>All</strong>, or <strong>Clear</strong> to see everything again. This does not apply to the till and the Kitchen, Bar and Coffee screens.</li>
+    <li><strong>Search and Filter boxes.</strong> Type in the search box, pick a status or dates, and click <strong>Filter</strong>. <strong>Clear</strong> removes the filters.</li>
+    <li><strong>Select many rows.</strong> Tick the boxes on the left of the rows, or the box in the table heading to tick all, and a bar appears with the actions you may use on all of them at once. See <a href="#duplicates">Duplicates and required fields</a> for what the system refuses.</li>
+    <li><strong>Times.</strong> Dates and times on a booking's page, on the till and on an order receipt are shown in your own device's time zone, so a phone set to the wrong zone shows the wrong time. The hotel's own time zone is fixed when the system is installed (it is shown under <strong>Save Hotel Details</strong> in Hotel Settings). If a time looks wrong, fix the clock and time zone on your device first.</li>
   </ul>
 
   <h2 id="devices">Using the admin on a phone or tablet</h2>
@@ -370,7 +379,7 @@
     <li>Four figures: <strong>Backup files on disk</strong>, <strong>Last successful backup</strong>, <strong>Last backup size</strong> and <strong>Backup health</strong>: <em>Fresh</em> (up to 25 hours), <em>Ageing</em> (up to 36 hours), <em>Stale</em> (older) or <em>None</em> (no backups yet).</li>
     <li><strong>Last copy saved off-site</strong> shows the date of the last <strong>Download</strong>, or <em>Never</em>. A backup only protects you from a server failure once a copy has been downloaded and kept somewhere else.</li>
     <li>If the last attempt failed, a red box says <em>"The last backup attempt failed on ..."</em>. It says what happened, what it means and what to do. The technical detail is under <strong>Details for the administrator</strong>. The box goes away once a later backup works.</li>
-    <li><strong>Run Backup Now</strong> takes a backup. It takes 5 to 30 seconds, so keep the page open until it finishes. Success: <em>"Backup saved (N KB). Your hotel data is protected up to this moment."</em> If it fails, the red box explains why.</li>
+    <li><strong>Run Backup Now</strong> takes a backup. Take one before a system update, before a big clean-up and before a restore. It takes 5 to 30 seconds, so keep the page open until it finishes. Success: <em>"Backup saved (N KB). Your hotel data is protected up to this moment."</em> If it fails, the red box explains why.</li>
     <li><strong>Server checks</strong> show whether the backup and restore scripts are in place, whether the backup and log folders can be written to, and the <strong>Free disk space</strong> (for example, <em>"12.3 GB free"</em>). The page also shows a backup log.</li>
     <li><strong>Available Backups</strong> lists the files, newest first. The newest is marked <strong>Latest</strong>. Under the list, the page shows how much space the backups use.</li>
     <li><strong>Delete</strong> (admin role only). Each row has a <strong>Delete</strong> button, and it asks you to confirm first. To delete several at once, tick the rows and click <strong>Delete selected</strong> in the bar at the bottom. The newest backup always shows <em>Always kept</em>, and at least 3 backups always stay. Deleted files cannot be brought back.</li>
@@ -398,8 +407,8 @@
   </ul>
   <p>Clearing the cache never deletes hotel data. The system rebuilds the copies as people use the website.</p>
 
-  <h2 id="logs">System Logs</h2>
-  <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>System Logs</strong> (<code>/admin/system-logs.php</code>). Permission: <strong>System Logs</strong>. It is a read-only record for troubleshooting.</p>
+  <h2 id="logs">System Logs (who did what)</h2>
+  <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>System Logs</strong> (<code>/admin/system-logs.php</code>). Permission: <strong>System Logs</strong>. It is a read-only record for troubleshooting, and the place to see who did what and when: sign-ins, setting changes, booking changes, orders and errors, each with the person's name. (For one booking, its own <strong>Activity timeline</strong> is quicker; for one order, use <strong>Order log</strong>.)</p>
   <ul>
     <li>Cards for the last 24 hours: system events, admin activity, booking changes, POS orders, KDS/DS events, API calls, offline replays and errors.</li>
     <li>Filters: <strong>Source</strong>, <strong>Level</strong>, <strong>Rows</strong> (20 to 500) and <strong>Auto-refresh 15s</strong>; click <strong>Apply</strong>, or <strong>Reset</strong> to clear.</li>
@@ -421,7 +430,7 @@
   </ul>
 
   <h2 id="analytics">Visitor Analytics</h2>
-  <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Visitor Analytics</strong> (<code>/admin/visitor-analytics.php</code>). Permission: <strong>Visitor Analytics</strong>. It shows how guests use the website.</p>
+  <p>Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Visitor Analytics</strong> (<code>/admin/visitor-analytics.php</code>). Permission: <strong>Visitor Analytics</strong>. It shows how guests use the website: how many people visited (visitors and visits), where they came from, which pages and rooms they looked at, and how many went on to book.</p>
   <ul>
     <li>Filter by <strong>Period</strong> (<strong>Last 7 Days</strong>, <strong>Today</strong>, <strong>Last 30 Days</strong>, <strong>Custom Range</strong>) and <strong>Device</strong> (<strong>All Devices</strong>, <strong>Desktop</strong>, <strong>Mobile</strong>, <strong>Tablet</strong>, <strong>Bots</strong>); click <strong>Apply</strong>.</li>
     <li>Panels include where traffic comes from, the booking conversion funnel, hourly traffic, visitor loyalty, entry and exit pages, most viewed rooms, countries, devices, browsers and referrers.</li>
@@ -532,6 +541,7 @@
   <h2 id="duplicates">Duplicates and required fields</h2>
   <p>Every add and edit form checks what you type before saving. Extra spaces are removed, and names are compared without caring about capital letters or doubled spaces, so <em>"Deluxe&nbsp;&nbsp;room"</em> counts as the same name as <em>"Deluxe Room"</em>.</p>
   <p>If you try to add something that already exists, nothing is saved and you see a message such as <em>"A supplier called "…" already exists. Use a different name or edit the existing one."</em> Edit the existing record instead.</p>
+  <p>On the staff, room type, individual room, menu item, restaurant table, stock item and supplier forms, a name or number that is already used is flagged in red under the box while you type (for example <em>"Another table already has this name."</em>). If the save is still refused, the form stays open with what you typed and the reason at the top, so nothing has to be typed again.</p>
   <table>
     <thead><tr><th>What you add</th><th>Counts as a duplicate when…</th></tr></thead>
     <tbody>

@@ -995,7 +995,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->beginTransaction();
             $created = autoCreateMaintenanceTasks($pdo, $user['id'] ?? null);
             $pdo->commit();
-            $message = "Auto-created {$created} maintenance tasks.";
+            $message = "Created {$created} maintenance tasks.";
         } elseif ($action === 'bulk_assign_rooms') {
             $room_ids_raw = $_POST['room_ids'] ?? '[]';
             $room_ids = is_array($room_ids_raw) ? $room_ids_raw : (json_decode((string)$room_ids_raw, true) ?: []);
@@ -1252,7 +1252,7 @@ $roomsNeedingMaintenance = getRoomsNeedingMaintenance($pdo);
 $staffWorkload = getMaintenanceStaffWorkload($pdo);
 
 // Maintenance tasks are never created as a side effect of loading this page.
-// Task creation only happens through the explicit "Auto-Create Tasks" button (POST + CSRF).
+// Task creation only happens through the explicit "Create Tasks for Rooms" button (POST + CSRF).
 
 // Get all schedules with enhanced sorting
 // Backward compatible: works with or without migration 005 columns
@@ -1386,7 +1386,7 @@ try {
                 <form method="POST" style="display:inline;">
                     <input type="hidden" name="action" value="auto_create_tasks">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                    <button class="btn btn-warning" type="button" onclick="rmConfirm(this.closest('form'), 'Create a maintenance task for every room currently in Maintenance / Out of order that has no open task? Rooms with a guest checked in are skipped.', 'Auto-Create', 'btn-warning')">
+                    <button class="btn btn-warning" type="button" onclick="rmConfirm(this.closest('form'), 'Create a maintenance task for every room currently in Maintenance / Out of order that has no open task? Rooms with a guest checked in are skipped.', 'Create tasks', 'btn-warning')">
                         <i class="fas fa-list-check"></i> Create Tasks for Rooms
                     </button>
                 </form>

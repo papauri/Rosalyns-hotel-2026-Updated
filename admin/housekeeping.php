@@ -1062,7 +1062,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->beginTransaction();
             $created = autoCreateCheckoutCleanup($pdo, $user['id'] ?? null);
             $pdo->commit();
-            $message = "Auto-created {$created} checkout cleanup assignments.";
+            $message = "Created {$created} checkout cleanup assignments.";
         } elseif ($action === 'bulk_assign_occupied') {
             $room_ids_raw = $_POST['room_ids'] ?? '[]';
             $room_ids = is_array($room_ids_raw) ? $room_ids_raw : (json_decode((string)$room_ids_raw, true) ?: []);
@@ -1434,7 +1434,7 @@ foreach ($assignments as $a) {
                 <form method="POST" style="display:inline;">
                     <input type="hidden" name="action" value="auto_create_checkout">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                    <button class="btn btn-warning" type="button" data-help="Create Checkout Cleanup|Generate cleaning assignments for every room that has a guest checking out and needs housekeeping." onclick="hkConfirm(this.closest('form'), 'Auto-create checkout cleanup assignments for all rooms that need it?', 'Auto-Create', 'btn-warning')">
+                    <button class="btn btn-warning" type="button" data-help="Create Checkout Cleanup|Generate cleaning assignments for every room that has a guest checking out and needs housekeeping." onclick="hkConfirm(this.closest('form'), 'Create checkout cleanup assignments for all rooms that need it?', 'Create', 'btn-warning')">
                         <i class="fas fa-broom"></i> Create Checkout Cleanup
                     </button>
                 </form>

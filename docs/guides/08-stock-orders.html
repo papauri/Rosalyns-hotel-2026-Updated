@@ -156,7 +156,7 @@
   </ol>
   <p>Only a user with the <strong>Admin</strong> or <strong>Manager</strong> role sees the <strong>Edit</strong> and <strong>Remove</strong> buttons; everyone else can view and search. Edits and removals are recorded in the activity log, and the next scan uses the new details straight away.</p>
 
-  <h2 id="recipes">How to build a recipe</h2>
+  <h2 id="recipes">How to build a recipe (link a dish to its ingredients)</h2>
   <p>A recipe says how much of each ingredient goes into one portion of a menu item. Open Admin menu &rarr; Stock &rarr; <strong>Recipes</strong>. Quantities are per portion sold. Stock comes off when the kitchen marks the dish Ready or Served on the station screen (or it is bumped), when drinks are handed over at payment, and immediately when an item is charged to a room.</p>
   <ol class="steps">
     <li>On the left use <strong>All</strong>, <strong>Food</strong>, <strong>Drinks</strong> or <strong>No recipe</strong>, or <strong>Search menu items...</strong>, and click a menu item. Each shows its food cost %.</li>
@@ -176,7 +176,7 @@
   <p>Supplier names must be unique: <em>"A supplier with this name already exists."</em> Each supplier email must be unique too, ignoring capital letters: <em>"Another supplier already uses this email address."</em> Both are checked as you type, and the save is refused again if a duplicate gets through. The form stays open with what you typed and the reason shown.</p>
   <p>The list shows <strong>Items</strong> (ingredients that name this supplier as preferred) and <strong>Total purchased</strong>. The pencil icon edits a supplier. The power icon deactivates or reactivates it after a confirmation (<em>"Deactivate this supplier? It will be hidden from purchase orders and stock-in pickers. Its history stays."</em> or <em>"Reactivate this supplier so it can be picked again?"</em>), then <em>"Supplier status updated."</em> Deactivating is usually better than deleting: the supplier's history stays.</p>
 
-  <h2 id="buying">How to see what to buy (Buying)</h2>
+  <h2 id="buying">How to see what to buy and reorder (Buying)</h2>
   <p>Open Admin menu &rarr; Stock &rarr; <strong>Buying</strong>. It lists every ingredient at or below its reorder point (or its minimum quantity if no reorder point is set). Ingredients with neither set are not listed.</p>
   <ol class="steps">
     <li>Read the summary: <strong>Items to reorder</strong>, <strong>Supplier orders</strong>, <strong>Est. purchase value</strong>.</li>
@@ -186,7 +186,7 @@
   <p>The top of Buying shows <strong>Left to spend this month</strong> when a stock budget is set. The amount links to the <a href="#budget">Budget</a> section.</p>
   <p>If nothing is low the page says <em>"Nothing to reorder &mdash; every tracked item is above its reorder point."</em></p>
 
-  <h2 id="po">How to raise and receive a purchase order</h2>
+  <h2 id="po">How to raise, send to a supplier and receive a purchase order</h2>
   <p>Open Admin menu &rarr; Stock &rarr; <strong>Purchase Orders</strong>. Orders move from draft to sent, then partly or fully received, then closed (or cancelled).</p>
   <ol class="steps">
     <li>Click <strong>New PO</strong> (or use <strong>Create draft PO</strong> from Buying). Choose the <strong>Supplier</strong>, <strong>Order date</strong>, <strong>Expected date</strong> and <strong>Notes</strong>, then <strong>Create draft</strong>. <em>"Draft purchase order PO-... created."</em></li>
@@ -229,7 +229,7 @@
     <li>Choose <strong>Warn if over</strong> or <strong>Needs approval</strong>.</li>
     <li>Click <strong>Save budgets</strong>. You will see <em>"Budgets saved."</em> Nothing is saved until you press it. If nothing changed you see <em>"No changes to save."</em></li>
   </ol>
-  <p>To save time use <strong>Copy last month</strong> (fills the form with last month's lines) or <strong>Suggest from last 3 months</strong> (the average monthly receipts of the last 3 months). The form fills in and you check it. If there is nothing to copy you see <em>"Last month has no budget to copy"</em>, or <em>"No stock received in the last 3 months"</em>. Past months are closed and cannot be changed.</p>
+  <p>To save time use <strong>Copy last month</strong> (fills the form with last month's lines) or <strong>Fill from last 3 months</strong> (the average monthly receipts of the last 3 months). The form fills in and you check it: <em>"Filled from what was received in the last 3 months (average per month). Change anything you like, then press Save budgets."</em> If there is nothing to copy you see <em>"Last month has no budget to copy"</em>, or <em>"No stock received in the last 3 months"</em>. Past months are closed and cannot be changed.</p>
   <p><strong>Where else you see it.</strong> The Stock Overview shows a <strong>Stock budget</strong> tile with its bar. When 80% is used it shows <em>"Most of this month's stock budget is used"</em>, and when it is over it shows <em>"Over budget this month"</em>. The Buying page shows <strong>Left to spend this month</strong> and warns if the order you are building would go over it.</p>
   <h3>When a purchase order would go over budget</h3>
   <p>The budget is checked when you press <strong>Mark as sent</strong> on a purchase order, and again if you make a sent order bigger. Nothing is sent until the check is passed.</p>
@@ -279,7 +279,7 @@
     <li>After approval the quantities and costs are in stock, and the <strong>Opening stock not recorded</strong> line goes away for those items.</li>
   </ol>
 
-  <h2 id="wastage">How to record wastage</h2>
+  <h2 id="wastage">How to record wastage (spoiled or thrown-away food)</h2>
   <ol class="steps">
     <li>Open Admin menu &rarr; Stock &rarr; <strong>Wastage</strong>.</li>
     <li>Under <strong>Record wastage</strong> check the <strong>Date</strong> (today or earlier; see the note below if a stock count is open). On each row choose the ingredient (<strong>Select ingredient...</strong>), type the <strong>Quantity</strong>, and choose a reason: Spoiled, Breakage, Over-prepared, Customer return, Trim/peel waste, Burnt, Spilled or Other. Click <strong>Add row</strong> for more.</li>
@@ -295,7 +295,7 @@
   </ul>
   <p>The stock comes off at once at the real cost of the batches used. <strong>Recent entries</strong> lists date, ingredient, quantity, cost, reason and who recorded it. The cards at the top (<strong>This month wastage</strong>, <strong>Last month</strong>, <strong>Days since last entry</strong>) open a detail window. A banner reminds you if no wastage has been logged for some days.</p>
 
-  <h2 id="batches">How to deal with expiring and recalled batches</h2>
+  <h2 id="batches">How to deal with expiring and recalled batches (see which stock expires soon)</h2>
   <p>Open Admin menu &rarr; Stock &rarr; <strong>Batch Tracker</strong>. Each time the page opens, active batches past their expiry date are removed from stock automatically: <em>"3 batch(es) automatically marked as expired."</em></p>
   <ol class="steps">
     <li>Use the cards <strong>Expiring &le; 3 days</strong> (with <strong>Value at risk</strong>), <strong>Expiring 4&ndash;7 days</strong>, <strong>Expiring 8&ndash;30 days</strong> and <strong>Total active batches</strong>, or the filters (ingredient, status <strong>Active</strong>, <strong>Depleted</strong>, <strong>Expired</strong>, <strong>Wasted</strong>, <strong>Recalled</strong>, <strong>All</strong>, and expiry range).</li>
@@ -323,11 +323,11 @@
   </ul>
   <p>Buttons on each row: two or three buttons are shown, and <strong>Cancel</strong>, <strong>Void</strong> and <strong>Delete</strong> are in the <strong>More</strong> menu at the end of the row.</p>
   <ul>
-    <li><strong>Timeline</strong> &mdash; the order's full history. <strong>Items</strong> &mdash; the lines. <strong>Receipt</strong> &mdash; for paid, voided, cancelled and room-service orders. <strong>Review</strong> &mdash; for orders whose items, payments and room charges do not balance.</li>
+    <li><strong>Timeline</strong> (the order lifecycle) &mdash; the order's full history from placing to paying, with the kitchen steps, payments and stock movements, so you can trace one order. <strong>Items</strong> &mdash; the lines. <strong>Receipt</strong> &mdash; for paid, voided, cancelled and room-service orders. <strong>Review</strong> &mdash; for orders whose items, payments and room charges do not balance.</li>
     <li><strong>Open</strong> and <strong>Settle</strong> &mdash; on an open order. <strong>Settle</strong> takes payment exactly as the till does (same deals, discounts, split bills and ledger records): it shows the order total, any deal that applies right now, your discount, the split and <strong>To collect now</strong>. Choose <strong>Cash</strong> (with the amount tendered and the change), <strong>Mobile Money</strong> (provider and reference) or <strong>Card (manual / slip)</strong> (last 4 digits and auth code). Optionally add a <strong>Tip</strong>, a <strong>Discount amount</strong> with a reason (needs <strong>POS Discounts</strong>) and <strong>Split bill</strong> 2&ndash;10 ways; for a split, each person pays in turn and the window stays open for the next payment. If some kitchen items were never bumped, people with <strong>POS Force-Serve Tab</strong> can tick the box to mark them served and settle. A tab already part-paid continues with its next payment. Settling needs <strong>POS Take Payment &amp; Settle</strong> and <strong>POS Till (Touch)</strong>; it is not offered for room-service orders (they go to the guest's bill).</li>
     <li><strong>Cancel</strong> &mdash; an open, unpaid order that nobody has started. Asks to confirm, then <em>"Order ORD-... cancelled and stock restored."</em></li>
     <li><strong>Void</strong> &mdash; Admin and Manager roles only, for open or paid orders (including an open order the kitchen has started). A reason of at least 8 characters is required. <em>"Order ORD-... voided. Stock restored. Reason logged."</em></li>
-    <li><strong>Delete</strong> (in <strong>More</strong>) &mdash; needs the <strong>Delete Orders</strong> permission. It removes any order for good, at any time. Type a reason of at least 8 characters. Payments are removed, room-service charges come off the guest bill (with a credit note if already paid), stock is put back only for items the kitchen had not started, prepared food is recorded as wastage, and the cash drawer is not changed. It is refused if a credit note is linked to the order or a payment was sent to MRA: void or refund instead. Full steps: <a href="01-pos-till.html#delete-order">How to delete an order</a>.</li>
+    <li><strong>Delete</strong> (in <strong>More</strong>) &mdash; needs the <strong>Delete Orders</strong> permission. It removes any order for good, at any time. Type a reason of at least 8 characters. Payments are removed, room-service charges come off the guest bill (with a credit note if already paid), stock is put back only for items the kitchen had not started, prepared food is recorded as wastage, and the cash drawer is not changed. It is refused if a credit note is linked to the order: void or refund instead. Full steps: <a href="01-pos-till.html#delete-order">How to delete an order</a>.</li>
     <li>Reconcile (in the review window) &mdash; Admin and Manager roles only. <em>"Order reconciled: ..."</em></li>
   </ul>
   <p>All of these happen in place: the message appears at the top and the cards and the list refresh without the page reloading.</p>

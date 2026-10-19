@@ -619,7 +619,7 @@ $schedule = [
     ['Stock & Recipe Management',       'Yes',     'Ingredients, batches, costing'],
     ['Conference & Events',             'Yes',     'Enquiry to invoice workflow'],
     ['Payments (Cash / Card / MoMo)',   'Yes',     ''],
-    ['Invoicing & Credit Notes (PDF)',  'Yes',     'VAT-compliant'],
+    ['Invoicing & Credit Notes (PDF)',  'Yes',     'VAT and levy applied'],
     ['WhatsApp Notifications',          'Yes (*)', 'Client supplies WhatsApp API key'],
     ['Email Notifications',             'Yes (*)', 'Client supplies SMTP credentials'],
     ['Visitor & Sales Analytics',       'Yes',     ''],

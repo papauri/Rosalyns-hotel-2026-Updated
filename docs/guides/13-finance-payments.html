@@ -125,7 +125,7 @@
     <li>A payment that was cancelled (for example because its booking was cancelled) cannot be reopened or have its amount or status changed. You will see <em>"This payment was cancelled and cannot be reopened. Record a new payment instead."</em></li>
   </ul>
   <h3>Deleting a payment</h3>
-  <p>Only a payment that was never received can be deleted: one that is still pending, or was cancelled or failed. It must have no receipt number, no invoice and no MRA submission. A payment that has been received cannot be deleted, whatever its status: you will see <em>"Payments that have been received can't be deleted. Use a refund or credit note instead."</em> Refund it (see below), or issue a credit note. A payment that has refunds recorded against it cannot be deleted either, and a payment made by credit note is not deleted: void the credit note instead.</p>
+  <p>Only a payment that was never received can be deleted: one that is still pending, or was cancelled or failed. It must have no receipt number and no invoice. A payment that has been received cannot be deleted, whatever its status: you will see <em>"Payments that have been received can't be deleted. Use a refund or credit note instead."</em> Refund it (see below), or issue a credit note. A payment that has refunds recorded against it cannot be deleted either, and a payment made by credit note is not deleted: void the credit note instead.</p>
   <div class="note"><p>Every edit and every refund is written to the <strong>payment audit log</strong>, with who did it and when. A deleted pending payment is written there too, with who removed it and the reason.</p></div>
 
   <h2 id="receipt">How to send or reprint a receipt</h2>
@@ -137,7 +137,7 @@
   </ol>
   <p>If the box is empty you will see <em>"Enter an email address."</em> or <em>"Enter a phone number."</em> For till payments the window also has a <strong>Print</strong> button.</p>
 
-  <h2 id="refund">How to refund a payment</h2>
+  <h2 id="refund">How to refund a payment (refund a guest)</h2>
   <ol class="steps">
     <li>Open the payment and click <strong>Refund</strong> (or the undo arrow on the Payments list, then <strong>Open Refund</strong> to confirm).</li>
     <li>Check the strip: <strong>Original Payment</strong>, <strong>Already Refunded</strong>, <strong>Refundable Balance</strong>. Earlier refunds appear under <strong>Refund History</strong>.</li>
@@ -169,7 +169,7 @@
   </ol>
   <p>The person who settles the refund is recorded as the one who paid it out, and when it is a till refund (for example an 86'd item on a paid order, settled from the POS notice with <strong>Settle refund</strong>) it is counted on that person's shift. A Pending refund can go to Processing, Completed or Failed (a mobile-money refund goes to Processing before Completed). A Processing refund can go to Completed or Failed. Nothing else is allowed. Store-credit refunds cannot be settled here; void the credit note to reverse one.</p>
 
-  <h2 id="owing">How to see who still owes money</h2>
+  <h2 id="owing">How to see who still owes money (money owed to the hotel)</h2>
   <ol class="steps">
     <li>On the Payments page click <strong>View Outstanding Balances</strong>.</li>
     <li>You will see every account with a balance, largest first: <strong>Reference</strong>, <strong>Client</strong>, <strong>Type</strong>, <strong>Total</strong>, <strong>Paid</strong>, <strong>Outstanding</strong>, <strong>Status</strong>. The top shows the number of accounts and the total owed.</li>
@@ -248,6 +248,7 @@
     </tbody>
   </table>
   <p><strong>Needs attention</strong> lists things to chase: balances owed, pending payments, refunds waiting to be settled, quotations awaiting a reply, voided till orders, stock lost. The links on this page open the Payments list already filtered: <strong>Open today's payments</strong> and <strong>Today's payments</strong> show today's date range, and the completed and pending links show that status for the chosen period. The tabs below show <strong>Recent payments</strong>, <strong>Receivables</strong>, <strong>Daily detail</strong>, <strong>Refunds</strong>, <strong>POS by type</strong> and <strong>Compliance</strong>.</p>
+  <div class="note"><p><strong>The system does not send anything to MRA.</strong> It does not report, submit or fiscalise your sales or VAT. It keeps the VAT figures (the VAT Register and the quarterly totals under <strong>Reports</strong>) that you or your accountant use to file the VAT return with MRA yourselves. If MRA requires fiscal receipts from your till, that is done outside this system.</p></div>
   <h3>VAT settings</h3>
   <ol class="steps">
     <li>On the Accounting page open <strong>VAT settings</strong> (or click <strong>VAT</strong> at the top).</li>
@@ -294,7 +295,7 @@
       <tr><td><em>A void reason is required.</em></td><td>Void box empty.</td><td>Type the reason.</td></tr>
       <tr><td><em>This credit note has expired and can no longer be used.</em></td><td>Past its Expires date.</td><td>Issue a new credit note.</td></tr>
       <tr><td><em>Nothing is due on this account, so there is nothing to apply the credit note to.</em></td><td>The booking has no balance.</td><td>Choose a booking that owes money.</td></tr>
-      <tr><td><em>Payments that have been received can't be deleted. Use a refund or credit note instead.</em></td><td>The payment was paid, receipted, invoiced, sent to MRA, or belongs to a checked-out stay.</td><td>Refund it, or issue a credit note. Only a payment that was never received (pending, cancelled or failed, with no receipt) can be deleted.</td></tr>
+      <tr><td><em>Payments that have been received can't be deleted. Use a refund or credit note instead.</em></td><td>The payment was paid, receipted, invoiced, or belongs to a checked-out stay.</td><td>Refund it, or issue a credit note. Only a payment that was never received (pending, cancelled or failed, with no receipt) can be deleted.</td></tr>
       <tr><td><em>Credit-note payments cannot be deleted; void the credit note instead</em></td><td>The payment was made by credit note.</td><td>Void the credit note (Credit Notes &rarr; three-dot menu).</td></tr>
       <tr><td><em>This payment has refunds recorded against it and cannot be deleted</em></td><td>Refunds are kept as money history.</td><td>Leave it. The refunds are the record.</td></tr>
       <tr><td><em>This payment was cancelled and cannot be reopened. Record a new payment instead.</em></td><td>A cancelled payment (often cancelled with its booking) was changed later.</td><td>Record a new payment for the amount that is really paid.</td></tr>

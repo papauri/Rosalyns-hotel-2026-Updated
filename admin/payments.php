@@ -19,7 +19,6 @@ $mod_gym        = function_exists('moduleEnabled') && moduleEnabled('gym');
 $mod_events     = function_exists('isEventsEnabled') && isEventsEnabled();
 $paymentTransactionColumn = finance_payment_transaction_column($pdo);
 $paymentColumns = finance_table_columns($pdo, 'payments');
-$hasMraStatus = isset($paymentColumns['mra_status']);
 
 // Get filter parameters
 $bookingType = isset($_GET['booking_type']) ? $_GET['booking_type'] : '';
@@ -457,7 +456,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             p.payment_reference, p.booking_type, p.booking_id, p.booking_reference,
             p.payment_date, p.payment_amount, p.vat_rate, p.vat_amount, p.total_amount,
             p.payment_method, p.payment_type, p.payment_status, p.{$paymentTransactionColumn} AS transaction_ref,
-            p.receipt_number, p.invoice_number, " . ($hasMraStatus ? "p.mra_status" : "NULL AS mra_status") . ",
+            p.receipt_number, p.invoice_number,
             p.created_at, p.processed_by,
             CASE
                 WHEN p.booking_type = 'room' THEN b.guest_name
@@ -482,7 +481,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="payments-' . date('Y-m-d-His') . '.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Reference', 'Type', 'BookingID', 'BookingRef', 'Customer', 'Date', 'Subtotal', 'VAT %', 'VAT', 'Total', 'Method', 'PaymentType', 'Status', 'ReceiptNo', 'InvoiceNo', 'MRAStatus', 'TransactionRef', 'Created', 'ProcessedBy']);
+    fputcsv($out, ['Reference', 'Type', 'BookingID', 'BookingRef', 'Customer', 'Date', 'Subtotal', 'VAT %', 'VAT', 'Total', 'Method', 'PaymentType', 'Status', 'ReceiptNo', 'InvoiceNo', 'TransactionRef', 'Created', 'ProcessedBy']);
     while ($row = $exportStmt->fetch(PDO::FETCH_ASSOC)) {
         fputcsv($out, array_map('payments_csv_cell', [
             $row['payment_reference'],
@@ -500,7 +499,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $row['payment_status'],
             $row['receipt_number'],
             $row['invoice_number'],
-            $row['mra_status'],
             $row['transaction_ref'],
             $row['created_at'],
             $row['processed_by']

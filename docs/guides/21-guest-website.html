@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Guest Website — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
+
+  <h1>The Guest Website</h1>
+  <p>What guests see and do on the hotel website, and where in the admin each page is looked after. Use this guide when a guest phones and says "I filled in the form" or "I cannot find the menu", so you know what they are looking at and where their message or booking lands.</p>
+
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Receptionist, Manager, Administrator, restaurant manager</dd>
+      <dt>Where to find it</dt><dd>On the hotel's public website: Book Your Stay, Check Booking Status, the room pages, Restaurant and Menu, Events, Conference, Gym and the gym schedule, Contact Us, Leave a review, and the website FAQ. The table below shows where each one lands in the admin.</dd>
+      <dt>Permission needed</dt><dd>None to read this guide. Each admin page named below has its own permission.</dd>
+    </dl>
+  </div>
+
+  <div class="toc">
+    <ol>
+      <li><a href="#pages">The guest pages at a glance</a></li>
+      <li><a href="#restaurant">The Restaurant page and the printable menu</a></li>
+      <li><a href="#contact">The Contact form</a></li>
+      <li><a href="#review">How a guest leaves a review</a></li>
+      <li><a href="#rooms">Room pages, Guest Services and the website FAQ</a></li>
+      <li><a href="#switch">Why a page is missing or closed</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+    </ol>
+  </div>
+
+  <h2 id="pages">The guest pages at a glance</h2>
+  <table>
+    <thead><tr><th>Guest page</th><th>What the guest does</th><th>Where it lands, and who handles it</th></tr></thead>
+    <tbody>
+      <tr data-module="bookings"><td><strong>Book Your Stay</strong></td><td>Picks dates and a room, enters their details and clicks <strong>Confirm Booking</strong>.</td><td>A Pending (or Tentative) booking in <strong>Front Desk &rarr; Bookings</strong>. See <a href="07-reception-bookings.html#guest">Reception and bookings</a>.</td></tr>
+      <tr data-module="bookings"><td><strong>Check Booking Status</strong></td><td>Types their booking reference and email, and may cancel.</td><td>The booking changes status. See <a href="07-reception-bookings.html#guest">Reception and bookings</a>.</td></tr>
+      <tr data-module="bookings"><td><strong>Rooms</strong> pages</td><td>Looks at room types, photos, facilities and prices.</td><td>Edited in <strong>Settings &rarr; Rooms</strong> and prices in <a href="09-packages-rates.html">Room prices, rate plans and packages</a>.</td></tr>
+      <tr data-module="pos"><td><strong>Restaurant</strong> and <strong>Menu</strong></td><td>Reads the food, coffee and bar menus, saves the menu as a PDF.</td><td>Edited in <strong>Restaurant &amp; Bar &rarr; Menu</strong>. See <a href="#restaurant">below</a>.</td></tr>
+      <tr data-module="events"><td><strong>Events</strong></td><td>Books or joins an event.</td><td><strong>Conference &amp; Events &rarr; Event Bookings</strong>. See <a href="10-conference-events.html#guest-events">Conference and events</a>.</td></tr>
+      <tr data-module="conference"><td><strong>Conference</strong></td><td>Sends a conference enquiry.</td><td><strong>Conference &amp; Events &rarr; Conference</strong>. See <a href="10-conference-events.html#guest-conference">Conference and events</a>.</td></tr>
+      <tr data-module="gym"><td><strong>Gym</strong> and the gym schedule</td><td>Asks to join the gym, or books a slot as a member.</td><td><strong>Gym &rarr; Inquiries</strong> and <strong>Schedule</strong>. See <a href="17-gym-management.html#public-form">Gym</a>.</td></tr>
+      <tr data-module="website_cms"><td><strong>Contact Us</strong></td><td>Sends a message through the form.</td><td><strong>Website &rarr; Contact Inquiries</strong>. See <a href="#contact">below</a>.</td></tr>
+      <tr data-module="website_cms"><td><strong>Leave a review</strong></td><td>Rates their stay and writes a comment.</td><td><strong>Website &rarr; Reviews</strong>, waiting to be approved. See <a href="#review">below</a>.</td></tr>
+    </tbody>
+  </table>
+  <p>The website menu at the top of the guest pages is made from <strong>Website &rarr; Pages</strong> and from the parts of the system switched on in <strong>Settings &rarr; Modules</strong>. A page for a part that is switched off is not shown.</p>
+
+  <h2 id="restaurant" data-module="pos">The Restaurant page and the printable menu</h2>
+  <p>The Restaurant page shows the food, coffee and bar menus. It reads them straight from <strong>Restaurant &amp; Bar &rarr; Menu</strong> (called <strong>Products</strong> when the restaurant is switched off), so there is nothing to type twice. Needs the <strong>Menu</strong> permission to change.</p>
+  <ol class="steps">
+    <li>Open <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong>.</li>
+    <li>Add or change the dish or drink, its price, its category and its description. Make sure it is marked available.</li>
+    <li>Open the Restaurant page on the website and reload it. The item is there. An item marked unavailable (86) is hidden from the guest menu.</li>
+  </ol>
+  <ul>
+    <li><strong>Printable menu.</strong> The guest Menu page shows the whole menu on one page with a <strong>Save as PDF</strong> button and a <strong>Back to Restaurant</strong> link. It is updated every time the Menu changes, and shows an "Updated" date. The Restaurant page also shows a QR code that opens it.</li>
+    <li><strong>Your own PDF.</strong> If the hotel has its own menu file, paste its link in <strong>Settings &rarr; Hotel Settings</strong> &rarr; Hotel details &rarr; <strong>Menu PDF link (optional)</strong>. Leave it empty to use the built-in menu page.</li>
+    <li>The photos and videos on the Restaurant page are managed in the <strong>Media Portal</strong> (see the <a href="99-admin-dashboard-full-guide.html#media">Admin reference</a>).</li>
+  </ul>
+  <p>If the Menu has no available items, the menu list on the page stays empty. Money and stock are not touched by the website menu: it only shows prices, and orders are taken on the till.</p>
+
+  <h2 id="contact" data-module="website_cms">The Contact form</h2>
+  <p>Guests fill in <strong>Full Name</strong>, <strong>Email Address</strong>, <strong>Phone Number</strong> (optional), <strong>Subject</strong> and <strong>Message</strong>, tick the consent box and send.</p>
+  <ol class="steps">
+    <li>The guest sees <em>"Thank you for reaching out. Our team will get back to you within 24 hours."</em> and gets an email with a reference.</li>
+    <li>The message appears in <strong>Website</strong> &rarr; <strong>Contact Inquiries</strong> as <strong>New / Unread</strong>, and an email goes to the hotel's reservations address (or the main hotel address if there is none).</li>
+    <li>Open it, click <strong>Reply via Email</strong>, write the answer and click <strong>Send Reply</strong>. See <a href="99-admin-dashboard-full-guide.html#contact">Contact Inquiries</a>.</li>
+  </ol>
+  <p>Needs the <strong>Contact Inquiries</strong> permission. Nothing to do with money or stock. If the admin email does not arrive, the message is still saved: check <strong>Contact Inquiries</strong> instead of waiting for the email.</p>
+
+  <h2 id="review" data-module="website_cms">How a guest leaves a review</h2>
+  <p>Guests use the review form on the website: they give their name and email, choose what they are reviewing (room, restaurant, conference, gym or service), give star ratings and write a title and comment.</p>
+  <ol class="steps">
+    <li>The guest sees <em>"Thank You! Your review has been successfully submitted and is pending moderation."</em></li>
+    <li>The review waits in <strong>Website</strong> &rarr; <strong>Reviews</strong> on the <strong>Pending</strong> tab. Nothing shows on the website yet.</li>
+    <li>Click <strong>Approve &amp; publish</strong> to show it, or <strong>Reject</strong> to keep it off. Click <strong>Reply</strong> to answer it in public.</li>
+  </ol>
+  <p>Needs the <strong>Reviews</strong> permission (Managers and Receptionists have it). The automatic <strong>Post-stay review requests</strong> email, which asks guests to leave a review after check-out, is off until you switch it on in <a href="19-hotel-settings.html#automated-emails">Automated Emails</a>. See <a href="99-admin-dashboard-full-guide.html#reviews">Reviews</a>.</p>
+
+  <h2 id="rooms">Room pages, Guest Services and the website FAQ</h2>
+  <ul>
+    <li><strong>Room pages.</strong> Each room type has a page with photos, facilities, policies and a booking button. Change the text and photos in <strong>Settings &rarr; Rooms</strong> (<a href="09-packages-rates.html">Room prices, rate plans and packages</a>) and the pictures in the <strong>Gallery</strong>.</li>
+    <li><strong>Guest Services.</strong> A hub page that links to the gym, conference, restaurant, events and booking pages. It only lists the services that are switched on.</li>
+    <li><strong>The website FAQ page.</strong> Its questions are fixed text. The hotel name, phone, email, check-in and check-out times and the service links are filled in from your settings (<strong>Hotel Settings</strong> and <strong>Footer</strong>), so change those, not the page. A service that is switched off is not linked.</li>
+    <li><strong>Hotel name, phone, email, address, social links and opening hours</strong> on every page come from <strong>Website &rarr; Footer</strong>.</li>
+  </ul>
+
+  <h2 id="switch">Why a page is missing or closed</h2>
+  <table>
+    <thead><tr><th>The guest sees</th><th>Why</th><th>Where to change it</th></tr></thead>
+    <tbody>
+      <tr><td>No menu link for a page</td><td>The page is switched off in <strong>Pages</strong>, or its part of the system is off in <strong>Modules</strong>.</td><td><a href="99-admin-dashboard-full-guide.html#pages">Pages</a>, <a href="16-business-presets.html">Modules</a></td></tr>
+      <tr><td>A maintenance page for the whole site</td><td><strong>Enable Full Frontend Maintenance Mode</strong> is ticked.</td><td><a href="19-hotel-settings.html#maintenance">Hotel Settings</a></td></tr>
+      <tr><td>Booking is closed</td><td><strong>Enable Online Booking System</strong> is unticked.</td><td><a href="19-hotel-settings.html#booking-status">Hotel Settings</a></td></tr>
+      <tr><td>Old text or prices after you changed them</td><td>The browser or website kept an old copy.</td><td><a href="99-admin-dashboard-full-guide.html#cache">Cache</a></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>Guests cannot see the admin, staff names, other guests, or anything marked unavailable or switched off.</li>
+    <li>Every guest form is protected: too many tries in a few minutes show <em>"Too many submissions. Please wait a few minutes before trying again."</em> (reviews) or the booking and look-up equivalents. Wait and try again.</li>
+    <li>A review is never shown until a member of staff approves it.</li>
+    <li>A booking from the website is Pending (or Tentative) until staff confirm it; a pending booking with no payment lapses after the number of hours set in <a href="19-hotel-settings.html#details">Hotel details</a> (48 by default).</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td>A guest says "I sent the contact form but nobody replied"</td><td>The message is waiting as New / Unread, or the hotel's reservations email is not receiving mail.</td><td>Open <strong>Contact Inquiries</strong>, find the message, reply with <strong>Reply via Email</strong>.</td></tr>
+      <tr><td>A guest says "I wrote a review but it is not on the site"</td><td>Reviews wait for approval.</td><td>Open <strong>Reviews</strong> &rarr; <strong>Pending</strong> and click <strong>Approve &amp; publish</strong>.</td></tr>
+      <tr><td>A new dish is not on the website menu</td><td>The item is marked unavailable (86), or was saved as not available.</td><td>Open <strong>Menu</strong>, mark it available, reload the Restaurant page.</td></tr>
+      <tr><td>The Restaurant page is empty</td><td>No available items yet.</td><td>Add items in <strong>Menu</strong> and mark them available.</td></tr>
+      <tr><td>The menu link or QR code goes to the wrong place</td><td>An old <strong>Menu PDF link (optional)</strong> is saved in Hotel details.</td><td>Correct it, or empty the box to use the built-in menu page.</td></tr>
+      <tr><td><em>"Too many submissions. Please wait a few minutes before trying again."</em></td><td>The guest sent the form too many times.</td><td>Ask them to wait a few minutes.</td></tr>
+      <tr><td>A page shows "not available" or is missing from the menu</td><td>The part of the system is switched off.</td><td>Check <strong>Pages</strong> and <strong>Modules</strong>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="07-reception-bookings.html#guest">Reception and bookings</a>: the booking form and the look-up page</li>
+    <li><a href="10-conference-events.html">Conference and events</a>: what guests see on the conference and events pages</li>
+    <li><a href="17-gym-management.html">Gym</a>: the gym enquiry form and schedule</li>
+    <li><a href="99-admin-dashboard-full-guide.html">Admin reference</a>: Pages, Gallery, Media Portal, Reviews, Contact Inquiries, Footer</li>
+    <li><a href="16-business-presets.html">Modules and business presets</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
+</body>
+</html>

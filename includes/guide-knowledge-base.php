@@ -61,6 +61,12 @@ function rh_kb_normalize(string $s): string
     $s = preg_replace('/\bwalk[\s-]in(s?)\b/u', 'walkin$1', $s) ?? $s;
     $s = preg_replace('/\bno[\s-]shows?\b/u', 'noshow', $s) ?? $s;
     $s = preg_replace('/\bz[\s-]?reports?\b/u', 'zreport', $s) ?? $s;
+    $s = preg_replace('/\benquir(y|ies)\b/u', 'inquir$1', $s) ?? $s;   // enquiry = inquiry (the admin says "Inquiries")
+    $s = preg_replace('/\bfavou?rites?\b/u', 'favorite', $s) ?? $s;   // favourite = favorite
+    $s = preg_replace('/\bstock[\s-]?takes?\b|\bstocktaking\b/u', 'stock count', $s) ?? $s;
+    $s = preg_replace('/\btime[\s-]?zones?\b/u', 'timezone', $s) ?? $s;
+    $s = preg_replace('/\bwork(?:s|ed|ing)? out\b/u', ' ', $s) ?? $s;   // "how do I work out what to reorder"
+    $s = preg_replace('/\band\b/u', ' ', $s) ?? $s;                   // "Orders & Tabs" = "orders and tabs"
     $s = preg_replace("/[^\p{L}\p{N}]+/u", ' ', $s) ?? $s;
     return ' ' . trim(preg_replace('/\s+/u', ' ', $s) ?? $s) . ' ';
 }
@@ -95,12 +101,18 @@ function rh_kb_synonym_groups(): array
         ['photo', 'image', 'picture', 'gallery', 'media', 'video'], ['website', 'site', 'web'],
         ['invoice', 'invoices'], ['receipt', 'receipts'], ['payment', 'pay', 'paid', 'deposit'],
         ['bulk', 'select all', 'selected', 'many at once'], ['settle', 'settlement', 'close the bill', 'take payment'],
-        ['discount', 'reduction'], ['debt', 'owe', 'owes', 'owing', 'outstanding', 'balance'],
+        ['discount', 'reduction'], ['debt', 'owe', 'owes', 'owed', 'owing', 'outstanding', 'balance'],
         ['report', 'reports', 'summary', 'analytics'], ['role', 'roles', 'position', 'job'],
         ['create', 'make', 'new', 'add'], ['ticket', 'tickets', 'order', 'orders'],
         ['86', 'unavailable'], ['offline', 'online'], ['assign', 'allocate'],
         ['join', 'joined', 'merge', 'combine', 'adjoining', 'connecting'],
         ['joined', 'combination', 'combinations', 'combined', 'pair', 'pairs', 'pairing', 'family', 'linked'],
+        ['dish', 'dishes', 'meal', 'item', 'items', 'product', 'products'],
+        ['reorder', 'restock', 'replenish', 'buy', 'buying', 'purchase', 'purchasing'],
+        ['available', 'availability', 'vacant', 'free', 'empty'],
+        ['register', 'enrol', 'enroll', 'signup'],
+        ['favorite', 'favorites', 'pin', 'star', 'starred', 'bookmark'],
+        ['overpay', 'overpaid', 'overpayment', 'overpaying'], ['lifecycle', 'timeline'], ['expire', 'expires', 'expiry', 'expiring', 'expiration'],
         ['chat', 'chats', 'message', 'messages', 'messaging', 'conversation', 'inbox', 'reply', 'replies', 'note', 'notes'],
     ];
 }
@@ -117,6 +129,15 @@ function rh_kb_expand_phrases(string $q): string
         '/\b(sign(ed)? me out|kicked out|logged out)\b/i' => ' signed out ',
         '/\b(room number|physical room)\b/i' => ' assign room ',
         '/\b(not working|doesn\'?t work|won\'?t work|broken|error)\b/i' => ' problem ',
+        '/\b(expir\w+|best before|use by)\b/i' => ' batch batches tracker ',
+        '/\b(totals?|figures?|numbers?)\b.{0,25}\b(match|agree|add up|differ\w*|wrong)\b|\bmismatch\b/i' => ' drift report ',
+        '/\bwho (did|changed|deleted|edited|made|created|approved)\b|\baudit\b|\bactivity (log|history)\b/i' => ' system logs ',
+        '/\bhow many (people|visitors)\b|\b(website|site) (traffic|visits|visitors)\b|\bvisited the (website|site)\b/i' => ' visitor analytics ',
+        '/\bjoin(ing)?\s+(the\s+)?gym\b|\bgym\s+sign[\s-]?up\b/i' => ' enrol member gym ',
+        '/\b(home screen|install (the )?app|add to home)\b/i' => ' install admin app ',
+        '/\bblock\w*\s+(a\s+)?(room|dates?)\b|\b(close dates|stop selling|stop sales)\b/i' => ' blocked dates individual rooms ',
+        '/\bwrong time|time is wrong|time ?zone\b/i' => ' time zone ',
+        '/\b(food|meal|order)\b.{0,30}\b(kept|keep|eaten|already started)\b|\b(kept|keep|eaten)\b.{0,20}\b(food|meal)\b/i' => ' room service started stays on the bill ',
     ];
     foreach ($map as $re => $add) {
         if (preg_match($re, $q)) {
@@ -160,7 +181,10 @@ function rh_kb_query_terms(string $q, ?array $vocab = null, array &$corrected = 
         return !in_array($w, $stop, true);
     }));
     if (!$kept) {
-        $kept = $words;
+        // Only filler: drop just the question openers, so "how do I see who did what" still asks for who/did/what.
+        $kept = array_values(array_filter($words, static function ($w) {
+            return !in_array($w, ['how', 'do', 'i', 'can', 'does', 'is', 'are', 'a', 'an', 'the', 'to', 'my', 'we', 'our', 'you', 'it'], true);
+        })) ?: $words;
     }
     $optional = array_flip(array_diff($extra, $stop));
     $terms = [];

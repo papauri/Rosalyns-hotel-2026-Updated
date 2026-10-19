@@ -21,7 +21,7 @@
 
   <div class="facts">
     <dl>
-      <dt>Who uses it</dt><dd>Administrator, Manager</dd>
+      <dt>Who uses it</dt><dd>Administrator (a Manager only if given the staff permissions below)</dd>
       <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong> (<code>/admin/user-management.php</code>)</dd>
       <dt>Permissions needed</dt><dd><strong>Create Users</strong> to add people, <strong>Edit Users</strong> to change them and resend invitations, <strong>Assign Permissions</strong> to change what they can open, <strong>Delete Users</strong> to remove them. An Administrator has all of these.</dd>
     </dl>
@@ -37,6 +37,7 @@
       <li><a href="#perms">How to change what someone can open</a></li>
       <li><a href="#follow">What each person sees</a></li>
       <li><a href="#actions">What each booking action needs</a></li>
+      <li><a href="#all-perms">Every permission, in plain words</a></li>
       <li><a href="#receptionist">Example: set up a receptionist</a></li>
       <li><a href="#edit">How to edit, deactivate or change someone's role</a></li>
       <li><a href="#resend">How to resend an invitation</a></li>
@@ -170,6 +171,169 @@
   </table>
   <p>Charges that come in from POS or room-service orders are added by those orders and do not need <strong>Edit Bookings</strong>.</p>
   <div class="note"><p>The normal Receptionist role has <strong>Check-in Guests</strong> and <strong>Check-out Guests</strong>, but not <strong>Cancel Bookings</strong>, <strong>Add Payments</strong> or <strong>Edit Bookings</strong>. Tick those only for receptionists you trust with them.</p></div>
+
+  <h2 id="all-perms">Every permission, in plain words</h2>
+  <p>This is the whole list you see in the <strong>Permissions</strong> window, in the same groups. <strong>Default for</strong> says which roles tick it for you; an Administrator always has every one. "Nobody" means it is only ticked when you choose to.</p>
+
+  <h3>Core</h3>
+  <table>
+    <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Dashboard</strong></td><td>Open the main Dashboard. Without it they land on the first page they can open.</td><td>Manager, Receptionist, Housekeeping, Accountant, Viewer, Gym Staff, Conference Staff</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Reservations</h3>
+  <table>
+    <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>View Bookings</strong></td><td>Open the Bookings list and a booking's page.</td><td>Manager, Receptionist, Accountant, Viewer</td></tr>
+      <tr><td><strong>Create Bookings</strong></td><td>Make a new booking (walk-ins, phone bookings).</td><td>Manager, Receptionist</td></tr>
+      <tr><td><strong>Edit Bookings</strong></td><td>Change a booking, confirm a pending one, convert a tentative one, add or void a charge on the guest's bill.</td><td>Manager</td></tr>
+      <tr><td><strong>Quick Modify Bookings</strong></td><td>Use the quick-change actions on the Bookings list.</td><td>Nobody</td></tr>
+      <tr><td><strong>Edit Booking Financials</strong></td><td>Change money on a booking: complimentary upgrades, keeping the old rate on a downgrade.</td><td>Nobody (Managers can still authorise complimentary upgrades)</td></tr>
+      <tr><td><strong>Cancel Bookings</strong></td><td>Cancel a booking or mark a no-show. The money follows the cancellation rule in Hotel Settings.</td><td>Manager</td></tr>
+      <tr><td><strong>Delete &amp; Restore Bookings</strong></td><td>Delete a duplicate or test booking (it moves to the <strong>Deleted</strong> tab with who, when and why) and bring it back.</td><td>Nobody</td></tr>
+      <tr><td><strong>Calendar View</strong></td><td>Open the Calendar.</td><td>Manager, Receptionist, Viewer</td></tr>
+      <tr><td><strong>Blocked Dates</strong></td><td>Open Blocked Dates, block and unblock nights for a room type or one room.</td><td>Manager, Receptionist</td></tr>
+      <tr><td><strong>Block Rooms</strong></td><td>Listed for blocking single rooms, but no screen asks for it today. To block a room use <strong>Blocked Dates</strong>, or set the room's status on <strong>Individual Rooms</strong>.</td><td>Manager</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Guest Services</h3>
+  <table>
+    <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Check-in Guests</strong></td><td>Check a guest in, and undo a check-in.</td><td>Manager, Receptionist</td></tr>
+      <tr><td><strong>Check-out Guests</strong></td><td>Check a guest out.</td><td>Manager, Receptionist</td></tr>
+      <tr><td><strong>Check-in to Room Not Clean</strong></td><td>Check a guest in although housekeeping has not marked the room clean. It is written on the booking's timeline.</td><td>Manager</td></tr>
+      <tr><td><strong>Check-out With Balance</strong></td><td>Check a guest out although they still owe money. They must confirm, and it is written on the timeline.</td><td>Nobody</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Property</h3>
+  <table>
+    <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Room Management</strong></td><td>Open <strong>Settings &rarr; Rooms</strong>: room types, prices and facilities.</td><td>Manager, Receptionist, Viewer</td></tr>
+      <tr><td><strong>Individual Rooms</strong></td><td>Open Individual Rooms: the numbered rooms, their status, joined pairs.</td><td>Manager, Receptionist, Housekeeping</td></tr>
+      <tr><td><strong>Room Dashboard</strong></td><td>See the room board (every room's status at a glance).</td><td>Manager, Receptionist, Housekeeping</td></tr>
+      <tr><td><strong>Room Maintenance</strong></td><td>Open Room Maintenance and report or work repair requests. Also lets them change a room's status.</td><td>Manager, Receptionist, Housekeeping</td></tr>
+      <tr><td><strong>Housekeeping</strong></td><td>Open Housekeeping, create and work cleaning tasks. Also lets them change a room's status.</td><td>Manager, Receptionist, Housekeeping</td></tr>
+      <tr><td><strong>Gallery</strong></td><td>Open the website Gallery and change its pictures.</td><td>Manager</td></tr>
+      <tr><td><strong>Media Portal</strong>, <strong>Create Media</strong>, <strong>Edit Media</strong>, <strong>Delete Media</strong></td><td>Open the Media Portal; upload new pictures and videos; change them; delete them. Each is a separate tick.</td><td>Manager (not Delete Media)</td></tr>
+      <tr><td><strong>Conference Bookings</strong></td><td>Open Conference and handle enquiries day to day: confirm, cancel, complete, add notes.</td><td>Manager, Conference Staff</td></tr>
+      <tr><td><strong>Manage Conference Rooms</strong></td><td>Add, edit, switch off and delete conference rooms.</td><td>Manager</td></tr>
+      <tr><td><strong>Conference Invoicing &amp; Pricing</strong></td><td>Set a conference price, send a quotation or invoice.</td><td>Manager</td></tr>
+      <tr><td><strong>Gym Inquiries</strong></td><td>Open the Gym pages for members, inquiries, schedule and classes and work them.</td><td>Manager, Receptionist, Gym Staff</td></tr>
+      <tr><td><strong>Manage Gym Packages</strong></td><td>Add, change and price gym packages.</td><td>Manager</td></tr>
+      <tr><td><strong>Gym Invoicing &amp; Pricing</strong></td><td>Send gym quotations and invoices, and change a gym amount.</td><td>Manager</td></tr>
+      <tr><td><strong>Gym Check-In Scanner</strong></td><td>Scan member cards to check members in and out.</td><td>Manager, Gym Staff</td></tr>
+      <tr><td><strong>Gym Reports</strong></td><td>Open Gym Reports: members, attendance, money owed.</td><td>Manager, Gym Staff</td></tr>
+      <tr><td><strong>Gym Member History</strong></td><td>See the full change log of a member's record.</td><td>Manager</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Content</h3>
+  <table>
+    <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Menu</strong></td><td>Open Menu (or Products) and add or change dishes, drinks and prices.</td><td>Manager</td></tr>
+      <tr><td><strong>Events</strong></td><td>Add and change events on the website.</td><td>Manager</td></tr>
+      <tr><td><strong>Event Bookings</strong></td><td>See event bookings and handle them day to day.</td><td>Manager</td></tr>
+      <tr><td><strong>Event Invoicing &amp; Pricing</strong></td><td>Set an event booking's amount, send a quotation or invoice.</td><td>Manager</td></tr>
+      <tr><td><strong>Reviews</strong></td><td>Approve, reject, reply to and delete guest reviews.</td><td>Manager, Receptionist</td></tr>
+      <tr><td><strong>Contact Inquiries</strong></td><td>Read and reply to messages from the website contact form.</td><td>Manager</td></tr>
+      <tr><td><strong>Footer Management</strong></td><td>Change the website footer, contact details and social links.</td><td>Manager</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Restaurant &amp; Stock</h3>
+  <table>
+    <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Restaurant Orders (POS)</strong></td><td>Place and see restaurant orders; open <strong>Orders &amp; Tabs</strong>. Placing an order takes stock off by itself.</td><td>Manager, Restaurant Staff, Chef, Bar Staff, Coffee Bar Staff, Room Service</td></tr>
+      <tr><td><strong>Stock Dashboard</strong></td><td>Open Stock Overview: stock levels, low-stock and expiry alerts.</td><td>Manager</td></tr>
+      <tr><td><strong>Ingredients &amp; Recipes</strong></td><td>Add and change ingredients, recipes, deliveries, suppliers, buying and purchase orders, and the table, deals and station-hours pages.</td><td>Manager</td></tr>
+      <tr><td><strong>Batch Tracker</strong></td><td>Manage stock batches, expiry dates and supplier details.</td><td>Manager</td></tr>
+      <tr><td><strong>Stock Count &amp; Variance</strong></td><td>Count stock and see differences. Approving a count is for the Admin and Manager roles only.</td><td>Manager</td></tr>
+      <tr><td><strong>Wastage Log</strong></td><td>Record and review wasted ingredients.</td><td>Manager</td></tr>
+      <tr><td><strong>Stock Reports</strong></td><td>Open the stock, usage, wastage and expiry reports.</td><td>Manager</td></tr>
+      <tr><td><strong>Stock Budget (view)</strong></td><td>See the monthly stock budget and what is left to spend.</td><td>Manager</td></tr>
+      <tr><td><strong>Stock Budget (set &amp; approve)</strong></td><td>Set monthly budgets and approve purchase orders that go over a budget.</td><td>Manager</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Stations</h3>
+  <table>
+    <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>POS Till (Touch)</strong></td><td>Open the POS Till and place orders and tabs.</td><td>Manager, Restaurant Staff, Room Service</td></tr>
+      <tr><td><strong>POS Take Payment &amp; Settle</strong></td><td>Take payment on the till: pay now, settle tabs, split bills. Without it the till only sends orders and runs tabs.</td><td>Manager, Restaurant Staff, Room Service</td></tr>
+      <tr><td><strong>POS Opening Float</strong></td><td>Record the cash float at the start of a shift.</td><td>Manager, Restaurant Staff</td></tr>
+      <tr><td><strong>POS Discounts</strong></td><td>Give a discount on an order or a tab.</td><td>Manager, Restaurant Staff</td></tr>
+      <tr><td><strong>POS Quick-86 Items</strong></td><td>Mark an item sold out (86) straight from the till.</td><td>Manager</td></tr>
+      <tr><td><strong>POS Refunds</strong></td><td>Refund a paid till order.</td><td>Manager</td></tr>
+      <tr><td><strong>POS Force-Serve Tab</strong></td><td>Settle a tab whose kitchen items were never marked served.</td><td>Manager</td></tr>
+      <tr><td><strong>POS All Cashiers' Tabs</strong></td><td>See, add to and settle every cashier's open tabs. Without it, only the tabs they opened.</td><td>Manager</td></tr>
+      <tr><td><strong>POS Void Tabs</strong></td><td>Void open tabs, one at a time or many. Cancelling an order before the kitchen starts it does not need this.</td><td>Manager</td></tr>
+      <tr><td><strong>Delete Orders</strong></td><td>Permanently delete any till order. Stock goes back, payments are removed, and a deletion record is kept. Give it only to named people.</td><td>Nobody</td></tr>
+      <tr><td><strong>POS Station Overview</strong></td><td>From the till, see the live Kitchen, Bar and Coffee boards and today's orders.</td><td>Manager</td></tr>
+      <tr><td><strong>POS Shift Override</strong></td><td>Close a cashier's shift that does not balance, with a reason.</td><td>Manager</td></tr>
+      <tr><td><strong>Settle Restaurant Tables</strong></td><td>Take payment and close a dine-in table from the Tables page.</td><td>Manager</td></tr>
+      <tr><td><strong>Kitchen Display (KDS)</strong>, <strong>Bar Display (BDS)</strong>, <strong>Coffee Bar Display (CDS)</strong></td><td>Open that station's screen and mark items ready or served.</td><td>Manager, plus Chef, Bar Staff or Coffee Bar Staff for their own screen</td></tr>
+      <tr><td><strong>Station Reports (KDS/BDS/CDS)</strong></td><td>Read the daily station reports, export them and email the end-of-day summary.</td><td>Manager, Chef, Bar Staff, Coffee Bar Staff</td></tr>
+      <tr><td><strong>Room Service Dashboard</strong></td><td>See live room-service orders and the delivery queue.</td><td>Manager, Receptionist, Restaurant Staff, Room Service</td></tr>
+      <tr><td><strong>Manage Room Service</strong></td><td>Place room-service orders, mark them delivered, post the charge to the guest's bill.</td><td>Manager, Receptionist, Restaurant Staff, Room Service</td></tr>
+      <tr><td><strong>Offline Activity Log</strong></td><td>See till and kitchen actions saved while the internet was down, and when they synced.</td><td>Manager</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Finance</h3>
+  <table>
+    <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Accounting</strong></td><td>Open the Accounting dashboard (money figures and VAT).</td><td>Manager, Accountant</td></tr>
+      <tr><td><strong>POS Accounting</strong></td><td>Review till sales and close cashier shifts from accounting.</td><td>Accountant</td></tr>
+      <tr><td><strong>View Payments</strong></td><td>Open Payments and see payment records.</td><td>Manager, Accountant</td></tr>
+      <tr><td><strong>Receipts</strong></td><td>Make, send, export and check receipts.</td><td>Manager, Accountant</td></tr>
+      <tr><td><strong>Add Payments</strong></td><td>Record a payment, mark a booking paid, change a payment.</td><td>Manager, Accountant</td></tr>
+      <tr><td><strong>Issue &amp; settle refunds</strong></td><td>Refund money and move a refund from pending to done.</td><td>Manager, Accountant</td></tr>
+      <tr><td><strong>Change VAT &amp; refund settings</strong></td><td>Change the VAT mode and rate, refund and cancellation rules, bank and invoice details.</td><td>Nobody</td></tr>
+      <tr><td><strong>Invoices</strong></td><td>Open Invoices and Credit Notes and work them. (Quotations needs <strong>Create Bookings</strong>.)</td><td>Manager, Accountant</td></tr>
+      <tr><td><strong>Reports</strong></td><td>Open Reports and End of Day.</td><td>Manager, Accountant, Viewer</td></tr>
+      <tr><td><strong>Visitor Analytics</strong></td><td>See how many people visit the website.</td><td>Manager</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Settings</h3>
+  <table>
+    <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Hotel Settings</strong></td><td>Open Hotel Settings, Rate Plans, Room Packages and Automated Emails: hotel details, booking rules, email server.</td><td>Manager</td></tr>
+      <tr><td><strong>Edit message templates</strong></td><td>Change the wording of guest emails, PDFs and receipt messages in Email Templates. Nothing else in Settings.</td><td>Manager</td></tr>
+      <tr><td><strong>Module Settings</strong></td><td>Switch parts of the system on and off, and apply business presets.</td><td>Nobody</td></tr>
+      <tr><td><strong>Page Management</strong></td><td>Switch website pages on and off and reorder them.</td><td>Nobody</td></tr>
+      <tr><td><strong>Section Headers</strong></td><td>Change headings on website pages.</td><td>Nobody</td></tr>
+      <tr><td><strong>Cache Management</strong></td><td>Clear the website cache.</td><td>Nobody</td></tr>
+      <tr><td><strong>Backup Management</strong></td><td>Open Backups and run a backup. Download, restore and delete are for the Administrator role only.</td><td>Manager</td></tr>
+      <tr><td><strong>API Keys</strong></td><td>Create and manage keys for outside websites and apps.</td><td>Nobody</td></tr>
+      <tr><td><strong>WhatsApp Settings</strong></td><td>Set up the WhatsApp connection.</td><td>Nobody</td></tr>
+      <tr><td><strong>Facebook Settings</strong></td><td>Connect the Facebook Page for posting.</td><td>Nobody</td></tr>
+    </tbody>
+  </table>
+
+  <h3>System and Administration</h3>
+  <table>
+    <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>System Logs</strong></td><td>Read the system logs: who did what, errors, backups, sign-ins.</td><td>Nobody</td></tr>
+      <tr><td><strong>User Management</strong></td><td>Open Staff &amp; Access.</td><td>Nobody</td></tr>
+      <tr><td><strong>Create Users</strong>, <strong>Edit Users</strong>, <strong>Delete Users</strong></td><td>Add a person, change one, remove one. Each is a separate tick.</td><td>Nobody</td></tr>
+      <tr><td><strong>Assign Permissions</strong></td><td>Change what other people can open.</td><td>Nobody</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><p>"Nobody" means no role ticks it for you, but an Administrator always has it. Tick it for a person only when they need it. A permission only has an effect if the part of the system it belongs to is switched on in <strong>Modules</strong>.</p></div>
 
   <h2 id="receptionist">Example: set up a receptionist</h2>
   <p>Goal: a front-desk person who checks guests in and out, confirms bookings and takes payments, but cannot see the company's finance reports.</p>

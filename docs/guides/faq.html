@@ -178,7 +178,7 @@
 
   <details class="faq" id="faq-delete-order" data-module="pos">
     <summary>How do I delete a POS order (a test or duplicate order)?</summary>
-    <p>You need the <strong>Delete Orders</strong> permission (administrators have it; an administrator can give it to anyone in Staff &amp; Access). Open the till's <strong>Today's orders</strong> and click <strong>Delete</strong> on the order, or use <strong>More</strong> &rarr; <strong>Delete</strong> on the row in <strong>Orders &amp; Tabs</strong>. Type a reason of at least 8 characters. Payments are removed, room-service charges come off the guest bill, stock is put back only for items the kitchen had not started, prepared food is recorded as wastage, and the cash drawer is not changed. It is refused if a credit note is linked or a payment went to MRA. See <a href="01-pos-till.html#delete-order">How to delete an order</a>.</p>
+    <p>You need the <strong>Delete Orders</strong> permission (administrators have it; an administrator can give it to anyone in Staff &amp; Access). Open the till's <strong>Today's orders</strong> and click <strong>Delete</strong> on the order, or use <strong>More</strong> &rarr; <strong>Delete</strong> on the row in <strong>Orders &amp; Tabs</strong>. Type a reason of at least 8 characters. Payments are removed, room-service charges come off the guest bill, stock is put back only for items the kitchen had not started, prepared food is recorded as wastage, and the cash drawer is not changed. It is refused if a credit note is linked. See <a href="01-pos-till.html#delete-order">How to delete an order</a>.</p>
   </details>
 
   <details class="faq" id="faq-todays-orders" data-module="pos">
@@ -234,7 +234,7 @@
 
   <details class="faq" id="faq-set-stock-budget" data-module="stock">
     <summary>How do I set the stock budget?</summary>
-    <p>Open <strong>Stock</strong> &rarr; <strong>Budget</strong>. You need <strong>Stock Budget (set &amp; approve)</strong>; managers have it. Click <strong>Add a line</strong>, pick <strong>Whole stock (all categories)</strong> or a category, and type a <strong>Fixed amount</strong> (or a % of expected sales). Choose <strong>Warn if over</strong> or <strong>Needs approval</strong>, then click <strong>Save budgets</strong>. You will see <em>"Budgets saved."</em> To start from last month, use <strong>Copy last month</strong> or <strong>Suggest from last 3 months</strong>, then check the lines before you save. See <a href="08-stock-orders.html#budget">the stock budget section</a>.</p>
+    <p>Open <strong>Stock</strong> &rarr; <strong>Budget</strong>. You need <strong>Stock Budget (set &amp; approve)</strong>; managers have it. Click <strong>Add a line</strong>, pick <strong>Whole stock (all categories)</strong> or a category, and type a <strong>Fixed amount</strong> (or a % of expected sales). Choose <strong>Warn if over</strong> or <strong>Needs approval</strong>, then click <strong>Save budgets</strong>. You will see <em>"Budgets saved."</em> To start from last month, use <strong>Copy last month</strong> or <strong>Fill from last 3 months</strong>, then check the lines before you save. See <a href="08-stock-orders.html#budget">the stock budget section</a>.</p>
   </details>
 
   <details class="faq" id="faq-receive-no-cost" data-module="stock">
@@ -290,6 +290,113 @@
   <details class="faq" id="faq-end-of-day">
     <summary>Where do I see today's takings and what still needs doing?</summary>
     <p><strong>Money &rarr; End of Day</strong> shows the day's <strong>Revenue earned</strong> (what the hotel earned that day: nights stayed, charges on guest bills, till sales, conferences and events on their event date), <strong>Cash collected</strong> on its own line, cash to bank, what is still owed and a close score with the items that need attention. See <a href="14-reports-eod.html#eod">End of Day report</a>.</p>
+  </details>
+
+  <h2 id="more">Rooms, website, settings and other questions</h2>
+
+  <details class="faq" id="faq-free-rooms" data-module="bookings">
+    <summary>How do I see which rooms are free on a date?</summary>
+    <p>Open <strong>Front Desk</strong> &rarr; <strong>Calendar</strong>. A room with no booking bar and no colour block on that day is free (available). Use <strong>All statuses</strong> &rarr; <strong>Available</strong> to narrow it down. See <a href="07-reception-bookings.html#calendar">How to use the Calendar</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-block-room" data-module="bookings">
+    <summary>How do I stop a room being sold (block a room, close dates, stop sales)?</summary>
+    <p>For set nights: <strong>Front Desk</strong> &rarr; <strong>Blocked Dates</strong> &rarr; <strong>Block Single Date</strong> or <strong>Block Date Range</strong>, choose <strong>Individual Room Level (Specific room)</strong> (or <strong>Room Type Level</strong> for every room of a type), save. Until the room is fixed: <strong>Individual Rooms</strong> &rarr; <strong>Status</strong> &rarr; <strong>Maintenance</strong> or <strong>Out of Order</strong>. Existing bookings are not moved. See <a href="07-reception-bookings.html#blocked">How to block dates</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-booking-page" data-module="bookings">
+    <summary>Where do I see a guest's whole bill and everything done to a booking?</summary>
+    <p>On the Bookings list click <strong>More</strong> &rarr; <strong>Full details</strong>. The booking page has <strong>Folio / Charges</strong> (the bill), <strong>Payment breakdown</strong>, <strong>Invoices</strong>, <strong>Internal notes</strong> and the <strong>Activity timeline</strong> (who did what and when). See <a href="07-reception-bookings.html#details">The Booking Details page</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-pending-lapse" data-module="bookings">
+    <summary>Why did a pending booking turn to Expired by itself (it disappeared from Pending)?</summary>
+    <p>A pending booking with no payment lapses after the hours set in <strong>Hotel Settings</strong> &rarr; Hotel details &rarr; <strong>Unpaid pending bookings lapse after</strong> (48 hours unless changed). Its room is released. Tentative holds expire when their time runs out, and unpaid confirmed bookings are only released if you set hours above 0. See <a href="19-hotel-settings.html#by-itself">Everything the system does by itself</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-by-itself">
+    <summary>What does the system do by itself, and what does it never do by itself?</summary>
+    <p>By itself: expire tentative holds and unpaid pending bookings, send reminder emails (if switched on), create the next recurring maintenance task, take the nightly backup after 01:00, and take stock off when something is sold. Never by itself: send the End of Day report or the daily station reports, close a cashier's shift, or restore a backup. See <a href="19-hotel-settings.html#by-itself">Everything the system does by itself</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-who-did">
+    <summary>Where can I see who changed something, and when?</summary>
+    <p>For one booking, its <strong>Activity timeline</strong>. For one order, <strong>Order log</strong> on the kitchen, bar or coffee screen. For everything (sign-ins, setting changes, refunds, errors) an administrator opens <strong>Settings</strong> &rarr; <strong>System Logs</strong>. See <a href="99-admin-dashboard-full-guide.html#logs">System Logs</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-filter-cards">
+    <summary>What do the number cards, tabs and chips at the top of a page do?</summary>
+    <p>They filter the list below them. Click a card or tab to see only those rows, and the page takes you straight to the filtered list. Click the same card again, <strong>All</strong> or <strong>Clear</strong> to see everything. See <a href="99-admin-dashboard-full-guide.html#lists">Lists, number cards, tabs and times</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-time-zone">
+    <summary>The times look wrong (wrong time or time zone).</summary>
+    <p>Times on a booking's page, on the till and on an order receipt are shown in your own device's time zone. Fix the clock and time zone on the phone or computer. The hotel's own time zone is fixed at installation. See <a href="99-admin-dashboard-full-guide.html#lists">Lists, number cards, tabs and times</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-permissions-list">
+    <summary>What does each permission let a person do?</summary>
+    <p>Every permission in the Permissions window, in plain words, with the roles that have it by default: <a href="18-staff-access.html#all-perms">Every permission, in plain words</a>. To change one person's access click <strong>Permissions</strong> on their row in <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong>.</p>
+  </details>
+
+  <details class="faq" id="faq-favorites">
+    <summary>How do I pin a page to the top of the menu (favourites)?</summary>
+    <p>Click the star at the right of any menu item. It moves into the <strong>Favorites</strong> group at the top. Click the star again to remove it. See <a href="99-admin-dashboard-full-guide.html#sidebar">The sidebar menu</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-contact-form" data-module="website_cms">
+    <summary>Where do messages from the website contact form go?</summary>
+    <p>Into <strong>Website</strong> &rarr; <strong>Contact Inquiries</strong> as New / Unread, and an email goes to the hotel's reservations address. Click <strong>Reply via Email</strong> to answer. The guest is told to expect a reply within 24 hours. See <a href="21-guest-website.html#contact">The Contact form</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-review-pending" data-module="website_cms">
+    <summary>A guest left a review but it is not on the website.</summary>
+    <p>New reviews wait for approval. Open <strong>Website</strong> &rarr; <strong>Reviews</strong> &rarr; <strong>Pending</strong> and click <strong>Approve &amp; publish</strong>. See <a href="21-guest-website.html#review">How a guest leaves a review</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-website-menu" data-module="pos">
+    <summary>How do I change the menu on the website?</summary>
+    <p>The website Restaurant page and the printable menu read straight from <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong>. Add or change the item there and mark it available; an item marked unavailable (86) is hidden from the website. See <a href="21-guest-website.html#restaurant">The Restaurant page and the printable menu</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-guest-website">
+    <summary>What does the guest see on the website, and where does their form land?</summary>
+    <p>Booking, booking look-up, rooms, restaurant, events, conference, gym, contact and reviews: <a href="21-guest-website.html">The guest website</a> lists each page, what the guest does and which admin page handles it.</p>
+  </details>
+
+  <details class="faq" id="faq-gym-unpaid-bill" data-module="gym">
+    <summary>I cancelled a gym member. What happens to their unpaid bill?</summary>
+    <p>Cancelling a member voids the unpaid part of their gym bills and releases their future bookings and classes. Money already paid stays as credit owed back: refund it or issue a credit note. Suspending or expiring a member leaves their bills alone. See <a href="17-gym-management.html#edit-member">How to edit a member, renew, suspend or cancel</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-started-food" data-module="pos">
+    <summary>A guest's booking was cancelled or deleted after the kitchen had started their room-service food. Who pays (food kept, not eaten)?</summary>
+    <p>Food nobody had started is cancelled and its stock goes back. Food already started or served stays on the guest's bill (the food was made), and the booking's refund is reduced by that amount. Only a part-paid order stops the cancel, until you settle or refund it in <strong>Orders &amp; Tabs</strong>. See <a href="07-reception-bookings.html#cancel">How to cancel a booking</a> and <a href="05-room-service.html">Room service</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-mra">
+    <summary>Does the system send our sales or VAT to MRA?</summary>
+    <p>No. The system has no connection to MRA. It does not report, submit or fiscalise sales, receipts or VAT. It keeps the VAT Register and the quarterly VAT totals (<strong>Money</strong> &rarr; <strong>Reports</strong> &rarr; <strong>VAT Register</strong>) that you or your accountant use to file the VAT return with MRA separately. VAT collected is held on behalf of MRA and is not the hotel's income. If MRA requires fiscal receipts from your till, that is done outside this system. See <a href="13-finance-payments.html#accounting">Accounting dashboard and VAT</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-old-content">
+    <summary>The website shows old content, text or prices after I changed them.</summary>
+    <p>The browser or the website kept an old copy. First reload the page (hold <kbd>Shift</kbd> and click reload). If it is still old, an administrator opens <strong>Settings</strong> &rarr; <strong>Cache</strong>, ticks the cache types and clicks <strong>Clear Selected Caches</strong>. Clearing the cache never deletes hotel data. See <a href="99-admin-dashboard-full-guide.html#cache">Cache</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-station-sound" data-module="pos">
+    <summary>The kitchen, bar or coffee screen does not beep when a new ticket comes in.</summary>
+    <p>Check that <strong>Sound</strong> on the screen is switched on, turn the device volume up, and make sure the browser tab is not muted. The board still updates by itself without sound. See <a href="02-kds-kitchen.html#screen">Kitchen Display</a>. On the till, a ready alert also plays a sound: see <a href="01-pos-till.html#ready-alert">How you know an order is ready</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-order-ready" data-module="pos">
+    <summary>How does a waiter know an order is ready?</summary>
+    <p>The till shows a small notice under the top bar, such as <em>"Kitchen: all 3 items ready"</em>, plays a sound and (on a tablet or phone) vibrates. It goes only to the person who placed the order. Tap it to open the order. See <a href="01-pos-till.html#ready-alert">How you know an order is ready</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-backup-before-update">
+    <summary>How do I take a backup before an update?</summary>
+    <p>An administrator opens <strong>Settings</strong> &rarr; <strong>Backups</strong> and clicks <strong>Run Backup Now</strong>. It takes 5 to 30 seconds. You will see <em>"Backup saved (N KB). Your hotel data is protected up to this moment."</em> Then click <strong>Download</strong> to keep a copy off the server. See <a href="99-admin-dashboard-full-guide.html#backups">Backups</a>.</p>
   </details>
 
   </div>

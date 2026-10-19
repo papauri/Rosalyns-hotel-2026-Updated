@@ -273,16 +273,11 @@ function buildAccountingSummary(string $startDate, string $endDate): array
 
     fputcsv($fp, []);
 
-    $hasMraStatus = rh_column_exists($pdo, 'payments', 'mra_status');
-    $mraPendingSql = $hasMraStatus
-        ? "SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' AND mra_status NOT IN ('accepted','not_required') THEN 1 ELSE 0 END)"
-        : "0";
     $complianceStmt = $pdo->prepare(
         "SELECT
             COUNT(*) AS completed_sales,
             SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' AND (receipt_number IS NULL OR receipt_number = '') THEN 1 ELSE 0 END) AS missing_receipts,
-            SUM(CASE WHEN invoice_generated = 1 AND (invoice_number IS NULL OR invoice_number = '') THEN 1 ELSE 0 END) AS generated_invoices_missing_numbers,
-            {$mraPendingSql} AS mra_pending_or_unsubmitted
+            SUM(CASE WHEN invoice_generated = 1 AND (invoice_number IS NULL OR invoice_number = '') THEN 1 ELSE 0 END) AS generated_invoices_missing_numbers
          FROM payments
          WHERE deleted_at IS NULL
            AND payment_date BETWEEN :s AND :e"
@@ -313,7 +308,6 @@ function buildAccountingSummary(string $startDate, string $endDate): array
     fputcsv($fp, ['Completed sales missing receipt number', (int)($compliance['missing_receipts'] ?? 0)]);
     fputcsv($fp, ['Generated invoices missing invoice number', (int)($compliance['generated_invoices_missing_numbers'] ?? 0)]);
     fputcsv($fp, ['Paid POS orders missing payments ledger row', $paidPosWithoutLedger]);
-    fputcsv($fp, ['MRA pending/unsubmitted sales', (int)($compliance['mra_pending_or_unsubmitted'] ?? 0)]);
 
     fputcsv($fp, []);
 

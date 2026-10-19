@@ -64,10 +64,8 @@ $complianceSummary = [
     'completed_sales' => 0,
     'missing_receipts' => 0,
     'generated_invoices_missing_numbers' => 0,
-    'mra_pending_or_unsubmitted' => 0,
     'paid_pos_without_ledger' => 0,
 ];
-$mraColumnsAvailable = false;
 $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
 $vatRate = getSetting('vat_rate');
 $vatNumber = getSetting('vat_number');
@@ -526,17 +524,11 @@ try {
     $trendStmt->execute([$trendStart, $trendEnd]);
     $dailyTrend = $trendStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $paymentColumns = finance_table_columns($pdo, 'payments');
-    $mraColumnsAvailable = isset($paymentColumns['mra_status']);
-    $mraPendingSql = $mraColumnsAvailable
-        ? "SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND mra_status NOT IN ('accepted','not_required') THEN 1 ELSE 0 END)"
-        : "0";
     $complianceStmt = $pdo->prepare("
         SELECT
             SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN 1 ELSE 0 END) AS completed_sales,
             SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND (receipt_number IS NULL OR receipt_number = '') THEN 1 ELSE 0 END) AS missing_receipts,
-            SUM(CASE WHEN invoice_generated = 1 AND (invoice_number IS NULL OR invoice_number = '') THEN 1 ELSE 0 END) AS generated_invoices_missing_numbers,
-            {$mraPendingSql} AS mra_pending_or_unsubmitted
+            SUM(CASE WHEN invoice_generated = 1 AND (invoice_number IS NULL OR invoice_number = '') THEN 1 ELSE 0 END) AS generated_invoices_missing_numbers
         FROM payments
         WHERE deleted_at IS NULL
           AND payment_date BETWEEN ? AND ?
@@ -905,7 +897,7 @@ if (!isset($folio_fnb)) {
         </template>
 
         <template id="acct-insight-template-vat-collected">
-            <p class="acct-insight-intro">VAT collected is tax held on behalf of MRA. Keep these figures aligned with configuration and submission status.</p>
+            <p class="acct-insight-intro">VAT collected is tax held on behalf of MRA. Keep these figures aligned with your VAT settings.</p>
             <table class="acct-insight-table">
                 <thead>
                     <tr>
@@ -1219,7 +1211,7 @@ if (!isset($folio_fnb)) {
         </template>
 
         <template id="acct-insight-template-compliance-missing-invoice-numbers">
-            <p class="acct-insight-intro">Generated invoices without invoice numbers break traceability for accounting and statutory reporting.</p>
+            <p class="acct-insight-intro">Generated invoices without invoice numbers break traceability for your accounting and VAT records.</p>
             <table class="acct-insight-table">
                 <thead>
                     <tr>
@@ -1277,45 +1269,6 @@ if (!isset($folio_fnb)) {
             </div>
         </template>
 
-        <template id="acct-insight-template-compliance-mra-pending">
-            <p class="acct-insight-intro">
-                <?php if ($mraColumnsAvailable): ?>
-                    MRA-ready fields are installed. This check tracks completed sales that still need MRA submission work.
-                <?php else: ?>
-                    MRA submission fields are not installed yet, so statutory submission tracking cannot run in this dashboard.
-                <?php endif; ?>
-            </p>
-            <table class="acct-insight-table">
-                <thead>
-                    <tr>
-                        <th>MRA Readiness Check</th>
-                        <th class="num">Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td><?php echo $mraColumnsAvailable ? 'Pending or unsubmitted sales' : 'Readiness field status'; ?></td>
-                        <td class="num"><strong><?php echo number_format($mraColumnsAvailable ? (int)($complianceSummary['mra_pending_or_unsubmitted'] ?? 0) : 1); ?></strong></td>
-                    </tr>
-                    <tr>
-                        <td>Columns available</td>
-                        <td class="num"><?php echo $mraColumnsAvailable ? 'Yes' : 'No'; ?></td>
-                    </tr>
-                    <tr>
-                        <td>Recommended next step</td>
-                        <td class="num"><?php echo $mraColumnsAvailable ? 'Process pending MRA submissions' : 'Install MRA tracking fields'; ?></td>
-                    </tr>
-                </tbody>
-            </table>
-            <div class="acct-insight-actions">
-                <?php if ($mraColumnsAvailable): ?>
-                    <a href="reports.php?start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn acct-btn--primary">Open MRA reporting</a>
-                <?php else: ?>
-                    <a href="booking-settings.php#invoice-settings" class="acct-btn acct-btn--primary">Open invoice settings</a>
-                <?php endif; ?>
-            </div>
-        </template>
-
         <?php if ($canChangeFinanceSettings): ?>
         <!-- VAT unlock confirmation modal -->
         <div class="modal-overlay" id="vatConfirmModal-overlay" data-modal-overlay aria-hidden="true"></div>
@@ -1328,7 +1281,7 @@ if (!isset($folio_fnb)) {
                 <div class="modal-body vat-confirm-modal__content">
                     <p class="vat-confirm-modal__body">
                         VAT settings control how tax is calculated across all bookings, POS transactions, and invoices.
-                        Incorrect values can cause compliance issues with the MRA.
+                        Incorrect values put wrong VAT on your documents and in your VAT figures.
                     </p>
                     <p class="vat-confirm-modal__body">
                         <strong>Are you sure you want to unlock and edit these settings?</strong>
@@ -1431,16 +1384,6 @@ if (!isset($folio_fnb)) {
                 'action_label' => 'Open POS orders',
             ];
         }
-        $complianceRows[] = [
-            'key' => 'compliance-mra-pending',
-            'insight_title' => $mraColumnsAvailable ? 'MRA Submission Readiness' : 'MRA Fields Installation Check',
-            'label' => $mraColumnsAvailable ? 'MRA pending/unsubmitted sales' : 'MRA readiness fields not installed',
-            'short' => $mraColumnsAvailable ? 'Sales not yet sent to MRA' : 'MRA fields not installed',
-            'count' => $mraColumnsAvailable ? (int)($complianceSummary['mra_pending_or_unsubmitted'] ?? 0) : 1,
-            'warn' => true,
-            'action_link' => $mraColumnsAvailable ? ('reports.php?start_date=' . urlencode($startDate) . '&end_date=' . urlencode($endDate)) : 'booking-settings.php#invoice-settings',
-            'action_label' => $mraColumnsAvailable ? 'Open MRA-focused reports' : 'Open settings & install fields',
-        ];
         $complianceAll = $complianceRows;
         // Only checks that need attention are listed; a clean period shows one line.
         $complianceRows = array_values(array_filter($complianceRows, static function ($row) {
@@ -2158,7 +2101,7 @@ if (!isset($folio_fnb)) {
 
                 <!-- Compliance checks -->
                 <div class="ck-pane" role="tabpanel" data-ck-pane="compliance" hidden>
-                    <p class="ck-panel__sub" style="margin:0 0 10px">Receipt, invoice, POS ledger and MRA-readiness gaps for the selected period.</p>
+                    <p class="ck-panel__sub" style="margin:0 0 10px">Receipt, invoice and POS ledger gaps for the selected period.</p>
                     <div class="ck-table-wrap">
                         <table class="no-card-mobile no-scroll ck-table">
                             <thead><tr><th>Check</th><th class="num">Count</th><th>Status</th><th>Action</th></tr></thead>
@@ -2190,7 +2133,7 @@ if (!isset($folio_fnb)) {
                 </span>
             </summary>
         <section class="acct-panel acct-panel--vat">
-            <p class="ck-panel__sub">Tax configuration affects all future invoices, payments, and MRA reporting. Changes cannot be undone automatically.</p>
+            <p class="ck-panel__sub">Tax configuration affects all future invoices, payments, and VAT reports. Changes cannot be undone automatically.</p>
 
             <?php if ($vatSettingsMessage): ?>
                 <div class="vat-result-banner vat-result-banner--success">
@@ -2234,7 +2177,7 @@ if (!isset($folio_fnb)) {
                     <button type="button" class="ck-btn" id="vatUnlockBtn">
                         <i class="fas fa-lock-open"></i> Unlock to Edit
                     </button>
-                    <p class="vat-unlock-hint"><i class="fas fa-triangle-exclamation"></i> Editing VAT settings affects all future invoices, tax calculations, and MRA reports. Proceed with caution.</p>
+                    <p class="vat-unlock-hint"><i class="fas fa-triangle-exclamation"></i> Editing VAT settings affects all future invoices, tax calculations, and VAT reports. Proceed with caution.</p>
                 </div>
                 <?php else: ?>
                 <p class="vat-unlock-hint"><i class="fas fa-lock"></i> Only users with the "Change VAT &amp; refund settings" permission can change VAT.</p>

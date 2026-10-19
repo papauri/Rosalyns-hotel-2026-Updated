@@ -45,7 +45,7 @@
       <li><a href="#services">Service Modules &amp; Dedicated Notification Emails</a></li>
       <li><a href="#pwa">PWA Install Banner</a></li>
       <li><a href="#elsewhere">Where the wording and other hotel details live</a></li>
-      <li><a href="#automated-emails">Automated Emails (reminders that send themselves)</a></li><li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#automated-emails">Automated Emails (reminders that send themselves)</a></li><li><a href="#by-itself">Everything the system does by itself</a></li><li><a href="#rules">Rules the system enforces</a></li>
       <li><a href="#problems">Problems and fixes</a></li>
       <li><a href="#related">Related guides</a></li>
     </ol>
@@ -174,6 +174,9 @@
       <tr><td><strong>Check-in from</strong></td><td>A time such as <code>2:00 PM</code> or <code>14:00</code>. Default 2:00 PM.</td><td>The check-in time shown to guests and in emails.</td></tr>
       <tr><td><strong>Check-out by</strong></td><td>A time such as <code>11:00 AM</code> or <code>11:00</code>. Default 11:00 AM.</td><td>The check-out time shown to guests and in emails.</td></tr>
       <tr><td><strong>Tentative hold reminder (hours before it lapses)</strong></td><td>Whole number 1 to 168. Default 24.</td><td>How long before a tentative hold runs out the guest is reminded.</td></tr>
+      <tr><td><strong>Unpaid pending bookings lapse after (hours since booked, 0 = never)</strong></td><td>Whole number 0 to 720. Default 48.</td><td>A pending booking with no payment and no confirmation is marked Expired this many hours after it was booked, and its room is released. The next page anyone opens does it, nobody has to click. 0 turns it off. A booking with any payment never lapses this way.</td></tr>
+      <tr><td><strong>Confirmed bookings with no payment are released after (hours since booked, 0 = never)</strong></td><td>Whole number 0 to 2160. Default 0 (off).</td><td>When above 0, a confirmed booking that still has no payment is released after this many hours (see Automated Emails).</td></tr>
+      <tr><td><strong>Remind the guest to pay (hours before that release, 0 = no reminder)</strong></td><td>Whole number 0 to 720. Default 24.</td><td>How long before that release the guest gets a payment reminder email. Only used when the release above is on.</td></tr>
       <tr><td><strong>Guest self-cancel notice (days before arrival, 0 = any time)</strong></td><td>Whole number 0 to 60. Default 0.</td><td>How many days before arrival a guest may still cancel online. 0 means any time.</td></tr>
       <tr><td><strong>Booking time buffer (minutes)</strong></td><td>Whole number 0 to 720. Default 60.</td><td>The minimum notice, in minutes, used on the Conference and Gym booking forms when a same-day time is chosen.</td></tr>
       <tr><td><strong>Child price (% of the adult rate)</strong></td><td>Whole number 0 to 100. Default 50.</td><td>The price charged for a child, as a percentage of the adult rate.</td></tr>
@@ -399,6 +402,7 @@
 
   <h2 id="elsewhere">Where the wording and other hotel details live</h2>
   <ul>
+    <li><strong>Currency and time zone</strong>: the currency symbol and code (for example MWK) and the hotel's time zone are set when the system is installed and cannot be changed in the admin. Ask your system administrator if they must change. The currency shows on every price, bill and receipt.</li>
     <li><strong>Email and PDF wording</strong> (subject lines, body text, invoice and quotation layouts) is on Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Email Templates</strong>, and needs the permission <strong>Edit message templates</strong>. The list of tags you can put in a template is in <a href="12-email-templates.php">Email template tags</a>. This page, Hotel Settings, does not edit any wording.</li>
     <li><strong>Automated Emails</strong> (Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Automated Emails</strong>, <code>/admin/automated-emails.php</code>, permission <strong>Hotel Settings</strong>): the master switch for automatic emails, the overdue payment reminder stages, the run interval, a test-recipient box and a <strong>Send test to me</strong> button (see <a href="#automated-emails">Automated Emails</a>). If the <strong>Test recipient</strong> box has an address in it, every automatic email goes to that address instead of to real guests, and a yellow <strong>TEST MODE</strong> bar shows at the top. Leave it empty in normal use.</li>
     <li><strong>Footer</strong> (Admin menu &rarr; <strong>Website</strong> &rarr; <strong>Footer</strong>, <code>/admin/footer-management.php</code>, permission <strong>Footer Management</strong>, needs the Website &amp; CMS module): this is where the hotel name (<strong>Site Name</strong>), tagline, logo, main <strong>Phone Number</strong>, <strong>Email Address</strong>, <strong>Address</strong>, <strong>Working Hours</strong>, the social media links (<strong>Facebook URL</strong>, <strong>Instagram URL</strong>, <strong>Twitter / X URL</strong>, <strong>LinkedIn URL</strong>) and the copyright text are set. Saving shows <em>"Site and footer settings saved."</em> The site name cannot be empty: <em>"Site name is required."</em></li>
@@ -422,7 +426,7 @@
       <tr><td>Tentative hold reminders / Tentative hold expired notices</td><td>Warns the guest before a tentative hold runs out, and tells them when it has.</td><td>Use the reminder hours in <a href="#tentative">Tentative Bookings</a>.</td></tr>
       <tr><td>Pending booking expired notices</td><td>Tells the guest when an unconfirmed (pending) booking has expired.</td><td></td></tr>
       <tr><td>Confirmed-but-unpaid payment reminders / room release</td><td>Reminds guests whose confirmed booking has no payment, then releases the room when the pay-by time passes.</td><td>Only work when <strong>Confirmed bookings with no payment are released after (hours since booked, 0 = never)</strong> in <a href="#details">Hotel details</a> is above 0. It is 0 (off) by default.</td></tr>
-      <tr><td>Pre-arrival reminders / Post-stay review requests</td><td>An email before arrival, and a review request after check-out.</td><td>Off by default. They share their switches and day settings with <a href="#notify">Booking Notification Email</a>.</td></tr>
+      <tr><td>Pre-arrival reminders / Post-stay review requests</td><td>An email before arrival, and an email after check-out to ask the guest to leave a review (a review request).</td><td>Off by default. They share their switches and day settings with <a href="#notify">Booking Notification Email</a>.</td></tr>
       <tr><td>Gym membership renewal reminders</td><td>Reminds members before their membership ends.</td><td>Shares its switch with Gym Members (see the <a href="17-gym-management.html#reminders">Gym guide</a>).</td></tr>
       <tr><td>Recurring maintenance generation</td><td>Creates the next room-maintenance task in each recurring series. Not an email.</td><td>On by default. It has its own switch.</td></tr>
       <tr><td>Nightly database backup</td><td>Makes the daily backup, once a day after 01:00, from the website itself. No cron job is needed.</td><td>Has its own switch and runs even when the master switch is off. See Backups in the <a href="99-admin-dashboard-full-guide.html#backups">Admin reference</a>.</td></tr>
@@ -444,6 +448,23 @@
     <li><strong>Recent activity (last 100)</strong> lists every automatic email: When, Job, Account, Stage, Recipient and Status (<em>sent</em>, <em>failed</em> with the reason underneath, or <em>skipped</em>, for example demo bookings). Each reminder stage is sent once per booking or account, never twice. A <em>failed</em> line such as <em>"Invalid address: (From)"</em> means the sending address in <a href="#email-config">Email Configuration</a> is missing or wrong.</li>
     <li>The wording of each email is edited in <a href="12-email-templates.php">Email Templates</a>.</li>
   </ul>
+
+  <h2 id="by-itself">Everything the system does by itself</h2>
+  <p>Nobody has to click for these, and no cron job or server set-up is needed. They run on the next page anyone opens on the website or the admin. If you wonder why something changed on its own, look here first.</p>
+  <table>
+    <thead><tr><th>What happens</th><th>When</th><th>Where you control it</th></tr></thead>
+    <tbody>
+      <tr data-module="bookings"><td>A tentative hold expires: the room is released, a sent quotation is marked expired, the guest gets the "Tentative Booking Expired" email.</td><td>When the hold time runs out.</td><td><a href="07-reception-bookings.html#tentative">Tentative bookings</a>, <a href="#tentative">Tentative Bookings</a> card.</td></tr>
+      <tr data-module="bookings"><td>An unpaid pending booking is marked Expired and its room released.</td><td>48 hours after it was booked, unless changed.</td><td><strong>Unpaid pending bookings lapse after</strong> in <a href="#details">Hotel details</a>.</td></tr>
+      <tr data-module="bookings"><td>A confirmed booking with no payment is released, after a payment reminder.</td><td>Off until you set hours above 0.</td><td><strong>Confirmed bookings with no payment are released after</strong> in <a href="#details">Hotel details</a>.</td></tr>
+      <tr data-module="bookings"><td>Reminder and notice emails: overdue payments, quotation expiry, tentative holds, pre-arrival, post-stay review request, gym renewal.</td><td>At most every Run interval (15 minutes by default).</td><td><a href="#automated-emails">Automated Emails</a>: master switch and a switch for each.</td></tr>
+      <tr data-module="bookings"><td>The next recurring room-maintenance task is created.</td><td>Checked at most every 6 hours.</td><td>Room Maintenance (see the <a href="06-housekeeping.html">Housekeeping guide</a>) and its switch in Automated Emails.</td></tr>
+      <tr data-module="gym"><td>A gym visit still open from a previous day is closed.</td><td>At 22:00, the gym closing time (fixed).</td><td><a href="17-gym-management.html#checkin">Gym check-in</a>.</td></tr>
+      <tr><td>The nightly database backup.</td><td>Once a day, after 01:00.</td><td><a href="99-admin-dashboard-full-guide.html#backups">Backups</a>; its own switch in Automated Emails.</td></tr>
+      <tr><td>Stock is taken off when something is sold, and put back when an order is cancelled or voided.</td><td>As each sale or cancel happens.</td><td><a href="20-stock-loss-prevention.html">Stopping stock going missing</a>.</td></tr>
+    </tbody>
+  </table>
+  <p>These do <strong>not</strong> happen by themselves: the End of Day report and the daily station reports are only emailed when someone clicks send; a cashier shift is only closed by a person; clearing the website cache on a schedule needs the hosting company to set up a timed task, so use <strong>Cache</strong> in the Admin reference when pages look old.</p>
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>

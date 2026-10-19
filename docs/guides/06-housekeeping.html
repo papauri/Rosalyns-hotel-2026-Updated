@@ -55,7 +55,7 @@
   <h3>Housekeeping screen</h3>
   <p>The page title is <strong>Housekeeping Management</strong>. From top to bottom:</p>
   <ul>
-    <li><strong>Auto-Create Checkout Cleanup</strong> and <strong>Add Assignment</strong> buttons at the top right.</li>
+    <li><strong>Create Checkout Cleanup</strong> and <strong>Add Assignment</strong> buttons at the top right.</li>
     <li>Number cards: <strong>Today's Tasks</strong>, <strong>Pending Tasks</strong>, <strong>In Progress</strong>, <strong>Completed Today</strong>, <strong>High Priority</strong>. A <strong>Blocked</strong> card appears only when at least one task is blocked. Click a card to open a window (for example <em>"Pending Tasks - Quick Insights"</em>) listing up to 12 matching tasks with the room, who it is assigned to, the due date and the notes.</li>
     <li><strong>Occupied Rooms</strong> list. Shown only when at least one guest is checked in. Each room card shows the room, the guest name and the check-out date. A card marked <strong>Checkout Today</strong> has a guest leaving today.</li>
     <li><strong>Staff Workload</strong> table (columns <strong>Staff Member</strong>, <strong>Active Tasks</strong>, <strong>High Priority Pending</strong>, <strong>Completed Today</strong>). It lists only staff who have an open task or finished one today.</li>
@@ -67,7 +67,7 @@
   <h3>Room Maintenance screen</h3>
   <p>The page title is <strong>Room Maintenance Management</strong>. It has the same layout:</p>
   <ul>
-    <li><strong>Auto-Create Tasks</strong> and <strong>Add Maintenance</strong> buttons at the top right.</li>
+    <li><strong>Create Tasks for Rooms</strong> and <strong>Add Maintenance</strong> buttons at the top right.</li>
     <li>Number cards: <strong>Today's Tasks</strong>, <strong>Pending Tasks</strong>, <strong>In Progress</strong>, <strong>Completed Today</strong>, <strong>Verified Today</strong>, <strong>High/Urgent Priority</strong>, <strong>Emergency</strong>. Click a card to see up to 12 matching requests.</li>
     <li><strong>Rooms Needing Maintenance</strong> list. Shown when a room is marked Maintenance or Out of Order, or has a guest checked in. Each card shows the room and its status.</li>
     <li><strong>Staff Workload</strong> table (same four columns as above).</li>
@@ -134,7 +134,7 @@
   </ul>
   <p>For full cleaning tasks with who did what and when, use <strong>Housekeeping</strong> as described below. The Room board is the quick overview.</p>
 
-  <h2 id="hk-work">How to work through a cleaning task (start, finish, verify)</h2>
+  <h2 id="hk-work">How to work through a cleaning task (start, finish, verify, mark a room clean)</h2>
   <ol class="steps">
     <li>Go to <strong>Front Desk</strong> &rarr; <strong>Housekeeping</strong>.</li>
     <li>Find the room in <strong>All Assignments</strong>. Use the search box (room number or staff name) or the status filter if the list is long.</li>
@@ -165,9 +165,9 @@
   <h2 id="hk-auto">How to create the checkout cleanings in one click</h2>
   <p>Use this at the start of a shift if some checked-out rooms have no cleaning task yet.</p>
   <ol class="steps">
-    <li>Click <strong>Auto-Create Checkout Cleanup</strong>.</li>
-    <li>A box asks <em>"Auto-create checkout cleanup assignments for all rooms that need it?"</em>. Click <strong>Auto-Create</strong>.</li>
-    <li>You will see <em>"Auto-created 3 checkout cleanup assignments."</em> (the number is however many were made, which can be 0).</li>
+    <li>Click <strong>Create Checkout Cleanup</strong>.</li>
+    <li>A box asks <em>"Create checkout cleanup assignments for all rooms that need it?"</em>. Click <strong>Create</strong>.</li>
+    <li>You will see <em>"Created 3 checkout cleanup assignments."</em> (the number is however many were made, which can be 0).</li>
   </ol>
   <p>The system looks at each room whose latest booking is checked out (or still checked in past its check-out date) with a check-out date of today or earlier. If that room has never had a checkout cleanup task, it creates one: type <strong>Checkout Cleanup</strong>, priority <strong>High</strong>, due today, <strong>Unassigned</strong>, note <em>"Checkout cleanup required"</em>. A room is never given a second checkout cleanup, even if you run this again.</p>
 
@@ -236,9 +236,9 @@
 
   <h3>Requests the system creates for you</h3>
   <ul>
-    <li>Nothing is created, and no room is released, when you open the Room Maintenance screen. Tasks are only created when you click <strong>Auto-Create Tasks</strong>.</li>
+    <li>Nothing is created, and no room is released, when you open the Room Maintenance screen. Tasks are only created when you click <strong>Create Tasks for Rooms</strong>.</li>
     <li>Recurring requests (see <strong>Recurring Task</strong> above) are created for you by the automatic scheduler, which runs every few hours. The next one falls due by calendar date after the last one (a real calendar month for Monthly). A new one is never made while an earlier request in the same series (same room and title) is still open, so you will not get duplicates. A manager can switch this off in Admin &rarr; <strong>Automated Emails</strong> with the <strong>Recurring maintenance</strong> toggle.</li>
-    <li>Click <strong>Auto-Create Tasks</strong>, then click <strong>Auto-Create</strong> in the box <em>"Create a maintenance task for every room currently in Maintenance / Out of order that has no open task? Rooms with a guest checked in are skipped."</em>. You will see <em>"Auto-created 2 maintenance tasks."</em></li>
+    <li>Click <strong>Create Tasks for Rooms</strong>, then click <strong>Create tasks</strong> in the box <em>"Create a maintenance task for every room currently in Maintenance / Out of order that has no open task? Rooms with a guest checked in are skipped."</em>. You will see <em>"Auto-created 2 maintenance tasks."</em></li>
     <li>Each task is titled <em>"Auto-generated maintenance task"</em>. Out of Order gets <strong>Repair</strong> and <strong>High</strong>; Maintenance gets <strong>Repair</strong> and <strong>Urgent</strong>. A room with a guest checked in never gets an automatic task.</li>
   </ul>
 
@@ -285,7 +285,7 @@
     <li>A maintenance request's end date must be after its start date.</li>
     <li>Verified tasks and requests are locked. They cannot be edited. They can only be deleted.</li>
     <li>Verify only works on tasks that are Completed and not yet verified.</li>
-    <li>A room is never given two open checkout cleanings, and the same room is never given a second checkout cleanup by <strong>Auto-Create Checkout Cleanup</strong>.</li>
+    <li>A room is never given two open checkout cleanings, and the same room is never given a second checkout cleanup by <strong>Create Checkout Cleanup</strong>.</li>
     <li>While a room has an open cleaning task, an Available room is moved to <strong>Cleaning</strong>. When the room has no open cleaning task (everything is Completed, Verified or deleted), a room in <strong>Cleaning</strong> is moved to <strong>Available</strong>. This check runs each time you open the Housekeeping screen and after every change you make on it.</li>
     <li>If a room's status is set to Maintenance or Out of Order, its Pending and In progress cleaning tasks become <strong>Blocked</strong>.</li>
     <li>Open maintenance requests move the room to <strong>Maintenance</strong>, except Occupied and Out of Order rooms, which are left as they are. Pending, In progress and Completed requests all count as open for this, so a Completed request keeps the room in Maintenance until it is Verified. Planned requests only count once their start date has arrived. Verifying, cancelling or deleting them releases the room, but only if the request put it in Maintenance (never a room staff set by hand), and the room goes to <strong>Cleaning</strong> with a housekeeping task, not straight to Available.</li>
@@ -317,7 +317,7 @@
       <tr><td><em>"Assignment not found or not in completed status."</em> / <em>"Schedule not found or not in completed status."</em></td><td>You clicked Verify on something that is not Completed, or someone already verified it.</td><td>Refresh the page and check the status.</td></tr>
       <tr><td><em>"No rooms selected."</em></td><td>You clicked assign without choosing a room.</td><td>Click at least one room card first.</td></tr>
       <tr><td><em>"Bulk assigned 0 rooms for housekeeping."</em> / <em>"Bulk assigned 0 rooms for maintenance."</em></td><td>Every selected room already has an open task.</td><td>Nothing to do. Edit the existing task if you need to change it.</td></tr>
-      <tr><td><em>"Auto-created 0 checkout cleanup assignments."</em></td><td>No checked-out room is missing a checkout cleanup.</td><td>Nothing to do.</td></tr>
+      <tr><td><em>"Created 0 checkout cleanup assignments."</em></td><td>No checked-out room is missing a checkout cleanup.</td><td>Nothing to do.</td></tr>
       <tr><td><em>"Invalid security token. Please refresh and try again."</em></td><td>The page was open too long.</td><td>Refresh the page and try again.</td></tr>
       <tr><td><em>"Network error — please try again."</em></td><td>The connection dropped while saving in the window.</td><td>Check the connection and click Save again.</td></tr>
       <tr><td><em>"Failed to load audit history."</em></td><td>The history could not be loaded.</td><td>Close the window and try again.</td></tr>

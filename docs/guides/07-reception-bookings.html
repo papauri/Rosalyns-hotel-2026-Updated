@@ -55,6 +55,7 @@
     <ol>
       <li><a href="#screen">What is on the screen</a></li>
       <li><a href="#find">How to find a booking</a></li>
+      <li><a href="#details">The Booking Details page (one booking in full)</a></li>
       <li><a href="#calendar">How to use the Calendar</a></li>
       <li><a href="#create">How to create a booking</a></li>
       <li><a href="#confirm">How to confirm a pending booking</a></li>
@@ -79,7 +80,7 @@
     </ol>
   </div>
 
-  <h2 id="screen">What is on the screen</h2>
+  <h2 id="screen">What is on the screen (the Bookings list)</h2>
   <p>The Bookings list has these parts:</p>
   <ul>
     <li><strong>Search</strong> box. Placeholder: <em>"Search ref, guest, phone, room no, payment ref..."</em>. Results update as you type.</li>
@@ -119,8 +120,19 @@
   </ol>
   <div class="note"><p>If nothing matches you will see <em>"No room bookings match your current search filters."</em> The Status column values are the same words as the status filter. Payment values include Paid, Partial and Unpaid.</p></div>
 
+  <h2 id="details">The Booking Details page (one booking in full)</h2>
+  <p>Click <strong>More</strong> &rarr; <strong>Full details</strong> on the Bookings list, or click a booking on the Calendar. The page is called <strong>Booking</strong> followed by the reference. Use it to see a guest's bill, what they have paid and everything that was done to the booking. Needs <strong>View Bookings</strong>. Each button on it needs the same permission as on the list (see the table at the top).</p>
+  <ul>
+    <li>Across the top: the reference, the guest, the dates and nights, the status, and <strong>Outstanding balance</strong> when money is owed. The buttons shown depend on the status: <strong>Confirm Booking</strong> or <strong>Convert to Confirmed</strong>, <strong>Mark No-Show</strong>, <strong>Upgrade / Change Type</strong>, <strong>Cancel Booking</strong> (for rooms booked together as a group: <strong>Cancel Whole Group (N rooms)</strong> and <strong>Cancel This Room Only</strong>) and <strong>Restore Booking</strong> (deleted bookings).</li>
+    <li><strong>Stay details</strong>: guest, room, dates, guests, special requests. <strong>Adjust Stay Dates</strong> changes the dates (see <a href="#dates">How to change the stay dates</a>).</li>
+    <li><strong>Folio / Charges</strong>: the guest's bill. <strong>Add Custom Charge</strong>, <strong>Add Menu Item to Folio</strong> and <strong>Void Charge</strong> are explained in <a href="#folio">How to add or void folio charges</a>. Food and drinks charged to the room from the till or room service also appear here.</li>
+    <li><strong>Payment breakdown</strong>: every payment, refund and credit, and what is still owed. See <a href="#payment">How to take a payment</a>.</li>
+    <li><strong>Invoices</strong>: documents sent to the guest. <strong>Guest history</strong>: the guest's other stays. <strong>Internal notes</strong>: notes only staff see. <strong>Activity timeline</strong>: who did what and when (see <a href="#notes">How to add a note and read the timeline</a>).</li>
+  </ul>
+  <p>Times on this page (Created, Updated, the timeline) are shown in your own device's time zone. If they look wrong, check the clock and time zone on your phone or computer.</p>
+
   <h2 id="calendar">How to use the Calendar</h2>
-  <p>Go to <strong>Front Desk</strong> &rarr; <strong>Calendar</strong>. It shows one month at a time, with one block per room and the bookings and blocks on each day.</p>
+  <p>Go to <strong>Front Desk</strong> &rarr; <strong>Calendar</strong>. It shows one month at a time, with one block per room and the bookings and blocks on each day. Use it to see which rooms are free (available or vacant) on any day: a room with no booking bar and no colour is free to sell.</p>
   <ol class="steps">
     <li>Click <strong>Previous</strong> or <strong>Next</strong> to change month.</li>
     <li>Use the filters: <strong>Room number or name…</strong> search, <strong>All types</strong>, <strong>All rooms</strong>, <strong>All statuses</strong> (Available, Occupied, Reserved, Cleaning, Maintenance, Out of order, Inspection) and <strong>All floors</strong>. A clear button appears once a filter is set.</li>
@@ -219,7 +231,7 @@
   </ol>
   <div class="note"><p>After check-out the folio is locked: <em>"Folio charges cannot be modified after check-out. Raise a credit note if an adjustment is needed."</em> On cancelled or no-show bookings: <em>"Folio charges cannot be modified on a cancelled booking."</em></p></div>
 
-  <h2 id="dates">How to change the stay dates</h2>
+  <h2 id="dates">How to change the stay dates (extend a stay by a night)</h2>
   <ol class="steps">
     <li>On the booking page click <strong>Adjust Stay Dates</strong>. The button is not shown for cancelled, checked-out or no-show bookings.</li>
     <li>Set <strong>New Check-in Date</strong> and <strong>New Check-out Date</strong>. The <strong>Adjustment Preview</strong> shows the new nights, new total and the amount difference.</li>
@@ -272,7 +284,7 @@
     <li>For a quotation click <strong>Send Quotation</strong> at the top of the page. Choose <strong>Quotation valid for</strong> (1, 2, 3, 5, 7, 14, 21 or 30 days), add an optional <strong>Note to guest</strong> and send. The page then shows <em>Quotation last sent</em> with the date.</li>
   </ol>
   <p>From the list use <strong>More</strong> &rarr; <strong>Send invoice</strong>, <strong>Send quotation</strong> or <strong>Resend email</strong>. In the Resend email window choose the <strong>Email Type</strong> (Booking Received, Booking Confirmed, Tentative Booking Confirmed, Tentative Converted to Confirmed, Booking Cancelled, Invoice, and a late Check-in Reminder when it applies) and optional <strong>CC Emails</strong>.</p>
-  <p>All quotations are listed under <strong>Money</strong> &rarr; <strong>Quotations</strong> (<code>/admin/quotations.php</code>, permission <strong>Create Bookings</strong>). Filter by type (Room, Conference, Event, Gym) and status (Sent, Accepted, Expired, Declined). A row can be re-sent, marked accepted or marked declined. An accepted room quotation confirms the booking: <em>"Quotation marked as accepted and booking confirmed."</em> An expired quotation cannot be accepted.</p>
+  <p>All quotations are listed under <strong>Money</strong> &rarr; <strong>Quotations</strong> (permission <strong>Create Bookings</strong>). Filter by type (Room, Conference, Event, Gym) and status (Sent, Accepted, Expired, Declined). A row can be re-sent, marked accepted or marked declined. An accepted room quotation confirms the booking: <em>"Quotation marked as accepted and booking confirmed."</em> An expired quotation cannot be accepted.</p>
   <div class="note"><p>Invoices and quotations cannot be sent for a tentative booking: <em>"Invoices cannot be generated or sent for tentative (unconfirmed) bookings. Convert the booking to confirmed first."</em> Quotations are the tool for tentative holds.</p></div>
 
   <h2 id="notes">How to add a note and read the timeline</h2>
@@ -355,7 +367,7 @@
   <div class="note"><p>On this page only users with the Administrator or Manager role can confirm or cancel a hold. Others see <em>"Your role does not have permission to manage tentative bookings."</em></p></div>
 
   <h2 id="blocked">How to block dates</h2>
-  <p>Block dates when a room type or one physical room must not be sold, for example for repairs or an event. Go to <strong>Front Desk</strong> &rarr; <strong>Blocked Dates</strong> (<code>/admin/blocked-dates.php</code>, needs <strong>Blocked Dates</strong>).</p>
+  <p>Block dates (close dates, stop selling) when a room type or one physical room must not be sold, for example for repairs or an event. To block one room, choose <strong>Individual Room Level (Specific room)</strong> below. To take a room out of sale until it is fixed, with no end date, set its status to <strong>Maintenance</strong> or <strong>Out of Order</strong> on Individual Rooms (see <a href="#rooms">Individual rooms</a>). Go to <strong>Front Desk</strong> &rarr; <strong>Blocked Dates</strong> (<code>/admin/blocked-dates.php</code>, needs <strong>Blocked Dates</strong>).</p>
   <ol class="steps">
     <li>Click <strong>Block Single Date</strong> or <strong>Block Date Range</strong>.</li>
     <li>Choose the <strong>Block Level</strong>: <strong>Room Type Level (All rooms of type)</strong> or <strong>Individual Room Level (Specific room)</strong>, then pick the <strong>Room Type</strong> or <strong>Individual Room</strong>.</li>
@@ -377,6 +389,7 @@
   <ul>
     <li>Filter by room type, status (Available, Occupied, Cleaning, Maintenance, Out of Order) and floor.</li>
     <li>Each row has <strong>Details</strong>, <strong>Edit</strong>, <strong>Assign</strong> and <strong>Status</strong>. Tick several rooms and use <strong>Change status to...</strong> to change them together.</li>
+    <li><strong>How to block a room:</strong> to take one room out of sale for set nights, use <a href="#blocked">Blocked Dates</a> with <strong>Individual Room Level</strong>. To take it out of sale until it is fixed, click <strong>Status</strong> and choose <strong>Maintenance</strong> or <strong>Out of Order</strong>: the room is left out of availability and no new booking can be given that room. Set it back to <strong>Available</strong> when it is ready. Existing bookings are not moved.</li>
     <li><strong>Add Individual Room</strong>: <strong>Room Type</strong> and <strong>Room Number</strong> are required (room numbers must be unique: <em>"Room number already exists. Please use a unique room number."</em>). Optional: Room Name, Floor, Guest Capacity Override, Status, Display Order, Child Supplement Override (%), occupancy overrides, Children Allowed Override, Notes.</li>
     <li>Duplicate room numbers are flagged while you type: <em>"This room number is already used by another room."</em> If the save is still refused, the form stays open with what you typed and the reason shown.</li>
     <li>A room with a live or tentative booking cannot be deleted. You see <em>"Room 101 has 2 live booking(s) (BR-..., BR-...). Move or cancel them first, then delete the room."</em></li>

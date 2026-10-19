@@ -144,7 +144,7 @@
   <p>What happens next: food items are sent to the Kitchen screen. Bar and Coffee Bar drinks are marked as handed over (served) straight away, so they do not wait on the Bar or Coffee Bar screens. Stock for those drinks comes off at that moment.</p>
   <div class="note"><p>If a station is closed when you send an order, you see a window headed with the closed station, its opening hours and the word "Closed" (for example "Kitchen (06:00 – 23:00) Closed"), saying the ticket "will sit unseen on the station display until it reopens". Click <strong>Cancel</strong> to stop, or <strong>Fire Anyway</strong> to send it. For payment the same warning is shown inside the <strong>Take payment</strong> window.</p></div>
 
-  <h2 id="tab">How to open a tab (send now, pay later)</h2>
+  <h2 id="tab">How to open a tab (send now, pay later, keep a table open)</h2>
   <p>Use this for dine-in, where the guest eats first and pays later.</p>
   <ol class="steps">
     <li>Click <strong>Dine-in</strong> and choose a table in <strong>Select table...</strong>. Only active, free tables are listed. A table that already has an open order cannot be chosen again.</li>
@@ -296,6 +296,20 @@
   <p>86'd items disappear from the till for staff who cannot 86. You can also change availability on the Menu page (see <a href="#menu">How to add or change a menu item</a>).</p>
   <div class="note"><p>This is different from "86 this item" on a Kitchen, Bar or Coffee Bar ticket. That removes one line from one order and alerts the cashier. See the <a href="02-kds-kitchen.html">Kitchen guide</a>.</p></div>
 
+  <h2 id="ready-alert">How you know an order is ready (ready alerts)</h2>
+  <p>When the Kitchen, Bar or Coffee Bar marks your order ready, the till tells you. You do not have to keep asking or watching the screen.</p>
+  <ol class="steps">
+    <li>A small notice appears under the top bar. The first line is the order number and the table or room, for example <em>"ORD-... &middot; Table 5"</em>. The second line names the station and says <em>"ready"</em> or <em>"all 3 items ready"</em>, with the first items.</li>
+    <li>The till plays a short sound. On a tablet or phone it also vibrates.</li>
+    <li>Tap the notice to open the order, or tap the cross (<strong>Dismiss</strong>) to clear it. It goes away by itself after about a minute. A later update for the same order and station replaces the text instead of adding another notice.</li>
+  </ol>
+  <ul>
+    <li>The first time you tap on the till, the browser may ask to allow notifications. Choose <strong>Allow</strong> so the alert also shows when the till is in another tab.</li>
+    <li>Ready alerts go only to the person who placed the order, even if you can see other cashiers' tabs (see <a href="#perms">Who can do what</a>).</li>
+    <li>If an order is cancelled or voided, its ready alert is cleared from the till.</li>
+    <li>No sound? Turn the device volume up and check the till tab is not muted in the browser.</li>
+  </ul>
+
   <h2 id="notices">What to do with cancellation, void and 86 notices</h2>
   <p>When an order is cancelled or voided, or a Kitchen or Bar station 86's an item that is on an order, the till shows a notice (<em>Order cancelled</em>, <em>Order voided</em> or <em>Item 86'd</em>). A notice stays until someone marks it as read, and the read mark is shared by everyone on the till. Each notice has buttons for what you can still do:</p>
   <ul>
@@ -339,7 +353,7 @@
     <li>A permanent record of the deletion, with your name and reason, is kept.</li>
     <li><strong>Receipts:</strong> the receipt history is kept, not erased. The receipt numbers of the deleted payments are listed in the record of the deletion, so the gap in the receipt numbers can be explained.</li>
   </ul>
-  <div class="warn"><p>A delete cannot be undone. It is refused if a credit note is linked to the order (<em>"Credit note ... is linked to ... Void that credit note first, then delete the order."</em>) or if a payment was already sent to MRA (<em>"... was already fiscalised with MRA - it cannot be deleted. Void or refund the order instead."</em>). Then void or refund the order instead.</p></div>
+  <div class="warn"><p>A delete cannot be undone. It is refused if a credit note is linked to the order (<em>"Credit note ... is linked to ... Void that credit note first, then delete the order."</em>). Then void or refund the order instead.</p></div>
 
   <h2 id="force-serve">How to settle a tab whose food was never served</h2>
   <p>A tab cannot be settled while it has food that the Kitchen has not marked served. If the food was never bumped (for example from an earlier shift), a manager can force it.</p>

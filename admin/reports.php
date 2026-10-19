@@ -972,7 +972,7 @@ try {
     }
 
     // ============================================
-    // VAT BY QUARTER (for MRA filing)
+    // VAT BY QUARTER (figures for the hotel's own VAT return; nothing is sent to MRA)
     // ============================================
     $vatByQuarter = [];
     try {
@@ -1120,7 +1120,7 @@ try {
             $tabs = [
                 'overview'   => ['icon' => 'fa-tachometer-alt',  'label' => 'P&L Overview',   'title' => 'Profit & Loss Overview — Gross Revenue, Gross Profit, VAT, and Outstanding balances at a glance'],
                 'revenue'    => ['icon' => 'fa-dollar-sign',     'label' => 'Revenue',          'title' => 'Detailed revenue breakdown by source, payment method, and date'],
-                'vat'        => ['icon' => 'fa-percent',         'label' => 'VAT Register',     'title' => 'VAT (Value Added Tax) Register — full record of tax collected, required for MRA reporting'],
+                'vat'        => ['icon' => 'fa-percent',         'label' => 'VAT Register',     'title' => 'VAT (Value Added Tax) Register — full record of tax collected, the figures for your VAT return'],
                 'aging'      => ['icon' => 'fa-hourglass-half',  'label' => 'Aging &amp; AR',   'title' => 'Aging & Accounts Receivable — AR = money owed to the hotel. Aging shows how long each balance has been outstanding.'],
                 'bookings'   => ['icon' => 'fa-calendar-check',  'label' => 'Bookings',         'title' => 'Room booking statistics, cancellation rates, and average booking value'],
                 'occupancy'  => ['icon' => 'fa-bed',             'label' => 'Occupancy',        'title' => 'Room occupancy — what percentage of available room nights were sold'],
@@ -1983,26 +1983,27 @@ try {
             <!-- ============================================ -->
             <div class="tab-content <?php echo $active_tab === 'vat' ? 'active' : ''; ?>" id="tab-vat">
 
-                <!-- MRA Filing Help -->
+                <!-- VAT return help -->
                 <details class="rh-help-panel">
-                    <summary class="rh-help-panel__toggle"><i class="fas fa-circle-question"></i> VAT Filing Guide — How to use this for MRA submissions</summary>
+                    <summary class="rh-help-panel__toggle"><i class="fas fa-circle-question"></i> VAT Filing Guide — figures for your MRA VAT return</summary>
                     <div class="rh-help-panel__body">
+                        <p style="margin:0 0 10px"><strong>This system does not connect to MRA.</strong> You or your accountant file the VAT return with MRA separately.</p>
                         <div class="rh-help-panel__grid">
                             <div>
-                                <h4>🏛️ What to submit to MRA</h4>
-                                <p>Your <strong>VAT Output Tax</strong> for a period = the "VAT Collected" figure on this page. You report this on your VAT return as Output Tax (Tax on Sales). MRA expects quarterly submissions unless you are on monthly filing.</p>
+                                <h4>🏛️ What to put on your VAT return</h4>
+                                <p>Your <strong>VAT Output Tax</strong> for a period = the "VAT Collected" figure on this page. You enter this on your VAT return as Output Tax (Tax on Sales). Confirm your filing frequency (quarterly or monthly) with MRA or your accountant.</p>
                             </div>
                             <div>
                                 <h4>📋 Input Tax (VAT on expenses)</h4>
                                 <p>If the hotel has VAT-registered suppliers (e.g. food wholesalers, linen suppliers), the VAT on <em>their</em> invoices is your Input Tax. Net VAT payable = Output Tax − Input Tax. Keep all supplier VAT invoices as evidence.</p>
                             </div>
                             <div>
-                                <h4>📅 MRA Quarter Periods</h4>
-                                <p><strong>Q1:</strong> Jan–Mar · <strong>Q2:</strong> Apr–Jun · <strong>Q3:</strong> Jul–Sep · <strong>Q4:</strong> Oct–Dec. VAT returns are due within 30 days after each quarter ends. Use the Quarterly Breakdown table below to get each quarter's liability.</p>
+                                <h4>📅 Quarter Periods</h4>
+                                <p><strong>Q1:</strong> Jan–Mar · <strong>Q2:</strong> Apr–Jun · <strong>Q3:</strong> Jul–Sep · <strong>Q4:</strong> Oct–Dec. Use the Quarterly Breakdown table below to get each quarter's VAT figures. Check the due dates for your return with MRA or your accountant.</p>
                             </div>
                             <div>
                                 <h4>⬇️ How to use this register</h4>
-                                <p>Click <strong>Export for Filing</strong> to download a CSV of all VAT-bearing transactions. This can be submitted as supporting documentation alongside your MRA VAT return form. Keep exported copies for 7 years.</p>
+                                <p>Click <strong>Export VAT Register</strong> to download a CSV of all VAT-bearing transactions. Use it as supporting documentation for your own VAT return. Keep exported copies with your records.</p>
                             </div>
                         </div>
                     </div>
@@ -2113,8 +2114,8 @@ try {
                 <!-- Full VAT Register — transaction detail -->
                 <?php if (!empty($vatByQuarter)): ?>
                     <div class="rh-panel">
-                        <div class="rh-panel__head"><h2 class="rh-panel__title">VAT by Quarter (MRA Filing Periods)</h2></div>
-                        <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">Use these quarterly totals to complete your MRA Output VAT figures. Net MRA payable = Output VAT (below) − Input VAT on your supplier invoices.</p>
+                        <div class="rh-panel__head"><h2 class="rh-panel__title">VAT by Quarter (calendar quarters)</h2></div>
+                        <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">Use these quarterly totals for the Output VAT on your VAT return. Net VAT payable to MRA = Output VAT (below) − Input VAT on your supplier invoices.</p>
                         <table class="acct-table">
                             <thead>
                                 <tr>
@@ -2156,7 +2157,7 @@ try {
                 <div class="rh-panel rh-panel--flush-head">
                     <div class="rh-panel__head">
                         <h2 class="rh-panel__title">Transaction VAT Register</h2>
-                        <div class="rh-panel__actions"><button class="acct-btn" onclick="exportToCSV()"><i class="fas fa-download"></i> Export for Filing</button></div>
+                        <div class="rh-panel__actions"><button class="acct-btn" onclick="exportToCSV()"><i class="fas fa-download"></i> Export VAT Register</button></div>
                     </div>
                     <?php if (empty($vatRegister)): ?>
                         <p class="acct-empty">No VAT-bearing transactions in this period.</p>

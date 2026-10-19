@@ -309,6 +309,20 @@ $totalShown = 0;
     <li>To test, use <strong>Send as Test Email</strong>: check the address and click <strong>Send</strong>. You must preview first. You will see <em>Sent to address!</em>, or <em>Enter a valid email address.</em>, or <em>Generate a preview first.</em> The email subject starts with [TEST]. PDF tabs send a real PDF attachment.</li>
     <li>Click <strong>Save All Templates</strong>. You will see <em>"Booking email templates updated successfully!"</em></li>
   </ol>
+  <h3 id="which-tab">Which tab is which message</h3>
+  <table>
+    <thead><tr><th>The message the guest gets</th><th>Tab to open</th></tr></thead>
+    <tbody>
+      <tr><td>"We have received your booking" (booking confirmation, first email)</td><td><strong>Received Email</strong></td></tr>
+      <tr><td>"Your booking is confirmed" (booking confirmation after staff confirm)</td><td><strong>Confirmed Email</strong></td></tr>
+      <tr><td>Reminder before arrival (check-in reminder)</td><td><strong>Reminder Email</strong></td></tr>
+      <tr><td>Booking cancelled</td><td><strong>Cancelled Email</strong></td></tr>
+      <tr><td>Tentative hold: created, reminder, expired, confirmed</td><td><strong>Tentative New</strong>, <strong>Tentative Reminder</strong>, <strong>Tentative Expired</strong>, <strong>Tentative Confirmed</strong></td></tr>
+      <tr><td>Invoice, quotation (room, conference, event)</td><td><strong>Room Invoice Email</strong> and <strong>Room Invoice PDF</strong>, <strong>Room Quote Email</strong> and <strong>Room Quote PDF</strong>, and the Conference and Event equivalents</td></tr>
+      <tr><td>Receipt, refund, credit note</td><td><strong>Receipt Email</strong> and <strong>Receipt PDF</strong>, <strong>Refund Email</strong>, <strong>Credit Note Email</strong> and <strong>Credit Note PDF</strong></td></tr>
+      <tr><td>Payment reminders for money owed</td><td><strong>Reminder 1 (Friendly)</strong>, <strong>Reminder 2 (Firm)</strong>, <strong>Reminder 3 (Final)</strong>, and the quotation expiry reminder</td></tr>
+    </tbody>
+  </table>
   <p><strong>Load Default</strong> puts the built-in wording for that one tab into the boxes (you are asked to confirm). Nothing changes until you click Save All Templates. <strong>Reset All to Defaults</strong> overwrites every template with the built-in wording after you confirm, and shows <em>"All booking email and PDF templates were reset to the default design (N templates)."</em></p>
   <div class="warn"><p>Preview fills in every tag with sample details, but a real message fills in only the tags listed for that template below. A tag that is not on the list for that template stays on the email as plain <code>{{text}}</code>. Always check the list before you use a tag.</p></div>
   <h3 id="receipt-whatsapp">How to edit the receipt WhatsApp message</h3>

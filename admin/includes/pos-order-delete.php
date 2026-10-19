@@ -22,14 +22,14 @@
  *                 - legacy adjustments keyed on the ORDER id are never auto-restored: the lines are
  *                   named in the summary and left untouched.
  *   (b) MONEY   removes every payments row of the order (booking_type 'restaurant', booking_id = the
- *               order) including refund / void-reversal rows, plus their queued MRA submissions, so shift
+ *               order) including refund / void-reversal rows, plus any rows in the (currently unused) MRA submission queue, so shift
  *               totals, POS accounting, End of Day and reports no longer count it. RECEIPT HISTORY is KEPT
  *               (owner, 2026-10-20): the receipt_events rows stay (payment_id set to 0, note records the
  *               original payment id and the deleted order) and the receipt numbers are listed in the
  *               pos_deleted_orders notes + snapshot.
  *               Room-service orders void their live folio charges, the booking is recalculated and any
  *               overpayment that leaves behind is converted to a credit note. Refused (nothing changed) when
- *               a live credit note is linked to the order or a payment was already fiscalised with MRA.
+ *               a live credit note is linked to the order or (only once an MRA integration exists; dormant today) a payment was already sent to MRA.
  *               An unsettled (pending / processing) refund is dropped with the order and recorded loudly as
  *               "UNSETTLED REFUND DROPPED". Cash already taken or handed back is not moved.
  *   (c) CHILDREN removes stock_order_items, stock_kds_events, stock_order_audit,
@@ -314,12 +314,14 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
         $unsettledRefund = round($unsettledRefund, 2);
 
         // ── Guards that need something reversed first (nothing has been changed yet) ──
+        // Dormant MRA guards: there is no MRA integration today (mra_status stays 'pending', the queue is
+        // empty), so neither guard below can trigger. They only apply once a real integration exists.
         foreach ($payments as $p) {
             if (in_array((string)($p['mra_status'] ?? ''), ['submitted', 'accepted'], true)) {
                 throw new RuntimeException('Payment ' . (string)$p['payment_reference'] . ' of ' . $reference . ' was already fiscalised with MRA - it cannot be deleted. Void or refund the order instead.', 409);
             }
         }
-        // The MRA queue is a second record of fiscalisation: anything past 'pending' was (or is being) sent.
+        // Once an MRA integration exists, the queue will be a second record of submission (dormant today).
         if ($paymentIds && rh_pos_del_table_exists($pdo, 'mra_submission_queue')) {
             $mqPh = implode(',', array_fill(0, count($paymentIds), '?'));
             $mq = $pdo->prepare("SELECT COUNT(*) FROM mra_submission_queue WHERE payment_id IN ($mqPh) AND status <> 'pending'");
