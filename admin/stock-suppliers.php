@@ -90,6 +90,11 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($dup) {
                     throw new RuntimeException(rh_duplicate_message('supplier', (string)$dup['value']));
                 }
+                // Two suppliers sharing one email would send purchase orders to the wrong place.
+                // Editing a supplier whose email is unchanged is never a new duplicate.
+                if ($email !== '' && rh_find_duplicate($pdo, 'stock_suppliers', 'email', $email, [], $id > 0 ? $id : null)) {
+                    throw new RuntimeException('Another supplier already uses the email address "' . rh_msg_value($email) . '". Use a different address or edit that supplier.');
+                }
 
                 if ($id > 0) {
                     $pdo->prepare("
@@ -171,12 +176,28 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($message) $_SESSION['stock_msg'] = $message;
     if ($error)   $_SESSION['stock_err'] = $error;
+    // A refused Add / Edit comes back with what was typed, so the form reopens with the reason.
+    if ($error && (string)($action ?? '') === 'save') {
+        $keep = [];
+        foreach (['id', 'name', 'contact_name', 'phone', 'email', 'lead_time_days', 'payment_terms', 'account_ref', 'address', 'notes'] as $keepField) {
+            $keep[$keepField] = (string)($_POST[$keepField] ?? '');
+        }
+        $keep['is_active'] = isset($_POST['is_active']) ? 1 : 0;
+        $_SESSION['stock_supplier_form_keep'] = ['error' => $error, 'data' => $keep];
+    }
     header('Location: stock-suppliers.php');
     exit;
 }
 
 if (!empty($_SESSION['stock_msg'])) { $message = $_SESSION['stock_msg']; unset($_SESSION['stock_msg']); }
 if (!empty($_SESSION['stock_err'])) { $error   = $_SESSION['stock_err']; unset($_SESSION['stock_err']); }
+
+// The last Add / Edit was refused: reopen it with what was typed and the reason.
+$supplierFormReopen = null;
+if (!empty($_SESSION['stock_supplier_form_keep']) && is_array($_SESSION['stock_supplier_form_keep'])) {
+    $supplierFormReopen = $_SESSION['stock_supplier_form_keep'];
+    unset($_SESSION['stock_supplier_form_keep']);
+}
 
 $suppliers = [];
 $stats = ['total' => 0, 'active' => 0];
@@ -366,11 +387,12 @@ $csrf_token = generateCsrfToken();
                 <h3 id="supModalTitle">Add Supplier</h3>
                 <button type="button" class="modal-close" aria-label="Close" onclick="closeSupplier()">&times;</button>
             </div>
-            <form method="POST">
+            <form method="POST" id="supForm" data-busy-text="Saving...">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="save">
                 <input type="hidden" name="id" id="sup_id" value="0">
                 <div class="body modal-body">
+                    <div class="rh-form-error full" id="sup_form_error" role="alert" hidden></div>
                     <div class="full">
                         <label>Supplier name *</label>
                         <input type="text" name="name" id="sup_name" required maxlength="255">
@@ -421,10 +443,13 @@ $csrf_token = generateCsrfToken();
         </div>
     </div>
 
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
         function openSupplier(s) {
             var m = document.getElementById('supModal');
-            document.getElementById('supModalTitle').textContent = s ? 'Edit Supplier' : 'Add Supplier';
+            // s.id is 0 when a refused Add is reopened with what was typed.
+            document.getElementById('supModalTitle').textContent = (s && Number(s.id) > 0) ? 'Edit Supplier' : 'Add Supplier';
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('supForm'));
             document.getElementById('sup_id').value      = s ? s.id : 0;
             document.getElementById('sup_name').value    = s ? (s.name || '') : '';
             document.getElementById('sup_contact').value = s ? (s.contact_name || '') : '';
@@ -440,6 +465,28 @@ $csrf_token = generateCsrfToken();
         }
         function closeSupplier() { document.getElementById('supModal').classList.remove('open'); }
         document.getElementById('supModal').addEventListener('click', function (e) { if (e.target === this) closeSupplier(); });
+
+        // A duplicate name or email is flagged while typing, Save shows a busy state and ignores a
+        // second click, and a refused save reopens the form with what was typed and the reason.
+        (function () {
+            var form = document.getElementById('supForm');
+            if (!form || !window.RHFormGuard) return;
+            var idEl = document.getElementById('sup_id');
+            RHFormGuard.watch(document.getElementById('sup_name'), function () {
+                return { form: 'stock_supplier_name', excludeId: idEl.value };
+            });
+            RHFormGuard.watch(document.getElementById('sup_email'), function () {
+                return { form: 'stock_supplier_email', excludeId: idEl.value };
+            });
+            RHFormGuard.guardSubmit(form, { busyText: 'Saving...' });
+        })();
+        <?php if ($supplierFormReopen): ?>
+        (function () {
+            var r = <?php echo json_encode($supplierFormReopen, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+            openSupplier(r.data);
+            if (window.RHFormGuard) RHFormGuard.showError(document.getElementById('supForm'), r.error);
+        })();
+        <?php endif; ?>
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>

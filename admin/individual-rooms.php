@@ -905,8 +905,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     } catch (PDOException $e) {
-        $error = 'Database error: ' . $e->getMessage();
+        error_log('individual-rooms save failed: ' . $e->getMessage());
+        $error = 'The room could not be saved. Nothing was changed - please try again, and tell a manager if it keeps happening.';
     }
+}
+
+// A refused Add / Edit room reopens its form with what was typed and the reason inside it.
+$roomFormReopen = null;
+if ($error !== '' && $_SERVER['REQUEST_METHOD'] === 'POST'
+    && in_array((string)($action ?? ''), ['add_individual_room', 'update_individual_room'], true)) {
+    $keepRoom = [];
+    foreach (['id', 'room_type_id', 'room_number', 'room_name', 'floor', 'max_guests_override', 'status', 'display_order',
+              'child_price_multiplier', 'single_occupancy_enabled_override', 'double_occupancy_enabled_override',
+              'triple_occupancy_enabled_override', 'children_allowed_override', 'notes', 'amenities_list', 'photos_list'] as $keepField) {
+        $keepRoom[$keepField] = (string)($_POST[$keepField] ?? '');
+    }
+    $keepRoom['is_active'] = isset($_POST['is_active']) ? 1 : 0;
+    $roomFormReopen = ['action' => (string)$action, 'error' => $error, 'data' => $keepRoom];
 }
 
 // Get filter parameters
@@ -1982,7 +1997,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
     <!-- Add/Edit Modal -->
     <div class="modal-overlay" id="roomModal">
         <div class="modal-content">
-            <form method="POST" id="roomForm">
+            <form method="POST" id="roomForm" data-busy-text="Saving room...">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
                 <input type="hidden" name="action" id="formAction" value="add_individual_room">
                 <input type="hidden" name="id" id="roomId">
@@ -1991,6 +2006,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                     <button type="button" class="modal-close" aria-label="Close" onclick="closeModal()">&times;</button>
                 </div>
                 <div class="modal-body">
+                    <div class="rh-form-error" id="room_form_error" role="alert" hidden></div>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="room_type_id">Room Type *</label>
@@ -2204,6 +2220,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
         <input type="hidden" name="id" id="deleteRoomId">
     </form>
 
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
         // Joined-room pairings (for editing a joined room from the list) and the physical rooms
         // behind each joined room (so each can still be edited on its own from the details modal).
@@ -2237,6 +2254,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             document.getElementById('children_allowed_override').value = '';
             document.getElementById('statusRow').style.display = 'grid';
             document.getElementById('activeRow').style.display = 'none';
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('roomForm'));
             document.getElementById('roomModal').classList.add('active');
         }
 
@@ -2263,6 +2281,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             document.getElementById('is_active').checked = room.is_active == 1;
             document.getElementById('statusRow').style.display = 'grid';
             document.getElementById('activeRow').style.display = 'block';
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('roomForm'));
             document.getElementById('roomModal').classList.add('active');
         }
 
@@ -3205,6 +3224,39 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 n.style.opacity = '0';
             }, 3500);
         }
+
+        // Add / Edit room form: a duplicate room number is flagged while typing, Save shows a busy
+        // state and ignores a second click, and a refused save reopens the form with what was typed.
+        (function () {
+            const form = document.getElementById('roomForm');
+            if (!form || !window.RHFormGuard) return;
+            RHFormGuard.watch(document.getElementById('room_number'), function () {
+                return { form: 'room_number', excludeId: document.getElementById('roomId').value };
+            });
+            RHFormGuard.guardSubmit(form, { busyText: 'Saving room...' });
+        })();
+        <?php if ($roomFormReopen): ?>
+        (function () {
+            const r = <?php echo json_encode($roomFormReopen, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+            const d = r.data;
+            if (r.action === 'update_individual_room') {
+                openEditModal(d, [], []);
+            } else {
+                openAddModal();
+            }
+            // Put back exactly what was typed (the edit/add openers fill from a stored room).
+            ['room_type_id', 'room_number', 'room_name', 'floor', 'max_guests_override', 'status', 'display_order',
+             'child_price_multiplier', 'single_occupancy_enabled_override', 'double_occupancy_enabled_override',
+             'triple_occupancy_enabled_override', 'children_allowed_override', 'notes', 'amenities_list', 'photos_list'].forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el && d[id] !== undefined) el.value = d[id];
+            });
+            if (r.action === 'update_individual_room') {
+                document.getElementById('is_active').checked = d.is_active == 1;
+            }
+            if (window.RHFormGuard) RHFormGuard.showError(document.getElementById('roomForm'), r.error);
+        })();
+        <?php endif; ?>
     </script>
 
     <?php require_once 'includes/admin-footer.php'; ?>

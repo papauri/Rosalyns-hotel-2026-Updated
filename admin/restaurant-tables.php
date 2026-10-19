@@ -1084,6 +1084,43 @@ $csrf_token = generateCsrfToken();
 $site_name = getSetting('site_name', 'Hotel');
 $rangeStart = (int)getSetting('restaurant_table_range_start', '1');
 $rangeEnd = (int)getSetting('restaurant_table_range_end', '20');
+
+// A refused save shows again with what was typed (not the stored values) and the reason inside the form.
+$rtFormError = ['save_tables' => '', 'generate_range' => ''];
+$rtPosted = [];        // table id => what was typed on the list
+$rtRangePosted = null; // what was typed in the range form
+if ($error !== '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $rtPostedAction = (string)($action ?? '');
+    if ($rtPostedAction === 'save_tables') {
+        $rtFormError['save_tables'] = $error;
+        $pickList = static function ($key) {
+            return is_array($_POST[$key] ?? null) ? $_POST[$key] : [];
+        };
+        $postedNames = $pickList('table_name');
+        $postedCaps = $pickList('capacity');
+        $postedNotes = $pickList('notes');
+        $postedActive = $pickList('is_active');
+        foreach ($pickList('table_id') as $postedIdx => $postedIdRaw) {
+            $postedId = (int)$postedIdRaw;
+            if ($postedId > 0) {
+                $rtPosted[$postedId] = [
+                    'name' => (string)($postedNames[$postedIdx] ?? ''),
+                    'capacity' => (string)($postedCaps[$postedIdx] ?? ''),
+                    'notes' => (string)($postedNotes[$postedIdx] ?? ''),
+                    'active' => isset($postedActive[$postedId]),
+                ];
+            }
+        }
+    } elseif ($rtPostedAction === 'generate_range') {
+        $rtFormError['generate_range'] = $error;
+        $rtRangePosted = [
+            'start' => (string)($_POST['range_start'] ?? ''),
+            'end' => (string)($_POST['range_end'] ?? ''),
+            'capacity' => (string)($_POST['default_capacity'] ?? ''),
+            'replace' => !empty($_POST['replace_range']),
+        ];
+    }
+}
 $tables = rh_restaurant_tables_exist($pdo)
     ? $pdo->query("SELECT id, table_number, capacity, notes, is_active, display_order, updated_at FROM restaurant_tables ORDER BY display_order ASC, CAST(table_number AS UNSIGNED) ASC, table_number ASC")->fetchAll(PDO::FETCH_ASSOC)
     : [];
@@ -1129,24 +1166,25 @@ foreach ($tables as $table) {
         <div class="rt-grid">
             <section class="rt-card">
                 <h2>Table Range</h2>
-                <form method="post" action="restaurant-tables.php" data-admin-loader-form>
+                <form method="post" action="restaurant-tables.php" id="rtRangeForm" data-admin-loader-form data-busy-text="Saving range...">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                     <input type="hidden" name="action" value="generate_range">
+                    <div class="rh-form-error" role="alert"<?php echo $rtFormError['generate_range'] === '' ? ' hidden' : ''; ?>><?php echo htmlspecialchars($rtFormError['generate_range']); ?></div>
                     <div class="rt-form-grid">
                         <div class="rt-field">
                             <label for="range_start">From</label>
-                            <input type="number" min="1" max="999" id="range_start" name="range_start" value="<?php echo (int)$rangeStart; ?>" required>
+                            <input type="number" min="1" max="999" id="range_start" name="range_start" value="<?php echo htmlspecialchars($rtRangePosted !== null ? $rtRangePosted['start'] : (string)(int)$rangeStart); ?>" required>
                         </div>
                         <div class="rt-field">
                             <label for="range_end">To</label>
-                            <input type="number" min="1" max="999" id="range_end" name="range_end" value="<?php echo (int)$rangeEnd; ?>" required>
+                            <input type="number" min="1" max="999" id="range_end" name="range_end" value="<?php echo htmlspecialchars($rtRangePosted !== null ? $rtRangePosted['end'] : (string)(int)$rangeEnd); ?>" required>
                         </div>
                         <div class="rt-field">
                             <label for="default_capacity">Capacity</label>
-                            <input type="number" min="1" max="999" id="default_capacity" name="default_capacity" placeholder="Optional">
+                            <input type="number" min="1" max="999" id="default_capacity" name="default_capacity" placeholder="Optional" value="<?php echo htmlspecialchars($rtRangePosted !== null ? $rtRangePosted['capacity'] : ''); ?>">
                         </div>
                     </div>
-                    <label class="rt-check"><input type="checkbox" name="replace_range" value="1"> Deactivate numeric tables outside this range</label>
+                    <label class="rt-check"><input type="checkbox" name="replace_range" value="1"<?php echo ($rtRangePosted !== null && $rtRangePosted['replace']) ? ' checked' : ''; ?>> Deactivate numeric tables outside this range</label>
                     <button type="submit" class="btn btn-primary"><i class="fas fa-layer-group"></i> Generate / Update Range</button>
                 </form>
             </section>
@@ -1172,9 +1210,10 @@ foreach ($tables as $table) {
                 <input type="hidden" name="action" value="delete_table">
             </form>
         <?php endif; ?>
-        <form method="post" action="restaurant-tables.php" data-admin-loader-form>
+        <form method="post" action="restaurant-tables.php" id="rtSaveForm" data-admin-loader-form data-busy-text="Saving tables...">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
             <input type="hidden" name="action" value="save_tables">
+            <div class="rh-form-error" role="alert"<?php echo $rtFormError['save_tables'] === '' ? ' hidden' : ''; ?>><?php echo htmlspecialchars($rtFormError['save_tables']); ?></div>
             <div class="rt-table-wrap" id="rtTableWrap">
                 <table class="rt-table">
                     <thead>
@@ -1201,7 +1240,7 @@ foreach ($tables as $table) {
                                 <tr>
                                     <td data-label="Select"><?php echo adminBulkRowBox((int)$table['id'], 'Select table ' . (string)$table['table_number']); ?></td>
                                     <td data-label="Table">
-                                        <input type="text" name="table_name[]" maxlength="50" required aria-label="Table name" value="<?php echo htmlspecialchars((string)$table['table_number']); ?>">
+                                        <input type="text" name="table_name[]" maxlength="50" required aria-label="Table name" value="<?php echo htmlspecialchars((string)($rtPosted[(int)$table['id']]['name'] ?? $table['table_number'])); ?>">
                                         <input type="hidden" name="table_id[]" value="<?php echo (int)$table['id']; ?>">
                                     </td>
                                     <td data-label="Live Status">
@@ -1219,10 +1258,10 @@ foreach ($tables as $table) {
                                             <?php echo rt_render_last_payment_html($tableLastPayments[(string)$table['table_number']] ?? null); ?>
                                         </div>
                                     </td>
-                                    <td data-label="Capacity"><input type="number" name="capacity[]" min="1" max="999" value="<?php echo $table['capacity'] !== null ? (int)$table['capacity'] : ''; ?>" placeholder="Optional"></td>
-                                    <td data-label="Notes"><input type="text" name="notes[]" maxlength="255" value="<?php echo htmlspecialchars((string)($table['notes'] ?? '')); ?>" placeholder="Window, patio, VIP..."></td>
+                                    <td data-label="Capacity"><input type="number" name="capacity[]" min="1" max="999" value="<?php echo htmlspecialchars(isset($rtPosted[(int)$table['id']]) ? $rtPosted[(int)$table['id']]['capacity'] : ($table['capacity'] !== null ? (string)(int)$table['capacity'] : '')); ?>" placeholder="Optional"></td>
+                                    <td data-label="Notes"><input type="text" name="notes[]" maxlength="255" value="<?php echo htmlspecialchars(isset($rtPosted[(int)$table['id']]) ? $rtPosted[(int)$table['id']]['notes'] : (string)($table['notes'] ?? '')); ?>" placeholder="Window, patio, VIP..."></td>
                                     <td data-label="Active">
-                                        <label class="rt-active"><input type="checkbox" name="is_active[<?php echo (int)$table['id']; ?>]" value="1" <?php echo (int)$table['is_active'] === 1 ? 'checked' : ''; ?>> Active</label>
+                                        <label class="rt-active"><input type="checkbox" name="is_active[<?php echo (int)$table['id']; ?>]" value="1" <?php echo (isset($rtPosted[(int)$table['id']]) ? $rtPosted[(int)$table['id']]['active'] : (int)$table['is_active'] === 1) ? 'checked' : ''; ?>> Active</label>
                                     </td>
                                     <td data-label="Updated"><span class="rt-muted"><?php echo htmlspecialchars(date('d M Y H:i', strtotime((string)$table['updated_at']))); ?></span></td>
                                     <td data-label="Actions">
@@ -1353,12 +1392,42 @@ foreach ($tables as $table) {
             <p class="admin-page-loader-title">Saving...</p>
         </div>
     </div>
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
         document.querySelectorAll('[data-admin-loader-form]').forEach(form => {
             form.addEventListener('submit', () => {
                 document.getElementById('admin-page-loader')?.classList.add('is-visible');
             });
         });
+
+        // A table name already used by another table (or by another row being edited here) is
+        // flagged while typing; a flagged list cannot be saved, and a save in progress ignores a
+        // second click. The server checks again on save.
+        (function () {
+            if (!window.RHFormGuard) return;
+            const saveForm = document.getElementById('rtSaveForm');
+            const rangeForm = document.getElementById('rtRangeForm');
+            if (saveForm) {
+                const norm = v => v.replace(/\s+/g, ' ').trim().toLowerCase();
+                saveForm.querySelectorAll('input[name="table_name[]"]').forEach(input => {
+                    RHFormGuard.watch(input, function () {
+                        const idInput = input.closest('td').querySelector('input[name="table_id[]"]');
+                        return {
+                            form: 'restaurant_table',
+                            excludeId: idInput ? idInput.value : '',
+                            local: function () {
+                                const mine = norm(input.value);
+                                const clash = Array.from(saveForm.querySelectorAll('input[name="table_name[]"]'))
+                                    .some(other => other !== input && norm(other.value) === mine);
+                                return clash ? 'Another row in this list already has this name.' : '';
+                            }
+                        };
+                    });
+                });
+                RHFormGuard.guardSubmit(saveForm, { busyText: 'Saving tables...' });
+            }
+            if (rangeForm) RHFormGuard.guardSubmit(rangeForm, { busyText: 'Saving range...' });
+        })();
 
         function closeRtActionMenus() {
             document.querySelectorAll('.rt-table .actions-more.open').forEach(function (el) {

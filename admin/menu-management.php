@@ -94,7 +94,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $_POST['is_available'] = !empty($_POST['is_available']) ? 1 : 0;
             $_POST['display_order'] = (int)($_POST['display_order'] ?? 0);
-            $menu_type = ($menu_type === 'drink') ? 'drink' : 'food';
+            // The drinks tab sends 'drinks'; only that or 'drink' selects drink_menu.
+            $menu_type = in_array($menu_type, ['drink', 'drinks'], true) ? 'drink' : 'food';
             if ($_POST['display_order'] < 0 || $_POST['display_order'] > 100000) {
                 throw new RuntimeException('Display order must be between 0 and 100000.');
             }
@@ -928,6 +929,7 @@ if ($stockReady) {
     </div>
 
 
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
         function switchTab(tab) {
             // Update URL without reloading
@@ -1004,6 +1006,7 @@ if ($stockReady) {
                 categorySelect.value = category;
             }
 
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('addMenuForm'));
             modal.classList.add('open');
         }
 
@@ -1023,7 +1026,8 @@ if ($stockReady) {
         });
 
         function saveRow(id, category, menuType) {
-            const row = document.getElementById(`${menuType}-row-${id}`);
+            // Drink rows are id="drink-row-N" while the tab passes 'drinks'.
+            const row = document.getElementById((menuType === 'food' ? 'food' : 'drink') + '-row-' + id);
             const formData = new FormData();
 
             formData.append('action', 'update');
@@ -1055,6 +1059,13 @@ if ($stockReady) {
             if (showRs && showRs.checked) formData.append('show_room_service', '1');
 
             if (window._saveRowBusy) return;
+            const flagged = row.querySelector('.rh-input-invalid');
+            if (flagged) {
+                // A duplicate name was already flagged under the field: say so instead of saving.
+                flagged.focus();
+                Alert.show((flagged.validationMessage || 'Fix the highlighted field first.'), 'error');
+                return;
+            }
             window._saveRowBusy = true;
             fetch(window.location.href, {
                     method: 'POST',
@@ -1432,6 +1443,40 @@ if ($stockReady) {
                 });
         });
 
+        // ── Duplicate names flagged while typing (api/check-unique.php) ───────────
+        // Add modal: same name in the same category of the same menu. Inline rows: the same, ignoring the row itself.
+        (function() {
+            if (!window.RHFormGuard) return;
+            const form = document.getElementById('addMenuForm');
+            const nameInput = document.getElementById('add_name');
+            const category = document.getElementById('add_category');
+            const menuType = document.getElementById('menu_type');
+            RHFormGuard.watch(nameInput, function() {
+                return {
+                    form: menuType.value === 'drinks' ? 'menu_drink' : 'menu_food',
+                    params: { category: category.value }
+                };
+            }, [category]);
+            RHFormGuard.guardSubmit(form, { busy: false }); // saving is AJAX with its own busy button
+        })();
+
+        function wireMenuNameChecks() {
+            if (!window.RHFormGuard) return;
+            document.querySelectorAll('tr[id] input[data-field="name"]').forEach(function(input) {
+                const row = input.closest('tr');
+                const m = /^(food|drink)-row-(\d+)$/.exec(row.id);
+                if (!m) return;
+                RHFormGuard.watch(input, function() {
+                    return {
+                        form: m[1] === 'drink' ? 'menu_drink' : 'menu_food',
+                        excludeId: m[2],
+                        params: { category: row.dataset.category || '' }
+                    };
+                });
+            });
+        }
+        wireMenuNameChecks();
+
         function refreshMenuTab() {
             var tabParam = document.querySelector('.tab-content.active') && document.querySelector('.tab-content.active').id === 'drinks-tab' ? 'drinks' : 'food';
             fetch(window.location.pathname + '?tab=' + tabParam)
@@ -1447,6 +1492,7 @@ if ($stockReady) {
                     var drinkCur = document.getElementById('drinks-tab');
                     if (drinkNext && drinkCur) drinkCur.innerHTML = drinkNext.innerHTML;
                     initDragToReorder();
+                    wireMenuNameChecks();
                 }).catch(function() {});
         }
 

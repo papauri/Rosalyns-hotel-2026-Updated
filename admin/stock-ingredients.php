@@ -479,6 +479,15 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
     }
     if ($error)   $_SESSION['stock_err'] = $error;
+    // A refused Add / Edit comes back with what was typed, so the form reopens instead of the
+    // person starting again (the reason is shown inside the form).
+    if ($error && in_array((string)($action ?? ''), ['add', 'update'], true)) {
+        $keep = [];
+        foreach (['id', 'name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'preferred_supplier_id', 'lead_time_days'] as $keepField) {
+            $keep[$keepField] = (string)($_POST[$keepField] ?? '');
+        }
+        $_SESSION['stock_ingredient_form_keep'] = ['action' => (string)$action, 'error' => $error, 'post' => $keep];
+    }
     header('Location: stock-ingredients.php');
     exit;
 }
@@ -498,6 +507,7 @@ $ingredients = [];
 $categories = [];
 $batchesByIngredient = [];
 $supplierOptions = [];
+$stockFormReopen = null; // set when the last Add / Edit was refused
 try {
     $supplierOptions = $pdo->query("SELECT id, name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) { $supplierOptions = []; }
@@ -535,6 +545,24 @@ if (!$error || strpos($error, 'Stock tables not yet') === false) {
             $ingFlagRow['has_history'] = $hasStockQty || isset($ingHistoryUsed[(int)$ingFlagRow['id']]);
         }
         unset($ingFlagRow);
+        // Rebuild the refused Add / Edit form: the stored row (for the unit lock) with what was typed on top.
+        if (!empty($_SESSION['stock_ingredient_form_keep']) && is_array($_SESSION['stock_ingredient_form_keep'])) {
+            $keepForm = $_SESSION['stock_ingredient_form_keep'];
+            unset($_SESSION['stock_ingredient_form_keep']);
+            $keepData = (array)($keepForm['post'] ?? []);
+            if (($keepForm['action'] ?? '') === 'update') {
+                foreach ($ingredients as $ingKeepRow) {
+                    if ((int)$ingKeepRow['id'] === (int)($keepData['id'] ?? 0)) {
+                        $keepData['unit_locked'] = !empty($ingKeepRow['unit_locked']);
+                        $keepData['unit'] = $keepData['unit_locked'] ? (string)$ingKeepRow['unit'] : $keepData['unit'];
+                        break;
+                    }
+                }
+            } else {
+                unset($keepData['id']);
+            }
+            $stockFormReopen = ['data' => $keepData, 'error' => (string)($keepForm['error'] ?? '')];
+        }
         foreach ($ingredients as $i) {
             if (!in_array($i['category'], $categories, true)) $categories[] = $i['category'];
         }
@@ -846,8 +874,9 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 <h3 id="ingredientModalTitle">Add <?php echo $stockNoun; ?></h3>
                 <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('ingredientModal')">&times;</button>
             </div>
-            <form method="POST" id="ingredientForm">
+            <form method="POST" id="ingredientForm" data-busy-text="Saving...">
                 <div class="modal-body">
+                <div class="rh-form-error" id="ing_form_error" role="alert" hidden></div>
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" id="ing_action" value="add">
                 <input type="hidden" name="id" id="ing_id" value="">
@@ -1133,6 +1162,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     </div>
 
     <?php require_once 'includes/admin-footer.php'; ?>
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
         const BATCHES = <?php echo json_encode($batchesByIngredient, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         const CURRENCY = <?php echo json_encode($currency_symbol); ?>;
@@ -1182,10 +1212,13 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
 
         function openIngredientModal(data) {
             document.getElementById('ingredientForm').reset();
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('ingredientForm'));
             if (data) {
-                document.getElementById('ingredientModalTitle').textContent = 'Edit <?php echo $stockNoun; ?>';
-                document.getElementById('ing_action').value = 'update';
-                document.getElementById('ing_id').value = data.id;
+                // data.id is missing when a refused Add is being reopened with what was typed.
+                const isEdit = !!data.id;
+                document.getElementById('ingredientModalTitle').textContent = (isEdit ? 'Edit ' : 'Add ') + '<?php echo $stockNoun; ?>';
+                document.getElementById('ing_action').value = isEdit ? 'update' : 'add';
+                document.getElementById('ing_id').value = data.id || '';
                 document.getElementById('ing_name').value = data.name || '';
                 document.getElementById('ing_category').value = data.category || '';
                 document.getElementById('ing_unit').value = data.unit || 'g';
@@ -1396,6 +1429,24 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 counter.textContent = shown === total ? total + ' ingredient(s)' : shown + ' of ' + total + ' ingredient(s)';
             }
         }
+
+        // Add / Edit form: a duplicate name is flagged while typing, Save shows a busy state and
+        // ignores a second click, and a refused save reopens the form with what was typed.
+        (function () {
+            const form = document.getElementById('ingredientForm');
+            if (!form || !window.RHFormGuard) return;
+            RHFormGuard.watch(document.getElementById('ing_name'), function () {
+                return { form: 'stock_ingredient', excludeId: document.getElementById('ing_id').value };
+            });
+            RHFormGuard.guardSubmit(form, { busyText: 'Saving...' });
+        })();
+        <?php if ($stockFormReopen): ?>
+        (function () {
+            const r = <?php echo json_encode($stockFormReopen, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+            openIngredientModal(r.data);
+            if (window.RHFormGuard) RHFormGuard.showError(document.getElementById('ingredientForm'), r.error);
+        })();
+        <?php endif; ?>
     </script>
 </body>
 

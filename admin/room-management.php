@@ -880,7 +880,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             <div class="form-section-title"><i class="fas fa-info-circle"></i> Room Information</div>
                             <div class="form-group">
                                 <label>Room Name *</label>
-                                <input type="text" name="name" id="editName" required>
+                                <input type="text" name="name" id="editName" maxlength="100" required>
                             </div>
                             <div class="form-group">
                                 <label>Short Description</label>
@@ -1013,7 +1013,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             <div class="form-section-title"><i class="fas fa-info-circle"></i> Room Information</div>
                             <div class="form-group">
                                 <label>Room Name *</label>
-                                <input type="text" name="name" required>
+                                <input type="text" name="name" id="addName" maxlength="100" required>
                             </div>
                             <div class="form-group">
                                 <label>Short Description</label>
@@ -1261,6 +1261,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
             </div>
         </div>
 
+        <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
         <script>
             // ===== EDIT MODAL =====
             // ===== MORE-ACTIONS MENU (shared placement from admin-components.js) =====
@@ -1317,6 +1318,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                 document.getElementById('editImageUrl').value = room.image_url || '';
                 document.getElementById('editIsActive').checked = room.is_active == 1;
                 document.getElementById('editIsFeatured').checked = room.is_featured == 1;
+                if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('editForm'));
                 document.getElementById('editModal').style.display = 'flex';
             }
 
@@ -1328,6 +1330,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
 
             // ===== ADD MODAL =====
             function openAddModal() {
+                if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('addForm'));
                 document.getElementById('addModal').style.display = 'flex';
             }
 
@@ -1858,6 +1861,20 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                 e.preventDefault();
                 handleRoomFormSubmit('addForm', 'addRoomSaveBtn', 'addRoomFeedback');
             });
+
+            // A duplicate room-type name is flagged while typing (api/check-unique.php). Saving is
+            // AJAX with its own busy button, so the guard only blocks a flagged form.
+            (function() {
+                if (!window.RHFormGuard) return;
+                RHFormGuard.watch(document.getElementById('editName'), function() {
+                    return { form: 'room_type_name', excludeId: document.getElementById('editId').value };
+                });
+                RHFormGuard.watch(document.getElementById('addName'), function() {
+                    return { form: 'room_type_name' };
+                });
+                RHFormGuard.guardSubmit(document.getElementById('editForm'), { busy: false });
+                RHFormGuard.guardSubmit(document.getElementById('addForm'), { busy: false });
+            })();
 
             function refreshRoomsGrid() {
                 fetch(window.location.href)
