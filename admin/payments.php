@@ -851,7 +851,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
         <?php if ($showOutstanding): ?>
         <!-- Outstanding Balances Table -->
-        <div class="table-container">
+        <div class="table-container" data-rh-results>
             <table class="table fit-or-card">
                 <thead>
                     <tr>

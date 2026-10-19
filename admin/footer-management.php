@@ -653,7 +653,7 @@ $active_tab = $_GET['tab'] ?? 'links';
                     <div class="form-group" style="grid-column:1/-1;">
                         <label>Content <span style="color:#dc3545">*</span></label>
                         <textarea name="content" placeholder="Full policy text. Use plain text or basic HTML." required style="min-height:180px;" data-tag-autocomplete></textarea>
-                        <p class="fm-tag-hint"><i class="fas fa-magic"></i> Type <code>{{</code> to autocomplete a DB tag — e.g. <code>{{check_in_time}}</code>, <code>{{site_name}}</code>, <code>{{phone}}</code>. Tags resolve to live values when the footer renders. Or use the Tags panel above.</p>
+                        <p class="fm-tag-hint"><i class="fas fa-circle-info"></i> Type <code>{{</code> to autocomplete a DB tag — e.g. <code>{{check_in_time}}</code>, <code>{{site_name}}</code>, <code>{{phone}}</code>. Tags resolve to live values when the footer renders. Or use the Tags panel above.</p>
                     </div>
                     <div class="form-group">
                         <label>Display Order</label>
@@ -870,7 +870,7 @@ $active_tab = $_GET['tab'] ?? 'links';
     <div class="form-group">
         <label>Content <span style="color:#dc3545">*</span></label>
         <textarea name="content" id="ep_content" required style="min-height:220px;" data-tag-autocomplete></textarea>
-        <p class="fm-tag-hint"><i class="fas fa-magic"></i> Type <code>{{</code> to autocomplete a DB tag — e.g. <code>{{check_in_time}}</code>, <code>{{check_out_time}}</code>, <code>{{site_name}}</code>.</p>
+        <p class="fm-tag-hint"><i class="fas fa-circle-info"></i> Type <code>{{</code> to autocomplete a DB tag — e.g. <code>{{check_in_time}}</code>, <code>{{check_out_time}}</code>, <code>{{site_name}}</code>.</p>
     </div>
     <div class="form-row">
         <div class="form-group">

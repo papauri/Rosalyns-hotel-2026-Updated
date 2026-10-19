@@ -379,7 +379,7 @@ $csrf_token = generateCsrfToken();
         </div>
 
         <h3 class="wastage-section-title wastage-section-title--entries" id="wastageEntries">Recent entries</h3>
-        <div class="table-responsive">
+        <div class="table-responsive" data-rh-results>
             <table class="stock-table">
                 <thead>
                     <tr>

@@ -3051,7 +3051,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <button type="button" data-method="cash" onclick="setMethod(this)"><i class="fas fa-money-bill-wave"></i> Cash</button>
                         <button type="button" data-method="mobile_money" onclick="setMethod(this)"><i class="fas fa-mobile-alt"></i> Mobile Money</button>
                         <button type="button" data-method="card_manual" onclick="setMethod(this)"><i class="fas fa-credit-card"></i> Card (manual)</button>
-                        <button type="button" class="disabled" data-method="card_pos" onclick="showCardPosUnavailable()"><i class="fas fa-microchip"></i> Card POS<br><small>(soon)</small></button>
+                        <button type="button" class="disabled" data-method="card_pos" onclick="showCardPosUnavailable()"><i class="fas fa-credit-card"></i> Card POS<br><small>(soon)</small></button>
                     </div>
                     <input type="hidden" name="payment_method" id="payment_method" value="">
 
@@ -3592,7 +3592,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         <button type="button" data-method="cash" onclick="setMethodTab(this)"><i class="fas fa-money-bill-wave"></i> Cash</button>
                         <button type="button" data-method="mobile_money" onclick="setMethodTab(this)"><i class="fas fa-mobile-alt"></i> Mobile</button>
                         <button type="button" data-method="card_manual" onclick="setMethodTab(this)"><i class="fas fa-credit-card"></i> Card</button>
-                        <button type="button" class="disabled" onclick="showCardPosUnavailable()"><i class="fas fa-microchip"></i> Card POS<br><small>(soon)</small></button>
+                        <button type="button" class="disabled" onclick="showCardPosUnavailable()"><i class="fas fa-credit-card"></i> Card POS<br><small>(soon)</small></button>
                     </div>
                     <input type="hidden" name="payment_method" id="payTabMethod" value="">
                     <div id="ext-tab-cash" style="display:none;">

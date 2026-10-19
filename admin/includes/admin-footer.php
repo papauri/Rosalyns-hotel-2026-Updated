@@ -24,6 +24,8 @@
 <script src="js/admin-mobile.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-mobile.js'); ?>"></script>
 <!-- Deep-linking: scroll to + flash the targeted row/card/section from ?focus= or #hash -->
 <script src="js/admin-deeplink.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-deeplink.js'); ?>"></script>
+<!-- Results anchoring: filter cards, tabs and chips land on the filtered list below the sticky header -->
+<script src="js/admin-anchor.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-anchor.js'); ?>"></script>
 <!-- PWA install prompt — shows "Install App" banner on Chrome/Edge desktop + Android -->
 <script src="js/pwa-install.js" defer></script>
 <!-- Universal offline queue + connectivity banner. Only intercepts forms with

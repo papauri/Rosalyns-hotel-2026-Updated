@@ -1387,7 +1387,7 @@ try {
                     <input type="hidden" name="action" value="auto_create_tasks">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                     <button class="btn btn-warning" type="button" onclick="rmConfirm(this.closest('form'), 'Create a maintenance task for every room currently in Maintenance / Out of order that has no open task? Rooms with a guest checked in are skipped.', 'Auto-Create', 'btn-warning')">
-                        <i class="fas fa-magic"></i> Auto-Create Tasks
+                        <i class="fas fa-list-check"></i> Create Tasks for Rooms
                     </button>
                 </form>
                 <button class="btn btn-primary" type="button" onclick="openModal()"><i class="fas fa-plus"></i> Add Maintenance</button>
@@ -1566,7 +1566,7 @@ try {
         $sched_total_pages = $sched_total > 0 ? (int)ceil($sched_total / $sched_per_page) : 1;
         $sched_display     = array_slice($schedules, ($sched_page - 1) * $sched_per_page, $sched_per_page);
         ?>
-        <div class="table-card" id="maintenanceSchedulesContainer">
+        <div class="table-card" id="maintenanceSchedulesContainer" data-rh-results>
             <div class="rm-table-toolbar">
                 <h3 class="rm-table-toolbar__title"><i class="fas fa-list-check"></i> All Maintenance Tasks (<?php echo count($schedules); ?>)</h3>
                 <div class="rm-table-toolbar__filters">

@@ -273,6 +273,7 @@ $site_name = getSetting('site_name');
     </div>
 
     <!-- Inquiry list -->
+    <div data-rh-results role="region" aria-label="Inquiries"></div>
     <?php if (empty($inquiries)): ?>
     <div class="empty-state">
         <i class="fas fa-envelope-open-text"></i>

@@ -1103,7 +1103,7 @@ try {
                                 <?php endforeach; ?>
                             </ul>
                             <p style="font-size: 12px; color: #666; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee;">
-                                <i class="fas fa-lightbulb" style="color: #FF9800;"></i> High exit rates may indicate content gaps or technical issues
+                                <i class="fas fa-circle-info" style="color: #FF9800;"></i> High exit rates may indicate content gaps or technical issues
                             </p>
                         <?php endif; ?>
                     </div>
@@ -1238,7 +1238,7 @@ try {
                                 $total_device = max(1, array_sum(array_column($devices, 'count')));
                                 foreach ($devices as $d):
                                     $pct = round(($d['count'] / $total_device) * 100);
-                                    $icons = ['desktop' => 'fa-desktop', 'mobile' => 'fa-mobile-alt', 'tablet' => 'fa-tablet-alt', 'bot' => 'fa-robot', 'unknown' => 'fa-question-circle'];
+                                    $icons = ['desktop' => 'fa-desktop', 'mobile' => 'fa-mobile-alt', 'tablet' => 'fa-tablet-alt', 'bot' => 'fa-spider', 'unknown' => 'fa-question-circle'];
                                     $icon = $icons[$d['device_type']] ?? 'fa-question-circle';
                                 ?>
                                     <li>

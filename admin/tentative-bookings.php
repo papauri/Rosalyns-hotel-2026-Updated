@@ -338,7 +338,7 @@ foreach ($active as $bk) {
         </div>
 
         <!-- Active tentative bookings table -->
-        <div class="acct-panel" style="margin-bottom: 24px;">
+        <div class="acct-panel" style="margin-bottom: 24px;" data-rh-results>
             <div class="acct-panel__head">
                 <h3 class="acct-panel__title"><i class="fas fa-hourglass-half"></i> Active Tentative Holds</h3>
                 <span class="acct-panel__sub" id="tb-visible-count"><?php echo count($active); ?> booking<?php echo count($active) === 1 ? '' : 's'; ?></span>

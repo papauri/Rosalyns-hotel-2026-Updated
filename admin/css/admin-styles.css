@@ -66,6 +66,27 @@ body {
     padding: 0;
 }
 
+/* Anchoring below the fixed header. scroll-padding on the root makes every in-page jump
+   (#section links, ?focus= deep links, focus() on a field, a validation error pointing at
+   an input, scrollIntoView) stop under the header, not behind it. It is set once here, not
+   as scroll-margin on each target, so the two never add up. */
+html {
+    scroll-padding-top: calc(var(--admin-header-height, 74px) + 16px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    html {
+        scroll-behavior: smooth;
+    }
+}
+
+/* The start of a filtered list takes focus after a filter click (admin-anchor.js) so
+   keyboard and screen-reader users land there too; no ring, it is not a control. */
+[data-rh-results]:focus,
+#rh-results:focus {
+    outline: none;
+}
+
 body {
     min-height: 100vh;
     display: flex;

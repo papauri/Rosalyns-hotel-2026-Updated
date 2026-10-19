@@ -582,7 +582,8 @@ body.modal-open {
 .alert-container-top,
 .alert-container-top-right {
     position: fixed;
-    top: 24px;
+    /* Below the fixed admin header, so a flash after a redirect never covers it. */
+    top: calc(var(--admin-header-height, 74px) + 12px);
     right: 24px;
     z-index: 99999;
     display: flex;
@@ -595,7 +596,7 @@ body.modal-open {
 
 .alert-container-top-left {
     position: fixed;
-    top: 24px;
+    top: calc(var(--admin-header-height, 74px) + 12px);
     left: 24px;
     z-index: 99999;
     display: flex;
@@ -820,7 +821,7 @@ body.modal-open {
     .alert-container-top,
     .alert-container-top-right,
     .alert-container-top-left {
-        top: 12px;
+        top: calc(var(--admin-header-height, 64px) + 8px);
         right: 12px;
         left: 12px;
         max-width: none;
@@ -979,6 +980,11 @@ body.modal-open {
         top: 8px;
         right: 8px;
         left: 8px;
+    }
+    .alert-container-top,
+    .alert-container-top-right,
+    .alert-container-top-left {
+        top: calc(var(--admin-header-height, 64px) + 6px);
     }
     .alert-container-bottom,
     .alert-container-bottom-right,

@@ -379,7 +379,7 @@ function expiry_tier(?string $expiry, ?int $days): array
             <span style="color:#6c757d;font-size:13px;"><?php echo count($batches); ?> batch(es)</span>
         </form>
 
-        <div class="table-responsive">
+        <div class="table-responsive" data-rh-results>
             <table class="stock-table">
                 <thead>
                     <tr>

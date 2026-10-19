@@ -558,7 +558,7 @@ $nav_categories = getNavCategories();
     </div>
 
     <!-- Users List -->
-    <div class="users-section">
+    <div class="users-section" data-rh-results>
         <div class="users-section-header">
             <h3><i class="fas fa-users"></i> All Users (<?php echo count($all_users); ?>)</h3>
             <div class="user-filters">

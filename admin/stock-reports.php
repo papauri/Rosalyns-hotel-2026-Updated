@@ -549,7 +549,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
             </section>
         <?php endif; ?>
 
-        <div class="table-responsive">
+        <div class="table-responsive" data-rh-results>
             <table class="stock-table">
                 <?php if ($tab === 'inventory'): ?>
                     <thead>

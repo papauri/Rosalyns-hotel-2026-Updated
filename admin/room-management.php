@@ -2291,7 +2291,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             </div>
 
                             <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:10px 12px;font-size:0.8rem;color:#856404;">
-                                <i class="fas fa-lightbulb"></i>
+                                <i class="fas fa-circle-info"></i>
                                 <strong>Tip:</strong> Posts with images get significantly more reach on Facebook. Review the preview on the right before posting.
                             </div>
                         </div>

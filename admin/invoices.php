@@ -678,7 +678,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
         <?php endif; ?>
 
         <!-- Invoices Table -->
-        <div class="invoices-table">
+        <div class="invoices-table" data-rh-results>
             <?php if (!empty($invoices)): ?>
                 <div class="table-responsive">
                     <table>

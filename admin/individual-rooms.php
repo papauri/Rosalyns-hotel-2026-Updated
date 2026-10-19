@@ -1315,7 +1315,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
         </div>
 
         <!-- Rooms Table -->
-        <div class="rooms-table">
+        <div class="rooms-table" data-rh-results>
                 <table>
                     <thead>
                         <tr>

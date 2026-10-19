@@ -538,7 +538,7 @@ $modalsHtml = ob_get_clean();
         <?php endif; ?>
 
         <!-- Credit Notes Table -->
-        <div class="table-container">
+        <div class="table-container" data-rh-results>
             <?php if (empty($creditNotes)): ?>
                 <div class="empty-state">
                     <i class="fas fa-file-invoice"></i>

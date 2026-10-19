@@ -1402,7 +1402,7 @@ $csrf_token = generateCsrfToken();
         <?php endif; ?>
 
         <?php if ((int)$healthSummary['unbalanced'] > 0): ?>
-            <a class="ops-banner ops-banner--warn" href="stock-orders.php?health=review#ops-insights" title="Open the review queue for orders needing attention">
+            <a class="ops-banner ops-banner--warn" href="stock-orders.php?health=review#rh-results" title="Open the review queue for orders needing attention">
                 <div class="ops-banner__content">
                     <strong><i class="fas fa-triangle-exclamation"></i> Manager review needed:</strong>
                     <?php echo (int)$healthSummary['unbalanced']; ?> order(s) have accounting, folio, or room-service balance checks to review.
@@ -1709,7 +1709,7 @@ $csrf_token = generateCsrfToken();
                 <div class="ops-panel ops-panel--station-queue" style="margin:0;">
                     <div class="ops-panel__header">
                         <strong class="ops-panel__header-title"><i class="fas fa-layer-group" style="color:#7E684B;"></i> Station Queue</strong>
-                        <a class="ops-panel__header-link" href="stock-orders.php?status=placed#ops-insights">View open orders</a>
+                        <a class="ops-panel__header-link" href="stock-orders.php?status=placed#rh-results">View open orders</a>
                     </div>
                     <div class="table-responsive" style="margin-top:10px;">
                         <table class="order-list" style="margin-top:0;">
@@ -1832,7 +1832,7 @@ $csrf_token = generateCsrfToken();
                             };
                             $mixAmt = (float)($mix['amount_total'] ?? 0);
                             $share  = $totalPaymentRevenue > 0 ? ($mixAmt / $totalPaymentRevenue) * 100 : 0;
-                            $mixHref = 'stock-orders.php?date=today&payment_method=' . rawurlencode($methodKey) . '#ops-insights';
+                            $mixHref = 'stock-orders.php?date=today&payment_method=' . rawurlencode($methodKey) . '#rh-results';
                             $isMixActive = $filterDate === 'today' && $filterMethod === $methodKey;
                         ?>
                             <a class="ops-panel__metric-link<?php echo $isMixActive ? ' ops-panel__metric-link--active' : ''; ?>"
@@ -1888,7 +1888,7 @@ $csrf_token = generateCsrfToken();
                             };
                             $chRev  = (float)($ch['revenue'] ?? 0);
                             $chPct  = $totalChannelRevenue > 0 ? ($chRev / $totalChannelRevenue) * 100 : 0;
-                            $chHref = 'stock-orders.php?date=today&order_type=' . rawurlencode($chType) . '#ops-insights';
+                            $chHref = 'stock-orders.php?date=today&order_type=' . rawurlencode($chType) . '#rh-results';
                             $isChannelActive = $filterDate === 'today' && $filterOrderType === $chType;
                         ?>
                             <a class="ops-panel__metric-link<?php echo $isChannelActive ? ' ops-panel__metric-link--active' : ''; ?>"
@@ -1935,7 +1935,7 @@ $csrf_token = generateCsrfToken();
                                 $barPct = $maxHourRev > 0 ? round(((float)$h['revenue'] / $maxHourRev) * 78, 0) : 0;
                                 $hr     = (int)$h['hour'];
                                 $hlbl   = $hr === 0 ? '12a' : ($hr < 12 ? $hr . 'a' : ($hr === 12 ? '12p' : ($hr - 12) . 'p'));
-                                $hourHref = 'stock-orders.php?date=today&hour=' . $hr . '#ops-insights';
+                                $hourHref = 'stock-orders.php?date=today&hour=' . $hr . '#rh-results';
                                 $isHourActive = $filterDate === 'today' && $filterHour !== '' && (int)$filterHour === $hr;
                             ?>
                                 <a class="ops-panel__chart-link<?php echo $isHourActive ? ' ops-panel__chart-link--active' : ''; ?>"
@@ -1967,7 +1967,7 @@ $csrf_token = generateCsrfToken();
                             <i class="fas fa-ban" style="color:<?php echo $totalVoidedToday > 0 ? '#721c24' : '#155724'; ?>;"></i>
                             Void Analysis Today
                         </strong>
-                        <a class="ops-panel__header-link" href="stock-orders.php?date=today&status=voided#ops-insights">Open voided orders</a>
+                        <a class="ops-panel__header-link" href="stock-orders.php?date=today&status=voided#rh-results">Open voided orders</a>
                     </div>
                     <?php if ($totalVoidedToday > 0): ?>
                         <div style="margin-top:10px;font-size:13px;">
@@ -1976,7 +1976,7 @@ $csrf_token = generateCsrfToken();
                                 <strong style="color:#721c24;"><?php echo $currency_symbol . ' ' . number_format($totalVoidedAmt, 2); ?> lost</strong>
                             </div>
                             <?php foreach ($voidReasonsToday as $vr): ?>
-                                <a class="ops-panel__reason-link" href="stock-orders.php?date=today&status=voided#ops-insights" title="View today's voided orders">
+                                <a class="ops-panel__reason-link" href="stock-orders.php?date=today&status=voided#rh-results" title="View today's voided orders">
                                     <span style="color:#555;flex:1;">
                                         <i class="fas fa-circle" style="font-size:6px;color:#dc3545;vertical-align:middle;margin-right:4px;"></i>
                                         <?php echo htmlspecialchars((string)($vr['reason'] ?? 'Unknown')); ?>
@@ -1985,7 +1985,7 @@ $csrf_token = generateCsrfToken();
                                 </a>
                             <?php endforeach; ?>
                             <div style="margin-top:10px;">
-                                <a href="stock-orders.php?date=today&status=voided#ops-insights" style="font-size:12px;color:#7E684B;text-decoration:none;font-weight:600;">
+                                <a href="stock-orders.php?date=today&status=voided#rh-results" style="font-size:12px;color:#7E684B;text-decoration:none;font-weight:600;">
                                     <i class="fas fa-magnifying-glass"></i> View all voided orders &rarr;
                                 </a>
                             </div>
@@ -2350,7 +2350,7 @@ $csrf_token = generateCsrfToken();
             }
         </script>
 
-        <h3 style="margin-top:32px;">Recent Orders</h3>
+        <h3 style="margin-top:32px;" id="rh-results" data-rh-results>Recent Orders</h3>
         <?php /* Shared bulk bar (admin-bulk.js shows/hides it and counts the selection). The buttons submit this
               form only so the shared markup works; the page script below intercepts the submit and runs
               the same cancel / void / reconcile / delete / export flows as before. */ ?>

@@ -1434,8 +1434,8 @@ foreach ($assignments as $a) {
                 <form method="POST" style="display:inline;">
                     <input type="hidden" name="action" value="auto_create_checkout">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                    <button class="btn btn-warning" type="button" data-help="Auto-Create Checkout Cleanup|Automatically generate cleaning assignments for every room that has a guest checking out and needs housekeeping." onclick="hkConfirm(this.closest('form'), 'Auto-create checkout cleanup assignments for all rooms that need it?', 'Auto-Create', 'btn-warning')">
-                        <i class="fas fa-magic"></i> Auto-Create Checkout Cleanup
+                    <button class="btn btn-warning" type="button" data-help="Create Checkout Cleanup|Generate cleaning assignments for every room that has a guest checking out and needs housekeeping." onclick="hkConfirm(this.closest('form'), 'Auto-create checkout cleanup assignments for all rooms that need it?', 'Auto-Create', 'btn-warning')">
+                        <i class="fas fa-broom"></i> Create Checkout Cleanup
                     </button>
                 </form>
                 <button class="btn btn-primary" type="button" onclick="openModal()" data-help="Add Assignment|Manually create a new housekeeping task for a room and assign it to a staff member."><i class="fas fa-plus"></i> Add Assignment</button>
@@ -1598,7 +1598,7 @@ foreach ($assignments as $a) {
         <?php endif; ?>
 
         <!-- Assignments Table -->
-        <div class="table-card" id="hkAssignmentsCard">
+        <div class="table-card" id="hkAssignmentsCard" data-rh-results>
             <div class="hk-table-toolbar">
                 <h3 class="hk-table-toolbar__title"><i class="fas fa-list-check"></i> All Assignments (<?php echo count($assignments); ?>)</h3>
                 <div class="hk-table-toolbar__filters">

@@ -3442,7 +3442,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             </div>
 
             <!-- Room Bookings -->
-            <div class="bookings-section">
+            <div class="bookings-section" data-rh-results>
                 <h3 class="section-title">
                     <i class="fas fa-bed"></i> Room Bookings
                     <span style="font-size: 14px; font-weight: normal; color: #666;">
@@ -4629,13 +4629,13 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 hydrateQuickActionButtons(container);
 
                 // Keep pagination/tab navigation focused on the booking table area.
-                const topAnchor = container.querySelector('.bookings-section .table-responsive, .bookings-section table.booking-table, .bookings-section') || container;
-                const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-                const targetTop = Math.max(0, (topAnchor.getBoundingClientRect().top + window.scrollY) - 88);
-                window.scrollTo({
-                    top: targetTop,
-                    behavior: prefersReducedMotion ? 'auto' : 'smooth'
-                });
+                // Shared anchoring: lands below the sticky header and stays put when the list is already in view.
+                const topAnchor = container.querySelector('[data-rh-results]') || container.querySelector('.bookings-section') || container;
+                if (window.rhAnchors) {
+                    window.rhAnchors.scrollToResults(topAnchor);
+                } else {
+                    window.scrollTo({ top: Math.max(0, (topAnchor.getBoundingClientRect().top + window.scrollY) - 88), behavior: 'smooth' });
+                }
 
                 // Update tab badge counts from the freshly fetched page
                 doc.querySelectorAll('.tab-button[data-tab]').forEach(btn => {

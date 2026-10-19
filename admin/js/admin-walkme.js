@@ -236,7 +236,7 @@
           <div class="wm-card__accent"></div>
           <div class="wm-card__body">
             <div class="wm-card__eyebrow">
-              <i class="fas ${step.icon || 'fa-lightbulb'}"></i>
+              <i class="fas ${step.icon || 'fa-circle-info'}"></i>
               ${escHtml(step.label || 'Tip ' + (index + 1) + ' of ' + total)}
             </div>
             <h3 class="wm-card__title">${escHtml(step.title || '')}</h3>

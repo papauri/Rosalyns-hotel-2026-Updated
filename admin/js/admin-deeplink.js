@@ -46,6 +46,12 @@
 
     function flash(el) {
         if (!el) return;
+        // The list start of a filtered page is a landing spot, not a row to highlight:
+        // shared anchoring scrolls to it below the header and leaves it unflashed.
+        if (el.id === 'rh-results' && window.rhAnchors) {
+            window.rhAnchors.scrollToResults(el);
+            return;
+        }
         // Reveal inside collapsed <details> where possible.
         var details = el.closest && el.closest('details');
         if (details && !details.open) { details.open = true; }

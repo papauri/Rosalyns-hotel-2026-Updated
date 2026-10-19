@@ -369,7 +369,7 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
             </form>
         </div>
 
-        <p class="reviews-result-count" role="status">
+        <p class="reviews-result-count" role="status" data-rh-results>
             <?php if ($total_reviews > 0): ?>
                 Showing <?php echo $offset + 1; ?>–<?php echo min($offset + $per_page, $total_reviews); ?> of <?php echo $total_reviews; ?> review<?php echo $total_reviews === 1 ? '' : 's'; ?>
             <?php endif; ?>

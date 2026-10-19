@@ -407,7 +407,7 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                                     echo 'changed ' . htmlspecialchars($cat) . ': ' . htmlspecialchars((string)$a['old_value']) . ' to ' . htmlspecialchars((string)$a['new_value']);
                                 }
                                 if (!empty($a['source']) && in_array($a['source'], ['copy', 'suggest'], true)) {
-                                    echo ' <em>(' . ($a['source'] === 'copy' ? 'copied from last month' : 'suggested from the last 3 months') . ')</em>';
+                                    echo ' <em>(' . ($a['source'] === 'copy' ? 'copied from last month' : 'filled from the last 3 months') . ')</em>';
                                 }
                                 ?>
                             </li>
@@ -435,7 +435,7 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                     <p class="sbud-note">One line per category. Give a fixed amount, or a % of the food and drink sales expected this month. Choose what happens when an order would go over.</p>
                     <div class="sbud-tools">
                         <button type="button" class="sbud-btn sbud-btn--ghost sbud-btn--sm" id="sbudCopy"<?php echo $copyProposal ? '' : ' disabled title="Last month has no budget to copy"'; ?>><i class="fas fa-copy"></i> Copy last month</button>
-                        <button type="button" class="sbud-btn sbud-btn--ghost sbud-btn--sm" id="sbudSuggest"<?php echo $suggestProposal ? '' : ' disabled title="No stock received in the last 3 months"'; ?>><i class="fas fa-wand-magic-sparkles"></i> Suggest from last 3 months</button>
+                        <button type="button" class="sbud-btn sbud-btn--ghost sbud-btn--sm" id="sbudSuggest"<?php echo $suggestProposal ? '' : ' disabled title="No stock received in the last 3 months"'; ?>><i class="fas fa-clock-rotate-left"></i> Fill from last 3 months</button>
                     </div>
                     <div class="sbud-filled" id="sbudFilled"></div>
                     <div id="sbudRows"></div>
@@ -544,7 +544,7 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
         ['sbudEditBtn', 'sbudEditBtn2'].forEach(function (id) { var b = document.getElementById(id); if (b) b.addEventListener('click', open); });
         document.getElementById('sbudAdd').addEventListener('click', function () { addRow(); });
         document.getElementById('sbudCopy').addEventListener('click', function () { fill(data.copy, 'copy', 'Filled in from last month. Check the lines, then press Save budgets. Nothing is saved until you do.'); });
-        document.getElementById('sbudSuggest').addEventListener('click', function () { fill(data.suggest, 'suggest', 'Suggested from what was received in the last 3 months (average per month). Change anything you like, then press Save budgets.'); });
+        document.getElementById('sbudSuggest').addEventListener('click', function () { fill(data.suggest, 'suggest', 'Filled from what was received in the last 3 months (average per month). Change anything you like, then press Save budgets.'); });
         // Any hand edit after a copy/suggest makes it a manual save again only if lines were changed - keep the label honest.
         rowsEl.addEventListener('input', function () { if (source.value !== 'manual') { source.value = 'manual'; filled.style.display = 'none'; } });
     })();

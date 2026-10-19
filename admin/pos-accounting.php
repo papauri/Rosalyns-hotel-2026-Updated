@@ -591,7 +591,7 @@ try {
                     <button type="submit" class="acct-btn acct-btn--primary"><i class="fas fa-lock"></i> Close selected</button>
                 </div>
             </div>
-            <div class="table-responsive">
+            <div class="table-responsive" data-rh-results>
                 <table class="pos-acct-table mobile-enhanced" id="pos-acct-match-table">
                     <thead>
                         <tr>

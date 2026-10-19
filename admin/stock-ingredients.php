@@ -711,7 +711,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             <span id="filter-count" data-total="<?php echo count($ingredients); ?>" style="color:#6c757d;font-size:13px;"><?php echo count($ingredients); ?> ingredient(s)</span>
         </div>
 
-        <div class="table-responsive">
+        <div class="table-responsive" data-rh-results>
             <table class="stock-table" id="stock-table">
                 <thead>
                     <tr>

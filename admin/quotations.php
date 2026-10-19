@@ -434,7 +434,7 @@ try {
         <?php endif; ?>
 
         <!-- Table -->
-        <div class="table-container">
+        <div class="table-container" data-rh-results>
             <?php if (!empty($quotations)): ?>
                 <table class="table">
                     <thead>

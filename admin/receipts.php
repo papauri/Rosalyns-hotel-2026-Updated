@@ -240,7 +240,7 @@ $site_name = getSetting('site_name', 'Hotel');
                 <form method="post">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="action" value="backfill_receipts">
-                    <button class="btn btn--primary" type="submit"><i class="fas fa-wand-magic-sparkles"></i> Generate Missing</button>
+                    <button class="btn btn--primary" type="submit"><i class="fas fa-file-circle-plus"></i> Generate Missing</button>
                 </form>
                 <a class="btn btn--ghost" href="receipts.php?<?php echo htmlspecialchars(http_build_query(array_merge($filters, ['export' => 'csv'])), ENT_QUOTES, 'UTF-8'); ?>"><i class="fas fa-file-csv"></i> Export CSV</a>
             </div>
@@ -333,7 +333,7 @@ $site_name = getSetting('site_name', 'Hotel');
             <span class="rh-page-head__meta"><?php echo number_format($totalRows); ?> match<?php echo $totalRows === 1 ? '' : 'es'; ?></span>
         </div>
         <div class="rh-panel__body">
-        <div class="table-container"data-admin-pagination-scope data-receipts-pagination-scope data-page-size="<?php echo (int)$limit; ?>" data-current-page="<?php echo (int)$page; ?>" data-total-pages="<?php echo (int)$totalPages; ?>">
+        <div class="table-container" data-rh-results data-admin-pagination-scope data-receipts-pagination-scope data-page-size="<?php echo (int)$limit; ?>" data-current-page="<?php echo (int)$page; ?>" data-total-pages="<?php echo (int)$totalPages; ?>">
             <?php if (!$payments): ?>
                 <div class="empty-state">
                     <i class="fas fa-receipt"></i>

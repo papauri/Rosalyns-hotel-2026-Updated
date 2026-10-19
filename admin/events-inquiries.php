@@ -436,7 +436,7 @@ try {
         </form>
 
         <!-- Bookings Table -->
-        <div class="table-container">
+        <div class="table-container" data-rh-results>
             <table class="table">
                 <thead>
                     <tr>

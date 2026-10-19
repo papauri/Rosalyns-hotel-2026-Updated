@@ -925,12 +925,12 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
         </div>
 
         <?php if (empty($gm_members)): ?>
-            <div class="empty-state">
+            <div class="empty-state" data-rh-results>
                 <i class="fas fa-id-card"></i>
                 <p><?php echo $gm_filter === 'all' ? 'No members enrolled yet. Enrol your first member to start the register.' : 'No members match this filter.'; ?></p>
             </div>
         <?php else: ?>
-            <table class="menu-table">
+            <table class="menu-table" data-rh-results>
                 <thead>
                     <tr>
                         <th style="width:110px;">Member #</th>

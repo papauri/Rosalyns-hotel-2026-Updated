@@ -1620,7 +1620,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </form>
 
                 <details class="tips-box">
-                    <summary><i class="fas fa-lightbulb"></i> How this affects your website</summary>
+                    <summary><i class="fas fa-circle-info"></i> How this affects your website</summary>
                     <div class="tips-body">
                         <ul>
                             <li>Date pickers only allow dates within this limit</li>
@@ -1833,7 +1833,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </script>
 
                 <details class="tips-box">
-                    <summary><i class="fas fa-lightbulb"></i> What happens when tentative is disabled</summary>
+                    <summary><i class="fas fa-circle-info"></i> What happens when tentative is disabled</summary>
                     <div class="tips-body">
                         <ul>
                             <li>The "Tentative Booking" card on the public booking page is removed entirely</li>
@@ -1891,7 +1891,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </form>
 
                 <details class="tips-box">
-                    <summary><i class="fas fa-lightbulb"></i> How Tourism Levy Works</summary>
+                    <summary><i class="fas fa-circle-info"></i> How Tourism Levy Works</summary>
                     <div class="tips-body">
                         <ul>
                             <li><strong>Calculation:</strong> (Room Rate + Child Supplement) × (Levy % / 100)</li>
@@ -2043,7 +2043,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </form>
 
                 <details class="tips-box" style="margin-top:10px;">
-                    <summary><i class="fas fa-lightbulb"></i> Email Configuration Tips</summary>
+                    <summary><i class="fas fa-circle-info"></i> Email Configuration Tips</summary>
                     <div class="tips-body">
                         <ul>
                             <li><strong>Testing:</strong> Use Development Mode to test without actually sending</li>

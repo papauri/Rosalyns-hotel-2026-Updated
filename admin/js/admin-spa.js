@@ -800,6 +800,16 @@
                     return;
                 }
 
+                // Filter links end on the results: shared anchoring knows the sticky header
+                // and skips the scroll when the list is already in view.
+                if (targetId === 'rh-results' && window.rhAnchors) {
+                    var results = window.rhAnchors.prepare();
+                    if (results) {
+                        window.rhAnchors.scrollToResults(results);
+                        return;
+                    }
+                }
+
                 var target = document.getElementById(targetId);
                 if (!target) {
                     window.scrollTo({ top: 0, behavior: 'instant' });
