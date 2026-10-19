@@ -366,6 +366,12 @@ if (!function_exists('rh_auto_defaults')) {
             $GLOBALS['rh_scheduler_budget'] = ['deadline' => time() + $timeBudget, 'emails_left' => $emailBudget];
             $testMode = trim(rh_auto_setting('automated_email_test_recipient')) !== '';
 
+            // Every run, before any job's own interval: tell the administrator when the data is
+            // not safe (no good backup for 36 hours, or no off-site copy for a week). Deduped inside.
+            if (function_exists('rh_backup_health_check')) {
+                rh_backup_health_check($pdo);
+            }
+
             foreach (rh_scheduler_jobs() as $name => $job) {
                 if (!empty($opts['only_jobs']) && !in_array($name, $opts['only_jobs'], true)) {
                     continue; // master switch off: only the backup job runs

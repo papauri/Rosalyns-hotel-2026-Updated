@@ -9,7 +9,9 @@
  *  - quotation_expiry_reminder  sent quotations that expire within automated_email_quotation_days.
  *  - tentative_hold_reminder    one reminder per hold, tentative_reminder_hours before it lapses.
  *  - tentative_expired_notice   guest + hotel notice once a hold has lapsed (last 24 h).
- *  - nightly_backup             runs scripts/backup_database.php once a day after 01:00.
+ *  - nightly_backup             runs the backup engine (includes/db-backup.php) once a day after 01:00;
+ *                               rh_backup_alert() emails the administrator when it fails, when no good
+ *                               backup exists for 36 hours, or when no off-site copy was downloaded for 7 days.
  *  - prearrival_reminders / poststay_review_requests / gym_membership_renewal
  *                               the former cron senders; they call the SAME library functions the
  *                               scripts/ wrappers call and keep their original settings and dedupe
@@ -883,9 +885,142 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
     }
 
     /**
+     * Tell the hotel administrator about a backup problem, in plain words. Kinds:
+     *   failed            the nightly backup did not work
+     *   stale             no good backup for over 36 hours
+     *   offsite_reminder  no copy has been downloaded off the server for over 7 days
+     * At most one email per kind per 24 hours (offsite_reminder: per 7 days), tracked in
+     * site_settings 'last_backup_alert_<kind>_at'. Never attaches the dump. With no admin email
+     * set it logs that once a day and carries on.
+     *
+     * @param string $detail technical line for the administrator (shown small, escaped)
+     * @param array  $opts   dry_run (bool): decide and build the message but send/stamp nothing
+     * @return array{sent:bool,reason:string,subject?:string,to?:string,html?:string,text?:string}
+     */
+    function rh_backup_alert(PDO $pdo, string $kind, string $detail, array $opts = []): array
+    {
+        require_once __DIR__ . '/db-backup.php';
+        $windows = ['failed' => 86400, 'stale' => 86400, 'offsite_reminder' => 7 * 86400];
+        if (!isset($windows[$kind])) {
+            return ['sent' => false, 'reason' => 'unknown_kind'];
+        }
+        $dry  = !empty($opts['dry_run']);
+        $root = dirname(__DIR__);
+        $read = static function (string $key) use ($pdo): int {
+            try {
+                $st = $pdo->prepare('SELECT setting_value FROM site_settings WHERE setting_key = ?');
+                $st->execute([$key]);
+                $v = $st->fetchColumn();
+                return $v === false ? 0 : (int)(strtotime((string)$v) ?: 0);
+            } catch (Throwable $e) {
+                return 0;
+            }
+        };
+        $key = 'last_backup_alert_' . $kind . '_at';
+        $lastSent = $read($key);
+        if ($lastSent > 0 && (time() - $lastSent) < $windows[$kind]) {
+            return ['sent' => false, 'reason' => 'recently_sent'];
+        }
+
+        $to = trim((string)getEmailSetting('email_admin_email', ''));
+        if ($to === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            $lastNote = $read('last_backup_alert_noemail_at');
+            if (!$dry && ($lastNote === 0 || (time() - $lastNote) >= 86400)) {
+                rh_db_backup_log($root, 'ALERT not sent (' . $kind . '): no administrator email address is set in Email Settings.');
+                rh_db_backup_stamp($pdo, ['last_backup_alert_noemail_at' => date('Y-m-d H:i:s')], $root);
+            }
+            return ['sent' => false, 'reason' => 'no_admin_email'];
+        }
+
+        $lastAt  = strtotime((string)rh_auto_setting_fresh($pdo, 'last_backup_at')) ?: 0;
+        $hours   = $lastAt > 0 ? (int)floor((time() - $lastAt) / 3600) : 0;
+        $site    = trim((string)getSetting('site_name', 'Hotel')) ?: 'Hotel';
+        if ($kind === 'failed') {
+            [$what, $means, $todo] = rh_db_backup_explain(rh_db_backup_code_from_error($detail));
+            $subject = $site . ': last night\'s data backup did not work';
+        } elseif ($kind === 'stale') {
+            $what  = $lastAt > 0
+                ? 'Your hotel data has not been backed up for ' . $hours . ' hours (the last good backup was on ' . date('j M Y \a\t H:i', $lastAt) . ').'
+                : 'Your hotel data has no backup recorded yet.';
+            $means = 'If the system failed now, recent bookings and payments could be lost.';
+            $todo  = 'Open Backups and press Run Backup Now. If it does not work, contact your IT support.';
+            $subject = $site . ': your hotel data has not been backed up for ' . ($lastAt > 0 ? $hours . ' hours' : 'a while');
+        } else {
+            $what  = 'No copy of your hotel data has been saved away from the server in over a week.';
+            $means = 'All backups sit on the same server as the hotel system. If that server were lost or damaged, the backups would be lost with it.';
+            $todo  = 'Open Backups, press Download beside the newest backup, and keep the file somewhere safe (a USB drive or cloud storage you control).';
+            $subject = $site . ': please save a copy of your backup off the server';
+        }
+        $link = rh_auto_site_base() . '/admin/backup-management.php';
+        $e = static function ($v): string {
+            return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+        };
+        $html = '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1f2937;line-height:1.5;">'
+            . '<h2 style="margin:0 0 12px;font-size:20px;color:#111827;">' . $e($subject) . '</h2>'
+            . '<p style="margin:0 0 6px;"><strong>What happened</strong><br>' . $e($what) . '</p>'
+            . '<p style="margin:0 0 6px;"><strong>What it means</strong><br>' . $e($means) . '</p>'
+            . '<p style="margin:0 0 14px;"><strong>What to do</strong><br>' . $e($todo) . '</p>'
+            . '<p style="margin:0 0 16px;"><a href="' . $e($link) . '" style="display:inline-block;background:#8B7355;color:#ffffff;padding:11px 22px;text-decoration:none;border-radius:6px;font-weight:bold;">Open Backups</a></p>'
+            . ($detail !== '' ? '<p style="margin:0;font-size:12px;color:#6b7280;">Details for the administrator: ' . $e($detail) . '</p>' : '')
+            . '</div>';
+        $text = $subject . "\n\nWhat happened\n" . $what . "\n\nWhat it means\n" . $means . "\n\nWhat to do\n" . $todo
+            . "\n\nOpen Backups: " . $link . ($detail !== '' ? "\n\nDetails for the administrator: " . $detail : '') . "\n";
+
+        if ($dry) {
+            return ['sent' => false, 'reason' => 'would_send', 'subject' => $subject, 'to' => $to, 'html' => $html, 'text' => $text];
+        }
+        $r = sendEmail($to, 'Administrator', $subject, $html, $text);
+        $ok = !empty($r['success']);
+        // A failed send is retried in about 3 hours, not on every scheduler run.
+        $stampAt = $ok ? time() : (time() - $windows[$kind] + 3 * 3600);
+        rh_db_backup_stamp($pdo, [$key => date('Y-m-d H:i:s', $stampAt)], $root);
+        rh_db_backup_log($root, 'ALERT ' . $kind . ($ok ? ' emailed' : ' could not be emailed: ' . (string)($r['message'] ?? '')));
+        return ['sent' => $ok, 'reason' => $ok ? 'sent' : 'send_failed', 'subject' => $subject, 'to' => $to];
+    }
+
+    /**
+     * Run on every scheduler run (before the per-job interval gate): warn when the last good
+     * backup is older than 36 hours, and remind about an off-site copy after 7 days.
+     * Never throws. A local copy (Windows / localhost) stays silent.
+     */
+    function rh_backup_health_check(PDO $pdo): void
+    {
+        try {
+            $host = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+            if (PHP_OS_FAMILY === 'Windows' || preg_match('/localhost|127\.0\.0\.1|\.local$/', $host)) {
+                return;
+            }
+            require_once __DIR__ . '/db-backup.php';
+            // Quiet while a restore is running (the settings it reads are being replaced).
+            $restoring = $pdo->query("SELECT IS_USED_LOCK('rh_db_restore')")->fetchColumn();
+            if ($restoring !== null && $restoring !== false) {
+                return;
+            }
+            $lastAt = strtotime(rh_auto_setting_fresh($pdo, 'last_backup_at')) ?: 0;
+            if ($lastAt <= 0 || (time() - $lastAt) > 36 * 3600) {
+                $err = trim(rh_auto_setting_fresh($pdo, 'last_backup_error'));
+                $errAt = trim(rh_auto_setting_fresh($pdo, 'last_backup_error_at'));
+                rh_backup_alert($pdo, 'stale', $err !== '' ? 'Last attempt' . ($errAt !== '' ? ' (' . $errAt . ')' : '') . ' failed: ' . $err : '');
+            }
+            $files = rh_db_backup_list(dirname(__DIR__));
+            if ($files) {
+                $dl = strtotime(rh_auto_setting_fresh($pdo, 'last_backup_downloaded_at')) ?: 0;
+                $ref = $dl > 0 ? $dl : (int)end($files)['ts']; // never downloaded: count from the oldest backup
+                if ((time() - $ref) > 7 * 86400) {
+                    rh_backup_alert($pdo, 'offsite_reminder', '');
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('rh_backup_health_check: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * One backup a day: at the first scheduler run after 01:00 once the last backup
      * (last_backup_at, written by includes/db-backup.php) is over 20 hours old.
      * The engine keeps its own lock, rotation (14 daily / 8 weekly / 12 monthly) and log.
+     * Another backup holding the lock is a skip, not a failure; after a real failure the job
+     * waits 3 hours before it tries again.
      */
     function rh_job_nightly_backup(PDO $pdo, array $o = []): array
     {
@@ -902,6 +1037,11 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             $res['skipped'] = 1;
             return $res;
         }
+        $errAt = strtotime(rh_auto_setting_fresh($pdo, 'last_backup_error_at')) ?: 0;
+        if ($errAt > $last && (time() - $errAt) < 3 * 3600) {
+            $res['skipped'] = 1; // a real failure just happened; try again in a few hours
+            return $res;
+        }
         @set_time_limit(900);
         @ignore_user_abort(true);
         // In-process: no child process, so it works where shell functions are disabled.
@@ -909,9 +1049,20 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         $r = rh_db_backup_run($pdo, dirname(__DIR__));
         if ($r['ok']) {
             $res['sent'] = 1; // shown as "1 of 1" on Admin -> Automated Emails
+        } elseif (!empty($r['skipped'])) {
+            $res['skipped'] = 1; // another backup is running right now
         } else {
             $res['errors'][] = 'backup failed: ' . mb_substr((string)$r['error'], 0, 300);
             error_log('auto-scheduler nightly backup: ' . $r['error']);
+            $host = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+            try {
+                // A laptop / localhost copy never emails the live administrator.
+                if (PHP_OS_FAMILY !== 'Windows' && !preg_match('/localhost|127\.0\.0\.1|\.local$/', $host)) {
+                    rh_backup_alert($pdo, 'failed', (string)$r['error']);
+                }
+            } catch (Throwable $e) {
+                error_log('rh_backup_alert: ' . $e->getMessage());
+            }
         }
         rh_auto_log_run_summary($pdo, 'nightly_backup', $res);
         return $res;

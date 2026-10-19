@@ -26,6 +26,7 @@ $result = [
     'last_backup_at'           => null,
     'last_backup_age_hours'    => null,
     'last_backup_stale'        => true,
+    'last_backup_error_at'     => null,
     'last_backup_size_bytes'   => null,
     'last_tentative_sweep_at'  => null,
     'disk_free_bytes'          => null,
@@ -43,7 +44,7 @@ try {
 
         $stmt = $pdo->prepare(
             "SELECT setting_key, setting_value FROM site_settings
-             WHERE setting_key IN ('last_backup_at','last_tentative_sweep_at','last_backup_size')"
+             WHERE setting_key IN ('last_backup_at','last_tentative_sweep_at','last_backup_size','last_backup_error_at')"
         );
         $stmt->execute();
         foreach ($stmt as $r) {
@@ -51,6 +52,7 @@ try {
                 case 'last_backup_at':          $result['last_backup_at']        = $r['setting_value']; break;
                 case 'last_tentative_sweep_at': $result['last_tentative_sweep_at'] = $r['setting_value']; break;
                 case 'last_backup_size':        $result['last_backup_size_bytes'] = (int)$r['setting_value']; break;
+                case 'last_backup_error_at':    $result['last_backup_error_at']   = $r['setting_value'] !== '' ? $r['setting_value'] : null; break;
             }
         }
     }

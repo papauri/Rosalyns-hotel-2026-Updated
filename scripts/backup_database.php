@@ -34,7 +34,7 @@ if (!$stamp && !$quiet) {
 }
 
 $r = rh_db_backup_run($pdo, $ROOT, ['stamp' => $stamp]);
-if (!$r['ok'] && ($r['error'] ?? '') === 'another backup is already running') {
+if (!$r['ok'] && !empty($r['skipped'])) {
     if (!$quiet) {
         echo 'Backup skipped: another backup process is already running.' . PHP_EOL;
     }
@@ -42,6 +42,18 @@ if (!$r['ok'] && ($r['error'] ?? '') === 'another backup is already running') {
 }
 if (!$r['ok']) {
     fwrite(STDERR, 'Backup failed: ' . ($r['error'] ?? 'unknown error') . "\n");
+    // A cron-run backup tells the administrator the same way the scheduler's nightly job does
+    // (once a day at most); a laptop copy never emails.
+    if ($stamp) {
+        try {
+            require_once $ROOT . '/includes/auto-email-jobs.php';
+            if (function_exists('rh_backup_alert')) {
+                rh_backup_alert($pdo, 'failed', (string)($r['error'] ?? 'unknown error'));
+            }
+        } catch (Throwable $e) {
+            fwrite(STDERR, 'Backup alert email could not be sent: ' . $e->getMessage() . "\n");
+        }
+    }
     exit(4);
 }
 if (!$quiet) {

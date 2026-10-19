@@ -1873,12 +1873,27 @@ $currency_symbol = getSetting('currency_symbol');
             </div>
         <?php endif; ?>
         <?php
-        // Backup freshness warning for whoever can open Admin -> Automated Emails.
+        // Backup freshness warning (one plain message; the health panel below skips its own copy).
+        $bkBannerShown = false;
         if (hasPermission((int)$user['id'], 'booking_settings')) {
             $bkTs = (int)strtotime((string)getSetting('last_backup_at', ''));
-            if ($bkTs <= 0 || (time() - $bkTs) > 36 * 3600): ?>
-            <div style="background:#fff3e0; border:1px solid #ffe0b2; border-radius:8px; padding:14px 20px; margin-bottom:20px; color:#e65100; display:flex; align-items:center; gap:10px; font-size:14px;">
-                <i class="fas fa-database"></i> No database backup in the last 36 hours &mdash; check <a href="automated-emails.php" style="color:inherit;text-decoration:underline;">Admin &rarr; Automated Emails</a>.
+            if ($bkTs <= 0 || (time() - $bkTs) > 36 * 3600):
+                $bkBannerShown = true;
+                $bkErrAt = trim((string)getSetting('last_backup_error_at', ''));
+                $bkCanOpen = in_array($user['role'] ?? '', ['admin', 'manager'], true); ?>
+            <div style="background:#fff3e0; border:1px solid #ffe0b2; border-radius:8px; padding:14px 20px; margin-bottom:20px; color:#e65100; display:flex; align-items:center; gap:10px; font-size:14px; flex-wrap:wrap;">
+                <i class="fas fa-database"></i>
+                <span style="flex:1 1 260px;">
+                    <?php echo $bkTs > 0
+                        ? 'Your hotel data has not been backed up for ' . (int)floor((time() - $bkTs) / 3600) . ' hours.'
+                        : 'Your hotel data has not been backed up yet.'; ?>
+                    If the system failed now, recent bookings could be lost.
+                    Ask an administrator to open Backups and press Run Backup Now.
+                    <?php if ($bkErrAt !== ''): ?>The last attempt failed on <?php echo htmlspecialchars($bkErrAt); ?>.<?php endif; ?>
+                </span>
+                <?php if ($bkCanOpen): ?>
+                    <a href="backup-management.php" class="btn btn-sm btn-outline" style="white-space:nowrap;">Open Backups</a>
+                <?php endif; ?>
             </div>
         <?php endif;
         } ?>
@@ -3028,6 +3043,7 @@ $currency_symbol = getSetting('currency_symbol');
             const list = document.getElementById('sysHealthIssues');
             if (!box || !list) return;
             const CHECK_SWEEP = <?php echo $mod_bookings ? 'true' : 'false'; ?>;
+            const BACKUP_SHOWN = <?php echo !empty($bkBannerShown) ? 'true' : 'false'; ?>;
             const POLL_MS = 300000;
 
             function hoursSince(iso) {
@@ -3049,10 +3065,14 @@ $currency_symbol = getSetting('currency_symbol');
                 }
                 const issues = [];
                 if (d.db !== 'ok') issues.push('The database is not responding.');
-                if (!d.last_backup_at) {
-                    issues.push('No backup has been taken yet.');
-                } else if (d.last_backup_age_hours !== null && d.last_backup_age_hours >= 36) {
-                    issues.push('The last backup was ' + d.last_backup_age_hours + ' hours ago.');
+                if (!BACKUP_SHOWN) { // the banner at the top of the page already says it
+                    const backupTail = ' If the system failed now, recent bookings could be lost. Ask an administrator to open Backups and press Run Backup Now.' +
+                        (d.last_backup_error_at ? ' The last attempt failed on ' + d.last_backup_error_at + '.' : '');
+                    if (!d.last_backup_at) {
+                        issues.push('Your hotel data has not been backed up yet.' + backupTail);
+                    } else if (d.last_backup_age_hours !== null && d.last_backup_age_hours >= 36) {
+                        issues.push('Your hotel data has not been backed up for ' + Math.floor(d.last_backup_age_hours) + ' hours.' + backupTail);
+                    }
                 }
                 if (d.disk_free_pct !== null && d.disk_free_pct <= 10) {
                     issues.push('Server disk space is low (' + d.disk_free_pct + '% free).');

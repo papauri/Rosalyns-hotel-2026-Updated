@@ -145,42 +145,178 @@
     background: #eff6ff;
 }
 
-.confirm-restore {
-    display: none;
-    background: #fef2f2;
-    border: 1.5px solid #fca5a5;
-    border-radius: 8px;
-    padding: 14px 18px;
-    margin-top: 16px;
+/* Delete one backup: a quiet outline button so it never competes with Restore */
+.bm-inline-form {
+    display: inline;
+    margin: 0;
 }
 
-.confirm-restore p {
-    margin: 0 0 10px;
+.btn-delete-backup {
+    background: transparent;
+    border: 1.5px solid #b91c1c;
+    color: #b91c1c;
+    padding: 5px 12px;
+    border-radius: 5px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.btn-delete-backup:hover {
+    background: #fef2f2;
+}
+
+.bm-kept {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #065f46;
+    background: #d1fae5;
+    border-radius: 999px;
+    padding: 4px 10px;
+}
+
+.bm-disk-note {
+    font-size: 0.85rem;
+    color: #4b5563;
+    margin: 12px 0 0;
+}
+
+/* Status notices (stale backup, last failure, restore note) */
+.bm-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin: 0 0 14px;
     font-size: 0.9rem;
-    color: #7f1d1d;
+    line-height: 1.5;
+    border: 1px solid transparent;
+}
+
+.bm-notice > i {
+    margin-top: 3px;
+}
+
+.bm-notice--warn {
+    background: #fff7ed;
+    border-color: #fed7aa;
+    color: #9a3412;
+}
+
+.bm-notice--error {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #991b1b;
+}
+
+.bm-notice--info {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #1e3a8a;
+    display: block;
+}
+
+.bm-offsite {
+    margin: 14px 0;
+    font-size: 0.9rem;
+    color: #374151;
+}
+
+.bm-offsite i {
+    color: var(--color-lux-gold, #8F6A35);
+    margin-right: 4px;
+}
+
+.bm-offsite__hint {
+    display: block;
+    font-size: 0.78rem;
+    color: #6b7280;
+    margin-top: 2px;
+}
+
+/* Technical detail for the administrator, collapsed by default */
+.bm-details {
+    margin-top: 8px;
+    font-size: 0.8rem;
+}
+
+.bm-details summary {
+    cursor: pointer;
     font-weight: 600;
 }
 
-.confirm-restore .file-path {
-    font-family: monospace;
-    font-size: 0.8rem;
-    color: var(--color-text-primary, #374151);
-    background: var(--color-surface, #f9fafb);
-    padding: 4px 8px;
-    border-radius: 4px;
-    display: block;
-    margin-bottom: 12px;
+.bm-details div {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    word-break: break-word;
 }
 
-.confirm-restore .btn-cancel {
-    background: transparent;
-    border: 1.5px solid #6b7280;
-    color: var(--color-text-primary, #374151);
-    padding: 6px 14px;
-    border-radius: 5px;
-    font-size: 0.85rem;
-    cursor: pointer;
-    margin-right: 8px;
+/* Row actions: one tidy wrapping group (Download, Restore, Delete / kept badge) */
+.bm-actions-head {
+    text-align: right;
+}
+
+.bm-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+}
+
+.bm-actions .bm-inline-form {
+    display: inline-flex;
+}
+
+.bm-actions .btn-dl,
+.bm-actions .btn-restore,
+.bm-actions .btn-delete-backup {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-width: 1.5px;
+    border-style: solid;
+    line-height: 1.3;
+    font-size: 0.8rem;
+}
+
+.bm-actions .btn-restore {
+    border-color: #dc2626;
+}
+
+.bm-actions .btn-restore:hover {
+    border-color: #b91c1c;
+}
+
+@media (max-width: 600px) {
+    .backup-table th,
+    .backup-table td {
+        padding: 8px 6px;
+    }
+
+    .backup-table td:nth-child(2),
+    .backup-table td:nth-child(3) {
+        overflow-wrap: anywhere;
+    }
+
+    .bm-actions-head {
+        text-align: left;
+    }
+
+    .bm-actions {
+        justify-content: flex-start;
+        min-width: 150px;
+    }
+
+    .bm-card {
+        padding: 16px;
+    }
 }
 
 .runtime-checks {
@@ -262,4 +398,18 @@
     font-size: 0.78rem;
     line-height: 1.45;
     word-break: break-all;
+}
+
+/* Touch screens: every backup action is at least 44px tall (same rule as the shared .btn). */
+@media (max-width: 1024px), (pointer: coarse) {
+    .btn-run,
+    .btn-dl,
+    .btn-restore,
+    .btn-delete-backup {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+    }
 }

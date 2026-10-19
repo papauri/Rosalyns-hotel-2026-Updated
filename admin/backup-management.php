@@ -7,6 +7,8 @@
  */
 
 require_once 'admin-init.php';
+require_once __DIR__ . '/includes/bulk-actions.php';
+require_once dirname(__DIR__) . '/includes/db-backup.php';
 // Bootstrap fallback guards (admin-init.php sets these; guards satisfy static analysis)
 $user       = $user       ?? ['id' => 0, 'username' => '', 'role' => 'guest', 'full_name' => ''];
 $csrf_token = $csrf_token ?? generateCsrfToken();
@@ -26,109 +28,50 @@ $backupScript = $ROOT . '/scripts/backup_database.php';
 $restoreScript = $ROOT . '/scripts/restore_database.php';
 
 /**
- * Return true when a function exists and is not disabled in php.ini.
+ * A problem told in plain words: what happened, what it means, the one thing to do next.
+ * The technical line goes into a collapsed "Details for the administrator" (escaped).
+ * Returns HTML that is already safe to print.
  */
-function rh_function_enabled(string $name): bool
+function rh_bm_problem(string $code, string $detail = ''): string
 {
-    if (!function_exists($name)) {
-        return false;
+    [$what, $means, $todo] = rh_db_backup_explain($code);
+    $html = '<strong>' . htmlspecialchars($what) . '</strong> ' . htmlspecialchars($means) . ' ' . htmlspecialchars($todo);
+    if ($detail !== '') {
+        $html .= '<details class="bm-details"><summary>Details for the administrator</summary><div>'
+            . htmlspecialchars($detail) . '</div></details>';
     }
-    $disabledRaw = (string)ini_get('disable_functions');
-    if ($disabledRaw === '') {
-        return true;
-    }
-    $disabled = array_map('trim', explode(',', $disabledRaw));
-    return !in_array($name, $disabled, true);
+    return $html;
 }
 
 /**
- * Build a CLI PHP command for a script plus optional args.
+ * Every backup file on disk, newest first. 'id' is the file's timestamp (YYYYMMDDHHMMSS), so
+ * the shared bulk bar's numeric ids map back to a file without ever trusting a browser path.
  */
-function rh_build_php_command(string $scriptPath, array $args = []): string
+function rh_backup_files(string $root, string $dir): array
 {
-    $parts = [escapeshellarg(PHP_BINARY), escapeshellarg($scriptPath)];
-    foreach ($args as $arg) {
-        $parts[] = escapeshellarg((string)$arg);
+    $list = [];
+    if (!is_dir($dir)) {
+        return $list;
     }
-    return implode(' ', $parts);
-}
-
-/**
- * Execute a command using the best available launcher.
- * Returns: ok(bool), exit(int), stdout(string), stderr(string), launcher(string)
- */
-function rh_run_command(string $command, string $cwd): array
-{
-    if (rh_function_enabled('proc_open')) {
-        $desc = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-        $proc = @proc_open($command, $desc, $pipes, $cwd);
-        if (is_resource($proc)) {
-            $stdout = (string)stream_get_contents($pipes[1]);
-            $stderr = (string)stream_get_contents($pipes[2]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            $exit = (int)proc_close($proc);
-            return [
-                'ok' => $exit === 0,
-                'exit' => $exit,
-                'stdout' => trim($stdout),
-                'stderr' => trim($stderr),
-                'launcher' => 'proc_open',
+    $rii = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+    foreach ($rii as $f) {
+        if ($f->isFile() && preg_match('/^db-(\d{8})-(\d{6})\.sql\.gz$/', $f->getFilename(), $m)) {
+            $rel = str_replace('\\', '/', ltrim(str_replace($root, '', $f->getPathname()), '/\\'));
+            $list[] = [
+                'id'    => $m[1] . $m[2],
+                'rel'   => $rel,
+                'abs'   => $f->getPathname(),
+                'name'  => $f->getFilename(),
+                'size'  => $f->getSize(),
+                'mtime' => $f->getMTime(),
+                'date'  => substr($m[1], 0, 4) . '-' . substr($m[1], 4, 2) . '-' . substr($m[1], 6, 2)
+                    . ' ' . substr($m[2], 0, 2) . ':' . substr($m[2], 2, 2) . ':' . substr($m[2], 4, 2),
             ];
         }
     }
-
-    if (rh_function_enabled('exec')) {
-        $output = [];
-        $exit = 1;
-        @exec($command . ' 2>&1', $output, $exit);
-        $text = trim(implode("\n", $output));
-        return [
-            'ok' => $exit === 0,
-            'exit' => $exit,
-            'stdout' => $text,
-            'stderr' => $exit === 0 ? '' : $text,
-            'launcher' => 'exec',
-        ];
-    }
-
-    if (rh_function_enabled('shell_exec')) {
-        $marker = '__RH_CMD_STATUS_' . str_replace('.', '', uniqid('', true)) . '__';
-        $wrapped = '(' . $command . ') && echo ' . $marker . 'OK || echo ' . $marker . 'FAIL';
-        $output = (string)@shell_exec($wrapped . ' 2>&1');
-        $ok = strpos($output, $marker . 'OK') !== false;
-        $clean = str_replace([$marker . 'OK', $marker . 'FAIL'], '', $output);
-        return [
-            'ok' => $ok,
-            'exit' => $ok ? 0 : 1,
-            'stdout' => trim($clean),
-            'stderr' => $ok ? '' : trim($clean),
-            'launcher' => 'shell_exec',
-        ];
-    }
-
-    return [
-        'ok' => false,
-        'exit' => 127,
-        'stdout' => '',
-        'stderr' => 'No command launcher available (proc_open/exec/shell_exec are disabled).',
-        'launcher' => 'none',
-    ];
-}
-
-/**
- * Keep command output short and readable in alerts.
- */
-function rh_output_summary(string $text, int $maxLen = 320): string
-{
-    $single = trim(preg_replace('/\s+/', ' ', $text) ?? '');
-    if ($single === '') {
-        return '';
-    }
-    if (strlen($single) <= $maxLen) {
-        return $single;
-    }
-    return substr($single, 0, $maxLen - 3) . '...';
+    // Newest by the time in the name (the order rotation uses), not by file mtime.
+    usort($list, fn($a, $b) => strcmp($b['id'], $a['id']));
+    return $list;
 }
 
 $message = '';
@@ -139,77 +82,128 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     // CSRF: all POST actions require the standard admin CSRF token
-    if (!validateCsrfToken($_POST['_tok'] ?? '')) {
+    // The shared bulk bar posts the token as csrf_token; this page's own forms use _tok.
+    if (!validateCsrfToken($_POST['_tok'] ?? ($_POST['csrf_token'] ?? ''))) {
         $error = 'Invalid form token. Please refresh and try again.';
     } else {
 
         if ($action === 'run_backup') {
-            if (!is_file($backupScript)) {
-                $error = 'Backup script is missing on server.';
-            } else {
-                $cmd = rh_build_php_command($backupScript);
-                $result = rh_run_command($cmd, $ROOT);
-                $out = rh_output_summary($result['stdout']);
-                $err = rh_output_summary($result['stderr']);
-
-                if ($result['ok']) {
-                    $suffix = '';
-                    if (preg_match('/Backup OK:[^\r\n]*/i', (string)$result['stdout'], $m)) {
-                        $suffix = ' ' . htmlspecialchars(trim((string)$m[0]));
-                    }
-                    $message = 'Backup completed via ' . htmlspecialchars($result['launcher']) . '.' . $suffix;
-                } else {
-                    $detail = $err !== '' ? $err : $out;
-                    $error = 'Backup failed (exit ' . (int)$result['exit'] . ', via ' . htmlspecialchars($result['launcher']) . '): '
-                        . htmlspecialchars($detail !== '' ? $detail : 'No output returned.');
+            // In this request, not a child process: works where shell functions are switched off.
+            @set_time_limit(900);
+            @ignore_user_abort(true);
+            // A copy on a Windows laptop must never stamp "last backup" on the shared live database.
+            $r = rh_db_backup_run($pdo, $ROOT, ['stamp' => PHP_OS_FAMILY !== 'Windows']);
+            if ($r['ok']) {
+                $message = 'Backup saved (' . number_format(round($r['size'] / 1024)) . ' KB). Your hotel data is protected up to this moment.';
+                if (PHP_OS_FAMILY === 'Windows') {
+                    $message .= ' This is a local test copy, so the "last backup" time was not changed.';
                 }
+                $message = htmlspecialchars($message);
+                logActivity((int)$user['id'], 'backup_run', 'Ran a database backup (' . basename((string)$r['path']) . ', ' . (int)$r['size'] . ' bytes)');
+            } elseif (!empty($r['skipped'])) {
+                $error = rh_bm_problem('locked');
+            } else {
+                $error = rh_bm_problem((string)$r['code'], (string)$r['error']);
+                logActivity((int)$user['id'], 'backup_run_failed', 'Backup run from the Backups screen failed: ' . substr((string)$r['error'], 0, 200));
             }
         } elseif ($action === 'restore' && $user['role'] === 'admin') {
-            // Restore is admin-only
-            $relPath = $_POST['backup_file'] ?? '';
-            // Sanitise: must be within backups/ and match expected name
-            if (!preg_match('#^backups[/\\\\]\d{4}[/\\\\]\d{2}[/\\\\]db-\d{8}-\d{6}\.sql\.gz$#', $relPath)) {
-                $error = 'Invalid backup file path.';
+            // Restore is admin-only, needs the word RESTORE, and always takes a safety backup first.
+            $relPath = rh_db_backup_norm_rel((string)($_POST['backup_file'] ?? ''));
+            if (($_POST['confirm_text'] ?? '') !== 'RESTORE') {
+                $error = 'Nothing was changed. To restore, you must type the word RESTORE exactly.';
+            } elseif ($relPath === '') {
+                $error = 'Nothing was changed. That is not a valid backup file name.';
             } else {
-                $absPath = $ROOT . '/' . $relPath;
-                if (!is_file($absPath)) {
-                    $error = 'Backup file not found on disk.';
+                @set_time_limit(900);
+                @ignore_user_abort(true);
+                rh_db_backup_log($ROOT, 'Restore requested by ' . ($user['username'] ?? 'admin') . ' from ' . $relPath);
+                $r = rh_db_restore_run($pdo, $ROOT, $relPath);
+                if ($r['ok']) {
+                    $message = htmlspecialchars('The database was restored from ' . basename($relPath) . ' (' . (int)$r['statements'] . ' steps). '
+                        . 'A copy of your data from just before the restore was saved as ' . (string)$r['safety_path'] . ', in case you need to undo it. '
+                        . 'If anything looks wrong, sign out and in again.');
+                    logActivity((int)$user['id'], 'backup_restored', 'Restored the database from ' . $relPath . '; safety copy ' . (string)$r['safety_path']);
                 } else {
-                    if (!is_file($restoreScript)) {
-                        $error = 'Restore script is missing on server.';
-                    } else {
-                        // Restore script requires explicit --confirm flag.
-                        $cmd = rh_build_php_command($restoreScript, ['--file=' . $relPath, '--confirm']);
-                        $result = rh_run_command($cmd, $ROOT);
-                        $out = rh_output_summary($result['stdout']);
-                        $err = rh_output_summary($result['stderr']);
-
-                        if ($result['ok']) {
-                            $suffix = '';
-                            if (preg_match('/Restore OK:[^\r\n]*/i', (string)$result['stdout'], $m)) {
-                                $suffix = ' ' . htmlspecialchars(trim((string)$m[0]));
-                            }
-                            $message = 'Restore completed successfully via ' . htmlspecialchars($result['launcher']) . '.' . $suffix;
-                        } else {
-                            $detail = $err !== '' ? $err : $out;
-                            $error = 'Restore failed (exit ' . (int)$result['exit'] . ', via ' . htmlspecialchars($result['launcher']) . '): '
-                                . htmlspecialchars($detail !== '' ? $detail : 'No output returned.');
-                        }
+                    $error = '<strong>' . htmlspecialchars((string)$r['error']) . '</strong>';
+                    if ($r['detail'] !== '') {
+                        $error .= '<details class="bm-details"><summary>Details for the administrator</summary><div>' . htmlspecialchars((string)$r['detail']) . '</div></details>';
                     }
+                    logActivity((int)$user['id'], 'backup_restore_failed', 'Restore from ' . $relPath . ' did not complete (' . (string)$r['code'] . ')');
                 }
             }
         } elseif ($action === 'restore' && $user['role'] !== 'admin') {
             $error = 'Only administrators can perform a restore.';
+        } elseif ($action === 'delete_backups') {
+            if ($user['role'] !== 'admin') {
+                $error = 'Only administrators can delete backups.';
+            } else {
+                // One row's Delete button sends backup_id; the bulk bar sends bulk_ids[].
+                $ids = array_map('strval', adminBulkIds());
+                if (preg_match('/^\d{14}$/', (string)($_POST['backup_id'] ?? ''))) {
+                    $ids[] = (string)$_POST['backup_id'];
+                }
+                $files = rh_backup_files($ROOT, $backupsDir);
+                $byId = array_column($files, null, 'id');
+                $newestId = $files ? $files[0]['id'] : null;
+                $base = realpath($backupsDir);
+                $done = 0;
+                $freed = 0;
+                $skipped = [];
+                $remaining = count($files);
+                foreach (array_unique($ids) as $id) {
+                    if (!isset($byId[$id])) {
+                        adminBulkSkip($skipped, 'already removed');
+                        continue;
+                    }
+                    if ($id === $newestId) {
+                        adminBulkSkip($skipped, 'the newest backup is always kept');
+                        continue;
+                    }
+                    if ($remaining <= 3) {
+                        adminBulkSkip($skipped, 'at least 3 backups are always kept');
+                        continue;
+                    }
+                    $f = $byId[$id];
+                    $real = realpath($f['abs']);
+                    if ($real === false || $base === false
+                        || strpos(str_replace('\\', '/', $real), str_replace('\\', '/', $base) . '/') !== 0) {
+                        adminBulkSkip($skipped, 'that file is not in the backups folder');
+                        continue;
+                    }
+                    if (@unlink($real)) {
+                        $done++;
+                        $remaining--;
+                        $freed += (int)$f['size'];
+                        rh_db_backup_log($ROOT, 'Deleted by ' . ($user['username'] ?? 'admin') . ': ' . $f['rel']);
+                    } else {
+                        adminBulkSkip($skipped, 'the server would not let the system remove the file');
+                    }
+                }
+                if ($done > 0) {
+                    logActivity($user['id'], 'backup_deleted', 'Deleted ' . $done . ' backup file(s), ' . number_format($freed / 1048576, 1) . ' MB');
+                }
+                [$okText, $errText] = adminBulkOutcome($done === 1 ? 'backup deleted' : 'backups deleted', $done, $skipped);
+                if ($okText !== '') {
+                    $message = htmlspecialchars($okText . ' Space freed: ' . number_format($freed / 1048576, 1) . ' MB.');
+                } else {
+                    $error = htmlspecialchars($errText);
+                }
+            }
         }
     }
 }
 
 // ── Download action (GET) ────────────────────────────────────────────────────
 if (isset($_GET['download']) && $user['role'] === 'admin') {
-    $relPath = $_GET['download'];
-    if (preg_match('#^backups[/\\\\]\d{4}[/\\\\]\d{2}[/\\\\]db-\d{8}-\d{6}\.sql\.gz$#', $relPath)) {
+    $relPath = rh_db_backup_norm_rel((string)$_GET['download']);
+    if ($relPath !== '') {
         $abs = $ROOT . '/' . $relPath;
-        if (is_file($abs)) {
+        $realAbs = is_file($abs) ? realpath($abs) : false;
+        $realBase = realpath($backupsDir);
+        if ($realAbs !== false && $realBase !== false
+            && strpos(str_replace('\\', '/', $realAbs), str_replace('\\', '/', $realBase) . '/') === 0) {
+            // Remember when a copy last left the server (drives the off-site reminder).
+            rh_db_backup_stamp($pdo, ['last_backup_downloaded_at' => date('Y-m-d H:i:s')], $ROOT);
             header('Content-Type: application/gzip');
             header('Content-Disposition: attachment; filename="' . basename($abs) . '"');
             header('Content-Length: ' . filesize($abs));
@@ -223,25 +217,9 @@ if (isset($_GET['download']) && $user['role'] === 'admin') {
 }
 
 // ── Collect backup list ──────────────────────────────────────────────────────
-$backups = [];
-if (is_dir($backupsDir)) {
-    $rii = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($backupsDir, FilesystemIterator::SKIP_DOTS));
-    foreach ($rii as $f) {
-        if ($f->isFile() && preg_match('/^db-(\d{8})-(\d{6})\.sql\.gz$/', $f->getFilename(), $m)) {
-            $rel = ltrim(str_replace($ROOT, '', $f->getPathname()), '/\\');
-            $rel = str_replace('\\', '/', $rel);
-            $backups[] = [
-                'rel'   => $rel,
-                'name'  => $f->getFilename(),
-                'size'  => $f->getSize(),
-                'mtime' => $f->getMTime(),
-                'date'  => substr($m[1], 0, 4) . '-' . substr($m[1], 4, 2) . '-' . substr($m[1], 6, 2)
-                    . ' ' . substr($m[2], 0, 2) . ':' . substr($m[2], 2, 2) . ':' . substr($m[2], 4, 2),
-            ];
-        }
-    }
-    usort($backups, fn($a, $b) => $b['mtime'] - $a['mtime']);
-}
+$backups = rh_backup_files($ROOT, $backupsDir);
+$backupsTotalSize = array_sum(array_column($backups, 'size'));
+$canDelete = count($backups) > 3; // at least 3 backup files always stay on disk
 
 // ── Recent backup log lines ──────────────────────────────────────────────────
 $logLines = [];
@@ -259,11 +237,13 @@ $isStale        = ($backupAgeHours === null || $backupAgeHours > 36);
 $backupsDirReady = is_dir($backupsDir) || @mkdir($backupsDir, 0775, true);
 $logsDir = dirname($logFile);
 $logsDirReady = is_dir($logsDir) || @mkdir($logsDir, 0775, true);
-$launchers = [];
-if (rh_function_enabled('proc_open')) $launchers[] = 'proc_open';
-if (rh_function_enabled('exec')) $launchers[] = 'exec';
-if (rh_function_enabled('shell_exec')) $launchers[] = 'shell_exec';
-$launcherText = $launchers ? implode(', ', $launchers) : 'none';
+$freeBytes = @disk_free_space($backupsDirReady ? $backupsDir : $ROOT);
+$needBytes = max(2 * $lastBackupSize, 5 * 1048576);
+$lastOffsite = trim((string)getSetting('last_backup_downloaded_at', ''));
+$lastError   = trim((string)getSetting('last_backup_error', ''));
+$lastErrorAt = trim((string)getSetting('last_backup_error_at', ''));
+// A failure that a later good backup has replaced is not shown.
+$showLastError = $lastError !== '' && $lastErrorAt !== '' && (!$lastBackupAt || strtotime($lastErrorAt) > strtotime((string)$lastBackupAt));
 $runtimeChecks = [
     [
         'label' => 'Backup script',
@@ -286,14 +266,9 @@ $runtimeChecks = [
         'detail' => str_replace('\\', '/', ltrim(str_replace($ROOT, '', $logsDir), '/\\')),
     ],
     [
-        'label' => 'Process launcher availability',
-        'ok' => !empty($launchers),
-        'detail' => $launcherText,
-    ],
-    [
-        'label' => 'PHP CLI binary',
-        'ok' => is_file(PHP_BINARY) || stripos(PHP_BINARY, 'php') !== false,
-        'detail' => PHP_BINARY,
+        'label' => 'Free disk space',
+        'ok' => $freeBytes === false || $freeBytes >= $needBytes,
+        'detail' => $freeBytes === false ? 'Could not be measured' : number_format($freeBytes / 1073741824, 1) . ' GB free',
     ],
 ];
 $localRunCmd = PHP_BINARY . ' ' . $backupScript;
@@ -365,6 +340,37 @@ $current_page = 'backup-management.php';
                 </div>
             </div>
 
+            <p class="bm-offsite">
+                <i class="fas fa-cloud-download-alt"></i>
+                Last copy saved off-site:
+                <strong><?php echo $lastOffsite !== '' ? htmlspecialchars($lastOffsite) : 'Never'; ?></strong>
+                <span class="bm-offsite__hint">(a backup is only safe from a server failure once you have downloaded a copy and kept it somewhere else)</span>
+            </p>
+
+            <?php if ($isStale): ?>
+                <div class="bm-notice bm-notice--warn" role="status">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <div>
+                        <?php if ($backupAgeHours === null): ?>
+                            <strong>Your hotel data has no backup recorded yet.</strong>
+                        <?php else: ?>
+                            <strong>Your hotel data has not been backed up for <?php echo (int)$backupAgeHours; ?> hours.</strong>
+                        <?php endif; ?>
+                        If the system failed now, recent bookings could be lost. Press Run Backup Now.
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($showLastError): ?>
+                <div class="bm-notice bm-notice--error" role="alert">
+                    <i class="fas fa-times-circle"></i>
+                    <div>
+                        The last backup attempt failed on <?php echo htmlspecialchars($lastErrorAt); ?>.
+                        <?php echo rh_bm_problem(rh_db_backup_code_from_error($lastError), $lastError); ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+
             <!-- Run backup button -->
             <form method="POST">
                 <input type="hidden" name="_tok" value="<?php echo htmlspecialchars($csrf_token); ?>">
@@ -372,7 +378,7 @@ $current_page = 'backup-management.php';
                 <button type="submit" class="btn-run" id="runBtn">
                     <i class="fas fa-play-circle"></i> Run Backup Now
                 </button>
-                <span style="font-size:.8rem;color:#6b7280;margin-left:12px">Takes 5–30 seconds depending on DB size. The page will reload when done.</span>
+                <span style="font-size:.8rem;color:#6b7280;margin-left:12px">Takes 5–30 seconds depending on database size. Keep this page open until it finishes.</span>
             </form>
         </div>
 
@@ -384,18 +390,30 @@ $current_page = 'backup-management.php';
                     <p style="color:#9ca3af">No backup files found. Run your first backup using the button above.</p>
                 <?php else: ?>
                     <div style="overflow-x:auto">
-                        <table class="backup-table">
+                        <table class="backup-table" id="backupTable">
                             <thead>
                                 <tr>
+                                    <?php if ($user['role'] === 'admin'): ?>
+                                        <th class="admin-bulk-col"><?php echo adminBulkAllBox('Select all backups'); ?></th>
+                                    <?php endif; ?>
                                     <th>Filename</th>
                                     <th>Date</th>
                                     <th>Size</th>
-                                    <th style="text-align:right">Actions</th>
+                                    <th class="bm-actions-head">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($backups as $i => $b): ?>
                                     <tr>
+                                        <?php if ($user['role'] === 'admin'): ?>
+                                            <td class="admin-bulk-col">
+                                                <?php if ($i === 0 || !$canDelete): ?>
+                                                    <input type="checkbox" class="admin-bulk-check" disabled aria-label="<?php echo $i === 0 ? 'The newest backup is always kept' : 'At least 3 backups are always kept'; ?>" title="<?php echo $i === 0 ? 'The newest backup is always kept' : 'At least 3 backups are always kept'; ?>">
+                                                <?php else: ?>
+                                                    <?php echo adminBulkRowBox($b['id'], 'Select backup ' . $b['date']); ?>
+                                                <?php endif; ?>
+                                            </td>
+                                        <?php endif; ?>
                                         <td>
                                             <i class="fas fa-file-archive" style="color:#6b7280;margin-right:6px"></i>
                                             <?php echo htmlspecialchars($b['name']); ?>
@@ -403,16 +421,35 @@ $current_page = 'backup-management.php';
                                         </td>
                                         <td><?php echo htmlspecialchars($b['date']); ?></td>
                                         <td><?php echo number_format(round($b['size'] / 1024)); ?> KB</td>
-                                        <td style="text-align:right;white-space:nowrap">
+                                        <td class="bm-actions-cell">
                                             <?php if ($user['role'] === 'admin'): ?>
+                                              <div class="bm-actions">
                                                 <a href="?download=<?php echo urlencode($b['rel']); ?>" class="btn-dl" title="Download backup">
                                                     <i class="fas fa-download"></i> Download
                                                 </a>
-                                                &nbsp;
                                                 <button type="button" class="btn-restore"
                                                     onclick="showRestoreConfirm(<?php echo htmlspecialchars(json_encode($b['rel'])); ?>, <?php echo htmlspecialchars(json_encode($b['date'])); ?>)">
                                                     <i class="fas fa-undo"></i> Restore
                                                 </button>
+                                                <?php if ($i === 0): ?>
+                                                    <span class="bm-kept" title="The newest backup is always kept so you are never left without one">Always kept</span>
+                                                <?php elseif (!$canDelete): ?>
+                                                    <span class="bm-kept" title="At least 3 backups are always kept">Kept (minimum 3)</span>
+                                                <?php else: ?>
+                                                    <form method="POST" class="bm-inline-form">
+                                                        <input type="hidden" name="_tok" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                                        <input type="hidden" name="action" value="delete_backups">
+                                                        <input type="hidden" name="backup_id" value="<?php echo htmlspecialchars($b['id']); ?>">
+                                                        <button type="submit" class="btn-delete-backup" title="Delete this backup file"
+                                                            data-admin-confirm="Delete the backup from <?php echo htmlspecialchars($b['date']); ?>? The file is removed from the server and cannot be brought back. Your other backups are not affected."
+                                                            data-admin-confirm-title="Delete backup"
+                                                            data-admin-confirm-ok="Delete backup"
+                                                            data-admin-confirm-tone="danger">
+                                                            <i class="fas fa-trash"></i> Delete
+                                                        </button>
+                                                    </form>
+                                                <?php endif; ?>
+                                              </div>
                                             <?php else: ?>
                                                 <span style="color:#9ca3af;font-size:.8rem">Admin only</span>
                                             <?php endif; ?>
@@ -422,22 +459,30 @@ $current_page = 'backup-management.php';
                             </tbody>
                         </table>
                     </div>
+                    <?php if ($user['role'] === 'admin'): ?>
+                        <p class="bm-disk-note">
+                            <i class="fas fa-hdd"></i> Backups use <?php echo number_format($backupsTotalSize / 1048576, 1); ?> MB on the server.
+                            Older backups are removed automatically (14 daily, 8 weekly, 12 monthly); delete extra ones here if space runs low.
+                            The newest backup is always kept, and at least 3 backups always stay on the server.
+                        </p>
+                        <?php
+                        adminBulkBarStart('delete_backups', '#backupTable', $csrf_token);
+                        adminBulkButton('delete', 'Delete selected', 'fa-trash',
+                            'Delete {n} backup file(s)? They are removed from the server and cannot be brought back. The newest backup is always kept, and at least 3 backups always stay.',
+                            'btn-danger', '', 'Delete backups', 'danger');
+                        adminBulkBarEnd();
+                        ?>
+                    <?php endif; ?>
 
                     <?php if ($user['role'] === 'admin'): ?>
-                        <!-- Restore confirmation panel (hidden, shown by JS) -->
-                        <div class="confirm-restore" id="restoreConfirm">
-                            <p><i class="fas fa-exclamation-triangle"></i> This will OVERWRITE the live database with the selected backup. This cannot be undone.</p>
-                            <span class="file-path" id="restoreFilePath"></span>
-                            <form method="POST" id="restoreForm">
-                                <input type="hidden" name="_tok" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                <input type="hidden" name="action" value="restore">
-                                <input type="hidden" name="backup_file" id="restoreFileInput">
-                                <button type="button" class="btn-cancel" onclick="hideRestoreConfirm()">Cancel</button>
-                                <button type="submit" class="btn-restore">
-                                    <i class="fas fa-undo"></i> Yes, restore this backup
-                                </button>
-                            </form>
-                        </div>
+                        <!-- Restore: the shared confirm asks for the word RESTORE, then this form is sent -->
+                        <form method="POST" id="restoreForm" hidden>
+                            <input type="hidden" name="_tok" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                            <input type="hidden" name="action" value="restore">
+                            <input type="hidden" name="backup_file" id="restoreFileInput">
+                            <input type="hidden" name="confirm_text" id="restoreConfirmText">
+                        </form>
+                        <p class="bm-notice bm-notice--info" id="restoreNote" role="status" hidden></p>
                     <?php endif; ?>
                 <?php endif; ?>
             </div>
@@ -505,7 +550,9 @@ $current_page = 'backup-management.php';
                     <li>Uses <code>mysqldump</code> when available; falls back to a pure-PHP dumper.</li>
                     <li>Verifies the gzip file's integrity before finalising.</li>
                     <li>Backup files are stored in <code>backups/YYYY/MM/</code> and blocked from HTTP access.</li>
-                    <li>Download any backup with the <strong>Download</strong> button — save off-site weekly.</li>
+                    <li>Download any backup with the <strong>Download</strong> button — save off-site weekly. The administrator is reminded by email if a week passes without one.</li>
+                    <li>If a backup fails, or none is saved for 36 hours, the administrator is emailed (at most once a day).</li>
+                    <li>A restore always saves a fresh safety backup first, and needs the word RESTORE typed to confirm.</li>
                     <li>Only <strong>Administrator</strong> accounts can restore or download backups.</li>
                 </ul>
             </div>
@@ -515,24 +562,54 @@ $current_page = 'backup-management.php';
     <?php require_once 'includes/admin-footer.php'; ?>
 
     <script>
-        document.getElementById('runBtn')?.addEventListener('click', function() {
-            this.disabled = true;
-            this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running backup…';
+        // Busy state after the submit has started (disabling the button inside its own click
+        // handler can cancel the submit).
+        document.getElementById('runBtn')?.form?.addEventListener('submit', function () {
+            const btn = document.getElementById('runBtn');
+            window.setTimeout(function () {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running backup…';
+            }, 0);
         });
 
+        // The shared confirm asks for the word RESTORE; the server checks it again.
         function showRestoreConfirm(filePath, dateStr) {
-            document.getElementById('restoreFilePath').textContent = filePath + '  (' + dateStr + ')';
-            document.getElementById('restoreFileInput').value = filePath;
-            const el = document.getElementById('restoreConfirm');
-            el.style.display = 'block';
-            el.scrollIntoView({
-                behavior: 'smooth',
-                block: 'nearest'
+            const form = document.getElementById('restoreForm');
+            const note = document.getElementById('restoreNote');
+            if (!form) return;
+            const warn = 'This replaces ALL current hotel data (bookings, payments, guests, stock and settings) with the backup from ' +
+                dateStr + '. Anything entered since then will be lost. A safety backup of your current data is saved first, so this can be undone.';
+            const details = [
+                'Backup chosen: ' + dateStr,
+                'It can take a minute. Keep this page open until it finishes.'
+            ];
+            const ask = (window.AdminConfirm && window.AdminConfirm.prompt) ?
+                window.AdminConfirm.prompt({
+                    title: 'Restore the database',
+                    message: warn,
+                    details: details,
+                    confirmText: 'Restore now',
+                    tone: 'danger',
+                    icon: 'fa-undo',
+                    inputLabel: 'Type RESTORE to confirm',
+                    inputPlaceholder: 'RESTORE'
+                }) :
+                Promise.resolve(window.prompt(warn + '\n\nType RESTORE to confirm:'));
+            ask.then(function (value) {
+                if (value === null || value === undefined) return; // cancelled
+                if (String(value).trim() !== 'RESTORE') {
+                    if (note) {
+                        note.textContent = 'Nothing was restored: the word RESTORE was not typed exactly.';
+                        note.hidden = false;
+                    }
+                    return;
+                }
+                if (note) note.hidden = true;
+                document.getElementById('restoreFileInput').value = filePath;
+                document.getElementById('restoreConfirmText').value = 'RESTORE';
+                if (form.requestSubmit) form.requestSubmit();
+                else form.submit();
             });
-        }
-
-        function hideRestoreConfirm() {
-            document.getElementById('restoreConfirm').style.display = 'none';
         }
     </script>
 </body>

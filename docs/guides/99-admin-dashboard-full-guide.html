@@ -157,11 +157,11 @@
   <p>A box that is normally hidden. It only appears for people with the <strong>System Logs</strong> permission, and only when something is wrong. The system checks every 5 minutes. It can list:</p>
   <ul>
     <li><em>"The database is not responding."</em></li>
-    <li><em>"No backup has been taken yet."</em> or <em>"The last backup was N hours ago."</em> (shown at 36 hours or more).</li>
+    <li><strong>Backup warning</strong>: <em>"Your hotel data has not been backed up for N hours. If the system failed now, recent bookings could be lost. Ask an administrator to open Backups and press Run Backup Now."</em> It shows at 36 hours or more. If no backup has ever been made, it says <em>"Your hotel data has no backup recorded yet."</em> If the last attempt failed, it adds <em>"The last attempt failed on <time>."</em></li>
     <li><em>"Server disk space is low (N% free)."</em> (10% or less).</li>
     <li><em>"Unpaid booking holds have not been released for N hours."</em> (25 hours or more; only when bookings are on).</li>
   </ul>
-  <p>The box has <strong>Backups</strong> and <strong>System Logs</strong> buttons.</p>
+  <p>Administrators and managers get an <strong>Open Backups</strong> button in the box.</p>
 
   <h3>The figures across the top</h3>
   <p>Figure cards are the same standard card on every admin page: a label, one large value and a short note.</p>
@@ -366,15 +366,21 @@
   <h2 id="backups">Backups</h2>
   <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Backups</strong> (<code>/admin/backup-management.php</code>). Permission: <strong>Backup Management</strong>. Page title: <strong>Database Backup Management</strong>.</p>
   <ul>
-    <li>Four figures: <strong>Backup files on disk</strong>, <strong>Last successful backup</strong>, <strong>Last backup size</strong> and <strong>Backup health</strong>: <em>Fresh</em> (up to 25 hours), <em>Getting old</em> (up to 36 hours), <em>Stale</em> (older) or <em>No backups</em>.</li>
-    <li><strong>Run Backup Now</strong> takes a backup (5 to 30 seconds; the page reloads). Success: <em>"Backup completed via ..."</em>. Failure: <em>"Backup failed (exit N, via ...): ..."</em>.</li>
-    <li><strong>Available Backups</strong> lists the files, the newest marked <strong>Latest</strong>. <strong>Download</strong> and <strong>Restore</strong> are for users with the <strong>admin</strong> role only; everyone else sees <em>Admin only</em>.</li>
-    <li><strong>Restore</strong> asks <em>"This will OVERWRITE the live database with the selected backup. This cannot be undone."</em> Click <strong>Yes, restore this backup</strong> or <strong>Cancel</strong>. Success: <em>"Restore completed successfully via ..."</em>.</li>
-    <li><strong>Backups run by themselves.</strong> The system takes one backup a day, the first time anyone opens the website or admin after 01:00. No cron job or server set-up is needed, and it still runs when the automated emails are switched off (the backup has its own switch under <strong>Automated Emails</strong>).</li>
-    <li><strong>Warning if a backup is missed:</strong> people with the <strong>Hotel Settings</strong> permission see an orange dashboard banner, <em>"No database backup in the last 36 hours"</em>, with a link to Admin &rarr; Automated Emails. That page shows <strong>Last database backup</strong> with its time and size, and an <em>overdue</em> tag when it is late.</li>
-    <li>The system keeps 14 daily, 8 weekly and 12 monthly backups; older ones are removed automatically. The page also shows a backup log and server checks.</li>
+    <li>Four figures: <strong>Backup files on disk</strong>, <strong>Last successful backup</strong>, <strong>Last backup size</strong> and <strong>Backup health</strong>: <em>Fresh</em> (up to 25 hours), <em>Ageing</em> (up to 36 hours), <em>Stale</em> (older) or <em>None</em> (no backups yet).</li>
+    <li><strong>Last copy saved off-site</strong> shows the date of the last <strong>Download</strong>, or <em>Never</em>. A backup only protects you from a server failure once a copy has been downloaded and kept somewhere else.</li>
+    <li>If the last attempt failed, a red box says <em>"The last backup attempt failed on ..."</em>. It says what happened, what it means and what to do. The technical detail is under <strong>Details for the administrator</strong>. The box goes away once a later backup works.</li>
+    <li><strong>Run Backup Now</strong> takes a backup. It takes 5 to 30 seconds, so keep the page open until it finishes. Success: <em>"Backup saved (N KB). Your hotel data is protected up to this moment."</em> If it fails, the red box explains why.</li>
+    <li><strong>Server checks</strong> show whether the backup and restore scripts are in place, whether the backup and log folders can be written to, and the <strong>Free disk space</strong> (for example, <em>"12.3 GB free"</em>). The page also shows a backup log.</li>
+    <li><strong>Available Backups</strong> lists the files, newest first. The newest is marked <strong>Latest</strong>. Under the list, the page shows how much space the backups use.</li>
+    <li><strong>Delete</strong> (admin role only). Each row has a <strong>Delete</strong> button, and it asks you to confirm first. To delete several at once, tick the rows and click <strong>Delete selected</strong> in the bar at the bottom. The newest backup always shows <em>Always kept</em>, and at least 3 backups always stay. Deleted files cannot be brought back.</li>
+    <li><strong>Download</strong> and <strong>Restore</strong> are for users with the <strong>admin</strong> role only; everyone else sees <em>Admin only</em>.</li>
+    <li><strong>Restore</strong> (admin role only). Click <strong>Restore</strong>, read the box, type <strong>RESTORE</strong> and click <strong>Restore now</strong>. The box warns that all current hotel data will be replaced and that anything entered since then will be lost. Click <strong>Cancel</strong> to stop. If you do not type RESTORE exactly, the page says <em>"Nothing was restored: the word RESTORE was not typed exactly."</em></li>
+    <li>A safety backup of your current data is taken first. The success message names that safety copy, so a restore can be undone by restoring it. Success: <em>"The database was restored from ..."</em>. If the backup file is damaged, the page says so and nothing is changed. If a restore stops part-way, the message names the safety copy to restore.</li>
+    <li><strong>Backups run by themselves.</strong> The system takes one backup a day, the first time anyone opens the website or admin after 01:00. No cron job or server set-up is needed. It still runs when the automated emails are switched off (the backup has its own switch under <strong>Automated Emails</strong>).</li>
+    <li>Backups less than 48 hours old are never removed automatically. Older ones are kept as 14 daily, 8 weekly and 12 monthly backups. The rest are removed automatically.</li>
+    <li><strong>Emails</strong> go to the <strong>Admin email</strong> set in <strong>Email Settings</strong>. If no admin email is set, no emails go out, so set one there. The system sends an email when a backup fails (at most once a day), when no backup has been made for 36 hours (at most once a day), and a weekly reminder to download a copy and keep it off the server, if no copy has been downloaded for 7 days. The backup file itself is never emailed, because it holds guest data.</li>
   </ul>
-  <div class="warn"><p>A restore replaces everything in the live system with the older copy. Anything done since that backup is lost. Download a copy of a backup and keep it away from the server every week.</p></div>
+  <div class="warn"><p>A restore replaces everything in the live system with the older copy. Anything done since that backup is lost. Download a copy of a backup every week and keep it away from the server. A backup that is only on the server is lost if the server fails.</p></div>
 
   <h2 id="modules">Modules</h2>
   <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Modules</strong>. It switches areas such as Bookings, POS, Stock, Gym and Website on or off, and has one-click business presets. Read <a href="16-business-presets.html">Modules and business presets</a> before changing anything.</p>
@@ -502,7 +508,7 @@
     <li>You only see menu items you have permission for, and only for modules that are on.</li>
     <li>You are signed out after 8 hours without activity. 5 wrong passwords lock an account for 15 minutes.</li>
     <li>Changing your password needs a code sent to your email.</li>
-    <li>Only the <strong>admin</strong> role can download or restore backups.</li>
+    <li>Only the <strong>admin</strong> role can download, restore or delete backups.</li>
     <li>Changes to settings, modules, refunds and sign-in attempts are written to System Logs with the person's name.</li>
   </ul>
 
