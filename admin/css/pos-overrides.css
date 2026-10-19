@@ -7774,3 +7774,64 @@ html.page-zoomed .pos-ready-card {
         border-radius: 22px !important;
     }
 }
+
+/* ==========================================================================
+   Cart never hides behind the bottom controls (phones and short landscape screens)
+   - Phone menu: the round cart button floats over the bottom-right corner, so the last row
+     of items gets room to scroll clear of it.
+   - Phone drawer: the whole drawer can scroll when it is taller than the screen (a short
+     phone, a banner for an open tab, many lines) while the Total / Fire / Pay footer stays
+     pinned above the home-indicator inset; the lines keep a usable minimum height.
+   - Short landscape (a phone on its side, a tablet with browser bars): the cart column
+     scrolls inside itself with the footer pinned, instead of running off the bottom of the
+     screen where Pay could not be reached.
+   ========================================================================== */
+@media (max-width: 640px) {
+    #grid {
+        padding-bottom: calc(92px + env(safe-area-inset-bottom));
+    }
+
+    .cart {
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    .cart-lines {
+        flex: 1 1 auto;
+        min-height: min(168px, 28dvh);
+        overflow-y: auto;
+    }
+
+    .cart-foot {
+        flex-shrink: 0;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    }
+}
+
+@media (min-width: 641px) and (max-height: 560px) {
+    .till-grid > .cart {
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    .till-grid > .cart .cart-lines {
+        flex: 1 1 auto;
+        min-height: 120px;
+        overflow-y: auto;
+    }
+
+    .till-grid > .cart .cart-foot {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        padding-top: 8px;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    }
+
+    .till-grid > .cart .cart-foot .park-btn,
+    .till-grid > .cart .cart-foot .pay-btn {
+        min-height: 44px;
+    }
+}

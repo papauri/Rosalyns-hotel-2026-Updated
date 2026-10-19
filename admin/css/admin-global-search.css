@@ -160,8 +160,8 @@ html.rh-gs-open { overflow: hidden; }
     .admin-header .admin-gsearch-btn { transition: none; }
 }
 
-/* Phones: the header has no room for the hotel name next to search, zoom and account
-   buttons — it was squeezed to a single letter. Keep the brand icon only. */
-@media (max-width: 480px) {
+/* Very narrow phones (320px class): no room for the hotel name next to search, help and
+   the menu button, so keep the brand icon only. Wider phones keep the name (ellipsis). */
+@media (max-width: 340px) {
     .admin-header .admin-header-brand h1 { display: none; }
 }

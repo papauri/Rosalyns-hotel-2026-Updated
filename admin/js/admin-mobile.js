@@ -75,6 +75,18 @@
             // Update aria-expanded
             const isExpanded = adminNav.classList.contains('nav-open');
             navToggle.setAttribute('aria-expanded', isExpanded);
+            navToggle.setAttribute('aria-label', isExpanded ? 'Close navigation' : 'Open navigation');
+
+            // Opening: bring the current page's row to the middle of the menu
+            if (isExpanded) {
+                requestAnimationFrame(function () {
+                    const current = adminNav.querySelector('.admin-nav-link.active:not(.favorite-link)');
+                    if (!current) return;
+                    const navBox = adminNav.getBoundingClientRect();
+                    const rowBox = current.getBoundingClientRect();
+                    adminNav.scrollTop += (rowBox.top - navBox.top) - (navBox.height - rowBox.height) / 2;
+                });
+            }
 
             // Update icon
             const icon = navToggle.querySelector('i');

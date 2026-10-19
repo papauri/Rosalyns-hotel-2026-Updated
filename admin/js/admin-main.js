@@ -169,7 +169,7 @@
         }
 
         function closeMobileNav() {
-            if (window.innerWidth > 768) return;
+            if (window.innerWidth > 1024) return; // menu is a drawer up to 1024px
             nav.classList.remove('nav-open');
             if (icon) icon.setAttribute('class', 'fas fa-bars'); // setAttribute: works on SVG icons too
             if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
@@ -504,7 +504,7 @@
         });
 
         document.addEventListener('click', function (event) {
-            if (toggleBtn && window.innerWidth <= 768 && !nav.contains(event.target) && !toggleBtn.contains(event.target)) {
+            if (toggleBtn && window.innerWidth <= 1024 && !nav.contains(event.target) && !toggleBtn.contains(event.target)) {
                 closeMobileNav();
             }
         });

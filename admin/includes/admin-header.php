@@ -445,8 +445,19 @@ if ($_admin_back_target !== null) {
         </section>
 
         <p class="admin-nav-empty admin-nav-search-empty" id="adminNavSearchEmpty" hidden>No matching menus.</p>
+
+        <?php /* Phones only (CSS): the header drops these two buttons to keep room for the hotel name. */ ?>
+        <div class="admin-nav-account">
+            <div class="admin-nav-account-id">
+                <strong><?php echo htmlspecialchars((string)$user['full_name']); ?></strong>
+                <?php echo htmlspecialchars(ucfirst((string)$user['role'])); ?>
+            </div>
+            <a href="change-password.php"><i class="fas fa-key" aria-hidden="true"></i><span>Change password</span></a>
+            <a href="logout.php"><i class="fas fa-sign-out-alt" aria-hidden="true"></i><span>Logout</span></a>
+        </div>
     </div>
 </nav>
+<div class="admin-nav-backdrop" aria-hidden="true"></div>
 
 <?php /* SPA router — loaded once here; applies to every admin page automatically */ ?>
 <script>

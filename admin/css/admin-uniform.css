@@ -312,3 +312,335 @@ body .content .sdash-section table tbody td {
    take .content's flex-grow, or on short pages it soaks up the spare height and pushes
    the page body down the screen. */
 #rh-admin-page > .content.admin-back-row { flex: 0 0 auto; min-height: 0; }
+
+/* ==========================================================================
+   Phone and tablet header + menu drawer (up to 1024px)
+   The menu is the desktop sidebar's dark panel, slid in from the left under the header,
+   with a backdrop, locked page scroll, 44px rows and the active page marked by a gold
+   bar. Phones move Change password and Logout into the menu so the header keeps the
+   hotel name, search, help and the menu button.
+   ========================================================================== */
+.admin-nav-backdrop,
+.admin-nav-account {
+    display: none;
+}
+
+@media (max-width: 1024px) {
+    :root {
+        --admin-header-height: calc(64px + env(titlebar-area-height, 0px) + env(safe-area-inset-top, 0px));
+    }
+
+    /* Header: 56px bar plus the notch inset, content kept clear of rounded corners */
+    html .admin-header {
+        height: calc(56px + env(safe-area-inset-top, 0px));
+        min-height: calc(56px + env(safe-area-inset-top, 0px));
+        max-height: calc(56px + env(safe-area-inset-top, 0px));
+        padding: env(safe-area-inset-top, 0px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px)) !important;
+        gap: 8px !important;
+    }
+
+    html .admin-header .user-info {
+        gap: 6px !important;
+        flex-shrink: 0;
+    }
+
+    /* Drawer panel */
+    html .admin-nav.nav-open {
+        position: fixed !important;
+        top: calc(56px + env(safe-area-inset-top, 0px));
+        bottom: 0;
+        left: 0 !important;
+        right: auto !important;
+        width: min(380px, calc(100vw - 48px)) !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        padding: 0 !important;
+        background: var(--admin-sidebar-bg) !important;
+        border: 0 !important;
+        border-right: 1px solid var(--admin-sidebar-border) !important;
+        box-shadow: 8px 0 24px rgba(12, 18, 28, 0.35) !important;
+        color: var(--admin-sidebar-text);
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(212, 168, 67, 0.7) rgba(255, 255, 255, 0.08);
+        z-index: 1001 !important;
+        animation: rh-nav-in 0.18s ease-out;
+    }
+
+    @keyframes rh-nav-in {
+        from { transform: translateX(-16px); opacity: 0; }
+        to { transform: none; opacity: 1; }
+    }
+
+    /* Dim the page behind the menu; tapping it closes the menu */
+    .admin-nav-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(17, 20, 27, 0.55);
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.18s ease, visibility 0s linear 0.18s;
+        z-index: 999;
+    }
+
+    body:has(.admin-nav.nav-open) .admin-nav-backdrop {
+        opacity: 1;
+        visibility: visible;
+        transition: opacity 0.18s ease;
+    }
+
+    /* Scroll lock while the menu is open; the help bubble button stays out of its way */
+    html:has(.admin-nav.nav-open),
+    html:has(.admin-nav.nav-open) body {
+        overflow: hidden;
+    }
+
+    body:has(.admin-nav.nav-open) .rh-help-toggle {
+        visibility: hidden;
+    }
+
+    html .admin-nav.nav-open .admin-nav-inner {
+        padding: 12px 12px calc(24px + env(safe-area-inset-bottom, 0px)) !important;
+        gap: 10px;
+    }
+
+    html .admin-nav.nav-open .admin-nav-title-row {
+        border-bottom: 1px solid var(--admin-sidebar-border);
+    }
+
+    html .admin-nav.nav-open .admin-nav-brand-mark {
+        background: rgba(212, 168, 67, 0.14);
+        color: var(--gold-on-dark, #D2AE72);
+    }
+
+    html .admin-nav.nav-open .admin-nav-title-main {
+        color: #fff;
+        font-size: 14px;
+    }
+
+    html .admin-nav.nav-open .admin-nav-title-sub {
+        color: var(--admin-sidebar-muted);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* Search stays at the top while the long list scrolls under it */
+    html .admin-nav.nav-open .admin-nav-search {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        padding: 2px 0 6px;
+        background: var(--admin-sidebar-bg);
+    }
+
+    html .admin-nav.nav-open .admin-nav-search i {
+        left: 13px;
+        top: calc(50% - 2px);
+        color: var(--admin-sidebar-muted);
+        font-size: 13px;
+        pointer-events: none;
+    }
+
+    html .admin-nav.nav-open .admin-nav-search input {
+        min-height: 44px;
+        padding: 0 12px 0 38px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 10px;
+        color: #fff;
+    }
+
+    html .admin-nav.nav-open .admin-nav-search input::placeholder {
+        color: var(--admin-sidebar-muted);
+    }
+
+    html .admin-nav.nav-open .admin-nav-search input:focus {
+        border-color: rgba(212, 168, 67, 0.7);
+        outline: none;
+    }
+
+    /* Groups */
+    html .admin-nav.nav-open .nav-group {
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.025);
+    }
+
+    html .admin-nav.nav-open .nav-group.is-active-group {
+        border-color: rgba(212, 168, 67, 0.35);
+        background: rgba(212, 168, 67, 0.05);
+    }
+
+    html .admin-nav.nav-open .nav-group-toggle {
+        min-height: 44px;
+        background: transparent;
+        color: #cbd5e1;
+        cursor: pointer;
+        text-align: left;
+    }
+
+    html .admin-nav.nav-open .nav-group-label {
+        min-width: 0;
+    }
+
+    html .admin-nav.nav-open .nav-group-label i {
+        width: 20px;
+        text-align: center;
+        color: var(--gold-on-dark, #D2AE72);
+        flex-shrink: 0;
+    }
+
+    html .admin-nav.nav-open .nav-group-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+    }
+
+    html .admin-nav.nav-open .nav-group.is-active-group > .nav-group-toggle .nav-group-title {
+        color: var(--gold-on-dark, #D2AE72);
+    }
+
+    html .admin-nav.nav-open .nav-group-count {
+        background: rgba(255, 255, 255, 0.08);
+        color: #d1d5db;
+    }
+
+    html .admin-nav.nav-open .nav-group-chevron {
+        color: var(--admin-sidebar-muted);
+        font-size: 11px;
+    }
+
+    html .admin-nav.nav-open .nav-group-items {
+        padding: 4px 6px 8px !important;
+    }
+
+    /* Rows: 44px tall, the star is its own 44px target */
+    html .admin-nav.nav-open .admin-nav-link {
+        min-height: 44px;
+        padding: 10px 52px 10px 12px !important;
+        border-radius: 8px;
+        background: transparent;
+        color: #d1d5db !important;
+        font-size: 14px !important;
+        font-weight: 500;
+        line-height: 1.25;
+        text-decoration: none !important;
+    }
+
+    html .admin-nav.nav-open .admin-nav-link i {
+        width: 20px;
+        margin: 0;
+        text-align: center;
+        color: #aeb7c5;
+        flex-shrink: 0;
+    }
+
+    html .admin-nav.nav-open .admin-nav-link:active {
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    html .admin-nav.nav-open .admin-nav-link.active {
+        background: rgba(212, 168, 67, 0.22);
+        box-shadow: inset 3px 0 0 var(--gold-on-dark, #D2AE72);
+        color: #fff !important;
+        font-weight: 700;
+    }
+
+    html .admin-nav.nav-open .admin-nav-link.active i {
+        color: #fff;
+    }
+
+    html .admin-nav.nav-open .nav-favorite-btn {
+        right: 2px;
+        width: 44px;
+        height: 44px;
+        border-radius: 8px;
+        background: transparent;
+        color: #8d96a5;
+    }
+
+    html .admin-nav.nav-open .nav-favorite-btn.is-favorite {
+        background: rgba(246, 196, 83, 0.12);
+        color: #f6c453;
+    }
+
+    html .admin-nav.nav-open .admin-nav-empty {
+        color: #8d96a5;
+        font-size: 12px;
+    }
+
+    html .admin-nav.nav-open :is(.admin-nav-link, .nav-group-toggle, .nav-favorite-btn, .admin-nav-account a):focus-visible {
+        outline: 2px solid var(--gold-on-dark, #D2AE72);
+        outline-offset: -2px;
+    }
+}
+
+/* Phones: account links live in the menu, not the header */
+@media (max-width: 600px) {
+    html .admin-header .btn-logout,
+    html .admin-header .rh-zoom {
+        display: none !important;
+    }
+
+    html .admin-header .admin-header-brand h1 {
+        display: block;
+        font-size: 15px !important;
+    }
+
+    html .admin-nav.nav-open .admin-nav-account {
+        display: grid;
+        gap: 4px;
+        margin-top: 4px;
+        padding-top: 12px;
+        border-top: 1px solid var(--admin-sidebar-border);
+    }
+
+    .admin-nav-account-id {
+        padding: 0 12px 6px;
+        color: var(--admin-sidebar-muted);
+        font-size: 12px;
+        line-height: 1.35;
+    }
+
+    .admin-nav-account-id strong {
+        display: block;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    html .admin-nav.nav-open .admin-nav-account a {
+        display: flex !important;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        padding: 10px 12px !important;
+        border-radius: 8px;
+        color: #d1d5db !important;
+        font-size: 14px !important;
+        font-weight: 500;
+        text-decoration: none;
+        border-bottom: 0 !important;
+    }
+
+    html .admin-nav.nav-open .admin-nav-account a i {
+        width: 20px;
+        text-align: center;
+        color: #aeb7c5;
+    }
+
+    html .admin-nav.nav-open .admin-nav-account a:active {
+        background: rgba(255, 255, 255, 0.08);
+    }
+}
