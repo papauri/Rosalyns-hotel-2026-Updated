@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stopping stock going missing (anti-theft) — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
+
+  <h1>Stopping stock going missing (anti-theft)</h1>
+  <p>This guide shows how the system helps you spot and stop stock theft, shrinkage and other losses: missing stock, stock loss, shortages and pilferage. It explains each protection, a weekly routine for managers, and what to do when the shelf does not match the books. It does not name a thief. It shows you where the stock went and who touched it.</p>
+
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Owners, managers and administrators. Store keepers and chefs only need the parts about counting and wastage.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Stock</strong>: <strong>Stock Count</strong> (with <strong>Theft Radar</strong>), <strong>Stock Reports</strong>, <strong>Wastage</strong>, <strong>Batch Tracker</strong>, <strong>Ingredients</strong>, <strong>Purchase Orders</strong>, <strong>Stock Overview</strong>. Also Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Orders &amp; Tabs</strong>, and Admin menu &rarr; <strong>Money</strong> &rarr; <strong>POS Accounting</strong>.</dd>
+      <dt>Permission needed</dt><dd>See the table "Who can do what" below. Approving, rejecting and manual changes are for the Admin and Manager roles only.</dd>
+      <dt>Only shown when</dt><dd>The <strong>Stock &amp; Inventory</strong> module is switched on in Settings &rarr; Modules.</dd>
+    </dl>
+  </div>
+
+  <div class="toc">
+    <ol>
+      <li><a href="#perms">Who can do what</a></li>
+      <li><a href="#protect">How the system protects your stock</a></li>
+      <li><a href="#weekly">Weekly routine for managers</a></li>
+      <li><a href="#short">When stock is short</a></li>
+      <li><a href="#setup">Setting it up</a></li>
+      <li><a href="#limits">What the system cannot do for you</a></li>
+      <li><a href="#problems">If something goes wrong</a></li>
+      <li><a href="#related">Related guides</a></li>
+    </ol>
+  </div>
+
+  <h2 id="perms">Who can do what</h2>
+  <table>
+    <thead><tr><th>Task</th><th>Permission or role</th></tr></thead>
+    <tbody>
+      <tr><td>Start a stock count, enter readings, submit it</td><td><strong>Stock Count &amp; Variance</strong>. Only the person who started the count, or a manager, can save readings, submit or reopen it.</td></tr>
+      <tr><td>Approve or reject a stock count</td><td>The Admin or Manager role (the permission alone is not enough).</td></tr>
+      <tr><td>Manual adjustment on an ingredient (<strong>Adjust</strong>)</td><td>Admin or Manager role.</td></tr>
+      <tr><td>Discard, write off or recall a whole batch</td><td>Admin or Manager role.</td></tr>
+      <tr><td>Record wastage</td><td><strong>Wastage Log</strong></td></tr>
+      <tr><td>Look at stock reports</td><td><strong>Stock Reports</strong></td></tr>
+      <tr><td>Receive deliveries, edit ingredients, raise purchase orders</td><td><strong>Ingredients &amp; Recipes</strong></td></tr>
+      <tr><td>Set budgets and approve over-budget orders</td><td><strong>Stock Budget (set &amp; approve)</strong></td></tr>
+      <tr><td>Void a paid order, reconcile an order</td><td>Admin or Manager role, with <strong>Restaurant Orders (POS)</strong></td></tr>
+      <tr><td>Void a tab, refund, 86 an item, give a discount, close a shift that does not balance</td><td><strong>POS Void Tabs</strong>, <strong>POS Refunds</strong>, <strong>POS Quick-86 Items</strong>, <strong>POS Discounts</strong>, <strong>POS Shift Override</strong></td></tr>
+      <tr><td>Delete an order for good</td><td><strong>Delete Orders</strong> (administrators by default)</td></tr>
+      <tr><td>See the POS Accounting figures and the shift close report</td><td><strong>POS Accounting</strong></td></tr>
+    </tbody>
+  </table>
+  <p>Managers have all of the stock permissions by default. Restaurant staff, chefs and bar staff can take orders and bump tickets, but they cannot count, adjust, write off or approve anything.</p>
+
+  <h2 id="protect">How the system protects your stock</h2>
+  <p>Each protection below works on its own. Together they mean that stock cannot leave the shelf in the books without a sale, a wastage entry, an expiry, or a count that a manager has approved.</p>
+
+  <h3>Every sale takes stock off by itself</h3>
+  <p>For any menu item that has a recipe, the system takes the ingredients off stock when the food or drink is made or handed over, and when a room-service charge is posted. Nobody types it in, so a sale cannot "forget" to use stock. If an order is cancelled or voided before work starts, the stock goes back. Who: automatic. Where: <strong>Recipes</strong> (build them) and <strong>Stock Overview</strong> &rarr; <strong>Recipe Coverage</strong> (see how many items are covered). An item with no recipe shows <strong>Untracked</strong> on the till and takes no stock, so give your selling items recipes.</p>
+
+  <h3>Food thrown away after cooking started is wastage</h3>
+  <p>If a dish is voided or 86'd after the kitchen or bar has started it, the ingredients are gone. The system does not put them back. It records the dish as wastage once, with its cost, so the loss is visible and not hidden. Who: automatic. Where: <strong>Stock Reports</strong> &rarr; <strong>Wastage</strong>.</p>
+
+  <h3>Wastage must be written down, with a reason and a name</h3>
+  <p>Anything thrown away is recorded on <strong>Wastage</strong> with the ingredient, quantity and a reason (Spoiled, Breakage, Over-prepared, Customer return, Trim/peel waste, Burnt, Spilled or Other). The stock comes off at once at the real cost, and the list shows who recorded it. You cannot record more than the stock on record, and you cannot date it in the future. Who: anyone with <strong>Wastage Log</strong>. Where: <strong>Stock</strong> &rarr; <strong>Wastage</strong>, and the <strong>Wastage</strong> tab in Stock Reports.</p>
+
+  <h3>Stock is used oldest-expiry first, and expired stock is written off</h3>
+  <p>Each delivery is a batch with its own cost and expiry date. A sale uses the batch that expires first. When the Stock Overview or Batch Tracker opens, any batch past its expiry date is removed from stock and recorded as wastage, so old stock cannot quietly vanish. Who: automatic. Where: <strong>Batch Tracker</strong>.</p>
+
+  <h3>Writing off a batch or adjusting stock by hand is for managers only</h3>
+  <p>The <strong>Adjust</strong> button on an ingredient, and <strong>Discard</strong>, <strong>Mark Wasted</strong> and <strong>Recall</strong> on a batch, are limited to the Admin and Manager roles. Each needs a written reason of at least 8 characters. A subtraction cannot be bigger than the stock on record. Every change is saved with the person's name. Anyone else sees <strong>Manager only</strong>. Where: <strong>Ingredients</strong> and <strong>Batch Tracker</strong>. See the changes in <strong>Stock Reports</strong> &rarr; <strong>Adjustments</strong>.</p>
+
+  <h3>Stock counts compare the shelf with the books</h3>
+  <p>A count records what is really on the shelf and measures it against what the system expects. You can count everything, one category, or a few items (a "spot check"). A spot check or a single category is a quick way to count by surprise. Where: <strong>Stock</strong> &rarr; <strong>Stock Count</strong>.</p>
+
+  <h3>The count is blind for the person counting</h3>
+  <p>While a count is open, the person who started it does not see the expected quantity, the variance or the cost of any shortage. They must write down what they really see. Staff who are not managers cannot see these figures until the count is approved. The page says <strong>Blind count.</strong> A manager who did not start the count sees the expected figures, so can check readings as they come in.</p>
+
+  <h3>Expected stock is worked out at the moment of counting</h3>
+  <p>The column <strong>Expected at count time</strong> is the stock at the start of the count plus anything sold, delivered or wasted since. A sale in the middle of a count therefore cannot hide a loss, and cannot be counted twice. The final change posted to stock is the difference from this figure.</p>
+
+  <h3>Every shortage needs a reason</h3>
+  <p>For each line that is short you must pick a <strong>Reason</strong>: <strong>Spillage</strong>, <strong>Expired</strong>, <strong>Staff meal</strong>, <strong>Sampling</strong>, <strong>Prep waste</strong>, <strong>Theft suspected</strong>, <strong>Correction</strong> or <strong>Other</strong>. You cannot submit the count without them. If sales during the count turn a line into a shortage that has no reason, nothing is posted and the count goes back to the counter. A blank line is never read as zero: a count cannot be submitted until every line has a reading.</p>
+
+  <h3>The counter cannot approve a big shortage</h3>
+  <p>A shortage is "big" when it is worth at least the cost limit <em>and</em> is at least the percentage limit of the expected stock (set in Hotel Settings, see Setting it up). A big shortage cannot be approved by the person who counted. A different manager or admin must do it. The opening stock count always needs a different approver. Rows with a large shortage are shaded orange or red for the approver.</p>
+
+  <h3>Approval is final, and a rejected count starts again from scratch</h3>
+  <p>When a manager clicks <strong>Approve &amp; post variances</strong>, the differences are applied to stock and the approver's name and time are kept. It cannot be undone. <strong>Reject &amp; send back</strong> needs a reason of at least 8 characters. After a rejection, <strong>Reopen for re-count</strong> takes a fresh snapshot and puts every line back to <strong>Not counted</strong>, so old readings cannot be tweaked to fit.</p>
+
+  <h3>Theft Radar points to the ingredients to watch</h3>
+  <p><strong>Theft Radar (last 30d)</strong> sits on the Stock Count page. It lists up to 20 ingredients that lost stock in the last 30 days through count shortages or manual subtractions, which no sale or wastage entry explains. The columns are <strong>Ingredient</strong>, <strong>Shortage</strong>, <strong>Manual out</strong> and <strong>Cost lost</strong>, biggest cost first. If nothing is found you see <em>"No unaccounted shortages detected. All stock movement traces to sales or recorded events."</em> Anyone who can open Stock Count can see it.</p>
+
+  <h3>Deliveries are checked against the order</h3>
+  <p>Receive against a purchase order, not from memory. You cannot receive more than is outstanding unless you type an <strong>Over-delivery note</strong> of at least 5 characters, and the line is flagged <strong>over-delivered</strong> with your note. Items with no cost cannot be received. On <strong>Stock In</strong> by hand, a quantity more than 5 times what you hold, or an expiry date in the past, makes you confirm. Each received batch shows who received it. Where: <strong>Purchase Orders</strong> and <strong>Receive Stock</strong>; see the <strong>Stock-In</strong> tab in Stock Reports.</p>
+
+  <h3>Buying is held to a budget</h3>
+  <p>A monthly stock budget can warn about, or block, a purchase order that goes over. A line set to <strong>Needs approval</strong> can only be sent by someone with <strong>Stock Budget (set &amp; approve)</strong>, who must give a reason. The reason and the person are saved on the order. Comparing what was received with what was sold is how you spot buying that does not match usage. Where: <strong>Stock</strong> &rarr; <strong>Budget</strong>.</p>
+
+  <h3>Till and cash controls protect stock and money</h3>
+  <ul>
+    <li><strong>Void:</strong> a paid order can only be voided by a manager or admin, with a reason of at least 8 characters. It is saved with their name.</li>
+    <li><strong>Refund:</strong> needs <strong>POS Refunds</strong> and a reason of at least 5 characters. A refund does <em>not</em> put stock back, so a manager must check it.</li>
+    <li><strong>86 an item:</strong> needs <strong>POS Quick-86 Items</strong>.</li>
+    <li><strong>Discounts:</strong> need <strong>POS Discounts</strong>. A reason can be chosen, and one discount per tab.</li>
+    <li><strong>Delete an order:</strong> needs <strong>Delete Orders</strong>, a reason, and leaves a permanent deletion record.</li>
+    <li><strong>Shift close:</strong> the cashier counts the drawer without seeing the expected amounts. A shift that does not balance cannot be closed without a supervisor who has <strong>POS Shift Override</strong> and gives a reason.</li>
+    <li><strong>History:</strong> on <strong>Orders &amp; Tabs</strong>, <strong>Timeline</strong> shows each order's full history. The cards <strong>Voids</strong> and <strong>Needs Review</strong> filter the list.</li>
+  </ul>
+
+  <h3>The accounts show the cost of losses</h3>
+  <p>On the Accounting Dashboard, the margin panel (named <strong>F&amp;B margin</strong>, or <strong>POS margin</strong> if there is no restaurant) shows <strong>Stock losses (shrinkage)</strong> and a fold-out <strong>Loss &amp; folio detail</strong> that splits it into wastage, count variance, expiry and recall. <strong>Net F&amp;B contribution</strong> is the margin after those losses. Where: Admin menu &rarr; <strong>Money</strong> &rarr; <strong>Accounting</strong>.</p>
+
+  <h3>Alerts on the Stock Overview</h3>
+  <p>The <strong>Stock Overview</strong> shows <strong>Heads up</strong> or <strong>Action needed</strong>, and the groups <strong>Out of Stock</strong>, <strong>Running Low</strong>, <strong>Expired Batches Still Active</strong> and <strong>Pending Reconciliation</strong>. It also shows <strong>Most Wasted Ingredients (30 days)</strong>. A sale at zero stock is never blocked, but it pushes stock below zero and appears in <strong>Pending Reconciliation</strong> so that someone looks at it.</p>
+
+  <h3>Everything leaves a trail</h3>
+  <p>Every stock movement is saved with the ingredient, the amount, the cost, the reason, the source and the person. Order events (placed, paid, voided and so on) are saved with who did them. You can read the stock trail in <strong>Stock Reports</strong> &rarr; <strong>Adjustments</strong>. The Source column shows where each change came from: for example <strong>pos_order</strong> or <strong>room_service</strong> (a sale), <strong>void_restore</strong> (stock put back), <strong>wastage</strong>, <strong>expiry</strong>, <strong>recall</strong>, <strong>variance</strong> (an approved count) and <strong>manual</strong> (an <strong>Adjust</strong>).</p>
+
+  <h2 id="weekly">Weekly routine for managers</h2>
+  <p>Set aside about 30 minutes, at the same time each week.</p>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; Stock &rarr; <strong>Stock Count</strong>. Read <strong>Theft Radar (last 30d)</strong>. Write down the top ingredients and their <strong>Cost lost</strong>.</li>
+    <li>Start a count without warning. Under <strong>Start a Count</strong> choose <strong>By category</strong> or <strong>Spot check (specific items)</strong>, pick the ingredients that Theft Radar and your high-cost items point to (spirits, meat, oil, cleaning supplies), and give it a <strong>Shift label</strong> such as "Surprise". Ask a storekeeper or a different manager to do the counting. Click <strong>Start count</strong>.</li>
+    <li>When the count is submitted, open it and review the shortages. Look at the <strong>Reason</strong> given on each line. Be wary of <strong>Other</strong>, <strong>Correction</strong> and <strong>Staff meal</strong> on high-cost items. Approve it, or use <strong>Reject &amp; send back</strong> with a reason if the figures do not make sense.</li>
+    <li>Open <strong>Stock Reports</strong> &rarr; <strong>Wastage</strong>. Set <strong>From</strong> and <strong>To</strong> to the last 7 days and click <strong>Apply</strong>. Look for entries that are large, repeated, all by one person, or of an item that is not normally wasted.</li>
+    <li>Open <strong>Stock Reports</strong> &rarr; <strong>Adjustments</strong> for the same dates. Look at every <strong>manual</strong> entry. Ask the person named in <strong>By</strong> if you do not know why it was made.</li>
+    <li>Open Admin menu &rarr; Money &rarr; <strong>POS Accounting</strong>, pick each day and open the <strong>Z-report</strong> (shift close report). Check <strong>Voids</strong>, <strong>Refund / Void Payouts</strong> and any shift marked <strong>SHORTFALL</strong> or <strong>Override applied</strong>. On <strong>Orders &amp; Tabs</strong> click the <strong>Voids</strong> card and open <strong>Timeline</strong> on anything unusual.</li>
+    <li>Open <strong>Stock Overview</strong>. Clear <strong>Pending Reconciliation</strong>, deal with <strong>Expired Batches Still Active</strong>, and check <strong>Recipe Coverage</strong>.</li>
+    <li>Open <strong>Stock</strong> &rarr; <strong>Budget</strong>. Compare <strong>Received</strong> for the month with your sales. If you are buying much more than you are selling, find out why.</li>
+    <li>Check the Accounting Dashboard for <strong>Stock losses (shrinkage)</strong>. If it is rising, look at the <strong>Loss &amp; folio detail</strong> to see whether it is wastage, count variance or expiry.</li>
+  </ol>
+
+  <h2 id="short">When stock is short</h2>
+  <p>Use this when a count, Theft Radar or a chef tells you an ingredient is missing. Work down the list and stop when you find the cause.</p>
+  <ol class="steps">
+    <li>Name the ingredient and the dates. Open <strong>Stock Reports</strong> &rarr; <strong>Adjustments</strong>, set <strong>From</strong> and <strong>To</strong>, click <strong>Apply</strong>, and read every entry for that ingredient. Use the <strong>CSV</strong> button if you want to filter it in a spreadsheet.</li>
+    <li>Check the sales side. The <strong>Usage</strong> tab shows what your sales should have used, worked out from the recipes. If the shelf has fallen by clearly more than this plus the recorded wastage, the extra left without a sale.</li>
+    <li>Check the recipes. If a recipe is too small, the system will take off too little per portion, and a "shortage" will build up on every count. Open <strong>Recipes</strong>, check the quantity per portion and the <strong>Yield %</strong>. Also check <strong>Recipe Coverage</strong>: items sold with no recipe use stock that the system does not see.</li>
+    <li>Check the <strong>Wastage</strong> and <strong>Yield</strong> tabs for the same dates. Compare <strong>Wasted</strong> and <strong>Expired</strong> with what the kitchen reports.</li>
+    <li>Check deliveries on the <strong>Stock-In</strong> tab and on the purchase order. Was the quantity received the same as the delivery note? Look for lines flagged <strong>over-delivered</strong> and for deliveries booked with no purchase order.</li>
+    <li>Check manual changes. In the <strong>Adjustments</strong> tab, a <strong>manual</strong> entry that adds stock can cover up an earlier loss, and one that subtracts stock moves it out without a sale. Read the reason and the name.</li>
+    <li>Check voids and refunds. On <strong>Orders &amp; Tabs</strong> look at <strong>Voids</strong>, then <strong>Timeline</strong>. A paid order that was voided, or a refund (which does not put stock back), can leave the shelf short. Check the Z-report for the cashier and shift.</li>
+    <li>Check for unrecorded breaks and spoilage. Ask the store and kitchen if anything was thrown away, and record it on <strong>Wastage</strong> so the books tell the truth.</li>
+    <li>Run a fresh spot count of just that ingredient, using a different person. Compare it with the earlier figure.</li>
+    <li>If you still cannot explain it, approve the count with the right reason (use <strong>Theft suspected</strong> if that is your honest view). The loss is then written off at the batch's cost, appears in Theft Radar and in the accounts as count variance, and the approver's name is kept. Then act on it using your normal staff procedure: the system only provides the evidence.</li>
+  </ol>
+
+  <h2 id="setup">Setting it up</h2>
+  <h3>Variance limits</h3>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; Settings &rarr; <strong>Hotel Settings</strong> &rarr; <strong>Hotel details &amp; policies</strong> and find the group <strong>Restaurant &amp; stock</strong>. You need the <strong>Hotel Settings</strong> permission.</li>
+    <li><strong>Stock count: needs approval above (%)</strong>: default 10. A shortage at or above this share of the expected stock may need a second approver.</li>
+    <li><strong>Stock count: ignore variances worth less than</strong>: default 5000 (MWK). A shortage worth less than this never needs a second approver and is not shaded on the count.</li>
+    <li>A different approver is needed only when <strong>both</strong> limits are passed. To make the rule apply to smaller shortages, lower both numbers.</li>
+    <li>Click <strong>Save Hotel Details</strong> at the bottom. Nothing is saved until you do.</li>
+  </ol>
+  <div class="note"><p>The setting <strong>Stock count: alert at variance (%)</strong> is saved, but the count page does not use it yet. Only the other two settings change what the count does.</p></div>
+  <h3>Permissions, so the counter is not the approver</h3>
+  <ul>
+    <li>Give <strong>Stock Count &amp; Variance</strong> to the storekeeper or chef who counts. Do not give them the Manager role. They can then count and submit, but they cannot approve or reject.</li>
+    <li>Keep at least two people with the Admin or Manager role, so a big shortage found by one manager can be approved by the other.</li>
+    <li>Give <strong>Wastage Log</strong> to the people who really throw stock away, and <strong>Stock Reports</strong> only to managers and the accountant.</li>
+    <li>Keep <strong>Ingredients &amp; Recipes</strong> (deliveries, purchase orders) with the person who buys, and have someone else do the counts. Whoever receives stock should not also be the only person who counts it.</li>
+  </ul>
+  <h3>Who should have manual adjustments</h3>
+  <p>The <strong>Adjust</strong> button and batch write-offs are tied to the Admin and Manager roles, not to a ticked permission. Do not make someone a Manager only to give them this. Keep the number of managers small, and look at the <strong>Adjustments</strong> tab every week.</p>
+  <h3>Staff permissions to keep tight</h3>
+  <ul>
+    <li><strong>POS Void Tabs</strong>, <strong>POS Refunds</strong>, <strong>POS Discounts</strong>, <strong>POS Shift Override</strong> and <strong>Delete Orders</strong> only for managers.</li>
+    <li>Tills that should not handle money: give <strong>POS Till (Touch)</strong> without <strong>POS Take Payment &amp; Settle</strong>.</li>
+  </ul>
+  <p>The steps for giving a person permissions are in <a href="18-staff-access.html#perms">Staff &amp; Access</a>.</p>
+
+  <h2 id="limits">What the system cannot do for you</h2>
+  <ul>
+    <li>It does not make anyone count on a schedule. You have to start the counts.</li>
+    <li>It cannot tell theft from a mistake. <strong>Theft suspected</strong> is a label that a person chooses.</li>
+    <li>It cannot see stock that leaves with no record at all, until a count finds it.</li>
+    <li>It does not track sold items that have no recipe.</li>
+    <li>It cannot stop a manager from approving a count they should not. This is why you keep at least two approvers and read the Adjustments tab.</li>
+  </ul>
+
+  <h2 id="problems">If something goes wrong</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><em>"This count has shortages over the approval threshold (MWK 5,000.00 and 10%). It must be approved by a different manager or admin than the person who counted it."</em></td><td>You counted it, and a shortage is over both limits. This is on purpose.</td><td>Ask another manager or admin to approve it. Or use <strong>Reject &amp; send back</strong>.</td></tr>
+      <tr><td><em>"Only admin/manager can approve counts."</em> / <em>"... reject counts."</em></td><td>Your role is not Manager or Admin.</td><td>Ask a manager.</td></tr>
+      <tr><td><em>"Every shortage line must have a reason. Save your readings, pick a reason for each negative variance, then submit."</em></td><td>A shortage has no reason.</td><td>Pick a reason on each short line, click <strong>Save readings</strong>, submit again.</td></tr>
+      <tr><td><em>"3 lines are not counted yet (Rice, Flour, Oil). Enter a reading for every line (type 0 if there is none) before continuing."</em></td><td>A line was left blank. Blank is never counted as 0.</td><td>Count it and type the number. Use the filter <strong>Not counted only</strong>.</td></tr>
+      <tr><td><em>"Not approved: 2 line(s) became shortages after allowing for stock movements and need a reason (...). Count returned to draft with readings kept - add the reasons and resubmit; nothing was posted to stock."</em></td><td>Sales or waste during the count turned a line into a shortage.</td><td>Open the count, pick a reason in <strong>Returned for reasons</strong> lines, save and submit again.</td></tr>
+      <tr><td><em>"Only the person who started this count or a manager can submit it."</em> / <em>"Only the original counter or a manager can edit this count."</em></td><td>Someone else started the count.</td><td>Ask them, or a manager.</td></tr>
+      <tr><td><em>"Provide a rejection reason (min 8 characters)."</em></td><td>The reason is too short.</td><td>Write more.</td></tr>
+      <tr><td>The count page has no <strong>System Qty</strong>, <strong>Variance</strong> or <strong>Cost Impact</strong> columns, and the note says <strong>Blind count.</strong></td><td>This is the blind count. You started the count, or you are not a manager.</td><td>Not an error. Type what you count. A manager sees the figures after you submit.</td></tr>
+      <tr><td><em>"Manual adjustments are restricted. Use Stock Count for variance reconciliation."</em></td><td>You do not have the Admin or Manager role.</td><td>Use a stock count, or ask a manager.</td></tr>
+      <tr><td><em>"A reason of at least 8 characters is required for manual adjustments."</em></td><td>The reason is too short.</td><td>Explain in more words.</td></tr>
+      <tr><td><em>"Cannot subtract more than current stock. Use Stock Count to reconcile physical differences."</em></td><td>You tried to take off more than the system holds.</td><td>Do a stock count instead.</td></tr>
+      <tr><td><em>"Writing off or recalling a batch is restricted to managers and admins."</em> / <em>"Discarding a batch is restricted to managers and admins."</em></td><td>Wrong role.</td><td>Ask a manager.</td></tr>
+      <tr><td><em>"A reason of at least 8 characters is required to write off or recall a batch."</em></td><td>The reason is too short.</td><td>Write a fuller reason.</td></tr>
+      <tr><td><em>"Wastage quantity exceeds current stock for ingredient #12."</em></td><td>More wasted than the system holds.</td><td>Count the stock, or lower the quantity.</td></tr>
+      <tr><td><em>"... receiving 2 more than ordered needs an over-delivery note (at least 5 characters) explaining why."</em></td><td>More arrived than the purchase order line expects.</td><td>Type the reason in <strong>Over-delivery note</strong>. If you cannot explain it, find out before you receive it.</td></tr>
+      <tr><td><em>"This order takes the budget over for [category]. A budget manager has to approve it before it can be sent."</em></td><td>The budget line needs approval.</td><td>Ask a manager with <strong>Stock Budget (set &amp; approve)</strong>.</td></tr>
+      <tr><td><em>"Only admins or managers can void a paid order."</em></td><td>Wrong role.</td><td>Ask a manager.</td></tr>
+      <tr><td>Theft Radar shows an ingredient with a large <strong>Cost lost</strong></td><td>It lost stock to count shortages or manual subtractions in the last 30 days.</td><td>Follow <a href="#short">When stock is short</a>.</td></tr>
+      <tr><td>Stock shows below zero or <strong>Pending Reconciliation</strong> is not empty</td><td>Items were sold when no stock was on record.</td><td>Receive the missing delivery or fix it at the next count.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="08-stock-orders.html#count">Stock, recipes and orders: how to do a stock count</a></li>
+    <li><a href="08-stock-orders.html#wastage">Stock, recipes and orders: how to record wastage</a></li>
+    <li><a href="01-pos-till.html#close">POS till: how to close your shift</a></li>
+    <li><a href="18-staff-access.html">Staff &amp; Access</a></li>
+    <li><a href="19-hotel-settings.html#details">Hotel Settings: Hotel details &amp; policies</a></li>
+    <li><a href="14-reports-eod.html">Reports and end of day</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
+</body>
+</html>

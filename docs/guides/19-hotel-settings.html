@@ -207,9 +207,9 @@
       <tr><td><strong>Restaurant receipt footer</strong></td><td>Text, up to 160 characters. Default <em>"Thank you for dining with us!"</em></td><td>The restaurant receipt footer line.</td></tr>
       <tr><td><strong>Menu PDF link (optional)</strong></td><td>A full <code>http://</code> or <code>https://</code> link, up to 500 characters. May be left empty.</td><td>A link to a menu PDF.</td></tr>
       <tr><td><strong>Restaurant service charge (%)</strong> (VAT &amp; refund)</td><td>Number 0 to 25. Default 0.</td><td>The restaurant service charge percentage.</td></tr>
-      <tr><td><strong>Stock count: alert at variance (%)</strong></td><td>Number 0 to 100. Default 2.</td><td>The difference between counted and expected stock at which an alert is raised.</td></tr>
-      <tr><td><strong>Stock count: needs approval above (%)</strong></td><td>Number 0 to 100. Default 10.</td><td>Above this difference a stock count needs approval.</td></tr>
-      <tr><td><strong>Stock count: ignore variances worth less than</strong></td><td>Number 0 to 100,000,000. Default 5000 (MWK).</td><td>Small differences below this value are ignored.</td></tr>
+      <tr><td><strong>Stock count: alert at variance (%)</strong></td><td>Number 0 to 100. Default 2.</td><td>Saved, but the Stock Count page does not use it yet. Only the next two settings change what a count does.</td></tr>
+      <tr><td><strong>Stock count: needs approval above (%)</strong></td><td>Number 0 to 100. Default 10.</td><td>A shortage this big (as a share of the expected stock) needs a different manager or admin than the person who counted, but only if it is also worth at least the amount in the next setting. A shortage this big is shaded red on the count. See <a href="20-stock-loss-prevention.html#setup">Stopping stock going missing</a>.</td></tr>
+      <tr><td><strong>Stock count: ignore variances worth less than</strong></td><td>Number 0 to 100,000,000. Default 5000 (MWK).</td><td>A shortage worth less than this never needs a different approver and is not shaded on the count. It is still posted to stock when the count is approved.</td></tr>
     </tbody>
   </table>
 

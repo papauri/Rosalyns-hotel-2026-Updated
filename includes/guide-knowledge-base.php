@@ -82,6 +82,7 @@ function rh_kb_synonym_groups(): array
         ['quotation', 'quote', 'estimate', 'proforma'],
         ['deal', 'promo', 'promotion', 'coupon', 'offer'],
         ['ingredient', 'stock', 'inventory'], ['supplier', 'vendor'],
+        ['theft', 'steal', 'stealing', 'stole', 'stolen', 'thief', 'pilferage', 'pilfer', 'shrinkage', 'shortage', 'shortages', 'variance', 'loss', 'losses'],
         ['wastage', 'waste', 'spoil', 'spoilage', 'spoiled', 'expired'],
         ['takings', 'revenue', 'sales', 'income', 'earnings'],
         ['price', 'rate', 'tariff', 'cost', 'pricing'],
@@ -110,6 +111,7 @@ function rh_kb_expand_phrases(string $q): string
     $map = [
         '/\b(sold out|out of stock|run out|ran out|finished)\b/i' => ' unavailable 86 ',
         '/\bmoney back\b/i' => ' refund ',
+        '/\b(stock|ingredients?|inventory)\s+(is |are |has |have )?(going )?(missing|gone|disappear\w*)\b|\b(missing|disappearing)\s+(stock|ingredients?|inventory)\b/i' => ' theft shrinkage ',
         '/\b(no internet|internet (is )?(down|off|gone|dropped|not working)|connection (lost|down|dropped)|wi-?fi (is )?down)\b/i' => ' offline ',
         '/\bwalk[\s-]?ins?\b/i' => ' walkin create booking ',
         '/\b(sign(ed)? me out|kicked out|logged out)\b/i' => ' signed out ',
@@ -582,6 +584,7 @@ function rh_kb_guide_requirements(): array
         '06-housekeeping.html'            => ['label' => 'Housekeeping',                  'all' => ['housekeeping']],
         '07-reception-bookings.html'      => ['label' => 'Bookings & Reservations',       'all' => ['bookings']],
         '08-stock-orders.html'            => ['label' => 'Stock & Inventory',             'all' => ['stock']],
+        '20-stock-loss-prevention.html'   => ['label' => 'Stock & Inventory',             'all' => ['stock']],
         '09-packages-rates.html'          => ['label' => 'Bookings & Reservations',       'all' => ['bookings']],
         '10-conference-events.html'       => ['label' => 'Conference & Events',           'any' => ['conference', 'flag:events']],
         '11-social-facebook-sharing.html' => ['label' => 'Website & CMS',                'all' => ['website_cms']],
@@ -809,7 +812,8 @@ function rh_kb_search(string $q, int $limit = 10, ?array $state = null): array
     // What kind of answer the question is after.
     $want = [
         'page' => (bool)preg_match('/\b(where|find|locate|menu|page|screen|open|get to|navigate)\b/i', $q),
-        'permission' => (bool)preg_match("/\b(permission|access|allow|allowed|rights|grant|who can|can'?t see|cannot see|missing|not see|hidden|greyed)\b/i", $q),
+        'permission' => (bool)preg_match("/\b(permission|access|allow|allowed|rights|grant|who can|can'?t see|cannot see|missing|not see|hidden|greyed)\b/i", $q)
+            && !preg_match('/\b(stock|ingredients?|inventory)\s+(is |are |has |have )?(going )?(missing|gone|disappear\w*)\b|\b(missing|disappearing)\s+(stock|ingredients?|inventory)\b/i', $q), // "stock is missing" is a loss, not a permission
         'role' => (bool)preg_match('/\b(role|roles|what can an?)\b/i', $q),
         'module' => (bool)preg_match('/\b(module|modules|switch(ed)? (on|off)|turn (on|off)|enable|disable|feature)\b/i', $q),
         'hint' => (bool)preg_match('/\b(what (does|is|are)|button|field|tick ?box|toggle|mean|means|for\?)\b/i', $q),

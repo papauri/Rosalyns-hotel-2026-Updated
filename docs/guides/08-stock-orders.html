@@ -77,7 +77,7 @@
     <li><strong>Drinks paid for at the till, or on a tab that is settled:</strong> the till marks Bar and Coffee Bar drinks as handed over, and stock comes off then.</li>
     <li><strong>Room service:</strong> stock comes off when the charge is posted to the guest's bill, at the moment the order is placed.</li>
     <li><strong>How much comes off:</strong> the recipe quantity for one portion, times the number sold, divided by the yield %. For example 150 g of chicken at 75% yield takes off 200 g.</li>
-    <li><strong>Which batch:</strong> the oldest batch is used first. The ingredient's total and its average cost update.</li>
+    <li><strong>Which batch:</strong> the batch that expires first is used first (batches with no expiry date go last, oldest first). The ingredient's total and its average cost update.</li>
     <li><strong>If there is not enough:</strong> the sale is never stopped. The tile on the till stays tappable and shows <strong>Low / none on record</strong>. The Kitchen, Bar and Coffee Bar can still mark the line Ready or Served. The ingredient's stock goes below zero, and the system records it as an oversell so a manager can reconcile it. The next delivery fills the shortfall first, or fix it at the next stock count.</li>
     <li><strong>Put back:</strong> cancelling before work starts, voiding an order, and 86 of an item that was not started all put the stock back. A refund does <em>not</em> put stock back.</li>
     <li><strong>Voided or 86'd after cooking started:</strong> the ingredients are already gone, so the dish is counted as <strong>wastage</strong> once. It is not also counted as usage in Stock Reports. Waste is only recorded when stock actually came off the shelf.</li>
@@ -247,7 +247,7 @@
   <ol class="steps">
     <li>Under <strong>Start a Count</strong> choose the <strong>Scope</strong>: <strong>Full count (every ingredient)</strong>, <strong>By category</strong> (then pick a <strong>Category</strong>) or <strong>Spot check (specific items)</strong> (pick ingredients with Ctrl/Cmd-click). Optionally add a <strong>Shift label</strong> and <strong>Notes</strong>.</li>
     <li>Click <strong>Start count</strong>. The system saves the quantity it expects for each ingredient at that moment. <em>"Count ... started. Enter your physical readings."</em></li>
-    <li>Every <strong>Actual Qty</strong> box starts blank and the line is <strong>Not counted</strong>. Enter what you physically counted for every line. <strong>0 is a valid count</strong> when the shelf really is empty, but a blank box is never read as 0. The <strong>Expected at count time</strong> column shows what the system believed you should have at the moment you counted that line (the starting figure plus anything sold, delivered or wasted since). <strong>Variance</strong> and <strong>Cost Impact</strong> are measured against it.</li>
+    <li>Every <strong>Actual Qty</strong> box starts blank and the line is <strong>Not counted</strong>. Enter what you physically counted for every line. <strong>0 is a valid count</strong> when the shelf really is empty, but a blank box is never read as 0. The count is <strong>blind</strong> for the person who started it, and for anyone who is not a manager: the page says <strong>Blind count.</strong> and hides the expected quantity, <strong>Variance</strong> and <strong>Cost Impact</strong> until the count is submitted (or approved, for non-managers). A manager who did not start the count sees the <strong>Expected at count time</strong> column, which is what the system believed you should have at the moment you counted that line (the starting figure plus anything sold, delivered or wasted since). <strong>Variance</strong> and <strong>Cost Impact</strong> are measured against it.</li>
     <li>For every shortage choose a <strong>Reason</strong>: <strong>Spillage</strong>, <strong>Expired</strong>, <strong>Staff meal</strong>, <strong>Sampling</strong>, <strong>Prep waste</strong>, <strong>Theft suspected</strong>, <strong>Correction</strong> or <strong>Other</strong>, and add <strong>Notes</strong> if useful. The filter <strong>Not counted only</strong> finds lines you have missed.</li>
     <li>Click <strong>Save readings</strong> (<em>"Count readings saved."</em>).</li>
     <li>Click <strong>Submit for approval</strong> (<em>"Submit count for approval? Once submitted you cannot edit it. Every line must have a reading."</em>). It is refused while any line is not counted. <em>"Count submitted for approval. Shortage cost: MWK ..."</em></li>
@@ -263,6 +263,7 @@
     <li><strong>Write-offs are capped:</strong> if a shortage is bigger than the stock still on the shelf, only what is there is written off, and the note on the stock record says how much was uncovered.</li>
   </ul>
   <p>The page also shows <strong>Theft Radar (last 30d)</strong>, the ingredients losing stock to shortages or manual adjustments that no sale or wastage explains, and <strong>Recent Counts</strong>. Surpluses need no reason.</p>
+  <div class="note"><p>See also <a href="20-stock-loss-prevention.html">Stopping stock going missing (anti-theft)</a>: every control that guards your stock, a weekly routine for managers, and what to do when stock is short.</p></div>
 
   <h2 id="opening">How to do the Opening stock count (first-time set-up)</h2>
   <p>Do this once, when you start using stock, so every ingredient has a starting quantity and cost. Until then, ingredients that never had stock show as <strong>Opening stock not recorded (N items)</strong>. You need <strong>Stock Count &amp; Variance</strong>, and a different manager or admin must approve it. It sets stock quantities and costs only. No supplier receipts are made.</p>
@@ -411,6 +412,7 @@
 
   <h2 id="related">Related guides</h2>
   <ul>
+    <li><a href="20-stock-loss-prevention.html">Stopping stock going missing (anti-theft)</a></li>
     <li><a href="01-pos-till.html">POS till, menu and tables</a></li>
     <li><a href="02-kds-kitchen.html">Kitchen display (KDS)</a></li>
     <li><a href="05-room-service.html">Room service</a></li>

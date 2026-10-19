@@ -242,6 +242,26 @@
     <p>An item with no cost cannot be received by barcode, and a count that adds stock for an item with no cost cannot be approved. Type the cost first. If more arrived than a purchase order says, you can receive it, but you must type an <strong>Over-delivery note</strong> of at least 5 characters. See <a href="08-stock-orders.html#po">How to raise and receive a purchase order</a>.</p>
   </details>
 
+  <details class="faq" id="faq-anti-theft" data-module="stock">
+    <summary>How does the system stop stock theft?</summary>
+    <p>It cannot stop a person, but it makes stock hard to lose without a trace. Every sale takes stock off by recipe. Wastage must be written down with a reason and a name. Stock counts are blind for the person counting, every shortage needs a reason, and a big shortage cannot be approved by the person who counted. Manual adjustments and batch write-offs are for managers only and need a reason. <strong>Theft Radar</strong> on the Stock Count page lists ingredients losing stock that no sale or wastage explains. Every change is saved with who made it. Run a surprise count each week. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-stock-missing" data-module="stock">
+    <summary>Stock is missing — what do I do?</summary>
+    <p>Open <strong>Stock</strong> &rarr; <strong>Stock Reports</strong> &rarr; <strong>Adjustments</strong>, set the dates and read every entry for that ingredient. Then check the <strong>Usage</strong>, <strong>Wastage</strong> and <strong>Stock-In</strong> tabs, the recipe for that item, any <strong>manual</strong> adjustments, and voids and refunds on <strong>Orders &amp; Tabs</strong>. Then run a fresh spot count with a different person. If you cannot explain the loss, approve the count with the honest reason (for example <strong>Theft suspected</strong>) so it is written off and recorded. See <a href="20-stock-loss-prevention.html#short">When stock is short</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-theft-radar" data-module="stock">
+    <summary>What is Theft Radar?</summary>
+    <p><strong>Theft Radar (last 30d)</strong> is a box on the <strong>Stock Count</strong> page. It lists up to 20 ingredients that lost stock in the last 30 days through count shortages or manual subtractions, which no sale or wastage entry explains. The columns are <strong>Ingredient</strong>, <strong>Shortage</strong>, <strong>Manual out</strong> and <strong>Cost lost</strong>. If nothing is found it says <em>"No unaccounted shortages detected. All stock movement traces to sales or recorded events."</em> It shows where to look, not who is to blame. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-approve-own-count" data-module="stock">
+    <summary>Why can't I approve my own stock count?</summary>
+    <p>Because a big shortage must be checked by someone other than the person who counted. If a shortage is over both the cost limit and the percentage limit you will see <em>"This count has shortages over the approval threshold (MWK 5,000.00 and 10%). It must be approved by a different manager or admin than the person who counted it."</em> Ask another manager or admin to approve it. Approving or rejecting a count also needs the Admin or Manager role: without it you see <em>"Only admin/manager can approve counts."</em> An opening stock count always needs a different approver. See <a href="20-stock-loss-prevention.html#setup">Setting it up</a>.</p>
+  </details>
+
   <details class="faq" id="faq-receptionist-cant" data-module="bookings">
     <summary>A receptionist cannot confirm, cancel, or mark a booking paid. Why?</summary>
     <p>Each booking action needs its own permission in <a href="18-staff-access.html#actions">Staff &amp; Access</a>: <strong>Check-in Guests</strong>, <strong>Check-out Guests</strong>, <strong>Cancel Bookings</strong> (cancel and no-show), <strong>Add Payments</strong> (mark paid), and <strong>Edit Bookings</strong> (change dates, <strong>Confirm Booking</strong>, <strong>Convert to Confirmed</strong>, charges on the guest bill). Changing a room's status needs <strong>Housekeeping</strong> or <strong>Room Maintenance</strong>. An administrator ticks them in <strong>Permissions</strong>. See <a href="18-staff-access.html#receptionist">Example: set up a receptionist</a>.</p>

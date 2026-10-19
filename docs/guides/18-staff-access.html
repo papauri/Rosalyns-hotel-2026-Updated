@@ -138,6 +138,7 @@
     <tbody>
       <tr><td>Only edit email and PDF templates</td><td><strong>Edit message templates</strong>. They get <strong>Settings &rarr; Email Templates</strong> and nothing else in Settings.</td></tr>
       <tr><td>Take orders on the till but never handle money (FOH, waiters)</td><td><strong>POS Till (Touch)</strong> without <strong>POS Take Payment &amp; Settle</strong> (untick it - Restaurant Staff have it by default). They fire orders and tabs; someone with the permission settles the bill in <strong>Orders &amp; Tabs</strong>.</td></tr>
+      <tr><td>Count stock without being able to approve their own count (storekeeper, chef)</td><td><strong>Stock Count &amp; Variance</strong>, without the Manager role. They can count and submit. Only someone with the Admin or Manager role can approve or reject, and a big shortage needs a different approver than the counter. Manual stock adjustments and writing off a batch are also for the Admin and Manager roles only. See <a href="20-stock-loss-prevention.html#setup">Stopping stock going missing</a>.</td></tr>
       <tr><td>See the stock budget and what is left to spend, but not change it</td><td><strong>Stock Budget (view)</strong></td></tr>
       <tr><td>Set monthly stock budgets and approve purchase orders that go over a budget that needs approval</td><td><strong>Stock Budget (set &amp; approve)</strong>. Managers have it; approval also needs a reason.</td></tr>
       <tr><td>See and settle every cashier's tabs</td><td><strong>POS All Cashiers' Tabs</strong> (Managers and admins have it). Everyone else only sees the orders they took, and ready alerts only ever go to the person who placed the order.</td></tr>
@@ -269,6 +270,7 @@
   <ul>
     <li><a href="99-admin-dashboard-full-guide.html">Admin reference</a> — menus, search and every settings page</li>
     <li><a href="12-email-templates.php">Email template tags</a></li>
+    <li><a href="20-stock-loss-prevention.html">Stopping stock going missing (anti-theft)</a> — which stock permissions to give, so the counter is not the approver</li>
   </ul>
 
   <footer>Updated October 2026. Describes the system as it is set up today.</footer>
