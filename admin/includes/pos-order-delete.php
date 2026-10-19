@@ -22,8 +22,11 @@
  *                 - legacy adjustments keyed on the ORDER id are never auto-restored: the lines are
  *                   named in the summary and left untouched.
  *   (b) MONEY   removes every payments row of the order (booking_type 'restaurant', booking_id = the
- *               order) including refund / void-reversal rows, plus their receipt_events and queued MRA
- *               submissions, so shift totals, POS accounting, End of Day and reports no longer count it.
+ *               order) including refund / void-reversal rows, plus their queued MRA submissions, so shift
+ *               totals, POS accounting, End of Day and reports no longer count it. RECEIPT HISTORY is KEPT
+ *               (owner, 2026-10-20): the receipt_events rows stay (payment_id set to 0, note records the
+ *               original payment id and the deleted order) and the receipt numbers are listed in the
+ *               pos_deleted_orders notes + snapshot.
  *               Room-service orders void their live folio charges, the booking is recalculated and any
  *               overpayment that leaves behind is converted to a credit note. Refused (nothing changed) when
  *               a live credit note is linked to the order or a payment was already fiscalised with MRA.
@@ -578,6 +581,18 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
         } catch (Throwable $e) {
             error_log('rh_delete_pos_order snapshot: ' . $e->getMessage());
         }
+        // Receipt history that stays behind (see the money step): ids + numbers go in the snapshot.
+        $keptReceiptEvents = [];
+        if ($paymentIds && rh_pos_del_table_exists($pdo, 'receipt_events')) {
+            try {
+                $phRe = implode(',', array_fill(0, count($paymentIds), '?'));
+                $re = $pdo->prepare("SELECT id, payment_id, receipt_number, event_type, channel, recipient, created_at FROM receipt_events WHERE payment_id IN ($phRe) ORDER BY id ASC LIMIT 300");
+                $re->execute($paymentIds);
+                $keptReceiptEvents = $re->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Throwable $e) {
+                error_log('rh_delete_pos_order receipt events snapshot: ' . $e->getMessage());
+            }
+        }
         $bookingReference = null;
         if (!empty($order['booking_id'])) {
             try {
@@ -615,7 +630,7 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
         }
         $deletedReceipts = array_values(array_unique($deletedReceipts));
         if ($deletedReceipts) {
-            $noteParts[] = 'Receipt number(s) removed with the order: ' . implode(', ', $deletedReceipts);
+            $noteParts[] = 'Receipt number(s) of the deleted order (receipt history kept in receipt_events): ' . implode(', ', $deletedReceipts);
         }
         $noteParts[] = 'Cash already taken or handed back is not moved.';
         $notes = implode(' | ', $noteParts);
@@ -641,13 +656,23 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
             'credit_note' => $creditNoteNumber,
             'booking_notes' => $bookingNotes,
             'deleted_receipt_numbers' => $deletedReceipts,
+            'receipt_events_kept' => $keptReceiptEvents,
         ], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
 
         // ── (b)/(c) MONEY + CHILD ROWS ──
         if ($paymentIds) {
             $ph = implode(',', array_fill(0, count($paymentIds), '?'));
+            // Receipt history is KEPT (owner, 2026-10-20): the rows stay so every receipt number issued /
+            // sent / reprinted stays traceable. receipt_events has no foreign key to payments, so nothing
+            // blocks or cascades. payment_id is pointed at 0 ("no live payment") so a payment id can never be
+            // re-used by mistake, and the note records the original payment id and the deleted order.
             if (rh_pos_del_table_exists($pdo, 'receipt_events')) {
-                $pdo->prepare("DELETE FROM receipt_events WHERE payment_id IN ($ph)")->execute($paymentIds);
+                $tag = ' [order ' . mb_substr($reference, 0, 40) . ' deleted; was payment #';
+                $pdo->prepare("UPDATE receipt_events
+                                  SET event_note = CONCAT(COALESCE(event_note, ''), ?, payment_id, ']'),
+                                      payment_id = 0
+                                WHERE payment_id IN ($ph)")
+                    ->execute(array_merge([$tag], $paymentIds));
             }
             if (rh_pos_del_table_exists($pdo, 'mra_submission_queue')) {
                 $pdo->prepare("DELETE FROM mra_submission_queue WHERE payment_id IN ($ph)")->execute($paymentIds);

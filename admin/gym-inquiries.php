@@ -28,6 +28,7 @@ $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
 // Its model derives amount_due from the LOCKED invoiced gross (total_with_vat),
 // which is rate-safe — it never rewrites an old-rate invoice to the current rate.
 require_once __DIR__ . '/includes/finance-account-sync.php';
+require_once __DIR__ . '/includes/gym-billing-lib.php';
 
 // Handle status updates and deletions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
@@ -262,13 +263,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                     $pdo->prepare("UPDATE gym_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?")->execute([$inquiry_id]);
                     // The member created from this enquiry stops being a live member, and their future
                     // floor-slot bookings and class places are released (the bill/payment handling below is unchanged).
-                    $linkedMembers = $pdo->prepare("SELECT id FROM gym_members WHERE gym_inquiry_id = ? AND status IN ('active','suspended') FOR UPDATE");
+                    $linkedMembers = $pdo->prepare("SELECT id, member_number FROM gym_members WHERE gym_inquiry_id = ? AND status IN ('active','suspended') FOR UPDATE");
                     $linkedMembers->execute([$inquiry_id]);
                     $cancelledMemberIds = [];
-                    foreach ($linkedMembers->fetchAll(PDO::FETCH_COLUMN) as $linkedMemberId) {
-                        $pdo->prepare("UPDATE gym_members SET status = 'cancelled' WHERE id = ?")->execute([(int)$linkedMemberId]);
-                        gym_member_release_future($pdo, (int)$linkedMemberId);
-                        $cancelledMemberIds[] = (int)$linkedMemberId;
+                    $renewalVoided = 0.0;
+                    foreach ($linkedMembers->fetchAll(PDO::FETCH_ASSOC) as $linkedMember) {
+                        $linkedMemberId = (int)$linkedMember['id'];
+                        $pdo->prepare("UPDATE gym_members SET status = 'cancelled' WHERE id = ?")->execute([$linkedMemberId]);
+                        gym_member_release_future($pdo, $linkedMemberId);
+                        // This enquiry is already cancelled above (its paid money is credit owed back as usual). The member's
+                        // OTHER live bills (desk renewals tied by the [member:NUMBER] marker) lose their unpaid part too.
+                        $renewalVoided += rh_gym_void_unpaid_for_member($pdo, $linkedMemberId, (string)$linkedMember['member_number'], null,
+                            (string)($user['full_name'] ?? $user['username'] ?? ('user #' . (int)($user['id'] ?? 0))))['cleared'];
+                        $cancelledMemberIds[] = $linkedMemberId;
                     }
                     if (!rh_sync_account_payments($pdo, 'gym', (int)$inquiry_id)) {
                         throw new Exception('Could not recalculate the account balance.');
@@ -291,6 +298,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 $cancelCreditNote = $cancelCredit > BALANCE_TOLERANCE
                     ? ' ' . getSetting('currency_symbol') . number_format($cancelCredit, 2) . ' already paid stays as credit owed back - refund it from the payment Refund screen.'
                     : '';
+                if ($renewalVoided > BALANCE_TOLERANCE) {
+                    $cancelCreditNote .= ' Unpaid renewal bill of ' . getSetting('currency_symbol') . number_format($renewalVoided, 2) . ' for the cancelled member was also cleared.';
+                }
 
                 $email_result = sendGymCancelledEmail($inquiry);
                 $message = $email_result['success']

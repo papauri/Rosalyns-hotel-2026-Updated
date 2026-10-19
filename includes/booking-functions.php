@@ -747,8 +747,8 @@ function createNoShowRefund(array $booking, int $adminUserId, PDO $pdo): array
 /**
  * Mark a booking as no-show - the ONE implementation behind admin/bookings.php and admin/booking-details.php.
  *
- * Everything in one transaction with the booking row locked: live orders closed (a part-paid or
- * already-started order refuses the whole thing), status -> 'no-show', room-type stock + every held room
+ * Everything in one transaction with the booking row locked: live orders closed (a part-paid order
+ * refuses the whole thing; food the kitchen already started stays charged to the booking), status -> 'no-show', room-type stock + every held room
  * released, open quotations expired, then createNoShowRefund() exactly as before (policy and amounts
  * untouched; a refund that cannot be created is reported but the no-show still stands, as it always did).
  * Emails stay with the caller.

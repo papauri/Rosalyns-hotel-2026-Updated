@@ -155,11 +155,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('You do not have permission to delete or restore bookings.');
             }
             $actorName = (string)($user['full_name'] ?? ($user['username'] ?? 'Admin'));
-            $res = $action === 'delete_booking'
-                ? rh_soft_delete_booking($pdo, (int)($_POST['booking_id'] ?? 0), (int)$user['id'], $actorName, (string)($_POST['reason'] ?? ''))
-                : rh_restore_booking($pdo, (int)($_POST['booking_id'] ?? 0), (int)$user['id'], $actorName, (string)($_POST['note'] ?? ''));
+            if ($action === 'delete_booking') {
+                $delId = (int)($_POST['booking_id'] ?? 0);
+                // Group booking (owner 2026-10-20): the modal asks each time, scope=group deletes every live
+                // room of the group in one transaction; scope=single (or no scope) is today's one-room delete.
+                $delGroup = ($_POST['scope'] ?? '') === 'group' ? rh_booking_group_ids($pdo, $delId) : [];
+                $res = count($delGroup) > 1
+                    ? rh_soft_delete_booking_group($pdo, $delGroup, (int)$user['id'], $actorName, (string)($_POST['reason'] ?? ''))
+                    : rh_soft_delete_booking($pdo, $delId, (int)$user['id'], $actorName, (string)($_POST['reason'] ?? ''));
+            } else {
+                $res = rh_restore_booking($pdo, (int)($_POST['booking_id'] ?? 0), (int)$user['id'], $actorName, (string)($_POST['note'] ?? ''));
+            }
             header('Content-Type: application/json');
             echo json_encode($res);
+            exit;
+        } elseif ($action === 'booking_group_info') {
+            // Read-only lookup for the cancel / delete dialogs: the live rooms booked together with this one.
+            if (!isAjaxRequest()) {
+                throw new Exception('Invalid request');
+            }
+            if (!hasPermission((int)($user['id'] ?? 0), 'cancel_booking') && !hasPermission((int)($user['id'] ?? 0), 'delete_booking')) {
+                throw new Exception('You do not have permission to do that.');
+            }
+            $gm = rh_booking_group_members($pdo, (int)($_POST['booking_id'] ?? ($_POST['id'] ?? 0)));
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true, 'count' => count($gm), 'members' => array_map(static fn ($m) => [
+                'id' => (int)$m['id'], 'reference' => (string)$m['booking_reference'], 'guest' => (string)$m['guest_name'],
+                'status' => (string)$m['status'], 'room' => (string)$m['room_name'],
+            ], $gm)]);
             exit;
         } elseif ($action === 'resend_email') {
             $booking_id = (int)($_POST['booking_id'] ?? 0);
@@ -771,6 +794,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $current_status = $current_booking['status'];
                 $room_id = $current_booking['room_id'];
+                $cancelledNow = []; // bookings cancelled by this request: [id, previous_status]
 
                 // Validate status transition using helper function
                 $transitionValidation = validateBookingStatusTransition($current_status, $new_status);
@@ -782,13 +806,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Cancellation: status change + room/stock release + bill treatment +
                     // refund all commit together (one transaction, booking row locked).
                     $cancellation_reason = $_POST['cancellation_reason'] ?? 'Cancelled by admin';
-                    $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason);
-                    if (!$cancelRes['success']) {
-                        throw new Exception('Cancellation failed - nothing was changed. ' . $cancelRes['error']);
+                    // Group booking (owner 2026-10-20): the dialog asks each time. scope=group cancels every live
+                    // room of the group in ONE transaction (all go or none); scope=single (or none) is one room.
+                    $cancelGroupIds = ($_POST['scope'] ?? '') === 'group' ? rh_booking_group_ids($pdo, (int)$booking_id) : [];
+                    if (count($cancelGroupIds) > 1) {
+                        $grpRes = rh_cancel_booking_group($pdo, $cancelGroupIds, (int)($user['id'] ?? 0), (string)$cancellation_reason);
+                        if (!$grpRes['success']) {
+                            throw new Exception('Cancellation failed - nothing was changed. ' . $grpRes['error']);
+                        }
+                        $message = $grpRes['message'];
+                        foreach ($grpRes['cancelled'] as $gc) {
+                            $cancelledNow[] = ['id' => $gc['id'], 'previous_status' => $gc['previous_status']];
+                            rh_log_event('bookings', 'info', 'Booking status changed (group cancel)', ['booking_id' => $gc['id'], 'ref' => $gc['reference'], 'to' => $new_status, 'group' => $cancelGroupIds, 'by' => $user['username'] ?? null]);
+                            logBookingAudit($gc['id'], $new_status, ['status' => $gc['previous_status']], ['status' => $new_status], 'Cancelled with its group (' . count($cancelGroupIds) . ' rooms)', $gc['reference']);
+                        }
+                    } else {
+                        $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason);
+                        if (!$cancelRes['success']) {
+                            throw new Exception('Cancellation failed - nothing was changed. ' . $cancelRes['error']);
+                        }
+                        $cancelledNow[] = ['id' => (int)$booking_id, 'previous_status' => (string)$current_status];
+                        $message = 'Booking cancelled. ' . $cancelRes['summary'];
+                        rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'mode' => $cancelRes['mode'], 'refund' => $cancelRes['refund_total'], 'by' => $user['username'] ?? null]);
+                        logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $current_booking['booking_reference'] ?? null);
                     }
-                    $message = 'Booking cancelled. ' . $cancelRes['summary'];
-                    rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'mode' => $cancelRes['mode'], 'refund' => $cancelRes['refund_total'], 'by' => $user['username'] ?? null]);
-                    logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $current_booking['booking_reference'] ?? null);
                 } elseif ($new_status === 'checked-out') {
                     // Checkout always passes the balance gate (override needs the permission + explicit confirm).
                     $coRes = rh_checkout_with_gate($pdo, (int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkout_with_balance']), $user['full_name'] ?? ($user['username'] ?? null));
@@ -868,22 +909,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                         }
                     }
-                } elseif ($current_status === 'confirmed' && $new_status === 'cancelled') {
+                } elseif ($new_status === 'cancelled' && !empty($cancelledNow)) {
                     // (Stock release, room release and refund were done atomically by cancelRoomBookingSettled above.)
-                    // Get booking details for email and logging
-                    $booking_stmt = $pdo->prepare("
-                        SELECT b.*, r.name as room_name
-                        FROM bookings b
-                        LEFT JOIN rooms r ON b.room_id = r.id
-                        WHERE b.id = ?
-                    ");
-                    $booking_stmt->execute([$booking_id]);
-                    $booking = $booking_stmt->fetch(PDO::FETCH_ASSOC);
-
-                    if ($booking) {
+                    // Every booking cancelled by this request that was confirmed gets the guest email + the log rows.
+                    require_once '../config/email.php';
+                    $cancellation_reason = $_POST['cancellation_reason'] ?? 'Cancelled by admin';
+                    foreach ($cancelledNow as $cn) {
+                        if ($cn['previous_status'] !== 'confirmed') {
+                            continue;
+                        }
+                        $booking_stmt = $pdo->prepare("
+                            SELECT b.*, r.name as room_name
+                            FROM bookings b
+                            LEFT JOIN rooms r ON b.room_id = r.id
+                            WHERE b.id = ?
+                        ");
+                        $booking_stmt->execute([$cn['id']]);
+                        $booking = $booking_stmt->fetch(PDO::FETCH_ASSOC);
+                        if (!$booking) {
+                            continue;
+                        }
                         // Send cancellation email
-                        require_once '../config/email.php';
-                        $cancellation_reason = $_POST['cancellation_reason'] ?? 'Cancelled by admin';
                         $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
 
                         // Log cancellation to database
@@ -911,10 +957,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $email_status
                         );
 
+                        $refTag = count($cancelledNow) > 1 ? (' [' . $booking['booking_reference'] . ']') : '';
                         if ($email_sent) {
-                            $message .= ' Cancellation email sent.';
+                            $message .= ' Cancellation email sent' . $refTag . '.';
                         } else {
-                            $message .= ' (Email failed: ' . $email_status . ')';
+                            $message .= ' (Email failed' . $refTag . ': ' . $email_status . ')';
                         }
                     }
                 }
@@ -5481,6 +5528,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <textarea name="cancellation_reason" id="cancellation_reason" class="form-control" rows="3" placeholder="Reason for cancellation..."></textarea>
                         <small style="color: #666;">This reason will be included in the cancellation email and logs.</small>
                     </div>
+                    <div class="form-group" id="cancel_group_box" style="display: none; background: #fff8e6; padding: 12px; border-radius: 8px;">
+                        <label style="margin-bottom: 6px;"><i class="fas fa-layer-group"></i> This room was booked together with other rooms. Cancel:</label>
+                        <label style="display: block; font-weight: normal; margin: 4px 0;"><input type="radio" name="scope" value="group" checked disabled> <span id="cancel_group_label">Whole group</span></label>
+                        <label style="display: block; font-weight: normal; margin: 4px 0;"><input type="radio" name="scope" value="single" disabled> Only this room</label>
+                        <small id="cancel_group_refs" style="color: #666;"></small>
+                    </div>
                     <div class="form-group" style="background: #f8f9fa; padding: 12px; border-radius: 8px;">
                         <p style="margin: 0; color: #666; font-size: 13px;">
                             <i class="fas fa-info-circle"></i>
@@ -5495,6 +5548,42 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeCancelBookingModal()">Cancel</button>
                     <button type="submit" class="btn btn-danger"><i class="fas fa-times"></i> Cancel Booking</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Delete Group Booking Modal (only opened when the booking is one of several rooms booked together) -->
+    <div id="deleteGroupModal" class="modal-overlay" aria-hidden="true">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-trash-can"></i> Delete Booking</h3>
+                <button type="button" class="close-modal" onclick="closeDeleteGroupModal()" aria-label="Close">&times;</button>
+            </div>
+            <form id="deleteGroupForm" method="POST" action="">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
+                <input type="hidden" name="action" value="delete_booking">
+                <input type="hidden" name="booking_id" id="delete_group_booking_id" value="">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label><i class="fas fa-hashtag"></i> Booking Reference:</label>
+                        <input type="text" id="delete_group_ref" class="form-control" readonly style="background: #f5f5f5;">
+                    </div>
+                    <div class="form-group" id="delete_group_box" style="background: #fff8e6; padding: 12px; border-radius: 8px;">
+                        <label style="margin-bottom: 6px;"><i class="fas fa-layer-group"></i> This room was booked together with other rooms. Delete:</label>
+                        <label style="display: block; font-weight: normal; margin: 4px 0;"><input type="radio" name="scope" value="group" checked> <span id="delete_group_label">Whole group</span></label>
+                        <label style="display: block; font-weight: normal; margin: 4px 0;"><input type="radio" name="scope" value="single"> Only this room</label>
+                        <small id="delete_group_refs" style="color: #666;"></small>
+                    </div>
+                    <div class="form-group">
+                        <label for="delete_group_reason"><i class="fas fa-comment"></i> Why is this being deleted? (required)</label>
+                        <textarea name="reason" id="delete_group_reason" class="form-control" rows="3" placeholder="e.g. Duplicate booking, test booking, created in error"></textarea>
+                        <small style="color: #666;">Deleted bookings are kept under the Deleted filter and can be restored. Nothing is sent to the guest. If any room cannot be deleted, none of them is.</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeDeleteGroupModal()">Cancel</button>
+                    <button type="submit" class="btn btn-danger"><i class="fas fa-trash-can"></i> Delete Booking</button>
                 </div>
             </form>
         </div>
@@ -6908,6 +6997,30 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         }
 
         // Cancel Booking Modal Functions
+        // Group booking lookup (live rooms booked together with this one) for the cancel / delete dialogs.
+        function bkFetchGroupInfo(bookingId) {
+            const fd = new FormData();
+            fd.append('action', 'booking_group_info');
+            fd.append('booking_id', bookingId);
+            return postBookingAction(fd, 'Could not look up the group booking.')
+                .then(data => ({ count: Number(data.count) || 0, members: Array.isArray(data.members) ? data.members : [] }))
+                .catch(() => ({ count: 0, members: [] }));
+        }
+
+        // Shows / hides the "Whole group | Only this room" choice. Radios are disabled while hidden so no
+        // scope is posted for an ordinary booking (the server then does today's single-room action).
+        function bkApplyGroupChoice(boxId, labelId, refsId, info) {
+            const box = document.getElementById(boxId);
+            const radios = box.querySelectorAll('input[name="scope"]');
+            const isGroup = info.count > 1;
+            box.style.display = isGroup ? '' : 'none';
+            radios.forEach(r => { r.disabled = !isGroup; r.checked = r.value === 'group'; });
+            if (isGroup) {
+                document.getElementById(labelId).textContent = 'Whole group (' + info.count + ' rooms)';
+                document.getElementById(refsId).textContent = info.members.map(m => m.reference + (m.room ? ' (' + m.room + ')' : '')).join(', ');
+            }
+        }
+
         function openCancelBookingModal(bookingId, bookingReference, guestName) {
             const modal = document.getElementById('cancelBookingModal');
             setBookingPageModalOpen(modal, true);
@@ -6915,6 +7028,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             document.getElementById('cancel_booking_ref').value = bookingReference;
             document.getElementById('cancel_guest_name').value = guestName;
             document.getElementById('cancellation_reason').value = '';
+            bkApplyGroupChoice('cancel_group_box', 'cancel_group_label', 'cancel_group_refs', { count: 0, members: [] });
+            const submitBtn = document.querySelector('#cancelBookingForm button[type="submit"]');
+            if (submitBtn) submitBtn.disabled = true; // until the group lookup answers, so the choice is never skipped
+            bkFetchGroupInfo(bookingId).then(info => {
+                if (String(document.getElementById('cancel_booking_id').value) !== String(bookingId)) return;
+                bkApplyGroupChoice('cancel_group_box', 'cancel_group_label', 'cancel_group_refs', info);
+                if (submitBtn) submitBtn.disabled = false;
+            });
         }
 
         function closeCancelBookingModal() {
@@ -7636,7 +7757,41 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         });
 
         // ── Delete / restore (recoverable; permission delete_booking) ────────────
+        function closeDeleteGroupModal() {
+            setBookingPageModalOpen(document.getElementById('deleteGroupModal'), false);
+            document.getElementById('deleteGroupForm').reset();
+        }
+
+        document.getElementById('deleteGroupForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const reason = (document.getElementById('delete_group_reason').value || '').trim();
+            if (reason.length < 5) {
+                Alert.show('A reason of at least 5 characters is required to delete a booking.', 'error');
+                return;
+            }
+            const formData = new FormData(this);
+            formData.set('reason', reason);
+            const submitBtn = this.querySelector('button[type="submit"]');
+            if (submitBtn) setButtonLoading(submitBtn, true);
+            postBookingAction(formData, 'Could not delete the booking.')
+                .then(data => reloadWithBookingActionMessage(data, 'Booking deleted.'))
+                .catch(err => {
+                    if (submitBtn) setButtonLoading(submitBtn, false);
+                    Alert.show(err.message || 'Could not delete the booking.', 'error');
+                });
+        });
+
         async function deleteBookingRecord(bookingId, bookingRef, guestName, status) {
+            // A room booked together with others: ask whole group or only this room (default whole group).
+            const groupInfo = await bkFetchGroupInfo(bookingId);
+            if (groupInfo.count > 1) {
+                document.getElementById('delete_group_booking_id').value = bookingId;
+                document.getElementById('delete_group_ref').value = bookingRef;
+                document.getElementById('delete_group_reason').value = '';
+                bkApplyGroupChoice('delete_group_box', 'delete_group_label', 'delete_group_refs', groupInfo);
+                setBookingPageModalOpen(document.getElementById('deleteGroupModal'), true);
+                return;
+            }
             const reason = await promptAdminAction({
                 title: 'Delete booking ' + bookingRef,
                 message: 'The booking moves to the Deleted filter. It can be restored later.',

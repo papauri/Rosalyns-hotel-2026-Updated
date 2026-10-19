@@ -624,13 +624,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             gymScheduleEnsureTables($pdo);
             $pdo->beginTransaction();
             try {
-                $prevStmt = $pdo->prepare("SELECT status, member_number FROM gym_members WHERE id = ? FOR UPDATE");
+                $prevStmt = $pdo->prepare("SELECT status, member_number, gym_inquiry_id FROM gym_members WHERE id = ? FOR UPDATE");
                 $prevStmt->execute([$memberId]);
                 $prevRow = $prevStmt->fetch(PDO::FETCH_ASSOC);
                 $pdo->prepare("UPDATE gym_members SET status=? WHERE id=?")->execute([$status, $memberId]);
                 // A membership that is no longer live must not keep floor-slot bookings or class places.
                 if ($prevRow && in_array($status, ['cancelled', 'expired', 'suspended'], true)) {
                     gym_member_release_future($pdo, $memberId);
+                }
+                // Cancelling (only cancelling - not suspended / expired) voids the UNPAID part of the member's
+                // gym bill(s) in the same transaction. Money already paid stays; no automatic refund.
+                $voided = ['cleared' => 0.0, 'accounts' => 0, 'details' => []];
+                if ($prevRow && $status === 'cancelled' && (string)$prevRow['status'] !== 'cancelled') {
+                    $voided = rh_gym_void_unpaid_for_member($pdo, $memberId, (string)$prevRow['member_number'],
+                        (int)($prevRow['gym_inquiry_id'] ?? 0) ?: null, (string)($user['full_name'] ?? $user['username'] ?? ('user #' . (int)($user['id'] ?? 0))));
                 }
                 $pdo->commit();
             } catch (Throwable $statusEx) {
@@ -642,9 +649,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             if ($prevRow && function_exists('logGymMemberAudit')) {
                 logGymMemberAudit($memberId, 'status_changed',
                     ['status' => (string)$prevRow['status']],
-                    ['status' => $status], null, (string)$prevRow['member_number']);
+                    ['status' => $status],
+                    $voided['accounts'] > 0 ? ('Unpaid gym bill voided: ' . number_format($voided['cleared'], 2) . ' across ' . $voided['accounts'] . ' account(s) ('
+                        . implode(', ', array_map(fn($d) => $d['reference'] . ' ' . $d['mode'], $voided['details'])) . ')') : null,
+                    (string)$prevRow['member_number']);
             }
-            $gm_json(true, 'Member marked ' . $status . '.');
+            $voidMsg = $voided['accounts'] > 0
+                ? ' Unpaid bill of ' . getSetting('currency_symbol') . number_format($voided['cleared'], 2) . ' cleared; anything already paid stays on the account (refund or credit-note it separately).'
+                : '';
+            $gm_json(true, 'Member marked ' . $status . '.' . $voidMsg);
         }
 
         if ($action === 'member_delete') {

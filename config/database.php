@@ -5504,8 +5504,10 @@ function rh_release_holds_for_booking_ids(PDO $pdo, array $bookingIds): void
 /**
  * Close every live order (room tab / room service) of a booking inside the caller's transaction, then
  * recalculate the affected bookings. Wraps rh_close_orders_for_booking() (admin/includes/pos-order-close.php).
- * Throws RuntimeException with a plain message when an order is part-paid or the kitchen already started it:
- * the caller must roll back. Send the returned 'notices' with rh_send_booking_order_notices() AFTER commit.
+ * Throws RuntimeException with a plain message when an order is part-paid: the caller must roll back.
+ * Food the kitchen already started stays charged to the booking folio (owner, 2026-10-20) and is returned in
+ * 'kept' / 'kept_total'; because the callers run this BEFORE their refund calculation, the kept charges reduce
+ * the refund (refund = net paid - retained - folio_charges_total). Send the returned 'notices' with rh_send_booking_order_notices() AFTER commit.
  */
 function rh_booking_close_orders(PDO $pdo, int $bookingId, int $userId, string $reason): array
 {
@@ -9252,6 +9254,9 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
         if (!empty($orderClose['refs'])) {
             $summary .= ' Closed order(s) ' . implode(', ', $orderClose['refs']) . '.';
         }
+        if (!empty($orderClose['kept'])) {
+            $summary .= ' Room service already started stays charged to the guest (' . $currency . ' ' . number_format((float)$orderClose['kept_total'], 2) . ' on the bill, taken off the refund).';
+        }
 
         $result['success'] = true;
         $result['retained'] = $retained;
@@ -9269,6 +9274,138 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
         $result['error'] = $e->getMessage();
         return $result;
     }
+}
+
+/**
+ * The live members of a booking's group (bookings.primary_booking_id: NULL on the lead, the lead's id on each
+ * secondary), for ANY member id. "Live" = not deleted and not already cancelled / no-show / expired / checked out,
+ * so a cancelled lead never drops its secondaries and a closed room is never touched again. The given booking
+ * comes first; the rest follow in id order. A booking that is not in a group returns just itself; a booking that
+ * is itself no longer live returns [].
+ *
+ * @return array<int,array{id:int,booking_reference:string,guest_name:string,status:string,room_name:string}>
+ */
+function rh_booking_group_members(PDO $pdo, int $bookingId): array
+{
+    if ($bookingId <= 0) {
+        return [];
+    }
+    try {
+        $st = $pdo->prepare("SELECT id, primary_booking_id FROM bookings WHERE id = ?");
+        $st->execute([$bookingId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return [];
+        }
+        $leadId = !empty($row['primary_booking_id']) ? (int)$row['primary_booking_id'] : (int)$row['id'];
+        $q = $pdo->prepare("
+            SELECT b.id, b.booking_reference, b.guest_name, b.status, COALESCE(r.name, '') AS room_name
+            FROM bookings b
+            LEFT JOIN rooms r ON r.id = b.room_id
+            WHERE (b.id = ? OR b.primary_booking_id = ?)
+              AND b.deleted_at IS NULL
+              AND b.status NOT IN ('cancelled', 'no-show', 'expired', 'checked-out')
+            ORDER BY b.id ASC
+        ");
+        $q->execute([$leadId, $leadId]);
+        $members = [];
+        $self = null;
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $m) {
+            $m['id'] = (int)$m['id'];
+            if ($m['id'] === $bookingId) {
+                $self = $m;
+            } else {
+                $members[] = $m;
+            }
+        }
+        return $self === null ? [] : array_merge([$self], $members);
+    } catch (Throwable $e) {
+        error_log('rh_booking_group_members failed for booking ' . $bookingId . ': ' . $e->getMessage());
+        return [];
+    }
+}
+
+/** Ids of rh_booking_group_members() - the one helper cancel / delete use to decide "whole group". */
+function rh_booking_group_ids(PDO $pdo, int $bookingId): array
+{
+    return array_map('intval', array_column(rh_booking_group_members($pdo, $bookingId), 'id'));
+}
+
+/**
+ * Cancel every booking in $bookingIds in ONE transaction: each goes through cancelRoomBookingSettled (bill
+ * treatment + refunds per booking), and if any one refuses or fails the whole group is rolled back and nothing
+ * changes. A caller transaction is joined (the caller then commits / rolls back).
+ *
+ * @return array{success:bool,error:string,message:string,cancelled:array<int,array{id:int,reference:string,previous_status:string,summary:string}>}
+ */
+function rh_cancel_booking_group(PDO $pdo, array $bookingIds, int $adminUserId, string $reason = ''): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $bookingIds), static fn ($i) => $i > 0)));
+    sort($ids); // fixed lock order: two staff cancelling the same group cannot deadlock
+    $out = ['success' => false, 'error' => '', 'message' => '', 'cancelled' => []];
+    if (!$ids) {
+        $out['error'] = $out['message'] = 'No bookings to cancel.';
+        return $out;
+    }
+    $refOf = static function (int $id) use ($pdo): string {
+        $s = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ?");
+        $s->execute([$id]);
+        $r = (string)$s->fetchColumn();
+        return $r !== '' ? $r : ('#' . $id);
+    };
+    $allRefs = implode(', ', array_map($refOf, $ids));
+
+    $ownTx = !$pdo->inTransaction();
+    $notices = [];
+    try {
+        if (function_exists('ensureBookingAuditTable')) {
+            ensureBookingAuditTable($pdo); // DDL, so never inside the transaction
+        }
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec("SAVEPOINT rh_grp_cancel"); // joined caller transaction: a refusal still undoes the whole group
+        }
+        foreach ($ids as $id) {
+            $res = cancelRoomBookingSettled($pdo, $id, $adminUserId, $reason);
+            if (empty($res['success'])) {
+                throw new RuntimeException('Group of ' . count($ids) . ' bookings (' . $allRefs . '): nothing was cancelled. '
+                    . $refOf($id) . ' could not be cancelled: ' . ($res['error'] !== '' ? $res['error'] : 'unknown error'));
+            }
+            $out['cancelled'][] = [
+                'id' => $id,
+                'reference' => (string)($res['booking_reference'] ?: $refOf($id)),
+                'previous_status' => (string)$res['previous_status'],
+                'summary' => (string)$res['summary'],
+            ];
+            if (!empty($res['order_notices']) && is_array($res['order_notices'])) {
+                $notices = array_merge($notices, $res['order_notices']);
+            }
+        }
+        if ($ownTx) {
+            $pdo->commit();
+            rh_send_booking_order_notices($pdo, $notices);
+        } else {
+            $pdo->exec("RELEASE SAVEPOINT rh_grp_cancel");
+            $out['order_notices'] = $notices;
+        }
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        } elseif (!$ownTx && $pdo->inTransaction()) {
+            try { $pdo->exec("ROLLBACK TO SAVEPOINT rh_grp_cancel"); } catch (Throwable $e2) { /* caller rolls back */ }
+        }
+        $out['cancelled'] = [];
+        $out['error'] = $out['message'] = $e->getMessage();
+        return $out;
+    }
+    $out['success'] = true;
+    $parts = [];
+    foreach ($out['cancelled'] as $c) {
+        $parts[] = $c['reference'] . ($c['summary'] !== '' ? ' - ' . $c['summary'] : '');
+    }
+    $out['message'] = 'Group cancelled (' . count($ids) . ' bookings: ' . $allRefs . '). ' . implode(' | ', $parts);
+    return $out;
 }
 
 /**

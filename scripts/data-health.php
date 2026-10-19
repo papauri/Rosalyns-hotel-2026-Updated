@@ -40,7 +40,10 @@ $checks = [
     ['FAIL', 'Folio charges still live for a cancelled/voided order',
         "SELECT c.id FROM booking_charges c JOIN stock_orders o ON o.id = c.stock_order_id WHERE c.voided = 0 AND o.status IN ('cancelled','voided')"],
     ['FAIL', 'Folio charges still live on a deleted booking',
-        "SELECT c.id FROM booking_charges c JOIN bookings b ON b.id = c.booking_id WHERE c.voided = 0 AND b.deleted_at IS NOT NULL"],
+        // Consumed room service (its order closed as 'completed') stays charged on a deleted booking on purpose (owner, 2026-10-20).
+        "SELECT c.id FROM booking_charges c JOIN bookings b ON b.id = c.booking_id
+          WHERE c.voided = 0 AND b.deleted_at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM stock_orders so WHERE so.id = c.stock_order_id AND so.status = 'completed')"],
     ['FAIL', 'Ready notifications for cancelled/voided/missing orders',
         "SELECT n.id FROM pos_ready_notifications n LEFT JOIN stock_orders o ON o.id = n.order_id WHERE o.id IS NULL OR o.status IN ('cancelled','voided')"],
     ['FAIL', 'Quotations still "sent" for a cancelled/deleted booking',
@@ -62,7 +65,9 @@ $checks = [
 ];
 foreach (['receipt_events', 'mra_submission_queue', 'payment_audit_log', 'credit_note_applications'] as $t) {
     $checks[] = ['WARN', "$t rows whose payment is missing",
-        "SELECT r.id FROM $t r LEFT JOIN payments p ON p.id = r.payment_id WHERE r.payment_id IS NOT NULL AND p.id IS NULL"];
+        "SELECT r.id FROM $t r LEFT JOIN payments p ON p.id = r.payment_id WHERE r.payment_id IS NOT NULL AND p.id IS NULL"
+        // receipt_events of a deleted POS order are kept on purpose with payment_id = 0 (pos-order-delete.php).
+        . ($t === 'receipt_events' ? ' AND r.payment_id <> 0' : '')];
 }
 foreach (['gym_attendance', 'gym_class_enrollments', 'gym_slot_reservations', 'gym_reminder_log'] as $t) {
     $checks[] = ['WARN', "$t rows whose member is missing",

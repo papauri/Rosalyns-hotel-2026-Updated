@@ -80,6 +80,7 @@ function rh_soft_delete_booking(PDO $pdo, int $bookingId, int $userId, string $u
     $reason = mb_substr($reason, 0, 500);
 
     $ownTx = !$pdo->inTransaction();
+    $orderNotices = []; // only returned when the caller owns the transaction (it sends them after its commit)
     try {
         if ($ownTx) {
             $pdo->beginTransaction();
@@ -105,8 +106,8 @@ function rh_soft_delete_booking(PDO $pdo, int $bookingId, int $userId, string $u
         $releases = in_array($prevStatus, rh_soft_delete_releasing_statuses(), true);
         $newStatus = $releases ? 'cancelled' : $prevStatus;
 
-        // No tab, kitchen ticket or folio charge may keep running on a deleted booking. A part-paid or
-        // already-started order throws a plain message here and nothing is deleted.
+        // No tab or kitchen ticket may keep running on a deleted booking. A part-paid order throws a plain
+        // message here and nothing is deleted; food the kitchen already started stays charged to the booking.
         $orderClose = rh_booking_close_orders($pdo, $bookingId, $userId, 'Booking ' . $ref . ' deleted: ' . $reason);
 
         if ($releases) {
@@ -128,6 +129,8 @@ function rh_soft_delete_booking(PDO $pdo, int $bookingId, int $userId, string $u
         if ($ownTx) {
             $pdo->commit();
             rh_send_booking_order_notices($pdo, $orderClose['notices']);
+        } else {
+            $orderNotices = $orderClose['notices'];
         }
     } catch (Throwable $e) {
         if ($ownTx && $pdo->inTransaction()) {
@@ -149,7 +152,82 @@ function rh_soft_delete_booking(PDO $pdo, int $bookingId, int $userId, string $u
         rh_log_event('bookings', 'warning', 'Booking deleted', ['booking_id' => $bookingId, 'ref' => $ref, 'previous_status' => $prevStatus, 'reason' => $reason, 'by' => $userName]);
     }
 
-    return ['success' => true, 'message' => 'Booking ' . $ref . ' deleted. It is listed under the Deleted filter and can be restored.'];
+    $keptNote = !empty($orderClose['kept'])
+        ? ' Room service the kitchen had already started stays charged to the guest (' . number_format((float)$orderClose['kept_total'], 2) . ') - settle it from the booking.'
+        : '';
+    return ['success' => true, 'message' => 'Booking ' . $ref . ' deleted. It is listed under the Deleted filter and can be restored.' . $keptNote, 'reference' => $ref, 'order_notices' => $orderNotices];
+}
+
+/**
+ * Delete every booking in $bookingIds in ONE transaction. Each goes through rh_soft_delete_booking; if any one
+ * refuses (money on it, checked in, part-paid order ...) the whole group is rolled back and nothing is deleted.
+ * A caller transaction is joined (the caller then commits / rolls back).
+ *
+ * @return array{success:bool,message:string,deleted:array<int,array{id:int,reference:string}>}
+ */
+function rh_soft_delete_booking_group(PDO $pdo, array $bookingIds, int $userId, string $userName, string $reason): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $bookingIds), static fn ($i) => $i > 0)));
+    sort($ids); // fixed lock order
+    $out = ['success' => false, 'message' => '', 'deleted' => []];
+    if (!$ids) {
+        $out['message'] = 'No bookings to delete.';
+        return $out;
+    }
+    if (mb_strlen(trim($reason)) < 5) {
+        $out['message'] = 'Give a reason for deleting this booking (at least 5 characters).';
+        return $out;
+    }
+    $refOf = static function (int $id) use ($pdo): string {
+        $s = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ?");
+        $s->execute([$id]);
+        $r = (string)$s->fetchColumn();
+        return $r !== '' ? $r : ('#' . $id);
+    };
+    $allRefs = implode(', ', array_map($refOf, $ids));
+
+    $ownTx = !$pdo->inTransaction();
+    $notices = [];
+    try {
+        if (function_exists('ensureBookingAuditTable')) {
+            ensureBookingAuditTable($pdo); // DDL, so never inside the transaction
+        }
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec("SAVEPOINT rh_grp_delete"); // joined caller transaction: a refusal still undoes the whole group
+        }
+        foreach ($ids as $id) {
+            $res = rh_soft_delete_booking($pdo, $id, $userId, $userName, $reason);
+            if (empty($res['success'])) {
+                throw new RuntimeException('Group of ' . count($ids) . ' bookings (' . $allRefs . '): nothing was deleted. '
+                    . $refOf($id) . ' could not be deleted: ' . $res['message']);
+            }
+            $out['deleted'][] = ['id' => $id, 'reference' => (string)($res['reference'] ?? $refOf($id))];
+            if (!empty($res['order_notices']) && is_array($res['order_notices'])) {
+                $notices = array_merge($notices, $res['order_notices']);
+            }
+        }
+        if ($ownTx) {
+            $pdo->commit();
+            rh_send_booking_order_notices($pdo, $notices);
+        } else {
+            $pdo->exec("RELEASE SAVEPOINT rh_grp_delete");
+            $out['order_notices'] = $notices;
+        }
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        } elseif (!$ownTx && $pdo->inTransaction()) {
+            try { $pdo->exec("ROLLBACK TO SAVEPOINT rh_grp_delete"); } catch (Throwable $e2) { /* caller rolls back */ }
+        }
+        $out['deleted'] = [];
+        $out['message'] = $e->getMessage();
+        return $out;
+    }
+    $out['success'] = true;
+    $out['message'] = 'Group deleted (' . count($ids) . ' bookings: ' . $allRefs . '). They are listed under the Deleted filter and can be restored.';
+    return $out;
 }
 
 /**

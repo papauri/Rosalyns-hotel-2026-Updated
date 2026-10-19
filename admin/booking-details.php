@@ -667,21 +667,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                         $previous_status = $booking_to_cancel['status'];
                         $cancellation_reason = $_POST['cancellation_reason'] ?? 'Cancelled by admin';
 
-                        // One transaction: status + room/stock release + bill treatment +
-                        // refund, booking row locked. Any failure rolls everything back.
-                        $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason);
-                        if (!$cancelRes['success']) {
-                            throw new RuntimeException('Cancellation failed - nothing was changed. ' . $cancelRes['error']);
+                        // Group booking (owner 2026-10-20): the page offers "whole group" and "only this room"
+                        // as separate buttons. scope=group cancels every live room of the group in ONE
+                        // transaction (all go or none); anything else is today's single-room cancel.
+                        $cancelGroupIds = ($_POST['scope'] ?? '') === 'group' ? rh_booking_group_ids($pdo, (int)$booking_id) : [];
+                        if (count($cancelGroupIds) > 1) {
+                            $grpRes = rh_cancel_booking_group($pdo, $cancelGroupIds, (int)($user['id'] ?? 0), (string)$cancellation_reason);
+                            if (!$grpRes['success']) {
+                                throw new RuntimeException('Cancellation failed - nothing was changed. ' . $grpRes['error']);
+                            }
+                            require_once '../config/email.php';
+                            $emailsSent = 0;
+                            $emailsFailed = 0;
+                            foreach ($grpRes['cancelled'] as $gc) {
+                                logBookingStatusChange($gc['id'], $gc['reference'], $gc['previous_status'], 'cancelled', 'admin', $user['id'], $user['full_name'], $cancellation_reason);
+                                $gcStmt = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
+                                $gcStmt->execute([$gc['id']]);
+                                $gcRow = $gcStmt->fetch(PDO::FETCH_ASSOC);
+                                if ($gcRow) {
+                                    $gcMail = sendBookingCancelledEmail($gcRow, $cancellation_reason);
+                                    if (!empty($gcMail['success'])) {
+                                        $emailsSent++;
+                                    } else {
+                                        $emailsFailed++;
+                                    }
+                                }
+                            }
+                            $_SESSION['success_message'] = $grpRes['message']
+                                . ($emailsSent > 0 ? ' Cancellation email sent for ' . $emailsSent . ' booking(s).' : '')
+                                . ($emailsFailed > 0 ? ' (Email failed for ' . $emailsFailed . ' booking(s).)' : '');
+                        } else {
+                            // One transaction: status + room/stock release + bill treatment +
+                            // refund, booking row locked. Any failure rolls everything back.
+                            $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason);
+                            if (!$cancelRes['success']) {
+                                throw new RuntimeException('Cancellation failed - nothing was changed. ' . $cancelRes['error']);
+                            }
+
+                            logBookingStatusChange($booking_id, $booking_to_cancel['booking_reference'], $previous_status, 'cancelled', 'admin', $user['id'], $user['full_name'], $cancellation_reason);
+                            $cancel_refund_msg = ' ' . $cancelRes['summary'];
+
+                            require_once '../config/email.php';
+                            $email_result = sendBookingCancelledEmail($booking_to_cancel, $cancellation_reason);
+
+                            $_SESSION['success_message'] = 'Booking cancelled.' . $cancel_refund_msg .
+                                ($email_result['success'] ? ' Cancellation email sent.' : ' (Email failed)');
                         }
-
-                        logBookingStatusChange($booking_id, $booking_to_cancel['booking_reference'], $previous_status, 'cancelled', 'admin', $user['id'], $user['full_name'], $cancellation_reason);
-                        $cancel_refund_msg = ' ' . $cancelRes['summary'];
-
-                        require_once '../config/email.php';
-                        $email_result = sendBookingCancelledEmail($booking_to_cancel, $cancellation_reason);
-
-                        $_SESSION['success_message'] = 'Booking cancelled.' . $cancel_refund_msg .
-                            ($email_result['success'] ? ' Cancellation email sent.' : ' (Email failed)');
                     }
                 }
                 break;
@@ -1429,16 +1460,33 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     </button>
                 <?php endif; /* quotation is offered only while it is relevant */ ?>
 
+                <?php
+                // Group booking (owner 2026-10-20): when other live rooms were booked together with this one, ask
+                // each time - "whole group" is offered first, "only this room" second.
+                $bd_group_live = ($can_cancel && $bd_perm_cancel) || $bd_can_delete ? rh_booking_group_members($pdo, (int)$booking_id) : [];
+                $bd_group_n = count($bd_group_live);
+                $bd_group_refs = implode(', ', array_column($bd_group_live, 'booking_reference'));
+                ?>
                 <?php if ($can_cancel): ?>
-                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking, release the room, and send the guest cancellation email? Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                    <?php if ($bd_perm_cancel && $bd_group_n > 1): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel the WHOLE GROUP (' . $bd_group_n . ' rooms: ' . $bd_group_refs . '), release every room, and send each guest cancellation email? If any room cannot be cancelled, none is. Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel whole group" data-admin-confirm-ok="Cancel whole group" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
                         <input type="hidden" name="booking_action" value="cancel">
+                        <input type="hidden" name="scope" value="group">
                         <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
-                        <button type="submit" class="action-btn cancel" aria-label="Cancel booking"><i class="fas fa-ban"></i> Cancel Booking</button>
+                        <button type="submit" class="action-btn cancel" aria-label="Cancel whole group"><i class="fas fa-ban"></i> Cancel Whole Group (<?php echo (int)$bd_group_n; ?> rooms)</button>
+                    </form><?php endif; ?>
+                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking, release the room, and send the guest cancellation email?' . ($bd_group_n > 1 ? ' The other rooms of the group stay booked.' : '') . ' Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                        <input type="hidden" name="booking_action" value="cancel">
+                        <?php if ($bd_group_n > 1): ?><input type="hidden" name="scope" value="single"><?php endif; ?>
+                        <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
+                        <button type="submit" class="action-btn cancel" aria-label="Cancel booking"><i class="fas fa-ban"></i> <?php echo $bd_group_n > 1 ? 'Cancel This Room Only' : 'Cancel Booking'; ?></button>
                     </form><?php endif; ?>
                 <?php endif; ?>
 
                 <?php if ($bd_can_delete): ?>
-                    <button type="button" class="action-btn cancel" onclick="bdDeleteBooking()" data-help="Delete Booking|Remove this booking from the lists (kept under the Deleted filter with who, when and why; it can be restored)."><i class="fas fa-trash-can"></i> Delete Booking</button>
+                    <?php if ($bd_group_n > 1): ?>
+                        <button type="button" class="action-btn cancel" onclick="bdDeleteBooking('group', <?php echo (int)$bd_group_n; ?>)" data-help="Delete Whole Group|Remove all <?php echo (int)$bd_group_n; ?> rooms booked together from the lists (kept under the Deleted filter; can be restored). If any room cannot be deleted, none is."><i class="fas fa-trash-can"></i> Delete Whole Group (<?php echo (int)$bd_group_n; ?> rooms)</button>
+                    <?php endif; ?>
+                    <button type="button" class="action-btn cancel" onclick="bdDeleteBooking('single', 1)" data-help="Delete Booking|Remove this booking from the lists (kept under the Deleted filter with who, when and why; it can be restored)."><i class="fas fa-trash-can"></i> <?php echo $bd_group_n > 1 ? 'Delete This Room Only' : 'Delete Booking'; ?></button>
                 <?php endif; ?>
                 <?php endif; /* not deleted */ ?>
 
@@ -2786,11 +2834,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 });
         }
 
-        function bdDeleteBooking() {
+        function bdDeleteBooking(scope, rooms) {
             if (!window.AdminConfirm) return;
+            var wholeGroup = scope === 'group' && rooms > 1;
             AdminConfirm.prompt({
-                title: 'Delete booking ' + <?php echo json_encode((string)$booking['booking_reference'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>,
-                message: 'The booking moves to the Deleted filter on the bookings list. It can be restored later.',
+                title: (wholeGroup ? 'Delete whole group (' + rooms + ' rooms) - ' : 'Delete booking ') + <?php echo json_encode((string)$booking['booking_reference'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>,
+                message: wholeGroup ? 'All rooms booked together move to the Deleted filter. If any room cannot be deleted, none is.' : 'The booking moves to the Deleted filter on the bookings list. It can be restored later.',
                 details: ['Any room it holds is released. Nothing is sent to the guest.', 'Your name, the exact time and the reason are recorded.'],
                 inputLabel: 'Why is this booking being deleted? (required)',
                 inputPlaceholder: 'e.g. Duplicate booking, test booking, created in error',
@@ -2803,7 +2852,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     Alert.show('A reason of at least 5 characters is required.', 'error');
                     return;
                 }
-                bdBookingPost('delete_booking', { reason: reason.trim() })
+                bdBookingPost('delete_booking', { reason: reason.trim(), scope: wholeGroup ? 'group' : 'single' })
                     .then(function(d) { Alert.show(d.message, 'success'); setTimeout(function() { location.reload(); }, 900); })
                     .catch(function(err) { Alert.show(err.message, 'error'); });
             });
