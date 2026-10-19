@@ -239,6 +239,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $recipeMenuType = $_POST['menu_type'] === 'food' ? 'food' : 'drink';
             $itemId = (int)$_POST['id'];
 
+            // BLOCK: a live line of this item on an open ('placed') order - the tab or kitchen ticket would lose its item.
+            $openLines = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items soi
+                                          JOIN stock_orders so ON so.id = soi.order_id
+                                         WHERE soi.menu_item_id = ? AND soi.menu_type = ? AND soi.kds_status <> 'void' AND so.status = 'placed'");
+            $openLines->execute([$itemId, $recipeMenuType]);
+            $openLineCount = (int)$openLines->fetchColumn();
+
+            // History: sold on any order, or posted as a room folio charge. Sold items are never hard-deleted.
+            $hasHistory = false;
+            if ($openLineCount === 0) {
+                $hist = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE menu_item_id = ? AND menu_type = ?");
+                $hist->execute([$itemId, $recipeMenuType]);
+                $hasHistory = ((int)$hist->fetchColumn() > 0);
+                if (!$hasHistory) {
+                    try {
+                        $chg = $pdo->prepare("SELECT COUNT(*) FROM booking_charges WHERE source_item_id = ? AND charge_type = ?");
+                        $chg->execute([$itemId, $recipeMenuType]);
+                        $hasHistory = ((int)$chg->fetchColumn() > 0);
+                    } catch (Throwable $e) {
+                        // legacy schema without booking_charges.source_item_id: nothing to check
+                    }
+                }
+            }
+
             // Recipe-aware delete: warn if a stock recipe is attached
             $hasRecipe = false;
             if (function_exists('ensureStockTablesExist') && ensureStockTablesExist()) {
@@ -247,7 +271,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $hasRecipe = ((int)$rcheck->fetchColumn() > 0);
             }
 
-            if ($hasRecipe && empty($_POST['force_delete'])) {
+            if ($openLineCount > 0) {
+                $error = 'This item is on ' . $openLineCount . ' open order line(s). Close or settle those orders first, then delete it (or mark it unavailable now).';
+            } elseif ($hasHistory) {
+                // Sales history stays readable (order history, reports, recipe-cost joins): hide it instead of deleting.
+                $pdo->prepare("UPDATE $table SET is_available = 0 WHERE id = ?")->execute([$itemId]);
+                $message = 'This item has sales history so it cannot be deleted - it has been marked unavailable instead.';
+            } elseif ($hasRecipe && empty($_POST['force_delete'])) {
                 $error = 'This menu item has a stock recipe. Re-submit with confirmation to delete the item AND its recipe.';
             } else {
                 $pdo->beginTransaction();
@@ -258,8 +288,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $stmt = $pdo->prepare("DELETE FROM $table WHERE id = ?");
                 $stmt->execute([$itemId]);
+
+                // Deals that name this item by id: drop the id (deal item_ids carry no type, so an id the
+                // OTHER menu table still uses is left alone). A deal left with no items is switched off.
+                $otherTable = ($table === 'food_menu') ? 'drink_menu' : 'food_menu';
+                $otherHas = $pdo->prepare("SELECT COUNT(*) FROM $otherTable WHERE id = ?");
+                $otherHas->execute([$itemId]);
+                $dealsTouched = 0;
+                if ((int)$otherHas->fetchColumn() === 0) {
+                    try {
+                        $dl = $pdo->query("SELECT id, item_ids FROM pos_deals WHERE item_ids IS NOT NULL AND item_ids <> '' FOR UPDATE");
+                        foreach ($dl->fetchAll(PDO::FETCH_ASSOC) as $deal) {
+                            $ids = json_decode((string)$deal['item_ids'], true);
+                            if (!is_array($ids)) {
+                                continue;
+                            }
+                            $kept = array_values(array_filter($ids, static function ($v) use ($itemId) { return (int)$v !== $itemId; }));
+                            if (count($kept) === count($ids)) {
+                                continue;
+                            }
+                            if ($kept) {
+                                $pdo->prepare("UPDATE pos_deals SET item_ids = ? WHERE id = ?")->execute([json_encode($kept), (int)$deal['id']]);
+                            } else {
+                                $pdo->prepare("UPDATE pos_deals SET item_ids = NULL, is_active = 0 WHERE id = ?")->execute([(int)$deal['id']]);
+                            }
+                            $dealsTouched++;
+                        }
+                    } catch (Throwable $e) {
+                        error_log('menu delete: deal item_ids cleanup: ' . $e->getMessage());
+                    }
+                }
                 $pdo->commit();
-                $message = 'Menu item deleted successfully!' . ($hasRecipe ? ' (Recipe also removed.)' : '');
+                $message = 'Menu item deleted successfully!' . ($hasRecipe ? ' (Recipe also removed.)' : '') . ($dealsTouched > 0 ? ' (' . $dealsTouched . ' deal(s) updated.)' : '');
             }
         } elseif ($action === 'toggle_availability') {
             $table = $_POST['menu_type'] === 'food' ? 'food_menu' : 'drink_menu';

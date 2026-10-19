@@ -706,6 +706,7 @@ function hkVerifyAssignment(PDO $pdo, int $id, ?int $userId, ?string $username):
 function hkDeleteAssignment(PDO $pdo, array $deletedData, ?int $userId, ?string $username): void
 {
     $id = (int)$deletedData['id'];
+    rh_log_task_snapshot_before_delete($pdo, 'housekeeping', $id, $userId, $username);
     $pdo->prepare("DELETE FROM housekeeping_assignments WHERE id = ?")->execute([$id]);
     reconcileIndividualRoomHousekeeping($pdo, (int)$deletedData['individual_room_id'], $userId);
     logHousekeepingAction($id, 'deleted', $deletedData, null, $userId, $username);

@@ -316,6 +316,15 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
                 throw new RuntimeException('Payment ' . (string)$p['payment_reference'] . ' of ' . $reference . ' was already fiscalised with MRA - it cannot be deleted. Void or refund the order instead.', 409);
             }
         }
+        // The MRA queue is a second record of fiscalisation: anything past 'pending' was (or is being) sent.
+        if ($paymentIds && rh_pos_del_table_exists($pdo, 'mra_submission_queue')) {
+            $mqPh = implode(',', array_fill(0, count($paymentIds), '?'));
+            $mq = $pdo->prepare("SELECT COUNT(*) FROM mra_submission_queue WHERE payment_id IN ($mqPh) AND status <> 'pending'");
+            $mq->execute($paymentIds);
+            if ((int)$mq->fetchColumn() > 0) {
+                throw new RuntimeException($reference . ' has payments that were already sent to MRA (see the MRA queue) - it cannot be deleted. Void or refund the order instead.', 409);
+            }
+        }
         $cnNumbers = [];
         try {
             $pidPh = $paymentIds ? implode(',', array_fill(0, count($paymentIds), '?')) : '';
@@ -596,6 +605,18 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
         foreach ($bookingNotes as $bn) {
             $noteParts[] = $bn;
         }
+        // Receipt numbers go with the payments: list them so the gap in the receipt sequence is explained.
+        $deletedReceipts = [];
+        foreach ($payments as $p) {
+            $rn = trim((string)($p['receipt_number'] ?? ''));
+            if ($rn !== '') {
+                $deletedReceipts[] = $rn;
+            }
+        }
+        $deletedReceipts = array_values(array_unique($deletedReceipts));
+        if ($deletedReceipts) {
+            $noteParts[] = 'Receipt number(s) removed with the order: ' . implode(', ', $deletedReceipts);
+        }
         $noteParts[] = 'Cash already taken or handed back is not moved.';
         $notes = implode(' | ', $noteParts);
 
@@ -619,6 +640,7 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
             'unsettled_refund_dropped' => $unsettledRefund,
             'credit_note' => $creditNoteNumber,
             'booking_notes' => $bookingNotes,
+            'deleted_receipt_numbers' => $deletedReceipts,
         ], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
 
         // ── (b)/(c) MONEY + CHILD ROWS ──

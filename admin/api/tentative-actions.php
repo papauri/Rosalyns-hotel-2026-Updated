@@ -153,6 +153,16 @@ try {
 
             $pdo->beginTransaction();
 
+            // Expiring drops the booking without any refund or bill treatment, so a booking that has
+            // money on it must be cancelled instead (that path refunds / retains it properly).
+            $payChk = $pdo->prepare("SELECT 1 FROM bookings b WHERE b.id = ? AND " . rh_booking_has_payment_sql('b') . " FOR UPDATE");
+            $payChk->execute([$booking_id]);
+            if ($payChk->fetchColumn()) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'error' => 'This booking has a payment. Cancel it instead so the money is refunded or retained properly.']);
+                exit;
+            }
+
             // Conditional on the status still being open: a confirmation/cancellation that landed
             // between the read above and this write must not be overwritten by 'expired'.
             $expUpd = $pdo->prepare("
@@ -166,6 +176,9 @@ try {
                 echo json_encode(['success' => false, 'error' => 'Booking is no longer tentative or pending; nothing was expired.']);
                 exit;
             }
+
+            // A tentative / pending booking has no orders; release its rooms and expire its open quotations.
+            rh_release_booking_holds($pdo, $booking_id, (int)$user['id'], 'booking expired manually');
 
             $pdo->prepare("
                 INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason)

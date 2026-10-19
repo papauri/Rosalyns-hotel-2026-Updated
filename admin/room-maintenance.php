@@ -113,6 +113,7 @@ function mtDeleteSchedule(PDO $pdo, int $id, ?int $userId, ?string $userName): s
 {
     $before = mtLoadSchedule($pdo, $id);
     if (!$before) return 'not found';
+    rh_log_task_snapshot_before_delete($pdo, 'maintenance', $id, $userId, $userName);
     $pdo->prepare("DELETE FROM room_maintenance_schedules WHERE id = ?")->execute([$id]);
     reconcileMaintenanceRoomStatus($pdo, (int)($before['individual_room_id'] ?? 0), $userId);
     logMaintenanceAction($id, 'deleted', $before, null, $userId, $userName);

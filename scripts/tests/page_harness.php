@@ -176,6 +176,9 @@ $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
 $_SESSION['admin_last_activity'] = time();
 session_write_close();
 
+// Optional seed rows (cfg.setup = [sql,...]): run inside the same never-committing transaction, before the page runs.
+foreach (($cfg['setup'] ?? []) as $setupSql) { $pdo->exec($setupSql); }
+
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_SERVER['PHP_SELF'] = $_SERVER['SCRIPT_NAME'] = '/' . $page;
 $_SERVER['REQUEST_URI'] = '/' . $page;

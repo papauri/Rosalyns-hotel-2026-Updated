@@ -14,6 +14,8 @@ $suites = [
     'Settings pages'        => 'scripts/tests/settings_pages.php',
     'Hotel details section' => 'scripts/tests/hotel_details.php',
     'User timezone display' => 'scripts/tests/user_timezone.php',
+    'Rooms linked data'     => 'scripts/tests/linked_rooms.php',
+    'Linked data health'    => 'scripts/data-health.php',
 ];
 $failed = 0;
 foreach ($suites as $name => $file) {

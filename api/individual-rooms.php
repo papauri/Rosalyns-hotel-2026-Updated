@@ -488,28 +488,16 @@ function deleteIndividualRoom($id) {
         ApiResponse::error('Individual room not found', 404);
     }
     
-    // Check for active bookings
-    $bookingsCheck = $pdo->prepare("
-        SELECT COUNT(*) as count 
-        FROM bookings 
-        WHERE individual_room_id = ? 
-        AND status IN ('pending', 'confirmed', 'checked-in')
-        AND " . rh_effective_checkout_sql('') . " >= CURDATE()
-    ");
-    $bookingsCheck->execute([$id]);
-    $bookingsCount = $bookingsCheck->fetch(PDO::FETCH_ASSOC)['count'];
-    
-    if ($bookingsCount > 0) {
-        ApiResponse::error("Cannot delete room with {$bookingsCount} active bookings. Please cancel or reassign bookings first.", 400);
+    // One shared routine (also used by the admin page): blocks on live bookings, keeps a room with
+    // history (inactive instead), otherwise deletes the room with its photos, amenities, open tasks and unused pairs.
+    $res = rh_delete_individual_room($pdo, (int)$id, (int)($user['id'] ?? 0));
+    if (!$res['success']) {
+        ApiResponse::error($res['error'], $res['code'] === 404 ? 404 : 400);
     }
-    
-    // Delete room (cascade will handle maintenance log and amenities)
-    $stmt = $pdo->prepare("DELETE FROM individual_rooms WHERE id = ?");
-    $stmt->execute([$id]);
-    
+
     // Clear cache
     require_once __DIR__ . '/../config/cache.php';
     clearRoomCache();
     
-    ApiResponse::success(null, 'Individual room deleted successfully');
+    ApiResponse::success(null, $res['mode'] === 'deactivated' ? 'Individual room has booking history, so it was made inactive instead of deleted' : 'Individual room deleted successfully');
 }

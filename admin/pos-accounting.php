@@ -311,10 +311,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     . ', card ' . number_format($varianceCard, 2);
             }
 
-            // Save per-order accountant notes — upsert (clear old entry, insert new) inside same transaction
+            // Save per-order accountant notes — history is kept: a new event row is added only when the
+            // text changed (the newest row per order is the current note; an empty row means "cleared").
             $orderNotesPost = is_array($_POST['order_notes'] ?? null) ? $_POST['order_notes'] : [];
             if ($orderNotesPost) {
-                $delNoteStmt = $pdo->prepare("DELETE FROM stock_order_audit WHERE order_id = ? AND event = 'accountant_order_note'");
+                $curNoteStmt = $pdo->prepare("SELECT details FROM stock_order_audit WHERE order_id = ? AND event = 'accountant_order_note' ORDER BY id DESC LIMIT 1");
                 $insNoteStmt = $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, 'accountant_order_note', ?, ?)");
                 $noteActorId   = (int)($user['id'] ?? 0);
                 $noteActorName = (string)($user['full_name'] ?? $user['username'] ?? 'Admin');
@@ -322,9 +323,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 foreach ($orderNotesPost as $rawOid => $rawNote) {
                     $oidInt = (int)$rawOid;
                     if ($oidInt <= 0) continue;
-                    $delNoteStmt->execute([$oidInt]);
                     $noteText = trim((string)$rawNote);
-                    if ($noteText !== '') {
+                    $curNoteStmt->execute([$oidInt]);
+                    $curNote = $curNoteStmt->fetchColumn();
+                    $curNote = $curNote === false ? '' : trim((string)$curNote);
+                    if ($noteText !== $curNote) {
                         $insNoteStmt->execute([$oidInt, $noteActorId, $noteActorName, $noteText, $noteIp]);
                     }
                 }

@@ -8,7 +8,8 @@ require_once '../config/invoice.php';
 require_once '../includes/alert.php';
 require_once '../includes/finance-sequences.php';
 require_once __DIR__ . '/includes/account-record-payment.php';
-
+require_once __DIR__ . '/includes/gym-classes-lib.php';
+require_once __DIR__ . '/includes/gym-schedule-lib.php';
 finance_ensure_sequence_tables($pdo);
 
 $user = [
@@ -114,14 +115,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 $message = 'Inquiry status updated successfully!';
             }
         } elseif ($action === 'delete') {
-            // Payments are ledger records: an inquiry that has any cannot be deleted (cancel it instead).
-            $payChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'gym' AND booking_id = ? AND deleted_at IS NULL");
-            $payChk->execute([(int)$inquiry_id]);
-            if ((int)$payChk->fetchColumn() > 0) {
-                throw new Exception('This inquiry has payments recorded against it and cannot be deleted. Cancel it instead.');
+            // Money trail is never deleted: any payment row (even a removed one - it is still history) or any
+            // credit note blocks deletion; a member created from this enquiry blocks it too. Checked under a row
+            // lock so a payment recorded at the same moment cannot slip in between the check and the delete.
+            $inquiry_id = (int)$inquiry_id;
+            $pdo->beginTransaction();
+            try {
+                $delLock = $pdo->prepare("SELECT id FROM gym_inquiries WHERE id = ? FOR UPDATE");
+                $delLock->execute([$inquiry_id]);
+                if (!$delLock->fetchColumn()) {
+                    throw new Exception('Gym inquiry not found!');
+                }
+                $payChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'gym' AND booking_id = ?");
+                $payChk->execute([$inquiry_id]);
+                if ((int)$payChk->fetchColumn() > 0) {
+                    throw new Exception('This inquiry has payments recorded against it and cannot be deleted. Cancel it instead.');
+                }
+                $cnChk = $pdo->prepare("SELECT COUNT(*) FROM credit_notes WHERE booking_type = 'gym' AND booking_id = ?");
+                $cnChk->execute([$inquiry_id]);
+                if ((int)$cnChk->fetchColumn() > 0) {
+                    throw new Exception('This inquiry has a credit note recorded against it and cannot be deleted. Cancel it instead.');
+                }
+                $memChk = $pdo->prepare("SELECT COUNT(*) FROM gym_members WHERE gym_inquiry_id = ?");
+                $memChk->execute([$inquiry_id]);
+                if ((int)$memChk->fetchColumn() > 0) {
+                    throw new Exception('A member was created from this enquiry — cancel the member first.');
+                }
+                $pdo->prepare("DELETE FROM gym_inquiries WHERE id = ?")->execute([$inquiry_id]);
+                $pdo->commit();
+            } catch (Throwable $delEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $delEx;
             }
-            $stmt = $pdo->prepare("DELETE FROM gym_inquiries WHERE id = ?");
-            $stmt->execute([$inquiry_id]);
             $message = 'Gym inquiry deleted successfully!';
         } elseif ($action === 'send_message') {
             // Free-form message emailed straight to the member from this page.
@@ -222,6 +249,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                 // on the account as credit owed back, and staff refund it deliberately from the payment's
                 // Refund screen (or issue a credit note). Status + resync commit together or not at all.
                 require_once __DIR__ . '/includes/finance-account-sync.php';
+                // Lazily created gym tables are made before the transaction (CREATE TABLE commits implicitly).
+                gymClassesEnsureTables($pdo);
+                gymScheduleEnsureTables($pdo);
                 $pdo->beginTransaction();
                 try {
                     $cancelLock = $pdo->prepare("SELECT status FROM gym_inquiries WHERE id = ? FOR UPDATE");
@@ -230,6 +260,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                         throw new Exception('This booking is already cancelled.');
                     }
                     $pdo->prepare("UPDATE gym_inquiries SET status = 'cancelled', updated_at = NOW() WHERE id = ?")->execute([$inquiry_id]);
+                    // The member created from this enquiry stops being a live member, and their future
+                    // floor-slot bookings and class places are released (the bill/payment handling below is unchanged).
+                    $linkedMembers = $pdo->prepare("SELECT id FROM gym_members WHERE gym_inquiry_id = ? AND status IN ('active','suspended') FOR UPDATE");
+                    $linkedMembers->execute([$inquiry_id]);
+                    $cancelledMemberIds = [];
+                    foreach ($linkedMembers->fetchAll(PDO::FETCH_COLUMN) as $linkedMemberId) {
+                        $pdo->prepare("UPDATE gym_members SET status = 'cancelled' WHERE id = ?")->execute([(int)$linkedMemberId]);
+                        gym_member_release_future($pdo, (int)$linkedMemberId);
+                        $cancelledMemberIds[] = (int)$linkedMemberId;
+                    }
                     if (!rh_sync_account_payments($pdo, 'gym', (int)$inquiry_id)) {
                         throw new Exception('Could not recalculate the account balance.');
                     }
@@ -241,6 +281,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                         $pdo->rollBack();
                     }
                     throw $cancelEx;
+                }
+                if (function_exists('logGymMemberAudit')) {
+                    foreach ($cancelledMemberIds as $cmId) {
+                        logGymMemberAudit($cmId, 'status_changed', ['status' => 'active/suspended'], ['status' => 'cancelled'], 'Cancelled with gym enquiry ' . (string)($inquiry['reference_number'] ?? ('#' . $inquiry_id)));
+                    }
                 }
                 $cancelCredit = rh_account_credit_owed($pdo, 'gym', (int)$inquiry_id);
                 $cancelCreditNote = $cancelCredit > BALANCE_TOLERANCE

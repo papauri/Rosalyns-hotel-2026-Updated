@@ -136,7 +136,13 @@ try {
     }
 
     if ($action === 'cancel_checkin') {
-        // Undo a check-in (revert to confirmed)
+        // Undo a check-in (revert to confirmed) - not while the guest has an open tab / room-service order.
+        $openOrderRef = rh_booking_open_order_ref($pdo, (int)$booking_id);
+        if ($openOrderRef !== null) {
+            http_response_code(409);
+            echo json_encode(['success' => false, 'message' => 'Order ' . $openOrderRef . ' is still open - close it in Orders & Tabs first.']);
+            exit;
+        }
         $stmt = $pdo->prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ? AND status = 'checked-in'");
         $stmt->execute([$booking_id]);
 

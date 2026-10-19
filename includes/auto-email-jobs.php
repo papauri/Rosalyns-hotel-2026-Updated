@@ -716,6 +716,8 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             // Same stock/unit release cancelRoomBookingSettled() performs for a confirmed booking.
             $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")->execute([$b['room_id']]);
             updateBookingRoomsStatus($id, 'available', 'Booking auto-released (unpaid): ' . $b['booking_reference'], null);
+            // Check-in is still in the future, so no orders can exist; release the room holds and open quotations.
+            rh_release_booking_holds($pdo, $id, 0, 'unpaid booking auto-released');
             if (!recalculateBookingFinancials($id)) {
                 throw new RuntimeException('could not recalculate balance');
             }

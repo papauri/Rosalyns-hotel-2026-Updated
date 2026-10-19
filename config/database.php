@@ -226,6 +226,12 @@ function _expireStaleTentativeBookings(PDO $pdo): void
     $ran = true;
 
     try {
+        // Which holds are about to lapse (a tentative hold never has orders, so only rooms/quotations are released).
+        $sel = $pdo->prepare("SELECT id FROM bookings WHERE is_tentative = 1 AND status = 'tentative'
+                                AND tentative_expires_at IS NOT NULL AND tentative_expires_at < NOW()");
+        $sel->execute();
+        $lapsing = $sel->fetchAll(PDO::FETCH_COLUMN);
+
         $stmt = $pdo->prepare("
             UPDATE bookings
             SET    status = 'expired',
@@ -240,6 +246,13 @@ function _expireStaleTentativeBookings(PDO $pdo): void
         $count = $stmt->rowCount();
         if ($count > 0) {
             error_log("[tentative] Auto-expired {$count} tentative booking(s) on page load.");
+            if ($lapsing) {
+                // One batch: release the rooms they held and expire their open quotations.
+                $ph = implode(',', array_fill(0, count($lapsing), '?'));
+                $done = $pdo->prepare("SELECT id FROM bookings WHERE status = 'expired' AND id IN ($ph)");
+                $done->execute($lapsing);
+                rh_release_holds_for_booking_ids($pdo, $done->fetchAll(PDO::FETCH_COLUMN));
+            }
         }
     } catch (PDOException $e) {
         // Non-fatal — log and continue; availability queries already filter
@@ -338,6 +351,8 @@ function _expireStalePendingBookings(PDO $pdo): void
         foreach ($rows as $r) {
             $upd->execute([(int)$r['id']]);
             if ($upd->rowCount() === 1) {
+                // A pending booking never has orders; release its rooms and expire its open quotations.
+                rh_release_holds_for_booking_ids($pdo, [(int)$r['id']]);
                 try {
                     if (!function_exists('logBookingStatusChange') && is_file(__DIR__ . '/../includes/booking-timeline.php')) {
                         require_once __DIR__ . '/../includes/booking-timeline.php';
@@ -5380,13 +5395,484 @@ function rh_validate_booking_stay_change(int $bookingId, string $newCheckIn, str
  * Release every physical room held by a booking (booking_rooms rows + the primary pointer)
  * without touching money or room status. Used when a booking changes room type.
  */
-function rh_release_booking_room_assignment(int $bookingId): void
+function rh_release_booking_room_assignment(int $bookingId, ?PDO $db = null): void
 {
     global $pdo;
-    $pdo->prepare("UPDATE bookings SET individual_room_id = NULL, room_combination_id = NULL WHERE id = ?")->execute([$bookingId]);
+    $db = $db ?? $pdo;
+    $db->prepare("UPDATE bookings SET individual_room_id = NULL, room_combination_id = NULL WHERE id = ?")->execute([$bookingId]);
     if (bookingAvailabilityTableExists('booking_rooms')) {
-        $pdo->prepare("UPDATE booking_rooms SET released_at = NOW() WHERE booking_id = ? AND released_at IS NULL")->execute([$bookingId]);
+        $db->prepare("UPDATE booking_rooms SET released_at = NOW() WHERE booking_id = ? AND released_at IS NULL")->execute([$bookingId]);
     }
+}
+
+/**
+ * A booking that is cancelled / deleted / no-showed / expired must stop holding rooms and stop
+ * advertising a live offer: release every room it holds (booking_rooms rows - both rooms of a joined
+ * pair - plus the primary pointer and combination pointer), write the released room number(s) to the
+ * booking timeline, and mark its room quotations that are still 'sent' as 'expired'.
+ * Runs inside the caller's transaction when there is one (never begins/commits itself). Money untouched.
+ * Call AFTER updateBookingRoomsStatus() (which needs the room ids) and after the status change.
+ *
+ * @return array{rooms:string[],quotations:int}
+ */
+function rh_release_booking_holds(PDO $pdo, int $bookingId, int $userId, string $why): array
+{
+    $out = ['rooms' => [], 'quotations' => 0];
+    if ($bookingId <= 0) {
+        return $out;
+    }
+    $ref = '';
+    $numbers = [];
+    try {
+        $b = $pdo->prepare("SELECT b.booking_reference, ir.room_number FROM bookings b LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id WHERE b.id = ?");
+        $b->execute([$bookingId]);
+        $row = $b->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return $out;
+        }
+        $ref = (string)($row['booking_reference'] ?? '');
+        if (($row['room_number'] ?? '') !== '' && $row['room_number'] !== null) {
+            $numbers[(string)$row['room_number']] = true;
+        }
+        if (bookingAvailabilityTableExists('booking_rooms')) {
+            $r = $pdo->prepare("SELECT ir.room_number FROM booking_rooms br JOIN individual_rooms ir ON ir.id = br.individual_room_id
+                                 WHERE br.booking_id = ? AND br.released_at IS NULL ORDER BY ir.room_number");
+            $r->execute([$bookingId]);
+            foreach ($r->fetchAll(PDO::FETCH_COLUMN) as $n) {
+                $numbers[(string)$n] = true;
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('rh_release_booking_holds lookup failed for booking ' . $bookingId . ': ' . $e->getMessage());
+    }
+
+    rh_release_booking_room_assignment($bookingId, $pdo);
+    $out['rooms'] = array_keys($numbers);
+
+    try {
+        $q = $pdo->prepare("UPDATE quotations SET status = 'expired', updated_at = NOW()
+                             WHERE booking_id = ? AND booking_type = 'room' AND status = 'sent'");
+        $q->execute([$bookingId]);
+        $out['quotations'] = $q->rowCount();
+    } catch (Throwable $e) {
+        error_log('rh_release_booking_holds quotation expiry failed for booking ' . $bookingId . ': ' . $e->getMessage());
+    }
+
+    if ($out['rooms'] || $out['quotations'] > 0) {
+        if (!function_exists('logBookingEvent') && is_file(__DIR__ . '/../includes/booking-timeline.php')) {
+            require_once __DIR__ . '/../includes/booking-timeline.php';
+        }
+        if (function_exists('logBookingEvent')) {
+            $parts = [];
+            if ($out['rooms']) {
+                $parts[] = 'Released room ' . implode(' + ', $out['rooms']);
+            }
+            if ($out['quotations'] > 0) {
+                $parts[] = $out['quotations'] . ' quotation(s) marked expired';
+            }
+            logBookingEvent($bookingId, $ref, 'Room hold released', 'status_change',
+                implode('; ', $parts) . ' (' . $why . ').', null, null,
+                $userId > 0 ? 'admin' : 'system', $userId > 0 ? $userId : null, null,
+                ['released_rooms' => $out['rooms'], 'quotations_expired' => $out['quotations'], 'why' => $why]);
+        }
+    }
+    return $out;
+}
+
+/**
+ * Batch version for the page-load expiry sweeps: one statement each, no timeline lines (the sweep
+ * already logs the status change). Releases rooms and expires 'sent' room quotations for every id.
+ */
+function rh_release_holds_for_booking_ids(PDO $pdo, array $bookingIds): void
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $bookingIds), static function ($v) { return $v > 0; })));
+    if (!$ids) {
+        return;
+    }
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    try {
+        $pdo->prepare("UPDATE bookings SET individual_room_id = NULL, room_combination_id = NULL WHERE id IN ($in)")->execute($ids);
+        if (bookingAvailabilityTableExists('booking_rooms')) {
+            $pdo->prepare("UPDATE booking_rooms SET released_at = NOW() WHERE booking_id IN ($in) AND released_at IS NULL")->execute($ids);
+        }
+        $pdo->prepare("UPDATE quotations SET status = 'expired', updated_at = NOW() WHERE booking_id IN ($in) AND booking_type = 'room' AND status = 'sent'")->execute($ids);
+    } catch (Throwable $e) {
+        error_log('rh_release_holds_for_booking_ids failed: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Close every live order (room tab / room service) of a booking inside the caller's transaction, then
+ * recalculate the affected bookings. Wraps rh_close_orders_for_booking() (admin/includes/pos-order-close.php).
+ * Throws RuntimeException with a plain message when an order is part-paid or the kitchen already started it:
+ * the caller must roll back. Send the returned 'notices' with rh_send_booking_order_notices() AFTER commit.
+ */
+function rh_booking_close_orders(PDO $pdo, int $bookingId, int $userId, string $reason): array
+{
+    if (!function_exists('rh_close_orders_for_booking')) {
+        require_once __DIR__ . '/../admin/includes/pos-order-close.php';
+    }
+    $res = rh_close_orders_for_booking($pdo, $bookingId, $userId, $reason);
+    $ids = array_values(array_unique(array_merge($res['booking_ids'], [$bookingId])));
+    if (!empty($res['refs'])) {
+        foreach ($ids as $bid) {
+            if (!recalculateBookingFinancials((int)$bid)) {
+                throw new RuntimeException('Could not recalculate the booking balance after closing its orders.');
+            }
+        }
+    }
+    return $res;
+}
+
+/** Send the cashier notices collected by rh_booking_close_orders(). Only after the transaction is committed. */
+function rh_send_booking_order_notices(PDO $pdo, array $notices): void
+{
+    if (!$notices) {
+        return;
+    }
+    if (!function_exists('rh_pos_notice_send')) {
+        require_once __DIR__ . '/../admin/includes/pos-notices.php';
+    }
+    foreach ($notices as $n) {
+        try {
+            rh_pos_notice_send($pdo, $n);
+        } catch (Throwable $e) {
+            error_log('rh_send_booking_order_notices failed: ' . $e->getMessage());
+        }
+    }
+}
+
+/** How many bookings (any status) refer to a joined-room combination. */
+function rh_combination_booking_count(PDO $pdo, int $combinationId): int
+{
+    $st = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_combination_id = ?");
+    $st->execute([$combinationId]);
+    $n = (int)$st->fetchColumn();
+    if (bookingAvailabilityTableExists('booking_rooms')) {
+        $st = $pdo->prepare("SELECT COUNT(DISTINCT booking_id) FROM booking_rooms WHERE room_combination_id = ?");
+        $st->execute([$combinationId]);
+        $n = max($n, (int)$st->fetchColumn());
+    }
+    return $n;
+}
+
+/** COUNT(*) that treats a missing table / column as 0 (older installs). */
+function rh_safe_count(PDO $pdo, string $sql, array $params = []): int
+{
+    try {
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        return (int)$st->fetchColumn();
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
+/**
+ * Delete image/video files that belonged to a record that is gone. Only paths under the project's own
+ * images/ or videos/ folder are touched, and a file still referenced by another row is kept.
+ */
+function rh_unlink_project_media(PDO $pdo, array $paths): int
+{
+    $root = realpath(__DIR__ . '/..');
+    if ($root === false) {
+        return 0;
+    }
+    $refs = [['individual_room_photos', 'image_path'], ['gallery', 'image_url'], ['rooms', 'image_url'], ['hotel_gallery', 'image_url']];
+    $removed = 0;
+    foreach (array_unique(array_map('trim', array_map('strval', $paths))) as $img) {
+        if ($img === '' || preg_match('#^[a-z][a-z0-9+.\-]*:#i', $img) || strpos($img, '..') !== false || !preg_match('#^(images|videos)/#', $img)) {
+            continue;
+        }
+        $real = realpath($root . '/' . $img);
+        if ($real === false || !is_file($real) || strpos($real, $root . DIRECTORY_SEPARATOR) !== 0) {
+            continue;
+        }
+        $stillUsed = false;
+        foreach ($refs as [$t, $c]) {
+            if (rh_safe_count($pdo, "SELECT COUNT(*) FROM `$t` WHERE `$c` = ?", [$img]) > 0) {
+                $stillUsed = true;
+                break;
+            }
+        }
+        if (!$stillUsed && @unlink($real)) {
+            $removed++;
+        }
+    }
+    return $removed;
+}
+
+/**
+ * Delete (or, when it has history, deactivate) an individual room - the ONE implementation behind
+ * admin/individual-rooms.php and api/individual-rooms.php.
+ *  - BLOCKED while a live / tentative booking holds the room (bookings.individual_room_id, an unreleased
+ *    booking_rooms row, or a joined pair it belongs to).
+ *  - A room with history (any booking, order, finished task, or a joined pair that was used) is kept and
+ *    set inactive instead (its pairs go inactive too, so nothing sells it); open tasks are closed.
+ *  - Otherwise one transaction removes the room with its amenities, photos (+files), open tasks, blocks
+ *    and unused joined pairs. Log rows (room_maintenance_log) are kept.
+ *
+ * @return array{success:bool,error:string,mode:string,room_number:string,code:int}
+ */
+function rh_delete_individual_room(PDO $pdo, int $roomId, int $userId = 0): array
+{
+    $res = ['success' => false, 'error' => '', 'mode' => '', 'room_number' => '', 'code' => 400];
+    $ownTx = !$pdo->inTransaction();
+    $photos = [];
+    $snapshots = [];
+    try {
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        $lock = $pdo->prepare("SELECT id, room_number, is_active FROM individual_rooms WHERE id = ? FOR UPDATE");
+        $lock->execute([$roomId]);
+        $room = $lock->fetch(PDO::FETCH_ASSOC);
+        if (!$room) {
+            $res['code'] = 404;
+            throw new RuntimeException('Individual room not found.');
+        }
+        $res['room_number'] = (string)$room['room_number'];
+        $label = 'Room ' . $res['room_number'];
+
+        // Joined pairs this room belongs to.
+        $combos = [];
+        if (bookingAvailabilityTableExists('room_combinations')) {
+            $cs = $pdo->prepare("SELECT id FROM room_combinations WHERE room_a_id = ? OR room_b_id = ?");
+            $cs->execute([$roomId, $roomId]);
+            $combos = array_map('intval', $cs->fetchAll(PDO::FETCH_COLUMN));
+        }
+
+        // BLOCK: a live or tentative booking holds this room (or a pair containing it).
+        $heldBy = "b.individual_room_id = ?";
+        $params = [$roomId];
+        if (bookingAvailabilityTableExists('booking_rooms')) {
+            $heldBy .= " OR EXISTS (SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.individual_room_id = ? AND br.released_at IS NULL)";
+            $params[] = $roomId;
+        }
+        if ($combos) {
+            $heldBy .= " OR b.room_combination_id IN (" . implode(',', array_fill(0, count($combos), '?')) . ")";
+            $params = array_merge($params, $combos);
+        }
+        $live = $pdo->prepare("SELECT b.booking_reference FROM bookings b
+            WHERE b.status IN ('pending', 'tentative', 'confirmed', 'checked-in')
+              AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
+              AND (b.status = 'checked-in' OR " . rh_effective_checkout_sql('b') . " >= CURDATE())
+              AND ($heldBy) ORDER BY b.check_in_date ASC LIMIT 6");
+        $live->execute($params);
+        $refs = $live->fetchAll(PDO::FETCH_COLUMN);
+        if ($refs) {
+            throw new RuntimeException($label . ' has ' . count($refs) . (count($refs) >= 6 ? '+' : '') . ' live booking(s) (' . implode(', ', array_slice($refs, 0, 5))
+                . '). Move or cancel them first, then delete the room.');
+        }
+
+        // History: anything that makes the room part of the records.
+        $comboUsed = 0;
+        foreach ($combos as $cid) {
+            if (rh_combination_booking_count($pdo, $cid) > 0) {
+                $comboUsed++;
+            }
+        }
+        $hasHistory = $comboUsed > 0
+            || rh_safe_count($pdo, "SELECT COUNT(*) FROM bookings WHERE individual_room_id = ?", [$roomId]) > 0
+            || rh_safe_count($pdo, "SELECT COUNT(*) FROM booking_rooms WHERE individual_room_id = ?", [$roomId]) > 0
+            || rh_safe_count($pdo, "SELECT COUNT(*) FROM stock_orders WHERE individual_room_id = ?", [$roomId]) > 0
+            || rh_safe_count($pdo, "SELECT COUNT(*) FROM housekeeping_assignments WHERE individual_room_id = ? AND status = 'completed'", [$roomId]) > 0
+            || rh_safe_count($pdo, "SELECT COUNT(*) FROM room_maintenance_schedules WHERE individual_room_id = ? AND status IN ('completed', 'cancelled')", [$roomId]) > 0;
+
+        // Open housekeeping tasks go either way (a snapshot is kept in the system log: deleting a task
+        // cascades its own audit rows).
+        try {
+            $ht = $pdo->prepare("SELECT * FROM housekeeping_assignments WHERE individual_room_id = ? AND status IN ('pending', 'in_progress', 'blocked')");
+            $ht->execute([$roomId]);
+            foreach ($ht->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $snapshots[] = ['housekeeping_task' => $row];
+            }
+            $pdo->prepare("DELETE FROM housekeeping_assignments WHERE individual_room_id = ? AND status IN ('pending', 'in_progress', 'blocked')")->execute([$roomId]);
+        } catch (PDOException $e) {
+            // table may not exist on an older install
+        }
+
+        if ($hasHistory) {
+            // Keep the record; stop selling it; stop its open maintenance.
+            $pdo->prepare("UPDATE individual_rooms SET is_active = 0 WHERE id = ?")->execute([$roomId]);
+            if ($combos) {
+                $pdo->prepare("UPDATE room_combinations SET is_active = 0 WHERE room_a_id = ? OR room_b_id = ?")->execute([$roomId, $roomId]);
+            }
+            try {
+                $pdo->prepare("UPDATE room_maintenance_schedules SET status = 'cancelled' WHERE individual_room_id = ? AND status IN ('planned', 'in_progress', '')")->execute([$roomId]);
+            } catch (PDOException $e) {
+            }
+            $res['mode'] = 'deactivated';
+        } else {
+            try {
+                $ms = $pdo->prepare("SELECT * FROM room_maintenance_schedules WHERE individual_room_id = ?");
+                $ms->execute([$roomId]);
+                foreach ($ms->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $snapshots[] = ['maintenance_schedule' => $row];
+                }
+                $pdo->prepare("DELETE FROM room_maintenance_schedules WHERE individual_room_id = ?")->execute([$roomId]);
+            } catch (PDOException $e) {
+            }
+            if (bookingAvailabilityTableExists('room_maintenance_blocks')) {
+                $pdo->prepare("DELETE FROM room_maintenance_blocks WHERE individual_room_id = ?")->execute([$roomId]);
+            }
+            $pdo->prepare("DELETE FROM individual_room_blocked_dates WHERE individual_room_id = ?")->execute([$roomId]);
+            $pdo->prepare("DELETE FROM individual_room_amenities WHERE individual_room_id = ?")->execute([$roomId]);
+            $ps = $pdo->prepare("SELECT image_path FROM individual_room_photos WHERE individual_room_id = ?");
+            $ps->execute([$roomId]);
+            $photos = $ps->fetchAll(PDO::FETCH_COLUMN);
+            $pdo->prepare("DELETE FROM individual_room_photos WHERE individual_room_id = ?")->execute([$roomId]);
+            if ($combos) {
+                $pdo->prepare("DELETE FROM room_combinations WHERE room_a_id = ? OR room_b_id = ?")->execute([$roomId, $roomId]);
+            }
+            $pdo->prepare("DELETE FROM individual_rooms WHERE id = ?")->execute([$roomId]);
+            $res['mode'] = 'deleted';
+        }
+        if ($ownTx) {
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $res['error'] = $e instanceof RuntimeException ? $e->getMessage() : 'The room could not be deleted. Nothing was changed.';
+        if (!($e instanceof RuntimeException)) {
+            error_log('rh_delete_individual_room failed for room ' . $roomId . ': ' . $e->getMessage());
+            $res['code'] = 500;
+        }
+        return $res;
+    }
+
+    if ($photos) {
+        rh_unlink_project_media($pdo, $photos);
+    }
+    if (function_exists('rh_log_event')) {
+        rh_log_event('rooms', 'warning', $res['mode'] === 'deleted' ? 'Individual room deleted' : 'Individual room deactivated (has history)',
+            ['room_id' => $roomId, 'room_number' => $res['room_number'], 'by' => $userId, 'closed_tasks' => $snapshots]);
+    }
+    $res['success'] = true;
+    return $res;
+}
+
+/**
+ * Delete a room type (rooms row) - the ONE implementation behind admin/room-management.php and api/room-types.php.
+ * BLOCKED while individual rooms, joined-room combinations, bookings or guest reviews (history) still use it.
+ * Otherwise, in one transaction: its gallery rows, blocked_dates and room_blocked_dates go with it, and the
+ * image files are removed afterwards (only ones nothing else uses).
+ *
+ * @return array{success:bool,error:string,code:int,name:string}
+ */
+function rh_delete_room_type(PDO $pdo, int $roomTypeId): array
+{
+    $res = ['success' => false, 'error' => '', 'code' => 400, 'name' => ''];
+    $ownTx = !$pdo->inTransaction();
+    $files = [];
+    try {
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        $lock = $pdo->prepare("SELECT id, name, image_url FROM rooms WHERE id = ? FOR UPDATE");
+        $lock->execute([$roomTypeId]);
+        $rt = $lock->fetch(PDO::FETCH_ASSOC);
+        if (!$rt) {
+            $res['code'] = 404;
+            throw new RuntimeException('Room type not found');
+        }
+        $res['name'] = (string)$rt['name'];
+
+        $n = rh_safe_count($pdo, "SELECT COUNT(*) FROM individual_rooms WHERE room_type_id = ?", [$roomTypeId]);
+        if ($n > 0) {
+            throw new RuntimeException("Cannot delete room type with {$n} individual rooms. Please delete or reassign rooms first.");
+        }
+        $n = rh_safe_count($pdo, "SELECT COUNT(*) FROM room_combinations WHERE combined_room_type_id = ?", [$roomTypeId]);
+        if ($n > 0) {
+            throw new RuntimeException("Cannot delete room type that is the type of {$n} joined-room combination(s). Remove them in Individual Rooms first.");
+        }
+        $n = rh_safe_count($pdo, "SELECT COUNT(*) FROM bookings b LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id WHERE b.room_id = ? OR ir.room_type_id = ?", [$roomTypeId, $roomTypeId]);
+        if ($n > 0) {
+            throw new RuntimeException("This room has booking history ({$n} booking" . ($n === 1 ? '' : 's') . ") and cannot be deleted. Deactivate it instead.");
+        }
+        $n = rh_safe_count($pdo, "SELECT COUNT(*) FROM reviews WHERE room_id = ?", [$roomTypeId]);
+        if ($n > 0) {
+            throw new RuntimeException("This room has {$n} guest review" . ($n === 1 ? '' : 's') . ", which are kept as history, so it cannot be deleted. Deactivate it instead.");
+        }
+
+        $files[] = (string)($rt['image_url'] ?? '');
+        try {
+            $g = $pdo->prepare("SELECT image_url FROM gallery WHERE room_id = ?");
+            $g->execute([$roomTypeId]);
+            foreach ($g->fetchAll(PDO::FETCH_COLUMN) as $f) {
+                $files[] = (string)$f;
+            }
+        } catch (PDOException $e) {
+        }
+        foreach (['gallery', 'blocked_dates', 'room_blocked_dates'] as $t) {
+            try {
+                $pdo->prepare("DELETE FROM `$t` WHERE room_id = ?")->execute([$roomTypeId]);
+            } catch (PDOException $e) {
+                // optional table on older installs
+            }
+        }
+        $pdo->prepare("DELETE FROM rooms WHERE id = ?")->execute([$roomTypeId]);
+        if ($ownTx) {
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if ($e instanceof RuntimeException) {
+            $res['error'] = $e->getMessage();
+        } else {
+            $res['error'] = 'The room type could not be deleted because other records still use it. Deactivate it instead.';
+            $res['code'] = 500;
+            error_log('rh_delete_room_type failed for ' . $roomTypeId . ': ' . $e->getMessage());
+        }
+        return $res;
+    }
+
+    rh_unlink_project_media($pdo, $files);
+    if (function_exists('rh_log_event')) {
+        rh_log_event('rooms', 'warning', 'Room type deleted', ['room_type_id' => $roomTypeId, 'name' => $res['name']]);
+    }
+    $res['success'] = true;
+    return $res;
+}
+
+/**
+ * Deleting a housekeeping / maintenance task cascades away its own audit rows (their FK is ON DELETE
+ * CASCADE), so write a snapshot of the task to the system event log BEFORE the DELETE. Never throws.
+ * $kind: 'housekeeping' | 'maintenance'.
+ */
+function rh_log_task_snapshot_before_delete(PDO $pdo, string $kind, int $taskId, ?int $userId = null, ?string $userName = null): void
+{
+    try {
+        $table = $kind === 'maintenance' ? 'room_maintenance_schedules' : 'housekeeping_assignments';
+        $st = $pdo->prepare("SELECT * FROM `$table` WHERE id = ?");
+        $st->execute([$taskId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return;
+        }
+        if (!function_exists('rh_log_event') && is_file(__DIR__ . '/../includes/system-logger.php')) {
+            require_once __DIR__ . '/../includes/system-logger.php';
+        }
+        if (function_exists('rh_log_event')) {
+            rh_log_event($kind, 'warning', ucfirst($kind) . ' task #' . $taskId . ' deleted (snapshot before delete)',
+                ['task' => $row, 'deleted_by_id' => $userId, 'deleted_by' => $userName]);
+        }
+    } catch (Throwable $e) {
+        error_log('rh_log_task_snapshot_before_delete failed: ' . $e->getMessage());
+    }
+}
+
+/** Reference of an open ('placed') order on a booking, or null. Used to block "undo check-in". */
+function rh_booking_open_order_ref(PDO $pdo, int $bookingId): ?string
+{
+    $st = $pdo->prepare("SELECT reference FROM stock_orders WHERE booking_id = ? AND status = 'placed' ORDER BY id ASC LIMIT 1");
+    $st->execute([$bookingId]);
+    $ref = $st->fetchColumn();
+    return $ref === false ? null : (string)$ref;
 }
 /**
  * Block input normalisers. A block is one NIGHT: blocking 2026-10-05 stops a stay that
@@ -6107,6 +6593,9 @@ function markTentativeBookingExpired(int $booking_id)
             WHERE id = ?
         ");
         $update_stmt->execute([$booking_id]);
+
+        // A lapsed hold must not keep a room or an open quotation (a tentative booking has no orders).
+        rh_release_booking_holds($pdo, $booking_id, 0, 'tentative hold expired');
 
         // Log the action
         logTentativeBookingAction($booking_id, 'expired', [
@@ -8068,6 +8557,28 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
             ];
         }
 
+        // A charge posted for a kitchen order that is still open (status 'placed') is part of a live
+        // ticket: voiding only the bill line would leave the order running and its stock unsettled.
+        // The order must be voided / cancelled in Orders & Tabs, which voids the charge itself.
+        try {
+            $ordStmt = $pdo->prepare("
+                SELECT so.reference FROM booking_charges bc
+                JOIN stock_orders so ON so.id = bc.stock_order_id
+                WHERE bc.id = ? AND so.status = 'placed'
+            ");
+            $ordStmt->execute([$chargeId]);
+            $openOrderRef = $ordStmt->fetchColumn();
+        } catch (Throwable $ordEx) {
+            $openOrderRef = false; // legacy schema without booking_charges.stock_order_id
+        }
+        if ($openOrderRef !== false) {
+            $pdo->rollBack();
+            return [
+                'success' => false,
+                'message' => 'This charge belongs to order ' . (string)$openOrderRef . ', which is still open. Void or cancel the order in Orders & Tabs.'
+            ];
+        }
+
         // Mark as voided
         $updateStmt = $pdo->prepare("
             UPDATE booking_charges
@@ -8089,14 +8600,43 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
             && !empty($charge['source_item_id'])
         ) {
             try {
-                restoreStockForMenuItem(
+                // A room-service charge booked against a kitchen order follows the kitchen line:
+                // prepared food becomes wastage, not a restore (same rule as an 86 / order void).
+                $stockOrderId = 0;
+                try {
+                    $soStmt = $pdo->prepare("SELECT stock_order_id FROM booking_charges WHERE id = ?");
+                    $soStmt->execute([$chargeId]);
+                    $stockOrderId = (int)$soStmt->fetchColumn();
+                } catch (Throwable $soEx) {
+                    $stockOrderId = 0; // legacy schema without booking_charges.stock_order_id
+                }
+                if ($stockOrderId > 0) {
+                    if (!function_exists('rh_restore_room_service_charge_stock')) {
+                        require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
+                    }
+                    rh_restore_room_service_charge_stock(
+                        $pdo,
+                        $stockOrderId,
+                        [
+                            'id' => $chargeId,
+                            'charge_type' => $charge['charge_type'],
+                            'source_item_id' => $charge['source_item_id'],
+                            'quantity' => $charge['quantity'],
+                            'stock_tracked' => $charge['stock_tracked'],
+                        ],
+                        'Charge voided: ' . $voidReason,
+                        $voidedBy
+                    );
+                } elseif (!restoreStockForMenuItem(
                     (int)$charge['source_item_id'],
                     $charge['charge_type'],
                     (float)$charge['quantity'],
                     'Charge voided: ' . $voidReason,
                     $voidedBy,
                     $chargeId
-                );
+                )) {
+                    error_log("voidBookingCharge stock restore returned false for charge {$chargeId}: stock was not restored, reconcile manually");
+                }
             } catch (Throwable $stockEx) {
                 error_log("voidBookingCharge stock restore failed for charge {$chargeId}: " . $stockEx->getMessage());
             }
@@ -8401,15 +8941,23 @@ function recalculateBookingFinancials(int $bookingId): bool
  * The total is capped at what can actually be refunded, so it never exceeds net
  * paid. Pass $lock=true inside a transaction to lock the payment rows.
  *
+ * $scope: 'cash' (default) skips payments made by credit note - those are never paid back in
+ * cash, the credit goes back to the note (see rh_refund_credit_note_payments); 'credit_note'
+ * returns only the credit-note payments; 'any' returns everything (moving paid money into a new
+ * credit note, which is not a cash payout).
+ *
  * @return array<int, array{payment: array, amount: float}> one entry per original payment
  */
-function allocateBookingRefunds(PDO $pdo, int $bookingId, float $amount, bool $lock = false): array
+function allocateBookingRefunds(PDO $pdo, int $bookingId, float $amount, bool $lock = false, string $scope = 'cash'): array
 {
     if ($amount <= BALANCE_TOLERANCE) {
         return [];
     }
+    $scopeSql = $scope === 'credit_note'
+        ? "AND p.payment_method = 'credit_note'"
+        : ($scope === 'any' ? '' : "AND COALESCE(p.payment_method, '') <> 'credit_note'");
     $stmt = $pdo->prepare("
-        SELECT p.id, p.payment_method, p.booking_type, p.booking_reference, p.vat_rate, p.total_amount,
+        SELECT p.id, p.payment_method, p.booking_type, p.booking_reference, p.vat_rate, p.total_amount, p.credit_note_id,
                COALESCE((
                    SELECT SUM(COALESCE(r.refund_amount, r.total_amount))
                    FROM payments r
@@ -8421,6 +8969,7 @@ function allocateBookingRefunds(PDO $pdo, int $bookingId, float $amount, bool $l
           AND COALESCE(p.payment_type, '') <> 'refund'
           AND p.payment_status IN ('completed','paid','refunded','partially_refunded')
           AND p.deleted_at IS NULL
+          {$scopeSql}
         ORDER BY p.payment_date DESC, p.id DESC
         " . ($lock ? "FOR UPDATE" : ""));
     $stmt->execute([$bookingId]);
@@ -8543,6 +9092,10 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
         $result['previous_status'] = $prev;
         $result['booking_reference'] = $ref;
 
+        // Close the booking's live orders (room tab / room service) FIRST, so a refusal (part-paid or
+        // already-started order) changes nothing. Their folio effect is recalculated before the refund below.
+        $orderClose = rh_booking_close_orders($pdo, $bookingId, $adminUserId, 'Booking ' . ($ref !== '' ? $ref : ('#' . $bookingId)) . ' cancelled' . ($reason !== '' ? ': ' . $reason : ''));
+
         // Status change (clears tentative hold fields)
         $pdo->prepare("UPDATE bookings SET status = 'cancelled', is_tentative = 0, tentative_expires_at = NULL, updated_at = NOW() WHERE id = ?")
             ->execute([$bookingId]);
@@ -8554,6 +9107,8 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
                 ->execute([$b['room_id']]);
         }
         updateBookingRoomsStatus($bookingId, 'available', 'Booking cancelled: ' . ($ref !== '' ? $ref : ('Booking #' . $bookingId)), $adminUserId ?: null);
+        // Drop the room holds (booking_rooms + primary pointer) and expire any open quotation.
+        rh_release_booking_holds($pdo, $bookingId, $adminUserId, 'booking cancelled');
 
         // Bill treatment. keep_first_night: booked nightly rate incl. its VAT/levy share
         // (total_with_vat / nights), capped at what is billed. Never-confirmed tentative
@@ -8568,6 +9123,20 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
             $retained = max(0.0, round(min($gross, $gross / $nights), 2));
         }
         $pdo->prepare("UPDATE bookings SET cancellation_retained_amount = ? WHERE id = ?")->execute([$retained, $bookingId]);
+
+        // A payment still pending (e.g. an unfinished online/mobile-money payment) must not be left
+        // open on a cancelled booking: it could clear later and land as an unrefunded payment.
+        // Pending payments never count as paid, so no amounts change here.
+        $pdo->prepare("
+            UPDATE payments
+            SET payment_status = 'cancelled', status = 'failed',
+                notes = CONCAT(COALESCE(notes, ''), CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE ' ' END, '[Booking cancelled before this payment cleared]'),
+                updated_at = NOW()
+            WHERE booking_type = 'room' AND booking_id = ?
+              AND COALESCE(payment_type, '') <> 'refund'
+              AND payment_status = 'pending'
+              AND deleted_at IS NULL
+        ")->execute([$bookingId]);
 
         if (!recalculateBookingFinancials($bookingId)) {
             throw new RuntimeException('Could not recalculate the booking balance.');
@@ -8587,8 +9156,21 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
 
         $refunded = 0.0;
         $refs = [];
+        $cnReturned = 0.0;
+        $cnNumbers = [];
         if ($refundTarget > BALANCE_TOLERANCE) {
-            $allocs = allocateBookingRefunds($pdo, $bookingId, $refundTarget, true);
+            // Money that arrived by credit note goes back to that note (re-opened), never out as cash.
+            // Done first, so the cash share below is only what the guest really paid in cash/card/etc.
+            require_once __DIR__ . '/credit-notes.php';
+            $cnShare = rh_refund_credit_note_payments($pdo, $bookingId, $ref, $refundTarget, $adminUserId, 'cancellation', 'Booking cancelled');
+            $cnReturned = (float)$cnShare['total'];
+            $cnNumbers = $cnShare['notes'];
+            $refs = $cnShare['refs'];
+            // 'covered' also counts a share whose note is voided/expired: that stays as credit owed back.
+            $cashTarget = round($refundTarget - (float)$cnShare['covered'], 2);
+            $allocs = $cashTarget > BALANCE_TOLERANCE
+                ? allocateBookingRefunds($pdo, $bookingId, $cashTarget, true)
+                : [];
             $ins = $pdo->prepare("
                 INSERT INTO payments (
                     payment_reference, booking_type, booking_id, booking_reference,
@@ -8639,7 +9221,11 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
         }
         if ($refunded > 0) {
             $summary .= ($refundStatus === 'pending' ? ' Refund queued for staff to settle ' : ' Refunded ')
-                . $currency . ' ' . number_format($refunded, 2) . ' (Ref: ' . implode(', ', $refs) . ').';
+                . $currency . ' ' . number_format($refunded, 2) . ' (Ref: ' . implode(', ', array_diff($refs, $cnShare['refs'] ?? [])) . ').';
+        }
+        if ($cnReturned > 0) {
+            $summary .= ' ' . $currency . ' ' . number_format($cnReturned, 2) . ' paid by credit note was returned to credit note '
+                . implode(', ', array_unique($cnNumbers)) . ' (re-opened, no cash paid out).';
         }
         if ($credit > BALANCE_TOLERANCE) {
             $summary .= ' ' . $currency . ' ' . number_format($credit, 2) . ' is owed back to the guest - refund it or issue a credit note.';
@@ -8655,6 +9241,12 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
 
         if ($ownTx) {
             $pdo->commit();
+            rh_send_booking_order_notices($pdo, $orderClose['notices']);
+        } else {
+            $result['order_notices'] = $orderClose['notices']; // caller sends them after its own commit
+        }
+        if (!empty($orderClose['refs'])) {
+            $summary .= ' Closed order(s) ' . implode(', ', $orderClose['refs']) . '.';
         }
 
         $result['success'] = true;
@@ -8839,6 +9431,16 @@ function rh_checkout_with_gate(PDO $pdo, int $bookingId, ?int $userId, bool $ove
         }
         $pdo->prepare("UPDATE bookings SET status = 'checked-out', checkout_completed_at = NOW(), updated_at = NOW() WHERE id = ?")->execute([$bookingId]);
         $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")->execute([$bk['room_id']]);
+        // Same as processGuestCheckout(): room-service orders already charged to the folio stop being 'placed'
+        // (so the room's active-order lock is released) and the booking stops holding its rooms. The room
+        // status change below still finds the rooms: getBookingRooms() reads released rows too.
+        if (!function_exists('closeFolioChargedRoomServiceOrders')) {
+            require_once __DIR__ . '/../includes/room-management.php';
+        }
+        closeFolioChargedRoomServiceOrders($pdo, $bookingId);
+        if (bookingAvailabilityTableExists('booking_rooms')) {
+            $pdo->prepare("UPDATE booking_rooms SET released_at = NOW() WHERE booking_id = ? AND released_at IS NULL")->execute([$bookingId]);
+        }
         if ($ownTx) {
             $pdo->commit();
         }

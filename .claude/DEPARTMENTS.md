@@ -71,6 +71,15 @@ finish, say `NEEDS_UI_DECISION: <question>` and carry on with the rest.
 - Output: files changed (paths only) · ≤6-line outcome · findings/UI_REQUEST/BLOCKED lines ·
   lint and test results. No code blocks.
 
+## Linked data (owner, 2026-10-19)
+
+Any change that adds or touches a delete, cancel, void, expire or no-show path: the owning lead
+lists every linked row (link map and rule in `.claude/plans/linked-data-cleanup.md`) and gives
+each one CLOSE / DELETE / KEEP / BLOCK in the same transaction — nothing linked may keep running
+(open tab, live ticket, held room, pending task, active reminder). Money and history are KEEP
+(void/refund, never DELETE). A new table with a parent id column is added to the link map and to
+`scripts/data-health.php` (runs in `php scripts/run_tests.php`).
+
 ## Ship gate (every change, no exceptions)
 
 1. The lead's own checks: `php -l`, `node --check`, `php scripts/run_tests.php`.

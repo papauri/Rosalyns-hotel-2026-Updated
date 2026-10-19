@@ -105,6 +105,10 @@ function rh_soft_delete_booking(PDO $pdo, int $bookingId, int $userId, string $u
         $releases = in_array($prevStatus, rh_soft_delete_releasing_statuses(), true);
         $newStatus = $releases ? 'cancelled' : $prevStatus;
 
+        // No tab, kitchen ticket or folio charge may keep running on a deleted booking. A part-paid or
+        // already-started order throws a plain message here and nothing is deleted.
+        $orderClose = rh_booking_close_orders($pdo, $bookingId, $userId, 'Booking ' . $ref . ' deleted: ' . $reason);
+
         if ($releases) {
             // Same room/stock release as a cancellation, but no fee and no guest email.
             $pdo->prepare("UPDATE bookings SET status = 'cancelled', is_tentative = 0, tentative_expires_at = NULL,
@@ -114,6 +118,8 @@ function rh_soft_delete_booking(PDO $pdo, int $bookingId, int $userId, string $u
                     ->execute([$b['room_id']]);
             }
             updateBookingRoomsStatus($bookingId, 'available', 'Booking deleted: ' . $ref, $userId ?: null);
+            // The room hold goes with the booking; restoring re-assigns a room (autoAssignIndividualRoom).
+            rh_release_booking_holds($pdo, $bookingId, $userId, 'booking deleted');
         }
         $pdo->prepare("UPDATE bookings SET deleted_at = NOW(), deleted_by = ?, deleted_reason = ?, updated_at = NOW() WHERE id = ?")
             ->execute([$userId ?: null, $reason, $bookingId]);
@@ -121,6 +127,7 @@ function rh_soft_delete_booking(PDO $pdo, int $bookingId, int $userId, string $u
 
         if ($ownTx) {
             $pdo->commit();
+            rh_send_booking_order_notices($pdo, $orderClose['notices']);
         }
     } catch (Throwable $e) {
         if ($ownTx && $pdo->inTransaction()) {

@@ -17,6 +17,8 @@ require_once __DIR__ . '/includes/gym-checkin-lib.php';
 require_once __DIR__ . '/includes/gym-analytics-lib.php';
 require_once __DIR__ . '/includes/gym-reminders-lib.php';
 require_once __DIR__ . '/includes/gym-billing-lib.php';
+require_once __DIR__ . '/includes/gym-classes-lib.php';
+require_once __DIR__ . '/includes/gym-schedule-lib.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 
 /** @var PDO $pdo */
@@ -617,10 +619,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             if ($status === '') {
                 $gm_json(false, 'Invalid status.');
             }
-            $prevStmt = $pdo->prepare("SELECT status, member_number FROM gym_members WHERE id = ?");
-            $prevStmt->execute([$memberId]);
-            $prevRow = $prevStmt->fetch(PDO::FETCH_ASSOC);
-            $pdo->prepare("UPDATE gym_members SET status=? WHERE id=?")->execute([$status, $memberId]);
+            // The lazily created gym tables are made before the transaction (CREATE TABLE commits implicitly).
+            gymClassesEnsureTables($pdo);
+            gymScheduleEnsureTables($pdo);
+            $pdo->beginTransaction();
+            try {
+                $prevStmt = $pdo->prepare("SELECT status, member_number FROM gym_members WHERE id = ? FOR UPDATE");
+                $prevStmt->execute([$memberId]);
+                $prevRow = $prevStmt->fetch(PDO::FETCH_ASSOC);
+                $pdo->prepare("UPDATE gym_members SET status=? WHERE id=?")->execute([$status, $memberId]);
+                // A membership that is no longer live must not keep floor-slot bookings or class places.
+                if ($prevRow && in_array($status, ['cancelled', 'expired', 'suspended'], true)) {
+                    gym_member_release_future($pdo, $memberId);
+                }
+                $pdo->commit();
+            } catch (Throwable $statusEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $statusEx;
+            }
             if ($prevRow && function_exists('logGymMemberAudit')) {
                 logGymMemberAudit($memberId, 'status_changed',
                     ['status' => (string)$prevRow['status']],
@@ -636,13 +654,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             if (!hasPermission((int)($user['id'] ?? 0), 'gym_financials')) {
                 $gm_json(false, 'Deleting a member requires a manager. Mark them cancelled instead to preserve their history.');
             }
-            $delStmt = $pdo->prepare("SELECT full_name, member_number, membership_type, monthly_fee, status FROM gym_members WHERE id = ?");
-            $delStmt->execute([$memberId]);
-            $delRow = $delStmt->fetch(PDO::FETCH_ASSOC);
-            if ($delRow && function_exists('logGymMemberAudit')) {
+            // Tables that are created on first use are made before the transaction (CREATE TABLE commits implicitly).
+            gymClassesEnsureTables($pdo);
+            gymScheduleEnsureTables($pdo);
+            $hasAttendance = gym_attendance_table_exists($pdo);
+            $hasReminders = gym_reminder_log_table_exists($pdo);
+            $pdo->beginTransaction();
+            try {
+                $delStmt = $pdo->prepare("SELECT full_name, member_number, membership_type, monthly_fee, status, gym_inquiry_id FROM gym_members WHERE id = ? FOR UPDATE");
+                $delStmt->execute([$memberId]);
+                $delRow = $delStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$delRow) {
+                    throw new RuntimeException('That member no longer exists.');
+                }
+                // Money history is never deleted. Any payment (even a removed one) on a bill linked to this
+                // member - the enrolment bill or a renewal bill tied by the [member:NUMBER] marker - blocks it.
+                $payChk = $pdo->prepare("
+                    SELECT COUNT(*) FROM payments p
+                    JOIN gym_inquiries gi ON gi.id = p.booking_id
+                    WHERE p.booking_type = 'gym'
+                      AND (gi.id = ? OR gi.notes LIKE ?)
+                ");
+                $payChk->execute([(int)($delRow['gym_inquiry_id'] ?? 0), '%' . rh_gym_member_marker((string)$delRow['member_number']) . '%']);
+                if ((int)$payChk->fetchColumn() > 0) {
+                    throw new RuntimeException('This member has payments on their bill — mark them cancelled instead.');
+                }
+                // Close everything still running for them; keep attendance and the audit trail as history.
+                gym_member_release_future($pdo, $memberId);
+                if ($hasReminders) {
+                    $pdo->prepare("DELETE FROM gym_reminder_log WHERE member_id = ?")->execute([$memberId]);
+                }
+                if ($hasAttendance) {
+                    $pdo->prepare("UPDATE gym_attendance SET checked_out_at = NOW() WHERE member_id = ? AND checked_out_at IS NULL")->execute([$memberId]);
+                }
+                $pdo->prepare("DELETE FROM gym_members WHERE id = ?")->execute([$memberId]);
+                $pdo->commit();
+            } catch (Throwable $delEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $delEx;
+            }
+            if (function_exists('logGymMemberAudit')) {
+                unset($delRow['gym_inquiry_id']);
                 logGymMemberAudit($memberId, 'deleted', $delRow, null, 'Member record permanently deleted', (string)$delRow['member_number']);
             }
-            $pdo->prepare("DELETE FROM gym_members WHERE id=?")->execute([$memberId]);
             $gm_json(true, 'Member deleted.');
         }
 

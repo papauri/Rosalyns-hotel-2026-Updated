@@ -584,58 +584,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'delete_room') {
             $room_id = (int)($_POST['id'] ?? 0);
 
-            // A room type with booking history must never be deleted (it would orphan or cascade
-            // away real reservations/folios); deactivate it instead.
-            $bk = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_id = ?");
-            $bk->execute([$room_id]);
-            if ((int)$bk->fetchColumn() > 0) {
-                $error = 'This room has booking history and cannot be deleted. Deactivate it instead.';
+            // One shared routine (also used by the API): blocks on individual rooms, joined-room combinations,
+            // bookings and guest reviews; otherwise removes the room type with its gallery, blocked dates and files.
+            $delRes = rh_delete_room_type($pdo, $room_id);
+            if (!$delRes['success']) {
+                $error = $delRes['error'];
                 if (is_ajax_request()) {
                     header('Content-Type: application/json');
                     echo json_encode(['success' => false, 'message' => $error]);
                     exit;
                 }
                 throw new RuntimeException($error);
-            }
-
-            $stmt = $pdo->prepare("SELECT image_url FROM rooms WHERE id = ?");
-            $stmt->execute([$room_id]);
-            $old_image = $stmt->fetchColumn();
-
-            // Collect canonical room gallery images, delete rows first, files only after the room is gone
-            $gallery_images = [];
-            try {
-                $stmt = $pdo->prepare("SELECT image_url FROM gallery WHERE room_id = ?");
-                $stmt->execute([$room_id]);
-                $gallery_images = $stmt->fetchAll(PDO::FETCH_COLUMN);
-            } catch (PDOException $e) {
-                // optional table
-            }
-
-            $pdo->beginTransaction();
-            try {
-                try {
-                    $stmt = $pdo->prepare("DELETE FROM gallery WHERE room_id = ?");
-                    $stmt->execute([$room_id]);
-                } catch (PDOException $e) {
-                    // Continue room deletion even if optional gallery cleanup fails.
-                }
-                $stmt = $pdo->prepare("DELETE FROM rooms WHERE id = ?");
-                $stmt->execute([$room_id]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                throw $e;
-            }
-
-            foreach (array_merge($gallery_images, [$old_image]) as $img) {
-                $img = trim((string)$img);
-                if ($img !== '' && !preg_match('#^https?://#i', $img) && strpos($img, '..') === false && preg_match('#^(images|videos)/#', $img)) {
-                    $path = '../' . $img;
-                    if (file_exists($path)) @unlink($path);
-                }
             }
 
             require_once __DIR__ . '/../config/cache.php';

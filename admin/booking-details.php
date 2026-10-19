@@ -610,87 +610,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                 break;
 
             case 'noshow':
-                $check_stmt = $pdo->prepare("
-                    SELECT b.*, ir.status as room_status
-                    FROM bookings b
-                    LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-                    WHERE b.id = ?
-                ");
-                $check_stmt->execute([$booking_id]);
-                $noshow_row = $check_stmt->fetch(PDO::FETCH_ASSOC);
-
-                if (!$noshow_row) {
-                    $_SESSION['error_message'] = 'Booking not found.';
+                // One transaction (orders, status, rooms, holds, refund) in rh_mark_booking_no_show();
+                // the guest email stays here, after the commit.
+                require_once __DIR__ . '/../includes/booking-functions.php';
+                $ns = rh_mark_booking_no_show($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)($user['full_name'] ?? ''), '');
+                if (!$ns['success']) {
+                    $_SESSION['error_message'] = $ns['error'];
                 } else {
-                    $todayNoShow = new DateTime('today');
-                    $checkInDateNoShow = new DateTime((string)($noshow_row['check_in_date'] ?? 'today'));
-                    $checkInDateNoShow->setTime(0, 0, 0);
+                    $noshow_row = $ns['booking'];
+                    $refund_result = $ns['refund'];
 
-                    if ($checkInDateNoShow >= $todayNoShow) {
-                        $_SESSION['error_message'] = 'No-show can only be marked after the check-in date has passed.';
-                    } else {
-                        $transitionValidation = validateBookingStatusTransition($noshow_row['status'], 'no-show');
-                        if (!$transitionValidation['allowed']) {
-                            $_SESSION['error_message'] = getBookingActionErrorMessage('noshow', $transitionValidation['reason']);
-                        } else {
-                            // Conditional on the status we validated: a double click / second tab must not
-                            // mark twice (which would queue a second refund and send a second email).
-                            $stmt = $pdo->prepare("UPDATE bookings SET status = 'no-show', updated_at = NOW() WHERE id = ? AND status = ?");
-                            $stmt->execute([$booking_id, $noshow_row['status']]);
-                            if ($stmt->rowCount() !== 1) {
-                                $_SESSION['error_message'] = 'This booking was already updated by someone else. Nothing was changed.';
-                                break;
-                            }
-
-                            logBookingEvent(
-                                $booking_id,
-                                $noshow_row['booking_reference'],
-                                'Guest marked as no-show',
-                                'status_change',
-                                'Guest did not arrive - marked as no-show',
-                                $noshow_row['status'],
-                                'no-show',
-                                'admin',
-                                $user['id'],
-                                $user['full_name']
-                            );
-
-                            if ($noshow_row['status'] === 'confirmed') {
-                                $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")
-                                    ->execute([$noshow_row['room_id']]);
-                            }
-
-                            updateBookingRoomsStatus($booking_id, 'available', 'Booking marked as no-show', $user['id'] ?? null);
-
-                            // Auto-refund (if policy configured) and guest email
-                            $refund_result = ['created' => false, 'refund_ref' => '', 'refund_amount' => 0.0];
-                            if ((float)($noshow_row['amount_paid'] ?? 0) > 0) {
-                                require_once __DIR__ . '/../includes/booking-functions.php';
-                                $refund_result = createNoShowRefund($noshow_row, (int) $user['id'], $pdo);
-                            }
-
-                            $email_result = ['success' => false, 'message' => 'No guest email on record'];
-                            if (!empty($noshow_row['guest_email'])) {
-                                require_once __DIR__ . '/../config/email.php';
-                                $email_result = sendNoShowEmail(
-                                    $noshow_row,
-                                    (float)($refund_result['refund_amount'] ?? 0.0),
-                                    (string)($refund_result['refund_ref'] ?? '')
-                                );
-                            }
-
-                            $msg = 'Booking marked as no-show.';
-                            if ($refund_result['created']) {
-                                $msg .= ' Pending refund ' . $refund_result['refund_ref']
-                                    . ' (' . getSetting('currency_symbol', 'MWK') . ' ' . number_format((float) $refund_result['refund_amount'], 2) . ') queued - review in Payments.';
-                            }
-                            if (!empty($refund_result['error'])) {
-                                $msg .= ' WARNING: the automatic refund could not be created (' . $refund_result['error'] . ') - raise it manually in Payments.';
-                            }
-                            $msg .= $email_result['success'] ? ' No-show email sent to guest.' : ' (No-show email could not be sent.)';
-                            $_SESSION['success_message'] = $msg;
-                        }
+                    $email_result = ['success' => false, 'message' => 'No guest email on record'];
+                    if (!empty($noshow_row['guest_email'])) {
+                        require_once __DIR__ . '/../config/email.php';
+                        $email_result = sendNoShowEmail(
+                            $noshow_row,
+                            (float)($refund_result['refund_amount'] ?? 0.0),
+                            (string)($refund_result['refund_ref'] ?? '')
+                        );
                     }
+
+                    $msg = 'Booking marked as no-show.';
+                    if (!empty($ns['closed_orders'])) {
+                        $msg .= ' Closed order(s) ' . implode(', ', $ns['closed_orders']) . '.';
+                    }
+                    if ($refund_result['created']) {
+                        $msg .= ' Pending refund ' . $refund_result['refund_ref']
+                            . ' (' . getSetting('currency_symbol', 'MWK') . ' ' . number_format((float) $refund_result['refund_amount'], 2) . ') queued - review in Payments.';
+                    }
+                    if (!empty($refund_result['error'])) {
+                        $msg .= ' WARNING: the automatic refund could not be created (' . $refund_result['error'] . ') - raise it manually in Payments.';
+                    }
+                    $msg .= $email_result['success'] ? ' No-show email sent to guest.' : ' (No-show email could not be sent.)';
+                    $_SESSION['success_message'] = $msg;
                 }
                 break;
 

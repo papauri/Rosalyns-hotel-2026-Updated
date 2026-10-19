@@ -111,12 +111,7 @@ function ir_expand_pair_ids(array $ids): array
 /** How many bookings (any status) refer to a joined-room combination. */
 function ir_combo_booking_count(PDO $pdo, int $combinationId): int
 {
-    $st = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_combination_id = ?");
-    $st->execute([$combinationId]);
-    $n = (int)$st->fetchColumn();
-    $st = $pdo->prepare("SELECT COUNT(DISTINCT booking_id) FROM booking_rooms WHERE room_combination_id = ?");
-    $st->execute([$combinationId]);
-    return max($n, (int)$st->fetchColumn());
+    return rh_combination_booking_count($pdo, $combinationId);
 }
 
 function saveRoomAmenities(PDO $pdo, int $roomId, string $amenitiesRaw): void
@@ -483,26 +478,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         } elseif ($action === 'delete_individual_room') {
-            $id = (int)$_POST['id'];
+            $id = (int)($_POST['id'] ?? 0);
 
-            // Check for active bookings, including joined-room bookings via booking_rooms
-            $bookingsCheck = $pdo->prepare("
-                SELECT COUNT(*) FROM bookings b
-                WHERE b.status IN ('pending', 'confirmed', 'checked-in') AND (b.check_out_date >= CURDATE() OR b.status = 'checked-in')
-                  AND (b.individual_room_id = ? OR EXISTS (
-                        SELECT 1 FROM booking_rooms br
-                        WHERE br.booking_id = b.id
-                          AND br.individual_room_id = ?
-                          AND br.released_at IS NULL
-                  ))
-            ");
-            $bookingsCheck->execute([$id, $id]);
-            if ($bookingsCheck->fetchColumn() > 0) {
-                $error = 'Cannot delete room with active bookings.';
+            // One shared routine: blocks on live bookings, keeps a room with history (inactive instead),
+            // otherwise deletes the room with its photos, amenities, open tasks and unused joined pairs.
+            $delRes = rh_delete_individual_room($pdo, $id, (int)($user['id'] ?? 0));
+            if (!$delRes['success']) {
+                $error = $delRes['error'];
+            } elseif ($delRes['mode'] === 'deactivated') {
+                $message = 'Room ' . $delRes['room_number'] . ' has booking or housekeeping history, so it was kept and made inactive instead of deleted. It is no longer sold.';
+                require_once __DIR__ . '/../config/cache.php';
+                clearRoomCache();
             } else {
-                $stmt = $pdo->prepare("DELETE FROM individual_rooms WHERE id = ?");
-                $stmt->execute([$id]);
                 $message = 'Individual room deleted successfully!';
+                require_once __DIR__ . '/../config/cache.php';
+                clearRoomCache();
             }
         } elseif ($action === 'bulk_status_change') {
             $room_ids = adminBulkIds('bulk_ids') ?: adminBulkIds('room_ids');

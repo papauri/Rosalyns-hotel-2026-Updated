@@ -733,6 +733,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $pdo->beginTransaction();
+                // A guest with an open tab / room-service order is in the house: the order must be closed first.
+                $pdo->prepare("SELECT id FROM bookings WHERE id = ? FOR UPDATE")->execute([$booking_id]);
+                $openOrderRef = rh_booking_open_order_ref($pdo, (int)$booking_id);
+                if ($openOrderRef !== null) {
+                    $pdo->rollBack();
+                    throw new Exception('Order ' . $openOrderRef . ' is still open - close it in Orders & Tabs first.');
+                }
                 $stmt = $pdo->prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?");
                 $stmt->execute([$booking_id]);
 
@@ -2117,90 +2124,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $booking_id = intval($_POST['id'] ?? 0);
             $noshow_note = trim((string)($_POST['checkin_note'] ?? ''));
             if ($booking_id > 0) {
-                // Get full booking info needed for refund + email
-                $check_stmt = $pdo->prepare("
-                    SELECT b.*, r.name as room_name
-                    FROM bookings b
-                    LEFT JOIN rooms r ON b.room_id = r.id
-                    WHERE b.id = ?
-                ");
-                $check_stmt->execute([$booking_id]);
-                $bk = $check_stmt->fetch(PDO::FETCH_ASSOC);
-
-                if ($bk) {
-                    $todayNoShow = new DateTime('today');
-                    $bookingCheckIn = new DateTime((string)($bk['check_in_date'] ?? 'today'));
-                    $bookingCheckIn->setTime(0, 0, 0);
-                    $daysOverdue = $bookingCheckIn < $todayNoShow ? (int)$bookingCheckIn->diff($todayNoShow)->days : 0;
-
-                    if ($bookingCheckIn >= $todayNoShow) {
-                        $error = 'No-show can only be marked after the check-in date has passed.';
-                    } else {
-                        // Validate transition to no-show
-                        $transitionValidation = validateBookingStatusTransition($bk['status'], 'no-show');
-                        if (!$transitionValidation['allowed']) {
-                            $error = getBookingActionErrorMessage('noshow', $transitionValidation['reason']);
-                        } else {
-                            // Conditional on the status we validated: a double click / second tab must not
-                            // mark twice (a second refund would be queued and a second email sent).
-                            $upd = $pdo->prepare("UPDATE bookings SET status = 'no-show', updated_at = NOW() WHERE id = ? AND status = ?");
-                            $upd->execute([$booking_id, $bk['status']]);
-                            if ($upd->rowCount() !== 1) {
-                                throw new Exception('This booking was already updated by someone else. Nothing was changed.');
-                            }
-
-                            // Restore room availability - only a confirmed booking held a stock unit
-                            // (decremented at confirmation); pending/other statuses never did.
-                            if ($bk['status'] === 'confirmed') {
-                                $restore = $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms");
-                                $restore->execute([$bk['room_id']]);
-                            }
-
-                            updateBookingRoomsStatus(
-                                $booking_id,
-                                'available',
-                                'Marked no-show: ' . ($bk['booking_reference'] ?? ('Booking #' . $booking_id)),
-                                $user['id'] ?? null
-                            );
-
-                            $message = 'Booking ' . htmlspecialchars($bk['booking_reference']) . ' marked as No-Show. Room availability restored.';
-                            $noshowEventContext = [
-                                'booking_id' => $booking_id,
-                                'ref' => $bk['booking_reference'],
-                                'scheduled_check_in' => $bk['check_in_date'] ?? null,
-                                'days_overdue' => $daysOverdue,
-                                'by' => $user['username'] ?? null,
-                            ];
-                            if ($noshow_note !== '') {
-                                $noshowEventContext['note'] = $noshow_note;
-                            }
-                            rh_log_event('bookings', 'warning', 'Booking marked no-show', $noshowEventContext);
-
-                            $noshowAuditNote = $noshow_note !== '' ? ('No-show note: ' . $noshow_note) : null;
-                            if ($daysOverdue > 0) {
-                                $noshowDescriptor = 'No-show marked ' . $daysOverdue . ' day(s) after check-in date';
-                                $noshowAuditNote = $noshowAuditNote !== null
-                                    ? ($noshowDescriptor . ' - ' . $noshowAuditNote)
-                                    : $noshowDescriptor;
-                            }
-                            logBookingAudit($booking_id, 'no-show', ['status' => $bk['status']], ['status' => 'no-show'], $noshowAuditNote, $bk['booking_reference'] ?? null);
-
-                            // Auto-refund — DB-only, fast
-                            $ns_refund = ['created' => false, 'refund_ref' => '', 'refund_amount' => 0.0];
-                            if ((float)($bk['amount_paid'] ?? 0) > 0) {
-                                require_once __DIR__ . '/../includes/booking-functions.php';
-                                $ns_refund = createNoShowRefund($bk, (int)($user['id'] ?? 0), $pdo);
-                            }
-                            if ($ns_refund['created']) {
-                                $message .= ' Pending refund ' . $ns_refund['refund_ref']
-                                    . ' (' . getSetting('currency_symbol', 'MWK') . ' ' . number_format((float)$ns_refund['refund_amount'], 2) . ') queued.';
-                            } elseif (!empty($ns_refund['error'])) {
-                                $message .= ' WARNING: the automatic refund could not be created (' . $ns_refund['error'] . ') - raise it manually in Payments.';
-                            }
-                        }
-                    }
+                // One transaction (orders, status, rooms, holds, refund) in rh_mark_booking_no_show().
+                require_once __DIR__ . '/../includes/booking-functions.php';
+                $ns = rh_mark_booking_no_show($pdo, $booking_id, (int)($user['id'] ?? 0), (string)($user['full_name'] ?? ($user['username'] ?? '')), $noshow_note);
+                if (!$ns['success']) {
+                    $error = $ns['error'];
                 } else {
-                    $error = 'Booking not found.';
+                    $bk = $ns['booking'];
+                    $ns_refund = $ns['refund'];
+                    $message = 'Booking ' . htmlspecialchars($bk['booking_reference']) . ' marked as No-Show. Room availability restored.';
+                    if (!empty($ns['closed_orders'])) {
+                        $message .= ' Closed order(s) ' . htmlspecialchars(implode(', ', $ns['closed_orders'])) . '.';
+                    }
+                    if ($ns_refund['created']) {
+                        $message .= ' Pending refund ' . $ns_refund['refund_ref']
+                            . ' (' . getSetting('currency_symbol', 'MWK') . ' ' . number_format((float)$ns_refund['refund_amount'], 2) . ') queued.';
+                    } elseif (!empty($ns_refund['error'])) {
+                        $message .= ' WARNING: the automatic refund could not be created (' . $ns_refund['error'] . ') - raise it manually in Payments.';
+                    }
                 }
             }
 

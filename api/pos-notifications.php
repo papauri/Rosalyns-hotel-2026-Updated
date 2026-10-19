@@ -154,6 +154,8 @@ if ($action === 'poll') {
                         FROM pos_ready_notifications n
                         WHERE n.created_at >= ?
                             AND n.created_at < ?
+                            /* A cancelled / voided order never asks anyone to collect it (backstop to the cleanup at cancel / void time). */
+                            AND NOT EXISTS (SELECT 1 FROM stock_orders closed_o WHERE closed_o.id = n.order_id AND closed_o.status IN ('cancelled', 'voided'))
                             AND NOT EXISTS (
                                         SELECT 1
                                             FROM stock_order_items pending

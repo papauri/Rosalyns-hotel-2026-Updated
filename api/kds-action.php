@@ -1237,8 +1237,16 @@ try {
         $liveLeft = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id=? AND kds_status <> 'void'");
         $liveLeft->execute([$orderId]);
         if ((int)$liveLeft->fetchColumn() === 0 && !$paidOrPart) {
-            $pdo->prepare("UPDATE stock_orders SET status='cancelled', voided_by=?, voided_at=NOW(), void_reason=?, updated_at=NOW() WHERE id=? AND status='placed'")
-                ->execute([$userId, '86: every item on the order was voided by the station', $orderId]);
+            $cancelEmpty = $pdo->prepare("UPDATE stock_orders SET status='cancelled', voided_by=?, voided_at=NOW(), void_reason=?, updated_at=NOW() WHERE id=? AND status='placed'");
+            $cancelEmpty->execute([$userId, '86: every item on the order was voided by the station', $orderId]);
+            if ($cancelEmpty->rowCount() > 0) {
+                // The order is gone: it must stop asking a waiter to collect it.
+                try {
+                    $pdo->prepare("DELETE FROM pos_ready_notifications WHERE order_id = ?")->execute([$orderId]);
+                } catch (Throwable $e) {
+                    error_log('void_item ready-ping cleanup: ' . $e->getMessage());
+                }
+            }
         }
 
         $newOrderStatus = kds_recompute_order_status($pdo, $orderId);

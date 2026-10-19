@@ -216,11 +216,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pm_action'])) {
             // Sold products stay for order history / recipe-cost joins — deactivate instead.
             $sold = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE menu_item_id = ?");
             $sold->execute([$itemId]);
-            if ((int)$sold->fetchColumn() > 0) {
+            $hasSales = ((int)$sold->fetchColumn() > 0);
+            // Folio charges also point at the item (booking_charges.source_item_id); match the charge
+            // type to the item's category slug (chargeTypeToMenuType) so a drink id never blocks a food item.
+            $slugStmt = $pdo->prepare("SELECT mc.slug FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE mi.id = ?");
+            $slugStmt->execute([$itemId]);
+            $itemMenuType = chargeTypeToMenuType((string)$slugStmt->fetchColumn());
+            if (!$hasSales && $itemMenuType !== null) {
+                try {
+                    $chg = $pdo->prepare("SELECT COUNT(*) FROM booking_charges WHERE source_item_id = ? AND charge_type = ?");
+                    $chg->execute([$itemId, $itemMenuType]);
+                    $hasSales = ((int)$chg->fetchColumn() > 0);
+                } catch (Throwable $e) {
+                    // legacy schema without booking_charges.source_item_id: nothing to check
+                }
+            }
+            if ($hasSales) {
                 $pdo->prepare("UPDATE menu_items SET is_available = 0 WHERE id = ?")->execute([$itemId]);
                 $pm_json(false, 'This product has sales history so it cannot be deleted — it has been marked unavailable instead.');
             }
-            $pdo->prepare("DELETE FROM menu_items WHERE id = ?")->execute([$itemId]);
+            // Delete the item and its stock recipe together (no orphaned recipe left deducting stock).
+            $pdo->beginTransaction();
+            try {
+                if ($itemMenuType !== null) {
+                    $recSel = $pdo->prepare("SELECT id FROM stock_recipes WHERE menu_item_id = ? AND menu_type = ?");
+                    $recSel->execute([$itemId, $itemMenuType]);
+                    foreach ($recSel->fetchAll(PDO::FETCH_COLUMN) as $recipeId) {
+                        $pdo->prepare("DELETE FROM stock_recipe_ingredients WHERE recipe_id = ?")->execute([(int)$recipeId]);
+                        $pdo->prepare("DELETE FROM stock_recipes WHERE id = ?")->execute([(int)$recipeId]);
+                    }
+                }
+                $pdo->prepare("DELETE FROM menu_items WHERE id = ?")->execute([$itemId]);
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
             $pm_json(true, 'Product deleted.');
         }
 

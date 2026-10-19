@@ -269,15 +269,35 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             } elseif ($action === 'cancel') {
                 $poId = (int)($_POST['po_id'] ?? 0);
-                $pdo->prepare("UPDATE stock_purchase_orders SET status = 'cancelled', cancelled_at = NOW() WHERE id = ? AND status IN ('draft','sent')")->execute([$poId]);
-                $message = 'Purchase order cancelled.';
                 $redirectTo = 'purchase-orders.php?id=' . $poId;
+                $cancelStmt = $pdo->prepare("UPDATE stock_purchase_orders SET status = 'cancelled', cancelled_at = NOW() WHERE id = ? AND status IN ('draft','sent')");
+                $cancelStmt->execute([$poId]);
+                if ($cancelStmt->rowCount() < 1) {
+                    throw new RuntimeException('A purchase order that has received stock cannot be cancelled. Close it instead.');
+                }
+                $message = 'Purchase order cancelled.';
 
             } elseif ($action === 'close') {
                 $poId = (int)($_POST['po_id'] ?? 0);
-                $pdo->prepare("UPDATE stock_purchase_orders SET status = 'closed', closed_at = NOW() WHERE id = ? AND status IN ('partial','received','sent')")->execute([$poId]);
-                $message = 'Purchase order closed.';
                 $redirectTo = 'purchase-orders.php?id=' . $poId;
+                $pdo->beginTransaction();
+                $pdo->prepare("SELECT id FROM stock_purchase_orders WHERE id = ? FOR UPDATE")->execute([$poId]);
+                // Lines still short of the ordered quantity when the PO is closed: leave a note on the PO.
+                $shortStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_purchase_order_items WHERE purchase_order_id = ? AND received_qty + 0.0001 < ordered_qty");
+                $shortStmt->execute([$poId]);
+                $shortLines = (int)$shortStmt->fetchColumn();
+                $closeStmt = $pdo->prepare("UPDATE stock_purchase_orders SET status = 'closed', closed_at = NOW() WHERE id = ? AND status IN ('partial','received','sent')");
+                $closeStmt->execute([$poId]);
+                if ($closeStmt->rowCount() < 1) {
+                    $pdo->rollBack();
+                    throw new RuntimeException('Only a sent or partly received purchase order can be closed.');
+                }
+                if ($shortLines > 0) {
+                    $pdo->prepare("UPDATE stock_purchase_orders SET notes = CONCAT_WS(CHAR(10), NULLIF(notes, ''), ?) WHERE id = ?")
+                        ->execute(['Closed short: ' . $shortLines . ' line(s) not fully received', $poId]);
+                }
+                $pdo->commit();
+                $message = 'Purchase order closed.';
 
             } elseif ($action === 'receive') {
                 $poId = (int)($_POST['po_id'] ?? 0);

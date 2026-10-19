@@ -681,6 +681,7 @@ function deleteAssignment($id): void {
     $row = $pdo->prepare("SELECT individual_room_id FROM housekeeping_assignments WHERE id = ?");
     $row->execute([$id]);
     $roomId = (int)($row->fetchColumn() ?: 0);
+    rh_log_task_snapshot_before_delete($pdo, 'housekeeping', (int)$id, null, null);
     $pdo->prepare("DELETE FROM housekeeping_assignments WHERE id = ?")->execute([$id]);
     if ($roomId) apiReconcileRoomById($roomId);
     ApiResponse::success(null, 'Assignment deleted');

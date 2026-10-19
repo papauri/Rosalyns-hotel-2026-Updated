@@ -108,6 +108,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 throw new Exception('Invalid refund method.');
             }
             $isStoreCredit = ($refund_method === 'store_credit');
+            // A payment made BY credit note is never paid back in cash: the credit goes back to that
+            // note (re-opened, no cash leaves the hotel). Settled immediately - there is no provider.
+            $isCnPayment = !$isStoreCredit && (string)($payment['payment_method'] ?? '') === 'credit_note';
 
             if ($refund_amount <= 0) {
                 throw new Exception('Refund amount must be greater than zero.');
@@ -124,7 +127,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 throw new Exception('Invalid refund reason.');
             }
 
-            if ($isStoreCredit) {
+            if ($isCnPayment) {
+                $refund_status = 'completed';
+            } elseif ($isStoreCredit) {
                 // Store credit is issued immediately as a credit note — it is always
                 // settled now, independent of the original payment method (no external
                 // provider settlement is involved). The mobile-money hold does not apply.
@@ -237,6 +242,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 $_SESSION['admin_user_id'] ?? null
             ]);
             $newRefundRowId = (int)$pdo->lastInsertId();
+
+            if ($isCnPayment) {
+                require_once __DIR__ . '/../config/credit-notes.php';
+                $cnBack = rh_reopen_credit_note_for_payment(
+                    $pdo,
+                    $payment,
+                    $refund_amount,
+                    (int)($_SESSION['admin_user_id'] ?? 0),
+                    $newRefundRowId,
+                    'Refund ' . $refundRef . ' (' . $refund_reason . ')'
+                );
+                if (empty($cnBack['ok'])) {
+                    throw new Exception('Nothing was refunded. ' . $cnBack['error'] . ' Use "store credit" to issue a new credit note instead.');
+                }
+                $pdo->prepare("UPDATE payments SET refund_notes = CONCAT(COALESCE(refund_notes, ''), ?) WHERE id = ?")
+                    ->execute([' [Returned to credit note ' . $cnBack['cn_number'] . ']', $newRefundRowId]);
+            }
 
             // Store credit: issue the credit note INSIDE the transaction and link it to the
             // refund row (credit_note_id), so voiding the note restores the money to the

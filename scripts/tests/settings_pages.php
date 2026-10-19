@@ -25,6 +25,9 @@ function run_page(string $page, array $post, array $verify = [], bool $ajax = fa
 function flash(array $r): string { return strtolower(implode(' | ', $r['output_flash'] ?? [])); }
 function jmsg(array $r): string { return strtolower((string)($r['json']['message'] ?? $r['json']['error'] ?? '')); }
 require_once $root . '/config/database.php';
+// The suite runs ~6 minutes of page subprocesses while this connection sits idle; the server's
+// 300s wait_timeout would drop it ("MySQL server has gone away"). Session-only, test-only.
+try { $pdo->exec('SET SESSION wait_timeout = 1800'); } catch (Throwable $e) {}
 function pdo_live(): PDO { global $pdo; return $pdo; }
 
 echo "== Rate plans (admin/rate-plans.php) ==\n";

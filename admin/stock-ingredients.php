@@ -134,6 +134,18 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 });
             } elseif ($action === 'archive') {
                 $id = (int)($_POST['id'] ?? 0);
+                /* Owner 2026-10-19: an archived ingredient drops out of the stock valuation, so stock
+                 * on hand must be counted or written off first (no value vanishing silently). */
+                $curQ = $pdo->prepare("SELECT current_quantity, unit FROM stock_ingredients WHERE id = ?");
+                $curQ->execute([$id]);
+                $cur = $curQ->fetch(PDO::FETCH_ASSOC);
+                if (!$cur) {
+                    throw new RuntimeException('Ingredient not found.');
+                }
+                if (abs((float)$cur['current_quantity']) > 0.00005) {
+                    throw new RuntimeException('Cannot archive: ' . rtrim(rtrim(number_format((float)$cur['current_quantity'], 3, '.', ''), '0'), '.')
+                        . ' ' . $cur['unit'] . ' is still in stock. Count it in a stock count or record it as wastage first, so its value is written off properly.');
+                }
                 $stmt = $pdo->prepare("UPDATE stock_ingredients SET is_archived = 1, updated_at = NOW() WHERE id = ?");
                 $stmt->execute([$id]);
                 $message = 'Ingredient archived.';

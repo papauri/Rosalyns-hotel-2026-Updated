@@ -70,14 +70,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
             $stmt->execute([$new_status, $inquiry_id]);
             $message = 'Event booking status updated successfully!';
         } elseif ($action === 'delete') {
-            // Payments are ledger records: a booking that has any cannot be deleted (cancel it instead).
-            $payChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'event' AND booking_id = ? AND deleted_at IS NULL");
-            $payChk->execute([(int)$inquiry_id]);
-            if ((int)$payChk->fetchColumn() > 0) {
-                throw new Exception('This booking has payments recorded against it and cannot be deleted. Cancel it instead.');
+            // Money trail is never deleted: any payment row (even a removed one - it is still history) or any
+            // credit note blocks deletion - cancel the booking instead. Checked under a row lock so a payment
+            // recorded at the same moment cannot slip in between the check and the delete.
+            $inquiry_id = (int)$inquiry_id;
+            $pdo->beginTransaction();
+            try {
+                $delLock = $pdo->prepare("SELECT id FROM event_inquiries WHERE id = ? FOR UPDATE");
+                $delLock->execute([$inquiry_id]);
+                if (!$delLock->fetchColumn()) {
+                    throw new Exception('Event booking not found!');
+                }
+                $payChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'event' AND booking_id = ?");
+                $payChk->execute([$inquiry_id]);
+                if ((int)$payChk->fetchColumn() > 0) {
+                    throw new Exception('This booking has payments recorded against it and cannot be deleted. Cancel it instead.');
+                }
+                $cnChk = $pdo->prepare("SELECT COUNT(*) FROM credit_notes WHERE booking_type = 'event' AND booking_id = ?");
+                $cnChk->execute([$inquiry_id]);
+                if ((int)$cnChk->fetchColumn() > 0) {
+                    throw new Exception('This booking has a credit note recorded against it and cannot be deleted. Cancel it instead.');
+                }
+                $pdo->prepare("DELETE FROM event_inquiries WHERE id = ?")->execute([$inquiry_id]);
+                $pdo->commit();
+            } catch (Throwable $delEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $delEx;
             }
-            $stmt = $pdo->prepare("DELETE FROM event_inquiries WHERE id = ?");
-            $stmt->execute([$inquiry_id]);
             $message = 'Event booking deleted successfully!';
         } elseif (in_array($action, ['confirm', 'promote', 'cancel', 'complete', 'record_payment', 'resend_invoice', 'send_quotation', 'update_amount', 'update_notes'], true)) {
             $inquiry_id = (int)$inquiry_id;

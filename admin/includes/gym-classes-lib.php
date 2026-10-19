@@ -181,14 +181,61 @@ if (!function_exists('gymClassDelete')) {
     function gymClassDelete(PDO $pdo, int $classId): array
     {
         gymClassesEnsureTables($pdo);
+        // Enrolments and the class go together or not at all. Join an outer transaction if the
+        // caller already opened one (only the owner of a transaction commits it).
+        $ownTx = !$pdo->inTransaction();
         try {
+            if ($ownTx) {
+                $pdo->beginTransaction();
+            }
             $pdo->prepare("DELETE FROM gym_class_enrollments WHERE class_id = ?")->execute([$classId]);
             $pdo->prepare("DELETE FROM gym_classes WHERE id = ?")->execute([$classId]);
+            if ($ownTx) {
+                $pdo->commit();
+            }
             return ['success' => true, 'message' => 'Class deleted.'];
         } catch (Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             error_log('gymClassDelete: ' . $e->getMessage());
             return ['success' => false, 'message' => 'Database error while deleting the class.'];
         }
+    }
+}
+
+if (!function_exists('gym_member_release_future')) {
+    /**
+     * Stop a member's future gym bookings from running on after the membership ends (cancelled,
+     * expired, suspended, deleted). Same-transaction helper: it never begins or commits - the caller
+     * owns the transaction (and should call gymClassesEnsureTables() / gymScheduleEnsureTables()
+     * BEFORE beginTransaction, because CREATE TABLE IF NOT EXISTS commits implicitly).
+     *
+     *  - gym_slot_reservations still 'booked' for today or later -> 'cancelled' (past ones are history).
+     *  - gym_class_enrollments -> deleted. Classes are weekly recurring (no dated sessions), so every
+     *    enrolment is for a class not yet held; attendance history lives in gym_attendance, untouched.
+     *
+     * @return array{reservations:int, enrollments:int}
+     */
+    function gym_member_release_future(PDO $pdo, int $memberId): array
+    {
+        if ($memberId <= 0) {
+            return ['reservations' => 0, 'enrollments' => 0];
+        }
+        // Outside a transaction it is safe to self-heal the lazily created tables.
+        if (!$pdo->inTransaction()) {
+            gymClassesEnsureTables($pdo);
+            if (!function_exists('gymScheduleEnsureTables')) {
+                require_once __DIR__ . '/gym-schedule-lib.php';
+            }
+            gymScheduleEnsureTables($pdo);
+        }
+        $res = $pdo->prepare("UPDATE gym_slot_reservations SET status = 'cancelled' WHERE member_id = ? AND status = 'booked' AND slot_date >= CURDATE()");
+        $res->execute([$memberId]);
+        $reservations = $res->rowCount();
+        $enr = $pdo->prepare("DELETE FROM gym_class_enrollments WHERE member_id = ?");
+        $enr->execute([$memberId]);
+        return ['reservations' => $reservations, 'enrollments' => $enr->rowCount()];
     }
 }
 

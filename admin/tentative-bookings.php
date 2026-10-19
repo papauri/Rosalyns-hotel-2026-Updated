@@ -38,6 +38,8 @@ try {
         foreach ($stale as $sid) {
             $ins->execute([$sid]);
         }
+        // Release the rooms those holds kept and expire their open quotations (one batch).
+        rh_release_holds_for_booking_ids($pdo, $stale);
     }
 } catch (PDOException $e) {
     error_log('Auto-expire error: ' . $e->getMessage());

@@ -27,6 +27,7 @@ require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../admin/includes/offline-log.php';
 require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
 require_once __DIR__ . '/../admin/includes/pos-notices.php';
+require_once __DIR__ . '/../admin/includes/pos-order-close.php';
 require_once __DIR__ . '/../includes/admin-session.php';
 rh_admin_session_start(); // 8h idle sign-out
 
@@ -41,59 +42,6 @@ function cjok(array $extra = []): void
 {
     echo json_encode(array_merge(['ok' => true], $extra));
     exit;
-}
-
-function c_restore_from_pos_order(PDO $pdo, int $orderId, ?int $doneBy): void
-{
-    // Shared per-line restore (see rh_restore_pos_order_stock): matched on the original deduction,
-    // skips lines an 86 or a KDS recall already handled.
-    rh_restore_pos_order_stock($pdo, $orderId, $doneBy, 'POS order cancelled before prep');
-}
-
-function c_column_exists(PDO $pdo, string $table, string $column): bool
-{
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?");
-    $stmt->execute([$table, $column]);
-    return (int)$stmt->fetchColumn() > 0;
-}
-
-function c_void_room_service_folio_charges(PDO $pdo, int $orderId, string $reason, int $voidedBy): int
-{
-    if (!c_column_exists($pdo, 'booking_charges', 'stock_order_id')) {
-        error_log("booking_charges.stock_order_id missing; room-service folio charges not voided for stock order {$orderId}");
-        // Graceful fallback: match void-order.php behaviour — don't block cancellation
-        return 0;
-    }
-
-    $stmt = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE stock_order_id = ? AND voided = 0 FOR UPDATE");
-    $stmt->execute([$orderId]);
-    $charges = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    if (!$charges) {
-        return 0;
-    }
-
-    // Tracked folio charges: per-line restore / wastage (lines the KDS already deducted under
-    // source_type='pos_order' were handled by c_restore_from_pos_order and are skipped there).
-
-    $update = $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ?");
-    $bookingIds = [];
-    foreach ($charges as $charge) {
-        $chargeId = (int)$charge['id'];
-        $update->execute([mb_substr($reason, 0, 255), $voidedBy, $chargeId]);
-        // Restore stock if it was deducted via the room_service path and not yet restored
-        try {
-            rh_restore_room_service_charge_stock($pdo, $orderId, $charge, 'Room service order cancelled: ' . $reason, $voidedBy);
-        } catch (Throwable $se) {
-            error_log("c_void_room_service_folio_charges stock restore failed for charge {$chargeId}: " . $se->getMessage());
-        }
-        $bookingIds[(int)$charge['booking_id']] = true;
-    }
-
-    foreach (array_keys($bookingIds) as $bookingId) {
-        recalculateBookingFinancials((int)$bookingId);
-    }
-
-    return count($charges);
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -207,58 +155,21 @@ try {
         cjerr('Cannot cancel: order is already in progress');
     }
 
-    c_restore_from_pos_order($pdo, $orderId, $userId);
-    $folioVoided = 0;
-    if (($order['order_type'] ?? '') === 'room_service') {
-        $folioVoided = c_void_room_service_folio_charges($pdo, $orderId, 'Room-service order cancelled before prep: ' . $details, $userId);
-    }
-
-    $pdo->prepare("UPDATE stock_orders SET status='cancelled', voided_by=?, voided_at=NOW(), void_reason=?, updated_at=NOW(), kitchen_status='served', served_at=COALESCE(served_at, NOW()) WHERE id=?")
-        ->execute([$userId, mb_substr($details, 0, 500), $orderId]);
-
-    $pdo->prepare("UPDATE stock_order_items SET kds_status='void', served_at=COALESCE(served_at, NOW()), bumped_by=? WHERE order_id=? AND kds_status NOT IN ('served','void')")
-        ->execute([$userId, $orderId]);
-
-    /* Retract any outstanding collection ping / unacknowledged station note — a cancelled
-     * order must stop asking the floor to collect it (see the same cleanup in void-order.php). */
-    try {
-        $pdo->prepare("DELETE FROM pos_ready_notifications WHERE order_id = ?")->execute([$orderId]);
-        $pdo->prepare("UPDATE station_messages SET pos_acknowledged = 1, pos_acknowledged_at = NOW(), pos_acknowledged_by = ? WHERE order_id = ? AND source = 'station' AND COALESCE(pos_acknowledged, 0) = 0")
-            ->execute([$userId, $orderId]);
-    } catch (Throwable $e) {
-        error_log('cancel-order notification cleanup: ' . $e->getMessage());
-    }
-
-    $actorName = (string)($user['full_name'] ?? $user['username'] ?? 'user');
-    $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, 'cancelled_before_prep', ?, ?)")
-        ->execute([$orderId, $userId, $actorName, $details, $ip]);
-
-    try {
-        $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, from_status, to_status, user_id, user_name, ip_address) VALUES (?, 'cancelled', ?, 'void', ?, ?, ?)")
-            ->execute([$orderId, (string)$order['kitchen_status'], $userId, $actorName, $ip]);
-    } catch (Throwable $e) {
-        // Keep cancellation resilient on older event schemas.
+    // Shared close (stock restore, folio charges, order + lines, ready pings, audit, KDS event):
+    // admin/includes/pos-order-close.php. Booking balances are re-derived here, inside the transaction.
+    $closed = rh_close_pos_order($pdo, $orderId, $userId, $details, 'cancel');
+    $folioVoided = (int)$closed['folio_voided'];
+    foreach ($closed['booking_ids'] as $closedBookingId) {
+        recalculateBookingFinancials((int)$closedBookingId);
     }
 
     $pdo->commit();
 
     /* Tell the cashier who opened the order that it was cancelled from another screen. The notice is
      * actionable on the till (Mark as read / Open order / ...): see admin/includes/pos-notices.php. */
-    if ((int)($order['created_by'] ?? 0) > 0 && (int)$order['created_by'] !== $userId) {
+    foreach ($closed['notices'] as $notice) {
         try {
-            $cancellerName = (string)($user['full_name'] ?? $user['username'] ?? 'station');
-            $notifMsg = 'Order ' . (string)$order['reference'] . ' was CANCELLED by ' . rh_pos_notice_actor_label($userRole) . ' (' . $cancellerName . '): ' . $reason;
-            rh_pos_notice_send($pdo, [
-                'station'      => 'kitchen',
-                'message'      => $notifMsg,
-                'sent_by'      => $userId,
-                'sent_by_name' => $cancellerName,
-                'order_id'     => $orderId,
-                'order_ref'    => (string)$order['reference'],
-                'to_user_id'   => (int)$order['created_by'],
-                'priority'     => 'urgent',
-                'notice_type'  => 'order_cancelled',
-            ]);
+            rh_pos_notice_send($pdo, $notice);
         } catch (Throwable $e) {
             error_log('cancel-order POS notify: ' . $e->getMessage());
             // Non-fatal - cancel is committed, notification is best-effort

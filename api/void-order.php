@@ -22,6 +22,7 @@ require_once __DIR__ . '/../admin/includes/offline-log.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
 require_once __DIR__ . '/../admin/includes/pos-notices.php';
+require_once __DIR__ . '/../admin/includes/pos-order-close.php';
 require_once __DIR__ . '/../includes/admin-session.php';
 rh_admin_session_start(); // 8h idle sign-out
 
@@ -49,45 +50,6 @@ $ip       = $_SERVER['REMOTE_ADDR'] ?? null;
 if ($orderId <= 0) vjerr('Missing order_id');
 if (mb_strlen($reason) < 8) vjerr('Void reason is required (at least 8 characters)');
 $details = $reason . ($notes !== '' ? "\nNotes: " . $notes : '');
-
-// Stock restore is shared with api/cancel-order.php and admin/stock-orders.php
-// (rh_restore_pos_order_stock in restaurant-payment-sync.php): per-line, matched on the
-// original deduction, and it skips lines an 86 or a KDS recall already dealt with.
-function v_restoreFromPosOrder(PDO $pdo, int $orderId, ?int $doneBy): void {
-    rh_restore_pos_order_stock($pdo, $orderId, $doneBy, 'POS order voided (admin)');
-}
-
-function v_voidRoomServiceFolioCharges(PDO $pdo, int $orderId, string $reason, int $voidedBy): int {
-    if (!v_column_exists($pdo, 'booking_charges', 'stock_order_id')) {
-        return 0;
-    }
-
-    $stmt = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE stock_order_id = ? AND voided = 0 FOR UPDATE");
-    $stmt->execute([$orderId]);
-    $charges = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    if (!$charges) {
-        return 0;
-    }
-
-    // Stock booked against a tracked folio charge (source_type='room_service') is restored or written
-    // off per line by rh_restore_room_service_charge_stock(); lines whose stock came through the KDS
-    // (source_type='pos_order') were already handled by v_restoreFromPosOrder() and are skipped there.
-
-    $bookingIds = [];
-    $update = $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ?");
-    foreach ($charges as $charge) {
-        $chargeId = (int)$charge['id'];
-        $update->execute([mb_substr($reason, 0, 255), $voidedBy, $chargeId]);
-        rh_restore_room_service_charge_stock($pdo, $orderId, $charge, 'Room service order voided: ' . $reason, $voidedBy);
-        $bookingIds[(int)$charge['booking_id']] = true;
-    }
-
-    foreach (array_keys($bookingIds) as $bookingId) {
-        recalculateBookingFinancials((int)$bookingId);
-    }
-
-    return count($charges);
-}
 
 try {
     $pdo->beginTransaction();
@@ -134,82 +96,24 @@ try {
         vjerr('Order ' . $order['reference'] . ' is ' . str_replace('_', ' ', (string)$order['status']) . ' - only an open or paid order can be voided.');
     }
 
-    v_restoreFromPosOrder($pdo, $orderId, (int)$user['id']);
-    $folioVoided = v_voidRoomServiceFolioCharges($pdo, $orderId, $details, (int)$user['id']);
-
-    $pdo->prepare("UPDATE stock_orders SET status='voided', voided_by=?, voided_at=NOW(), void_reason=?, updated_at=NOW(), kitchen_status='served', served_at=COALESCE(served_at, NOW()) WHERE id=?")
-         ->execute([(int)$user['id'], mb_substr($details, 0, 500), $orderId]);
-    $pdo->prepare("UPDATE stock_order_items SET kds_status='void', served_at=COALESCE(served_at, NOW()), bumped_by=? WHERE order_id=? AND kds_status NOT IN ('served','void')")
-         ->execute([(int)$user['id'], $orderId]);
-
-    // Reverse the sale with contra rows (payment_type='refund' - the category every report already
-    // nets out) through the shared method used by the POS refund: one reversal per original payment
-    // row (per split leg, in that leg's tender), for only what is still refundable after any
-    // earlier refund. The original rows are never mutated. An order that was never paid simply has
-    // nothing to reverse. 'cancellation' is the closest member of the refund_reason ENUM; the
-    // operator's wording goes to notes.
-    $reversal = rh_reverse_restaurant_payments(
-        $pdo,
-        $orderId,
-        (string)($order['reference'] ?? ('ORD' . $orderId)),
-        'VOID-',
-        'cancellation',
-        'Void: ' . $details,
-        (int)$user['id']
-    );
-    /* Retract any outstanding "ready for collection" ping and unacknowledged station note for
-     * this order. The POS poll only suppresses a notification while items are still in
-     * progress — once every item is 'void' that check passes, so a voided order would keep
-     * telling a waiter to go and collect food that no longer exists. */
-    try {
-        $pdo->prepare("DELETE FROM pos_ready_notifications WHERE order_id = ?")->execute([$orderId]);
-        $pdo->prepare("UPDATE station_messages SET pos_acknowledged = 1, pos_acknowledged_at = NOW(), pos_acknowledged_by = ? WHERE order_id = ? AND source = 'station' AND COALESCE(pos_acknowledged, 0) = 0")
-             ->execute([(int)$user['id'], $orderId]);
-    } catch (Throwable $e) {
-        error_log('void-order notification cleanup: ' . $e->getMessage());
+    // Shared close (stock restore / wastage, folio charges, order + lines, payment reversal with contra
+    // rows, ready pings, STOP note, audit + KDS event): admin/includes/pos-order-close.php.
+    // Booking balances are re-derived here, inside the transaction.
+    $closed = rh_close_pos_order($pdo, $orderId, (int)$user['id'], $details, 'void');
+    $folioVoided = (int)$closed['folio_voided'];
+    foreach ($closed['booking_ids'] as $closedBookingId) {
+        recalculateBookingFinancials((int)$closedBookingId);
     }
-
-    $actorName = $user['full_name'] ?? $user['username'] ?? 'admin';
-    $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, 'voided', ?, ?)")
-         ->execute([$orderId, (int)$user['id'], $actorName, $details, $ip]);
-    try {
-        $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, from_status, to_status, user_id, user_name, ip_address) VALUES (?, 'voided', 'in_progress', 'void', ?, ?, ?)")
-             ->execute([$orderId, (int)$user['id'], $actorName, $ip]);
-    } catch (Throwable $e) { /* legacy */ }
 
     $pdo->commit();
     if (function_exists('deleteCache')) { try { rh_clear_stock_dashboard_cache(); } catch (Throwable $e) {} }
 
     /* Tell the cashier who opened the order that it was voided from another screen (actionable
-     * notice on the till). When a payment was reversed the notice says the guest is owed the money. */
-    if ((int)($order['created_by'] ?? 0) > 0 && (int)$order['created_by'] !== (int)$user['id']) {
+     * notice on the till). When a payment was reversed the notice says the guest is owed the money
+     * and on whose shift - the wording is built in rh_close_pos_order(). */
+    foreach ($closed['notices'] as $notice) {
         try {
-            $voiderName = (string)($user['full_name'] ?? $user['username'] ?? 'manager');
-            /* The money sentence comes BEFORE the reason and is never cut: the reason is what gets truncated
-             * to fit the 255-character note. The payout is booked on the voider's shift (voided_by), so the
-             * cashier is told whose drawer the guest's money comes back from. */
-            $voidHead = 'Order ' . (string)$order['reference'] . ' was VOIDED by ' . rh_pos_notice_actor_label((string)($user['role'] ?? '')) . ' (' . $voiderName . ').';
-            $voidMoney = '';
-            if (!empty($reversal['reversed_gross']) && (float)$reversal['reversed_gross'] > 0) {
-                $voidMoney = ' Payment of ' . number_format((float)$reversal['reversed_gross'], 2) . ' (excl. tip) was reversed and counted as paid out on ' . $voiderName . "'s shift - hand the guest their money back from that drawer.";
-            }
-            if (mb_strlen($voidHead . $voidMoney) > 235) {
-                $voidHead = 'Order ' . (string)$order['reference'] . ' was VOIDED.';
-            }
-            $reasonRoom = 255 - mb_strlen($voidHead . $voidMoney) - 9; // ' Reason: '
-            $reasonText = $reasonRoom >= 12 ? (mb_strlen($reason) > $reasonRoom ? mb_substr($reason, 0, $reasonRoom - 1) . '…' : $reason) : '';
-            $voidMsg = $voidHead . $voidMoney . ($reasonText !== '' ? ' Reason: ' . $reasonText : '');
-            rh_pos_notice_send($pdo, [
-                'station'      => 'kitchen',
-                'message'      => $voidMsg,
-                'sent_by'      => (int)$user['id'],
-                'sent_by_name' => $voiderName,
-                'order_id'     => $orderId,
-                'order_ref'    => (string)$order['reference'],
-                'to_user_id'   => (int)$order['created_by'],
-                'priority'     => 'urgent',
-                'notice_type'  => 'order_voided',
-            ]);
+            rh_pos_notice_send($pdo, $notice);
         } catch (Throwable $e) {
             error_log('void-order POS notify: ' . $e->getMessage()); // best-effort; the void is committed
         }

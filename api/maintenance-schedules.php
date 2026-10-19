@@ -687,6 +687,7 @@ function deleteSchedule($id) {
         ApiResponse::error('Schedule not found', 404);
     }
 
+    rh_log_task_snapshot_before_delete($pdo, 'maintenance', (int)$id, isset($row['created_by']) ? (int)$row['created_by'] : null, null);
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare("DELETE FROM room_maintenance_schedules WHERE id = ?");

@@ -736,3 +736,125 @@ function createNoShowRefund(array $booking, int $adminUserId, PDO $pdo): array
         'error'         => '',
     ];
 }
+
+/**
+ * Mark a booking as no-show - the ONE implementation behind admin/bookings.php and admin/booking-details.php.
+ *
+ * Everything in one transaction with the booking row locked: live orders closed (a part-paid or
+ * already-started order refuses the whole thing), status -> 'no-show', room-type stock + every held room
+ * released, open quotations expired, then createNoShowRefund() exactly as before (policy and amounts
+ * untouched; a refund that cannot be created is reported but the no-show still stands, as it always did).
+ * Emails stay with the caller.
+ *
+ * @return array{success:bool,error:string,booking:array,refund:array,days_overdue:int,closed_orders:string[]}
+ */
+function rh_mark_booking_no_show(PDO $pdo, int $bookingId, int $userId, string $userName = '', string $note = ''): array
+{
+    $out = ['success' => false, 'error' => '', 'booking' => [], 'refund' => ['created' => false, 'refund_ref' => '', 'refund_amount' => 0.0, 'error' => ''],
+            'days_overdue' => 0, 'closed_orders' => []];
+    $ownTx = !$pdo->inTransaction();
+    $notices = [];
+    try {
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        $lock = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id = ? FOR UPDATE");
+        $lock->execute([$bookingId]);
+        $bk = $lock->fetch(PDO::FETCH_ASSOC);
+        if (!$bk) {
+            throw new RuntimeException('Booking not found.');
+        }
+        $today = new DateTime('today');
+        $checkIn = new DateTime((string)($bk['check_in_date'] ?? 'today'));
+        $checkIn->setTime(0, 0, 0);
+        if ($checkIn >= $today) {
+            throw new RuntimeException('No-show can only be marked after the check-in date has passed.');
+        }
+        $tv = validateBookingStatusTransition((string)$bk['status'], 'no-show');
+        if (!$tv['allowed']) {
+            throw new RuntimeException(getBookingActionErrorMessage('noshow', $tv['reason']));
+        }
+        if ((string)$bk['status'] === 'no-show') {
+            throw new RuntimeException('This booking is already marked as no-show. Nothing was changed.');
+        }
+        $ref = (string)$bk['booking_reference'];
+        $daysOverdue = (int)$checkIn->diff($today)->days;
+
+        // Live orders first: a refusal changes nothing.
+        $oc = rh_booking_close_orders($pdo, $bookingId, $userId, 'Booking ' . $ref . ' marked no-show');
+        $notices = $oc['notices'];
+
+        // Conditional on the status we validated (the row is locked, this is belt and braces).
+        $upd = $pdo->prepare("UPDATE bookings SET status = 'no-show', updated_at = NOW() WHERE id = ? AND status = ?");
+        $upd->execute([$bookingId, $bk['status']]);
+        if ($upd->rowCount() !== 1) {
+            throw new RuntimeException('This booking was already updated by someone else. Nothing was changed.');
+        }
+        // Only a confirmed booking held a room-type stock unit (taken at confirmation).
+        if ((string)$bk['status'] === 'confirmed') {
+            $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")
+                ->execute([$bk['room_id']]);
+        }
+        updateBookingRoomsStatus($bookingId, 'available', 'Marked no-show: ' . ($ref !== '' ? $ref : ('Booking #' . $bookingId)), $userId ?: null);
+        rh_release_booking_holds($pdo, $bookingId, $userId, 'marked no-show');
+
+        // Auto-refund per the no_show_refund_policy setting. A savepoint keeps a failed refund from leaving
+        // half its legs behind while the no-show itself stands (same outcome as before this was one transaction).
+        $refund = ['created' => false, 'refund_ref' => '', 'refund_amount' => 0.0, 'error' => ''];
+        if ((float)($bk['amount_paid'] ?? 0) > 0) {
+            $pdo->exec('SAVEPOINT rh_noshow_refund');
+            $refund = createNoShowRefund($bk, $userId, $pdo);
+            if (!empty($refund['error'])) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT rh_noshow_refund');
+            }
+            $pdo->exec('RELEASE SAVEPOINT rh_noshow_refund');
+        }
+
+        if ($ownTx) {
+            $pdo->commit();
+            rh_send_booking_order_notices($pdo, $notices);
+        }
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $out['error'] = $e instanceof RuntimeException ? $e->getMessage() : 'The no-show could not be saved. Nothing was changed.';
+        if (!($e instanceof RuntimeException)) {
+            error_log('rh_mark_booking_no_show failed for booking ' . $bookingId . ': ' . $e->getMessage());
+        }
+        return $out;
+    }
+
+    // Audit trail (after commit; a logging failure must not undo the no-show).
+    $auditNote = $note !== '' ? ('No-show note: ' . $note) : null;
+    if ($daysOverdue > 0) {
+        $descriptor = 'No-show marked ' . $daysOverdue . ' day(s) after check-in date';
+        $auditNote = $auditNote !== null ? ($descriptor . ' - ' . $auditNote) : $descriptor;
+    }
+    if (function_exists('logBookingAudit')) {
+        logBookingAudit($bookingId, 'no-show', ['status' => $bk['status']], ['status' => 'no-show'], $auditNote, $ref);
+    }
+    if (!function_exists('logBookingEvent') && is_file(__DIR__ . '/booking-timeline.php')) {
+        require_once __DIR__ . '/booking-timeline.php';
+    }
+    if (function_exists('logBookingEvent')) {
+        logBookingEvent($bookingId, $ref, 'Guest marked as no-show', 'status_change',
+            'Guest did not arrive - marked as no-show' . ($daysOverdue > 0 ? ' (' . $daysOverdue . ' day(s) after check-in date)' : '')
+            . ($note !== '' ? '. Note: ' . $note : ''),
+            (string)$bk['status'], 'no-show', 'admin', $userId ?: null, $userName !== '' ? $userName : null);
+    }
+    if (function_exists('rh_log_event')) {
+        rh_log_event('bookings', 'warning', 'Booking marked no-show', array_filter([
+            'booking_id' => $bookingId, 'ref' => $ref, 'scheduled_check_in' => $bk['check_in_date'] ?? null,
+            'days_overdue' => $daysOverdue, 'by' => $userName !== '' ? $userName : null, 'note' => $note !== '' ? $note : null,
+            'closed_orders' => $oc['refs'] ?: null,
+        ], static function ($v) { return $v !== null; }));
+    }
+
+    $out['success'] = true;
+    $out['booking'] = $bk;
+    $out['refund'] = $refund;
+    $out['days_overdue'] = $daysOverdue;
+    $out['closed_orders'] = $oc['refs'];
+    return $out;
+}

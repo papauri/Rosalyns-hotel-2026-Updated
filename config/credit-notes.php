@@ -506,7 +506,7 @@ if (!function_exists('recordCreditNoteRefundLegs')) {
             require_once $syncInclude;
         }
         if ($bookingType === 'room') {
-            $allocs = allocateBookingRefunds($pdo, $bookingId, $amount, true);
+            $allocs = allocateBookingRefunds($pdo, $bookingId, $amount, true, 'any'); // money into a note, not a cash payout
         } else {
             $allocs = rh_allocate_account_refunds($pdo, $bookingType, $bookingId, $amount, true);
         }
@@ -541,6 +541,158 @@ if (!function_exists('recordCreditNoteRefundLegs')) {
             if (function_exists('rh_refresh_original_payment_status')) {
                 rh_refresh_original_payment_status($pdo, (int)$orig['id']);
             }
+        }
+        return $out;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rh_reopen_credit_note_for_payment / rh_refund_credit_note_payments
+// ─────────────────────────────────────────────────────────────────────────────
+if (!function_exists('rh_reopen_credit_note_for_payment')) {
+    /**
+     * Give credit-note money back to the note it came from (the "refund" of a payment that was
+     * made by credit note - no cash leaves the hotel). Lowers amount_used, raises balance, moves
+     * the status back to active / partially_applied and writes a NEGATIVE row in
+     * credit_note_applications as the reversal. Call inside the caller's transaction.
+     * Refuses a voided or expired note (the caller leaves that money as credit owed back).
+     *
+     * @param array $origPayment payments row of the credit-note payment (id, credit_note_id, booking_*)
+     * @return array{ok:bool,error:string,cn_number:string,application_id:int}
+     */
+    function rh_reopen_credit_note_for_payment(PDO $pdo, array $origPayment, float $amount, int $adminUserId, int $refundPaymentId = 0, string $note = ''): array
+    {
+        $out = ['ok' => false, 'error' => '', 'cn_number' => '', 'application_id' => 0];
+        $amount = round($amount, 2);
+        if ($amount <= BALANCE_TOLERANCE) {
+            $out['error'] = 'Nothing to return to the credit note.';
+            return $out;
+        }
+        $cnId = (int)($origPayment['credit_note_id'] ?? 0);
+        if ($cnId <= 0 && !empty($origPayment['id'])) {
+            $q = $pdo->prepare("SELECT credit_note_id FROM payments WHERE id = ?");
+            $q->execute([(int)$origPayment['id']]);
+            $cnId = (int)$q->fetchColumn();
+        }
+        if ($cnId <= 0) {
+            $out['error'] = 'This payment is not linked to a credit note.';
+            return $out;
+        }
+        $st = $pdo->prepare("SELECT * FROM credit_notes WHERE id = ? FOR UPDATE");
+        $st->execute([$cnId]);
+        $cn = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$cn) {
+            $out['error'] = 'The credit note for this payment no longer exists.';
+            return $out;
+        }
+        $out['cn_number'] = (string)$cn['credit_note_number'];
+        if (in_array((string)$cn['status'], ['voided', 'expired'], true)
+            || ($cn['expires_at'] !== null && $cn['expires_at'] < date('Y-m-d'))) {
+            $out['error'] = 'Credit note ' . $cn['credit_note_number'] . ' is ' . ((string)$cn['status'] === 'voided' ? 'voided' : 'expired') . ', so it cannot be re-opened.';
+            return $out;
+        }
+        $used = round((float)$cn['amount_used'], 2);
+        if ($amount > $used + BALANCE_TOLERANCE) {
+            $out['error'] = 'Credit note ' . $cn['credit_note_number'] . ' only shows ' . number_format($used, 2) . ' as used, so ' . number_format($amount, 2) . ' cannot be returned to it.';
+            return $out;
+        }
+        $bType = (string)($origPayment['booking_type'] ?? 'room');
+        if (!in_array($bType, ['room', 'conference', 'restaurant'], true)) {
+            $out['error'] = 'Credit notes cannot be re-opened for a ' . $bType . ' account.';
+            return $out;
+        }
+        $newUsed = max(0.0, round($used - $amount, 2));
+        $newBalance = round((float)$cn['original_amount'] - $newUsed, 2);
+        $newStatus = $newUsed <= BALANCE_TOLERANCE ? 'active' : 'partially_applied';
+        $pdo->prepare("UPDATE credit_notes SET amount_used = ?, balance = ?, status = ?, updated_at = NOW() WHERE id = ?")
+            ->execute([$newUsed, $newBalance, $newStatus, $cnId]);
+
+        $by = $adminUserId > 0 ? $adminUserId : (int)$pdo->query("SELECT MIN(id) FROM admin_users")->fetchColumn();
+        $pdo->prepare("
+            INSERT INTO credit_note_applications (
+                credit_note_id, payment_id, applied_to_booking_id,
+                applied_to_booking_reference, applied_to_booking_type,
+                amount_applied, applied_by, applied_at, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+        ")->execute([
+            $cnId,
+            $refundPaymentId > 0 ? $refundPaymentId : null,
+            (int)($origPayment['booking_id'] ?? 0) ?: null,
+            (string)($origPayment['booking_reference'] ?? ''),
+            $bType,
+            -$amount,
+            $by,
+            'Reversal: ' . ($note !== '' ? $note : 'payment refunded back to the credit note'),
+        ]);
+        $out['application_id'] = (int)$pdo->lastInsertId();
+        $out['ok'] = true;
+        return $out;
+    }
+}
+
+if (!function_exists('rh_refund_credit_note_payments')) {
+    /**
+     * Cancellation / refund share of a room booking that was paid by CREDIT NOTE: each such
+     * payment gets a completed refund row (method credit_note, no credit_note_id so voiding the
+     * note never undoes it) and the note is re-opened for the same amount. Newest payment first,
+     * capped at $amount. A payment whose note is voided/expired is skipped - that money stays on
+     * the booking as credit owed back. Call inside the caller's transaction, then recalculate.
+     *
+     * @return array{total:float,covered:float,refs:array,notes:array,skipped:array} total = returned to
+     *         notes; covered = total + the share skipped (voided/expired note) - callers must not
+     *         pay the covered share out in cash
+     */
+    function rh_refund_credit_note_payments(PDO $pdo, int $bookingId, string $bookingReference, float $amount, int $adminUserId, string $reason = 'cancellation', string $note = ''): array
+    {
+        $out = ['total' => 0.0, 'covered' => 0.0, 'refs' => [], 'notes' => [], 'skipped' => []];
+        $syncInclude = __DIR__ . '/../admin/includes/finance-account-sync.php';
+        if (!function_exists('rh_refresh_original_payment_status') && is_file($syncInclude)) {
+            require_once $syncInclude;
+        }
+        $allocs = allocateBookingRefunds($pdo, $bookingId, $amount, true, 'credit_note');
+        if (!$allocs) {
+            return $out;
+        }
+        $ins = $pdo->prepare("
+            INSERT INTO payments (
+                payment_reference, booking_type, booking_id, booking_reference,
+                payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                payment_method, payment_type, payment_status, original_payment_id,
+                refund_reason, refund_status, refund_amount, refund_notes,
+                recorded_by, created_at
+            ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, 'credit_note', 'refund', 'completed', ?,
+                      ?, 'completed', ?, ?, ?, NOW())
+        ");
+        foreach ($allocs as $alloc) {
+            $orig = $alloc['payment'];
+            $leg  = (float)$alloc['amount'];
+            $out['covered'] = round($out['covered'] + $leg, 2);
+            $re = rh_reopen_credit_note_for_payment($pdo, $orig, $leg, $adminUserId, 0, $note);
+            if (!$re['ok']) {
+                $out['skipped'][] = $re['error'];
+                continue;
+            }
+            $vr = (float)($orig['vat_rate'] ?? 0);
+            $va = $vr > 0 ? round($leg * ($vr / (100 + $vr)), 2) : 0.0;
+            $ref = finance_next_refund_reference($pdo, date('Y-m-d'));
+            $ins->execute([
+                $ref, $bookingId, $bookingReference,
+                round($leg - $va, 2), $vr, $va, $leg,
+                (int)$orig['id'],
+                $reason, $leg,
+                'Returned to credit note ' . $re['cn_number'] . ($note !== '' ? ' - ' . $note : ''),
+                $adminUserId ?: null,
+            ]);
+            $refundId = (int)$pdo->lastInsertId();
+            if ($re['application_id'] > 0) {
+                $pdo->prepare("UPDATE credit_note_applications SET payment_id = ? WHERE id = ?")->execute([$refundId, $re['application_id']]);
+            }
+            if (function_exists('rh_refresh_original_payment_status')) {
+                rh_refresh_original_payment_status($pdo, (int)$orig['id']);
+            }
+            $out['total'] = round($out['total'] + $leg, 2);
+            $out['refs'][] = $ref;
+            $out['notes'][] = $re['cn_number'];
         }
         return $out;
     }

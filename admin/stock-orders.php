@@ -11,6 +11,7 @@ require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
+require_once __DIR__ . '/includes/pos-order-close.php';
 require_once __DIR__ . '/includes/bulk-actions.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 
@@ -655,6 +656,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 /* Cancel — only allowed on UNPAID orders (none should normally exist
                  * with the combined-pay flow, but we keep this for legacy/edge cases). */
                 $orderId = (int)($_POST['order_id'] ?? 0);
+                $cancelReason = trim((string)($_POST['cancel_reason'] ?? ''));
+                if (mb_strlen($cancelReason) < 8) {
+                    throw new RuntimeException('Cancel reason is required (at least 8 characters).');
+                }
 
                 $pdo->beginTransaction();
                 $oh = $pdo->prepare("SELECT * FROM stock_orders WHERE id = ? FOR UPDATE");
@@ -679,22 +684,21 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('Cannot cancel: order is already in progress. Use Void instead.');
                 }
 
-                $folioVoids = 0;
-                if (($order['order_type'] ?? '') === 'room_service') {
-                    // Stock first: the POS restore skips lines whose folio charge is still live,
-                    // so voiding the charges first would waste their stock twice.
-                    restoreFromPosOrder($pdo, $orderId, $user['id']);
-                    $folioVoids = voidRoomServiceFolioChargesForOrder($pdo, $orderId, 'Room-service order cancelled', (int)$user['id']);
-                } else {
-                    restoreFromPosOrder($pdo, $orderId, $user['id']);
+                // Shared close: stock, folio charges, order + lines, ready pings, station notes, audit, KDS event.
+                $closed = rh_close_pos_order($pdo, $orderId, (int)$user['id'], $cancelReason, 'cancel');
+                $folioVoids = (int)$closed['folio_voided'];
+                foreach ($closed['booking_ids'] as $closedBookingId) {
+                    recalculateBookingFinancials((int)$closedBookingId);
                 }
-
-                $pdo->prepare("UPDATE stock_orders SET status = 'cancelled', updated_at = NOW(), kitchen_status='served', served_at=COALESCE(served_at, NOW()) WHERE id = ?")->execute([$orderId]);
-                $pdo->prepare("UPDATE stock_order_items SET kds_status='void', served_at=COALESCE(served_at, NOW()), bumped_by=? WHERE order_id=? AND kds_status NOT IN ('served','void')")
-                    ->execute([$user['id'], $orderId]);
-                logOrderAudit($pdo, $orderId, $user['id'], $user['full_name'], 'cancelled', null);
                 $pdo->commit();
 
+                foreach ($closed['notices'] as $notice) {
+                    try {
+                        rh_pos_notice_send($pdo, $notice);
+                    } catch (Throwable $e) {
+                        error_log('stock-orders cancel POS notify: ' . $e->getMessage());
+                    }
+                }
                 if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
 
                 $message = "Order {$order['reference']} cancelled" . ($folioVoids > 0 ? " and {$folioVoids} folio charge(s) voided." : ' and stock restored.');
@@ -717,34 +721,21 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 /* Only a live sale can be voided: 'placed' (open, possibly part-paid) or 'paid'. */
                 if (!in_array($order['status'], ['placed', 'paid'], true)) throw new RuntimeException('Order is ' . str_replace('_', ' ', (string)$order['status']) . ' — only an open or paid order can be voided.');
 
-                $folioVoids = 0;
-                if (($order['order_type'] ?? '') === 'room_service') {
-                    // Stock first: the POS restore skips lines whose folio charge is still live,
-                    // so voiding the charges first would waste their stock twice.
-                    restoreFromPosOrder($pdo, $orderId, $user['id']);
-                    $folioVoids = voidRoomServiceFolioChargesForOrder($pdo, $orderId, $voidReason, (int)$user['id']);
-                } else {
-                    restoreFromPosOrder($pdo, $orderId, $user['id']);
+                // Shared close: stock / wastage, folio charges, order + lines, payment reversal (contra rows), ready pings, STOP note, audit, KDS event.
+                $closed = rh_close_pos_order($pdo, $orderId, (int)$user['id'], $voidReason, 'void');
+                $folioVoids = (int)$closed['folio_voided'];
+                foreach ($closed['booking_ids'] as $closedBookingId) {
+                    recalculateBookingFinancials((int)$closedBookingId);
                 }
-
-                $pdo->prepare("UPDATE stock_orders SET status = 'voided', voided_by = ?, voided_at = NOW(), void_reason = ?, updated_at = NOW(), kitchen_status='served', served_at=COALESCE(served_at, NOW()) WHERE id = ?")
-                    ->execute([$user['id'], mb_substr($voidReason, 0, 500), $orderId]);
-                // Clear all station boards: mark every non-served line as voided so KDS/BDS/CDS drop it
-                $pdo->prepare("UPDATE stock_order_items SET kds_status='void', served_at=COALESCE(served_at, NOW()), bumped_by=? WHERE order_id=? AND kds_status NOT IN ('served','void')")
-                    ->execute([$user['id'], $orderId]);
-                // KDS audit trail entry for the void
-                try {
-                    $ip = $_SERVER['REMOTE_ADDR'] ?? null;
-                    $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, from_status, to_status, user_id, user_name, ip_address) VALUES (?, 'voided', 'in_progress', 'void', ?, ?, ?)")
-                        ->execute([$orderId, $user['id'], $user['full_name'], $ip]);
-                } catch (Throwable $e) {
-                    error_log('void kds_log: ' . $e->getMessage());
-                }
-                // Same reversal method as api/void-order.php: contra rows per original payment row (per split leg, in its own tender), never an in-place edit of the original payment.
-                rh_reverse_restaurant_payments($pdo, $orderId, (string)$order['reference'], 'VOID-', 'cancellation', 'Void: ' . $voidReason, (int)$user['id']);
-                logOrderAudit($pdo, $orderId, $user['id'], $user['full_name'], 'voided', $voidReason);
                 $pdo->commit();
 
+                foreach ($closed['notices'] as $notice) {
+                    try {
+                        rh_pos_notice_send($pdo, $notice);
+                    } catch (Throwable $e) {
+                        error_log('stock-orders void POS notify: ' . $e->getMessage());
+                    }
+                }
                 if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
 
                 $message = "Order {$order['reference']} voided. " . ($folioVoids > 0 ? "{$folioVoids} folio charge(s) voided and stock restored." : 'Stock restored.') . ' Reason logged.';
@@ -3004,15 +2995,33 @@ $csrf_token = generateCsrfToken();
 
         async function soRowAction(kind, id, ref) {
             if (kind === 'cancel') {
-                var ok = await (window.AdminConfirm ? AdminConfirm.request({ title: 'Cancel order', message: 'Cancel ' + ref + ' and restore its stock?', details: ['Only an open, unpaid order whose preparation has not started can be cancelled. Use Void otherwise.'], confirmText: 'Cancel order', tone: 'danger', icon: 'fa-circle-xmark' }) : Promise.resolve(confirm('Cancel ' + ref + '?')));
-                if (!ok) return;
-                var j = await soPost({ action: 'cancel_order', order_id: id });
+                var cReason = await soAskCancelReason(1, ref);
+                if (cReason === null) return;
+                var j = await soPost({ action: 'cancel_order', order_id: id, cancel_reason: cReason });
                 soToast(j.ok ? j.message : j.error, j.ok ? 'success' : 'error');
                 if (j.ok) soRefresh();
             } else if (kind === 'void') {
                 promptVoid([id], ref);
             } else if (kind === 'delete') {
                 soDeleteOrders([id], ref);
+            }
+        }
+
+        /* Cancel needs a reason (>= 8 characters), like the API: one reason for the whole selection. */
+        async function soAskCancelReason(count, ref) {
+            var label = count > 1 ? count + ' orders' : ref;
+            var details = [
+                'Only an open, unpaid order whose preparation has not started can be cancelled. Use Void otherwise.',
+                'Its stock is put back, its ready alerts and station notes are cleared, and the reason is saved on the order.'
+            ];
+            while (true) {
+                var reason = await (window.AdminConfirm && AdminConfirm.prompt
+                    ? AdminConfirm.prompt({ title: 'Cancel ' + label, message: 'Cancel ' + label + ' and restore its stock?', details: details, inputLabel: 'Reason (min 8 characters)', inputPlaceholder: 'Why is this order being cancelled?', confirmText: 'Cancel order' + (count > 1 ? 's' : ''), tone: 'danger', icon: 'fa-circle-xmark' })
+                    : Promise.resolve(window.prompt('Reason for cancelling ' + label + ' (min 8 characters)')));
+                if (reason === null) return null;
+                reason = String(reason).trim();
+                if (reason.length >= 8) return reason;
+                soToast('Please give a reason of at least 8 characters.', 'warning');
             }
         }
 
@@ -3168,9 +3177,9 @@ $csrf_token = generateCsrfToken();
             if (kind === 'cancel') {
                 var c = pick(['placed']);
                 if (!c.length) { soToast('None of the selected orders is open - only open, unpaid orders can be cancelled.', 'warning'); return; }
-                var ok = await (window.AdminConfirm ? AdminConfirm.request({ title: 'Cancel ' + c.length + ' order(s)', message: 'Cancel the selected open orders and restore their stock?', details: ['Orders already paid, part-paid or being prepared are skipped (use Void for those).'], confirmText: 'Cancel orders', tone: 'danger', icon: 'fa-circle-xmark' }) : Promise.resolve(confirm('Cancel ' + c.length + ' order(s)?')));
-                if (!ok) return;
-                soReportBulk('cancelled', await soRunEach(c.map(function(tr) { return tr.dataset.soId; }), function(id) { return soPost({ action: 'cancel_order', order_id: id }); }));
+                var bReason = await soAskCancelReason(c.length, '');
+                if (bReason === null) return;
+                soReportBulk('cancelled', await soRunEach(c.map(function(tr) { return tr.dataset.soId; }), function(id) { return soPost({ action: 'cancel_order', order_id: id, cancel_reason: bReason }); }));
             } else if (kind === 'void') {
                 var v = pick(['placed', 'paid']);
                 if (!v.length) { soToast('Only open or paid orders can be voided.', 'warning'); return; }

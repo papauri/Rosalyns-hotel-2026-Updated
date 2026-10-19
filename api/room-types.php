@@ -379,28 +379,13 @@ function deleteRoomType($id) {
         ApiResponse::error('Room type not found', 404);
     }
     
-    // Check for existing individual rooms
-    $roomsCheck = $pdo->prepare("SELECT COUNT(*) as count FROM individual_rooms WHERE room_type_id = ?");
-    $roomsCheck->execute([$id]);
-    $roomsCount = $roomsCheck->fetch(PDO::FETCH_ASSOC)['count'];
-    
-    if ($roomsCount > 0) {
-        ApiResponse::error("Cannot delete room type with {$roomsCount} individual rooms. Please delete or reassign rooms first.", 400);
+    // One shared routine (also used by the admin page): blocks on individual rooms, joined-room combinations,
+    // bookings and guest reviews; otherwise removes the room type with its gallery, blocked dates and files.
+    $res = rh_delete_room_type($pdo, (int)$id);
+    if (!$res['success']) {
+        ApiResponse::error($res['error'], $res['code'] === 404 ? 404 : 400);
     }
-    
-    // Check for existing bookings
-    $bookingsCheck = $pdo->prepare("\n        SELECT COUNT(*) as count\n        FROM bookings b\n        LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id\n        WHERE b.room_id = ? OR ir.room_type_id = ?\n    ");
-    $bookingsCheck->execute([$id, $id]);
-    $bookingsCount = $bookingsCheck->fetch(PDO::FETCH_ASSOC)['count'];
-    
-    if ($bookingsCount > 0) {
-        ApiResponse::error("Cannot delete room type with {$bookingsCount} existing bookings.", 400);
-    }
-    
-    // Delete room type (use rooms table)
-    $stmt = $pdo->prepare("DELETE FROM rooms WHERE id = ?");
-    $stmt->execute([$id]);
-    
+
     // Clear cache
     require_once __DIR__ . '/../config/cache.php';
     clearRoomCache();

@@ -319,15 +319,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'delete') {
-            // A room with live enquiries cannot be removed: they would lose their room (and the
-            // double-booking guard would stop protecting that date). Deactivate it instead.
-            $liveChk = $pdo->prepare("SELECT COUNT(*) FROM conference_inquiries WHERE conference_room_id = ? AND status IN ('pending','confirmed')");
-            $liveChk->execute([(int)($_POST['id'] ?? 0)]);
-            if ((int)$liveChk->fetchColumn() > 0) {
-                throw new Exception('This room has pending or confirmed enquiries. Cancel or complete them first, or deactivate the room instead of deleting it.');
+            // A room that any enquiry points at (any status, including completed and cancelled) cannot be
+            // removed: those enquiries and their bills would lose their room, and the double-booking guard
+            // would stop protecting those dates. Deactivate it instead. Checked under a lock on the room row.
+            $delRoomId = (int)($_POST['id'] ?? 0);
+            $pdo->beginTransaction();
+            try {
+                $roomLock = $pdo->prepare("SELECT id FROM conference_rooms WHERE id = ? FOR UPDATE");
+                $roomLock->execute([$delRoomId]);
+                if ($roomLock->fetchColumn()) {
+                    $liveChk = $pdo->prepare("SELECT COUNT(*) FROM conference_inquiries WHERE conference_room_id = ?");
+                    $liveChk->execute([$delRoomId]);
+                    if ((int)$liveChk->fetchColumn() > 0) {
+                        throw new Exception('This room has enquiries on record (even completed or cancelled ones), so it cannot be deleted. Deactivate the room instead.');
+                    }
+                    $pdo->prepare("DELETE FROM conference_rooms WHERE id = ?")->execute([$delRoomId]);
+                }
+                $pdo->commit();
+            } catch (Throwable $delRoomEx) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $delRoomEx;
             }
-            $stmt = $pdo->prepare("DELETE FROM conference_rooms WHERE id = ?");
-            $stmt->execute([$_POST['id']]);
             $message = 'Conference room deleted successfully!';
             if ($is_ajax) {
                 header('Content-Type: application/json');
@@ -772,7 +786,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 if (!$delLock->fetchColumn()) {
                     throw new Exception('Enquiry not found!');
                 }
-                $payChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'conference' AND booking_id = ? AND deleted_at IS NULL");
+                // Removed (soft-deleted) payment rows count too: they are still money history.
+                $payChk = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'conference' AND booking_id = ?");
                 $payChk->execute([$enquiry_id]);
                 if ((int)$payChk->fetchColumn() > 0) {
                     throw new Exception($delBlocked);

@@ -906,17 +906,105 @@ function deletePayment(PDO $pdo, int $paymentId)
         ApiResponse::error('This payment has refunds recorded against it and cannot be deleted', 409);
     }
 
+    // Money that has been received is never deleted: it is reversed with a refund or credit note.
+    // Only an unreceipted pending draft may be removed.
+    $receivedMsg = "Payments that have been received can't be deleted. Use a refund or credit note instead.";
+    $payStatus = (string)($payment['payment_status'] ?? '');
+    $mraStatus = (string)($payment['mra_status'] ?? '');
+    if (!in_array($payStatus, ['pending', 'cancelled', 'failed'], true)
+        || trim((string)($payment['receipt_number'] ?? '')) !== ''
+        || !in_array($mraStatus, ['', 'not_required', 'pending'], true)
+        || (int)($payment['invoice_generated'] ?? 0) === 1
+        || trim((string)($payment['invoice_number'] ?? '')) !== ''
+        || (string)($payment['booking_type'] ?? '') === 'restaurant') {
+        ApiResponse::error($receivedMsg, 409);
+    }
+    if ((string)($payment['booking_type'] ?? '') === 'room') {
+        $coStmt = $pdo->prepare("SELECT status FROM bookings WHERE id = ?");
+        $coStmt->execute([(int)$payment['booking_id']]);
+        if ((string)$coStmt->fetchColumn() === 'checked-out') {
+            ApiResponse::error($receivedMsg, 409);
+        }
+    }
+    $mraQ = $pdo->prepare("SELECT COUNT(*) FROM mra_submission_queue WHERE payment_id = ? AND status NOT IN ('pending')");
+    $mraQ->execute([$paymentId]);
+    if ((int)$mraQ->fetchColumn() > 0) {
+        ApiResponse::error($receivedMsg, 409);
+    }
+
+    // A reason is mandatory (JSON body "reason" or ?reason=)
+    $delInput = json_decode((string)file_get_contents('php://input'), true);
+    $delReason = trim((string)(is_array($delInput) ? ($delInput['reason'] ?? '') : ''));
+    if ($delReason === '') {
+        $delReason = trim((string)($_GET['reason'] ?? ''));
+    }
+    if ($delReason === '') {
+        // Older API clients send no reason; only an uncleared draft can reach this point anyway.
+        $delReason = 'API delete (no reason given)';
+    }
+    $delReason = mb_substr($delReason, 0, 500);
+    $apiClient = $GLOBALS['rh_api_client'] ?? [];
+    $actorName = 'API: ' . (string)($apiClient['client_name'] ?? 'unknown client');
+
     // Start transaction
     $pdo->beginTransaction();
 
     try {
         // Soft delete
-        $stmt = $pdo->prepare("UPDATE payments SET deleted_at = NOW() WHERE id = ?");
+        $stmt = $pdo->prepare("UPDATE payments SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL");
         $stmt->execute([$paymentId]);
+        if ($stmt->rowCount() < 1) {
+            throw new Exception('Payment was already deleted');
+        }
+
+        // Audit trail: who removed what, and why
+        $pdo->prepare("INSERT INTO payment_audit_log
+                (payment_id, payment_reference, action, field_name, old_value, new_value, performed_by, performed_by_name, ip_address, user_agent)
+                VALUES (?, ?, 'deleted', 'payment', ?, ?, NULL, ?, ?, ?)")
+            ->execute([
+                $paymentId,
+                $payment['payment_reference'] ?? null,
+                json_encode([
+                    'status' => $payStatus,
+                    'payment_amount' => $payment['payment_amount'],
+                    'total_amount' => $payment['total_amount'],
+                    'payment_method' => $payment['payment_method'],
+                    'booking_type' => $payment['booking_type'],
+                    'booking_id' => $payment['booking_id'],
+                ]),
+                'Reason: ' . $delReason,
+                mb_substr($actorName, 0, 100),
+                $_SERVER['REMOTE_ADDR'] ?? null,
+                isset($_SERVER['HTTP_USER_AGENT']) ? mb_substr((string)$_SERVER['HTTP_USER_AGENT'], 0, 255) : null,
+            ]);
 
         // Update account totals (every account type)
         if (!rh_sync_account_payments($pdo, (string)$payment['booking_type'], (int)$payment['booking_id'])) {
             throw new Exception('Could not recalculate the account balance');
+        }
+
+        // Room payments: leave a line on the booking timeline
+        if ((string)$payment['booking_type'] === 'room') {
+            require_once __DIR__ . '/../includes/booking-timeline.php';
+            $bref = (string)($payment['booking_reference'] ?? '');
+            if ($bref === '') {
+                $brStmt = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ?");
+                $brStmt->execute([(int)$payment['booking_id']]);
+                $bref = (string)$brStmt->fetchColumn();
+            }
+            logBookingEvent(
+                (int)$payment['booking_id'],
+                $bref,
+                'Pending payment deleted',
+                'payment',
+                'Pending payment ' . ($payment['payment_reference'] ?? ('#' . $paymentId)) . ' (' . number_format((float)$payment['total_amount'], 2) . ') deleted via API. Reason: ' . $delReason,
+                $payStatus,
+                'deleted',
+                'api',
+                null,
+                $actorName,
+                ['payment_id' => $paymentId]
+            );
         }
 
         $pdo->commit();
