@@ -588,7 +588,9 @@ if (!function_exists('rh_reopen_credit_note_for_payment')) {
         $out['cn_number'] = (string)$cn['credit_note_number'];
         if (in_array((string)$cn['status'], ['voided', 'expired'], true)
             || ($cn['expires_at'] !== null && $cn['expires_at'] < date('Y-m-d'))) {
-            $out['error'] = 'Credit note ' . $cn['credit_note_number'] . ' is ' . ((string)$cn['status'] === 'voided' ? 'voided' : 'expired') . ', so it cannot be re-opened.';
+            $why = (string)$cn['status'] === 'voided' ? 'is voided'
+                : ((string)$cn['status'] === 'expired' ? 'has expired' : 'passed its valid-until date (' . $cn['expires_at'] . ')');
+            $out['error'] = 'Credit note ' . $cn['credit_note_number'] . ' ' . $why . ', so it cannot be re-opened. The amount stays on the booking as credit owed back.';
             return $out;
         }
         $used = round((float)$cn['amount_used'], 2);

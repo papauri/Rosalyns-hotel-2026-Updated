@@ -83,6 +83,8 @@ if (!function_exists('rh_close_pos_order')) {
         }
         $actorName = (string)($actor['full_name'] ?: ($actor['username'] ?: 'user'));
         $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+        // System closes (guest self-cancel, auto-release) run as user 0: store no actor rather than id 0.
+        $actorId = $userId > 0 ? $userId : null;
 
         // What state the lines are in decides restore vs wastage and who gets a STOP note.
         $ls = $pdo->prepare("SELECT id, station, kds_status, stock_deducted FROM stock_order_items WHERE order_id = ? FOR UPDATE");
@@ -123,7 +125,7 @@ if (!function_exists('rh_close_pos_order')) {
                 $chargeReason = $isVoid ? $details : 'Room-service order cancelled before prep: ' . $details;
                 $cu = $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ?");
                 foreach ($charges as $charge) {
-                    $cu->execute([mb_substr($chargeReason, 0, 255), $userId, (int)$charge['id']]);
+                    $cu->execute([mb_substr($chargeReason, 0, 255), $actorId, (int)$charge['id']]);
                     $outcome = rh_restore_room_service_charge_stock($pdo, $orderId, $charge, ($isVoid ? 'Room service order voided: ' : 'Room service order cancelled: ') . $chargeReason, $userId);
                     if ($outcome === 'restored') {
                         $stockRestored++;
@@ -138,7 +140,7 @@ if (!function_exists('rh_close_pos_order')) {
 
         $newStatus = $isVoid ? 'voided' : 'cancelled';
         $pdo->prepare("UPDATE stock_orders SET status = ?, voided_by = ?, voided_at = NOW(), void_reason = ?, updated_at = NOW(), kitchen_status = 'served', served_at = COALESCE(served_at, NOW()) WHERE id = ?")
-            ->execute([$newStatus, $userId, mb_substr($details, 0, 500), $orderId]);
+            ->execute([$newStatus, $actorId, mb_substr($details, 0, 500), $orderId]);
         $pdo->prepare("UPDATE stock_order_items SET kds_status = 'void', served_at = COALESCE(served_at, NOW()), bumped_by = ? WHERE order_id = ? AND kds_status NOT IN ('served', 'void')")
             ->execute([$userId, $orderId]);
 
@@ -168,7 +170,7 @@ if (!function_exists('rh_close_pos_order')) {
             foreach ($stopStations as $stn) {
                 try {
                     $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, is_acknowledged, acknowledged_at) VALUES (?, ?, ?, ?, 'pos', 'urgent', ?, ?, 0, NULL)")
-                        ->execute([$stn, $stopMsg, $userId, mb_substr($actorName, 0, 120), $orderId, $ref]);
+                        ->execute([$stn, $stopMsg, $actorId, mb_substr($actorName, 0, 120), $orderId, $ref]);
                 } catch (Throwable $e) {
                     error_log('rh_close_pos_order STOP note: ' . $e->getMessage());
                 }
@@ -176,7 +178,7 @@ if (!function_exists('rh_close_pos_order')) {
         }
 
         $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, ?, ?, ?)")
-            ->execute([$orderId, $userId, $actorName, $isVoid ? 'voided' : 'cancelled_before_prep', $details, $ip]);
+            ->execute([$orderId, $actorId, $actorName, $isVoid ? 'voided' : 'cancelled_before_prep', $details, $ip]);
         try {
             $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, from_status, to_status, user_id, user_name, ip_address) VALUES (?, ?, ?, 'void', ?, ?, ?)")
                 ->execute([$orderId, $isVoid ? 'voided' : 'cancelled', $isVoid ? 'in_progress' : (string)$order['kitchen_status'], $userId, $actorName, $ip]);
@@ -209,7 +211,7 @@ if (!function_exists('rh_close_pos_order')) {
             $notices[] = [
                 'station'      => 'kitchen',
                 'message'      => $msg,
-                'sent_by'      => $userId,
+                'sent_by'      => $actorId,
                 'sent_by_name' => $actorName,
                 'order_id'     => $orderId,
                 'order_ref'    => $ref,

@@ -815,6 +815,14 @@ function updatePayment(PDO $pdo, int $paymentId)
                 ApiResponse::error($guardMsg, 409);
             }
         }
+        // A payment cancelled with its booking stays cancelled: a late gateway/API update must not
+        // complete money on a cancelled account. Record a new payment instead.
+        if ((string)$lockedPay['payment_status'] === 'cancelled'
+            && ((isset($input['payment_status']) && (string)$input['payment_status'] !== 'cancelled')
+                || isset($input['payment_amount']))) {
+            $pdo->rollBack();
+            ApiResponse::error('This payment was cancelled and cannot be reopened. Record a new payment instead.', 409);
+        }
 
         if ($needsReceiptNumber) {
             $updateFields[] = "receipt_number = ?";
