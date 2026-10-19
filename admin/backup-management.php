@@ -16,8 +16,7 @@ $site_name  = $site_name  ?? getSetting('site_name', 'Hotel');
 
 // Only admin + manager may access this page
 if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
-    $_SESSION['alert'] = ['type' => 'error', 'message' => 'Access denied.'];
-    header('Location: dashboard.php');
+    rhDenyAndRedirectHome((int)$user['id'], (string)($user['role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

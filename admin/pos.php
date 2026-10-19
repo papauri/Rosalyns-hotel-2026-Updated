@@ -2670,6 +2670,7 @@ if ($posCanStations) {
 </head>
 
 <body class="pos-screen<?php echo in_array($user['role'] ?? '', ['admin', 'manager'], true) ? ' pos-admin' : ''; ?>">
+<?php require __DIR__ . '/includes/access-notice.php'; /* friendly card after a "no access" redirect */ ?>
     <div class="pos-action-loader" id="posActionLoader" role="status" aria-live="polite" aria-label="Loading">
         <div class="pos-action-loader__card">
             <div class="pos-action-loader__brand">

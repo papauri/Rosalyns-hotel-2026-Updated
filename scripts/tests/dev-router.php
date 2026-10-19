@@ -2,7 +2,7 @@
 /**
  * Router for PHP's built-in server, for local browser checks only:
  *   php -S 0.0.0.0:8000 -t . scripts/tests/dev-router.php
- * /__devlogin?to=<admin page> signs the browser in as the first active admin (no password) and
+ * /__devlogin?to=<admin page>[&as=<username>] signs the browser in as the first active admin (or that user; no password) and
  * redirects to admin/<page>. Refuses to run anywhere but the built-in server, and only for
  * requests from this machine. NEVER tunnel or port-forward this port (ngrok, WSL/Docker
  * forwarding, a reverse proxy): forwarded visitors look like 127.0.0.1 and would get admin.
@@ -16,7 +16,14 @@ if ($path === '/__devlogin') {
     chdir($_SERVER['DOCUMENT_ROOT']);
     require $_SERVER['DOCUMENT_ROOT'] . '/config/database.php';
     require_once $_SERVER['DOCUMENT_ROOT'] . '/includes/session-boot.php';
-    $admin = $pdo->query("SELECT id, username, full_name, role FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    // ?as=<username> signs in as that active user instead (to check what a non-admin sees).
+    if (!empty($_GET['as'])) {
+        $st = $pdo->prepare("SELECT id, username, full_name, role FROM admin_users WHERE is_active = 1 AND username = ? LIMIT 1");
+        $st->execute([(string)$_GET['as']]);
+        $admin = $st->fetch(PDO::FETCH_ASSOC);
+    } else {
+        $admin = $pdo->query("SELECT id, username, full_name, role FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    }
     if (!$admin) {
         http_response_code(500);
         exit('no active admin user');

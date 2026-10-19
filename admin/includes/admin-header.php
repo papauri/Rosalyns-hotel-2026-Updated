@@ -468,6 +468,7 @@ if ($_admin_back_target !== null) {
           lands inside this wrapper, which carries the sidebar-offset margin. */ ?>
 <?php /** @var string $csrf_token */ ?>
 <div id="rh-admin-page">
+    <?php require __DIR__ . '/access-notice.php'; /* friendly card after a "no access" redirect */ ?>
     <?php if ($_admin_back_target !== null && $_admin_back_label !== ''): ?>
         <div class="content admin-back-row">
             <a href="<?php echo htmlspecialchars((string)$_admin_back_target['href']); ?>" class="btn btn-secondary btn-sm" aria-label="<?php echo htmlspecialchars($_admin_back_label); ?>">

@@ -10,7 +10,7 @@ require_once __DIR__ . '/../includes/form-validation.php';
 $csrf_token = $csrf_token ?? generateCsrfToken();
 
 if (($_SESSION['admin_role'] ?? '') !== 'admin') {
-    header('Location: dashboard.php');
+    rhDenyAndRedirectHome((int)($_SESSION['admin_user_id'] ?? 0), (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
 

@@ -236,6 +236,7 @@ $bootstrap['fingerprint'] = md5(
 </head>
 
 <body class="station-screen">
+<?php require __DIR__ . '/includes/access-notice.php'; /* friendly card after a "no access" redirect */ ?>
     <!-- Hotel-branded fullscreen loader -->
     <div class="kds-action-loader" id="kdsActionLoader" role="status" aria-live="polite" aria-label="Loading">
         <div class="kds-action-loader__card">

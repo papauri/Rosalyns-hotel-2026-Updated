@@ -2040,7 +2040,14 @@ function rhDenyAndRedirectHome(int $user_id, string $role, string $current_page,
 {
     $home = rhUserHomePage($user_id, $role);
     if ($home !== null && $home !== $current_page) {
-        header('Location: ' . $home . ($home === 'dashboard.php' ? '?error=' . rawurlencode($error) : ''));
+        // Their main page opens with a friendly card naming the page they tried
+        // (admin/includes/access-notice.php), instead of a silent bounce.
+        $page = strtolower(basename($current_page));
+        $q = preg_match('/^[a-z0-9_-]{1,80}\.php$/', $page) ? '?no_access=' . rawurlencode($page) : '?no_access=page.php';
+        if ($error === 'module_disabled') {
+            $q .= '&why=module';
+        }
+        header('Location: ' . $home . $q);
         exit;
     }
 
@@ -2050,8 +2057,8 @@ function rhDenyAndRedirectHome(int $user_id, string $role, string $current_page,
         . '<body style="font-family:system-ui,sans-serif;background:#f5f2eb;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">'
         . '<div style="background:#fff;border:1px solid #d5cfc4;border-radius:6px;padding:36px 40px;max-width:420px;text-align:center;">'
         . '<div style="font-size:2rem;margin-bottom:10px;">&#128274;</div>'
-        . '<h1 style="font-size:1.1rem;color:#3e3930;margin:0 0 10px;">No accessible pages</h1>'
-        . '<p style="font-size:.9rem;color:#7a6f63;line-height:1.6;margin:0 0 20px;">Your account (' . htmlspecialchars($username) . ') does not currently have permission to view this area. Please contact your administrator.</p>'
+        . '<h1 style="font-size:1.1rem;color:#3e3930;margin:0 0 10px;">Your account has no pages to open yet</h1>'
+        . '<p style="font-size:.9rem;color:#7a6f63;line-height:1.6;margin:0 0 20px;">You are signed in as ' . htmlspecialchars($username) . ', but no part of the system has been switched on for your account yet. Nothing is wrong with your account. Ask your administrator to give you access, then sign in again.</p>'
         . '<a href="logout.php" style="display:inline-block;background:#7E684B;color:#fff;padding:10px 22px;border-radius:4px;text-decoration:none;font-size:.9rem;">Sign out</a>'
         . '</div></body></html>';
     exit;
