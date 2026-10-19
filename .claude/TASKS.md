@@ -5,10 +5,14 @@ and when work ships. One line per task: status · what · where it stands · nex
 Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 
 ## Open
-- TODO · Linked-data follow-ups · API payment delete has no automated test (needs an HTTP harness that leaves no live rows); owner decisions in .claude/plans/linked-data-cleanup.md (group bookings, consumed room service on cancel, CN vs cash, POS receipt history, gym bill on member cancel, orphan gallery row 43).
 - TODO · Form validation across other admin create/edit forms (duplicates flagged while typing, form reopens with the reason) · page messages are visible again everywhere (alert fix), so server-side rejections now show; next: apply the user-management pattern to the busiest forms.
 
 ## Shipped 2026-10-20
+- Stock budget (Stock > Budget): open-to-buy per month/category, fixed or % of expected sales, PO send check (warn / needs approval + reason), dashboard tile, Buying hint, permissions Stock Budget (view)/(set & approve), 65-check test.
+- Owner decisions: group cancel/delete ask each time; started room-service food stays billable on cancel; POS order delete keeps receipt history; gym member cancel voids unpaid bills; orphan gallery row deleted. Tests: linked_gym, api_payment_delete.
+- Form checks on menu items, ingredients, suppliers, rooms, room types, tables (live duplicate warning, reopen with reason, busy button).
+- Mobile: admin menu drawer on phones/tablets, slim header; POS cart footer pinned.
+- Guides + FAQ + KB updated for all of the above.
 - Payment audit log on every payment edit and refund (admin, API, settle, cancel/CN/no-show refunds); admin edit cannot reopen a cancelled payment; "Order note cleared" in POS accounting; scripts/tests/linked_money.php (24 checks) in run_tests.
 - Linked-data QA follow-ups: cancelled payments cannot be reopened or re-amounted via the API; system order closes record no user (not id 0); clearer credit-note re-open message.
 
