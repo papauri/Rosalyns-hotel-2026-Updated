@@ -5,8 +5,11 @@ and when work ships. One line per task: status · what · where it stands · nex
 Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 
 ## Open
-- TODO · Linked-data follow-ups · regression test for credit-note re-open on cancel, pending-payment cancel, no-show refund, API payment delete; payment_audit_log on edit/refund paths; "Note cleared" label in POS accounting timeline; QA notes: confirm a late gateway callback cannot complete a payment marked cancelled on booking cancel; user id 0 written to voided_by/actor_id on guest self-cancel; clearer message for an expired fully-applied credit note; owner decisions in .claude/plans/linked-data-cleanup.md (group bookings, consumed room service on cancel, CN vs cash, POS receipt history, gym bill on member cancel, orphan gallery row 43).
+- TODO · Linked-data follow-ups · regression test for credit-note re-open on cancel, pending-payment cancel, no-show refund, API payment delete; payment_audit_log on edit/refund paths; "Note cleared" label in POS accounting timeline; owner decisions in .claude/plans/linked-data-cleanup.md (group bookings, consumed room service on cancel, CN vs cash, POS receipt history, gym bill on member cancel, orphan gallery row 43).
 - TODO · Form validation across other admin create/edit forms (duplicates flagged while typing, form reopens with the reason) · page messages are visible again everywhere (alert fix), so server-side rejections now show; next: apply the user-management pattern to the busiest forms.
+
+## Shipped 2026-10-20
+- Linked-data QA follow-ups: cancelled payments cannot be reopened or re-amounted via the API; system order closes record no user (not id 0); clearer credit-note re-open message.
 
 ## Shipped today (2026-10-19)
 - Linked-data cleanup: cancel/delete/no-show/void close or remove everything linked (open tabs, kitchen tickets, room holds, quotations, gym bookings, room photos/files); money kept and reversed, never deleted; scripts/data-health.php in run_tests.
