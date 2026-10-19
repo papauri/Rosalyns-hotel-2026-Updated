@@ -184,7 +184,8 @@
     <li>You will see <em>"Guest checked in successfully."</em> on the booking page, with <em>"Room marked as occupied."</em> and, for a late arrival, <em>"Note: late check-in (N day(s) overdue)."</em></li>
   </ol>
   <div class="warn"><p>Check-in is the one step that waits for housekeeping: a room being turned over can be assigned, but the guest cannot be checked in until it is clean. If housekeeping has not marked the room clean, check-in is blocked: <em>"Check-in blocked: Room 101 (cleaning pending) is not marked clean yet. Ask housekeeping to finish the room, or ask someone with the "Check-in to Room Not Clean" permission."</em> A person who has that permission sees <em>"... Confirm to check the guest in anyway (recorded in the booking timeline)."</em> and can go ahead. The check-in is then recorded in the timeline as "Checked in to a room not marked clean".</p></div>
-  <p>To undo a check-in, use <strong>More</strong> &rarr; <strong>Undo check-in</strong> on the list (needs Check-in Guests; not shown once the guest is overdue for check-out). The booking goes back to Confirmed. A room that is still Occupied is freed and sent to <strong>Cleaning</strong> (the guest was in it), not straight to Available. A room that is in Maintenance or Out of Order is left as it is: <em>"Check-in cancelled (reverted to confirmed)."</em></p>
+  <p>To undo a check-in, use <strong>More</strong> &rarr; <strong>Undo check-in</strong> on the list (needs Check-in Guests; not shown once the guest is overdue for check-out). The booking goes back to Confirmed. It is refused while the guest still has an open tab or room-service order: <em>"Order ORD-... is still open - close it in Orders &amp; Tabs first."</em> Close or settle that order first, then undo the check-in.</p>
+  <p>A room that is still Occupied is freed and sent to <strong>Cleaning</strong> (the guest was in it), not straight to Available. A room that is in Maintenance or Out of Order is left as it is: <em>"Check-in cancelled (reverted to confirmed)."</em></p>
 
   <h2 id="payment">How to take a payment</h2>
   <ul>
@@ -300,24 +301,40 @@
     <li>The confirmation says what will happen to the money: <em>"Cancel this booking, release the room, and send the guest cancellation email? Cancellation handling: ..."</em>. The handling follows the setting in Hotel Settings: void the bill and refund everything paid, void the bill and keep payments as guest credit, or charge the first night and refund the rest.</li>
     <li>On the list you may type a <strong>Cancellation Reason (Optional)</strong>. Confirm. You will see <em>"Booking cancelled."</em> followed by a summary of any refund or credit.</li>
   </ol>
+  <p><strong>Group bookings.</strong> If the booking was made together with other rooms, the window first asks <em>"This room was booked together with other rooms. Cancel:"</em>. Choose <strong>Whole group (N rooms)</strong> (the default: every room booked together is cancelled) or <strong>Only this room</strong>. The same choice is asked when you delete. A group action is all or nothing: if one room cannot be cancelled or deleted, none of the rooms change, and the message names the room that blocked it, for example <em>"Group of 3 bookings (BR-...): nothing was cancelled. BR-... could not be cancelled: ..."</em></p>
+  <p>Cancelling also closes everything linked to the booking, all in one go. Nothing is left running:</p>
+  <ul>
+    <li><strong>Room tab and room-service orders</strong> still open on the booking are closed. Food nobody started is cancelled: its stock goes back and its room charge comes off the bill. Food already started stays charged (see the note below the warning).</li>
+    <li><strong>The room</strong> is released straight away.</li>
+    <li><strong>A sent quotation</strong> for the booking is marked expired.</li>
+    <li><strong>Payments made by credit note</strong> go back to that same credit note, never out as cash. The rest is refunded or kept as the Hotel Settings cancellation rule says. See the <a href="13-finance-payments.html#refund">Finance guide</a>.</li>
+  </ul>
   <p>If a paid booking was cancelled and a refund is waiting, use the refund button on the list.</p>
+  <div class="warn"><p>The cancel is refused, and nothing changes, only if an order on the booking is <strong>part-paid</strong>, or a delivered room-service order has been paid. You will see one of these messages. Settle or refund that order, then cancel again.</p>
+  <ul>
+    <li><em>"Order ORD-... is part-paid. Settle or refund it in Orders &amp; Tabs first, then try again."</em> Someone has paid part of the order. Settle or refund it in <strong>Orders &amp; Tabs</strong> first.</li>
+    <li><em>"Order ORD-... has a payment on it. Settle or refund it in Orders &amp; Tabs first, then try again."</em> A paid room-service order must be settled or refunded first.</li>
+  </ul></div>
+  <p><strong>Food already started:</strong> the cancel goes ahead. Food the kitchen or bar has already started or served stays charged to the guest's bill, and the refund is reduced by that amount. Food nobody has started is cancelled and its stock goes back. A station that had started part of the order gets a note <em>"STOP - order ORD-...: do NOT make ... Booking closed; items already started still go out."</em> The items already started still go out.</p>
   <h3>No-show</h3>
   <ol class="steps">
     <li>The no-show button appears only once the check-in date has passed. On the booking page click <strong>Mark No-Show</strong>; on the list click the no-show button and add an optional note.</li>
     <li>Confirm <em>"Mark this booking as no-show and release the assigned room?"</em></li>
   </ol>
+  <p>A no-show does the same clean-up as a cancel: open room tab and room-service orders are closed, the room is released, and a sent quotation is marked expired. It is one step, so either all of it happens or none of it does. If an order is part-paid you see the same plain message as for a cancel, and the booking stays as it was. Food already started stays on the guest's bill, as for a cancel.</p>
   <p>If the check-in date has not passed you will see <em>"No-show can only be marked after the check-in date has passed."</em> Cancelled, no-show and checked-out bookings cannot be changed back.</p>
 
   <h2 id="delete">How to delete and restore a booking</h2>
   <p>Delete is for bookings that should not be there at all: duplicates, test bookings, bookings made in error. A cancellation is different: it is a real booking the guest called off, and it stays in the cancellation figures. Deleting needs the <strong>Delete &amp; Restore Bookings</strong> permission. Administrators always have it and can give it to others in Staff Access.</p>
   <ol class="steps">
     <li>On the list click <strong>More</strong> &rarr; <strong>Delete booking</strong>, or <strong>Delete Booking</strong> on the booking page.</li>
+    <li>If the booking was made together with other rooms, choose <strong>Whole group (N rooms)</strong> (the default) or <strong>Only this room</strong>.</li>
     <li>Type why it is being deleted (required). Confirm.</li>
-    <li>The booking moves to the <strong>Deleted</strong> tab (also the <em>Deleted</em> status filter). Any room it held is released straight away. Nothing is sent to the guest.</li>
+    <li>The booking moves to the <strong>Deleted</strong> tab (also the <em>Deleted</em> status filter). Any room it held is released straight away. Open room tab and room-service orders are closed in the same step (the same way as a cancel), and a sent quotation is marked expired. Nothing is sent to the guest.</li>
   </ol>
   <p>The Deleted tab shows <strong>who</strong> deleted each booking, the <strong>exact date and time</strong>, and the <strong>reason</strong>. The booking page shows the same in a banner and is read-only. The deletion is also in the audit log and timeline.</p>
   <p>To bring it back, click <strong>Restore booking</strong> on the Deleted tab or the booking page. It returns with the status it had before. If it held a room, the room type must still be free for its dates. If not, you are told and the booking stays deleted.</p>
-  <div class="warn"><p>A booking cannot be deleted while the guest is checked in, or while money is on it (payments or folio charges). Refund or void the payments and void the charges first. This keeps the accounts complete: money is never left attached to a booking nobody can see.</p></div>
+  <div class="warn"><p>A booking cannot be deleted while the guest is checked in, or while money is on it (payments or folio charges). Refund or void the payments and void the charges first. This keeps the accounts complete: money is never left attached to a booking nobody can see. The same goes for a room order that is part-paid: you see the same plain message as for a cancel, and nothing is deleted. Settle or refund that order in <strong>Orders &amp; Tabs</strong> first. Food the kitchen has already started does not block a delete: it stays on the guest's bill, and food not yet started is cancelled.</p></div>
 
   <h2 id="tentative">Tentative bookings</h2>
   <p>A tentative booking holds a room without payment for a set time. The length is a hotel setting (48 hours unless changed). Open <strong>Tentative</strong> from the Bookings page toolbar (<code>/admin/tentative-bookings.php</code>).</p>
@@ -333,6 +350,7 @@
     <li><strong>Hold Activity</strong>: the history of the hold.</li>
     <li><strong>Cancel Tentative Hold</strong>: asks <em>"Cancel this tentative hold and release the room?"</em> You will see <em>"Tentative booking cancelled and room hold released."</em> and the guest is notified.</li>
   </ul>
+  <p>A tentative hold expires automatically when its time runs out. Nobody has to do anything: the room is released, any sent quotation is marked expired, and the guest gets the "Tentative Booking Expired" email (if that email is switched on in Booking Settings). If a hold has money on it, cancel the booking instead so the money is refunded or kept properly.</p>
   <p>To turn a pending booking into a hold, use <strong>More</strong> &rarr; <strong>Make tentative</strong> on the list. This is only possible while the booking is Pending with no payment: <em>"Cannot make tentative: Bookings with payments cannot be made tentative."</em> A confirmed booking cannot go back to tentative.</p>
   <div class="note"><p>On this page only users with the Administrator or Manager role can confirm or cancel a hold. Others see <em>"Your role does not have permission to manage tentative bookings."</em></p></div>
 
@@ -360,7 +378,9 @@
     <li>Filter by room type, status (Available, Occupied, Cleaning, Maintenance, Out of Order) and floor.</li>
     <li>Each row has <strong>Details</strong>, <strong>Edit</strong>, <strong>Assign</strong> and <strong>Status</strong>. Tick several rooms and use <strong>Change status to...</strong> to change them together.</li>
     <li><strong>Add Individual Room</strong>: <strong>Room Type</strong> and <strong>Room Number</strong> are required (room numbers must be unique: <em>"Room number already exists. Please use a unique room number."</em>). Optional: Room Name, Floor, Guest Capacity Override, Status, Display Order, Child Supplement Override (%), occupancy overrides, Children Allowed Override, Notes.</li>
-    <li>A room with a current or future pending, confirmed or checked-in booking cannot be deleted: <em>"Cannot delete room with active bookings."</em></li>
+    <li>Duplicate room numbers are flagged while you type: <em>"This room number is already used by another room."</em> If the save is still refused, the form stays open with what you typed and the reason shown.</li>
+    <li>A room with a live or tentative booking cannot be deleted. You see <em>"Room 101 has 2 live booking(s) (BR-..., BR-...). Move or cancel them first, then delete the room."</em></li>
+    <li>A room that has booking or housekeeping history is not deleted. It is kept and made inactive: <em>"Room 101 has booking or housekeeping history, so it was kept and made inactive instead of deleted. It is no longer sold."</em> Its photos, amenities and blocked dates go with a room that is really deleted, but not with one that is kept.</li>
     <li>A room that belongs to a joined pair shows a blue badge under its room type: <em>"Also joined: Family Suite with 102"</em> (the room is still sold on its own) or <em>"Joined only: ..."</em> (sold only as the pair). A pairing that is switched off is greyed and ends with <em>(inactive)</em>.</li>
   </ul>
   <h3>Joined room combinations</h3>
@@ -409,6 +429,8 @@
     <li>A guest is <em>overdue</em> once their departure date has passed, and a <em>late checkout</em> when due today and still in after the check-out time set in Hotel Settings. An overdue guest keeps the room (it is not sold to anyone else) until checked out.</li>
     <li>Prices are never typed in on the edit pages: changes reprice at the guest's booked rate, room-type changes go through Upgrade / change room type, and price corrections through a credit note.</li>
     <li>Deleted bookings are hidden everywhere except the Deleted tab, hold no room, and cannot be changed until restored.</li>
+    <li>Cancel, delete, no-show and expiry never leave anything running on the booking. Open room tabs and room-service orders are closed, the room is released and a sent quotation is expired, all in one step. If one order cannot be closed (only a part-paid order stops it), the whole action is refused and nothing changes. Food already started stays on the bill.</li>
+    <li>Undo check-in is refused while the guest has an open order.</li>
     <li>After check-out the room goes to Cleaning and the folio is locked.</li>
     <li>Housekeeping never takes a room off sale and never removes it from the Assign Room list: a room being turned over still shows, marked <em>Turnover</em>. Only check-in waits for a clean room (an in-house room move also needs a clean room).</li>
     <li>A joined pair is sold only when both rooms are free and neither room's own room type is blocked for those dates. A room can be in only one active pair.</li>
@@ -433,6 +455,9 @@
       <tr><td>The guest is leaving N night(s) before / after the booked departure...</td><td>A plain checkout was tried on a day other than the booked departure.</td><td>Use the checkout button on the list (or <strong>Check Out &amp; Settle</strong> on the booking page) to settle the extra or unused nights.</td></tr>
       <tr><td>A complimentary upgrade needs a manager...</td><td>Keeping the price on an upgrade or downgrade is a revenue decision.</td><td>Charge the difference, or ask a manager.</td></tr>
       <tr><td>This booking has ... paid against it. Refund or void the payments first</td><td>Bookings with money on them cannot be deleted.</td><td>Refund / void the payments and void folio charges, or cancel the booking instead.</td></tr>
+      <tr><td><em>"Group of 3 bookings (BR-...): nothing was cancelled. BR-... could not be cancelled: ..."</em> (or <em>nothing was deleted</em>)</td><td>One room of a group could not be cancelled or deleted, so none of them were.</td><td>Fix the room named in the message, then cancel or delete the group again.</td></tr>
+      <tr><td><em>"Order ORD-... is part-paid. Settle or refund it in Orders &amp; Tabs first, then try again."</em></td><td>A room tab or room-service order on the booking is part-paid. Nothing was changed.</td><td>Settle or refund the order in <strong>Orders &amp; Tabs</strong>, then repeat the cancel, delete or no-show.</td></tr>
+      <tr><td><em>"Order ORD-... is still open - close it in Orders &amp; Tabs first."</em></td><td>Undo check-in was tried while the guest has an open order.</td><td>Close the order, then undo the check-in.</td></tr>
       <tr><td>Cannot restore as confirmed: the room type is no longer free...</td><td>The room was sold while the booking was deleted.</td><td>Rebook the guest on other dates or another room type.</td></tr>
       <tr><td>Folio charges cannot be modified after check-out...</td><td>The booking is checked out.</td><td>Raise a credit note.</td></tr>
       <tr><td>Cannot confirm: No rooms available for the selected dates.</td><td>The room type is full for those dates.</td><td>Change dates or room type, or free a room.</td></tr>

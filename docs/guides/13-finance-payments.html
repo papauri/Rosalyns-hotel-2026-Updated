@@ -122,7 +122,11 @@
     <li>Refund lines cannot be edited. Use <strong>Settle this refund</strong> instead.</li>
     <li>A payment with refunds against it is locked: its amount and status cannot be changed.</li>
     <li>If an edit raises the amount above what is owed, the extra becomes a credit note, as described above.</li>
+    <li>A payment that was cancelled (for example because its booking was cancelled) cannot be reopened or have its amount or status changed. You will see <em>"This payment was cancelled and cannot be reopened. Record a new payment instead."</em></li>
   </ul>
+  <h3>Deleting a payment</h3>
+  <p>Only a payment that was never received can be deleted: one that is still pending, or was cancelled or failed. It must have no receipt number, no invoice and no MRA submission. A payment that has been received cannot be deleted, whatever its status: you will see <em>"Payments that have been received can't be deleted. Use a refund or credit note instead."</em> Refund it (see below), or issue a credit note. A payment that has refunds recorded against it cannot be deleted either, and a payment made by credit note is not deleted: void the credit note instead.</p>
+  <div class="note"><p>Every edit and every refund is written to the <strong>payment audit log</strong>, with who did it and when. A deleted pending payment is written there too, with who removed it and the reason.</p></div>
 
   <h2 id="receipt">How to send or reprint a receipt</h2>
   <ol class="steps">
@@ -146,6 +150,14 @@
     <li>You will see <em>"Refund processed"</em> and <em>"Refund created successfully! Reference: REF-..."</em>. A box shows whether the customer was emailed. If not, it says <em>"Email not sent — notify the customer manually"</em>.</li>
   </ol>
   <div class="warn"><p>Mobile money refunds cannot be saved as Completed. They must start as Pending or Processing until the provider confirms. A pending mobile-money refund must be moved to <strong>Processing</strong> first and then to <strong>Completed</strong> once the provider confirms; it cannot jump straight to Completed (<em>"A mobile money refund cannot go straight to completed - mark it processing first and complete it once the provider confirms."</em>).</p></div>
+  <h3 id="credit-paid">Money paid by credit note</h3>
+  <p>If the guest paid by credit note, the money never goes back out as cash. It goes back onto that same credit note:</p>
+  <ul>
+    <li><strong>Cancelling a booking</strong> returns the credit-note share to the note first (the note is re-opened and can be used again). Only the rest is refunded in cash, or kept, as the cancellation setting says. The summary reads <em>"... paid by credit note was returned to credit note CN-... (re-opened, no cash paid out)."</em></li>
+    <li><strong>Refunding a credit-note payment</strong> from the Refund screen puts the money back on its note. If that cannot be done, nothing is refunded: <em>"Nothing was refunded."</em> followed by the reason. Use <strong>Store credit</strong> to issue a new credit note instead.</li>
+    <li><strong>Early checkout and no-show refunds</strong> leave the credit-note share out of the cash refund. That share stays on the booking as credit owed back, and is not re-opened automatically.</li>
+    <li><strong>If the credit note was voided or has expired</strong> it cannot be re-opened. That share stays on the booking as <em>credit owed back</em>. It is still owed to the guest, but it is not paid out as cash automatically: refund it or issue a new credit note. The cancel summary says so: <em>"... is owed back to the guest - refund it or issue a credit note."</em></li>
+  </ul>
   <p>Example: a guest paid MWK 200,000 and leaves a day early. Refund MWK 60,000, reason Early Checkout, status Pending. Later, when the money is sent, settle it (next section).</p>
 
   <h2 id="settle">How to settle a pending refund</h2>
@@ -200,7 +212,7 @@
     <li>You will see <em>"Credit note applied: ... Remaining balance: ..."</em>. The amount is capped at the lower of what you typed, the note balance, and what the booking still owes.</li>
   </ol>
   <h3>Other actions</h3>
-  <p>Click the three-dot button on a row for <strong>View PDF</strong>, <strong>Redemption history</strong>, <strong>Regenerate PDF</strong>, <strong>Resend email</strong> (only if the guest has an email) and <strong>Void credit note</strong> (only for Active or Partial notes). Voiding asks for <strong>Reason for Voiding</strong> and cannot be undone. It gives the money back to the booking. The note then shows as Voided.</p>
+  <p>Click the three-dot button on a row for <strong>View PDF</strong>, <strong>Redemption history</strong>, <strong>Regenerate PDF</strong>, <strong>Resend email</strong> (only if the guest has an email) and <strong>Void credit note</strong> (only for Active or Partial notes). Voiding asks for <strong>Reason for Voiding</strong> and cannot be undone. It gives the money back to the booking. The note then shows as Voided. Any share of this note that a guest already paid with is not paid out as cash: it stays on the booking as <em>credit owed back</em> until it is refunded or covered by a new credit note. A voided note cannot be re-opened.</p>
   <p>Expiry: a new note expires after the number of months set in Hotel Settings (<strong>Credit notes expire after (months, 0 = never)</strong>). The <strong>Expires</strong> column shows the date. Expired notes cannot be applied.</p>
 
   <h2 id="quotes">Quotations</h2>
@@ -255,6 +267,9 @@
     <li>You cannot lower a payment below what has already been refunded from it.</li>
     <li>No payments on a cancelled, no-show or expired room booking. A checked-out booking accepts payments only while a balance remains.</li>
     <li>Paid and Completed payments get a receipt number automatically.</li>
+    <li>A received payment cannot be deleted. Refund it or issue a credit note. A cancelled payment cannot be reopened; record a new payment instead.</li>
+    <li>Money paid by credit note goes back to that credit note, never out as cash.</li>
+    <li>Every payment edit and refund is kept in the payment audit log.</li>
     <li>A balance of 0.01 or less counts as settled.</li>
   </ul>
 
@@ -279,6 +294,12 @@
       <tr><td><em>A void reason is required.</em></td><td>Void box empty.</td><td>Type the reason.</td></tr>
       <tr><td><em>This credit note has expired and can no longer be used.</em></td><td>Past its Expires date.</td><td>Issue a new credit note.</td></tr>
       <tr><td><em>Nothing is due on this account, so there is nothing to apply the credit note to.</em></td><td>The booking has no balance.</td><td>Choose a booking that owes money.</td></tr>
+      <tr><td><em>Payments that have been received can't be deleted. Use a refund or credit note instead.</em></td><td>The payment was paid, receipted, invoiced, sent to MRA, or belongs to a checked-out stay.</td><td>Refund it, or issue a credit note. Only a payment that was never received (pending, cancelled or failed, with no receipt) can be deleted.</td></tr>
+      <tr><td><em>Credit-note payments cannot be deleted; void the credit note instead</em></td><td>The payment was made by credit note.</td><td>Void the credit note (Credit Notes &rarr; three-dot menu).</td></tr>
+      <tr><td><em>This payment has refunds recorded against it and cannot be deleted</em></td><td>Refunds are kept as money history.</td><td>Leave it. The refunds are the record.</td></tr>
+      <tr><td><em>This payment was cancelled and cannot be reopened. Record a new payment instead.</em></td><td>A cancelled payment (often cancelled with its booking) was changed later.</td><td>Record a new payment for the amount that is really paid.</td></tr>
+      <tr><td><em>This payment has refunds; its status cannot be changed</em></td><td>Refunds are on the payment.</td><td>Use the refund records; the status is set by the refund process.</td></tr>
+      <tr><td><em>Nothing was refunded.</em> followed by the reason</td><td>A credit-note payment could not be put back on its note.</td><td>Read the reason. To give the guest money, issue a new credit note with <strong>Store credit</strong>.</td></tr>
     </tbody>
   </table>
 

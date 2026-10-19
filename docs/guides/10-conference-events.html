@@ -182,7 +182,7 @@
     <li>Click the bin button on the card. A window asks <em>"Delete conference room?"</em> and <em>"This permanently removes the room from conference management."</em></li>
     <li>Click <strong>Delete room</strong> (or <strong>Cancel</strong> to keep it).</li>
   </ol>
-  <div class="warn"><p>A room that still has <strong>Pending</strong> or <strong>Confirmed</strong> enquiries cannot be deleted. A message window shows the reason and the room stays on the page. After a successful delete you see <em>"Conference room deleted successfully!"</em>. Cancel or complete those enquiries first, or switch the room off instead of deleting it.</p></div>
+  <div class="warn"><p>A room that has <strong>any</strong> enquiry on record cannot be deleted, including completed and cancelled ones. A message window shows <em>"This room has enquiries on record (even completed or cancelled ones), so it cannot be deleted. Deactivate the room instead."</em> and the room stays on the page. After a successful delete you see <em>"Conference room deleted successfully!"</em>. Switch the room off instead of deleting it.</p></div>
 
   <h2 id="conf-confirm">How to confirm a conference enquiry</h2>
   <ol class="steps">
@@ -259,7 +259,7 @@
     <li>A window asks <em>"Permanently delete enquiry CONF-...? This cannot be undone."</em> Click <strong>Delete enquiry</strong>.</li>
     <li>The enquiry and its quotation records are removed, and the deletion is written to the activity log.</li>
   </ol>
-  <div class="warn"><p>An enquiry that has <strong>any payment recorded</strong> (or a credit note) cannot be deleted. You will see <em>"This enquiry has payments recorded — cancel it instead so the money trail stays."</em> Use <strong>Cancel enquiry</strong> instead.</p></div>
+  <div class="warn"><p>An enquiry that has <strong>any payment recorded</strong>, or a credit note, cannot be deleted. Deleting is blocked on the spot, and nothing is removed. You will see <em>"This enquiry has payments recorded — cancel it instead so the money trail stays."</em> Use <strong>Cancel enquiry</strong> instead.</p></div>
 
   <h3>Keep notes</h3>
   <ol class="steps">
@@ -321,6 +321,7 @@
   <p>You can also change a booking between <strong>Pending</strong>, <strong>Confirmed</strong> and <strong>Completed</strong> with the dropdown in the Status column. It saves as soon as you pick a value and shows <em>"Event booking status updated successfully!"</em>. Cancelled and waitlisted bookings show the status as plain text, with no dropdown.</p>
   <h3>Delete a booking</h3>
   <p>Click <strong>Delete</strong> in the row and answer OK to <em>"Are you sure you want to delete this booking?"</em>. You will see <em>"Event booking deleted successfully!"</em>. Only use this for mistakes or test entries. If the guest changed their mind, cancel the booking instead.</p>
+  <p>A booking that has any payment recorded against it, or a credit note, cannot be deleted. You see <em>"This booking has payments recorded against it and cannot be deleted. Cancel it instead."</em> (or <em>"... has a credit note recorded against it and cannot be deleted. Cancel it instead."</em>). Use <strong>Cancel</strong> so the money trail stays.</p>
 
   <h2 id="waitlist">How to move a guest off the waitlist</h2>
   <ol class="steps">

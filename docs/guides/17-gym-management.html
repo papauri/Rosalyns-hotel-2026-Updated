@@ -124,7 +124,7 @@
     <li>You will see <em>"Gym membership cancelled successfully! Cancellation email sent."</em> If money had been paid, the message adds how much stays as credit owed back. Refund it from the payment's <strong>Refund</strong> screen.</li>
     <li>To delete a mistaken inquiry, click <strong>Delete</strong> on its row and confirm <em>"Are you sure you want to delete this inquiry?"</em> You will see <em>"Gym inquiry deleted successfully!"</em></li>
   </ol>
-  <div class="warn"><p>A cancelled inquiry cannot be reopened. The guest must send a new request. An inquiry that has any payment recorded cannot be deleted &mdash; cancel it instead.</p></div>
+  <div class="warn"><p>A cancelled inquiry cannot be reopened. The guest must send a new request. An inquiry that has any payment recorded, or a credit note, cannot be deleted &mdash; cancel it instead. An inquiry that has already become a member record cannot be deleted, even after the member is cancelled. Cancelling the inquiry's membership also cancels the linked member, and releases their future bookings.</p></div>
 
   <h2 id="enrol">How to enrol a member</h2>
   <ol class="steps">
@@ -175,6 +175,9 @@
     <li>To delete for good, a manager clicks the bin button (<strong>Delete</strong>) on the row and confirms <em>Delete member "name"? This cannot be undone.</em> with <strong>Yes, continue</strong>.</li>
     <li>You will see <em>"Member deleted."</em></li>
   </ol>
+  <p><strong>Cancelling a member</strong> also voids the unpaid part of their gym bills. Their account is marked cancelled and nothing more is billed. Money already paid stays on the account as credit owed back: refund it or issue a credit note, as for any cancelled account. <strong>Suspending</strong> or <strong>expiring</strong> a member leaves their bills alone.</p>
+  <p>Cancelling a member, setting them to <strong>Expired</strong> or <strong>Suspended</strong>, or deleting them, releases their future bookings in the same step. Their future floor-slot bookings are cancelled and they are taken off every future class. Past visits and the attendance record stay as history.</p>
+  <div class="warn"><p>A member cannot be deleted while their bill has any payment on it, including a payment that has since been removed. You will see <em>"This member has payments on their bill — mark them cancelled instead."</em> Set the member to <strong>Cancelled</strong> instead. The member's inquiry cannot be deleted either, even after the member is cancelled. You see <em>"A member was created from this enquiry — cancel the member first."</em> Leave the inquiry in place; cancelling the membership is the right step.</p></div>
   <div class="warn"><p>Without the <strong>Gym Invoicing &amp; Pricing</strong> permission you get <em>"Deleting a member requires a manager. Mark them cancelled instead to preserve their history."</em></p></div>
 
   <h2 id="checkin">How to check members in and out</h2>
@@ -276,7 +279,7 @@
     <li>Staff without <strong>Gym Invoicing &amp; Pricing</strong> cannot type a price or an expiry date, cannot enrol without a package, cannot delete a member and cannot edit an inquiry's amounts, send quotations or invoices.</li>
     <li>Every change to a member (enrolment, edits, status, deletion) is written to the member's change history.</li>
     <li>Two packages cannot have the same name.</li>
-    <li>A cancelled inquiry cannot be reopened and cannot have its amount changed. An inquiry with payments cannot be deleted.</li>
+    <li>A cancelled inquiry cannot be reopened and cannot have its amount changed. An inquiry with payments or a credit note cannot be deleted, and an inquiry that has become a member record cannot be deleted, even after that member is cancelled.</li>
     <li>Cancelling an inquiry does not refund automatically (unless your refund settings say so). What was paid stays as credit owed back.</li>
     <li>Only active members with an unexpired membership can be put in a class.</li>
   </ul>
@@ -306,6 +309,9 @@
       <tr><td><em>"Cancelled inquiries cannot be reopened. Ask the guest to submit a new one."</em></td><td>You tried to change a cancelled inquiry's status.</td><td>Ask the guest to send a new request.</td></tr>
       <tr><td><em>"Use the Cancel button in the inquiry details to cancel ..."</em></td><td>You picked <strong>Cancelled</strong> in the status list.</td><td>Click <strong>View</strong>, then <strong>Cancel Membership</strong>.</td></tr>
       <tr><td><em>"This inquiry has payments recorded against it and cannot be deleted. Cancel it instead."</em></td><td>Payments are kept as records.</td><td>Use <strong>Cancel Membership</strong>.</td></tr>
+      <tr><td><em>"This inquiry has a credit note recorded against it and cannot be deleted. Cancel it instead."</em></td><td>Credit notes are kept as money history.</td><td>Use <strong>Cancel Membership</strong>.</td></tr>
+      <tr><td><em>"A member was created from this enquiry — cancel the member first."</em></td><td>The inquiry already has a member record. The member record, even a cancelled one, keeps the inquiry.</td><td>Leave the inquiry as it is, or cancel the membership instead of deleting the inquiry.</td></tr>
+      <tr><td><em>"This member has payments on their bill — mark them cancelled instead."</em></td><td>Payments are on the member's bill, so the member cannot be deleted.</td><td>Set the member's Status to <strong>Cancelled</strong>.</td></tr>
       <tr><td><em>"This inquiry has no valid email address on file."</em></td><td>Cannot email the guest.</td><td>Phone the guest instead.</td></tr>
       <tr><td><em>"Both a subject and a message are required to email the member."</em></td><td>One box is empty.</td><td>Fill in both.</td></tr>
       <tr><td><em>"Set a total amount before recording payment."</em></td><td>Total amount is 0.</td><td>Use <strong>Set Total Amount</strong> first.</td></tr>

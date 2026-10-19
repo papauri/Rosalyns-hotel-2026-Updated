@@ -98,6 +98,7 @@
     <li>Under <strong>Status</strong> tick <strong>Featured Room</strong> if you want it shown on the homepage.</li>
     <li>Click <strong>Add Room</strong>. You will see <em>"New room added successfully!"</em> inside the window and the new card appears behind it. Click <strong>Close</strong> when finished.</li>
   </ol>
+  <p>Room type names must be unique. A name already in use is flagged while you type: <em>"A room type with this name already exists."</em> If the save is refused, the form stays open with what you typed and the reason shown.</p>
   <div class="note"><p>A new room is always created as <strong>Active</strong>. The Add window has no Active tick box. To hide it, use the active on/off icon on its card afterwards.</p></div>
 
   <h2 id="room-prices">How to change room prices</h2>
@@ -125,6 +126,13 @@
     <li><strong>Change the order:</strong> drag the cards into the order you want. You can also type a number in <strong>Display Order</strong> in <strong>Edit Room</strong>.</li>
     <li><strong>Delete:</strong> click the bin icon. Confirm the question <em>Delete "[room name]" permanently? This removes all images, videos and data. Cannot be undone.</em></li>
   </ol>
+  <p>When a room type is really deleted, its gallery photos (and their files), its blocked dates and its room blocks are removed with it, in one step. If anything in the list below is still there, the delete is refused and nothing changes:</p>
+  <ul>
+    <li><em>"Cannot delete room type with N individual rooms. Please delete or reassign rooms first."</em> Delete or move the physical rooms in <strong>Individual Rooms</strong> first.</li>
+    <li><em>"Cannot delete room type that is the type of N joined-room combination(s). Remove them in Individual Rooms first."</em> Remove the joined pairs first.</li>
+    <li><em>"This room has booking history (3 bookings) and cannot be deleted. Deactivate it instead."</em> (the number is the count of bookings, and says "1 booking" when there is one) Any booking ever made on it keeps the room type. Use the active icon to hide it.</li>
+    <li><em>"This room has N guest review(s), which are kept as history, so it cannot be deleted. Deactivate it instead."</em> Guest reviews are kept as history.</li>
+  </ul>
   <div class="warn"><p>A room type that has ever had a booking cannot be deleted. Deactivate it instead.</p></div>
 
   <h2 id="plan-add">How to create a rate plan</h2>
@@ -220,7 +228,8 @@
     <tbody>
       <tr><td><em>Room name is required.</em> (when adding a room: <em>Error: Room name is required.</em>)</td><td>The name box is empty.</td><td>Type a room name and save again.</td></tr>
       <tr><td><em>Availability cannot exceed total rooms.</em></td><td>Rooms Available is higher than Total Rooms.</td><td>Lower Rooms Available or raise Total Rooms.</td></tr>
-      <tr><td><em>This room has booking history and cannot be deleted. Deactivate it instead.</em></td><td>The room type has bookings.</td><td>Use the active icon on the card to hide it.</td></tr>
+      <tr><td><em>This room has booking history (3 bookings) and cannot be deleted. Deactivate it instead.</em></td><td>The room type has bookings.</td><td>Use the active icon on the card to hide it.</td></tr>
+      <tr><td><em>Cannot delete room type with 2 individual rooms. Please delete or reassign rooms first.</em></td><td>Physical rooms still belong to this room type.</td><td>Delete or move those rooms in Individual Rooms, then try again.</td></tr>
       <tr><td><em>Network error — please try again.</em></td><td>The connection dropped while saving.</td><td>Check the connection and click save again.</td></tr>
       <tr><td><em>Plan name is required.</em></td><td>The rate plan name is empty.</td><td>Type a name.</td></tr>
       <tr><td><em>Plan name cannot exceed 100 characters.</em> / <em>Description cannot exceed 2000 characters.</em></td><td>Text is too long.</td><td>Shorten it.</td></tr>

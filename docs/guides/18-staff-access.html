@@ -129,6 +129,7 @@
     <li>Shortcuts: <strong>Select All</strong>, <strong>Deselect All</strong>, <strong>Role Defaults</strong>. <strong>Role Defaults</strong> ticks exactly the permissions their role gets by default and unticks everything else. Nothing is saved until you click <strong>Save Permissions</strong>.</li>
     <li>Click <strong>Save Permissions</strong>. You will see <em>"Permissions updated successfully."</em></li>
   </ol>
+  <p>On a phone, the <strong>Change password</strong> and <strong>Logout</strong> buttons are at the bottom of the menu (open it with the <strong>Menu</strong> button). On a narrow phone they are not in the top bar.</p>
   <p>Their menu changes on their next page load: items they cannot open disappear, and opening such a page directly sends them back to a page they are allowed to see.</p>
   <div class="note"><p>Two Reservations permissions are deliberately not part of any role's defaults: <strong>Delete &amp; Restore Bookings</strong> (remove duplicate or test bookings; every delete records who, when and why and can be undone) and <strong>Edit Booking Financials</strong> (complimentary upgrades, keeping the original rate on a downgrade). Administrators always have both, and Managers can also authorise complimentary upgrades; tick them only for people you trust with those decisions.</p></div>
   <h3>Common set-ups</h3>
@@ -137,6 +138,8 @@
     <tbody>
       <tr><td>Only edit email and PDF templates</td><td><strong>Edit message templates</strong>. They get <strong>Settings &rarr; Email Templates</strong> and nothing else in Settings.</td></tr>
       <tr><td>Take orders on the till but never handle money (FOH, waiters)</td><td><strong>POS Till (Touch)</strong> without <strong>POS Take Payment &amp; Settle</strong> (untick it - Restaurant Staff have it by default). They fire orders and tabs; someone with the permission settles the bill in <strong>Orders &amp; Tabs</strong>.</td></tr>
+      <tr><td>See the stock budget and what is left to spend, but not change it</td><td><strong>Stock Budget (view)</strong></td></tr>
+      <tr><td>Set monthly stock budgets and approve purchase orders that go over a budget that needs approval</td><td><strong>Stock Budget (set &amp; approve)</strong>. Managers have it; approval also needs a reason.</td></tr>
       <tr><td>See and settle every cashier's tabs</td><td><strong>POS All Cashiers' Tabs</strong> (Managers and admins have it). Everyone else only sees the orders they took, and ready alerts only ever go to the person who placed the order.</td></tr>
       <tr><td>Check guests out even when they still owe money</td><td><strong>Check-out With Balance</strong> (under Guest Services). They must confirm, and it is recorded on the booking's timeline.</td></tr>
       <tr><td>Change hotel details, email server and booking rules</td><td><strong>Hotel Settings</strong>. Add <strong>Change VAT &amp; refund settings</strong> if they may also change VAT, refund rules and bank/invoice details.</td></tr>

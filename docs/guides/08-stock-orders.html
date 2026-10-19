@@ -57,6 +57,8 @@
     <thead><tr><th>Page</th><th>Permission</th></tr></thead>
     <tbody>
       <tr><td>Stock Overview</td><td><strong>Stock Dashboard</strong></td></tr>
+      <tr><td>Budget (see the budget, the Buying hint and the Stock Overview tile)</td><td><strong>Stock Budget (view)</strong></td></tr>
+      <tr><td>Budget (set budgets, approve over-budget orders)</td><td><strong>Stock Budget (set &amp; approve)</strong></td></tr>
       <tr><td>Ingredients, Recipes, Receive Stock, Buying, Suppliers, Purchase Orders, Tables</td><td><strong>Ingredients &amp; Recipes</strong></td></tr>
       <tr><td>Batch Tracker</td><td><strong>Batch Tracker</strong></td></tr>
       <tr><td>Stock Count</td><td><strong>Stock Count &amp; Variance</strong> (approving or rejecting a count needs the Admin or Manager role)</td></tr>
@@ -105,13 +107,14 @@
     <li>For buying: <strong>Reorder point</strong>, <strong>Par level (order up to)</strong>, <strong>Preferred supplier</strong> and <strong>Supplier lead time (days)</strong>. Notes are optional.</li>
     <li>Click <strong>Save</strong>. You will see <em>"Ingredient &quot;Chicken breast&quot; added."</em></li>
   </ol>
+  <p>Names are checked as you type. An ingredient name already used by another ingredient is flagged: <em>"A stock item with this name already exists (archived items count too)."</em> If the save is refused, the form stays open with what you typed and the reason shown.</p>
   <h3>Other actions on each row</h3>
   <ul>
     <li><strong>Edit</strong> &mdash; change the details. <em>"Ingredient updated."</em></li>
     <li><strong>Stock In</strong> &mdash; see the next section.</li>
     <li><strong>Batches</strong> &mdash; the batches for that ingredient. Use <strong>Edit Batch</strong> to fix an expiry date, alert days or notes (<em>"Batch updated."</em>). Use <strong>Discard</strong> to write off a batch as expired, recalled or wasted. You are asked <em>"This will subtract the remaining quantity from your total stock and close the batch. Continue?"</em> and then see <em>"Wasted &mdash; batch closed and stock adjusted."</em> (or <em>"Expired ..."</em>, <em>"Recalled ..."</em>).</li>
     <li><strong>Adjust</strong> &mdash; a manual correction, for Admin and Manager roles only. Choose <strong>Direction</strong> (<strong>Add stock (+)</strong> or <strong>Subtract stock (&minus;)</strong>), <strong>Quantity</strong> and a <strong>Reason</strong> of at least 8 characters, then <strong>Save Adjustment</strong>. <em>"Manual adjustment recorded."</em> For anything else use a stock count.</li>
-    <li><strong>Archive</strong> (<em>"Archive this ingredient?"</em>) hides an ingredient: <em>"Ingredient archived."</em> Choose <strong>Archived</strong> in the status filter to find it, then <strong>Restore</strong> (<em>"Ingredient restored."</em>) or <strong>Delete</strong> (<em>"Permanently delete? This cannot be undone."</em>). An ingredient used in any recipe cannot be deleted.</li>
+    <li><strong>Archive</strong> (<em>"Archive this ingredient?"</em>) hides an ingredient: <em>"Ingredient archived."</em> Choose <strong>Archived</strong> in the status filter to find it, then <strong>Restore</strong> (<em>"Ingredient restored."</em>) or <strong>Delete</strong> (<em>"Permanently delete? This cannot be undone."</em>). An ingredient used in any recipe cannot be deleted. An ingredient that still has stock on hand cannot be archived either: <em>"Cannot archive: 5 kg is still in stock. Count it in a stock count or record it as wastage first, so its value is written off properly."</em> Count it or record the wastage first, then archive it.</li>
     <li><strong>Export to Excel</strong> downloads the list.</li>
   </ul>
   <p>Use the category and status filters (<strong>Low</strong>, <strong>Critical</strong>, <strong>Expiring soon</strong>, <strong>Archived</strong>) to narrow the list. The Status column shows <strong>OK</strong>, <strong>Low</strong>, <strong>Expiring</strong> (within 7 days), <strong>Expired</strong> or <strong>Critical</strong> (nothing left).</p>
@@ -170,6 +173,7 @@
     <li>Fill in <strong>Supplier name</strong> (required, must be unique), <strong>Contact person</strong>, <strong>Phone</strong>, <strong>Email</strong>, <strong>Lead time (days)</strong>, <strong>Payment terms</strong>, <strong>Account ref</strong>, <strong>Address</strong>, <strong>Notes</strong>, and tick <strong>Active</strong>.</li>
     <li>Click <strong>Save Supplier</strong>. You will see <em>"Supplier added."</em> or <em>"Supplier updated."</em></li>
   </ol>
+  <p>Supplier names must be unique: <em>"A supplier with this name already exists."</em> Each supplier email must be unique too, ignoring capital letters: <em>"Another supplier already uses this email address."</em> Both are checked as you type, and the save is refused again if a duplicate gets through. The form stays open with what you typed and the reason shown.</p>
   <p>The list shows <strong>Items</strong> (ingredients that name this supplier as preferred) and <strong>Total purchased</strong>. The pencil icon edits a supplier. The power icon deactivates or reactivates it after a confirmation (<em>"Deactivate this supplier? It will be hidden from purchase orders and stock-in pickers. Its history stays."</em> or <em>"Reactivate this supplier so it can be picked again?"</em>), then <em>"Supplier status updated."</em> Deactivating is usually better than deleting: the supplier's history stays.</p>
 
   <h2 id="buying">How to see what to buy (Buying)</h2>
@@ -179,6 +183,7 @@
     <li>Each supplier group lists <strong>On hand</strong>, <strong>Reorder pt</strong>, <strong>Par</strong>, <strong>On order</strong>, <strong>Suggested</strong> and <strong>Est. cost</strong>. Suggested is the par level (or twice the reorder point if no par is set) minus what you hold and minus what is already on open purchase orders.</li>
     <li>Click <strong>Create draft PO</strong> to turn the group into a draft purchase order. The button is off for the <strong>Unassigned</strong> group: give those ingredients a preferred supplier first.</li>
   </ol>
+  <p>The top of Buying shows <strong>Left to spend this month</strong> when a stock budget is set. The amount links to the <a href="#budget">Budget</a> section.</p>
   <p>If nothing is low the page says <em>"Nothing to reorder &mdash; every tracked item is above its reorder point."</em></p>
 
   <h2 id="po">How to raise and receive a purchase order</h2>
@@ -190,9 +195,52 @@
     <li>When goods arrive, fill in <strong>Receive now</strong> (and <strong>Expiry</strong>) on each line you received, then click <strong>Receive stock</strong> (<em>"Receive the entered quantities into stock?"</em>). <em>"Stock received against purchase order."</em></li>
     <li>If more arrived than was ordered, you can still type the larger number, because the stock is really there. Fill in the box <strong>Over-delivery note (needed if above outstanding)</strong> under that line, at least 5 characters, saying why. The line is then flagged <strong>over-delivered</strong> with your note.</li>
     <li>The order becomes partly received until every line is complete, then received.</li>
-    <li>Click <strong>Close</strong> when finished (outstanding lines will not be received) or <strong>Cancel</strong> for a draft or sent order. <strong>Print</strong> prints the order.</li>
+    <li>Click <strong>Close</strong> when finished (outstanding lines will not be received) or <strong>Cancel</strong> for a draft or sent order. <strong>Print</strong> prints the order. You will see <em>"Purchase order cancelled."</em> or <em>"Purchase order closed."</em></li>
   </ol>
+  <p>If an order would take its budget over, the order page warns you before it is sent. See <a href="#budget">How to set and watch the stock budget</a>.</p>
+  <p>If the order has already received stock, <strong>Cancel</strong> is refused: <em>"A purchase order that has received stock cannot be cancelled. Close it instead."</em> Only a sent or partly received order can be closed: <em>"Only a sent or partly received purchase order can be closed."</em> The system checks that the change really happened, so you never see "cancelled" or "closed" when nothing changed.</p>
   <p>A draft order has not gone to the supplier yet, so it cannot be received and it does not count as <strong>On order</strong> in Buying. Only <strong>Sent</strong> and <strong>Partially received</strong> orders count as on order and accept stock. Receiving creates stock batches linked to the supplier and the order. Lines for custom or non-stock items are recorded but add no stock. Once an order is received, closed or cancelled its lines cannot be changed.</p>
+
+  <h2 id="budget">How to set and watch the stock budget (Budget)</h2>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Budget</strong>. To look at it you need <strong>Stock Budget (view)</strong>. To set budgets, and to approve purchase orders that go over a budget that needs approval, you need <strong>Stock Budget (set &amp; approve)</strong>. Managers have both.</p>
+  <p>The budget is the most you plan to spend on stock in a month. It is counted in what the stock costs you, not in selling prices.</p>
+  <p>The card for the month has four figures:</p>
+  <ul>
+    <li><strong>Budget</strong>: the amount set for the month. It shows <em>Not set</em> until you set one.</li>
+    <li><strong>Received</strong>: the stock booked in this month, at the cost it was received for.</li>
+    <li><strong>Already ordered</strong>: what is still to arrive on purchase orders you have sent.</li>
+    <li><strong>Left to spend</strong>: the budget minus Received minus Already ordered. Orders you have sent are counted straight away, so two people cannot both spend the same last amount.</li>
+  </ul>
+  <p>Under the figures a bar shows <strong>Share of the month gone</strong> (how much of the budget is used) next to how far through the month we are. <strong>Month-end forecast</strong> is what you will spend by the end of the month at this pace. It starts from day 4 of the month. Typical messages:</p>
+  <ul>
+    <li><em>"Over budget by ..."</em> when the money is used up.</li>
+    <li><em>"... left to spend - N% of the budget is used."</em> when 80% or more is used.</li>
+    <li><em>"Ahead of pace - at this rate you'll spend ... by month end."</em> when the forecast is above the budget.</li>
+    <li><em>"On track."</em> when none of the above applies.</li>
+  </ul>
+  <p><strong>Fixed amount</strong> or <strong>% of expected sales</strong>. A line can be a fixed amount, or a percentage of the food and drink sales we expect for the month (the same daily sales figure as the End of Day report, VAT included). Expected sales are this month's sales so far spread over the whole month, from day 4. In the first 3 days of a month, or before any sale that month, last month's sales are used. A past month uses what was actually sold. Because sales include VAT, set the percentage on the same basis as the costs you enter.</p>
+  <p>Each line also says what happens when an order would go over it:</p>
+  <ul>
+    <li><strong>Warn if over</strong>: the order can still be sent, but the person sending it must tick a box first.</li>
+    <li><strong>Needs approval</strong>: only someone with <strong>Stock Budget (set &amp; approve)</strong> can send it, and must give a reason of at least 5 characters.</li>
+  </ul>
+  <ol class="steps">
+    <li>Click <strong>Add a line</strong>, choose <strong>Whole stock (all categories)</strong> or a category, then pick <strong>Fixed amount</strong> or the percentage option and type the amount.</li>
+    <li>Choose <strong>Warn if over</strong> or <strong>Needs approval</strong>.</li>
+    <li>Click <strong>Save budgets</strong>. You will see <em>"Budgets saved."</em> Nothing is saved until you press it. If nothing changed you see <em>"No changes to save."</em></li>
+  </ol>
+  <p>To save time use <strong>Copy last month</strong> (fills the form with last month's lines) or <strong>Suggest from last 3 months</strong> (the average monthly receipts of the last 3 months). The form fills in and you check it. If there is nothing to copy you see <em>"Last month has no budget to copy"</em>, or <em>"No stock received in the last 3 months"</em>. Past months are closed and cannot be changed.</p>
+  <p><strong>Where else you see it.</strong> The Stock Overview shows a <strong>Stock budget</strong> tile with its bar. When 80% is used it shows <em>"Most of this month's stock budget is used"</em>, and when it is over it shows <em>"Over budget this month"</em>. The Buying page shows <strong>Left to spend this month</strong> and warns if the order you are building would go over it.</p>
+  <h3>When a purchase order would go over budget</h3>
+  <p>The budget is checked when you press <strong>Mark as sent</strong> on a purchase order, and again if you make a sent order bigger. Nothing is sent until the check is passed.</p>
+  <ul>
+    <li><strong>Warn line:</strong> the order page shows the box <em>"I know this order goes over budget and I want to send it anyway"</em>. If you do not tick it you see <em>"This order takes the budget over for [category]. Tick the box to send it anyway."</em></li>
+    <li><strong>Needs approval line, without the approve permission:</strong> the button is locked and the page says <em>"This order takes the budget over and needs approval. A budget manager has to send it."</em> If you try anyway you see <em>"This order takes the budget over for [category]. A budget manager has to approve it before it can be sent."</em></li>
+    <li><strong>Needs approval line, with the approve permission:</strong> a box asks <em>"Why is it going over budget?"</em>. Type a reason of at least 5 characters. Without one you see <em>"This order takes the budget over for [category]. Give a reason (at least 5 characters) to approve it."</em></li>
+    <li>When the order is sent over budget you see <em>"Purchase order marked as sent. It is over budget and that has been recorded."</em> The order then shows <em>Went over budget - approved by</em> your name and the reason, and every change is in the budget's history.</li>
+  </ul>
+  <div class="note"><p>Stock already received is never blocked by the budget. The budget only stops new orders from being sent.</p></div>
+  <div class="warn"><p>If the budget page says <em>"You do not have permission to set stock budgets."</em>, you have <strong>Stock Budget (view)</strong> only. Ask a manager to set the budget or to approve the order.</p></div>
 
   <h2 id="count">How to do a stock count</h2>
   <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Count</strong>. Every shortage must be explained, and a big shortage must be approved by a manager other than the person who counted. Service can carry on while you count: sales, deliveries and wastage recorded during the count are taken into account.</p>

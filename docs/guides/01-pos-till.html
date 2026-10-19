@@ -263,6 +263,7 @@
     <li>In the <strong>Cancel order</strong> window type a reason of at least 8 characters. The window counts <em>"0 / 8 characters minimum"</em> as you type.</li>
     <li>Click <strong>Cancel order</strong>. You will see <em>"Order cancelled."</em> or a message from the system. If the order was a room-service order, its folio charges are voided too.</li>
   </ol>
+  <p>Every cancel or void also tidies up the screens. Any <em>ready</em> alert for that order is cleared from the till. Each kitchen, bar or coffee station that had already started one of its items gets a note that reads <em>"STOP — order ORD-... cancelled. Do not serve it."</em> (or <em>"... voided."</em>). The note means the food may already be on the stove, so the station must not send it out.</p>
   <p>Cancelling an order before the kitchen starts it does not need the <strong>POS Void Tabs</strong> permission. You can cancel your own tabs. Managers and admins can cancel any tab. Many tabs at once: tick them in the Tabs tray (<strong>Bulk tools</strong> &rarr; <strong>Select all</strong>, <strong>Select stale</strong> or tick each card) and click <strong>Bulk cancel</strong>. You see <em>"3 tabs cancelled."</em>, or <em>"2 cancelled, 1 failed."</em></p>
   <h3>Void a tab</h3>
   <ol class="steps">
@@ -336,6 +337,7 @@
     <li><strong>Stock:</strong> stock is put back only for items the kitchen or bar had <strong>not</strong> started. Food and drink already prepared is recorded as wastage (<em>Deleted order ORD-...</em>).</li>
     <li><strong>Cash drawer:</strong> the drawer is <strong>not</strong> changed. Cash that was taken or handed back is not moved, so settle the drawer separately.</li>
     <li>A permanent record of the deletion, with your name and reason, is kept.</li>
+    <li><strong>Receipts:</strong> the receipt history is kept, not erased. The receipt numbers of the deleted payments are listed in the record of the deletion, so the gap in the receipt numbers can be explained.</li>
   </ul>
   <div class="warn"><p>A delete cannot be undone. It is refused if a credit note is linked to the order (<em>"Credit note ... is linked to ... Void that credit note first, then delete the order."</em>) or if a payment was already sent to MRA (<em>"... was already fiscalised with MRA - it cannot be deleted. Void or refund the order instead."</em>). Then void or refund the order instead.</p></div>
 
@@ -445,6 +447,7 @@
     <li>Tick <strong>Available (visible on menu)</strong>, <strong>Show in POS / Till</strong> and <strong>Show in Room Service Dashboard</strong> as needed.</li>
     <li>Click <strong>Add item</strong>. You will see <em>"Menu item added successfully!"</em></li>
   </ol>
+  <p>Names are checked as you type. A second item with the same name in the same category is flagged: <em>"A food item with this name already exists in this category."</em> (or <em>"A drink item ..."</em>). The same name in another category is allowed. If the save is still refused, the form stays open with what you typed and the reason shown.</p>
   <h3>Change an item</h3>
   <ol class="steps">
     <li>Edit the row directly: name, description, price, <strong>Routing</strong> (station and the <strong>POS</strong> and <strong>Room Service</strong> tick boxes) and <strong>Status</strong> (<strong>Available</strong> or <strong>Unavailable</strong>).</li>
@@ -453,6 +456,10 @@
     <li><strong>Recipe</strong> opens the stock recipe for the item (see the <a href="08-stock-orders.html">Stock guide</a>). <strong>Feature</strong> posts the item to Facebook, if posting is switched on.</li>
     <li><strong>Delete</strong> asks <em>"Delete this menu item? Any attached stock recipe will also be removed."</em> Click <strong>Delete</strong> to confirm: <em>"Menu item deleted successfully!"</em></li>
   </ol>
+  <ul>
+    <li>An item that is on an open order cannot be deleted: <em>"This item is on N open order line(s). Close or settle those orders first, then delete it (or mark it unavailable now)."</em> Close or settle those orders, or use <strong>Unavailable</strong> for now.</li>
+    <li>An item that has ever been sold is not deleted, so the sales history stays readable. It is hidden instead: <em>"This item has sales history so it cannot be deleted - it has been marked unavailable instead."</em> Its stock recipe is kept with it.</li>
+  </ul>
   <div class="note"><p>An item shows on the till only if it is <strong>Available</strong> and <strong>Show in POS / Till</strong> is ticked. It shows in room-service mode only if <strong>Show in Room Service Dashboard</strong> is ticked. The price on the menu is the price the guest pays, tax included. The till always uses the price saved here, not a price sent from the screen.</p></div>
 
   <h2 id="tables">How to set up the dine-in tables</h2>
@@ -464,6 +471,7 @@
     <li>In the table list, change each table's name if you wish (the box in the <strong>Table</strong> column, 1 to 50 characters, for example <em>Patio 1</em>), set its <strong>Capacity</strong> (optional), <strong>Notes</strong> (for example Window, patio, VIP) and the <strong>Active</strong> tick, then click <strong>Save Table Details</strong>. You will see <em>"Table capacities and active flags saved."</em></li>
   </ol>
   <p>Two tables cannot have the same name (<em>"A table called ... already exists. Use a different name or edit the existing one."</em>). A table that has an open order cannot be renamed or switched off until the order is settled or cancelled (<em>"Cannot rename Table 5 while order ... is still active."</em> / <em>"Cannot deactivate Table 5 while order ... is still active."</em>). The open-order check for switching off applies only to a table that is active and being switched off now; a table that is already inactive does not stop the rest of the list from saving.</p>
+  <p>A table name that is already used is flagged while you type: <em>"Another table already has this name."</em> If the save is refused, the form stays open with what you typed and the reason shown.</p>
   <p>The list shows each table's <strong>Live Status</strong> (Available, or Pending, Preparing, Ready, Collecting, Served, Awaiting Payment, Recalled, Active), its <strong>Current Order</strong> and its <strong>Last Payment</strong>. A summary shows total rows, active tables and total capacity. <strong>Open POS</strong> takes you to the till.</p>
 
   <h3>How to delete one table</h3>
