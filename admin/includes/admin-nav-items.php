@@ -49,6 +49,7 @@ function rh_admin_nav_groups(): array
             ['stock-barcode-receive.php', 'fas fa-barcode',         'Receive Stock',   'stock_management', '', 'stock'],
             ['stock-reorder.php',         'fas fa-cart-flatbed',    'Buying',          'stock_management', '', 'stock'],
             ['purchase-orders.php',       'fas fa-file-invoice',    'Purchase Orders', 'stock_management', '', 'stock'],
+            ['stock-budget.php',          'fas fa-scale-balanced',  'Budget',          'stock_budget',     '', 'stock'],
             ['stock-suppliers.php',       'fas fa-truck-field',     'Suppliers',       'stock_management', '', 'stock'],
             ['stock-count.php',           'fas fa-clipboard-check', 'Stock Count',     'stock_count',      '', 'stock'],
             ['stock-wastage.php',         'fas fa-trash-alt',       'Wastage',         'stock_wastage',    '', 'stock'],

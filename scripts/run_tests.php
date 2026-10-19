@@ -16,6 +16,9 @@ $suites = [
     'User timezone display' => 'scripts/tests/user_timezone.php',
     'Rooms linked data'     => 'scripts/tests/linked_rooms.php',
     'Money linked data'     => 'scripts/tests/linked_money.php',
+    'Gym linked data'       => 'scripts/tests/linked_gym.php',
+    'API payment delete'    => 'scripts/tests/api_payment_delete.php',
+    'Stock budget'          => 'scripts/tests/stock_budget.php',
     'Linked data health'    => 'scripts/data-health.php',
 ];
 $failed = 0;

@@ -9,6 +9,7 @@ require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once dirname(__DIR__) . '/config/cache.php';
 require_once 'includes/procurement-schema.php';
+require_once 'includes/stock-budget-lib.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -147,6 +148,20 @@ if (!$error) {
     }
 }
 
+// Stock budget tile + 80% / 100% notice (live, never cached; only for people who may see the budget)
+$budgetTile = null;
+$budgetCanManage = false;
+if (!$error && hasPermission((int)$user['id'], 'stock_budget')) {
+    $budgetCanManage = hasPermission((int)$user['id'], 'stock_budget_manage');
+    try {
+        if (rh_sbud_ensure_schema($pdo)) {
+            $budgetTile = rh_sbud_dashboard($pdo);
+        }
+    } catch (Throwable $e) {
+        error_log('stock-dashboard budget tile: ' . $e->getMessage());
+    }
+}
+
 // Health banner state
 $healthState = 'ok';
 if ($alertSummary['out'] > 0 || ($metrics['expiring_3d'] ?? 0) > 0 || ($metrics['expired_batches'] ?? 0) > 0) {
@@ -234,6 +249,13 @@ $csrf_token = generateCsrfToken();
             </button>
         </div>
 
+        <?php if ($budgetTile && $budgetTile['notice'] !== ''): ?>
+        <div class="sdash-setup-note" style="margin:0 0 16px;padding:12px 16px;border:1px solid <?php echo $budgetTile['status'] === 'over' ? '#edc9c3' : '#ecd4a6'; ?>;background:<?php echo $budgetTile['status'] === 'over' ? '#fbeeec' : '#fdf6e7'; ?>;color:<?php echo $budgetTile['status'] === 'over' ? '#8a3a3a' : '#8a6a2f'; ?>;border-radius:8px;">
+            <i class="fas fa-scale-balanced"></i> <strong>Stock budget &mdash;</strong> <?php echo htmlspecialchars($budgetTile['notice']); ?>
+            <a href="stock-budget.php">See the budget</a>.
+        </div>
+        <?php endif; ?>
+
         <!-- ═══ TOP KPI ROW ═══ -->
         <div class="ck-kpis ck-kpis--4">
             <a class="ck-kpi ck-kpi--info" href="stock-orders.php?date=today&status=paid">
@@ -274,6 +296,34 @@ $csrf_token = generateCsrfToken();
                 </span>
             </a>
         </div>
+
+        <?php if ($budgetTile || $budgetCanManage): ?>
+        <style>
+            .sdash-budget { display:block; text-decoration:none; color:inherit; background:#fff; border:1px solid #e6e0d6; border-radius:8px; padding:14px 18px; margin:16px 0; }
+            .sdash-budget:hover { border-color:#7E684B; }
+            .sdash-budget__head { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; font-size:.95rem; color:#3e3930; }
+            .sdash-budget__head strong { font-variant-numeric:tabular-nums; }
+            .sdash-budget__bar { height:10px; background:#eee9df; border-radius:5px; overflow:hidden; margin:10px 0 8px; }
+            .sdash-budget__bar i { display:block; height:100%; background:#7E684B; }
+            .sdash-budget--near .sdash-budget__bar i, .sdash-budget--ahead .sdash-budget__bar i { background:#c9a24a; }
+            .sdash-budget--over .sdash-budget__bar i { background:#a25048; }
+            .sdash-budget__foot { font-size:.82rem; color:#6a6255; }
+        </style>
+        <?php if ($budgetTile): $bt = $budgetTile; ?>
+        <a class="sdash-budget sdash-budget--<?php echo htmlspecialchars($bt['status']); ?>" href="stock-budget.php">
+            <div class="sdash-budget__head"><span><i class="fas fa-scale-balanced"></i> Budget this month &middot; <?php echo htmlspecialchars($bt['label']); ?></span><strong><?php echo number_format($bt['pct_used'], 0); ?>% used</strong></div>
+            <div class="sdash-budget__bar"><i style="width:<?php echo (int)min(100, round($bt['pct_used'])); ?>%"></i></div>
+            <div class="sdash-budget__foot">
+                <?php echo $bt['left'] < -BALANCE_TOLERANCE ? 'Over by ' . htmlspecialchars($currency_symbol) . ' ' . number_format(abs($bt['left']), 0) : 'Left to spend ' . htmlspecialchars($currency_symbol) . ' ' . number_format($bt['left'], 0); ?>
+                <?php if ($bt['worst']): ?> &middot; Closest to its limit: <?php echo htmlspecialchars($bt['worst']['label']); ?> (<?php echo number_format($bt['worst']['pct_used'], 0); ?>%)<?php endif; ?>
+            </div>
+        </a>
+        <?php else: ?>
+        <a class="sdash-budget" href="stock-budget.php">
+            <div class="sdash-budget__head"><span><i class="fas fa-scale-balanced"></i> Budget this month</span><strong style="font-weight:400;color:#8a8172;">Not set &mdash; set one</strong></div>
+        </a>
+        <?php endif; ?>
+        <?php endif; ?>
 
         <?php if ($alertSummary['never_stocked'] > 0): ?>
         <div class="sdash-setup-note" style="margin:0 0 16px;padding:12px 16px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;border-radius:8px;">

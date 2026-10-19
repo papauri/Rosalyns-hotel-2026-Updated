@@ -104,6 +104,8 @@ function getAllRoles()
                 'stock_count',
                 'stock_wastage',
                 'stock_reports',
+                'stock_budget',
+                'stock_budget_manage',
                 'bds_view',
                 'cds_view',
                 'offline_log_view',
@@ -803,6 +805,22 @@ function getAllPermissions()
             'page' => 'stock-reports.php',
             'group' => 'stock_read'
         ],
+        'stock_budget' => [
+            'label' => 'Stock Budget (view)',
+            'description' => 'See the monthly stock budget: spent, already ordered and left to spend per category',
+            'icon' => 'fa-scale-balanced',
+            'category' => 'Restaurant & Stock',
+            'page' => 'stock-budget.php',
+            'group' => 'stock_read'
+        ],
+        'stock_budget_manage' => [
+            'label' => 'Stock Budget (set & approve)',
+            'description' => 'Set monthly stock budgets and approve purchase orders that go over a budget that needs approval',
+            'icon' => 'fa-scale-balanced',
+            'category' => 'Restaurant & Stock',
+            'page' => 'stock-budget.php',
+            'group' => 'stock_write'
+        ],
         'events' => [
             'label' => 'Events',
             'description' => 'Manage hotel events',
@@ -1466,6 +1484,7 @@ function getPermissionForPage(string $page)
         'stock-count.php' => 'stock_count',
         'stock-wastage.php' => 'stock_wastage',
         'stock-reports.php' => 'stock_reports',
+        'stock-budget.php' => 'stock_budget',
         'events-management.php' => 'events',
         'events-inquiries.php' => 'events_bookings',
         'reviews.php' => 'reviews',
@@ -1572,6 +1591,7 @@ function getModuleForPage(string $page)
         'stock-count.php' => 'stock',
         'stock-wastage.php' => 'stock',
         'stock-reports.php' => 'stock',
+        'stock-budget.php' => 'stock',
         'conference-management.php' => 'conference',
         'gym-management.php' => 'gym',
         'gym-packages.php' => 'gym',

@@ -12,6 +12,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'includes/procurement-schema.php';
+require_once 'includes/stock-budget-lib.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -110,6 +111,18 @@ if (!$error) {
     }
 }
 
+// Left to spend this month (whole-stock cap, or all category budgets added up) for people who may see the budget.
+$budgetLeft = null;
+if (!$error && hasPermission((int)$user['id'], 'stock_budget')) {
+    try {
+        if (rh_sbud_ensure_schema($pdo)) {
+            $budgetLeft = rh_sbud_dashboard($pdo);
+        }
+    } catch (Throwable $e) {
+        error_log('stock-reorder budget hint: ' . $e->getMessage());
+    }
+}
+
 $csrf_token = generateCsrfToken();
 ?>
 <!DOCTYPE html>
@@ -161,7 +174,11 @@ $csrf_token = generateCsrfToken();
         <div class="ck-kpis ck-kpis--3 ro-summary">
             <div class="ck-kpi ck-kpi--warn"><span class="ck-kpi__label">Items to reorder</span><span class="ck-kpi__value"><?php echo (int)$itemCount; ?></span></div>
             <div class="ck-kpi"><span class="ck-kpi__label">Supplier orders</span><span class="ck-kpi__value"><?php echo count($groups); ?></span></div>
-            <div class="ck-kpi"><span class="ck-kpi__label">Est. purchase value</span><span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($grandTotal, 2); ?></span></div>
+            <div class="ck-kpi"><span class="ck-kpi__label">Est. purchase value</span><span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($grandTotal, 2); ?></span>
+                <?php if ($budgetLeft): $afterBuy = $budgetLeft['left'] - $grandTotal; ?>
+                    <span class="ck-kpi__sub">Left to spend this month: <a href="stock-budget.php"><?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($budgetLeft['left'], 0); ?></a><?php echo $grandTotal > 0 && $afterBuy < -BALANCE_TOLERANCE ? ' &middot; <strong style="color:#8a3a3a;">this would go over by ' . htmlspecialchars($currency_symbol) . ' ' . number_format(abs($afterBuy), 0) . '</strong>' : ''; ?></span>
+                <?php endif; ?>
+            </div>
         </div>
 
         <?php if (empty($groups)): ?>

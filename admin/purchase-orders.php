@@ -11,6 +11,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'includes/procurement-schema.php';
+require_once 'includes/stock-budget-lib.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 
 $user = [
@@ -28,7 +29,10 @@ if (!ensureStockTablesExist()) {
     $error = 'Stock tables not yet created.';
 } else {
     ensureProcurementSchema($pdo);
+    $sbudSchemaOk = rh_sbud_ensure_schema($pdo);
 }
+// Approving a PO that goes over a "needs approval" budget line is a separate permission.
+$canApproveBudget = hasPermission((int)$user['id'], 'stock_budget_manage');
 
 /** Recompute and persist a PO's subtotal/total from its lines. */
 function rh_po_recalc(PDO $pdo, int $poId): void
@@ -207,7 +211,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (mb_strlen($desc) > 255) throw new RuntimeException('Description is too long (255 characters maximum).');
                 if (mb_strlen($unit) > 50) throw new RuntimeException('Unit is too long (50 characters maximum).');
                 if ($poId <= 0) throw new RuntimeException('Purchase order not found.');
-                rh_po_assert_editable($pdo, $poId);
+                $pdo->beginTransaction();
+                rh_sbud_lock($pdo); // first statement: see rh_sbud_lock()
+                $poStatus = rh_po_assert_editable($pdo, $poId);
                 if ($iid > 0) {
                     $m = $pdo->prepare("SELECT name, unit, cost_per_unit FROM stock_ingredients WHERE id = ?");
                     $m->execute([$iid]);
@@ -224,6 +230,12 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 ")->execute([$poId, $iid ?: null, $desc, $unit ?: null, $q, $c, round($q * $c, 2)]);
                 rh_po_recalc($pdo, $poId);
+                // A PO that has already been sent is promised money: growing it is checked against the budget again.
+                if ($poStatus !== 'draft') {
+                    $bud = rh_sbud_authorize_po($pdo, $poId, (int)$user['id'], $canApproveBudget, !empty($_POST['budget_confirm']), (string)($_POST['budget_reason'] ?? ''));
+                    if (!$bud['ok']) throw new RuntimeException($bud['error']);
+                }
+                $pdo->commit();
                 $message = 'Line added.';
                 $redirectTo = 'purchase-orders.php?id=' . $poId;
 
@@ -246,26 +258,46 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $poId   = (int)($_POST['po_id'] ?? 0);
                 $q = rh_po_number($_POST['ordered_qty'] ?? '', 'Quantity', true);
                 $c = rh_po_number($_POST['unit_cost'] ?? '', 'Unit cost', false, true);
-                rh_po_assert_editable($pdo, $poId);
-                $recvChk = $pdo->prepare("SELECT received_qty FROM stock_purchase_order_items WHERE id = ? AND purchase_order_id = ?");
+                $pdo->beginTransaction();
+                rh_sbud_lock($pdo); // first statement: see rh_sbud_lock()
+                $poStatus = rh_po_assert_editable($pdo, $poId);
+                $recvChk = $pdo->prepare("SELECT received_qty, line_total FROM stock_purchase_order_items WHERE id = ? AND purchase_order_id = ?");
                 $recvChk->execute([$lineId, $poId]);
-                $alreadyRecv = (float)$recvChk->fetchColumn();
+                $recvRow = $recvChk->fetch(PDO::FETCH_ASSOC) ?: ['received_qty' => 0, 'line_total' => 0];
+                $alreadyRecv = (float)$recvRow['received_qty'];
                 if ($q + 0.0001 < $alreadyRecv) {
                     throw new RuntimeException('Quantity cannot be lower than the ' . rtrim(rtrim(number_format($alreadyRecv, 4, '.', ''), '0'), '.') . ' already received.');
                 }
                 $pdo->prepare("UPDATE stock_purchase_order_items SET ordered_qty = ?, unit_cost = ?, line_total = ? WHERE id = ? AND purchase_order_id = ?")
                     ->execute([$q, $c, round($q * $c, 2), $lineId, $poId]);
                 rh_po_recalc($pdo, $poId);
+                // Only a bigger line on an already-sent PO is checked against the budget again.
+                if ($poStatus !== 'draft' && round($q * $c, 2) > (float)$recvRow['line_total'] + BALANCE_TOLERANCE) {
+                    $bud = rh_sbud_authorize_po($pdo, $poId, (int)$user['id'], $canApproveBudget, !empty($_POST['budget_confirm']), (string)($_POST['budget_reason'] ?? ''));
+                    if (!$bud['ok']) throw new RuntimeException($bud['error']);
+                }
+                $pdo->commit();
                 $message = 'Line updated.';
                 $redirectTo = 'purchase-orders.php?id=' . $poId;
 
             } elseif ($action === 'send') {
                 $poId = (int)($_POST['po_id'] ?? 0);
+                $redirectTo = 'purchase-orders.php?id=' . $poId;
+                $pdo->beginTransaction();
+                rh_sbud_lock($pdo); // first statement: see rh_sbud_lock()
+                $stLock = $pdo->prepare("SELECT status FROM stock_purchase_orders WHERE id = ? FOR UPDATE");
+                $stLock->execute([$poId]);
+                $curStatus = $stLock->fetchColumn();
+                if ($curStatus === false) throw new RuntimeException('Purchase order not found.');
+                if ($curStatus !== 'draft') throw new RuntimeException('Only a draft purchase order can be sent (this one is ' . $curStatus . ').');
                 $cnt = (int)$pdo->query("SELECT COUNT(*) FROM stock_purchase_order_items WHERE purchase_order_id = " . $poId)->fetchColumn();
                 if ($cnt < 1) throw new RuntimeException('Add at least one line before sending.');
+                // Budget check: warn lines need a confirm, needs-approval lines need a budget manager and a reason.
+                $bud = rh_sbud_authorize_po($pdo, $poId, (int)$user['id'], $canApproveBudget, !empty($_POST['budget_confirm']), (string)($_POST['budget_reason'] ?? ''));
+                if (!$bud['ok']) throw new RuntimeException($bud['error']);
                 $pdo->prepare("UPDATE stock_purchase_orders SET status = 'sent', sent_at = NOW() WHERE id = ? AND status = 'draft'")->execute([$poId]);
-                $message = 'Purchase order marked as sent.';
-                $redirectTo = 'purchase-orders.php?id=' . $poId;
+                $pdo->commit();
+                $message = $bud['overridden'] ? 'Purchase order marked as sent. It is over budget and that has been recorded.' : 'Purchase order marked as sent.';
 
             } elseif ($action === 'cancel') {
                 $poId = (int)($_POST['po_id'] ?? 0);
@@ -379,6 +411,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                             $user['id'],
                             'PO ' . $po['reference'] . ($overQty > 0 ? ' | over-delivery +' . rtrim(rtrim(number_format($overQty, 3, '.', ''), '0'), '.') . ': ' . $overNote : '')
                         );
+                    } elseif (function_exists('rh_sbud_record_nonstock_receipt') && !empty($sbudSchemaOk)) {
+                        // No stock to book, but the money was spent: the budget counts it as received.
+                        rh_sbud_record_nonstock_receipt($pdo, $poId, (int)$lid, (string)($line['description'] ?? ''), $rq, $cost, (int)$user['id']);
                     }
                     $pdo->prepare("UPDATE stock_purchase_order_items SET received_qty = received_qty + ? WHERE id = ?")
                         ->execute([$rq, $lid]);
@@ -435,13 +470,15 @@ try {
     $ingredients = $pdo->query("SELECT id, name, unit, cost_per_unit FROM stock_ingredients WHERE is_archived = 0 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) { /* schema not ready */ }
 
-$po = null; $lines = [];
+$po = null; $lines = []; $budgetEffect = null;
 if (!$error && $viewId > 0) {
     $st = $pdo->prepare("
-        SELECT po.*, s.name AS supplier_name, s.email AS supplier_email, s.phone AS supplier_phone, u.full_name AS creator
+        SELECT po.*, s.name AS supplier_name, s.email AS supplier_email, s.phone AS supplier_phone, u.full_name AS creator,
+               ou.full_name AS budget_override_name
         FROM stock_purchase_orders po
         LEFT JOIN stock_suppliers s ON s.id = po.supplier_id
         LEFT JOIN admin_users u ON u.id = po.created_by
+        LEFT JOIN admin_users ou ON ou.id = po.budget_override_by
         WHERE po.id = ? LIMIT 1
     ");
     $st->execute([$viewId]);
@@ -450,6 +487,9 @@ if (!$error && $viewId > 0) {
         $ls = $pdo->prepare("SELECT * FROM stock_purchase_order_items WHERE purchase_order_id = ? ORDER BY id");
         $ls->execute([$viewId]);
         $lines = $ls->fetchAll(PDO::FETCH_ASSOC);
+        if (in_array($po['status'], ['draft', 'sent', 'partial'], true) && $lines) {
+            try { $budgetEffect = rh_sbud_po_effect($pdo, (int)$po['id']); } catch (Throwable $e) { $budgetEffect = null; }
+        }
     } else {
         $error = 'Purchase order not found.';
     }
@@ -508,7 +548,21 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
         .recv-out { display:block; margin-top:3px; font-size:.74rem; color:#8a8172; white-space:nowrap; }
         .mono { font-variant-numeric:tabular-nums; }
         .po-link { color:#7E684B; text-decoration:none; font-weight:600; }
-        @media (max-width:640px){ .po-table thead { display:none; } }
+        .po-bud { margin-top:14px; }
+        .po-bud h4 { margin:0 0 8px; font-size:.95rem; color:#3e3930; }
+        .po-bud h4 small { font-weight:400; color:#8a8172; font-size:.78rem; margin-left:6px; }
+        .po-neg { color:#8a3a3a; font-weight:600; }
+        .card .po-bud-table, .po-bud-table { min-width:0; width:100%; border-collapse:collapse; background:#fff; border:1px solid #e6e0d6; }
+        .po-bud-table th, .po-bud-table td { padding:9px 12px; border-bottom:1px solid #efeae1; font-size:.86rem; text-align:left; }
+        .po-bud-table th { background:#faf8f4; font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; color:#8a8172; }
+        .po-bud-table .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+        .po-actions { align-items:flex-start; }
+        .po-bud-ack { display:block; font-size:.84rem; color:#6a6255; margin-bottom:8px; max-width:420px; }
+        .po-bud-ack input[type="text"] { display:block; width:100%; margin-top:4px; padding:8px 10px; border:1px solid #d3cbc0; border-radius:2px; font-family:inherit; box-sizing:border-box; }
+        .po-bud-ack input[type="checkbox"] { margin-right:6px; }
+        .po-bud-block { font-size:.84rem; color:#8a3a3a; background:#f0e3e3; padding:8px 12px; border-radius:2px; margin:0 0 8px; }
+        .po-send { display:flex; flex-direction:column; align-items:flex-start; }
+        @media (max-width:640px){ .po-table thead { display:none; } .po-bud-table th, .po-bud-table td { padding:7px 5px; font-size:.74rem; } .po-bud-table th { font-size:.62rem; letter-spacing:0; } .po-bud .badge { padding:2px 7px; font-size:.64rem; } }
     </style>
 </head>
 
@@ -545,13 +599,46 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                 <?php if (!empty($po['notes'])): ?>
                     <p style="margin-top:12px;color:#6a6255;"><?php echo nl2br(htmlspecialchars($po['notes'])); ?></p>
                 <?php endif; ?>
+                <?php if (!empty($po['budget_override_at'])): ?>
+                    <p class="po-bud-block" style="margin-top:12px;"><i class="fas fa-scale-balanced"></i> Went over budget &mdash; approved by <?php echo htmlspecialchars((string)($po['budget_override_name'] ?? 'a manager')); ?>: <?php echo htmlspecialchars((string)$po['budget_override_reason']); ?></p>
+                <?php endif; ?>
+                <?php if ($budgetEffect && !empty($budgetEffect['rows'])): ?>
+                    <div class="po-bud">
+                        <h4><i class="fas fa-scale-balanced"></i> Budget effect <small>in <?php echo htmlspecialchars($currency_symbol); ?>, for <?php echo htmlspecialchars(date('F Y')); ?> &middot; <a class="po-link" href="stock-budget.php">open the budget</a></small></h4>
+                        <div style="overflow-x:auto;"><table class="po-bud-table no-card-mobile no-auto-sort">
+                            <thead><tr><th>Category</th><th class="num">Left now</th><th class="num">This order</th><th class="num">Left after</th><th></th></tr></thead>
+                            <tbody>
+                            <?php foreach ($budgetEffect['rows'] as $be): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($be['label']); ?></td>
+                                    <td class="num"><?php echo number_format($be['left_before'], 0); ?></td>
+                                    <td class="num"><?php echo number_format($be['po_value'], 0); ?></td>
+                                    <td class="num<?php echo $be['over'] ? ' po-neg' : ''; ?>"><?php echo number_format($be['left_after'], 0); ?></td>
+                                    <td><?php if ($be['over']): ?><span class="badge" style="color:#8a3a3a;background:#f0e3e3;"><?php echo $be['control'] === 'approval' ? 'Approval' : 'Over'; ?></span><?php else: ?><span class="badge" style="color:#2e6b34;background:#e3f0e4;">OK</span><?php endif; ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table></div>
+                    </div>
+                <?php endif; ?>
                 <div class="po-actions">
-                    <?php if ($po['status'] === 'draft'): ?>
-                        <form method="POST" onsubmit="return confirm('Mark this PO as sent to the supplier?');">
+                    <?php if ($po['status'] === 'draft'):
+                        $beOver = $budgetEffect['over'] ?? [];
+                        $beNeeds = !empty($budgetEffect['needs_approval']);
+                        $beBlocked = $beNeeds && !$canApproveBudget; ?>
+                        <form method="POST" class="po-send" onsubmit="return confirm('Mark this PO as sent to the supplier?');">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                             <input type="hidden" name="action" value="send">
                             <input type="hidden" name="po_id" value="<?php echo (int)$po['id']; ?>">
-                            <button class="btn btn-primary"><i class="fas fa-paper-plane"></i> Mark as sent</button>
+                            <?php if ($beOver && !$beNeeds): ?>
+                                <label class="po-bud-ack"><input type="checkbox" name="budget_confirm" value="1" required> I know this order goes over budget and I want to send it anyway</label>
+                            <?php elseif ($beOver && $beNeeds && $canApproveBudget): ?>
+                                <label class="po-bud-ack">Why is it going over budget? <span style="color:#a25048;">(needed to approve)</span>
+                                    <input type="text" name="budget_reason" maxlength="500" minlength="5" required placeholder="Reason, at least 5 characters"></label>
+                            <?php elseif ($beBlocked): ?>
+                                <p class="po-bud-block"><i class="fas fa-lock"></i> This order takes the budget over and needs approval. A budget manager has to send it.</p>
+                            <?php endif; ?>
+                            <button class="btn btn-primary"<?php echo $beBlocked ? ' disabled' : ''; ?>><i class="fas fa-paper-plane"></i> Mark as sent</button>
                         </form>
                     <?php endif; ?>
                     <?php if (in_array($po['status'], ['draft','sent'], true)): ?>
