@@ -5,10 +5,11 @@ and when work ships. One line per task: status · what · where it stands · nex
 Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 
 ## Open
-- TODO · Linked-data follow-ups · regression test for credit-note re-open on cancel, pending-payment cancel, no-show refund, API payment delete; payment_audit_log on edit/refund paths; "Note cleared" label in POS accounting timeline; owner decisions in .claude/plans/linked-data-cleanup.md (group bookings, consumed room service on cancel, CN vs cash, POS receipt history, gym bill on member cancel, orphan gallery row 43).
+- TODO · Linked-data follow-ups · API payment delete has no automated test (needs an HTTP harness that leaves no live rows); owner decisions in .claude/plans/linked-data-cleanup.md (group bookings, consumed room service on cancel, CN vs cash, POS receipt history, gym bill on member cancel, orphan gallery row 43).
 - TODO · Form validation across other admin create/edit forms (duplicates flagged while typing, form reopens with the reason) · page messages are visible again everywhere (alert fix), so server-side rejections now show; next: apply the user-management pattern to the busiest forms.
 
 ## Shipped 2026-10-20
+- Payment audit log on every payment edit and refund (admin, API, settle, cancel/CN/no-show refunds); admin edit cannot reopen a cancelled payment; "Order note cleared" in POS accounting; scripts/tests/linked_money.php (24 checks) in run_tests.
 - Linked-data QA follow-ups: cancelled payments cannot be reopened or re-amounted via the API; system order closes record no user (not id 0); clearer credit-note re-open message.
 
 ## Shipped today (2026-10-19)
