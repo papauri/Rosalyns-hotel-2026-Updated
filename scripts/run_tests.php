@@ -15,6 +15,7 @@ $suites = [
     'Hotel details section' => 'scripts/tests/hotel_details.php',
     'User timezone display' => 'scripts/tests/user_timezone.php',
     'Rooms linked data'     => 'scripts/tests/linked_rooms.php',
+    'Money linked data'     => 'scripts/tests/linked_money.php',
     'Linked data health'    => 'scripts/data-health.php',
 ];
 $failed = 0;

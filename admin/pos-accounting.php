@@ -41,9 +41,13 @@ function rh_pos_accounting_money_text(float $amount, string $currencySymbol): st
     return trim($currencySymbol) . ' ' . number_format($amount, 2);
 }
 
-function rh_pos_accounting_event_label(string $event): string
+function rh_pos_accounting_event_label(string $event, ?string $details = null): string
 {
     $event = strtolower(trim($event));
+    // Notes keep their history: an empty note row means the accountant cleared it.
+    if ($event === 'accountant_order_note' && $details !== null && trim($details) === '') {
+        return 'Order note cleared';
+    }
     $labels = [
         'parked_open_tab' => 'Open tab parked',
         'accountant_shift_closed' => 'Shift closed by accounting',
@@ -840,9 +844,12 @@ try {
                 <div class="pos-acct-log-list">
                     <?php foreach ($logs as $log):
                         $detailView = rh_pos_accounting_log_details_view($log['details'] ?? null, $currency_symbol);
+                        if ((string)$log['event'] === 'accountant_order_note' && trim((string)($log['details'] ?? '')) === '') {
+                            $detailView['summary'] = 'The note on this order was removed.';
+                        }
                     ?>
                         <article class="pos-acct-log-item">
-                            <strong class="pos-acct-log-item__title"><?php echo htmlspecialchars(rh_pos_accounting_event_label((string)$log['event'])); ?></strong>
+                            <strong class="pos-acct-log-item__title"><?php echo htmlspecialchars(rh_pos_accounting_event_label((string)$log['event'], (string)($log['details'] ?? ''))); ?></strong>
                             <span class="pos-acct-log-item__meta"><?php echo htmlspecialchars((string)$log['created_at']); ?> · <?php echo htmlspecialchars((string)($log['actor_name'] ?: 'System')); ?> · <?php echo htmlspecialchars((string)($log['reference'] ?: 'POS')); ?></span>
                             <p class="pos-acct-log-item__summary"><?php echo htmlspecialchars($detailView['summary'] !== '' ? $detailView['summary'] : 'No extra context captured.'); ?></p>
                             <?php if (!empty($detailView['pairs'])): ?>

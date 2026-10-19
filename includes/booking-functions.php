@@ -679,6 +679,9 @@ function createNoShowRefund(array $booking, int $adminUserId, PDO $pdo): array
             )
         ");
 
+        if (!function_exists('rh_log_payment_audit') && is_file(__DIR__ . '/../admin/includes/finance-account-sync.php')) {
+            require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
+        }
         $refundRef = '';
         $refundAmount = 0.0;
         foreach ($allocations as $alloc) {
@@ -702,6 +705,10 @@ function createNoShowRefund(array $booking, int $adminUserId, PDO $pdo): array
                 'No-show auto-refund (' . $policy . ' policy) — pending admin review and processing.',
                 $adminUserId,
             ]);
+            if (function_exists('rh_log_payment_audit')) {
+                rh_log_payment_audit($pdo, (int)$orig['id'], (string)($orig['payment_reference'] ?? ''), 'refund_recorded', [], $adminUserId, $adminUserId > 0 ? 'staff' : 'system',
+                    'Refund ' . $legRef . ' of ' . number_format($legAmount, 2) . ' (no-show, pending)');
+            }
             $refundAmount = round($refundAmount + $legAmount, 2);
         }
 

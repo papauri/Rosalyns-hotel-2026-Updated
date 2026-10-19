@@ -461,6 +461,54 @@ if (!function_exists('rh_payment_status_supported')) {
     }
 }
 
+if (!function_exists('rh_log_payment_audit')) {
+    /**
+     * Write payment_audit_log rows: one per changed field in $changes (field => [old, new]); money
+     * fields compare within BALANCE_TOLERANCE. With no $changes, one row for the action itself
+     * ($note as new_value; unused when there are changes). Call inside the caller's transaction; a logging failure never blocks
+     * the money action (it goes to the error log).
+     */
+    function rh_log_payment_audit(PDO $pdo, int $paymentId, ?string $paymentRef, string $action, array $changes, ?int $userId, string $userName, string $note = ''): int
+    {
+        $rows = [];
+        foreach ($changes as $field => [$old, $new]) {
+            $o = $old === null ? '' : (string)$old;
+            $n = $new === null ? '' : (string)$new;
+            if (is_numeric($o) && is_numeric($n) && abs((float)$o - (float)$n) <= BALANCE_TOLERANCE) {
+                continue;
+            }
+            if ($o === $n) {
+                continue;
+            }
+            $rows[] = [(string)$field, $old === null ? null : $o, $new === null ? null : $n];
+        }
+        if (!$changes) {
+            $rows[] = [null, null, $note !== '' ? $note : null];
+        }
+        if (!$rows) {
+            return 0;
+        }
+        try {
+            $ins = $pdo->prepare("INSERT INTO payment_audit_log
+                    (payment_id, payment_reference, action, field_name, old_value, new_value, performed_by, performed_by_name, ip_address, user_agent)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            foreach ($rows as [$field, $old, $new]) {
+                $ins->execute([
+                    $paymentId, $paymentRef, mb_substr($action, 0, 50), $field, $old, $new,
+                    $userId && $userId > 0 ? $userId : null,
+                    mb_substr($userName, 0, 100) ?: null,
+                    $_SERVER['REMOTE_ADDR'] ?? null,
+                    isset($_SERVER['HTTP_USER_AGENT']) ? mb_substr((string)$_SERVER['HTTP_USER_AGENT'], 0, 255) : null,
+                ]);
+            }
+        } catch (Throwable $e) {
+            error_log('rh_log_payment_audit failed for payment ' . $paymentId . ': ' . $e->getMessage());
+            return 0;
+        }
+        return count($rows);
+    }
+}
+
 if (!function_exists('rh_refresh_original_payment_status')) {
     /**
      * Recompute an original payment's status from its SETTLED refunds (completed or
@@ -647,6 +695,8 @@ if (!function_exists('rh_settle_refund_row')) {
                        refund_notes = CONCAT(COALESCE(refund_notes, ''), ?), updated_at = NOW()
                  WHERE id = ?
             ")->execute([$targetStatus, $newPaymentStatus, $newRowStatus, $targetStatus, $targetStatus, $settlerUserId, $settlerUserId, $line, $refundId]);
+            rh_log_payment_audit($pdo, $refundId, (string)$row['payment_reference'], 'refund_' . $targetStatus,
+                ['refund_status' => [$from, $targetStatus]], $settlerUserId, $actor !== '' ? $actor : 'staff');
 
             rh_apply_refund_side_effects(
                 $pdo,

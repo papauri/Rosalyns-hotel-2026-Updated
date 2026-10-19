@@ -692,6 +692,10 @@ if (!function_exists('rh_refund_credit_note_payments')) {
             if (function_exists('rh_refresh_original_payment_status')) {
                 rh_refresh_original_payment_status($pdo, (int)$orig['id']);
             }
+            if (function_exists('rh_log_payment_audit')) {
+                rh_log_payment_audit($pdo, (int)$orig['id'], (string)($orig['payment_reference'] ?? ''), 'refund_recorded', [], $adminUserId, $adminUserId > 0 ? 'staff' : 'system',
+                    'Refund ' . $ref . ' of ' . number_format($leg, 2) . ' returned to credit note ' . $re['cn_number'] . ' (' . $reason . ')');
+            }
             $out['total'] = round($out['total'] + $leg, 2);
             $out['refs'][] = $ref;
             $out['notes'][] = $re['cn_number'];

@@ -835,6 +835,24 @@ function updatePayment(PDO $pdo, int $paymentId)
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
 
+        $auditChanges = [];
+        foreach (['payment_date', 'payment_method', 'payment_status', 'notes', 'processed_by'] as $f) {
+            if (array_key_exists($f, $input)) {
+                $auditChanges[$f] = [$existingPayment[$f] ?? null, $input[$f]];
+            }
+        }
+        if (isset($input['payment_amount'])) {
+            $auditChanges['total_amount'] = [$existingPayment['total_amount'] ?? null, round((float)$input['payment_amount'], 2)];
+        }
+        if (isset($input['transaction_reference'])) {
+            $auditChanges['transaction_reference'] = [$existingPayment[finance_payment_transaction_column($pdo)] ?? null, $input['transaction_reference']];
+        }
+        if ($auditChanges) {
+            $apiClient = $GLOBALS['rh_api_client'] ?? [];
+            rh_log_payment_audit($pdo, $paymentId, (string)($existingPayment['payment_reference'] ?? ''), 'edited', $auditChanges,
+                null, 'API: ' . (string)($apiClient['client_name'] ?? 'unknown client'));
+        }
+
         // Update account totals (every account type)
         if (!rh_sync_account_payments($pdo, (string)$existingPayment['booking_type'], (int)$existingPayment['booking_id'])) {
             throw new Exception('Could not recalculate the account balance');

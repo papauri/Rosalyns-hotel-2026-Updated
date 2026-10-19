@@ -309,6 +309,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             // Pending refunds reserve refundable balance but do not touch paid or the original.
             rh_apply_refund_side_effects($pdo, (string)$payment['booking_type'], (int)$payment['booking_id'], (int)$payment_id, 'Refund ' . $refundRef . ' (' . $refund_reason . ')');
 
+            rh_log_payment_audit($pdo, (int)$payment_id, (string)$payment['payment_reference'], 'refund_recorded', [], (int)($_SESSION['admin_user_id'] ?? 0),
+                (string)($_SESSION['admin_full_name'] ?? ($_SESSION['admin_username'] ?? '')),
+                'Refund ' . $refundRef . ' of ' . number_format((float)$refund_amount, 2) . ' (' . $refund_reason . ', ' . $refund_status . ')');
+
             $pdo->commit();
 
             $refundEmailSent = false;

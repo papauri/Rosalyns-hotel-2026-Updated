@@ -343,6 +343,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 )) {
                     throw new Exception('Refunds were recorded against this payment while you were editing. Reload the page; its amount and status are now managed by the refund records.');
                 }
+                // A payment cancelled with its booking stays cancelled (same rule as the API).
+                if ((string)$lockedRow['payment_status'] === 'cancelled' && $paymentStatus !== 'cancelled') {
+                    throw new Exception('This payment was cancelled and cannot be reopened. Record a new payment instead.');
+                }
 
                 $needsReceiptNumber = in_array($paymentStatus, ['completed', 'paid'], true)
                     && !in_array((string)$lockedRow['payment_status'], ['completed', 'paid'], true)
@@ -358,6 +362,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sql = "UPDATE payments SET " . implode(', ', $updateFields) . ", updated_at = NOW() WHERE id = ?";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute($params);
+
+                rh_log_payment_audit($pdo, $editId, (string)($payment['payment_reference'] ?? ''), 'edited', [
+                    'payment_date'          => [$payment['payment_date'] ?? null, $paymentDate],
+                    'total_amount'          => [$payment['total_amount'] ?? null, $totalAmount],
+                    'payment_method'        => [$payment['payment_method'] ?? null, $paymentMethod],
+                    'payment_status'        => [$lockedRow['payment_status'] ?? null, $paymentStatus],
+                    'transaction_reference' => [$payment[$paymentTransactionColumn] ?? null, $transactionReference ?: null],
+                    'notes'                 => [$payment['notes'] ?? null, $notes ?: null],
+                ], (int)($user['id'] ?? 0), (string)($user['full_name'] ?? ($user['username'] ?? '')));
 
                 // Update account totals (every receivable type; restaurant has no balance row)
                 if (!rh_sync_account_payments($pdo, $bookingType, $bookingId)) {

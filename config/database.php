@@ -9196,12 +9196,16 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
                     $refundStatus,
                     $leg, 'Cancellation (' . $mode . ')', $adminUserId ?: null,
                 ]);
-                if ($refundStatus === 'completed' && !function_exists('rh_refresh_original_payment_status')
+                if (!function_exists('rh_refresh_original_payment_status')
                     && is_file(__DIR__ . '/../admin/includes/finance-account-sync.php')) {
                     require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
                 }
                 if ($refundStatus === 'completed' && function_exists('rh_refresh_original_payment_status')) {
                     rh_refresh_original_payment_status($pdo, (int)$orig['id']);
+                }
+                if (function_exists('rh_log_payment_audit')) {
+                    rh_log_payment_audit($pdo, (int)$orig['id'], (string)($orig['payment_reference'] ?? ''), 'refund_recorded', [], $adminUserId, $adminUserId > 0 ? 'staff' : 'system',
+                        'Refund ' . $legRef . ' of ' . number_format($leg, 2) . ' (cancellation, ' . $refundStatus . ')');
                 }
                 $refunded = round($refunded + $leg, 2);
                 $refs[] = $legRef;
