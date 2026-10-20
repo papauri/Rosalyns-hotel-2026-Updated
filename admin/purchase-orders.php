@@ -604,7 +604,23 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
         .po-bud-ack input[type="checkbox"] { margin-right:6px; }
         .po-bud-block { font-size:.84rem; color:#8a3a3a; background:#f0e3e3; padding:8px 12px; border-radius:2px; margin:0 0 8px; }
         .po-send { display:flex; flex-direction:column; align-items:flex-start; }
-        @media (max-width:640px){ .po-table thead { display:none; } .po-bud-table th, .po-bud-table td { padding:7px 5px; font-size:.74rem; } .po-bud-table th { font-size:.62rem; letter-spacing:0; } .po-bud .badge { padding:2px 7px; font-size:.64rem; } }
+        .rc-note { display:block; width:100%; margin-top:4px; font-size:.8rem; box-sizing:border-box; }
+        /* Touch widths (phones and tablets): every control in the receive area is a 44px target. */
+        @media (max-width:1024px){
+            .po-receive .rc-cell input:not([type="hidden"]), .po-receive .rc-cell select { min-height:44px; box-sizing:border-box; font-size:16px; padding:8px 10px; }
+            .po-receive .rc-cell select { min-width:0; }
+        }
+        /* Phones and tablets: the shared admin card layout (admin-mobile.js, .mobile-enhanced) stacks each line and labels every cell from the header row.
+           The receive cells take the full card width so the quantity, price, note and expiry are easy to read and hit. */
+        @media (max-width:1024px){
+            .po-table.po-receive.mobile-enhanced tbody tr > td[data-label="Item"] { grid-column:1 / -1; }
+            .po-table.po-receive.mobile-enhanced tbody tr > td.rc-cell { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px 8px; align-items:center; text-align:left; }
+            .po-table.po-receive.mobile-enhanced tbody tr > td.rc-cell::before { grid-column:1 / -1; }
+            .po-table.po-receive.mobile-enhanced tbody tr > td.rc-cell .mini, .po-table.po-receive.mobile-enhanced tbody tr > td.rc-cell input[type="date"] { width:100%; min-width:0; }
+            .po-table.po-receive.mobile-enhanced tbody tr > td.rc-cell input[type="date"] { grid-column:1 / -1; }
+            .po-table.po-receive.mobile-enhanced tbody tr > td.rc-cell .recv-out, .po-table.po-receive.mobile-enhanced tbody tr > td.rc-cell .rc-note { grid-column:1 / -1; margin-top:0; white-space:normal; text-align:left; }
+        }
+        @media (max-width:640px){ .po-bud-table th, .po-bud-table td { padding:7px 5px; font-size:.74rem; } .po-bud-table th { font-size:.62rem; letter-spacing:0; } .po-bud .badge { padding:2px 7px; font-size:.64rem; } }
     </style>
 </head>
 
@@ -708,7 +724,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="receive">
                 <input type="hidden" name="po_id" value="<?php echo (int)$po['id']; ?>">
-                <div style="overflow-x:auto;"><table class="po-table">
+                <div style="overflow-x:auto;"><table class="po-table po-receive">
                     <thead>
                         <tr>
                             <th>Item</th>
@@ -726,24 +742,24 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                         <?php else: foreach ($lines as $ln):
                             $outstanding = (float)$ln['ordered_qty'] - (float)$ln['received_qty']; ?>
                             <tr>
-                                <td>
+                                <td data-label="Item">
                                     <strong><?php echo htmlspecialchars($ln['description']); ?></strong>
                                     <?php if (!empty($ln['unit'])): ?><span style="color:#8a8172;"> (<?php echo htmlspecialchars($ln['unit']); ?>)</span><?php endif; ?>
                                     <?php if (empty($ln['ingredient_id'])): ?><br><span style="color:#a06a3a;font-size:.76rem;">Non-stock line (no ingredient link)</span><?php endif; ?>
                                 </td>
-                                <td class="num"><?php
+                                <td class="num" data-label="Ordered"><?php
                                     $lnPack = ($ln['order_in'] ?? 'unit') === 'pack' && (float)($ln['pack_size_snapshot'] ?? 0) > 0;
                                     if ($lnPack) {
                                         echo '<strong>' . htmlspecialchars(rh_pack_describe((float)$ln['ordered_qty'], (string)($ln['unit'] ?? ''), 'pack', (float)$ln['pack_size_snapshot'], (string)($ln['pack_name_snapshot'] ?? ''))) . '</strong>';
                                     } else {
                                         echo number_format((float)$ln['ordered_qty'], 3);
                                     } ?></td>
-                                <td class="num"><?php echo number_format((float)$ln['received_qty'], 3); ?>
+                                <td class="num" data-label="Received"><?php echo number_format((float)$ln['received_qty'], 3); ?>
                                     <?php if ((float)($ln['over_received_qty'] ?? 0) > 0): ?><br><span style="color:#a06a3a;font-size:.76rem;" title="<?php echo htmlspecialchars((string)($ln['over_note'] ?? '')); ?>"><i class="fas fa-flag"></i> over-delivered +<?php echo number_format((float)$ln['over_received_qty'], 3); ?><?php echo !empty($ln['over_note']) ? ': ' . htmlspecialchars((string)$ln['over_note']) : ''; ?></span><?php endif; ?>
                                 </td>
-                                <td class="num"><?php echo number_format((float)$ln['unit_cost'], 4); ?>
+                                <td class="num" data-label="Unit cost"><?php echo number_format((float)$ln['unit_cost'], 4); ?>
                                     <?php if ($lnPack): ?><br><span style="color:#8a8172;font-size:.76rem;"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$ln['unit_cost'] * (float)$ln['pack_size_snapshot'], 2); ?> per <?php echo htmlspecialchars((string)($ln['pack_name_snapshot'] ?: 'pack')); ?></span><?php endif; ?></td>
-                                <td class="num"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$ln['line_total'], 2); ?></td>
+                                <td class="num" data-label="Line total"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$ln['line_total'], 2); ?></td>
                                 <?php if ($canReceive): ?>
                                     <?php
                                         $rcPackSize = $lnPack ? (float)$ln['pack_size_snapshot'] : 0.0;
@@ -755,7 +771,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                                         $rcQtyVal    = $outstanding > 0 ? ($rcQtyInPack ? round($rcOutPacks) : round($outstanding, 3)) : 0;
                                         $rcCostVal   = (float)$ln['unit_cost'] > 0 ? ($lnPack ? round((float)$ln['unit_cost'] * $rcPackSize, 4) : (float)$ln['unit_cost']) : '';
                                     ?>
-                                    <td class="num">
+                                    <td class="num rc-cell" data-label="Receive now">
                                         <input type="hidden" name="line_id[]" value="<?php echo (int)$ln['id']; ?>">
                                         <input class="mini rc-qty" type="number" name="receive_qty[]" step="0.001" min="0"
                                                value="<?php echo htmlspecialchars((string)$rcQtyVal); ?>"
@@ -769,9 +785,9 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                                             <input type="hidden" name="receive_qty_in[]" value="unit">
                                         <?php endif; ?>
                                         <span class="recv-out"><?php echo $outstanding > 0 ? number_format($outstanding, 3) . ' ' . htmlspecialchars((string)($ln['unit'] ?? '')) . ' outstanding' : 'fully received'; ?><?php if ($lnPack && $outstanding > 0): ?> (<?php echo htmlspecialchars(rh_pack_num($outstanding / (float)$ln['pack_size_snapshot'])); ?> <?php echo htmlspecialchars(rh_pack_label((string)($ln['pack_name_snapshot'] ?: 'pack'), $outstanding / (float)$ln['pack_size_snapshot'])); ?>)<?php endif; ?></span>
-                                        <input type="text" name="over_note[]" maxlength="200" placeholder="Over-delivery note (needed if above outstanding)" style="margin-top:4px;width:100%;font-size:.76rem;">
+                                        <input class="rc-note" type="text" name="over_note[]" maxlength="200" placeholder="Only if more than ordered: why?" aria-label="Over-delivery note">
                                     </td>
-                                    <td class="num">
+                                    <td class="num rc-cell" data-label="Price on invoice">
                                         <input class="mini" type="number" name="receive_cost[]" step="0.0001" min="0"
                                                value="<?php echo htmlspecialchars((string)$rcCostVal); ?>"
                                                placeholder="<?php echo $lnPack ? 'Price per ' . htmlspecialchars($rcPackName) : 'Price per ' . htmlspecialchars($rcUnit); ?>"
@@ -786,7 +802,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                                             <span class="recv-out">per <?php echo htmlspecialchars($rcUnit); ?></span>
                                         <?php endif; ?>
                                     </td>
-                                    <td><input type="date" name="expiry_date[]"></td>
+                                    <td class="rc-cell" data-label="Expiry"><input type="date" name="expiry_date[]" aria-label="Expiry date"></td>
                                 <?php endif; ?>
                                 <?php if ($isEditable): ?>
                                     <td>

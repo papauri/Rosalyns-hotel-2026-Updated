@@ -1348,7 +1348,7 @@ $csrf_token = generateCsrfToken();
             <!-- ============= LIST + START ============= -->
             <?php echo rh_stock_count_reminder_html($countReminder, '#start-count'); ?>
             <div class="grid-2">
-                <div>
+                <div class="count-side">
                     <div class="card" id="start-count">
                         <h3><i class="fas fa-plus-circle"></i> Start a Count</h3>
                         <p style="font-size:12px; color:#6c757d; margin-top:0;">Surprise counts catch shrinkage. Start narrow if you suspect a specific category.</p>
@@ -1398,7 +1398,7 @@ $csrf_token = generateCsrfToken();
                         </form>
                     </div>
 
-                    <div class="card" style="margin-top:14px;">
+                    <div class="card">
                         <h3 style="color:#c82333;">Theft Radar (last 30 days)</h3>
                         <p style="font-size:12px; color:#6c757d; margin-top:0;">Top ingredients losing stock to <strong>shortage variances</strong> or <strong>manual adjustments</strong> — i.e. drains <em>not</em> attributable to a sale or wastage. Manual additions are listed in the next card, because adding stock by hand can cover up a loss.</p>
                         <?php if (empty($theftRadar)): ?>
@@ -1418,7 +1418,7 @@ $csrf_token = generateCsrfToken();
                         <?php endif; ?>
                     </div>
 
-                    <div class="card" style="margin-top:14px;">
+                    <div class="card">
                         <h3>Manual additions (last 30 days)</h3>
                         <p style="font-size:12px; color:#6c757d; margin-top:0;">Stock added by hand, not received from a supplier or found in a count. A manual addition can hide an earlier loss, so check these against the Theft Radar. Biggest 20 by cost.</p>
                         <?php if (empty($manualAdds)): ?>
@@ -1442,6 +1442,7 @@ $csrf_token = generateCsrfToken();
                 <div>
                     <div class="card">
                         <h3><i class="fas fa-list"></i> Recent Counts</h3>
+                        <div class="count-list-wrap">
                         <table class="count-list no-card-mobile">
                             <thead>
                                 <tr>
@@ -1475,8 +1476,8 @@ $csrf_token = generateCsrfToken();
                                                 $rowApprovers = $approversFor((int)$c['counted_by']);
                                                 $rowSecond = !empty($c['is_opening']) || ($canApprove && rh_sca_needs_second_person($pdo, $c, $blockPct, $minCost));
                                             ?>
-                                                <?php if ($rowSecond): ?><div style="font-size:11px;color:#1e3a5f;margin-top:3px;">Needs a second person to approve &mdash; not <?php echo htmlspecialchars((string)($c['counted_by_name'] ?: 'the counter')); ?></div><?php endif; ?>
-                                                <div style="font-size:11px;color:#6c757d;margin-top:2px;">Can approve: <?php echo $rowApprovers ? htmlspecialchars(rh_sca_approver_names($rowApprovers)) : '<span style="color:#842029;">nobody else yet</span>'; ?></div>
+                                                <?php if ($rowSecond): ?><div class="count-note count-note--second">Needs a second person to approve &mdash; not <?php echo htmlspecialchars((string)($c['counted_by_name'] ?: 'the counter')); ?></div><?php endif; ?>
+                                                <div class="count-note">Can approve: <?php echo $rowApprovers ? htmlspecialchars(rh_sca_approver_names($rowApprovers)) : '<span class="count-note--warn">nobody else yet</span>'; ?></div>
                                             <?php endif; ?>
                                         </td>
                                     </tr>
@@ -1488,6 +1489,7 @@ $csrf_token = generateCsrfToken();
                                 <?php endif; ?>
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
             </div>

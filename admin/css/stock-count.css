@@ -1,8 +1,12 @@
 /* Stock Count / Cycle Count page styles */
 .grid-2 {
     display: grid;
-    grid-template-columns: 380px 1fr;
+    grid-template-columns: 380px minmax(0, 1fr);
     gap: 18px;
+}
+
+.grid-2 > * {
+    min-width: 0;
 }
 
 @media (max-width: 1100px) {
@@ -106,6 +110,64 @@ table.count-list th {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: #495057;
+}
+
+/* Recent Counts: scrolls inside its card if a narrow column ever cannot fit every column. */
+.count-list-wrap {
+    overflow-x: auto;
+    max-width: 100%;
+}
+
+.count-note {
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #6c757d;
+}
+
+.count-note--second {
+    color: #1e3a5f;
+}
+
+.count-note--warn {
+    color: #842029;
+}
+
+/* Left column of the page: the start-count form, Theft Radar and Manual additions cards. */
+.count-side > .card + .card {
+    margin-top: 14px;
+}
+
+@media (min-width: 64.01rem) {
+    table.count-list td[data-label="Date"],
+    table.count-list td[data-label="Shortage"],
+    table.count-list td[data-label="Surplus"] {
+        white-space: nowrap;
+    }
+
+    table.count-list td[data-label="Status"] {
+        min-width: 180px;
+        max-width: 240px;
+    }
+}
+
+/* Laptop widths with the sidebar open: the list needs the full page width to stay a readable table,
+   so it sits under the form cards instead of squeezed beside them. */
+@media (max-width: 1680px) {
+    .grid-2 {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .count-side {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        gap: 14px;
+        align-items: start;
+    }
+
+    .count-side > .card + .card {
+        margin-top: 0;
+    }
 }
 
 .pill {
@@ -289,6 +351,18 @@ table.count-list th {
     .count-list {
         display: block;
         width: 100%;
+    }
+
+    table.count-list {
+        min-width: 0;
+    }
+
+    .count-list td[data-label="Status"] {
+        grid-column: 1 / -1;
+    }
+
+    .count-list td[data-label="Status"] .pill {
+        justify-self: start;
     }
 
     .lines-table thead,
