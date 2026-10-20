@@ -343,6 +343,120 @@ if (!function_exists('rh_account_credit_owed')) {
     }
 }
 
+if (!function_exists('rh_account_balance_due')) {
+    /**
+     * The live balance still owed on a room / conference / gym / event account, re-derived from the
+     * ledger (rooms: recalculateBookingFinancials first). Call it INSIDE the transaction, after the
+     * account row is locked, so two staff can never both collect the same balance. Never negative.
+     */
+    function rh_account_balance_due(PDO $pdo, string $bookingType, int $bookingId): float
+    {
+        if ($bookingType === 'room') {
+            if (function_exists('recalculateBookingFinancials')) {
+                recalculateBookingFinancials($bookingId);
+            }
+            $st = $pdo->prepare("SELECT amount_due FROM bookings WHERE id = ?");
+            $st->execute([$bookingId]);
+            return max(0.0, round((float)($st->fetchColumn() ?: 0), 2));
+        }
+        $tables = ['gym' => 'gym_inquiries', 'event' => 'event_inquiries', 'conference' => 'conference_inquiries'];
+        if (!isset($tables[$bookingType])) {
+            return 0.0;
+        }
+        $st = $pdo->prepare("SELECT status, total_amount, total_with_vat FROM {$tables[$bookingType]} WHERE id = ? LIMIT 1");
+        $st->execute([$bookingId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return 0.0;
+        }
+        return rh_account_amount_due($row, rh_account_gross_total($row), rh_sum_account_paid($pdo, $bookingType, $bookingId));
+    }
+}
+
+if (!function_exists('rh_payment_overpay_message')) {
+    function rh_payment_overpay_message(): string
+    {
+        return "That is more than the balance due. Tick 'The guest paid more than owed' to record it \u{2014} the extra becomes a credit note.";
+    }
+}
+
+if (!function_exists('rh_payment_limit_error')) {
+    /**
+     * The single rule for taking money against an account (owner, 2026-10-20): nothing owed = no
+     * payment; more than the balance only with the explicit "guest paid more than owed" tick (the
+     * extra then becomes a credit note). Returns the staff-readable refusal, or null when allowed.
+     * Compare with BALANCE_TOLERANCE, never raw equality.
+     */
+    function rh_payment_limit_error(float $amount, float $balanceDue, bool $confirmOverpay): ?string
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        if ($balanceDue <= $tol) {
+            return 'Nothing is owed on this booking. Use a credit note or refund instead.';
+        }
+        if ($amount > $balanceDue + $tol && !$confirmOverpay) {
+            return rh_payment_overpay_message();
+        }
+        return null;
+    }
+}
+
+if (!function_exists('rh_doc_state')) {
+    /**
+     * Which document is the RIGHT one to offer for an account (owner rule): money still owed = 'invoice'
+     * (request for payment); money came in and nothing is owed = 'receipt'; nothing paid and nothing
+     * billed yet = 'quote'. Void statuses never offer an invoice.
+     */
+    function rh_doc_state(float $paid, float $due, string $status = ''): string
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        if (in_array($status, ['cancelled', 'no-show', 'expired', 'declined'], true)) {
+            return $paid > $tol ? 'receipt' : 'none';
+        }
+        if ($due > $tol) {
+            return 'invoice';
+        }
+        return $paid > $tol ? 'receipt' : 'quote';
+    }
+}
+
+if (!function_exists('rh_account_fully_paid')) {
+    /**
+     * True when money came in and nothing is owed on a room / conference / gym / event account (read-only:
+     * no recalculation, no writes). Used to refuse "send invoice" on a settled account.
+     */
+    function rh_account_fully_paid(PDO $pdo, string $bookingType, int $bookingId): bool
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        if ($bookingType === 'room') {
+            $st = $pdo->prepare("SELECT status, amount_paid, amount_due FROM bookings WHERE id = ?");
+            $st->execute([$bookingId]);
+            $r = $st->fetch(PDO::FETCH_ASSOC);
+            return $r && !in_array((string)$r['status'], ['cancelled', 'no-show', 'expired'], true)
+                && (float)$r['amount_paid'] > $tol && (float)$r['amount_due'] <= $tol;
+        }
+        $tables = ['gym' => 'gym_inquiries', 'event' => 'event_inquiries', 'conference' => 'conference_inquiries'];
+        if (!isset($tables[$bookingType])) {
+            return false;
+        }
+        $st = $pdo->prepare("SELECT status, total_amount, total_with_vat FROM {$tables[$bookingType]} WHERE id = ? LIMIT 1");
+        $st->execute([$bookingId]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$r || (string)$r['status'] === 'cancelled') {
+            return false;
+        }
+        $paid = rh_sum_account_paid($pdo, $bookingType, $bookingId);
+        return $paid > $tol && rh_account_amount_due($r, rh_account_gross_total($r), $paid) <= $tol;
+    }
+}
+
+if (!function_exists('rh_invoice_paid_refusal')) {
+    /** The refusal staff see when they ask for an invoice on a settled account, or null when an invoice is fine. */
+    function rh_invoice_paid_refusal(PDO $pdo, string $bookingType, int $bookingId): ?string
+    {
+        return rh_account_fully_paid($pdo, $bookingType, $bookingId) ? 'This booking is fully paid. Send the receipt instead.' : null;
+    }
+}
+
 if (!function_exists('rh_sync_account_payments')) {
     /**
      * Resync an account's paid/due snapshot from the ledger, whatever its type.

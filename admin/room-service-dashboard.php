@@ -311,7 +311,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($orderId <= 0) throw new RuntimeException('Invalid order.');
                 $pdo->beginTransaction();
 
-                $orderStmt = $pdo->prepare("SELECT id, order_type, status, kitchen_status FROM stock_orders WHERE id = ? FOR UPDATE");
+                $orderStmt = $pdo->prepare("SELECT id, order_type, status, kitchen_status, folio_posted_at FROM stock_orders WHERE id = ? FOR UPDATE");
                 $orderStmt->execute([$orderId]);
                 $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
                 if (!$order || ($order['order_type'] ?? '') !== 'room_service') {
@@ -319,6 +319,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $currentKitchenStatus = (string)($order['kitchen_status'] ?? '');
+                // Served on the KDS but still open (charged to the folio): Delivered just closes it.
+                if (($order['status'] ?? '') === 'placed' && $currentKitchenStatus === 'served' && !empty($order['folio_posted_at'])) {
+                    $pdo->prepare("UPDATE stock_order_items SET kds_status='served', served_at=COALESCE(served_at,NOW()) WHERE order_id=? AND kds_status NOT IN ('served','void')")
+                        ->execute([$orderId]);
+                    if (!rh_close_finished_room_service_order($pdo, $orderId)) {
+                        throw new RuntimeException('Unable to mark order as delivered from its current state.');
+                    }
+                    $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, to_status, user_id, user_name, ip_address) VALUES (?, 'served', 'served', ?, ?, ?)")
+                        ->execute([$orderId, $user['id'], $user['full_name'], $_SERVER['REMOTE_ADDR'] ?? null]);
+                    $pdo->commit();
+                    rs_logAudit($pdo, $orderId, (int)$user['id'], $user['full_name'], 'rs_order_delivered', json_encode(['source' => 'room-service-dashboard.php', 'was_served_on_kds' => true]));
+                    $flash['msg'] = 'Order #' . $orderId . ' marked as delivered.';
+                } else {
                 if (($order['status'] ?? '') === 'cancelled' || in_array($currentKitchenStatus, ['served', 'cancelled'], true)) {
                     throw new RuntimeException('Order is already finalized and cannot be marked delivered.');
                 }
@@ -378,7 +391,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, to_status, user_id, user_name, ip_address) VALUES (?, 'delivered', 'served', ?, ?, ?)")
+                $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, to_status, user_id, user_name, ip_address) VALUES (?, 'served', 'served', ?, ?, ?)")
                     ->execute([$orderId, $user['id'], $user['full_name'], $_SERVER['REMOTE_ADDR'] ?? null]);
                 $pdo->commit();
                 rs_logAudit($pdo, $orderId, (int)$user['id'], $user['full_name'], 'rs_order_delivered', json_encode([
@@ -389,6 +402,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'actor'    => $user['full_name'],
                 ]);
                 $flash['msg'] = 'Order #' . $orderId . ' marked as delivered.';
+                }
             }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();

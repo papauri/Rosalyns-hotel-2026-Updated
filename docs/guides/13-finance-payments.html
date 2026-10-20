@@ -92,19 +92,24 @@
     <li>Click <strong>Record Payment</strong>, then confirm. You will see <em>"Payment recorded successfully."</em> and the payment details page opens.</li>
   </ol>
   <p>Amount rules: it must be more than zero and not above 99,999,999. Example: a guest owes MWK 150,000 and hands over MWK 100,000 cash. Enter 100000, method Cash, status Completed. The balance becomes MWK 50,000.</p>
-  <p>If the booking already has no balance, a box <em>"Booking fully paid"</em> appears and the amount box stays locked until you tick <strong>Allow payment anyway (adjustment / credit)</strong>.</p>
+  <p>When you pick a booking, the card shows <em>"Balance due MWK ..."</em>, and the same figure appears under the amount box. Type less for a part payment.</p>
+  <p>If nothing is owed, there is no way to take a payment. The page shows <em>"Nothing is owed on this booking."</em> with <em>"No payment can be recorded here. Use a credit note or refund instead."</em>, the amount box stays locked and <strong>Record Payment</strong> is switched off. In the list of matching bookings, a settled one reads <em>"Nothing owed"</em> instead of a balance. The same rule applies to a payment saved through the API, and to <strong>Record payment</strong> on conference, gym and event enquiries.</p>
+  <p>If the guest paid more than the balance, see the next section. Without the tick the payment is refused.</p>
   <p>What goes out automatically when you save as <strong>Paid</strong> or <strong>Completed</strong>: a <strong>receipt</strong> with a PDF goes to the guest's email, once, for every type (Room, Conference, Gym and Event). Your <strong>Additional CC Emails</strong> get it too. No invoice is sent, because an invoice asks for money and this guest has just paid. The success line tells you what happened, for example <em>"Receipt emailed to the guest."</em> See <a href="#sent">What the guest is sent, and when</a>. If the receipt cannot go, the same line says why (see Problems and fixes).</p>
   <div class="note"><p>Clicking <strong>Record Payment</strong> twice by accident does not record it twice. You will see <em>"Payment already recorded (reference). Duplicate submission ignored."</em></p></div>
 
   <h2 id="overpay">What happens when a guest pays too much</h2>
-  <p>Enter what the guest actually handed over. If it is more than they owe, the system keeps the booking at zero balance and moves the extra into a credit note.</p>
+  <p>Enter what the guest actually handed over. If it is more than they owe, you must confirm it on purpose. Then the system keeps the booking at zero balance and moves the extra into a credit note.</p>
   <ol class="steps">
+    <li>Type the amount the guest handed over. A warning appears: <em>"That is MWK ... more than owed. The extra will be issued to the guest as a credit note."</em></li>
+    <li>Tick <strong>The guest paid more than owed</strong>. The tick is required; you cannot save without it. (On <strong>Create Booking</strong> the <strong>Amount Collected</strong> box has the same tick. In <strong>Payments &amp; balance</strong> on the bookings list it is in the same place.)</li>
     <li>Record the payment as <strong>Completed</strong> or <strong>Paid</strong>.</li>
     <li>You will see <em>"Overpayment detected — credit note CN... for ... issued and queued under Credit Notes."</em></li>
     <li>On the booking, the extra shows as a refund line with reason <strong>Overpayment</strong>, paid by credit note. The booking reads Paid with no balance.</li>
     <li>If the guest has an email address, the credit note is emailed to them.</li>
   </ol>
   <p>Example: a guest owes MWK 40,000 and pays MWK 50,000. The booking is settled and a credit note for MWK 10,000 is issued. A cancelled booking is never converted this way; its paid money stays as credit that staff refund on purpose.</p>
+  <p>If you forget the tick you will see <em>"That is more than the balance due. Tick 'The guest paid more than owed' to record it &mdash; the extra becomes a credit note."</em> Check the amount for a typing slip before you tick. For software that records payments through the API, the request must contain <strong>allow_overpayment</strong> set to true, otherwise it gets the same refusal.</p>
 
   <h2 id="edit">How to edit a payment</h2>
   <ol class="steps">
@@ -130,7 +135,8 @@
     <thead><tr><th>What happened</th><th>What the guest is sent</th><th>How</th></tr></thead>
     <tbody>
       <tr><td>A front-desk booking is made and nothing is paid yet</td><td>The booking email and a <strong>Quotation</strong> (the agreed price, with the balance due)</td><td>By itself when you create the booking</td></tr>
-      <tr><td>Money is owed and you want to ask for it</td><td>An <strong>Invoice</strong></td><td>By hand: <strong>Send Invoice</strong> on the booking, or <strong>Send invoice</strong> on a conference, gym or event enquiry</td></tr>
+      <tr><td>Money is owed and you want to ask for it</td><td>An <strong>Invoice</strong></td><td>By hand, and only while a balance is due: <strong>Send Invoice (balance due)</strong> on the booking, or <strong>Send invoice (balance due)</strong> on a conference, gym or event enquiry. Once the account is fully paid there is no invoice: <strong>Send receipt</strong> is offered instead</td></tr>
+      <tr><td>You want to send a receipt again</td><td>The <strong>Receipt</strong> for a payment already received</td><td>By hand: <strong>Send receipt</strong> (booking page, More menu on the list, conference, gym or event enquiry, or Invoices page). One payment: you confirm. Several payments: pick one from the list, the latest is already selected</td></tr>
       <tr><td>Any payment is saved as Paid or Completed (Room, Conference, Gym, Event)</td><td>A <strong>Receipt</strong> with a PDF, one per payment</td><td>By itself, once. Also when a Pending payment is later marked Paid or Completed</td></tr>
       <tr><td>A restaurant or room-service sale is paid on the till</td><td>A <strong>Receipt</strong></td><td>By itself, only when the order has a customer email. A bill split between several people sends one receipt for each part, to the email on the order</td></tr>
       <tr><td>Check-out and the guest still owes money</td><td>A <strong>Final Invoice</strong></td><td>By itself at check-out</td></tr>
@@ -143,7 +149,9 @@
     <li>A payment never sends an invoice. In the Record Payment window for a conference, gym or event, the tick <strong>Also email an invoice for any balance still due</strong> is off by default. Tick it only if you also want the guest asked for the rest. If nothing is left to pay you will see <em>"No invoice sent: nothing is left to pay, the receipt covers this payment."</em></li>
     <li>The guest needs a valid email address. Without one nothing can be emailed. The success line says so, and you can use <strong>Send Receipt</strong> on the payment later.</li>
     <li>The automatic receipt uses the <strong>Receipt Email</strong> template. If it is switched off (see <a href="12-email-templates.php">Email templates</a>), no receipt goes by itself, but <strong>Send Receipt</strong> still works.</li>
-    <li>The receipt goes out once per payment. To send it again, use <strong>Send Receipt</strong> on the payment.</li>
+    <li>The receipt goes out once per payment. To send it again, use <strong>Send Receipt</strong> on the payment, or <strong>Send receipt</strong> on the booking or enquiry.</li>
+    <li>Which button you see depends on the money. <strong>Send quotation</strong> shows only while nothing has been paid. <strong>Send invoice (balance due)</strong> shows only while something is owed. <strong>Send receipt</strong> shows once any payment has come in. A booking that is part paid shows the invoice first, then the receipt. A fully paid booking shows the receipt only.</li>
+    <li>If you ask for an invoice on a paid account (for example from an old page left open) you will see <em>"This booking is fully paid. Send the receipt instead."</em></li>
   </ul>
 
   <h2 id="receipt">How to send or reprint a receipt</h2>
@@ -154,6 +162,7 @@
     <li>To email: check the <strong>Email</strong> address and click <strong>Send email</strong>. To use WhatsApp: check the number and click <strong>Send WhatsApp</strong>. WhatsApp opens in a new tab with the message ready.</li>
     <li>Close the window with <strong>Done</strong>.</li>
   </ol>
+  <p>You can also send a receipt from the account itself, without opening the payment: <strong>Send Receipt</strong> on the booking page, <strong>More</strong> &rarr; <strong>Send receipt</strong> on the Bookings list or a conference enquiry row, <strong>Send receipt</strong> in a gym or event inquiry window, or <strong>Send receipt</strong> on the Invoices page. It emails the guest at the address saved on the account. If there is only one payment, you are asked to confirm. If there are several, pick one from the list; the latest is already selected. If no payment has been received you will see <em>"No payment has been received on this booking yet, so there is no receipt to send."</em></p>
   <p>If the box is empty you will see <em>"Enter an email address."</em> or <em>"Enter a phone number."</em> For till payments the window also has a <strong>Print</strong> button.</p>
 
   <h2 id="refund">How to refund a payment (refund a guest)</h2>
@@ -208,9 +217,11 @@
       <tr><td><strong>WhatsApp</strong></td><td>Opens WhatsApp with a reminder message.</td></tr>
       <tr><td><strong>Regenerate</strong></td><td>Rebuilds the PDF. You are asked to confirm.</td></tr>
       <tr><td><strong>Credit Note</strong></td><td>Only on refund lines that have no document yet.</td></tr>
+      <tr><td><strong>Send receipt</strong></td><td>Shown instead of Resend / Email, Reminder and WhatsApp when the account is fully paid. One payment: you confirm. Several payments: you pick one from a list, with the latest selected.</td></tr>
       <tr><td>Booking (<em>View booking</em> / <em>View conference inquiry</em>)</td><td>For a room payment, opens the booking details page. For a conference payment, opens Conference Management at that enquiry's row.</td></tr>
     </tbody>
   </table>
+  <p>A fully paid account is never asked for money again, so its rows do not offer an invoice email, a reminder or WhatsApp. They offer <strong>Send receipt</strong> instead.</p>
   <p>Invoice emails are supported for Room, Conference, Gym and Event payments only.</p>
 
   <h2 id="credit">Credit notes</h2>
@@ -286,6 +297,8 @@
     <li>A collected payment cannot be changed to Cancelled or Refunded by editing. Refund it instead.</li>
     <li>You cannot lower a payment below what has already been refunded from it.</li>
     <li>No payments on a cancelled, no-show or expired room booking. A checked-out booking accepts payments only while a balance remains.</li>
+    <li>Nothing owed means no payment, on every account type. More than owed is recorded only with the tick <strong>The guest paid more than owed</strong>, and the extra becomes a credit note.</li>
+    <li>A fully paid account gets its receipt, never an invoice.</li>
     <li>Paid and Completed payments get a receipt number automatically.</li>
     <li>A received payment cannot be deleted. Refund it or issue a credit note. A cancelled payment cannot be reopened; record a new payment instead.</li>
     <li>Money paid by credit note goes back to that credit note, never out as cash.</li>
@@ -302,6 +315,10 @@
       <tr><td><em>Payment amount exceeds the maximum allowed value</em></td><td>Amount above 99,999,999.</td><td>Check for an extra digit.</td></tr>
       <tr><td><em>Error: Payments cannot be recorded against a cancelled booking.</em> (or no-show, expired)</td><td>The booking is closed.</td><td>Check the booking status.</td></tr>
       <tr><td><em>Error: This booking is checked-out and fully settled. No further payments can be recorded.</em></td><td>Nothing is owed.</td><td>None needed. For a gift or adjustment, issue a credit note.</td></tr>
+      <tr><td><em>Nothing is owed on this booking. Use a credit note or refund instead.</em></td><td>You tried to record a payment on an account with a zero balance. Someone may have just paid it.</td><td>No payment is needed. Refresh and check the balance. If money must move, issue a credit note or a refund.</td></tr>
+      <tr><td><em>That is more than the balance due. Tick 'The guest paid more than owed' to record it &mdash; the extra becomes a credit note.</em></td><td>The amount is above the balance and the tick is empty.</td><td>Check the amount. If the guest really paid more, tick <strong>The guest paid more than owed</strong> and save again. Software using the API must send <strong>allow_overpayment</strong> as true.</td></tr>
+      <tr><td><em>This booking is fully paid. Send the receipt instead.</em></td><td>You asked for an invoice on a settled account.</td><td>Use <strong>Send receipt</strong>.</td></tr>
+      <tr><td><em>No payment has been received on this booking yet, so there is no receipt to send.</em></td><td>Nothing has been paid, so there is no receipt.</td><td>Record the payment first, or send a quotation or invoice instead.</td></tr>
       <tr><td><em>This account type is not available for the active preset.</em></td><td>That module is switched off.</td><td>Ask an administrator to switch it on in Settings &rarr; Modules.</td></tr>
       <tr><td><em>This payment has already been collected. Use "Process Refund"...</em></td><td>You tried to cancel a collected payment by editing.</td><td>Use Refund.</td></tr>
       <tr><td><em>Refund amount cannot exceed remaining refundable balance</em></td><td>Too much entered.</td><td>Use <strong>Full</strong> or a smaller amount.</td></tr>

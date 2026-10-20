@@ -247,16 +247,60 @@
 
 }
 
-/* ── Stat card — click-to-filter interaction ───────────────────── */
+/* ── Stat card — click-to-filter interaction ─────────────────────
+   Same cue as the .ck-kpi clickable cards (admin-kpi.css): pointer, hover,
+   focus ring, pressed state and a small chevron. */
 .status-card[data-status-filter] {
+    position: relative;
     cursor: pointer;
-    transition: box-shadow 0.15s, transform 0.15s;
+    padding-right: 30px;
+    transition: box-shadow .12s ease, transform .12s ease, border-color .12s ease;
     user-select: none;
 }
 
-.status-card[data-status-filter]:hover {
-    box-shadow: 0 4px 14px rgba(0, 0, 0, .10);
-    transform: translateY(-2px);
+.status-card[data-status-filter]::after {
+    content: "";
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    margin-top: -4px;
+    border-top: 2px solid var(--ir-gold);
+    border-right: 2px solid var(--ir-gold);
+    transform: rotate(45deg);
+    opacity: .75;
+    pointer-events: none;
+    transition: transform .12s ease, opacity .12s ease;
+}
+
+@media (hover: hover) {
+    .status-card[data-status-filter]:hover {
+        box-shadow: 0 4px 14px rgba(0, 0, 0, .10);
+        border-color: var(--ir-gold);
+        transform: translateY(-2px);
+    }
+    .status-card[data-status-filter]:hover::after {
+        transform: translateX(3px) rotate(45deg);
+        opacity: 1;
+    }
+}
+
+.status-card[data-status-filter]:focus-visible {
+    outline: 3px solid var(--gold-on-dark, #D2AE72);
+    outline-offset: 2px;
+}
+
+.status-card[data-status-filter]:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .status-card[data-status-filter],
+    .status-card[data-status-filter]::after { transition: none; }
+    .status-card[data-status-filter]:hover,
+    .status-card[data-status-filter]:active { transform: none; }
 }
 
 .status-card.active-filter {

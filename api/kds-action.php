@@ -57,6 +57,7 @@ require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../admin/includes/offline-log.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
+require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 
 /* Resolve which station this user is acting on. */
 $STATION_ALLOWED = ['kitchen', 'bar', 'coffee_bar'];
@@ -1448,6 +1449,8 @@ try {
         $newOrderStatus = kds_recompute_order_status($pdo, $orderId);
         $pdo->prepare("UPDATE stock_orders SET kitchen_status=?, served_at=CASE WHEN ?='served' THEN NOW() ELSE served_at END WHERE id=?")
             ->execute([$newOrderStatus, $newOrderStatus, $orderId]);
+        // Room service charged to the folio and fully served is finished: close it so the room is free again.
+        if ($newOrderStatus === 'served') rh_close_finished_room_service_order($pdo, $orderId);
         $pdo->commit();
 
         // After commit: notify POS when this station's items are all ready/collected/served
@@ -1525,6 +1528,7 @@ try {
         $pdo->prepare("UPDATE stock_orders SET kitchen_status=?, served_at=CASE WHEN ?='served' THEN NOW() ELSE served_at END WHERE id=?")
             ->execute([$newOrderStatus, $newOrderStatus, $orderId]);
         kds_log($pdo, $orderId, null, 'bumped', null, $newOrderStatus, $user, $ip);
+        if ($newOrderStatus === 'served') rh_close_finished_room_service_order($pdo, $orderId);
         $pdo->commit();
         // Bumping a station's items marks them served — notify POS
         kds_maybe_notify_ready($pdo, $orderId, $STATION);
@@ -1585,6 +1589,11 @@ try {
             $pdo->prepare("UPDATE stock_order_items SET kds_status='preparing', served_at=NULL, stock_deducted=0 WHERE order_id=? AND station=? AND kds_status IN ('served','collection')")->execute([$orderId, $STATION]);
         }
         $pdo->prepare("UPDATE stock_orders SET kitchen_status='recalled', served_at=NULL WHERE id=?")->execute([$orderId]);
+        // A folio-charged room-service order closed when it was served comes back to life with the recall
+        // (only while the guest is still in house; after checkout it stays closed).
+        $pdo->prepare("UPDATE stock_orders o JOIN bookings b ON b.id = o.booking_id AND b.status = 'checked-in'
+                       SET o.status = 'placed', o.updated_at = NOW()
+                       WHERE o.id = ? AND o.order_type = 'room_service' AND o.status = 'completed' AND o.folio_posted_at IS NOT NULL")->execute([$orderId]);
 
         /* Clear the ready-for-collection notification for this order+station. Without this the
          * recall silently breaks the POS notification for the rest of the order's life:

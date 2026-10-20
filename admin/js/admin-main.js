@@ -17,6 +17,7 @@
 
     function refreshAdminPageAssists() {
         initAdminStatusCardFilters();
+        initClickableCardKeyboard();
         initAdminSmartHints();
     }
 
@@ -871,6 +872,34 @@
                 sensitivity: 'base'
             });
         }
+    }
+
+    // ============================================
+    // CLICKABLE STAT CARDS - KEYBOARD (shared)
+    // Cards that only have an inline onclick (or data-href) are not focusable by
+    // default. Give them role="button" + tabindex="0" and one delegated
+    // Enter/Space handler. Only cards upgraded here are handled, so cards with
+    // their own key handler (insight triggers, filter cards) never fire twice.
+    // The look (cursor, hover, focus ring, chevron) is CSS: admin-kpi.css.
+    // ============================================
+
+    function initClickableCardKeyboard() {
+        document.querySelectorAll('.ck-kpi[data-href], .ck-kpi[onclick], .status-card[onclick], .stat-card[onclick]').forEach(function (card) {
+            if (card.tagName === 'A' || card.tagName === 'BUTTON') return;
+            if (card.hasAttribute('role') || card.hasAttribute('tabindex')) return;
+            card.setAttribute('role', 'button');
+            card.setAttribute('tabindex', '0');
+            card.setAttribute('data-kbd-card', '1');
+        });
+        if (window.__adminCardKeyboardBound) return;
+        window.__adminCardKeyboardBound = true;
+        document.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            const card = event.target && event.target.closest ? event.target.closest('[data-kbd-card="1"]') : null;
+            if (!card || event.target !== card) return;
+            event.preventDefault();
+            card.click();
+        });
     }
 
     // ============================================
@@ -1892,8 +1921,21 @@
     function isFilterForm(form) {
         if (!form || form.hasAttribute('data-no-autofilter')) return false;
         if (form.hasAttribute('data-live-search-form')) return false; /* page has its own live search */
-        var method = (form.getAttribute('method') || 'get').toLowerCase();
-        return method === 'get';
+        /* Only forms explicitly meant as filters: method="get" written out, or data-autofilter.
+           A form with no method attribute is NOT a filter - it is usually a JS-handled form that
+           POSTs by fetch, and auto-submitting it on change would save it by itself. */
+        var method = (form.getAttribute('method') || '').toLowerCase();
+        if (method !== 'get' && !form.hasAttribute('data-autofilter')) return false;
+        /* Never inside a modal or dialog */
+        if (form.closest('.modal, .modal-overlay, .modal-content, [role="dialog"], [aria-modal="true"], dialog')) return false;
+        /* Never a form that carries a CSRF token or an "action" field: that is a write, not a filter.
+           Use getAttribute-free lookups so an input named id/action/method cannot shadow the form. */
+        var fields = form.elements;
+        for (var i = 0; i < fields.length; i++) {
+            var n = fields[i].name;
+            if (n === 'csrf_token' || n === 'action') return false;
+        }
+        return true;
     }
 
     function submitForm(form) {

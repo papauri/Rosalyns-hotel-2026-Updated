@@ -638,6 +638,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         }
         unset($line);
 
+        // More collected than the booking costs: only with the explicit tick (the extra becomes a credit note).
+        if ($payment_received && $amount_collected > $grand_total_with_vat + BALANCE_TOLERANCE && empty($_POST['confirm_overpay'])) {
+            require_once __DIR__ . '/includes/finance-account-sync.php';
+            throw new Exception(rh_payment_overpay_message());
+        }
+
         // Derive payment_status from amount collected vs grand total
         if ($payment_received && $amount_collected > 0) {
             if ($amount_collected >= ($grand_total_with_vat - BALANCE_TOLERANCE)) {
@@ -2308,6 +2314,10 @@ try {
                                         step="0.01" min="0" placeholder="0.00"
                                         oninput="checkPartialPayment()">
                                     <small id="amountCollectedHint">Enter full amount for complete payment, or partial amount for a deposit.</small>
+                                    <div id="overCollectedWrap" style="display:none;margin-top:6px;">
+                                        <div id="overCollectedWarn" style="color:#8a4b00;font-size:12px;margin-bottom:4px;"></div>
+                                        <label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;color:#8a4b00;cursor:pointer;"><input type="checkbox" name="confirm_overpay" value="1" id="overCollectedCb" style="margin-top:2px;"> <span>The guest paid more than owed</span></label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -3413,6 +3423,15 @@ try {
             const grand = parseFloat((el('accGrandTotal')?.textContent || '').replace(/[^\d.]/g, '')) || 0;
             const entered = parseFloat(amtEl.value) || 0;
             amtEl.removeAttribute('data-auto');
+            const overBy = entered - grand;
+            const overWrap = el('overCollectedWrap');
+            if (overWrap) {
+                const isOver = grand > 0 && overBy > 0.01;
+                overWrap.style.display = isOver ? 'block' : 'none';
+                el('overCollectedWarn').textContent = isOver ? 'That is ' + fmt(overBy) + ' more than owed. The extra will be issued to the guest as a credit note.' : '';
+                el('overCollectedCb').required = isOver;
+                if (!isOver) el('overCollectedCb').checked = false;
+            }
             if (entered > 0 && entered < grand - 0.01) {
                 hint.textContent = 'Partial payment — booking will be marked Partially Paid.';
                 hint.style.color = '#e67e22';

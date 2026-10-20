@@ -306,12 +306,28 @@
       <li><em>"Receipt not emailed: payment receipt emails are switched off in Booking Settings..."</em> Tick <strong>Active</strong> on the <strong>Receipt Email</strong> tab of Email Templates.</li>
       <li><em>"Receipt NOT emailed (the email could not be sent - details are in System Logs)..."</em> Try <strong>Send Receipt</strong> again; if it keeps failing, tell your manager.</li>
     </ul>
-    <p>A Pending payment gets no receipt until it is marked Paid or Completed. A receipt is sent only once per payment, so use <strong>Send Receipt</strong> to send it again. On the till, an order with no customer email sends nothing by itself. See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</p>
+    <p>A Pending payment gets no receipt until it is marked Paid or Completed. A receipt is sent only once per payment, so use <strong>Send receipt</strong> on the booking, or <strong>Send Receipt</strong> on the payment, to send it again. On the till, an order with no customer email sends nothing by itself. See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-cannot-take-payment">
+    <summary>Why can't I take a payment on this booking?</summary>
+    <p>Because nothing is owed. When the balance is zero there is no payment form. You will see <em>"Nothing is owed on this booking."</em> on the Payments &amp; balance window and on the Add Payment page, and <strong>Mark as Paid</strong> says <em>"Nothing is owed on this booking. No payment was recorded."</em> If you force it you will see <em>"Nothing is owed on this booking. Use a credit note or refund instead."</em> The same goes for conference, gym and event accounts.</p>
+    <p>If the guest really paid more than the balance, type the amount they gave you. You will see <em>"That is MWK ... more than owed. The extra will be issued to the guest as a credit note."</em> Tick <strong>The guest paid more than owed</strong> and save. Without the tick you get <em>"That is more than the balance due. Tick 'The guest paid more than owed' to record it &mdash; the extra becomes a credit note."</em> The same tick is on <strong>Amount Collected</strong> when you create a booking. See <a href="13-finance-payments.html#overpay">What happens when a guest pays too much</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-resend-receipt">
+    <summary>How do I resend a receipt?</summary>
+    <p>Click <strong>Send receipt</strong>. You find it on the booking page (top of the page and the Invoices box), in the <strong>More</strong> menu on the Bookings list, in a conference <strong>More</strong> menu, in a gym or event inquiry window, and on the Invoices page for a fully paid account. If there is one payment you are asked to confirm. If there are several, pick one from the list; the latest is already selected. The receipt goes to the email address on the booking. You can also open the payment and click <strong>Send Receipt</strong>. See <a href="13-finance-payments.html#receipt">How to send or reprint a receipt</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-invoice-missing">
+    <summary>Why is Send invoice missing?</summary>
+    <p>An invoice asks for money, so it is shown only while a balance is owed. The button reads <strong>Send invoice (balance due)</strong>. If the booking is fully paid it is hidden and <strong>Send receipt</strong> is shown instead. If you try anyway you will see <em>"This booking is fully paid. Send the receipt instead."</em> On a booking with nothing paid yet, the menu shows <strong>Send quotation</strong> first; once a payment comes in the quotation goes away. A part-paid booking shows <strong>Send invoice (balance due)</strong> and then <strong>Send receipt</strong>. Invoices are also not sent for tentative bookings: send a quotation. See <a href="07-reception-bookings.html#invoice">How to send an invoice or quotation</a>.</p>
   </details>
 
   <details class="faq" id="faq-quote-invoice-receipt">
     <summary>Quote, invoice or receipt: which one is sent when?</summary>
-    <p>A <strong>quotation</strong> is the price before the stay: it goes with a front-desk booking that has nothing paid. An <strong>invoice</strong> asks for money: it is sent by hand (<strong>Send Invoice</strong>), or at check-out when the guest still owes. A <strong>receipt</strong> says money came in: it is sent by itself for every payment. A payment never sends an invoice. At check-out the guest gets a <strong>Final Invoice</strong> if a balance is owed, or a <strong>Stay Statement - paid in full</strong> if nothing is owed. When money goes back, the guest gets a refund notice or a credit note. See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</p>
+    <p>A <strong>quotation</strong> is the price before the stay: it goes with a front-desk booking that has nothing paid. An <strong>invoice</strong> asks for money: it is sent by hand (<strong>Send invoice (balance due)</strong>, only while something is owed), or at check-out when the guest still owes. A <strong>receipt</strong> says money came in: it is sent by itself for every payment. A payment never sends an invoice. At check-out the guest gets a <strong>Final Invoice</strong> if a balance is owed, or a <strong>Stay Statement - paid in full</strong> if nothing is owed. When money goes back, the guest gets a refund notice or a credit note. See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</p>
   </details>
 
   <details class="faq" id="faq-delete-payment">

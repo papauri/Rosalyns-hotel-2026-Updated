@@ -129,15 +129,12 @@ if (!function_exists('rh_record_account_payment')) {
             $paidBefore = rh_sum_account_paid($pdo, $type, $id);   // re-read under the lock
             $balance = max(0.0, round($gross - $paidBefore, 2));
 
-            if (!$explicitAmount && $balance <= $tol) {
-                throw new Exception('Nothing is outstanding on this account - it is already paid in full.');
-            }
+            // Nothing owed = no payment at all; more than owed only with the explicit tick (owner rule).
             $amount = $explicitAmount ? round((float)$amountRaw, 2) : $balance;
-            $excess = round($amount - $balance, 2);
-            if ($excess > $tol && !$confirmOverpay) {
-                throw new Exception('That amount is ' . number_format($excess, 2) . ' more than the balance of ' . number_format($balance, 2)
-                    . '. Tick "Deliberate overpayment" to record it - the excess becomes a credit note.');
+            if (($limitErr = rh_payment_limit_error($amount, $balance, $confirmOverpay)) !== null) {
+                throw new Exception($limitErr);
             }
+            $excess = round($amount - $balance, 2);
 
             $split = rh_account_vat_split($pdo, $type, $id, $amount, (float)($row['vat_rate'] ?? 0));
 
@@ -299,14 +296,16 @@ if (!function_exists('rh_render_record_payment_modal')) {
                     <div class="form-group" style="margin-bottom:12px;">
                         <label for="rhRpAmount" style="display:block;font-weight:600;margin-bottom:4px;">Amount received (<?php echo $e($currencySymbol); ?>, gross) *</label>
                         <input type="number" step="0.01" min="0.01" name="payment_amount" id="rhRpAmount" class="form-control" required>
-                        <small style="color:#6b6258;">Defaults to the balance. Enter less for a part-payment.</small>
+                        <small id="rhRpDueHint" style="color:#6b6258;">Defaults to the balance. Enter less for a part-payment.</small>
                     </div>
                     <div class="form-group" id="rhRpOverWrap" style="margin-bottom:12px;display:none;">
+                        <p id="rhRpOverWarn" style="margin:0 0 6px;color:#8a4b00;font-size:.9rem;"></p>
                         <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;color:#8a4b00;">
                             <input type="checkbox" name="confirm_overpay" value="1" id="rhRpOver" style="margin-top:3px;">
-                            <span>Deliberate overpayment: this is more than the balance. The excess is issued as a credit note.</span>
+                            <span>The guest paid more than owed</span>
                         </label>
                     </div>
+                    <p id="rhRpNothingOwed" style="display:none;margin:0 0 12px;padding:10px 12px;background:#eef6ee;border:1px solid #bcd8bc;border-radius:6px;color:#1f5f2a;font-weight:600;">Nothing is owed on this booking.</p>
                     <div class="form-group" style="margin-bottom:12px;">
                         <label for="rhRpTxn" style="display:block;font-weight:600;margin-bottom:4px;">Transaction reference</label>
                         <input type="text" name="transaction_reference" id="rhRpTxn" class="form-control" maxlength="100" placeholder="Bank ref, cheque no., mobile money transaction ID...">
@@ -341,7 +340,10 @@ if (!function_exists('rh_render_record_payment_modal')) {
                 var amt = parseFloat(document.getElementById('rhRpAmount').value || '0');
                 var over = amt > balance + 0.009;
                 document.getElementById('rhRpOverWrap').style.display = over ? '' : 'none';
+                document.getElementById('rhRpOverWarn').textContent = over
+                    ? 'That is ' + fmt(amt - balance) + ' more than owed. The extra will be issued to the guest as a credit note.' : '';
                 if (!over) { document.getElementById('rhRpOver').checked = false; }
+                document.getElementById('rhRpOver').required = over;
             }
             window.rhOpenRecordPayment = function (a) {
                 balance = Number(a.balance || 0);
@@ -359,7 +361,18 @@ if (!function_exists('rh_render_record_payment_modal')) {
                 inv.checked = false; // a receipt is emailed automatically; an invoice only on request
                 inv.disabled = !hasMail;
                 document.getElementById('rhRpInvoiceLabel').textContent = hasMail ? 'Also email an invoice for any balance still due to ' + a.email : 'No email address on file - no receipt or invoice can be emailed';
-                document.getElementById('rhRpSubmit').disabled = false;
+                var owed = balance > 0.009;
+                // Nothing owed: no payment form is offered (the server refuses it too).
+                ['rhRpMethod', 'rhRpAmount', 'rhRpTxn', 'rhRpNotes', 'rhRpInvoice'].forEach(function (id) {
+                    var grp = document.getElementById(id).closest('.form-group, label');
+                    if (grp) { grp.style.display = owed ? '' : 'none'; }
+                });
+                document.getElementById('rhRpNothingOwed').style.display = owed ? 'none' : '';
+                document.getElementById('rhRpMethod').required = owed;
+                document.getElementById('rhRpAmount').required = owed;
+                document.getElementById('rhRpDueHint').textContent = owed ? 'Balance due ' + fmt(balance) + '. Enter less for a part-payment.' : '';
+                document.getElementById('rhRpSubmit').style.display = owed ? '' : 'none';
+                document.getElementById('rhRpSubmit').disabled = !owed;
                 syncOver();
                 document.getElementById('rhRecordPaymentModal').classList.add('show');
                 setTimeout(function () { document.getElementById('rhRpMethod').focus(); }, 60);

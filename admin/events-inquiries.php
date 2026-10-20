@@ -27,6 +27,7 @@ $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
 require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/../includes/event-capacity.php';
 require_once __DIR__ . '/includes/account-record-payment.php';
+require_once __DIR__ . '/includes/account-receipt-send.php';
 
 // Handle status updates, deletions and financial actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
@@ -631,7 +632,9 @@ try {
                         onclick="closeInquiryModal();rhOpenRecordPayment({id: ${Number(inquiry.id)}, ref: window._eventCurrentInquiry.reference_number, name: window._eventCurrentInquiry.name, email: window._eventCurrentInquiry.email, total: window._eventCurrentInquiry.rp_total, paid: window._eventCurrentInquiry.rp_paid, balance: window._eventCurrentInquiry.rp_balance})">
                         <i class="fas fa-cash-register"></i> Record payment
                     </button>
-                    ${(Number(inquiry.rp_paid) > 0 && inquiry.email) ? `
+                    ${(Number(inquiry.rp_paid) > 0.01) ? `
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="closeInquiryModal();rhSendAccountReceipt('event', ${Number(inquiry.id)}, window._eventCurrentInquiry.reference_number)"><i class="fas fa-receipt"></i> Send receipt</button>` : ''}
+                    ${(Number(inquiry.rp_balance) > 0.01 && totalAmount > 0 && inquiry.email) ? `
                     <form method="POST" style="display:inline;">
                         <input type="hidden" name="inquiry_action" value="resend_invoice">
                         <input type="hidden" name="inquiry_id" value="${inquiry.id}">
@@ -641,9 +644,10 @@ try {
                             data-admin-confirm-title="Send invoice"
                             data-admin-confirm-ok="Send invoice"
                             data-admin-confirm-tone="warning"
-                            data-admin-confirm-icon="fa-file-invoice-dollar"><i class="fas fa-file-invoice-dollar"></i> Send invoice</button>
+                            data-admin-confirm-icon="fa-file-invoice-dollar"><i class="fas fa-file-invoice-dollar"></i> Send invoice (balance due)</button>
                     </form>` : ''}
                 </div>
+                ${(Number(inquiry.rp_paid) > 0.01) ? '' : `
                 <div class="detail-item" style="grid-column: 1 / -1;">
                     <form method="POST" style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
                         <input type="hidden" name="inquiry_action" value="send_quotation">
@@ -654,6 +658,7 @@ try {
                         <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-file-invoice"></i> Send Quotation</button>
                     </form>
                 </div>
+                `}
                 ` : ''}
                 <div class="detail-item" style="grid-column: 1 / -1;display:flex;gap:8px;flex-wrap:wrap;">
                     ${inquiry.status === 'pending' ? `
@@ -773,5 +778,6 @@ try {
     <script src="js/admin-components.js"></script>
 
     <?php rh_render_record_payment_modal((string)$csrf_token, 'inquiry_action', 'inquiry_id', $currency_symbol); ?>
+    <?php rh_render_send_receipt_script((string)$csrf_token); ?>
 
     <?php require_once 'includes/admin-footer.php'; ?>

@@ -33,6 +33,8 @@ if (!$booking_id) {
 require_once '../includes/booking-timeline.php';
 require_once '../includes/finance-sequences.php';
 require_once __DIR__ . '/includes/booking-lifecycle.php';
+require_once __DIR__ . '/includes/finance-account-sync.php';
+require_once __DIR__ . '/includes/account-receipt-send.php';
 finance_ensure_sequence_tables($pdo);
 
 // Get folio charges for this booking
@@ -226,6 +228,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
         $lcCheck = bookingAllowsAction($_early_booking, $lcInvoiceAction);
         if (!$lcCheck['allowed']) {
             $_SESSION['error_message'] = $lcCheck['reason'];
+            header('Location: booking-details.php?id=' . $booking_id . '#invoices');
+            exit;
+        }
+    }
+
+    // A settled booking gets its receipt, never an invoice (owner rule).
+    if ($lcInvoiceAction === 'send_invoice') {
+        require_once 'includes/finance-account-sync.php';
+        $paidRefusal = rh_invoice_paid_refusal($pdo, 'room', (int)$booking_id);
+        if ($paidRefusal !== null) {
+            $_SESSION['error_message'] = $paidRefusal;
             header('Location: booking-details.php?id=' . $booking_id . '#invoices');
             exit;
         }
@@ -1107,8 +1120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
             if ($paymentAlreadyRecorded) {
                 // No new payment was taken, so no invoice or receipt is due — emailing
                 // one here would tell the guest they had paid a second time.
-                $_SESSION['success_message'] = 'Payment status updated. A completed payment was already '
-                    . 'recorded for this booking, so no second payment was created.' . $auto_assign_msg;
+                $_SESSION['success_message'] = 'Nothing is owed on this booking. No payment was recorded.' . $auto_assign_msg;
             } else {
                 // Money received -> RECEIPT (not an invoice: an invoice requests payment).
                 require_once '../config/receipts.php';
@@ -1450,7 +1462,17 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         <i class="fas fa-calendar-alt"></i> Adjust Stay Dates
                     </button>
                 <?php endif; ?>
-                <?php if ($bPerms['can_send_quotation']): ?>
+                <?php
+                // Right document for the state (owner rule): nothing paid = quotation; balance owed = invoice; paid = receipt.
+                $bd_paid_now = (float)($booking['amount_paid'] ?? 0);
+                $bd_doc = rh_doc_state($bd_paid_now, (float)($booking['amount_due'] ?? 0), (string)$booking['status']);
+                ?>
+                <?php if ($bd_doc === 'receipt'): ?>
+                    <button type="button" class="action-btn quote" onclick="rhSendAccountReceipt('room', <?php echo (int) $booking_id; ?>, <?php echo htmlspecialchars(json_encode((string)$booking['booking_reference']), ENT_QUOTES); ?>)">
+                        <i class="fas fa-receipt"></i> Send Receipt
+                    </button>
+                <?php endif; ?>
+                <?php /* same rule as the bookings list: before the stay (not yet arrived) and nothing paid */ if ($bPerms['can_send_quotation'] && $bd_paid_now <= BALANCE_TOLERANCE && in_array((string)$booking['status'], ['pending', 'tentative', 'confirmed'], true)):  ?>
                     <button type="button" class="action-btn quote" onclick="openBookingQuoteModal(<?php echo (int) $booking_id; ?>, '<?php echo htmlspecialchars($booking['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($booking['guest_email'], ENT_QUOTES); ?>')">
                         <i class="fas fa-file-invoice"></i> Send Quotation
                     </button>
@@ -1844,7 +1866,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             </p>
                         <?php endif; ?>
 
-                        <?php if ($booking['payment_status'] !== 'paid'): ?>
+                        <?php if ($booking['payment_status'] !== 'paid' && !$bd_has_due): ?>
+                            <p class="bd-paid-note"><i class="fas fa-check-circle"></i> Nothing is owed on this booking.</p>
+                        <?php elseif ($booking['payment_status'] !== 'paid'): ?>
                             <div class="payment-form">
                                 <?php if ($bd_perm_pay): ?><form method="POST" data-admin-confirm="Mark this booking payment as paid and email the guest a receipt?" data-admin-confirm-title="Record payment" data-admin-confirm-ok="Mark paid" data-admin-confirm-icon="fa-money-bill-wave" data-admin-submit-text="Recording payment...">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
@@ -1878,14 +1902,20 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                         <i class="fas fa-file-pdf"></i> Generate Invoice
                                     </button>
                                 </form>
+                                <?php if ($bd_doc !== 'receipt'): ?>
                                 <form method="POST" data-admin-confirm="Send this booking invoice to the guest by email?" data-admin-confirm-title="Send invoice email" data-admin-confirm-ok="Send email" data-admin-confirm-icon="fa-envelope-circle-check" data-admin-submit-text="Sending invoice...">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                                     <input type="hidden" name="invoice_action" value="send_invoice">
                                     <button type="submit" class="folio-btn success">
-                                        <i class="fas fa-envelope-circle-check"></i> Send Invoice
+                                        <i class="fas fa-envelope-circle-check"></i> Send Invoice (balance due)
                                     </button>
                                 </form>
-                                <?php if (function_exists('isWhatsAppEnabled') && isWhatsAppEnabled()): ?>
+                                <?php else: ?>
+                                    <button type="button" class="folio-btn success" onclick="rhSendAccountReceipt('room', <?php echo (int) $booking_id; ?>, <?php echo htmlspecialchars(json_encode((string)$booking['booking_reference']), ENT_QUOTES); ?>)">
+                                        <i class="fas fa-receipt"></i> Send Receipt
+                                    </button>
+                                <?php endif; ?>
+                                <?php if ($bd_doc !== 'receipt' && function_exists('isWhatsAppEnabled') && isWhatsAppEnabled()): ?>
                                     <form method="POST" data-admin-confirm="Send the invoice link to the guest on WhatsApp? This can use the configured WhatsApp provider." data-admin-confirm-title="Send invoice via WhatsApp" data-admin-confirm-ok="Send WhatsApp" data-admin-confirm-icon="fa-whatsapp" data-admin-submit-text="Sending WhatsApp...">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                                         <input type="hidden" name="invoice_action" value="send_invoice_whatsapp">
@@ -2873,6 +2903,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         }
     </script>
 
+    <?php rh_render_send_receipt_script($csrf_token ?? ''); ?>
     <?php require_once 'includes/admin-footer.php'; ?>
 </body>
 

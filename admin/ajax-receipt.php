@@ -31,7 +31,7 @@ $paymentId = (int)($_POST['payment_id'] ?? 0);
 $action    = trim((string)($_POST['action'] ?? ''));
 $recipient = trim((string)($_POST['recipient'] ?? ''));
 
-if ($paymentId <= 0) {
+if ($paymentId <= 0 && $action !== 'account_receipts') {
     echo json_encode(['ok' => false, 'error' => 'Payment ID required.']);
     exit;
 }
@@ -39,7 +39,24 @@ if ($paymentId <= 0) {
 try {
     receipt_ensure_schema($pdo);
 
-    if ($action === 'email') {
+    if ($action === 'account_receipts') {
+        // Receipts of one account (room / conference / gym / event), newest first, for the "Send receipt" action.
+        $acctType = (string)($_POST['booking_type'] ?? '');
+        $acctId = (int)($_POST['booking_id'] ?? 0);
+        if (!in_array($acctType, ['room', 'conference', 'gym', 'event'], true) || $acctId <= 0) {
+            throw new RuntimeException('Account required.');
+        }
+        $st = $pdo->prepare("SELECT id, payment_reference, receipt_number, total_amount, payment_date, payment_method, receipt_emailed_at
+            FROM payments WHERE booking_type = ? AND booking_id = ? AND deleted_at IS NULL
+              AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund'
+            ORDER BY payment_date DESC, id DESC");
+        $st->execute([$acctType, $acctId]);
+        echo json_encode(['ok' => true, 'payments' => $st->fetchAll(PDO::FETCH_ASSOC)]);
+    } elseif ($action === 'email_guest') {
+        // Re-send a receipt to the address on the account (a manual re-send is always allowed).
+        $result = receipt_send_email($pdo, $paymentId, null, $user);
+        echo json_encode(['ok' => true, 'message' => $result['message'] ?? 'Receipt emailed.']);
+    } elseif ($action === 'email') {
         if ($recipient === '' || !filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
             throw new RuntimeException('A valid email address is required.');
         }

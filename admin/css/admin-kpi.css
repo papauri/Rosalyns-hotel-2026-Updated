@@ -95,19 +95,57 @@
     text-decoration: none;
 }
 a.ck-kpi { color: inherit; }
-a.ck-kpi,
-button.ck-kpi,
-.ck-kpi[data-href] {
-    cursor: pointer;
-    transition: transform .18s, box-shadow .18s, border-color .18s;
-}
 button.ck-kpi { font: inherit; text-align: left; width: 100%; }
-a.ck-kpi:hover,
-button.ck-kpi:hover,
-.ck-kpi[data-href]:hover { transform: translateY(-2px); box-shadow: var(--ck-shadow-hover); border-color: var(--ck-line-strong); }
-a.ck-kpi:focus-visible,
-button.ck-kpi:focus-visible,
-.ck-kpi[data-href]:focus-visible { outline: 3px solid var(--ck-gold-on-dark); outline-offset: 2px; }
+
+/* ---------- Clickable cards ----------
+   One rule set says "this card opens something": a link, a button, a
+   role="button" card (insight triggers, status filters), a [data-href] card or
+   a card with an inline onclick. Static cards match none of these, so they get
+   no pointer, hover, focus ring or chevron. admin-main.js gives onclick-only
+   cards role="button" + tabindex so the keyboard reaches them too. */
+.ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick]) {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+}
+/* Footer cue: a plain chevron, bottom right, in the muted gold link colour */
+.ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick])::after {
+    content: "";
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
+    width: 7px;
+    height: 7px;
+    border-top: 2px solid var(--ck-gold);
+    border-right: 2px solid var(--ck-gold);
+    transform: rotate(45deg);
+    opacity: .75;
+    pointer-events: none;
+    transition: transform .12s ease, opacity .12s ease;
+}
+.ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick]) .ck-kpi__sub { padding-right: 20px; }
+.ck-kpi--dark:is(a[href], button, [role="button"], [data-href], [onclick])::after { border-color: var(--ck-gold-on-dark); }
+@media (hover: hover) {
+    .ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick]):hover {
+        transform: translateY(-2px);
+        box-shadow: var(--ck-shadow-hover);
+        border-color: var(--ck-gold);
+    }
+    .ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick]):hover::after {
+        transform: translateX(3px) rotate(45deg);
+        opacity: 1;
+    }
+}
+.ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick]):focus-visible {
+    outline: 3px solid var(--ck-gold-on-dark);
+    outline-offset: 2px;
+    border-color: var(--ck-gold);
+}
+.ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick]):active {
+    transform: translateY(0);
+    box-shadow: var(--ck-shadow);
+    border-color: var(--ck-gold);
+}
 
 .ck-kpi__icon {
     position: absolute;
@@ -199,11 +237,12 @@ button.ck-kpi:focus-visible,
 @media (prefers-reduced-motion: reduce) {
     .ck-kpi,
     .ck-meter > span { transition: none !important; }
-    a.ck-kpi:hover,
-    button.ck-kpi:hover,
-    .ck-kpi[data-href]:hover { transform: none; }
+    .ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick]):hover,
+    .ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick]):active { transform: none; }
+    .ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick])::after { transition: none !important; }
 }
 
 @media print {
     .ck-kpi { box-shadow: none; break-inside: avoid; }
+    .ck-kpi::after { display: none !important; }
 }

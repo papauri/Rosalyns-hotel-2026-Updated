@@ -100,12 +100,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
                 'refund_id' => $paymentId, 'from' => $from, 'to' => $targetStatus,
                 'amount' => (float)$refundRow['amt'], 'by' => $user['username'] ?? null,
             ]);
-            $_SESSION['alert'] = ['type' => 'success', 'message' => 'Refund ' . $refundRow['payment_reference'] . ' is now ' . $targetStatus . '.'];
+            $_SESSION['alert'] = ['type' => 'success', 'message' => 'Refund ' . htmlspecialchars((string)$refundRow['payment_reference'], ENT_QUOTES, 'UTF-8') . ' is now ' . htmlspecialchars((string)$targetStatus, ENT_QUOTES, 'UTF-8') . '.'];
         } catch (Throwable $settleEx) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            $_SESSION['alert'] = ['type' => 'error', 'message' => 'Could not settle the refund: ' . $settleEx->getMessage()];
+            $_SESSION['alert'] = ['type' => 'error', 'message' => 'Could not settle the refund: ' . htmlspecialchars($settleEx->getMessage(), ENT_QUOTES, 'UTF-8')];
         }
     }
     header('Location: ' . $settleBack);

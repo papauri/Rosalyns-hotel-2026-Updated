@@ -6,6 +6,8 @@ require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'includes/finance-schema.php';
 require_once __DIR__ . '/includes/booking-lifecycle.php';
+require_once __DIR__ . '/includes/finance-account-sync.php';
+require_once __DIR__ . '/includes/account-receipt-send.php';
 $message = '';
 $error = '';
 $csrf_token = $csrf_token ?? generateCsrfToken();
@@ -783,8 +785,19 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                                 <?php endif; ?>
                                             <?php endif; ?>
 
-                                            <!-- Resend invoice — only for non-refund payments with a generated invoice -->
-                                            <?php if ($invoice['invoice_generated'] && $invoice['payment_type'] !== 'refund'): ?>
+                                            <?php
+                                            // Right document (owner rule): a fully paid account is offered its RECEIPT, never an invoice.
+                                            $invPaidFull = $invoice['payment_type'] !== 'refund' && !empty($invoice['booking_id'])
+                                                && rh_account_fully_paid($pdo, (string)$invoice['booking_type'], (int)$invoice['booking_id']);
+                                            ?>
+                                            <?php if ($invPaidFull): ?>
+                                                <button type="button" class="btn-action btn-resend" onclick="rhSendAccountReceipt(<?php echo htmlspecialchars(json_encode((string)$invoice['booking_type']), ENT_QUOTES); ?>, <?php echo (int)$invoice['booking_id']; ?>, <?php echo htmlspecialchars(json_encode((string)$invoice['booking_reference']), ENT_QUOTES); ?>)">
+                                                    <i class="fas fa-receipt"></i> Send receipt
+                                                </button>
+                                            <?php endif; ?>
+
+                                            <!-- Resend invoice — only for non-refund payments with a generated invoice (not once fully paid) -->
+                                            <?php if (!$invPaidFull && $invoice['invoice_generated'] && $invoice['payment_type'] !== 'refund'): ?>
                                                 <form method="POST" action="invoices.php" class="invoice-ajax-form" data-no-admin-loader="1" style="display: inline;"
                                                     data-confirm-msg="Resend invoice email to the customer?"
                                                     data-confirm-title="Resend Invoice"
@@ -801,7 +814,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                             <?php endif; ?>
 
                                             <!-- Payment reminder — only for outstanding, non-refund payments -->
-                                            <?php if (in_array($invoice['payment_status'], ['pending', 'partial'], true) && $invoice['payment_type'] !== 'refund'): ?>
+                                            <?php if (!$invPaidFull && in_array($invoice['payment_status'], ['pending', 'partial'], true) && $invoice['payment_type'] !== 'refund'): ?>
                                                 <form method="POST" action="invoices.php" class="invoice-ajax-form" data-no-admin-loader="1" style="display: inline;"
                                                     data-confirm-msg="Send a payment reminder email to the customer now?"
                                                     data-confirm-title="Send Payment Reminder"
@@ -818,7 +831,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                             <?php endif; ?>
 
                                             <!-- Direct email with invoice attachment -->
-                                            <?php if (!empty($invoice['customer_email'])): ?>
+                                            <?php if (!$invPaidFull && !empty($invoice['customer_email'])): ?>
                                                 <form method="POST" action="invoices.php" class="invoice-ajax-form" data-no-admin-loader="1" style="display: inline;"
                                                     data-confirm-msg="Send an email with the invoice attached to <?php echo htmlspecialchars($invoice['customer_email'], ENT_QUOTES, 'UTF-8'); ?>?"
                                                     data-confirm-title="Send Invoice Email"
@@ -842,9 +855,11 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                                 ? 'https://wa.me/' . ltrim($waPhone, '+') . '?text=' . $waText
                                                 : 'https://wa.me/?text=' . $waText;
                                             ?>
+                                            <?php if (!$invPaidFull): ?>
                                             <a class="btn-action" href="<?php echo htmlspecialchars($waHref, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener">
                                                 <i class="fab fa-whatsapp"></i> WhatsApp
                                             </a>
+                                            <?php endif; ?>
 
                                             <!-- Regenerate invoice — not applicable for refund records (use Credit Note instead) -->
                                             <?php if ($invoice['payment_type'] !== 'refund'): ?>
@@ -980,5 +995,6 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
         }, true); // capture phase
     })();
     </script>
+    <?php rh_render_send_receipt_script($csrf_token ?? ''); ?>
     <?php require_once 'includes/admin-footer.php'; ?>
 

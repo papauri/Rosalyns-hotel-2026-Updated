@@ -8,6 +8,7 @@
 require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/email.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
+require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
 
 if (!function_exists('rh_invoice_signed_payments')) {
     /**
@@ -1156,6 +1157,11 @@ function sendPaymentInvoiceEmail(int $booking_id)
             throw new Exception("Booking not found");
         }
 
+        // A settled account gets its receipt, never an invoice (owner rule).
+        if (($paidRefusal = rh_invoice_paid_refusal($pdo, 'room', $booking_id)) !== null) {
+            throw new Exception($paidRefusal);
+        }
+
         // Get latest payment row and reuse existing invoice when available.
         $paymentStmt = $pdo->prepare("\n            SELECT id, invoice_generated, invoice_path, invoice_number\n            FROM payments\n            WHERE booking_type = 'room' AND booking_id = ? AND deleted_at IS NULL\n            ORDER BY id DESC\n            LIMIT 1\n        ");
         $paymentStmt->execute([$booking_id]);
@@ -1263,6 +1269,11 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
 
         if (!$booking) {
             throw new Exception("Booking not found");
+        }
+
+        // A settled account gets its receipt, never an invoice (owner rule).
+        if (($paidRefusal = rh_invoice_paid_refusal($pdo, 'room', $booking_id)) !== null) {
+            throw new Exception($paidRefusal);
         }
 
         // Get latest payment row and reuse existing invoice when available.
@@ -2241,6 +2252,11 @@ function sendConferenceInvoiceEmail(int $enquiry_id)
             throw new Exception("Conference enquiry not found");
         }
 
+        // A settled account gets its receipt, never an invoice (owner rule).
+        if (($paidRefusal = rh_invoice_paid_refusal($pdo, 'conference', $enquiry_id)) !== null) {
+            throw new Exception($paidRefusal);
+        }
+
         // Generate invoice PDF/HTML
         $invoice_result = generateConferenceInvoicePDF($enquiry_id);
         if (!$invoice_result) {
@@ -2313,6 +2329,11 @@ function sendConferenceInvoiceEmailWithCC(int $enquiry_id, array $ccRecipients =
 
         if (!$enquiry) {
             throw new Exception("Conference enquiry not found");
+        }
+
+        // A settled account gets its receipt, never an invoice (owner rule).
+        if (($paidRefusal = rh_invoice_paid_refusal($pdo, 'conference', $enquiry_id)) !== null) {
+            throw new Exception($paidRefusal);
         }
 
         // Generate invoice PDF/HTML
@@ -2709,6 +2730,11 @@ function sendGymInvoiceEmail(int $inquiry_id)
             throw new Exception("Gym inquiry not found");
         }
 
+        // A settled account gets its receipt, never an invoice (owner rule).
+        if (($paidRefusal = rh_invoice_paid_refusal($pdo, 'gym', $inquiry_id)) !== null) {
+            throw new Exception($paidRefusal);
+        }
+
         $invoice_result = generateGymInvoicePDF($inquiry_id);
         if (!$invoice_result) {
             throw new Exception("Failed to generate invoice");
@@ -3035,6 +3061,11 @@ function sendEventInvoiceEmail(int $inquiry_id)
 
         if (!$inquiry) {
             throw new Exception("Event booking not found");
+        }
+
+        // A settled account gets its receipt, never an invoice (owner rule).
+        if (($paidRefusal = rh_invoice_paid_refusal($pdo, 'event', $inquiry_id)) !== null) {
+            throw new Exception($paidRefusal);
         }
 
         $invoice_result = generateEventInvoicePDF($inquiry_id);

@@ -14,8 +14,26 @@ function rh_restaurant_normalize_location(string $value): string {
 
 function rh_restaurant_active_order_sql_for_alias(string $alias = ''): string {
     $prefix = $alias !== '' ? rtrim($alias, '.') . '.' : '';
+    // A room-service order already charged to the folio and fully served is finished: it never
+    // blocks the room (the money is on the bill, nothing is left to cook or deliver).
     return $prefix . "status NOT IN ('cancelled','voided','completed','paid')
-        AND (" . $prefix . "status = 'placed' OR " . $prefix . "kitchen_status IN ('none','new','in_progress','ready','recalled'))";
+        AND (" . $prefix . "status = 'placed' OR " . $prefix . "kitchen_status IN ('none','new','in_progress','ready','recalled'))
+        AND NOT (" . $prefix . "order_type = 'room_service' AND " . $prefix . "folio_posted_at IS NOT NULL AND " . $prefix . "kitchen_status = 'served')";
+}
+
+/**
+ * Close a room-service order that is finished: charged to the guest folio (folio_posted_at set) and
+ * every non-void line served. Same end state checkout gives folio-charged room service
+ * (status 'completed'). Unpaid non-folio orders are left alone. Stock is not touched (lines were
+ * deducted when the order was placed). Call inside the caller's transaction. True when closed.
+ */
+function rh_close_finished_room_service_order(PDO $pdo, int $orderId): bool {
+    $stmt = $pdo->prepare("UPDATE stock_orders o SET o.status = 'completed', o.kitchen_status = 'served',
+            o.served_at = COALESCE(o.served_at, NOW()), o.updated_at = NOW()
+        WHERE o.id = ? AND o.order_type = 'room_service' AND o.status = 'placed' AND o.folio_posted_at IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM stock_order_items i WHERE i.order_id = o.id AND i.kds_status NOT IN ('served','void'))");
+    $stmt->execute([$orderId]);
+    return $stmt->rowCount() > 0;
 }
 
 function rh_restaurant_active_order_sql(): string {

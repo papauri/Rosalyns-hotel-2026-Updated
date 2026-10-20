@@ -27,6 +27,8 @@ $checks = [
         "SELECT o.id FROM stock_orders o JOIN bookings b ON b.id = o.booking_id WHERE $openOrder AND $gone"],
     ['FAIL', 'Open tabs/orders whose booking no longer exists',
         "SELECT o.id FROM stock_orders o LEFT JOIN bookings b ON b.id = o.booking_id WHERE o.booking_id IS NOT NULL AND b.id IS NULL AND $openOrder"],
+    ['FAIL', 'Room-service order still "placed" on a checked-out or cancelled booking',
+        "SELECT o.id FROM stock_orders o JOIN bookings b ON b.id = o.booking_id WHERE o.order_type = 'room_service' AND o.status = 'placed' AND b.status IN ('checked-out','cancelled')"],
     ['FAIL', 'Live kitchen tickets on cancelled/voided orders',
         "SELECT o.id FROM stock_orders o WHERE o.status IN ('cancelled','voided') AND o.kitchen_status IN ('new','in_progress','ready')"],
     ['FAIL', 'Rooms still held (booking_rooms) by a cancelled/deleted booking',

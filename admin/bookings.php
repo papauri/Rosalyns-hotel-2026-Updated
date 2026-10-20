@@ -19,6 +19,8 @@ require_once '../includes/booking-timeline.php';
 require_once '../includes/booking-soft-delete.php';
 require_once '../includes/booking-room-change.php';
 require_once '../includes/finance-sequences.php';
+require_once 'includes/finance-account-sync.php';
+require_once 'includes/account-receipt-send.php';
 $message = '';
 $error = '';
 $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
@@ -1392,6 +1394,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $settleCreated = true;
             }
 
+            if ($payment_status === 'paid' && !$settleCreated) {
+                $message = 'Nothing is owed on this booking. No payment was recorded.';
+            }
             // Derive amount_paid / amount_due / payment_status from the payments
             // ledger (total_with_vat — the bill — is never written from here).
             if (!recalculateBookingFinancials((int)$booking_id)) {
@@ -1606,7 +1611,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
             } else {
                 // Early: guest may be owed a refund for unused nights
-                $unusedNights = abs($nightDiff);
+                // Unused = booked nights minus the nights billed (a same-day checkout still bills 1 night), so the modal's nights add up
+                $unusedNights = max(0, $schedNights - $actualNights);
                 $quoteBill    = $quoteRp['new_gross'] + (float)($abk['folio_charges_total'] ?? 0);
                 $refundable   = max(0.0, min($adjAmount, round($amountPaid_a - $quoteBill, 2) + 0.0));
                 header('Content-Type: application/json');
@@ -1746,7 +1752,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Early checkout: reprice to the nights actually stayed at the BOOKED
                     // nightly rate, reduce the bill, and refund (net paid - new bill) in this
                     // same transaction against the original payment(s) / method(s).
-                    $unusedNights_s = abs($nightDiff_s);
+                    $unusedNights_s = max(0, $schedNights_s - $actualNights_s); // same count the assess step showed
                     $lockB = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
                     $lockB->execute([$booking_id]);
                     $lockedBk = $lockB->fetch(PDO::FETCH_ASSOC);
@@ -2061,6 +2067,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->rollBack();
                     header('Content-Type: application/json');
                     echo json_encode(['success' => false, 'message' => $cr_guard['reason'] ?: 'A payment cannot be recorded on this booking.']);
+                    exit;
+                }
+                // Nothing owed = no payment; more than owed only with the explicit tick (balance re-read under the lock).
+                $cr_limitErr = rh_payment_limit_error($pay_amount, rh_account_balance_due($pdo, 'room', $booking_id), !empty($_POST['confirm_overpay']));
+                if ($cr_limitErr !== null) {
+                    $pdo->rollBack();
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => $cr_limitErr]);
                     exit;
                 }
 
@@ -3653,8 +3667,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             $can_change_room_type = ($bk_holding && !$is_missed_checkin) || $bk_inhouse;
                                             // A late arrival (confirmed, arrival date passed) still needs a room to check in.
                                             $can_assign_room = $bk_status === 'confirmed';
-                                            $can_quote = in_array($bk_status, ['pending', 'tentative'], true);
-                                            $can_invoice = in_array($bk_status, ['confirmed', 'checked-in', 'checked-out'], true);
+                                            // The right document for the state (owner rule): nothing paid yet = quotation first;
+                                            // balance owed = invoice first; fully paid = receipt (never an invoice).
+                                            $bk_doc = rh_doc_state($bk_paid, $bk_due, $bk_status);
+                                            $can_quote = $bk_holding && $bk_paid <= BALANCE_TOLERANCE;
+                                            $can_invoice = in_array($bk_status, ['confirmed', 'checked-in', 'checked-out'], true) && $bk_due > BALANCE_TOLERANCE;
+                                            $can_receipt = !$bk_deleted && $bk_paid > BALANCE_TOLERANCE && !in_array($bk_status, ['no-show', 'expired'], true);
                                             $can_consolidate = $_perm_pay && ($bk_holding || $bk_inhouse
                                                 || ($bk_status === 'checked-out' && ($bk_due > BALANCE_TOLERANCE || $bk_credit > BALANCE_TOLERANCE)));
                                             $can_make_tentative = $bk_status === 'pending' && !in_array($booking['payment_status'], ['paid', 'partial'], true);
@@ -3780,14 +3798,20 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                                                             <hr class="menu-divider">
                                                             <button type="button" onclick="openResendEmailModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_js($bk_status); ?>, <?php echo ($is_missed_checkin || $is_overdue_checkout) ? 'true' : 'false'; ?>)"><i class="fas fa-envelope"></i> Resend email</button>
-                                                            <?php if ($can_invoice): ?>
-                                                                <button type="button" onclick="sendInvoiceEmail(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this)"><i class="fas fa-file-invoice"></i> Send invoice</button>
+                                                            <?php if ($bk_doc === 'receipt' && $can_receipt): ?>
+                                                                <button type="button" onclick="rhSendAccountReceipt('room', <?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)"><i class="fas fa-receipt"></i> Send receipt</button>
                                                             <?php endif; ?>
                                                             <?php if ($can_quote): ?>
                                                                 <button type="button" onclick="openBookingListQuoteModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo $bk_js($booking['guest_email'] ?? ''); ?>)"><i class="fas fa-file-invoice-dollar"></i> Send quotation</button>
                                                                 <?php if (!empty($booking['guest_phone'])): ?>
                                                                     <button type="button" onclick="openBookingListQuotationWhatsApp(<?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo $bk_js($booking['guest_phone']); ?>)"><i class="fab fa-whatsapp"></i> Quotation via WhatsApp</button>
                                                                 <?php endif; ?>
+                                                            <?php endif; ?>
+                                                            <?php if ($can_invoice): ?>
+                                                                <button type="button" onclick="sendInvoiceEmail(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this)"><i class="fas fa-file-invoice"></i> Send invoice (balance due)</button>
+                                                            <?php endif; ?>
+                                                            <?php if ($bk_doc !== 'receipt' && $can_receipt): ?>
+                                                                <button type="button" onclick="rhSendAccountReceipt('room', <?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)"><i class="fas fa-receipt"></i> Send receipt</button>
                                                             <?php endif; ?>
                                                         <?php endif; /* not deleted */ ?>
 
@@ -5064,7 +5088,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     '<tr><td>Full refund value</td><td>' + fmt(s.refund_amount) + '</td></tr>' +
                     '<tr class="cs-total"><td>Refundable (capped at paid)</td><td><strong>' + fmt(s.refundable) + '</strong></td></tr>' +
                     '</table>' +
-                    (s.refundable <= 0 ? '<p style="color:#888;font-size:12px;">No payment on record — no refund will be issued.</p>' : '');
+                    (s.refundable <= 0 ? '<p style="color:#888;font-size:12px;">' + (parseFloat(s.amount_paid) > 0.01 ? 'Paid ' + fmt(s.amount_paid) + '; no refund due.' : 'No payment on record — no refund will be issued.') + '</p>' : '');
                 chargeRow.style.display = 'none';
                 refundRow.style.display = s.refundable > 0 ? '' : 'none';
                 proceedBtn.textContent = s.refundable > 0 ? 'Refund & Checkout' : 'Checkout (no refund)';
@@ -5219,7 +5243,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         async function handleCheckoutSettlementSubmit(e) {
             e.preventDefault();
             const form = e.target;
-            if (!form || form.id !== 'checkoutSettlementForm') {
+            // getAttribute: this form has an input named "id", so form.id is that input, not the form's id
+            if (!form || !form.getAttribute || form.getAttribute('id') !== 'checkoutSettlementForm') {
                 return;
             }
 
@@ -5287,7 +5312,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         }
 
         document.addEventListener('submit', function(e) {
-            if (e.target && e.target.id === 'checkoutSettlementForm') {
+            if (e.target && e.target.getAttribute && e.target.getAttribute('id') === 'checkoutSettlementForm') {
                 handleCheckoutSettlementSubmit(e);
             }
         });
@@ -7482,13 +7507,18 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     '<div style="background:' + (b.amount_due > 0.01 ? '#fff3f3' : '#e8f5e9') + ';border-radius:6px;padding:10px 12px;text-align:center;"><div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;">Balance Due</div><div style="font-size:18px;font-weight:700;color:' + (b.amount_due > 0.01 ? '#dc3545' : '#28a745') + ';margin-top:2px;">' + fmtMWK(b.amount_due) + '</div></div>' +
                     '</div>';
 
-                // Record Payment form
-                const paymentForm =
-                    '<form id="conPaymentForm">' +
+                // Record Payment form (only offered while something is owed; the server refuses it otherwise)
+                const conDue = Math.max(0, parseFloat(b.amount_due) || 0);
+                const conOwed = conDue > 0.01;
+                const paymentForm = !conOwed
+                    ? '<p style="margin:0 0 6px;padding:12px 14px;background:#e8f5e9;border-radius:6px;color:#1f5f2a;font-weight:600;"><i class="fas fa-circle-check"></i> Nothing is owed on this booking.</p>' +
+                      '<div class="modal-actions" style="border-top:1px solid #eee;padding-top:14px;"><button type="button" class="btn btn-secondary" onclick="closeConsolidationModal()">Close</button></div>'
+                    : '<form id="conPaymentForm" method="post" data-no-autofilter>' +
                     '<input type="hidden" name="action" value="consolidation_record">' +
                     '<input type="hidden" name="id" value="' + b.id + '">' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">' +
-                    '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Amount (' + _currencySymbol + ') <span style="color:#dc3545;">*</span></label><input type="number" name="amount" id="con_amount" class="form-control" min="0.01" step="0.01" placeholder="e.g. 25000.00" required style="border-color:#8F6A35;"></div>' +
+                    '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Amount (' + _currencySymbol + ') <span style="color:#dc3545;">*</span></label><input type="number" name="amount" id="con_amount" class="form-control" min="0.01" step="0.01" value="' + conDue.toFixed(2) + '" required style="border-color:#8F6A35;"><small style="color:#6b6258;display:block;margin-top:4px;">Balance due ' + fmtMWK(conDue) + '</small>' +
+                    '<div id="con_over_wrap" style="display:none;margin-top:6px;"><div id="con_over_warn" style="color:#8a4b00;font-size:12px;margin-bottom:4px;"></div><label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;color:#8a4b00;cursor:pointer;"><input type="checkbox" name="confirm_overpay" value="1" id="con_over_cb" style="margin-top:2px;"> <span>The guest paid more than owed</span></label></div></div>' +
                     '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Payment method <span style="color:#dc3545;">*</span></label><select name="payment_method" class="form-control"><option value="cash">Cash</option><option value="bank_transfer">Bank Transfer</option><option value="credit_card">Credit Card</option><option value="debit_card">Debit Card</option><option value="mobile_money">Mobile Money</option><option value="cheque">Cheque</option><option value="other">Other</option></select></div>' +
                     '</div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">' +
@@ -7514,10 +7544,25 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     summaryBar +
                     '<details style="margin-bottom:12px;" open><summary style="font-size:12px;font-weight:600;color:#555;cursor:pointer;padding:4px 0;">Folio Charges</summary>' + chargesHtml + '</details>' +
                     '<details style="margin-bottom:16px;" open><summary style="font-size:12px;font-weight:600;color:#555;cursor:pointer;padding:4px 0;">Payment History</summary>' + paysHtml + '</details>' +
-                    '<div style="border-top:2px solid #8F6A35;padding-top:14px;"><h4 style="margin:0 0 12px;font-size:14px;color:#2a2723;"><i class="fas fa-plus-circle"></i> Record New Payment</h4>' + paymentForm + '</div></div>';
+                    '<div style="border-top:2px solid #8F6A35;padding-top:14px;">' + (conOwed ? '<h4 style="margin:0 0 12px;font-size:14px;color:#2a2723;"><i class="fas fa-plus-circle"></i> Record New Payment</h4>' : '') + paymentForm + '</div></div>';
 
-                document.getElementById('conPaymentForm').addEventListener('submit', async function(e) {
+                const conPayForm = document.getElementById('conPaymentForm');
+                if (!conPayForm) return; // nothing owed: no payment form
+                const conAmt = document.getElementById('con_amount');
+                conAmt.addEventListener('input', function() {
+                    const extra = (parseFloat(conAmt.value) || 0) - conDue;
+                    const over = extra > 0.01;
+                    document.getElementById('con_over_wrap').style.display = over ? '' : 'none';
+                    document.getElementById('con_over_warn').textContent = over
+                        ? 'That is ' + fmtMWK(extra) + ' more than owed. The extra will be issued to the guest as a credit note.' : '';
+                    document.getElementById('con_over_cb').required = over;
+                    if (!over) document.getElementById('con_over_cb').checked = false;
+                });
+                conPayForm.addEventListener('submit', async function(e) {
                     e.preventDefault();
+                    // Submit guard: one payment per click, never a second post while the first is in flight
+                    if (conPayForm.dataset.submitting === '1') return;
+                    conPayForm.dataset.submitting = '1';
                     const fd2 = new FormData(this);
                     const btn = document.getElementById('con_submit_btn');
                     if (btn) setButtonLoading(btn, true);
@@ -7525,12 +7570,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     try {
                         const result = await postBookingAction(fd2, 'Failed to record payment');
                         hideLoadingOverlay();
-                        if (btn) setButtonLoading(btn, false);
                         closeConsolidationModal();
                         Alert.show(result.message + ' Ref: ' + result.payment_reference, 'success');
                         setTimeout(() => window.location.reload(), 2000);
                     } catch (err) {
                         hideLoadingOverlay();
+                        conPayForm.dataset.submitting = '';
                         if (btn) setButtonLoading(btn, false);
                         Alert.show(err.message || 'Failed to record payment.', 'error');
                     }
@@ -8867,5 +8912,6 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         </div>
     </div>
 
+    <?php rh_render_send_receipt_script($csrf_token ?? ''); ?>
     <?php require_once 'includes/admin-footer.php'; ?>
 

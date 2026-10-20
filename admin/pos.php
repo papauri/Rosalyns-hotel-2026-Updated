@@ -3407,7 +3407,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             <div class="modal-head modal-header">
                 <h3><i class="fas fa-coins"></i> Set opening float</h3><button class="close modal-close" onclick="closeFloatModal()">&times;</button>
             </div>
-            <form id="floatForm" onsubmit="submitFloat(event)">
+            <form id="floatForm" method="post" data-no-autofilter onsubmit="submitFloat(event)">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="set_float">
                 <div class="modal-body">
@@ -3438,7 +3438,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <h3 style="color:#fff;margin:0;"><i class="fas fa-rotate-left"></i> Process refund</h3>
                 <button class="close modal-close" onclick="closeRefundModal()" style="color:#fff;">&times;</button>
             </div>
-            <form id="refundForm" onsubmit="submitRefund(event)">
+            <form id="refundForm" method="post" data-no-autofilter onsubmit="submitRefund(event)">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="refund_order">
                 <input type="hidden" name="order_id" id="refundOrderId" value="">
@@ -3466,7 +3466,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <h3 style="color:#fff;margin:0;"><i class="fas fa-shield-alt"></i> Manager Authorisation</h3>
                 <button class="close modal-close" onclick="closeMgrAuthOverlay()" style="color:#fff;">&times;</button>
             </div>
-            <form id="mgrAuthForm" onsubmit="submitMgrAuth(event)" autocomplete="off">
+            <form id="mgrAuthForm" method="post" data-no-autofilter onsubmit="submitMgrAuth(event)" autocomplete="off">
                 <div class="modal-body">
                     <p style="font-size:13px;color:#6c757d;margin-top:0;">This action requires a manager or authorised user to approve. Please enter your credentials to proceed.</p>
                     <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#166534;">

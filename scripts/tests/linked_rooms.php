@@ -72,6 +72,31 @@ function mk_order_line(PDO $pdo, int $orderId, string $lineStatus, ?array $menu)
 }
 
 $leakRef = '';
+// Run before the main transaction opens: the harness uses its own connection and would otherwise wait on this one's row locks.
+echo "\n--- F4: the real KDS and Delivered endpoints close a served folio order (rolled-back harness) ---\n";
+$harness = __DIR__ . '/page_harness.php';
+$runScenario = function (string $scenario, string $page = 'scripts/tests/room_service_close_child.php') use ($harness, $run): array {
+    $oref = 'ORRC' . $run . substr($scenario, 0, 3);
+    $cfg = base64_encode(json_encode(['post' => ['scenario' => $scenario, 'ref' => $oref], 'ajax' => false,
+        'verify' => ["SELECT status, kitchen_status, (folio_posted_at IS NOT NULL) AS posted FROM stock_orders WHERE reference = '$oref'",
+                     "SELECT COUNT(*) AS open_lines FROM stock_order_items WHERE kds_status NOT IN ('served','void') AND order_id = (SELECT id FROM stock_orders WHERE reference = '$oref')"]]));
+    $out = shell_exec('php ' . escapeshellarg($harness) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg($cfg) . ' 2>&1');
+    if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $r = json_decode($m[1], true); if (is_array($r)) { return $r; } }
+    return ['error' => 'no result', 'raw' => substr((string)$out, -500)];
+};
+foreach (['serve' => 'serve_item on the last open line', 'bump' => 'bump_ticket'] as $sc => $label) {
+    $r = $runScenario($sc);
+    $st = $r['verify'][0][0] ?? [];
+    check(empty($r['leak']) && !empty($r['rolled_back']), "KDS $label: harness rolled back, nothing left behind", json_encode($r['raw'] ?? $r['leak'] ?? ''));
+    check(($st['status'] ?? '') === 'completed' && ($st['kitchen_status'] ?? '') === 'served' && (int)($st['posted'] ?? 0) === 1, "KDS $label closes the folio-charged order (completed, served, folio_posted_at set)", json_encode([$st, $r['json'] ?? null, $r['raw'] ?? null]));
+}
+$r = $runScenario('recall');
+$st = $r['verify'][0][0] ?? [];
+check(($st['status'] ?? '') === 'placed' && ($st['kitchen_status'] ?? '') === 'recalled', 'Recalling a just-closed folio order re-opens it while the guest is in house', json_encode([$st, $r['json'] ?? null]));
+$r = $runScenario('deliver');
+$st = $r['verify'][0][0] ?? [];
+check(($st['status'] ?? '') === 'completed' && stripos(implode(' ', $r['output_flash'] ?? []), 'marked as delivered') !== false, 'Delivered accepts a served-but-open folio order and completes it', json_encode([$st, $r['output_flash'] ?? null]));
+
 try {
     $pdo->beginTransaction();
     $future = date('Y-m-d', strtotime('+400 day')); $future2 = date('Y-m-d', strtotime('+401 day'));
@@ -178,6 +203,45 @@ try {
     if (check(!empty($co8['success']), 'Checkout goes through', (string)($co8['message'] ?? ''))) {
         check(col($pdo, "SELECT status FROM stock_orders WHERE id = ?", [$o8]) === 'completed', 'Folio-charged room-service order is closed at checkout');
         check((int)col($pdo, "SELECT COUNT(*) FROM booking_rooms WHERE booking_id = ? AND released_at IS NULL", [$b8]) === 0, 'Checkout releases booking_rooms');
+    }
+
+    echo "\n--- F4: folio-charged room service is finished once served; the room is never wrongly locked ---\n";
+    require_once __DIR__ . '/../../includes/restaurant-location-locks.php';
+    [$b11] = mk_booking($pdo, $run, (int)$type['id'], (int)$ir['id'], 'checked-in', $ci, $co, 'rsclose');
+    $roomKey = (string)$ir['room_number'];
+    $mkRs = function (string $kitchen, bool $folio, string $lineStatus) use ($pdo, $run, $b11, $menu, $roomKey): int {
+        $oid = mk_order($pdo, $run, $b11, $lineStatus, $menu);
+        $pdo->prepare("UPDATE stock_orders SET room_number = ?, table_number = ?, kitchen_status = ?, folio_posted_at = " . ($folio ? 'NOW()' : 'NULL') . " WHERE id = ?")
+            ->execute([$roomKey, $roomKey, $kitchen, $oid]);
+        return $oid;
+    };
+    $lockedBy = function (int $oid) use ($pdo, $roomKey): bool {
+        $locks = rh_restaurant_active_location_locks($pdo);
+        $c = rh_restaurant_find_active_order_conflict($pdo, 'room_service', $roomKey, false);
+        return (isset($locks['rooms'][$roomKey]) && (int)$locks['rooms'][$roomKey]['id'] === $oid) || ($c !== null && (int)$c['id'] === $oid);
+    };
+    $oA = $mkRs('in_progress', true, 'preparing');
+    check($lockedBy($oA), 'A room-service order still being prepared locks the room');
+    $pdo->prepare("UPDATE stock_order_items SET kds_status = 'served' WHERE order_id = ?")->execute([$oA]);
+    check(rh_close_finished_room_service_order($pdo, $oA), 'Serving the last line closes a folio-charged room-service order');
+    check(col($pdo, "SELECT status FROM stock_orders WHERE id = ?", [$oA]) === 'completed', 'Order status is completed');
+    check(col($pdo, "SELECT folio_posted_at FROM stock_orders WHERE id = ?", [$oA]) !== null, 'folio_posted_at stays set');
+    check(!$lockedBy($oA), 'The closed order no longer locks the room');
+    $oB = $mkRs('served', true, 'served'); // served on the KDS by an older build: still "placed"
+    check(!$lockedBy($oB), 'A served, folio-charged "placed" order does not lock the room');
+    $oC = $mkRs('served', false, 'served'); // not on the folio: unpaid till order keeps today\'s behaviour
+    check($lockedBy($oC), 'A served order NOT charged to the folio still locks the room (unchanged)');
+    check(!rh_close_finished_room_service_order($pdo, $oC), 'The helper leaves an unpaid non-folio order alone');
+    $oD = $mkRs('in_progress', true, 'ready');
+    check(!rh_close_finished_room_service_order($pdo, $oD) && col($pdo, "SELECT status FROM stock_orders WHERE id = ?", [$oD]) === 'placed', 'A line still open keeps the order open');
+    // Checkout closes the leftover placed, folio-charged orders (oB, oD once its line is served).
+    $pdo->prepare("UPDATE stock_order_items SET kds_status = 'served' WHERE order_id = ?")->execute([$oD]);
+    $pdo->prepare("UPDATE bookings SET total_amount = 0, total_with_vat = 0, amount_due = 0, payment_status = 'paid' WHERE id = ?")->execute([$b11]);
+    $pdo->prepare("UPDATE stock_orders SET status = 'completed' WHERE id = ?")->execute([$oC]); // keep the checkout gate simple
+    $co11 = rh_checkout_with_gate($pdo, $b11, $adminId, true, 'Test');
+    if (check(!empty($co11['success']), 'Checkout goes through with leftover room-service orders', (string)($co11['message'] ?? ''))) {
+        check(col($pdo, "SELECT status FROM stock_orders WHERE id = ?", [$oB]) === 'completed' && col($pdo, "SELECT status FROM stock_orders WHERE id = ?", [$oD]) === 'completed', 'Checkout closes every leftover folio-charged placed order');
+        check((int)col($pdo, "SELECT COUNT(*) FROM stock_orders o JOIN bookings b ON b.id = o.booking_id WHERE b.id = ? AND o.order_type = 'room_service' AND o.status = 'placed'", [$b11]) === 0, 'No room-service order is left "placed" on the checked-out booking');
     }
 
     echo "\n--- Group bookings: cancel / delete whole group or one room (owner 2026-10-20) ---\n";

@@ -4269,22 +4269,30 @@ function sendEmailWithCC(string $to, ?string $toName, string $subject, string $h
  */
 function getCCEmails()
 {
-    global $pdo;
-
+    // Never throws: a missing or unreadable setting must not break the booking action that sends the email.
     try {
-        $stmt = $pdo->query("SELECT email_value FROM email_settings WHERE email_key = 'cc_emails' LIMIT 1");
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $db = $GLOBALS['pdo'] ?? null;
+        if (!($db instanceof PDO)) {
+            return [];
+        }
+        $stmt = $db->prepare("SELECT setting_value FROM email_settings WHERE setting_key = 'cc_emails' LIMIT 1");
+        $stmt->execute();
+        $value = $stmt->fetchColumn();
 
-        if ($result && !empty($result['email_value'])) {
-            $emails = json_decode($result['email_value'], true);
+        if ($value !== false && trim((string)$value) !== '') {
+            $emails = json_decode((string)$value, true);
+            if (!is_array($emails)) {
+                // Also accept a plain comma/semicolon separated list
+                $emails = preg_split('/[,;\s]+/', (string)$value, -1, PREG_SPLIT_NO_EMPTY);
+            }
             if (is_array($emails) && !empty($emails)) {
-                return array_filter($emails, function (mixed $email) {
-                    return filter_var($email, FILTER_VALIDATE_EMAIL);
-                });
+                return array_values(array_filter($emails, function ($email) {
+                    return is_string($email) && filter_var($email, FILTER_VALIDATE_EMAIL);
+                }));
             }
         }
-    } catch (Exception $e) {
-        error_log("Error getting CC emails: " . $e->getMessage());
+    } catch (Throwable $e) {
+        error_log('Error getting CC emails: ' . $e->getMessage());
     }
 
     return [];

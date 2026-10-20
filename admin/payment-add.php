@@ -384,6 +384,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $wasCollected = in_array((string)$lockedRow['payment_status'], ['completed', 'paid'], true);
                     $editMaxExcess = $wasCollected ? round($totalAmount - $storedTotal, 2) : round($totalAmount, 2);
                     if ($editMaxExcess > BALANCE_TOLERANCE) {
+                        $editCredit = rh_account_credit_owed($pdo, $bookingType, (int)$bookingId);
+                        if (min($editCredit, $editMaxExcess) > BALANCE_TOLERANCE && empty($_POST['confirm_overpay'])) {
+                            throw new Exception(rh_payment_overpay_message());
+                        }
                         $editOverpayCn = rh_auto_credit_overpayment($pdo, $bookingType, (int)$bookingId, $editMaxExcess, (string)$payment['payment_reference'], (int)$user['id']);
                     }
                 }
@@ -452,6 +456,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } while ($refExists);
 
                 $pdo->beginTransaction();
+
+                // Nothing owed = no payment; more than owed only with the explicit tick. The balance is
+                // re-read under the account row lock so two staff can never both collect the same balance.
+                $lockTables = ['room' => 'bookings', 'conference' => 'conference_inquiries', 'gym' => 'gym_inquiries', 'event' => 'event_inquiries'];
+                if (isset($lockTables[$bookingType])) {
+                    $pdo->prepare("SELECT id FROM {$lockTables[$bookingType]} WHERE id = ? FOR UPDATE")->execute([$bookingId]);
+                    $limitErr = rh_payment_limit_error($paymentAmount, rh_account_balance_due($pdo, $bookingType, (int)$bookingId), !empty($_POST['confirm_overpay']));
+                    if ($limitErr !== null) {
+                        throw new Exception($limitErr);
+                    }
+                }
 
                 $receiptNumber = in_array($paymentStatus, ['completed', 'paid'], true)
                     ? finance_next_receipt_number($pdo, $paymentDate)
@@ -600,12 +615,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            $_SESSION['alert'] = ['type' => 'error', 'message' => 'Database error: ' . $e->getMessage()];
+            $_SESSION['alert'] = ['type' => 'error', 'message' => 'Database error: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8')];
         } catch (Exception $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            $_SESSION['alert'] = ['type' => 'error', 'message' => 'Error: ' . $e->getMessage()];
+            $_SESSION['alert'] = ['type' => 'error', 'message' => 'Error: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8')];
         }
     }
 }
@@ -751,6 +766,12 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                     <div><dt>Paid</dt><dd><?php echo $currency_symbol . number_format($paidDisplay, 0); ?></dd></div>
                                 </dl>
                             </div>
+                            <?php if (!$editId && (float)$outstandingAmount <= BALANCE_TOLERANCE): ?>
+                                <div id="pa-owed-none" style="margin-top:1rem; padding:1rem; background:var(--finance-warning-bg); border:1px solid var(--finance-warning-border); border-radius:8px;">
+                                    <p style="margin:0 0 0.5rem; font-weight:600; color:var(--finance-warning);"><i class="fas fa-circle-check"></i> Nothing is owed on this booking.</p>
+                                    <p style="margin:0; font-size:0.85rem; color:var(--finance-muted);">No payment can be recorded here. Use a credit note or refund instead.</p>
+                                </div>
+                            <?php endif; ?>
 
                         <?php else: ?>
                             <?php if (!$pa_any_booking): ?>
@@ -825,13 +846,10 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                 </div>
                             </div>
 
-                            <!-- Fully paid warning -->
+                            <!-- Nothing owed: no payment can be recorded -->
                             <div id="pa-fullypaid-warn" style="display:none; margin-top:1rem; padding:1rem; background:var(--finance-warning-bg); border:1px solid var(--finance-warning-border); border-radius:8px;">
-                                <p style="margin:0 0 0.5rem; font-weight:600; color:var(--finance-warning);"><i class="fas fa-exclamation-triangle"></i> Booking fully paid</p>
-                                <p style="margin:0 0 0.75rem; font-size:0.85rem; color:var(--finance-muted);">This booking has no outstanding balance. Recording here will create a credit or overpayment.</p>
-                                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
-                                    <input type="checkbox" id="pa-override-cb"> Allow payment anyway (adjustment / credit)
-                                </label>
+                                <p style="margin:0 0 0.5rem; font-weight:600; color:var(--finance-warning);"><i class="fas fa-circle-check"></i> Nothing is owed on this booking.</p>
+                                <p style="margin:0; font-size:0.85rem; color:var(--finance-muted);">No payment can be recorded here. Use a credit note or refund instead.</p>
                             </div>
                             <?php endif; /* $pa_any_booking */ ?>
                         <?php endif; ?>
@@ -911,6 +929,13 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                         class="pa-input pa-input--amount"
                                         placeholder="0.00"
                                         required>
+                                </div>
+                                <small id="pa-due-hint" style="display:none;color:var(--finance-muted);margin-top:0.35rem;"></small>
+                                <div id="pa-over-wrap" style="display:none;margin-top:0.5rem;">
+                                    <p id="pa-over-warn" style="margin:0 0 0.35rem;color:var(--finance-warning);font-size:0.85rem;"></p>
+                                    <label style="display:flex;align-items:flex-start;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+                                        <input type="checkbox" name="confirm_overpay" value="1" id="pa-over-cb" style="margin-top:3px;"> <span>The guest paid more than owed</span>
+                                    </label>
                                 </div>
                             </div>
                             <div>
@@ -1069,6 +1094,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
         const IS_EDIT       = <?php echo $editId ? 'true' : 'false'; ?>;
         const PRE_BOOKING   = <?php echo $bookingDetails ? 'true' : 'false'; ?>;
         const PRE_DUE       = <?php echo (float)$outstandingAmount; ?>;
+        const EDIT_CREDITED = <?php echo ($editId && $payment && in_array((string)$payment['payment_status'], ['completed', 'paid'], true)) ? (float)$payment['total_amount'] : 0; ?>;
 
         /* ── Element refs ─────────────────────────────────────── */
         const amountInput   = document.getElementById('pa-amount');
@@ -1118,12 +1144,30 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                     : 'var(--finance-accent)';
             }
 
+            syncOverpay(gross);
+
             // Email notice
             const emailNotice = el('pa-email-notice');
             if (emailNotice) {
                 const triggerStatus = ['completed', 'paid'];
                 emailNotice.style.display = triggerStatus.includes(statusSel.value) ? '' : 'none';
             }
+        }
+
+        /* Balance due next to the amount; more than owed needs the explicit tick (the server enforces it too). */
+        function syncOverpay(gross) {
+            const hint = el('pa-due-hint'), wrap = el('pa-over-wrap'), warn = el('pa-over-warn'), cb = el('pa-over-cb');
+            if (!hint || !wrap) return;
+            if (_linkedDue === null) { hint.style.display = 'none'; wrap.style.display = 'none'; cb.required = false; return; }
+            const limit = _linkedDue + EDIT_CREDITED;
+            hint.style.display = '';
+            hint.textContent = 'Balance due ' + fmt(limit);
+            const extra = gross - limit;
+            const over = limit > 0.01 && extra > 0.01;
+            wrap.style.display = over ? '' : 'none';
+            warn.textContent = over ? 'That is ' + fmt(extra) + ' more than owed. The extra will be issued to the guest as a credit note.' : '';
+            cb.required = over;
+            if (!over) cb.checked = false;
         }
 
         /* ── Method card picker ───────────────────────────────── */
@@ -1242,7 +1286,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             bookings.forEach(function (b) {
                 const isDue = b.amount_due > 0;
                 const dueCls = isDue ? 'is-due' : 'is-settled';
-                const dueLabel = isDue ? fmt(b.amount_due) + ' due' : '✓ Settled';
+                const dueLabel = isDue ? 'Balance due ' + fmt(b.amount_due) : '✓ Nothing owed';
                 let ref, name, sub;
                 if (_activeType === 'room') {
                     ref  = b.booking_reference || '';
@@ -1319,9 +1363,11 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                     fpWarn.style.display = '';
                     amountInput.disabled = true;
                     amountInput.value    = '';
+                    setSubmitBlocked(true);
                 } else {
                     fpWarn.style.display = 'none';
                     amountInput.disabled = false;
+                    setSubmitBlocked(false);
                     // Auto-fill outstanding amount
                     amountInput.value = _linkedDue.toFixed(2);
                 }
@@ -1339,6 +1385,11 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             updatePreview();
         }
 
+        function setSubmitBlocked(blocked) {
+            const sb = el('pa-submit-btn');
+            if (sb) sb.disabled = !!blocked;
+        }
+
         function _clearSelection() {
             hdId.value   = '';
             _linkedDue   = null;
@@ -1348,6 +1399,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             if (searchResults){ searchResults.innerHTML = ''; searchResults.hidden = true; }
             amountInput.disabled = false;
             amountInput.value    = '';
+            setSubmitBlocked(false);
             const fpWarn = el('pa-fullypaid-warn');
             if (fpWarn) fpWarn.style.display = 'none';
             const meter = el('pa-meter');
@@ -1358,13 +1410,11 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
         const clearBtn = el('pa-clear-btn');
         if (clearBtn) clearBtn.addEventListener('click', _clearSelection);
 
-        // Override checkbox for fully paid
-        const overrideCb = el('pa-override-cb');
-        if (overrideCb) {
-            overrideCb.addEventListener('change', function () {
-                amountInput.disabled = !overrideCb.checked;
-                if (!overrideCb.checked) { amountInput.value = ''; updatePreview(); }
-            });
+        // Linked account with nothing owed: no payment can be recorded
+        if (PRE_BOOKING && !IS_EDIT && PRE_DUE <= 0.01) {
+            amountInput.disabled = true;
+            amountInput.value = '';
+            setSubmitBlocked(true);
         }
 
         /* ── Status change watcher ────────────────────────────── */

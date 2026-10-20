@@ -17,6 +17,7 @@ require_once '../includes/finance-sequences.php';
 require_once '../includes/form-validation.php';
 require_once '../includes/conference-pricing.php';
 require_once __DIR__ . '/includes/account-record-payment.php';
+require_once __DIR__ . '/includes/account-receipt-send.php';
 
 finance_ensure_sequence_tables($pdo);
 
@@ -1115,11 +1116,14 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                             <?php endif; ?>
                                             <?php
                                             $confCanRecordPay = in_array($enquiry['status'], ['confirmed', 'completed'], true) && hasPermission((int)($user['id'] ?? 0), 'conference_financials');
-                                            $confCanQuote = in_array($enquiry['status'], ['pending', 'confirmed'], true) && hasPermission((int)($user['id'] ?? 0), 'conference_financials');
-                                            $confCanResend = $confCanRecordPay && (float)$enquiry['rp_paid'] > BALANCE_TOLERANCE && filter_var((string)($enquiry['email'] ?? ''), FILTER_VALIDATE_EMAIL);
+                                            $confCanQuote = in_array($enquiry['status'], ['pending', 'confirmed'], true) && (float)$enquiry['rp_paid'] <= BALANCE_TOLERANCE && hasPermission((int)($user['id'] ?? 0), 'conference_financials');
+                                            // Right document (owner rule): owed = invoice, paid in full = receipt (never an invoice), nothing paid = quotation first.
+                                            $confDoc = rh_doc_state((float)$enquiry['rp_paid'], (float)$enquiry['rp_balance'], (string)$enquiry['status']);
+                                            $confCanResend = $confCanRecordPay && $confDoc === 'invoice' && (float)$enquiry['rp_total'] > BALANCE_TOLERANCE && filter_var((string)($enquiry['email'] ?? ''), FILTER_VALIDATE_EMAIL);
+                                            $confCanReceipt = $confCanRecordPay && (float)$enquiry['rp_paid'] > BALANCE_TOLERANCE;
                                             $confCanCancel = in_array($enquiry['status'], ['pending', 'confirmed'], true);
                                             ?>
-                                            <?php if ($confCanRecordPay || $confCanQuote || $confCanCancel || $confCanDeleteEnquiry): ?>
+                                            <?php if ($confCanRecordPay || $confCanQuote || $confCanReceipt || $confCanCancel || $confCanDeleteEnquiry): ?>
                                                 <div class="actions-more">
                                                     <button type="button" class="btn btn-secondary btn-sm actions-more-toggle" title="More actions" aria-label="More actions" onclick="toggleConfActionsMore(this, event)">
                                                         <i class="fas fa-ellipsis-vertical"></i> More
@@ -1131,21 +1135,10 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                                                 <i class="fas fa-cash-register"></i> Record payment
                                                             </button>
                                                         <?php endif; ?>
-                                                        <?php if ($confCanResend): ?>
-                                                            <form method="POST" style="margin:0;">
-                                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                                                                <input type="hidden" name="enquiry_action" value="resend_invoice">
-                                                                <input type="hidden" name="enquiry_id" value="<?php echo $enquiry['id']; ?>">
-                                                                <button type="submit"
-                                                                    data-admin-confirm="Email the invoice to <?php echo htmlspecialchars((string)$enquiry['email'], ENT_QUOTES, 'UTF-8'); ?> now?"
-                                                                    data-admin-confirm-title="Send invoice"
-                                                                    data-admin-confirm-ok="Send invoice"
-                                                                    data-admin-confirm-cancel="Cancel"
-                                                                    data-admin-confirm-tone="warning"
-                                                                    data-admin-confirm-icon="fa-file-invoice-dollar">
-                                                                    <i class="fas fa-file-invoice-dollar"></i> Send invoice
-                                                                </button>
-                                                            </form>
+                                                        <?php if ($confCanReceipt && $confDoc === 'receipt'): ?>
+                                                            <button type="button" onclick='closeConfActionMenus();rhSendAccountReceipt("conference", <?php echo (int)$enquiry['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$enquiry['inquiry_reference']), ENT_QUOTES, 'UTF-8'); ?>)'>
+                                                                <i class="fas fa-receipt"></i> Send receipt
+                                                            </button>
                                                         <?php endif; ?>
                                                         <?php if ($confCanQuote): ?>
                                                             <form method="POST" style="margin:0;">
@@ -1164,6 +1157,27 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                                                     <i class="fas fa-file-signature"></i> Send quotation
                                                                 </button>
                                                             </form>
+                                                        <?php endif; ?>
+                                                        <?php if ($confCanResend): ?>
+                                                            <form method="POST" style="margin:0;">
+                                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                                                                <input type="hidden" name="enquiry_action" value="resend_invoice">
+                                                                <input type="hidden" name="enquiry_id" value="<?php echo $enquiry['id']; ?>">
+                                                                <button type="submit"
+                                                                    data-admin-confirm="Email the invoice to <?php echo htmlspecialchars((string)$enquiry['email'], ENT_QUOTES, 'UTF-8'); ?> now?"
+                                                                    data-admin-confirm-title="Send invoice"
+                                                                    data-admin-confirm-ok="Send invoice"
+                                                                    data-admin-confirm-cancel="Cancel"
+                                                                    data-admin-confirm-tone="warning"
+                                                                    data-admin-confirm-icon="fa-file-invoice-dollar">
+                                                                    <i class="fas fa-file-invoice-dollar"></i> Send invoice (balance due)
+                                                                </button>
+                                                            </form>
+                                                        <?php endif; ?>
+                                                        <?php if ($confCanReceipt && $confDoc !== 'receipt'): ?>
+                                                            <button type="button" onclick='closeConfActionMenus();rhSendAccountReceipt("conference", <?php echo (int)$enquiry['id']; ?>, <?php echo htmlspecialchars(json_encode((string)$enquiry['inquiry_reference']), ENT_QUOTES, 'UTF-8'); ?>)'>
+                                                                <i class="fas fa-receipt"></i> Send receipt
+                                                            </button>
                                                         <?php endif; ?>
                                                         <?php if ($confCanCancel): ?>
                                                             <form method="POST" style="margin:0;">
@@ -2397,6 +2411,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
     <?php endif; ?>
 
     <?php rh_render_record_payment_modal((string)$csrf_token, 'enquiry_action', 'enquiry_id', (string)getSetting('currency_symbol')); ?>
+    <?php rh_render_send_receipt_script((string)$csrf_token); ?>
 
     <?php require_once 'includes/admin-footer.php'; ?>
 

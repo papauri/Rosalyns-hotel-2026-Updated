@@ -194,7 +194,7 @@
         }
         const fd = new FormData(f);
         const fields = []; for (const [k, v] of fd.entries()) fields.push([k, typeof v === 'string' ? v : '']);
-        await enqueue({ url: f.action || location.href, fields, when: Date.now() });
+        await enqueue({ url: new URL(f.getAttribute('action') || '', location.href).href, /* getAttribute: an input named action would shadow f.action */ fields, when: Date.now() });
         refreshBanner();
         notify('You are offline — action saved locally and will sync automatically when the connection returns.', 'info');
     }, true);

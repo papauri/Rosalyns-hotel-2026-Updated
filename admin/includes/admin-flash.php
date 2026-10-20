@@ -27,6 +27,13 @@ foreach ($_rhFlashPairs as [$_rhKey, $_rhType]) {
         unset($_SESSION[$_rhKey]);
     }
 }
+// Pages that set $_SESSION['alert'] = ['type' => ..., 'message' => ...] (payment-add, payments...) and render in the same
+// request would otherwise never show it: queue it as a toast too.
+if (!empty($_SESSION['alert']) && is_array($_SESSION['alert']) && !empty($_SESSION['alert']['message'])) {
+    $_rhAlertType = in_array((string)($_SESSION['alert']['type'] ?? ''), ['success', 'error', 'warning', 'info'], true) ? (string)$_SESSION['alert']['type'] : 'info';
+    $_rhFlashItems[] = ['msg' => (string)$_SESSION['alert']['message'], 'type' => $_rhAlertType];
+    unset($_SESSION['alert'], $_rhAlertType);
+}
 unset($_rhFlashPairs, $_rhKey, $_rhType);
 
 if (!empty($_rhFlashItems)): ?>

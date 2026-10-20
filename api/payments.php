@@ -565,6 +565,16 @@ function createPayment(PDO $pdo)
     $pdo->beginTransaction();
 
     try {
+        // Nothing owed = no payment; more than owed only with "allow_overpayment": true (the extra becomes a
+        // credit note). The balance is re-read under the account row lock.
+        $lockTable = $input['booking_type'] === 'room' ? 'bookings' : 'conference_inquiries';
+        $pdo->prepare("SELECT id FROM {$lockTable} WHERE id = ? FOR UPDATE")->execute([(int)$input['booking_id']]);
+        $limitErr = rh_payment_limit_error($paymentAmount, rh_account_balance_due($pdo, (string)$input['booking_type'], (int)$input['booking_id']), ($input['allow_overpayment'] ?? false) === true);
+        if ($limitErr !== null) {
+            $pdo->rollBack();
+            ApiResponse::error($limitErr, 422);
+        }
+
         $paymentDate = isset($input['payment_date']) ? $input['payment_date'] : date('Y-m-d');
         $receiptNumber = in_array($input['payment_status'], ['completed', 'paid'], true)
             ? finance_next_receipt_number($pdo, $paymentDate)
@@ -863,6 +873,12 @@ function updatePayment(PDO $pdo, int $paymentId)
         if (isset($input['payment_amount']) && in_array($resultingStatus, ['completed', 'paid'], true)
             && in_array((string)$existingPayment['booking_type'], ['room', 'conference', 'gym', 'event'], true)) {
             $raisedBy = round((float)$input['payment_amount'] - (float)$existingPayment['total_amount'], 2);
+            if ($raisedBy > BALANCE_TOLERANCE
+                && min(rh_account_credit_owed($pdo, (string)$existingPayment['booking_type'], (int)$existingPayment['booking_id']), $raisedBy) > BALANCE_TOLERANCE
+                && ($input['allow_overpayment'] ?? false) !== true) {
+                $pdo->rollBack();
+                ApiResponse::error(rh_payment_overpay_message(), 422);
+            }
             $overpayCn = rh_auto_credit_overpayment($pdo, (string)$existingPayment['booking_type'], (int)$existingPayment['booking_id'], $raisedBy, (string)$existingPayment['payment_reference'], 0);
         }
 

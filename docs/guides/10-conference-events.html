@@ -73,7 +73,7 @@
     <li>If a room has a display order above 0, a small number such as <em>#2</em> shows on the card.</li>
     <li>Below the cards, a table called <strong>Conference Enquiries</strong> with columns Reference, Company, Contact, Event Date, Time, Room, Attendees, Status, Amount, Actions. The newest event dates are at the top.</li>
     <li>The Amount column shows the amount, or <em>Pending</em> when the amount is zero.</li>
-    <li>Buttons in the Actions column depend on the status: <strong>Confirm</strong> (pending only), <strong>Complete</strong> (confirmed only) and <strong>Details</strong> (always). Everything else is in the row's <strong>More</strong> menu: <strong>Record payment</strong>, <strong>Send invoice</strong>, <strong>Send quotation</strong>, <strong>Cancel enquiry</strong> and, for administrators and managers only, <strong>Delete enquiry</strong>.</li>
+    <li>Buttons in the Actions column depend on the status: <strong>Confirm</strong> (pending only), <strong>Complete</strong> (confirmed only) and <strong>Details</strong> (always). Everything else is in the row's <strong>More</strong> menu: <strong>Record payment</strong>, <strong>Send invoice (balance due)</strong>, <strong>Send receipt</strong>, <strong>Send quotation</strong>, <strong>Cancel enquiry</strong> and, for administrators and managers only, <strong>Delete enquiry</strong>.</li>
   </ul>
 
   <h3>Events page</h3>
@@ -228,13 +228,15 @@
   <ol class="steps">
     <li>Check the amount is correct (see above).</li>
     <li>On the enquiry row open <strong>More</strong> and click <strong>Record payment</strong>.</li>
-    <li>Choose the <strong>Payment method</strong> and type the <strong>Amount received</strong> (gross, VAT included). Optional: <strong>Transaction reference</strong> and <strong>Notes</strong>. Click <strong>Record payment</strong>.</li>
+    <li>Choose the <strong>Payment method</strong> and check the <strong>Amount received</strong> (gross, VAT included). It starts at the balance, with <em>"Balance due MWK ..."</em> under it. Type less for a part payment. Optional: <strong>Transaction reference</strong> and <strong>Notes</strong>. Click <strong>Record payment</strong>.</li>
+    <li>If the guest handed over more than owed, you will see <em>"That is MWK ... more than owed. The extra will be issued to the guest as a credit note."</em> Tick <strong>The guest paid more than owed</strong> to save it. If nothing is owed, the window shows <em>"Nothing is owed on this booking."</em> and no payment can be taken.</li>
     <li>The system records the payment, issues a receipt and emails it to the guest by itself (once), and shows a line such as <em>"Payment ... of MWK ... recorded. Balance still due: ..."</em> or <em>"The account is paid in full."</em> followed by <em>"Receipt emailed to the guest."</em> If the receipt cannot be sent, the line says why, for example <em>"Receipt not emailed: guest has no email address - use Email receipt on the payment."</em> If the guest paid more than was owed, the extra becomes a credit note.</li>
     <li>A payment never sends an invoice. If you want to ask for the rest of the money at the same time, tick <strong>Also email an invoice for any balance still due</strong> (it is off by default). If nothing is left to pay you will see <em>"No invoice sent: nothing is left to pay, the receipt covers this payment."</em></li>
   </ol>
   <ul>
     <li>Part payments are allowed: record each payment as it arrives.</li>
-    <li>To email the invoice again, open <strong>More</strong> &rarr; <strong>Send invoice</strong>. It only works once a payment has been recorded.</li>
+    <li>The <strong>More</strong> menu offers only the document that fits. <strong>Send quotation</strong> shows only while nothing is paid. <strong>Send invoice (balance due)</strong> shows only while something is owed. <strong>Send receipt</strong> shows once a payment has come in; it is the only one left when the account is fully paid. With one payment you confirm; with several you pick from a list with the latest selected.</li>
+    <li>If you try to take a payment when nothing is owed you will see <em>"Nothing is owed on this booking. Use a credit note or refund instead."</em> If the amount is too high and the tick is empty: <em>"That is more than the balance due. Tick 'The guest paid more than owed' to record it &mdash; the extra becomes a credit note."</em></li>
   </ul>
 
   <h2 id="conf-finish">How to complete or cancel a conference enquiry</h2>
@@ -350,9 +352,9 @@
   <h3>Record payment and send the invoice</h3>
   <ol class="steps">
     <li>In the booking window click <strong>Record payment</strong>. It is greyed out (<em>"Set a total amount first (not for cancelled or waitlisted bookings)"</em>) until the amount is above zero.</li>
-    <li>Choose the <strong>Payment method</strong> and type the <strong>Amount received</strong> (gross, VAT included). Optional: <strong>Transaction reference</strong> and <strong>Notes</strong>. Click <strong>Record payment</strong>.</li>
+    <li>Choose the <strong>Payment method</strong> and check the <strong>Amount received</strong> (gross, VAT included). It starts at the balance. Optional: <strong>Transaction reference</strong> and <strong>Notes</strong>. If the guest paid more than owed, tick <strong>The guest paid more than owed</strong>. If nothing is owed the window says <em>"Nothing is owed on this booking."</em> Click <strong>Record payment</strong>.</li>
     <li>The system records the payment, issues a receipt and emails it to the guest by itself (once). You will see a line such as <em>"Payment ... of MWK ... recorded. Balance still due: ..."</em> or <em>"The account is paid in full."</em> and then whether the receipt was emailed. A payment never sends an invoice; tick <strong>Also email an invoice for any balance still due</strong> (off by default) if you also want to ask for the rest. Part payments are allowed. If the guest paid more than was owed, the extra becomes a credit note.</li>
-    <li>To email the invoice again, click <strong>Send invoice</strong> in the same window.</li>
+    <li>In the same window, <strong>Send invoice (balance due)</strong> shows only while something is owed, and <strong>Send receipt</strong> shows once a payment has come in. <strong>Send quotation</strong> shows only while nothing is paid.</li>
   </ol>
   <h3>Cancel a booking</h3>
   <ol class="steps">

@@ -268,7 +268,7 @@ $gs_nextDate = (clone $gs_dateObj)->modify('+1 day')->format('Y-m-d');
         <!-- Slot booking settings -->
         <div class="gss-card">
             <h3><i class="fas fa-sliders-h"></i> Slot Booking Settings</h3>
-            <form id="gsSettingsForm" onsubmit="return gsSaveSettings(event)">
+            <form id="gsSettingsForm" method="post" onsubmit="return gsSaveSettings(event)">
                 <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-weight:600;cursor:pointer;">
                     <input type="checkbox" name="enabled" value="1" <?php echo $cfg['enabled'] ? 'checked' : ''; ?>>
                     Enable public slot booking (shows the schedule page + reserve buttons on the gym site)
@@ -295,7 +295,7 @@ $gs_nextDate = (clone $gs_dateObj)->modify('+1 day')->format('Y-m-d');
         <!-- Opening hours -->
         <div class="gss-card">
             <h3><i class="fas fa-clock"></i> Opening Hours</h3>
-            <form id="gsHoursForm" onsubmit="return gsSaveHours(event)">
+            <form id="gsHoursForm" method="post" onsubmit="return gsSaveHours(event)">
                 <?php for ($d = 0; $d < 7; $d++): $h = $hours[$d]; ?>
                     <div class="gss-hours-row">
                         <label style="display:flex;align-items:center;gap:6px;font-weight:600;cursor:pointer;">
