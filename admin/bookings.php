@@ -1458,6 +1458,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             // Restore room availability
                             $restore = $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms");
                             $restore->execute([$bk['room_id']]);
+                            // The stay is over: stop holding its rooms (booking_rooms.released_at).
+                            rh_release_booking_room_holds($pdo, (int)$booking_id);
                             $pdo->commit();
                         } else {
                             $pdo->rollBack();
@@ -1842,6 +1844,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")
                     ->execute([$sbk['room_id']]);
+                // The stay is over: stop holding its rooms (booking_rooms.released_at).
+                rh_release_booking_room_holds($pdo, (int)$booking_id);
 
                 updateBookingRoomsStatus(
                     $booking_id,
@@ -2569,6 +2573,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
         $error = 'Error: ' . $e->getMessage();
+    }
+
+    // An AJAX action that did not answer in JSON itself (some branches only set $message / $error and fall
+    // through to the page render): answer with JSON now, so the browser gets a real success or failure
+    // instead of the whole page (which used to be mistaken for "done").
+    if (isAjaxRequest()) {
+        header('Content-Type: application/json');
+        // Success only when a handler actually reported one: an unknown action, or one that returned
+        // early without a message, did nothing and must say so.
+        if (!empty($error)) {
+            echo json_encode(['success' => false, 'message' => (string)$error]);
+        } elseif ((string)($message ?? '') !== '') {
+            echo json_encode(['success' => true, 'message' => (string)$message]);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Nothing was changed. Please reload the page and try again.']);
+        }
+        exit;
     }
 }
 
@@ -4189,6 +4210,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             restoreQueuedBookingActionMessage();
         }
 
+        // Every booking action posts to this page explicitly. Never post to window.location: right after an
+        // in-place (SPA) page change the address bar can still be on the previous page, and the POST would
+        // land on the wrong script (it used to answer with a whole page that looked like success).
+        function rhBookingsPostUrl() {
+            return new URL('bookings.php', window.location.href).pathname;
+        }
+        window.rhBookingsPostUrl = rhBookingsPostUrl;
+
         function postBookingAction(formData, errorMessage, timeoutMs) {
             if (formData instanceof FormData && !formData.has('csrf_token')) {
                 const csrfMeta = document.querySelector('meta[name="csrf-token"]');
@@ -4201,7 +4230,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const controller = new AbortController();
             const tid = setTimeout(() => controller.abort(), timeoutMs || 30000);
 
-            return fetch(window.location.href, {
+            return fetch(rhBookingsPostUrl(), {
                 method: 'POST',
                 body: formData,
                 signal: controller.signal,
@@ -4221,11 +4250,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     return data;
                 }
 
-                if (!response.ok) {
-                    throw new Error(errorMessage || 'Action failed.');
-                }
-
-                return { success: true };
+                // Anything that is not a JSON answer is NOT a confirmation (it is usually a page or a login
+                // screen). Never report success for it.
+                throw new Error('The server did not confirm this action. Please reload and check before trying again.');
             }).catch(err => {
                 clearTimeout(tid);
                 if (err.name === 'AbortError') {
@@ -5075,12 +5102,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 proceedBtn.textContent = 'Charge & Checkout';
                 proceedBtn.style.background = '#dc3545';
             } else {
-                titleEl.innerHTML = '<i class="fas fa-rotate-left" style="color:#28a745;"></i> Early Checkout — Refund';
+                titleEl.innerHTML = '<i class="fas fa-rotate-left" style="color:#28a745;"></i> Early Checkout' + (parseFloat(s.refundable) > 0 ? ' — Refund' : '');
                 bodyEl.innerHTML =
                     csGuestInfo(s, reference) +
-                    '<p style="margin:0 0 10px;">Guest is checking out after <strong>' + s.actual_nights + ' night(s)</strong> ' +
-                    'but was booked for <strong>' + s.sched_nights + ' nights</strong>. ' +
-                    'Scheduled checkout was <strong>' + escHtml(s.sched_checkout) + '</strong>.</p>' +
+                    (parseInt(s.unused_nights, 10) > 0
+                        ? '<p style="margin:0 0 10px;">Guest is checking out after <strong>' + s.actual_nights + ' night(s)</strong> ' +
+                          'but was booked for <strong>' + s.sched_nights + ' nights</strong>. ' +
+                          'Scheduled checkout was <strong>' + escHtml(s.sched_checkout) + '</strong>.</p>'
+                        : '<p style="margin:0 0 10px;">Guest is checking out on or after the booked check-out date (<strong>' + escHtml(s.sched_checkout) + '</strong>), so there are no unused nights.</p>') +
                     '<table class="cs-table">' +
                     '<tr><td>Unused nights</td><td><strong>' + s.unused_nights + '</strong></td></tr>' +
                     '<tr><td>Rate per night</td><td>' + fmt(s.price_per_night) + '</td></tr>' +
@@ -6361,7 +6390,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             viewBookingRequestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
             const requestSignal = viewBookingRequestController ? viewBookingRequestController.signal : undefined;
 
-            fetch(window.location.href, {
+            fetch(rhBookingsPostUrl(), {
                     method: 'POST',
                     body: formData,
                     signal: requestSignal,
@@ -6522,7 +6551,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 if (prevErr) prevErr.remove();
 
                 const formData = new FormData(resendForm);
-                fetch(window.location.href, {
+                fetch(rhBookingsPostUrl(), {
                         method: 'POST',
                         headers: {
                             'X-Requested-With': 'XMLHttpRequest'
@@ -6673,7 +6702,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             formData.append('check_out', checkOut);
             formData.append('exclude_booking_id', bookingId);
 
-            fetch(window.location.href, {
+            fetch(rhBookingsPostUrl(), {
                     method: 'POST',
                     body: formData,
                     headers: {
@@ -6848,7 +6877,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 }
             }
 
-            fetch(window.location.href, {
+            fetch(rhBookingsPostUrl(), {
                     method: 'POST',
                     body: formData,
                     headers: {
@@ -8155,7 +8184,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const fd = new FormData();
             fd.append('action', 'get_booking_for_modify');
             fd.append('booking_id', bookingId);
-            fetch(window.location.href, {
+            fetch(rhBookingsPostUrl(), {
                     method: 'POST',
                     body: fd,
                     headers: {
@@ -8230,7 +8259,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const btn = this.querySelector('button[type=submit]');
             if (btn) setButtonLoading(btn, true);
             showLoadingOverlay('Saving changes…');
-            fetch(window.location.href, {
+            fetch(rhBookingsPostUrl(), {
                     method: 'POST',
                     body: fd,
                     headers: {
@@ -8261,7 +8290,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             fd.append('action', 'find_payment_for_refund');
             fd.append('booking_id', bookingId);
             showLoadingOverlay('Looking up payment…');
-            fetch(window.location.href, {
+            fetch(rhBookingsPostUrl(), {
                     method: 'POST',
                     body: fd,
                     headers: {
@@ -8526,7 +8555,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const fd = new FormData();
             fd.append('action', 'get_booking_audit_log');
             fd.append('booking_id', bookingId);
-            fetch(window.location.href, {
+            fetch(rhBookingsPostUrl(), {
                     method: 'POST',
                     body: fd,
                     headers: {
@@ -8632,7 +8661,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 const fd = new FormData();
                 fd.append('action', 'send_invoice_email');
                 fd.append('booking_id', bookingId);
-                fetch(window.location.href, {
+                fetch(rhBookingsPostUrl(), {
                         method: 'POST',
                         body: fd,
                         headers: {

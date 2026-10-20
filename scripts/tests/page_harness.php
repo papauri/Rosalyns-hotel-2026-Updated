@@ -201,7 +201,7 @@ if (!empty($cfg['fake_smtp'])) {
     if ($chk !== '127.0.0.1') { fwrite(STDERR, "fake smtp override failed\n"); exit(3); }
 }
 
-$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SERVER['REQUEST_METHOD'] = (($cfg['method'] ?? 'POST') === 'GET') ? 'GET' : 'POST'; // 'method':'GET' renders a page (read-only)
 $_SERVER['PHP_SELF'] = $_SERVER['SCRIPT_NAME'] = '/' . $page;
 $_SERVER['REQUEST_URI'] = '/' . $page;
 $_SERVER['HTTP_HOST'] = 'localhost';

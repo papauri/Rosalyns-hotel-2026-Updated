@@ -238,6 +238,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
         $ir_stmt->execute([$room_type_id]);
         $result = [];
         $eff_co = rh_effective_checkout_sql('b');
+        // Same rule as checkIndividualRoomAvailability(): only statuses that really hold a room count
+        // (a checked-out or expired booking has freed it), and an expired tentative hold is free.
+        $blocking_statuses = getBookingStatusesThatBlockAvailability(true);
+        $blocking_ph = implode(',', array_fill(0, count($blocking_statuses), '?'));
         foreach ($ir_stmt->fetchAll(PDO::FETCH_ASSOC) as $ir) {
             $conflict_stmt = $pdo->prepare("
                                 SELECT COUNT(*) FROM bookings b
@@ -247,10 +251,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
                                             AND br.individual_room_id = ?
                                             AND br.released_at IS NULL
                                 ))
-                                    AND b.status NOT IN ('cancelled','no-show')
+                                    AND b.status IN ({$blocking_ph})
+                  AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
                   AND b.check_in_date < ? AND {$eff_co} > ?
             ");
-            $conflict_stmt->execute([$ir['id'], $ir['id'], $co, $ci]);
+            $conflict_stmt->execute(array_merge([$ir['id'], $ir['id']], $blocking_statuses, [$co, $ci]));
             $has_conflict = (int)$conflict_stmt->fetchColumn() > 0;
             $label = $ir['room_number'];
             if (!empty($ir['room_name'])) $label .= ' – ' . $ir['room_name'];

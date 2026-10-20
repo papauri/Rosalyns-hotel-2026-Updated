@@ -577,6 +577,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                                 // Restore room availability
                                 $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")
                                     ->execute([$checkout_row['room_id']]);
+                                // The stay is over: stop holding its rooms (booking_rooms.released_at).
+                                rh_release_booking_room_holds($pdo, (int)$booking_id);
                                 $pdo->commit();
                             } else {
                                 $pdo->rollBack();
@@ -2026,6 +2028,15 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <?php foreach (array_slice($timeline, 0, 10) as $event):
                                 $type_info = formatActionType($event['action_type']);
                                 $event_metadata = !empty($event['metadata']) ? json_decode($event['metadata'], true) : [];
+                                // The old / new nights are stored in old_value / new_value (JSON), not in metadata.
+                                $adj_old_nights = null;
+                                $adj_new_nights = null;
+                                if ($event['action_type'] === 'date_adjustment') {
+                                    $adjOld = json_decode((string)($event['old_value'] ?? ''), true);
+                                    $adjNew = json_decode((string)($event['new_value'] ?? ''), true);
+                                    $adj_old_nights = $adjOld['old']['nights'] ?? ($event_metadata['old']['nights'] ?? null);
+                                    $adj_new_nights = $adjNew['new']['nights'] ?? ($event_metadata['new']['nights'] ?? null);
+                                }
                             ?>
                                 <div class="timeline-item">
                                     <div class="timeline-icon <?php echo $event['action_type']; ?>">
@@ -2046,12 +2057,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                                 <div class="timeline-adjustment-row">
                                                     <span class="timeline-adjustment-label">Nights</span>
                                                     <span class="timeline-adjustment-value">
-                                                        <?php echo htmlspecialchars($event_metadata['old']['nights'] ?? '?'); ?> ->
-                                                        <?php echo htmlspecialchars($event_metadata['new']['nights'] ?? '?'); ?>
+                                                        <?php echo htmlspecialchars((string)($adj_old_nights ?? '?')); ?> ->
+                                                        <?php echo htmlspecialchars((string)($adj_new_nights ?? '?')); ?>
                                                     </span>
                                                 </div>
                                                 <div class="timeline-adjustment-row">
-                                                    <span class="timeline-adjustment-label">Amount Delta</span>
+                                                    <span class="timeline-adjustment-label">Room charge change</span>
                                                     <span class="timeline-adjustment-value <?php echo ($event_metadata['amount_delta'] ?? 0) >= 0 ? 'is-increase' : 'is-decrease'; ?>">
                                                         <?php echo ($event_metadata['amount_delta'] ?? 0) >= 0 ? '+' : '-'; ?>
                                                         <?php echo $currency_symbol . number_format(abs($event_metadata['amount_delta'] ?? 0), 2); ?>
@@ -2280,7 +2291,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         <span id="previewNewTotal" style="font-size: 13px; font-weight: 600;">-</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; padding-top: 8px; border-top: 1px solid #d0e8ff;">
-                        <span style="font-size: 12px; font-weight: 600; color: #1a7a96;">Amount Delta:</span>
+                        <span style="font-size: 12px; font-weight: 600; color: #1a7a96;">Room charge change (room only):</span>
                         <span id="previewDelta" style="font-size: 14px; font-weight: 700; color: var(--color-lux-ink, #231F1C);">-</span>
                     </div>
                 </div>

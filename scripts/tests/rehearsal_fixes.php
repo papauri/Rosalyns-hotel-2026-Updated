@@ -19,7 +19,7 @@ function ok(string $name, bool $cond, string $detail = ''): void {
 }
 function rf_run(string $page, array $post = [], array $opts = []): array {
     global $harness;
-    $cfg = base64_encode(json_encode(['post' => $post, 'get' => $opts['get'] ?? [], 'ajax' => !empty($opts['ajax']), 'verify' => $opts['verify'] ?? [], 'setup' => $opts['setup'] ?? [], 'grep' => $opts['grep'] ?? []]));
+    $cfg = base64_encode(json_encode(['post' => $post, 'get' => $opts['get'] ?? [], 'ajax' => !empty($opts['ajax']), 'method' => $opts['method'] ?? 'POST', 'dump_html' => $opts['dump_html'] ?? '', 'verify' => $opts['verify'] ?? [], 'setup' => $opts['setup'] ?? [], 'grep' => $opts['grep'] ?? []]));
     $out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg($cfg) . ' 2>&1');
     $res = ['error' => 'no result', 'raw' => substr((string)$out, -500), 'rolled_back' => false];
     if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $r = json_decode($m[1], true); if (is_array($r)) { $res = $r; } }
@@ -100,6 +100,77 @@ $r = rf_run('admin/bookings.php', ['action' => 'checkout_settle', 'id' => $bid, 
     'verify' => ["SELECT status FROM bookings WHERE id = $bid", "SELECT COUNT(*) AS n FROM payments WHERE booking_type='room' AND booking_id = $bid AND payment_type = 'refund'"],
 ]);
 ok('checkout with settlement skipped: completes, no refund written', !empty($r['json']['success']) && ($r['verify'][0][0]['status'] ?? '') === 'checked-out' && ($r['verify'][1][0]['n'] ?? 9) == 0, json_encode([$r['json'] ?? $r['raw'] ?? '', $r['verify'] ?? '']));
+
+echo "== Rehearsal re-check: room picker, room release, timeline wording ==\n";
+// Read-only look-up of one plain (non-joined) physical room to hang the test bookings on.
+require_once $root . '/config/database.php';
+$pick = $pdo->query("SELECT ir.id, ir.room_type_id FROM individual_rooms ir WHERE ir.is_active = 1
+    AND ir.room_type_id NOT IN (SELECT combined_room_type_id FROM room_combinations WHERE is_active = 1)
+    AND ir.id NOT IN (SELECT room_a_id FROM room_combinations UNION SELECT room_b_id FROM room_combinations) ORDER BY ir.id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if (!$pick) {
+    ok('room picker tests: a plain physical room exists to test with', false, 'no individual room found');
+} else {
+    $irid = (int)$pick['id']; $rtid = (int)$pick['room_type_id'];
+    $pickCi = date('Y-m-d', strtotime('+400 day')); $pickCo = date('Y-m-d', strtotime('+402 day'));
+    $pickRoomState = function (string $status) use ($irid, $rtid, $pickCi, $pickCo): ?array {
+        $bid = rf_id(); $ref = 'RFP' . $bid % 100000;
+        $r = rf_run('admin/create-booking.php', ['action' => 'get_available_individual_rooms', 'room_type_id' => $rtid, 'check_in' => $pickCi, 'check_out' => $pickCo], [
+            'ajax' => true,
+            'setup' => [rf_booking_sql($bid, $ref, $status, 400, 2), "UPDATE bookings SET room_id = $rtid, individual_room_id = $irid WHERE id = $bid"],
+        ]);
+        foreach (($r['json']['data'] ?? []) as $row) { if ((int)$row['id'] === $irid) { return $row; } }
+        return null;
+    };
+    $row = $pickRoomState('checked-out');
+    ok('room picker: a checked-out booking on those dates does not make the room "Booked"', $row !== null && $row['conflict'] === false, json_encode($row));
+    $row = $pickRoomState('expired');
+    ok('room picker: an expired booking does not make the room "Booked"', $row !== null && $row['conflict'] === false, json_encode($row));
+    $row = $pickRoomState('confirmed');
+    ok('room picker: a confirmed booking on those dates still shows the room as taken', $row !== null && $row['conflict'] === true, json_encode($row));
+
+    // Checkout releases the room hold (booking_rooms.released_at) on both checkout paths.
+    foreach (['checkout' => ['action' => 'checkout'], 'checkout_settle' => ['action' => 'checkout_settle', 'settlement_action' => 'skip', 'payment_method' => 'cash', 'notes' => '']] as $label => $post) {
+        $bid = rf_id(); $ref = 'RFR' . $bid % 100000; $pid = rf_id();
+        $r = rf_run('admin/bookings.php', $post + ['id' => $bid], [
+            'ajax' => true,
+            'setup' => [rf_booking_sql($bid, $ref, 'checked-in', -1, 1), rf_paid_sql($pid, $bid, $ref, 100.0),
+                "UPDATE bookings SET amount_paid = 100, amount_due = 0, payment_status = 'paid', room_id = $rtid, individual_room_id = $irid WHERE id = $bid",
+                "INSERT INTO booking_rooms (booking_id, individual_room_id, is_primary, assigned_at, status_snapshot) VALUES ($bid, $irid, 1, NOW(), 'assigned')"],
+            'verify' => ["SELECT status FROM bookings WHERE id = $bid",
+                "SELECT COUNT(*) AS n FROM booking_rooms WHERE booking_id = $bid AND released_at IS NULL",
+                "SELECT COUNT(*) AS n FROM booking_rooms WHERE booking_id = $bid AND released_at IS NOT NULL"],
+        ]);
+        ok("checkout ($label): the booking is checked out and answers JSON success", !empty($r['json']['success']) && ($r['verify'][0][0]['status'] ?? '') === 'checked-out', json_encode([$r['json'] ?? $r['raw'] ?? '', $r['verify'] ?? '']));
+        ok("checkout ($label): booking_rooms.released_at is set (no live hold left)", ($r['verify'][1][0]['n'] ?? 1) == 0 && ($r['verify'][2][0]['n'] ?? 0) == 1, json_encode($r['verify'] ?? $r));
+    }
+}
+
+// A real Adjust Dates writes a description in the hotel currency (no "$") and stores the nights.
+$bid = rf_id(); $ref = 'RFT' . $bid % 100000;
+$in = date('Y-m-d', strtotime('+300 day')); $newOut = date('Y-m-d', strtotime('+303 day'));
+$r = rf_run('admin/booking-details.php', ['adjust_dates' => '1', 'new_check_in' => $in, 'new_check_out' => $newOut, 'adjustment_reason' => 'rehearsal timeline'], [
+    'ajax' => true, 'get' => ['id' => $bid],
+    'setup' => [rf_booking_sql($bid, $ref, 'confirmed', 300, 1)],
+    'verify' => ["SELECT description, old_value, new_value FROM booking_timeline_logs WHERE booking_id = $bid AND action_type = 'date_adjustment' ORDER BY id DESC LIMIT 1"],
+]);
+$tl = $r['verify'][0][0] ?? [];
+ok('adjust dates: the timeline description uses the hotel currency, not "$"', !empty($tl['description']) && strpos($tl['description'], '$') === false, json_encode($tl));
+ok('adjust dates: old / new nights are stored in old_value / new_value', strpos((string)($tl['old_value'] ?? ''), '"nights":1') !== false && strpos((string)($tl['new_value'] ?? ''), '"nights":3') !== false, json_encode($tl));
+
+// The booking page renders those nights ("1 -> 3"), not "? -> ?".
+$bid = rf_id(); $ref = 'RFU' . $bid % 100000;
+$dump = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'rf_timeline_' . $bid . '.html';
+$r = rf_run('admin/booking-details.php', ['noop' => '1'], [
+    'method' => 'GET', 'get' => ['id' => $bid], 'dump_html' => $dump,
+    'setup' => [rf_booking_sql($bid, $ref, 'confirmed', 300, 1),
+        "INSERT INTO booking_timeline_logs (booking_id, booking_reference, action, action_type, description, old_value, new_value, performed_by_type, metadata)
+         VALUES ($bid, " . rf_q($ref) . ", 'Stay dates adjusted', 'date_adjustment', 'x', " . rf_q('{"old":{"nights":1}}') . ", " . rf_q('{"new":{"nights":3}}') . ", 'admin', " . rf_q('{"amount_delta":200,"reason":"t"}') . ")"],
+]);
+$html = is_file($dump) ? (string)file_get_contents($dump) : '';
+@unlink($dump);
+$flat = trim((string)preg_replace('/\s+/', ' ', strip_tags($html)));
+ok('booking page timeline: shows "Nights 1 -> 3"', preg_match('/Nights 1 -> 3/', $flat) === 1 && strpos($flat, 'Nights ? ->') === false, substr($flat, 0, 120));
+ok('booking page timeline: the amount line says it is the room charge change', strpos($flat, 'Room charge change') !== false);
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail === 0 ? 0 : 1);

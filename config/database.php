@@ -5406,6 +5406,20 @@ function rh_release_booking_room_assignment(int $bookingId, ?PDO $db = null): vo
 }
 
 /**
+ * A completed stay stops holding its rooms: stamp booking_rooms.released_at for every room the booking
+ * still holds, inside the caller's transaction. Unlike rh_release_booking_room_assignment() the primary
+ * room / combination pointers on the booking stay, so the checked-out booking keeps showing which room
+ * the guest stayed in. Money and room status untouched (updateBookingRoomsStatus() still finds the
+ * rooms: getBookingRooms() reads released rows too).
+ */
+function rh_release_booking_room_holds(PDO $pdo, int $bookingId): void
+{
+    if ($bookingId > 0 && bookingAvailabilityTableExists('booking_rooms')) {
+        $pdo->prepare("UPDATE booking_rooms SET released_at = NOW() WHERE booking_id = ? AND released_at IS NULL")->execute([$bookingId]);
+    }
+}
+
+/**
  * A booking that is cancelled / deleted / no-showed / expired must stop holding rooms and stop
  * advertising a live offer: release every room it holds (booking_rooms rows - both rooms of a joined
  * pair - plus the primary pointer and combination pointer), write the released room number(s) to the
@@ -9522,8 +9536,11 @@ function rh_log_early_checkout(array $bk, ?int $userId = null, ?string $userName
             require_once __DIR__ . '/../includes/booking-timeline.php';
         }
         if (function_exists('logBookingEvent')) {
-            logBookingEvent((int)($bk['id'] ?? 0), (string)($bk['booking_reference'] ?? ''), 'Early check-out', 'check_out',
-                "Left {$unused} night(s) before the booked check-out ({$bk['check_out_date']}); stayed {$stayed} night(s). Room released; the booked total is unchanged unless the stay was shortened via Adjust dates.",
+            $earlyText = $unused > 0
+                ? "Left {$unused} night(s) before the booked check-out ({$bk['check_out_date']}); stayed {$stayed} night(s). Room released; the booked total is unchanged unless the stay was shortened via Adjust dates."
+                : "Checked out on the booked check-out date ({$bk['check_out_date']}); stayed {$stayed} night(s). Room released.";
+            logBookingEvent((int)($bk['id'] ?? 0), (string)($bk['booking_reference'] ?? ''), $unused > 0 ? 'Early check-out' : 'Check-out', 'check_out',
+                $earlyText,
                 null, null, 'admin', $userId, $userName, ['nights_stayed' => $stayed, 'nights_unused' => $unused, 'booked_check_out' => $bk['check_out_date']]);
         }
     } catch (Throwable $e) {
@@ -10096,14 +10113,15 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
         // Log to timeline
         require_once __DIR__ . '/../includes/booking-timeline.php';
 
+        $adjCs = (string)getSetting('currency_symbol', 'MWK');
         $deltaText = $calculation['amount_delta'] >= 0
-            ? '+$' . number_format(abs($calculation['amount_delta']), 2) . ' additional charge'
-            : '-$' . number_format(abs($calculation['amount_delta']), 2) . ' refund/credit';
+            ? '+' . $adjCs . ' ' . number_format(abs($calculation['amount_delta']), 2) . ' additional charge'
+            : '-' . $adjCs . ' ' . number_format(abs($calculation['amount_delta']), 2) . ' refund/credit';
 
         // Add credit note if applicable
         $creditNote = '';
         if ($creditBalance > BALANCE_TOLERANCE) {
-            $creditNote = ' (Credit balance: $' . number_format($creditBalance, 2) . ')';
+            $creditNote = ' (Credit balance: ' . $adjCs . ' ' . number_format($creditBalance, 2) . ')';
         }
 
         $description = sprintf(
@@ -10145,7 +10163,7 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
             'adjustment_id' => $adjustmentId,
             'calculation' => $calculation,
             'credit_balance' => $creditBalance > 0 ? $creditBalance : null,
-            'message' => 'Booking dates adjusted successfully.' . ($creditBalance > 0 ? " Guest has a credit balance of $" . number_format($creditBalance, 2) . "." : '')
+            'message' => 'Booking dates adjusted successfully.' . ($creditBalance > 0 ? " Guest has a credit balance of " . $adjCs . ' ' . number_format($creditBalance, 2) . "." : '')
         ];
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {

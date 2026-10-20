@@ -1152,6 +1152,9 @@
 
                 var heldHeight = Math.max(scope.element.getBoundingClientRect().height, parseFloat(scope.element.dataset.rhHeldHeight || '0') || 0);
                 var navWasInside = !!navEl && scope.element.contains(navEl);
+                if (pushState) {
+                    history.pushState({ spa: true, url: fullHref }, '', fullHref);
+                }
                 scope.element.innerHTML = newScope.innerHTML;
                 _syncPaginationNav(currentContent, newContent, scope, navEl, navSelector, navIndex);
                 _holdPagerPosition(scope.element, heldHeight, navWasInside, navSelector);
@@ -1163,9 +1166,6 @@
                         if (newTitle) document.title = newTitle.textContent;
 
                         _updateNavActive(fullHref);
-                        if (pushState) {
-                            history.pushState({ spa: true, url: fullHref }, '', fullHref);
-                        }
 
                         var y = scope.element.getBoundingClientRect().top + window.scrollY - 80;
                         if (y < 0) y = 0;
@@ -1300,6 +1300,13 @@
                         // page's scripts run and (optionally) register a new one.
                         window.__pageTabHandler = null;
 
+                        // Move the address bar to the new page BEFORE its scripts run: page
+                        // scripts (deep links, AJAX helpers) read window.location. On
+                        // back/forward the browser has already changed the URL.
+                        if (pushState) {
+                            history.pushState({ spa: true, url: fullHref }, '', fullHref);
+                        }
+
                         currentContent.innerHTML = newContent.innerHTML;
 
                         return _runScripts(currentContent)
@@ -1310,11 +1317,6 @@
                             .then(function () {
                                 // Update nav active state
                                 _updateNavActive(fullHref);
-
-                                // Update browser history
-                                if (pushState) {
-                                    history.pushState({ spa: true, url: fullHref }, '', fullHref);
-                                }
 
                                 _scrollToNavigationTarget(url);
 
