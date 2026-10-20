@@ -24,6 +24,7 @@ require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/../includes/stock-loss.php';
+require_once __DIR__ . '/includes/stock-count-approval-lib.php';
 
 $user = [
     'id'        => $_SESSION['admin_user_id'],
@@ -31,7 +32,9 @@ $user = [
     'role'      => $_SESSION['admin_role'],
     'full_name' => $_SESSION['admin_full_name'],
 ];
-$canApprove = in_array($user['role'] ?? '', ['admin', 'manager'], true);
+/* Who can approve or reject a submitted count: the "Approve stock counts" permission (admin and manager by
+ * default; any user can be given it in User Management). Not the same as who may open the page. */
+$canApprove = hasPermission((int)$user['id'], 'stock_count_approve');
 
 $message = '';
 $error = '';
@@ -60,6 +63,12 @@ function displayCountReference(?string $reference): string
     }
     // Keep legacy records readable but remove the old SC- prefix in UI.
     return (string)preg_replace('/^SC-/i', '', $ref);
+}
+
+/* Plain label for a count status: a submitted count is "Waiting for approval". */
+function scStatusLabel(string $status): string
+{
+    return $status === 'submitted' ? 'Waiting for approval' : $status;
 }
 
 /* Feature-detect stock_count_lines.counted_at / counted_by (migration 062). Cached per request. */
@@ -269,7 +278,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $_SESSION['stock_msg'] = $isOpeningStart
-                    ? "Opening stock count {$ref} started. Enter the physical quantity AND the unit cost for every item you have; a different manager must approve it."
+                    ? "Opening stock count {$ref} started. Enter the physical quantity AND the unit cost for every item you have; someone other than you must approve it."
                     : "Count {$ref} started. Enter your physical readings.";
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
@@ -424,12 +433,31 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
 
                 $_SESSION['stock_msg'] = 'Count submitted for approval.' . ($canApprove ? ' Shortage cost: ' . $currency . ' ' . number_format(abs((float)$t['shortage']), 2) . '.' : '');
+                // Tell the approvers (tickbox, default on). The count is already submitted: an email problem only changes the message.
+                if (!empty($_POST['email_approvers'])) {
+                    $em = rh_sca_email_approvers($pdo, $countId, (int)$user['id'], 'submit');
+                    $_SESSION['stock_msg'] .= ' ' . $em['message'];
+                } else {
+                    $_SESSION['stock_msg'] .= ' Approvers were not emailed.';
+                }
+                header('Location: stock-count.php?id=' . $countId);
+                exit;
+            }
+
+            if ($action === 'remind_count') {
+                $countId = (int)($_POST['count_id'] ?? 0);
+                $em = rh_sca_email_approvers($pdo, $countId, (int)$user['id'], 'remind');
+                if ($em['ok']) {
+                    $_SESSION['stock_msg'] = $em['message'];
+                } else {
+                    $_SESSION['stock_err'] = $em['message'];
+                }
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
             }
 
             if ($action === 'approve_count') {
-                if (!$canApprove) throw new RuntimeException('Only admin/manager can approve counts.');
+                if (!$canApprove) throw new RuntimeException('You do not have permission to approve stock counts. Ask an administrator to give you "Approve stock counts" in User Management.');
                 $countId = (int)($_POST['count_id'] ?? 0);
 
                 $pdo->beginTransaction();
@@ -668,7 +696,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($action === 'reject_count') {
-                if (!$canApprove) throw new RuntimeException('Only admin/manager can reject counts.');
+                if (!$canApprove) throw new RuntimeException('You do not have permission to reject stock counts. Ask an administrator to give you "Approve stock counts" in User Management.');
                 $countId = (int)($_POST['count_id'] ?? 0);
                 $reason = trim($_POST['rejection_reason'] ?? '');
                 if (mb_strlen($reason) < 8) throw new RuntimeException('Provide a rejection reason (min 8 characters).');
@@ -766,6 +794,12 @@ $counts = $pdo->query("
     ORDER BY sc.created_at DESC
     LIMIT 50
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+/* Everyone who can approve counts (active, with the permission); each count then excludes its own counter. */
+$allApprovers = rh_sca_approvers($pdo, 0);
+$approversFor = static function (int $counterId) use ($allApprovers): array {
+    return array_values(array_filter($allApprovers, static fn($a) => (int)$a['id'] !== $counterId));
+};
 
 $categories = $pdo->query("SELECT DISTINCT category FROM stock_ingredients WHERE is_archived = 0 ORDER BY category")->fetchAll(PDO::FETCH_COLUMN);
 $ingredientList = $pdo->query("SELECT id, name, category, unit FROM stock_ingredients WHERE is_archived = 0 ORDER BY category, name")->fetchAll(PDO::FETCH_ASSOC);
@@ -889,13 +923,13 @@ $csrf_token = generateCsrfToken();
             $isSubmitted = $activeCount['status'] === 'submitted';
             $isOwnCount = (int)$activeCount['counted_by'] === (int)$user['id'];
             $canWorkCount = $isOwnCount || $canApprove;
-            $blockSelfApprove = $isSubmitted && $anyOverThreshold && $isOwnCount;
+            $blockSelfApprove = $isSubmitted && ($anyOverThreshold || $isOpeningCount) && $isOwnCount;
             ?>
             <div class="count-header">
                 <a href="stock-count.php" class="btn-secondary"><i class="fas fa-arrow-left"></i> Back to all counts</a>
                 <span class="count-header__meta">
                     Count <strong><?php echo htmlspecialchars(displayCountReference((string)$activeCount['reference'])); ?></strong>
-                    <span class="pill st-<?php echo $activeCount['status']; ?>"><?php echo $activeCount['status']; ?></span>
+                    <span class="pill st-<?php echo htmlspecialchars($activeCount['status']); ?>"><?php echo htmlspecialchars(scStatusLabel((string)$activeCount['status'])); ?></span>
                     <?php if (!empty($activeCount['is_opening'])): ?><span class="pill" style="background:#eff6ff;color:#1e3a8a;border:1px solid #bfdbfe;">Opening stock</span><?php endif; ?>
                     ·
                     Counted by <strong><?php echo htmlspecialchars($activeCount['counted_by_name'] ?: '—'); ?></strong>
@@ -942,6 +976,49 @@ $csrf_token = generateCsrfToken();
                     <span style="background:#fff7e6;padding:0 4px;">orange</span> when it is <?php echo htmlspecialchars($fmtPct($alertPct)); ?>% or more of the expected stock (the alert level), and
                     <span style="background:#fde7e9;padding:0 4px;">red</span> when it is <?php echo htmlspecialchars($fmtPct($blockPct)); ?>% or more (the approval level, which needs a second approver). Both levels are set in Hotel Settings.
                 </p>
+            <?php endif; ?>
+
+            <?php if ($isSubmitted):
+                $countApprovers = $approversFor((int)$activeCount['counted_by']);
+                $counterNm = (string)($activeCount['counted_by_name'] ?: 'the person who counted it');
+                $needsSecondKnown = $isOpeningCount || ($canApprove && $anyOverThreshold);
+                $remindWait = rh_sca_remind_wait($pdo, (int)$activeCount['id']);
+            ?>
+                <div class="approval-box" style="background:#eef6ff;border:1px solid #b6d4fe;color:#1e3a5f;padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;line-height:1.6;">
+                    <div><strong><i class="fas fa-hourglass-half"></i> Waiting for approval.</strong>
+                        <?php if ($needsSecondKnown): ?>
+                            <strong>Needs a second person to approve &mdash; not <?php echo htmlspecialchars($counterNm); ?>.</strong>
+                        <?php else: ?>
+                            If any shortage is over the approval level (<?php echo htmlspecialchars($currency . ' ' . number_format($minCost, 2) . ' and ' . $fmtPct($blockPct) . '%'); ?>), a second person (not <?php echo htmlspecialchars($counterNm); ?>) must approve it.
+                        <?php endif; ?>
+                    </div>
+                    <div>
+                        <strong>Who can approve:</strong>
+                        <?php if ($countApprovers): ?>
+                            <?php echo htmlspecialchars(rh_sca_approver_names($countApprovers)); ?>
+                        <?php else: ?>
+                            <span style="color:#842029;">nobody else right now. Ask an administrator to give someone the &ldquo;Approve stock counts&rdquo; permission in User Management.</span>
+                        <?php endif; ?>
+                    </div>
+                    <?php if ($isOwnCount && $canApprove && $needsSecondKnown): ?>
+                        <div><i class="fas fa-user-lock"></i> You counted this, so you can&rsquo;t approve it yourself. Ask one of the people above.</div>
+                    <?php elseif ($isOwnCount && !$canApprove): ?>
+                        <div><i class="fas fa-user-lock"></i> You counted this and you don&rsquo;t have the approval permission, so one of the people above must approve it.</div>
+                    <?php elseif (!$canApprove): ?>
+                        <div><i class="fas fa-user-lock"></i> You can&rsquo;t approve counts. Ask one of the people above.</div>
+                    <?php endif; ?>
+                    <form method="POST" style="margin-top:8px;">
+                        <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                        <input type="hidden" name="action" value="remind_count">
+                        <input type="hidden" name="count_id" value="<?php echo (int)$activeCount['id']; ?>">
+                        <?php if ($remindWait > 0): ?>
+                            <button type="button" class="btn-secondary" disabled><i class="fas fa-envelope"></i> Approvers emailed &mdash; remind again in <?php echo (int)ceil($remindWait / 60); ?> min</button>
+                        <?php else: ?>
+                            <button type="submit" class="btn-secondary"><i class="fas fa-envelope"></i> Remind approvers</button>
+                            <span style="font-size:12px;color:#556;">Sends them an email with a link to this count.</span>
+                        <?php endif; ?>
+                    </form>
+                </div>
             <?php endif; ?>
 
             <?php if ($activeCount['status'] === 'draft' && trim((string)($activeCount['rejection_reason'] ?? '')) !== ''): ?>
@@ -1104,8 +1181,14 @@ $csrf_token = generateCsrfToken();
                     <?php if ($editable && $canWorkCount): ?>
                         <button type="submit" name="action" value="save_lines" class="btn-secondary"><i class="fas fa-save"></i> Save readings</button>
                         <button type="button" class="btn-primary" onclick="scConfirm(this.form,'submit_count','Submit count for approval? Once submitted you cannot edit it. Every line must have a reading.')"><i class="fas fa-paper-plane"></i> Submit for approval</button>
+                        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#495057;">
+                            <input type="checkbox" name="email_approvers" value="1" checked>
+                            Email the approvers
+                            <?php $draftApprovers = $approversFor((int)$activeCount['counted_by']); ?>
+                            <span style="color:#6c757d;font-size:12px;">(<?php echo $draftApprovers ? htmlspecialchars(rh_sca_approver_names($draftApprovers)) : 'nobody else can approve yet'; ?>)</span>
+                        </label>
                     <?php elseif ($isSubmitted && $canApprove && $blockSelfApprove): ?>
-                        <span style="color:#856404;background:#fff3cd;border:1px solid #ffe69c;padding:8px 12px;border-radius:8px;"><i class="fas fa-user-lock"></i> This count has shortages over the approval threshold, so it must be approved by a different manager or admin than the person who counted it.</span>
+                        <span style="color:#856404;background:#fff3cd;border:1px solid #ffe69c;padding:8px 12px;border-radius:8px;"><i class="fas fa-user-lock"></i> <?php echo $isOpeningCount ? 'An opening stock count' : 'This count has shortages over the approval threshold, so it'; ?> must be approved by someone other than the person who counted it.</span>
                         <button type="button" class="btn-danger" onclick="rejectPrompt(this.form)"><i class="fas fa-times"></i> Reject &amp; send back</button>
                         <input type="hidden" name="rejection_reason" id="rejection_reason" value="">
                         <span id="reject_err" style="color:#c82333;font-size:13px;display:none;"></span>
@@ -1275,7 +1358,7 @@ $csrf_token = generateCsrfToken();
                             <div class="form-field" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;">
                                 <label style="display:flex;gap:8px;align-items:flex-start;">
                                     <input type="checkbox" name="opening" value="1" id="opening_cb" <?php echo !empty($_GET['opening']) ? 'checked' : ''; ?> onchange="onOpeningChange()">
-                                    <span><strong>This is the opening stock count</strong> (first-time set-up). Counts every ingredient, needs a unit cost on each line, and must be approved by a different manager. No supplier receipts are created.</span>
+                                    <span><strong>This is the opening stock count</strong> (first-time set-up). Counts every ingredient, needs a unit cost on each line, and must be approved by someone other than you. No supplier receipts are created.</span>
                                 </label>
                             </div>
                             <div class="form-field">
@@ -1386,7 +1469,16 @@ $csrf_token = generateCsrfToken();
                                         <td data-label="Shortage" style="text-align:right; color:#c82333;"><?php echo $hideCountFigures ? '—' : $currency . ' ' . number_format(abs((float)$c['shortage_cost']), 2); ?></td>
                                         <td data-label="Surplus" style="text-align:right; color:#155724;"><?php echo $hideCountFigures ? '—' : $currency . ' ' . number_format((float)$c['surplus_cost'], 2); ?></td>
                                         <td data-label="Counted by" style="font-size:12px;"><?php echo htmlspecialchars($c['counted_by_name'] ?: '—'); ?></td>
-                                        <td data-label="Status"><span class="pill st-<?php echo htmlspecialchars($c['status']); ?>"><?php echo htmlspecialchars($c['status']); ?></span></td>
+                                        <td data-label="Status">
+                                            <span class="pill st-<?php echo htmlspecialchars($c['status']); ?>"><?php echo htmlspecialchars(scStatusLabel((string)$c['status'])); ?></span>
+                                            <?php if ($c['status'] === 'submitted'):
+                                                $rowApprovers = $approversFor((int)$c['counted_by']);
+                                                $rowSecond = !empty($c['is_opening']) || ($canApprove && rh_sca_needs_second_person($pdo, $c, $blockPct, $minCost));
+                                            ?>
+                                                <?php if ($rowSecond): ?><div style="font-size:11px;color:#1e3a5f;margin-top:3px;">Needs a second person to approve &mdash; not <?php echo htmlspecialchars((string)($c['counted_by_name'] ?: 'the counter')); ?></div><?php endif; ?>
+                                                <div style="font-size:11px;color:#6c757d;margin-top:2px;">Can approve: <?php echo $rowApprovers ? htmlspecialchars(rh_sca_approver_names($rowApprovers)) : '<span style="color:#842029;">nobody else yet</span>'; ?></div>
+                                            <?php endif; ?>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                                 <?php if (empty($counts)): ?>

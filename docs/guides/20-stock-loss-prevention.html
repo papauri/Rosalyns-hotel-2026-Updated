@@ -23,7 +23,7 @@
     <dl>
       <dt>Who uses it</dt><dd>Owners, managers and administrators. Store keepers and chefs only need the parts about counting and wastage.</dd>
       <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Stock</strong>: <strong>Stock Count</strong> (with <strong>Theft Radar</strong>), <strong>Stock Reports</strong>, <strong>Wastage</strong>, <strong>Batch Tracker</strong>, <strong>Ingredients</strong>, <strong>Purchase Orders</strong>, <strong>Stock Overview</strong>. Also Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Orders &amp; Tabs</strong>, and Admin menu &rarr; <strong>Money</strong> &rarr; <strong>POS Accounting</strong>.</dd>
-      <dt>Permission needed</dt><dd>See the table "Who can do what" below. Approving, rejecting and manual changes are for the Admin and Manager roles only.</dd>
+      <dt>Permission needed</dt><dd>See the table "Who can do what" below. Approving or rejecting a stock count needs <strong>Approve stock counts</strong> (Admin and Manager have it by default). Manual changes are for the Admin and Manager roles only.</dd>
       <dt>Only shown when</dt><dd>The <strong>Stock &amp; Inventory</strong> module is switched on in Settings &rarr; Modules.</dd>
     </dl>
   </div>
@@ -46,7 +46,8 @@
     <thead><tr><th>Task</th><th>Permission or role</th></tr></thead>
     <tbody>
       <tr><td>Start a stock count, enter readings, submit it</td><td><strong>Stock Count &amp; Variance</strong>. Only the person who started the count, or a manager, can save readings, submit or reopen it.</td></tr>
-      <tr><td>Approve or reject a stock count</td><td>The Admin or Manager role (the permission alone is not enough).</td></tr>
+      <tr><td>Approve or reject a stock count</td><td><strong>Approve stock counts</strong>. Admin and Manager have it by default, and an administrator can give it to anyone else in Staff &amp; Access (also tick <strong>Stock Count &amp; Variance</strong> so they can open the page). The person who counted can never approve their own opening count.</td></tr>
+      <tr><td>Remind the approvers that a count is waiting</td><td>Anyone who can open <strong>Stock Count &amp; Variance</strong>.</td></tr>
       <tr><td>Manual adjustment on an ingredient (<strong>Adjust</strong>)</td><td>Admin or Manager role.</td></tr>
       <tr><td>Discard, write off or recall a whole batch</td><td>Admin or Manager role.</td></tr>
       <tr><td>Record wastage</td><td><strong>Wastage Log</strong></td></tr>
@@ -83,7 +84,7 @@
   <p>A count records what is really on the shelf and measures it against what the system expects. You can count everything, one category, or a few items (a "spot check"). A spot check or a single category is a quick way to count by surprise. Where: <strong>Stock</strong> &rarr; <strong>Stock Count</strong>.</p>
 
   <h3>The count is blind for the person counting</h3>
-  <p>While a count is open, the person who started it does not see the expected quantity, the variance or the cost of any shortage. They must write down what they really see. Staff who are not managers cannot see these figures until the count is approved. The page says <strong>Blind count.</strong> A manager who did not start the count sees the expected figures, so can check readings as they come in.</p>
+  <p>While a count is open, the person who started it does not see the expected quantity, the variance or the cost of any shortage. They must write down what they really see. Staff who cannot approve counts cannot see these figures until the count is approved. The page says <strong>Blind count.</strong> A manager who did not start the count sees the expected figures, so can check readings as they come in.</p>
 
   <h3>Expected stock is worked out at the moment of counting</h3>
   <p>The column <strong>Expected at count time</strong> is the stock at the start of the count plus anything sold, delivered or wasted since. A sale in the middle of a count therefore cannot hide a loss, and cannot be counted twice. The final change posted to stock is the difference from this figure.</p>
@@ -92,11 +93,16 @@
   <p>For each line that is short you must pick a <strong>Reason</strong>: <strong>Spillage</strong>, <strong>Expired</strong>, <strong>Staff meal</strong>, <strong>Sampling</strong>, <strong>Prep waste</strong>, <strong>Theft suspected</strong>, <strong>Correction</strong> or <strong>Other</strong>. You cannot submit the count without them. If sales during the count turn a line into a shortage that has no reason, nothing is posted and the count goes back to the counter. A blank line is never read as zero: a count cannot be submitted until every line has a reading.</p>
 
   <h3>The counter cannot approve a big shortage</h3>
-  <p>A shortage is "big" when it is worth at least the cost limit <em>and</em> is at least the percentage limit of the expected stock (set in Hotel Settings, see Setting it up). A big shortage cannot be approved by the person who counted. A different manager or admin must do it. The opening stock count always needs a different approver.</p>
+  <p>A shortage is "big" when it is worth at least the cost limit <em>and</em> is at least the percentage limit of the expected stock (set in Hotel Settings, see Setting it up). A big shortage cannot be approved by the person who counted. Someone else who has <strong>Approve stock counts</strong> must do it. The opening stock count always needs a different approver, even if the counter has the permission.</p>
   <p>Lines are shaded for the approver by one simple rule. A shortage worth at least the minimum value (see Setting it up) is shaded <strong>orange</strong> when it is the <strong>alert at variance</strong> share of the expected stock or more, and <strong>red</strong> when it is the <strong>needs approval above</strong> share or more. Red needs a second approver. When any line is orange or red, a yellow box above the lines says, for example, <em>"2 lines over the alert level."</em> (<em>"1 line over the alert level."</em> for one). Surpluses and small shortages are never shaded. The shading and the box do not show on a blind count, only to people who may see the figures.</p>
 
+  <h3>Who can approve, who is emailed, and the Remind approvers button</h3>
+  <p>A count that has been submitted shows <strong>Waiting for approval</strong>. Under the heading of the count, and next to it in the list, the page says <strong>Who can approve</strong> and gives the names of the people who hold <strong>Approve stock counts</strong>, leaving out the person who counted. Where a second person is needed (an opening count, or a big shortage) it also says <strong>Needs a second person to approve &mdash; not</strong> the counter&rsquo;s name. If you are the person who counted, the page tells you that you cannot approve it yourself and who to ask. If nobody else can approve, it says so: ask an administrator to give someone <strong>Approve stock counts</strong> in Staff &amp; Access.</p>
+  <p>When you click <strong>Submit for approval</strong>, the box <strong>Email the approvers</strong> is ticked. Each approver who has an email address on their account then gets a short email with the count reference, whether it is an opening or a regular count, who counted it, how many lines it has, the shortage and surplus value, whether a second person is needed, and a link to the count. Untick the box if you only want to tell them in person. The page then says <strong>Approvers emailed: 3</strong> (or the number that went out). If the email cannot be sent it says <strong>Could not email approvers</strong>, but the count is still submitted. Nothing is lost.</p>
+  <p>If the count is still waiting later, click <strong>Remind approvers</strong> on the count. It sends the same email again, marked as a reminder. It can be sent once every 10 minutes for each count, and the button tells you when you can use it again. Every email sent is written to the activity log.</p>
+
   <h3>Approval is final, and a rejected count starts again from scratch</h3>
-  <p>When a manager clicks <strong>Approve &amp; post variances</strong>, the differences are applied to stock and the approver's name and time are kept. It cannot be undone. <strong>Reject &amp; send back</strong> needs a reason of at least 8 characters. After a rejection, <strong>Reopen for re-count</strong> takes a fresh snapshot and puts every line back to <strong>Not counted</strong>, so old readings cannot be tweaked to fit.</p>
+  <p>When an approver clicks <strong>Approve &amp; post variances</strong>, the differences are applied to stock and the approver's name and time are kept. It cannot be undone. <strong>Reject &amp; send back</strong> needs a reason of at least 8 characters. After a rejection, <strong>Reopen for re-count</strong> takes a fresh snapshot and puts every line back to <strong>Not counted</strong>, so old readings cannot be tweaked to fit.</p>
 
   <h3>Theft Radar points to the ingredients to watch</h3>
   <p><strong>Theft Radar (last 30 days)</strong> sits on the Stock Count page. It is a list of up to 20 ingredients that lost stock in the last 30 days through count shortages or manual subtractions, which no sale or wastage entry explains. Each row shows the ingredient, its <strong>Shortage</strong> and <strong>Manual out</strong> amounts in small print, and the cost lost on the right, biggest cost first. If nothing is found you see <em>"No unaccounted shortages detected. All stock movement traces to sales or recorded events."</em> Anyone who can open Stock Count can see it.</p>
@@ -180,7 +186,7 @@
   <h3>Permissions, so the counter is not the approver</h3>
   <ul>
     <li>Give <strong>Stock Count &amp; Variance</strong> to the storekeeper or chef who counts. Do not give them the Manager role. They can then count and submit, but they cannot approve or reject.</li>
-    <li>Keep at least two people with the Admin or Manager role, so a big shortage found by one manager can be approved by the other.</li>
+    <li>Keep at least two people who hold <strong>Approve stock counts</strong> (the Admin and Manager roles have it by default), so a big shortage found by one person can be approved by the other. To let someone else approve, open <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong>, edit the person and tick <strong>Approve stock counts</strong> and <strong>Stock Count &amp; Variance</strong>. To stop a manager approving, untick <strong>Approve stock counts</strong> for them. Make sure each approver has an email address on their account, or they will not get the approval emails.</li>
     <li>Give <strong>Wastage Log</strong> to the people who really throw stock away, and <strong>Stock Reports</strong> only to managers and the accountant.</li>
     <li>Keep <strong>Ingredients &amp; Recipes</strong> (deliveries, purchase orders) with the person who buys, and have someone else do the counts. Whoever receives stock should not also be the only person who counts it.</li>
   </ul>
@@ -195,7 +201,7 @@
 
   <h2 id="limits">What the system cannot do for you</h2>
   <ul>
-    <li>It does not make anyone count on a schedule. It shows a reminder on the screen when no count has been approved for a while, but you have to start the counts. It sends no emails.</li>
+    <li>It does not make anyone count on a schedule. It shows a reminder on the screen when no count has been approved for a while, but you have to start the counts. That reminder sends no emails. Emails go out only to approvers when a count is submitted or when someone clicks <strong>Remind approvers</strong>.</li>
     <li>It cannot tell theft from a mistake. <strong>Theft suspected</strong> is a label that a person chooses.</li>
     <li>It cannot see stock that leaves with no record at all, until a count finds it.</li>
     <li>It does not track sold items that have no recipe.</li>
@@ -206,8 +212,10 @@
   <table>
     <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
     <tbody>
-      <tr><td><em>"This count has shortages over the approval threshold (MWK 5,000.00 and 10%). It must be approved by a different manager or admin than the person who counted it."</em></td><td>You counted it, and a shortage is over both limits. This is on purpose.</td><td>Ask another manager or admin to approve it. Or use <strong>Reject &amp; send back</strong>.</td></tr>
-      <tr><td><em>"Only admin/manager can approve counts."</em> / <em>"... reject counts."</em></td><td>Your role is not Manager or Admin.</td><td>Ask a manager.</td></tr>
+      <tr><td><em>"This count has shortages over the approval threshold (MWK 5,000.00 and 10%). It must be approved by a different manager or admin than the person who counted it."</em> / <em>"An opening stock count must be approved by a different manager or admin than the person who counted it."</em></td><td>You counted it, and it is an opening count or a shortage is over both limits. This is on purpose, even if you have <strong>Approve stock counts</strong>.</td><td>Ask another approver (the names are under <strong>Who can approve</strong>). Or use <strong>Reject &amp; send back</strong>.</td></tr>
+      <tr><td><em>"You do not have permission to approve stock counts."</em> / <em>"... reject stock counts."</em></td><td>You do not have the <strong>Approve stock counts</strong> permission.</td><td>Ask one of the people under <strong>Who can approve</strong>, or ask an administrator to give you the permission in Staff &amp; Access.</td></tr>
+      <tr><td><em>"Could not email approvers."</em> / <em>"Could not email approvers: there is nobody else who can approve this count."</em></td><td>The email could not be sent, or nobody else holds <strong>Approve stock counts</strong> and has an email address. The count is still submitted.</td><td>Tell an approver in person, or click <strong>Remind approvers</strong> later. Check that approvers have an email address on their account.</td></tr>
+      <tr><td><em>"Approvers were emailed a moment ago. You can remind them again in 8 minutes."</em></td><td>A reminder can be sent only once every 10 minutes for each count.</td><td>Wait, then click <strong>Remind approvers</strong> again.</td></tr>
       <tr><td><em>"Every shortage line must have a reason. Save your readings, pick a reason for each negative variance, then submit."</em></td><td>A shortage has no reason.</td><td>Pick a reason on each short line, click <strong>Save readings</strong>, submit again.</td></tr>
       <tr><td><em>"3 lines are not counted yet (Rice, Flour, Oil). Enter a reading for every line (type 0 if there is none) before continuing."</em></td><td>A line was left blank. Blank is never counted as 0.</td><td>Count it and type the number. Use the filter <strong>Not counted only</strong>.</td></tr>
       <tr><td><em>"Not approved: 2 line(s) became shortages after allowing for stock movements and need a reason (...). Count returned to draft with readings kept - add the reasons and resubmit; nothing was posted to stock."</em></td><td>Sales or waste during the count turned a line into a shortage.</td><td>Open the count, pick a reason in <strong>Returned for reasons</strong> lines, save and submit again.</td></tr>

@@ -88,6 +88,7 @@ function rh_kb_synonym_groups(): array
         ['quotation', 'quote', 'estimate', 'proforma'],
         ['deal', 'promo', 'promotion', 'coupon', 'offer'],
         ['ingredient', 'stock', 'inventory'], ['supplier', 'vendor'],
+        ['approve', 'approver', 'approvers', 'approval', 'approved', 'authorise', 'authorize', 'signoff'],
         ['theft', 'steal', 'stealing', 'stole', 'stolen', 'thief', 'pilferage', 'pilfer', 'shrinkage', 'shortage', 'shortages', 'variance', 'loss', 'losses'],
         ['wastage', 'waste', 'spoil', 'spoilage', 'spoiled', 'expired'],
         ['takings', 'revenue', 'sales', 'income', 'earnings'],

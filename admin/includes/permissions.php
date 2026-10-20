@@ -102,6 +102,7 @@ function getAllRoles()
                 'restaurant_table_settle',
                 'kds_view',
                 'stock_count',
+                'stock_count_approve', // approve / reject submitted stock counts (managers keep doing this without re-saving anyone's permissions)
                 'stock_wastage',
                 'stock_reports',
                 'stock_budget',
@@ -786,6 +787,14 @@ function getAllPermissions()
         'stock_count' => [
             'label' => 'Stock Count & Variance',
             'description' => 'Physical stock counts and theft / variance reconciliation',
+            'icon' => 'fa-clipboard-check',
+            'category' => 'Restaurant & Stock',
+            'page' => 'stock-count.php',
+            'group' => 'stock_write'
+        ],
+        'stock_count_approve' => [
+            'label' => 'Approve stock counts',
+            'description' => 'Approve or reject a submitted stock count (the person who counted can never approve their own opening count). Also tick Stock Count & Variance so they can open the page. Approvers get an email when a count is waiting',
             'icon' => 'fa-clipboard-check',
             'category' => 'Restaurant & Stock',
             'page' => 'stock-count.php',
