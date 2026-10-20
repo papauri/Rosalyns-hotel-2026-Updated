@@ -265,7 +265,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
                 'id'                => (int)$ir['id'],
                 'label'             => $label,
                 'status'            => $ir['status'],
-                'available'         => !$has_conflict && $ir['status'] === 'available',
+                // Dates decide: a room being cleaned or occupied today is still free for a later stay
+                // (conflicts with other bookings are counted above). Only a room taken out of
+                // service (maintenance / out of order) cannot be picked.
+                'available'         => !$has_conflict && !in_array($ir['status'], ['maintenance', 'out_of_order'], true),
                 'conflict'          => $has_conflict,
                 'child_multiplier'  => (float)($ir['effective_child_multiplier'] ?? 50),
                 'single_override'   => $ir['single_occupancy_enabled_override'],
@@ -3211,7 +3214,7 @@ try {
                         lbl.textContent = ir.label;
                         const st = document.createElement('span');
                         st.className = 'ir-card-status';
-                        st.textContent = ir.is_pair ? (ir.available ? 'Available' : 'Not free') : (ir.conflict ? 'Booked' : (ir.status !== 'available' ? ir.status.charAt(0).toUpperCase() + ir.status.slice(1) : 'Available'));
+                        st.textContent = ir.is_pair ? (ir.available ? 'Available' : 'Not free') : (ir.conflict ? 'Booked' : (!ir.available ? ir.status.replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); }) : (ir.status !== 'available' ? 'Available (now ' + ir.status.replace(/_/g, ' ') + ')' : 'Available')));
                         card.appendChild(radio);
                         card.appendChild(lbl);
                         card.appendChild(st);
