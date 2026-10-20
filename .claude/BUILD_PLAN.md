@@ -11,6 +11,50 @@
 > approval," never silently queued. /build-loop stops (not pauses) once every item below
 > is `[x]`.
 
+## PRODUCTION READINESS GATE (owner-approved 2026-10-20) — overrides everything below
+
+Purpose: know when the system is ready and stop patching things that don't need it.
+
+**1. Feature freeze (from the 2026-10-20 push).** No new features, redesigns or polish without
+explicit owner approval. New ideas go to "Future Ideas" with one line each — never into a phase
+table, never built proactively.
+
+**2. Only these four kinds of fix may be made without asking (severity P1/P2):**
+- Money is wrong (a total, VAT/levy, balance, refund, receipt/invoice/credit-note number).
+- A guest cannot book or pay, or a guest document (receipt/invoice/quotation) is wrong or missing.
+- Staff are blocked from doing their job (a screen errors, a button does nothing, a permission
+  wrongly refuses).
+- Data loss or a security hole.
+Anything else is logged and batched monthly for owner approval.
+
+**3. Dress rehearsal — once per hotel, scripted, on the live DB.** Liwonde Sun first (not yet
+live; guest email johnpaulchirwa@gmail.com, guest name "DRESS REHEARSAL"): public booking →
+confirmation email → confirm + quotation → part payment + receipt → check-in → room service and
+till order to the room → checkout, balance paid + receipt → paid-in-full stay statement →
+end of day → money checks (paid/owed/VAT/receipt numbering) → data-health. Every failure is
+triaged with rule 2. Then Rosalyn's, by the owner/staff on a real stay.
+
+**4. Owner items that must be done before go-live:**
+- [ ] Rosalyn's email sender: use an address the SMTP account owns (Gmail sender via another
+      server is DMARC-blocked — receipts may go to spam).
+- [ ] Rosalyn's: create a manager account.
+- [ ] Opening stock count recorded (Stock → Stock Count) in each hotel that uses stock.
+- [ ] Confirm restaurant tables match the real floor plan; replace placeholder reviews.
+- [ ] Decide the DRESS REHEARSAL rows in Liwonde (keep for reference or clear).
+
+**5. Finished when (then /build-loop stops and no proactive work is started):**
+- [ ] Liwonde dress rehearsal passes end to end (no P1/P2 open).
+- [ ] All owner items in 4 are done.
+- [ ] `php scripts/run_tests.php` and `php scripts/data-health.php` green in both hotels.
+- [ ] Two weeks of real use with no new P1/P2.
+
+**How to test from here on:** tests run against the live DBs (no local MariaDB on the owner's
+laptop) and must roll back or delete exactly what they create; real test entries go to Liwonde.
+Per change, run only the relevant suites + browser-check only changed screens; the full suite
+runs once per push.
+
+---
+
 ## Go-live round — 2026-10-02 (owner-requested; done jointly in Rosalyn's and Liwonde)
 
 Every item below was built in both repos with the same targeted edits, `php -l` clean,
