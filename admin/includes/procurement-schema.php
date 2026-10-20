@@ -160,6 +160,15 @@ if (!function_exists('ensureProcurementSchema')) {
             rh_add_column($pdo, 'stock_purchase_order_items', 'over_received_qty', "DECIMAL(12,3) NOT NULL DEFAULT 0");
             rh_add_column($pdo, 'stock_purchase_order_items', 'over_note', "VARCHAR(500) DEFAULT NULL");
 
+            // ── Purchase packs: an item is counted in its stock unit but may be bought in packs ──
+            // pack_size NULL = no pack. PO lines always hold stock-unit quantities and costs; order_in and
+            // pack_size_snapshot only remember how the line was typed so it can be shown as "2 crates = 48 bottles".
+            rh_add_column($pdo, 'stock_ingredients', 'pack_name', "VARCHAR(30) DEFAULT NULL");
+            rh_add_column($pdo, 'stock_ingredients', 'pack_size', "DECIMAL(12,3) DEFAULT NULL");
+            rh_add_column($pdo, 'stock_purchase_order_items', 'order_in', "VARCHAR(8) NOT NULL DEFAULT 'unit'");
+            rh_add_column($pdo, 'stock_purchase_order_items', 'pack_size_snapshot', "DECIMAL(12,3) DEFAULT NULL");
+            rh_add_column($pdo, 'stock_purchase_order_items', 'pack_name_snapshot', "VARCHAR(30) DEFAULT NULL");
+
             // ── Supplier linkage on receiving tables ─────────────────────────
             rh_add_column($pdo, 'stock_batches', 'supplier_id', "INT UNSIGNED DEFAULT NULL");
             rh_add_column($pdo, 'stock_batches', 'purchase_order_id', "INT UNSIGNED DEFAULT NULL");
@@ -175,6 +184,139 @@ if (!function_exists('ensureProcurementSchema')) {
         }
 
         return $done;
+    }
+}
+
+/* ── Purchase packs (e.g. a crate of 24 bottles) ───────────────────────────────────────────────
+ * Stock, batches, counts, costs and the budget always stay in the item's STOCK unit. A pack only
+ * changes how a purchase-order line is typed and how a buying suggestion is worded. */
+
+if (!function_exists('rh_pack_label')) {
+    /** "crate" -> "crate" / "crates" depending on the number. */
+    function rh_pack_label(?string $name, float $n): string
+    {
+        $name = trim((string)$name);
+        if ($name === '') {
+            $name = 'pack';
+        }
+        if (abs($n - 1.0) < 0.0005) {
+            return $name;
+        }
+        if (preg_match('/(s|x|z|ch|sh)$/i', $name)) {
+            return $name . 'es';
+        }
+        return $name . 's';
+    }
+}
+
+if (!function_exists('rh_unit_label')) {
+    /** Stock unit worded for a number: "bottle" -> "bottles"; short codes (kg, L, pcs, g) are left alone. */
+    function rh_unit_label(?string $unit, float $n): string
+    {
+        $unit = trim((string)$unit);
+        if ($unit === '' || abs($n - 1.0) < 0.0005 || !preg_match('/^[a-z]{4,}$/i', $unit) || preg_match('/s$/i', $unit)) {
+            return $unit;
+        }
+        return rh_pack_label($unit, $n);
+    }
+}
+
+if (!function_exists('rh_pack_num')) {
+    /** Plain number text: no trailing zeros, thousands separated. */
+    function rh_pack_num(float $n, int $dp = 3): string
+    {
+        $s = number_format($n, $dp, '.', ',');
+        return strpos($s, '.') !== false ? rtrim(rtrim($s, '0'), '.') : $s;
+    }
+}
+
+if (!function_exists('rh_pack_convert')) {
+    /**
+     * Turn what was typed on a PO line into stock-unit figures.
+     *
+     * @param string $orderIn   'unit' or 'pack': what $qty counts.
+     * @param float  $qty       Number of units or packs ordered.
+     * @param float  $price     Price typed (0 = none).
+     * @param string $priceIn   'unit' or 'pack': what $price is per.
+     * @param ?float $packSize  Units in one pack (null / 0 = the item has no pack).
+     * @return array{order_in:string,packs:?float,ordered_qty:float,unit_cost:float,line_total:float,pack_size:?float}
+     */
+    function rh_pack_convert(string $orderIn, float $qty, float $price, string $priceIn, ?float $packSize): array
+    {
+        $hasPack = $packSize !== null && $packSize > 0.0;
+        $orderIn = $orderIn === 'pack' ? 'pack' : 'unit';
+        $priceIn = $priceIn === 'pack' ? 'pack' : 'unit';
+        if (($orderIn === 'pack' || $priceIn === 'pack') && !$hasPack) {
+            throw new RuntimeException('This item has no pack size. Enter the quantity and price per unit, or set a pack size on the item first.');
+        }
+        $units = $orderIn === 'pack' ? round($qty * (float)$packSize, 4) : round($qty, 4);
+        $unitCost = $priceIn === 'pack' ? round($price / (float)$packSize, 4) : round($price, 4);
+        return [
+            'order_in'    => $orderIn,
+            'packs'       => $orderIn === 'pack' ? $qty : null,
+            'ordered_qty' => $units,
+            'unit_cost'   => $unitCost,
+            'line_total'  => round($units * $unitCost, 2),
+            'pack_size'   => $hasPack ? (float)$packSize : null,
+        ];
+    }
+}
+
+if (!function_exists('rh_po_line_figures')) {
+    /**
+     * Stock-unit figures for a PO line. The pack size always comes from the item in the database (never from
+     * the form). Ordered quantity, unit cost and line total are in the item's STOCK unit whatever was typed.
+     * Returns rh_pack_convert() plus pack_name.
+     */
+    function rh_po_line_figures(PDO $pdo, int $ingredientId, string $orderIn, float $qty, float $price, string $priceIn): array
+    {
+        $packSize = null; $packName = null;
+        if ($ingredientId > 0) {
+            $st = $pdo->prepare("SELECT pack_size, pack_name FROM stock_ingredients WHERE id = ?");
+            $st->execute([$ingredientId]);
+            if ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+                $packSize = $r['pack_size'] !== null && (float)$r['pack_size'] > 0 ? (float)$r['pack_size'] : null;
+                $packName = $r['pack_name'] !== null && trim((string)$r['pack_name']) !== '' ? trim((string)$r['pack_name']) : null;
+            }
+        }
+        $f = rh_pack_convert($orderIn, $qty, $price, $priceIn, $packSize);
+        $f['pack_name'] = $packName;
+        if ($f['ordered_qty'] <= 0) {
+            throw new RuntimeException('Quantity must be greater than zero.');
+        }
+        return $f;
+    }
+}
+
+if (!function_exists('rh_pack_suggest')) {
+    /**
+     * Round a buying suggestion (in stock units) up to whole packs when the item has a pack size.
+     *
+     * @return array{packs:?int,units:float}  packs is null when the item has no pack.
+     */
+    function rh_pack_suggest(float $units, ?float $packSize): array
+    {
+        if ($packSize === null || $packSize <= 0.0 || $units <= 0.0001) {
+            return ['packs' => null, 'units' => $units];
+        }
+        // A few thousandths of a unit over a whole pack is rounding dust, not another pack.
+        $packs = (int)ceil(($units - 0.0005) / $packSize);
+        $packs = max(1, $packs);
+        return ['packs' => $packs, 'units' => round($packs * $packSize, 3)];
+    }
+}
+
+if (!function_exists('rh_pack_describe')) {
+    /** "2 crates = 48 bottles" for a pack line, else "48 bottles" (unit may be blank). */
+    function rh_pack_describe(float $units, ?string $unit, ?string $orderIn, ?float $packSize, ?string $packName): string
+    {
+        $u = rh_unit_label($unit, $units);
+        $base = rh_pack_num($units) . ($u !== '' ? ' ' . $u : '');
+        if ($orderIn === 'pack' && $packSize !== null && $packSize > 0) {
+            $packs = $units / $packSize;
+            return rh_pack_num($packs) . ' ' . rh_pack_label($packName, $packs) . ' = ' . $base;
+        }
+        return $base;
     }
 }
 

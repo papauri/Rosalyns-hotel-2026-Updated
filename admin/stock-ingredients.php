@@ -66,6 +66,24 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $parLevel     = max(0, (float)$rawNums['par_level']);
                 $leadTime     = max(0, (int)$rawLead);
                 $prefSupplier = (int)($_POST['preferred_supplier_id'] ?? 0) ?: null;
+                // Optional purchase pack (e.g. crate of 24). Stock stays in the unit above; both fields or neither.
+                $packName = rh_clean_text($_POST['pack_name'] ?? '');
+                $rawPack = str_replace(',', '', trim((string)($_POST['pack_size'] ?? '')));
+                $packSize = null;
+                if ($rawPack !== '' && $rawPack !== '0') {
+                    if (!is_numeric($rawPack) || (float)$rawPack <= 0 || (float)$rawPack > 99999) {
+                        throw new RuntimeException('Units per pack must be a number above 0.');
+                    }
+                    $packSize = round((float)$rawPack, 3);
+                    if ($packName === '') {
+                        $packName = 'pack';
+                    }
+                } else {
+                    $packName = '';
+                }
+                if (mb_strlen($packName) > 30) {
+                    throw new RuntimeException('Pack name is too long (30 characters maximum).');
+                }
                 $editId = (int)($_POST['id'] ?? 0);
 
                 if ($name === '' || $unit === '') {
@@ -85,7 +103,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                rh_with_create_lock($pdo, 'stock_ingredient', function () use ($pdo, $action, $name, $category, $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $editId, &$message) {
+                rh_with_create_lock($pdo, 'stock_ingredient', function () use ($pdo, $action, $name, $category, $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName, $packSize, $editId, &$message) {
                     // Archived ingredients still block the name (restoring one would clash).
                     $dup = rh_find_duplicate($pdo, 'stock_ingredients', 'name', $name, [], $action === 'update' ? $editId : null);
                     if ($dup) {
@@ -93,10 +111,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     if ($action === 'add') {
                         $stmt = $pdo->prepare("
-                            INSERT INTO stock_ingredients (name, category, unit, min_quantity, yield_percent, notes, reorder_point, par_level, lead_time_days, preferred_supplier_id)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO stock_ingredients (name, category, unit, min_quantity, yield_percent, notes, reorder_point, par_level, lead_time_days, preferred_supplier_id, pack_name, pack_size)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ");
-                        $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier]);
+                        $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName !== '' ? $packName : null, $packSize]);
                         $message = "Ingredient \"{$name}\" added.";
                     } else {
                         /* A unit change does not convert anything: quantity on hand, batches, cost per
@@ -125,10 +143,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmt = $pdo->prepare("
                             UPDATE stock_ingredients
                             SET name = ?, category = ?, unit = ?, min_quantity = ?, yield_percent = ?, notes = ?,
-                                reorder_point = ?, par_level = ?, lead_time_days = ?, preferred_supplier_id = ?, updated_at = NOW()
+                                reorder_point = ?, par_level = ?, lead_time_days = ?, preferred_supplier_id = ?, pack_name = ?, pack_size = ?, updated_at = NOW()
                             WHERE id = ?
                         ");
-                        $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $editId]);
+                        $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName !== '' ? $packName : null, $packSize, $editId]);
                         $message = "Ingredient updated.";
                     }
                 });
@@ -483,7 +501,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // person starting again (the reason is shown inside the form).
     if ($error && in_array((string)($action ?? ''), ['add', 'update'], true)) {
         $keep = [];
-        foreach (['id', 'name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'preferred_supplier_id', 'lead_time_days'] as $keepField) {
+        foreach (['id', 'name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'preferred_supplier_id', 'lead_time_days', 'pack_name', 'pack_size'] as $keepField) {
             $keep[$keepField] = (string)($_POST[$keepField] ?? '');
         }
         $_SESSION['stock_ingredient_form_keep'] = ['action' => (string)$action, 'error' => $error, 'post' => $keep];
@@ -950,6 +968,16 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                         <input type="number" name="lead_time_days" id="ing_lead" min="0" max="365" value="0">
                     </div>
                 </div>
+                <div class="form-row">
+                    <div>
+                        <label>Bought in packs? Pack name <i class="help" data-tip="Optional. If you buy this item by the crate, case, tray or box, enter the name here and how many single units are inside. Stock, counts and recipes stay in the unit above; purchase orders and buying suggestions can then use whole packs.">?</i></label>
+                        <input type="text" name="pack_name" id="ing_pack_name" maxlength="30" placeholder="e.g. crate, case, tray, box">
+                    </div>
+                    <div>
+                        <label>Units in one pack <i class="help" data-tip="How many of the stock unit are in one pack, e.g. 24 for a crate of 24 bottles. Leave blank if you do not buy this item in packs.">?</i></label>
+                        <input type="number" name="pack_size" id="ing_pack_size" step="0.001" min="0" placeholder="e.g. 24">
+                    </div>
+                </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary" onclick="closeModal('ingredientModal')">Cancel</button>
@@ -1221,7 +1249,15 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 document.getElementById('ing_id').value = data.id || '';
                 document.getElementById('ing_name').value = data.name || '';
                 document.getElementById('ing_category').value = data.category || '';
-                document.getElementById('ing_unit').value = data.unit || 'g';
+                (function () {
+                    // A unit typed elsewhere (e.g. bottle, box) that is not in the list is added so it is not lost.
+                    const us = document.getElementById('ing_unit');
+                    const want = data.unit || 'g';
+                    if (!Array.prototype.some.call(us.options, function (o) { return o.value === want; })) {
+                        const o = document.createElement('option'); o.value = want; o.textContent = want; us.appendChild(o);
+                    }
+                    us.value = want;
+                })();
                 setIngredientUnitLock(!!data.unit_locked, data.unit || 'g');
                 document.getElementById('ing_min').value = data.min_quantity || 0;
                 document.getElementById('ing_yield').value = data.yield_percent || 100;
@@ -1230,6 +1266,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 document.getElementById('ing_par').value = data.par_level || 0;
                 document.getElementById('ing_lead').value = data.lead_time_days || 0;
                 document.getElementById('ing_supplier').value = data.preferred_supplier_id || 0;
+                document.getElementById('ing_pack_name').value = data.pack_name || '';
+                document.getElementById('ing_pack_size').value = data.pack_size ? parseFloat(data.pack_size) : '';
             } else {
                 document.getElementById('ingredientModalTitle').textContent = 'Add <?php echo $stockNoun; ?>';
                 document.getElementById('ing_action').value = 'add';

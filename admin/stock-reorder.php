@@ -54,7 +54,7 @@ if (!$error) {
         $histSql = rh_stock_history_sql($pdo, 'i');
         $ingredients = $pdo->query("
             SELECT (CASE WHEN {$histSql} THEN 0 ELSE 1 END) AS never_stocked, i.id, i.name, i.unit, i.category, i.current_quantity, i.min_quantity,
-                   i.reorder_point, i.par_level, i.lead_time_days, i.cost_per_unit,
+                   i.reorder_point, i.par_level, i.lead_time_days, i.cost_per_unit, i.pack_name, i.pack_size,
                    i.preferred_supplier_id, s.id AS supplier_exists, s.name AS supplier_name,
                    s.lead_time_days AS supplier_lead, s.is_active AS supplier_active
             FROM stock_ingredients i
@@ -75,7 +75,11 @@ if (!$error) {
             $suggest = $target - $onHand - $ord;
             if ($suggest <= 0.0001) continue;                 // incoming PO already covers it
 
-            $lineCost = round($suggest * (float)$i['cost_per_unit'], 2);
+            // Items bought in packs: suggest whole packs (rounded up), so the order matches what the supplier delivers.
+            $packSize = $i['pack_size'] !== null && (float)$i['pack_size'] > 0 ? (float)$i['pack_size'] : null;
+            $pk = rh_pack_suggest($suggest, $packSize);
+            $suggestUnits = $pk['units'];
+            $lineCost = round($suggestUnits * (float)$i['cost_per_unit'], 2);
             // A preferred supplier that no longer exists counts as unassigned.
             $sid = !empty($i['supplier_exists']) ? (int)$i['preferred_supplier_id'] : 0;
             $key = $sid > 0 ? $sid : 0;
@@ -92,7 +96,8 @@ if (!$error) {
             $groups[$key]['items'][] = [
                 'id' => (int)$i['id'], 'name' => $i['name'], 'unit' => $i['unit'],
                 'never' => ((int)$i['never_stocked'] === 1 && $onHand <= 0.0001), 'on_hand' => $onHand, 'reorder' => $reorderPoint, 'par' => $target,
-                'on_order' => $ord, 'suggest' => round($suggest, 3), 'cost' => (float)$i['cost_per_unit'],
+                'on_order' => $ord, 'suggest' => round($suggestUnits, 3), 'cost' => (float)$i['cost_per_unit'],
+                'packs' => $pk['packs'], 'pack_name' => $pk['packs'] !== null ? (trim((string)$i['pack_name']) !== '' ? trim((string)$i['pack_name']) : 'pack') : null, 'pack_size' => $packSize,
                 'line_cost' => $lineCost,
             ];
             $groups[$key]['total'] += $lineCost;
@@ -204,8 +209,10 @@ $csrf_token = generateCsrfToken();
                         <input type="hidden" name="supplier_id" value="<?php echo (int)$g['supplier_id']; ?>">
                         <?php foreach ($g['items'] as $it): ?>
                             <input type="hidden" name="ingredient_id[]" value="<?php echo (int)$it['id']; ?>">
-                            <input type="hidden" name="order_qty[]" value="<?php echo htmlspecialchars((string)$it['suggest']); ?>">
-                            <input type="hidden" name="unit_cost[]" value="<?php echo htmlspecialchars((string)$it['cost']); ?>">
+                            <?php /* A pack item posts whole packs and the price of one pack; the order converts it to stock units. */ ?>
+                            <input type="hidden" name="order_in[]" value="<?php echo $it['packs'] !== null ? 'pack' : 'unit'; ?>">
+                            <input type="hidden" name="order_qty[]" value="<?php echo htmlspecialchars((string)($it['packs'] !== null ? $it['packs'] : $it['suggest'])); ?>">
+                            <input type="hidden" name="unit_cost[]" value="<?php echo htmlspecialchars((string)($it['packs'] !== null ? round($it['cost'] * $it['pack_size'], 4) : $it['cost'])); ?>">
                         <?php endforeach; ?>
                         <button type="submit" class="btn-ro" <?php echo $g['supplier_id'] === 0 ? 'disabled title="Assign a preferred supplier to these items first"' : (!empty($g['inactive']) ? 'disabled title="This supplier is deactivated. Reactivate it on the Suppliers page or pick another preferred supplier for these items."' : ''); ?>>
                             <i class="fas fa-file-invoice"></i> Create draft PO
@@ -232,7 +239,7 @@ $csrf_token = generateCsrfToken();
                                 <td class="num"><?php echo number_format($it['reorder'], 3); ?></td>
                                 <td class="num"><?php echo number_format($it['par'], 3); ?></td>
                                 <td class="num"><?php echo number_format($it['on_order'], 3); ?></td>
-                                <td class="num"><strong><?php echo number_format($it['suggest'], 3); ?></strong></td>
+                                <td class="num"><?php if ($it['packs'] !== null): ?><strong>Buy <?php echo (int)$it['packs']; ?> <?php echo htmlspecialchars(rh_pack_label($it['pack_name'], (float)$it['packs'])); ?></strong><br><span style="color:#8a8172;font-size:.78rem;">(<?php echo htmlspecialchars(rh_pack_num($it['suggest']) . ' ' . rh_unit_label($it['unit'], $it['suggest'])); ?>)</span><?php else: ?><strong><?php echo number_format($it['suggest'], 3); ?></strong><?php endif; ?></td>
                                 <td class="num"><?php echo htmlspecialchars($currency_symbol) . number_format($it['line_cost'], 2); ?></td>
                             </tr>
                         <?php endforeach; ?>

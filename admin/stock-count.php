@@ -181,6 +181,25 @@ function scOpeningUncostedLines(PDO $pdo, int $countId): array
     return $q->fetchAll(PDO::FETCH_COLUMN);
 }
 
+/* Opening-stock batches waiting for an opening count to be approved (stock_opening_batches, created by
+ * scripts/import_stock_sheet.php). Each carries its own expiry date; approval turns them into real batches.
+ * Returns [] when the table does not exist or the ingredient has none. Earliest expiry first (FIFO). */
+function scPendingOpeningBatches(PDO $pdo, int $countId, int $ingredientId): array
+{
+    static $has = null;
+    if ($has === null) {
+        $has = (int)$pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_opening_batches'")->fetchColumn() > 0;
+    }
+    if (!$has) {
+        return [];
+    }
+    $q = $pdo->prepare("SELECT id, batch_label, quantity, expiry_date FROM stock_opening_batches
+                        WHERE count_id = ? AND ingredient_id = ? AND applied_batch_id IS NULL
+                        ORDER BY (expiry_date IS NULL), expiry_date, id");
+    $q->execute([$countId, $ingredientId]);
+    return $q->fetchAll(PDO::FETCH_ASSOC);
+}
+
 /* ============== POST handlers ============== */
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
@@ -548,33 +567,61 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $liveQty = (float)$live['current_quantity'];
 
                     if ($variance > 0) {
-                        // Count surplus becomes a real active batch so FIFO stays correct.
-                        $tmpBatchNumber = 'TMP-C-' . date('YmdHis') . '-' . strtoupper(substr(str_replace('.', '', uniqid('', true)), -8));
-                        /* Sales beyond the batches left the ingredient total negative with no batch behind it;
-                         * settle that deficit first so the batch sum stays equal to current_quantity. */
-                        $settle = rh_stock_receipt_settlement($pdo, $ingredientId, $liveQty, $variance);
-                        $batchIns->execute([
-                            $ingredientId,
-                            $tmpBatchNumber,
-                            $variance,
-                            $settle['remaining'],
-                            max(0, $costAtTime),
-                            mb_substr('Stock count surplus ' . $count['reference'] . ($settle['settled'] > 0 ? ' (settled ' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' unallocated deficit)' : ''), 0, 500),
-                            $user['id'],
-                        ]);
-                        $batchId = (int)$pdo->lastInsertId();
-                        if ($settle['remaining'] < 0.0001) {
-                            $pdo->prepare("UPDATE stock_batches SET status = 'depleted' WHERE id = ?")->execute([$batchId]);
+                        /* Count surplus becomes real active batches so FIFO stays correct. Normally ONE batch
+                         * (no expiry). An opening count from the stock-sheet import can carry batches with their
+                         * own expiry dates: the surplus is split across them (earliest expiry first), any rest
+                         * goes into one plain batch. */
+                        $slices = [[$variance, null, '', 0]];
+                        if (!empty($count['is_opening'])) {
+                            $pending = scPendingOpeningBatches($pdo, $countId, $ingredientId);
+                            if ($pending) {
+                                $slices = [];
+                                $left = $variance;
+                                foreach ($pending as $pb) {
+                                    if ($left <= 0.0001) break;
+                                    $take = min((float)$pb['quantity'], $left);
+                                    $slices[] = [$take, $pb['expiry_date'], (string)($pb['batch_label'] ?? ''), (int)$pb['id']];
+                                    $left = round($left - $take, 4);
+                                }
+                                if ($left > 0.0001) $slices[] = [$left, null, '', 0];
+                            }
                         }
-                        $batchNumber = 'C' . date('Ymd') . '-' . str_pad((string)$batchId, 6, '0', STR_PAD_LEFT);
-                        $batchNumUpd->execute([$batchNumber, $batchId]);
+                        $avgNow = (float)$live['cost_per_unit'];
+                        foreach ($slices as [$sliceQty, $sliceExpiry, $sliceLabel, $pendingId]) {
+                            $tmpBatchNumber = 'TMP-C-' . date('YmdHis') . '-' . strtoupper(substr(str_replace('.', '', uniqid('', true)), -8));
+                            /* Sales beyond the batches left the ingredient total negative with no batch behind it;
+                             * settle that deficit first so the batch sum stays equal to current_quantity. */
+                            $settle = rh_stock_receipt_settlement($pdo, $ingredientId, $liveQty, $sliceQty);
+                            $batchIns->execute([
+                                $ingredientId,
+                                $tmpBatchNumber,
+                                $sliceQty,
+                                $settle['remaining'],
+                                max(0, $costAtTime),
+                                mb_substr('Stock count surplus ' . $count['reference'] . ($sliceLabel !== '' ? ' batch ' . $sliceLabel : '') . ($settle['settled'] > 0 ? ' (settled ' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' unallocated deficit)' : ''), 0, 500),
+                                $user['id'],
+                            ]);
+                            $batchId = (int)$pdo->lastInsertId();
+                            if ($sliceExpiry) {
+                                $pdo->prepare("UPDATE stock_batches SET expiry_date = ? WHERE id = ?")->execute([$sliceExpiry, $batchId]);
+                            }
+                            if ($pendingId > 0) {
+                                $pdo->prepare("UPDATE stock_opening_batches SET applied_batch_id = ? WHERE id = ?")->execute([$batchId, $pendingId]);
+                            }
+                            if ($settle['remaining'] < 0.0001) {
+                                $pdo->prepare("UPDATE stock_batches SET status = 'depleted' WHERE id = ?")->execute([$batchId]);
+                            }
+                            $batchNumber = 'C' . date('Ymd') . '-' . str_pad((string)$batchId, 6, '0', STR_PAD_LEFT);
+                            $batchNumUpd->execute([$batchNumber, $batchId]);
 
-                        // Keep the ingredient's weighted-average cost in step with the new surplus batch.
-                        if ($costAtTime > 0 && function_exists('calculateWeightedAvgCost')) {
-                            $newAvg = calculateWeightedAvgCost($liveQty, (float)$live['cost_per_unit'], $variance, $costAtTime);
-                            $ingCostUpd->execute([round($newAvg, 4), $ingredientId]);
+                            // Keep the ingredient's weighted-average cost in step with the new surplus batch.
+                            if ($costAtTime > 0 && function_exists('calculateWeightedAvgCost')) {
+                                $avgNow = calculateWeightedAvgCost($liveQty, $avgNow, $sliceQty, $costAtTime);
+                                $ingCostUpd->execute([round($avgNow, 4), $ingredientId]);
+                            }
+                            $ingAdd->execute([$sliceQty, $ingredientId]);
+                            $liveQty += $sliceQty;
                         }
-                        $ingAdd->execute([$variance, $ingredientId]);
                         $adjInsPositive->execute([$ingredientId, $variance, $reasonShort, $countId, $costAtTime, $user['id']]);
                         $adjId = (int)$pdo->lastInsertId();
                     } else {

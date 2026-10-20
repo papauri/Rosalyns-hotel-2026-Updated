@@ -90,6 +90,8 @@ $checks[] = ['WARN', 'Review responses whose review is missing',
     "SELECT x.id FROM review_responses x LEFT JOIN reviews r ON r.id = x.review_id WHERE r.id IS NULL"];
 $checks[] = ['WARN', 'Purchase-order lines whose order is missing',
     "SELECT x.id FROM stock_purchase_order_items x LEFT JOIN stock_purchase_orders p ON p.id = x.purchase_order_id WHERE p.id IS NULL"];
+$checks[] = ['WARN', 'Opening-stock batches whose stock count is missing',
+    "SELECT x.id FROM stock_opening_batches x LEFT JOIN stock_counts c ON c.id = x.count_id WHERE c.id IS NULL"];
 $checks[] = ['WARN', 'User permissions whose user is missing',
     "SELECT x.id FROM user_permissions x LEFT JOIN admin_users u ON u.id = x.user_id WHERE u.id IS NULL"];
 

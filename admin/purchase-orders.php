@@ -136,6 +136,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $ids   = $_POST['ingredient_id'] ?? [];
                     $qtys  = $_POST['order_qty'] ?? [];
                     $costs = $_POST['unit_cost'] ?? [];
+                    $ordIns = $_POST['order_in'] ?? [];
                     $seenIds = [];
                     $n = is_array($ids) ? count($ids) : 0;
                     for ($k = 0; $k < $n; $k++) {
@@ -148,7 +149,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                             throw new RuntimeException('The same ingredient appears more than once in this order.');
                         }
                         $seenIds[$iid] = true;
-                        $reorderLines[] = [$iid, $q, $c];
+                        $reorderLines[] = [$iid, $q, $c, (string)($ordIns[$k] ?? 'unit') === 'pack' ? 'pack' : 'unit'];
                     }
                 }
 
@@ -182,16 +183,19 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($action === 'create_from_reorder') {
                         $lineIns = $pdo->prepare("
                             INSERT INTO stock_purchase_order_items
-                                (purchase_order_id, ingredient_id, description, unit, ordered_qty, unit_cost, line_total)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                                (purchase_order_id, ingredient_id, description, unit, ordered_qty, unit_cost, line_total, order_in, pack_size_snapshot, pack_name_snapshot)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ");
                         $ingMeta = $pdo->prepare("SELECT name, unit FROM stock_ingredients WHERE id = ?");
                         foreach ($reorderLines as $rl) {
-                            [$iid, $q, $c] = $rl;
+                            [$iid, $q, $c, $oin] = $rl;
                             $ingMeta->execute([$iid]);
                             $m = $ingMeta->fetch(PDO::FETCH_ASSOC);
                             if (!$m) continue;
-                            $lineIns->execute([$poId, $iid, $m['name'], $m['unit'], $q, $c, round($q * $c, 2)]);
+                            // A pack line: quantity and price on the form are per pack; the line is saved in stock units.
+                            $fig = rh_po_line_figures($pdo, $iid, $oin, $q, $c, $oin);
+                            $isPack = $fig['order_in'] === 'pack';
+                            $lineIns->execute([$poId, $iid, $m['name'], $m['unit'], $fig['ordered_qty'], $fig['unit_cost'], $fig['line_total'], $fig['order_in'], $isPack ? $fig['pack_size'] : null, $isPack ? $fig['pack_name'] : null]);
                         }
                         rh_po_recalc($pdo, $poId);
                     }
@@ -207,7 +211,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $desc = rh_clean_text($_POST['description'] ?? '');
                 $unit = rh_clean_text($_POST['unit'] ?? '');
                 $q    = rh_po_number($_POST['ordered_qty'] ?? '', 'Quantity', true);
-                $c    = rh_po_number($_POST['unit_cost'] ?? '', 'Unit cost', false, true);
+                $c    = rh_po_number($_POST['unit_cost'] ?? '', 'Price', false, true);
+                $orderIn = (string)($_POST['order_in'] ?? 'unit') === 'pack' ? 'pack' : 'unit';
+                $priceIn = (string)($_POST['price_in'] ?? 'unit') === 'pack' ? 'pack' : 'unit';
                 if (mb_strlen($desc) > 255) throw new RuntimeException('Description is too long (255 characters maximum).');
                 if (mb_strlen($unit) > 50) throw new RuntimeException('Unit is too long (50 characters maximum).');
                 if ($poId <= 0) throw new RuntimeException('Purchase order not found.');
@@ -220,15 +226,18 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($row = $m->fetch(PDO::FETCH_ASSOC)) {
                         if ($desc === '') $desc = $row['name'];
                         if ($unit === '') $unit = $row['unit'];
-                        if ($c <= 0) $c = (float)$row['cost_per_unit'];
+                        if ($c <= 0) { $c = (float)$row['cost_per_unit']; $priceIn = 'unit'; }   // no price typed: the item's current cost per stock unit
                     }
                 }
                 if ($desc === '') throw new RuntimeException('Enter an item or description.');
+                // Stock-unit figures: a pack line is converted here, so stock, receiving and the budget never see packs.
+                $fig = rh_po_line_figures($pdo, $iid, $orderIn, $q, $c, $priceIn);
+                $isPack = $fig['order_in'] === 'pack';
                 $pdo->prepare("
                     INSERT INTO stock_purchase_order_items
-                        (purchase_order_id, ingredient_id, description, unit, ordered_qty, unit_cost, line_total)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ")->execute([$poId, $iid ?: null, $desc, $unit ?: null, $q, $c, round($q * $c, 2)]);
+                        (purchase_order_id, ingredient_id, description, unit, ordered_qty, unit_cost, line_total, order_in, pack_size_snapshot, pack_name_snapshot)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ")->execute([$poId, $iid ?: null, $desc, $unit ?: null, $fig['ordered_qty'], $fig['unit_cost'], $fig['line_total'], $fig['order_in'], $isPack ? $fig['pack_size'] : null, $isPack ? $fig['pack_name'] : null]);
                 rh_po_recalc($pdo, $poId);
                 // A PO that has already been sent is promised money: growing it is checked against the budget again.
                 if ($poStatus !== 'draft') {
@@ -258,21 +267,26 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $poId   = (int)($_POST['po_id'] ?? 0);
                 $q = rh_po_number($_POST['ordered_qty'] ?? '', 'Quantity', true);
                 $c = rh_po_number($_POST['unit_cost'] ?? '', 'Unit cost', false, true);
+                $orderIn = (string)($_POST['order_in'] ?? 'unit') === 'pack' ? 'pack' : 'unit';
+                $priceIn = (string)($_POST['price_in'] ?? 'unit') === 'pack' ? 'pack' : 'unit';
                 $pdo->beginTransaction();
                 rh_sbud_lock($pdo); // first statement: see rh_sbud_lock()
                 $poStatus = rh_po_assert_editable($pdo, $poId);
-                $recvChk = $pdo->prepare("SELECT received_qty, line_total FROM stock_purchase_order_items WHERE id = ? AND purchase_order_id = ?");
+                $recvChk = $pdo->prepare("SELECT received_qty, line_total, ingredient_id FROM stock_purchase_order_items WHERE id = ? AND purchase_order_id = ?");
                 $recvChk->execute([$lineId, $poId]);
-                $recvRow = $recvChk->fetch(PDO::FETCH_ASSOC) ?: ['received_qty' => 0, 'line_total' => 0];
+                $recvRow = $recvChk->fetch(PDO::FETCH_ASSOC) ?: ['received_qty' => 0, 'line_total' => 0, 'ingredient_id' => 0];
+                $fig = rh_po_line_figures($pdo, (int)$recvRow['ingredient_id'], $orderIn, $q, $c, $priceIn);
+                $q = $fig['ordered_qty']; $c = $fig['unit_cost'];
                 $alreadyRecv = (float)$recvRow['received_qty'];
                 if ($q + 0.0001 < $alreadyRecv) {
                     throw new RuntimeException('Quantity cannot be lower than the ' . rtrim(rtrim(number_format($alreadyRecv, 4, '.', ''), '0'), '.') . ' already received.');
                 }
-                $pdo->prepare("UPDATE stock_purchase_order_items SET ordered_qty = ?, unit_cost = ?, line_total = ? WHERE id = ? AND purchase_order_id = ?")
-                    ->execute([$q, $c, round($q * $c, 2), $lineId, $poId]);
+                $isPack = $fig['order_in'] === 'pack';
+                $pdo->prepare("UPDATE stock_purchase_order_items SET ordered_qty = ?, unit_cost = ?, line_total = ?, order_in = ?, pack_size_snapshot = ?, pack_name_snapshot = ? WHERE id = ? AND purchase_order_id = ?")
+                    ->execute([$q, $c, $fig['line_total'], $fig['order_in'], $isPack ? $fig['pack_size'] : null, $isPack ? $fig['pack_name'] : null, $lineId, $poId]);
                 rh_po_recalc($pdo, $poId);
                 // Only a bigger line on an already-sent PO is checked against the budget again.
-                if ($poStatus !== 'draft' && round($q * $c, 2) > (float)$recvRow['line_total'] + BALANCE_TOLERANCE) {
+                if ($poStatus !== 'draft' && $fig['line_total'] > (float)$recvRow['line_total'] + BALANCE_TOLERANCE) {
                     $bud = rh_sbud_authorize_po($pdo, $poId, (int)$user['id'], $canApproveBudget, !empty($_POST['budget_confirm']), (string)($_POST['budget_reason'] ?? ''));
                     if (!$bud['ok']) throw new RuntimeException($bud['error']);
                 }
@@ -467,7 +481,7 @@ $suppliers = [];
 $ingredients = [];
 try {
     $suppliers = $pdo->query("SELECT id, name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-    $ingredients = $pdo->query("SELECT id, name, unit, cost_per_unit FROM stock_ingredients WHERE is_archived = 0 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+    $ingredients = $pdo->query("SELECT id, name, unit, cost_per_unit, pack_name, pack_size FROM stock_ingredients WHERE is_archived = 0 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) { /* schema not ready */ }
 
 $po = null; $lines = []; $budgetEffect = null;
@@ -689,11 +703,18 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                                     <?php if (!empty($ln['unit'])): ?><span style="color:#8a8172;"> (<?php echo htmlspecialchars($ln['unit']); ?>)</span><?php endif; ?>
                                     <?php if (empty($ln['ingredient_id'])): ?><br><span style="color:#a06a3a;font-size:.76rem;">Non-stock line (no ingredient link)</span><?php endif; ?>
                                 </td>
-                                <td class="num"><?php echo number_format((float)$ln['ordered_qty'], 3); ?></td>
+                                <td class="num"><?php
+                                    $lnPack = ($ln['order_in'] ?? 'unit') === 'pack' && (float)($ln['pack_size_snapshot'] ?? 0) > 0;
+                                    if ($lnPack) {
+                                        echo '<strong>' . htmlspecialchars(rh_pack_describe((float)$ln['ordered_qty'], (string)($ln['unit'] ?? ''), 'pack', (float)$ln['pack_size_snapshot'], (string)($ln['pack_name_snapshot'] ?? ''))) . '</strong>';
+                                    } else {
+                                        echo number_format((float)$ln['ordered_qty'], 3);
+                                    } ?></td>
                                 <td class="num"><?php echo number_format((float)$ln['received_qty'], 3); ?>
                                     <?php if ((float)($ln['over_received_qty'] ?? 0) > 0): ?><br><span style="color:#a06a3a;font-size:.76rem;" title="<?php echo htmlspecialchars((string)($ln['over_note'] ?? '')); ?>"><i class="fas fa-flag"></i> over-delivered +<?php echo number_format((float)$ln['over_received_qty'], 3); ?><?php echo !empty($ln['over_note']) ? ': ' . htmlspecialchars((string)$ln['over_note']) : ''; ?></span><?php endif; ?>
                                 </td>
-                                <td class="num"><?php echo number_format((float)$ln['unit_cost'], 4); ?></td>
+                                <td class="num"><?php echo number_format((float)$ln['unit_cost'], 4); ?>
+                                    <?php if ($lnPack): ?><br><span style="color:#8a8172;font-size:.76rem;"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$ln['unit_cost'] * (float)$ln['pack_size_snapshot'], 2); ?> per <?php echo htmlspecialchars((string)($ln['pack_name_snapshot'] ?: 'pack')); ?></span><?php endif; ?></td>
                                 <td class="num"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$ln['line_total'], 2); ?></td>
                                 <?php if ($canReceive): ?>
                                     <td class="num">
@@ -701,7 +722,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                                         <input class="mini" type="number" name="receive_qty[]" step="0.001" min="0"
                                                value="<?php echo $outstanding > 0 ? htmlspecialchars((string)round($outstanding, 3)) : '0'; ?>"
                                                title="<?php echo $outstanding > 0 ? htmlspecialchars((string)round($outstanding, 3)) . ' still outstanding. Entering more is an over-delivery and needs a note.' : 'Fully received. Entering a quantity is an over-delivery and needs a note.'; ?>">
-                                        <span class="recv-out"><?php echo $outstanding > 0 ? number_format($outstanding, 3) . ' outstanding' : 'fully received'; ?></span>
+                                        <span class="recv-out"><?php echo $outstanding > 0 ? number_format($outstanding, 3) . ' ' . htmlspecialchars((string)($ln['unit'] ?? '')) . ' outstanding' : 'fully received'; ?><?php if ($lnPack && $outstanding > 0): ?> (<?php echo htmlspecialchars(rh_pack_num($outstanding / (float)$ln['pack_size_snapshot'])); ?> <?php echo htmlspecialchars(rh_pack_label((string)($ln['pack_name_snapshot'] ?: 'pack'), $outstanding / (float)$ln['pack_size_snapshot'])); ?>)<?php endif; ?></span>
                                         <input type="text" name="over_note[]" maxlength="200" placeholder="Over-delivery note (needed if above outstanding)" style="margin-top:4px;width:100%;font-size:.76rem;">
                                         <input type="hidden" name="receive_cost[]" value="<?php echo htmlspecialchars((string)$ln['unit_cost']); ?>">
                                     </td>
@@ -746,7 +767,9 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                                 <?php foreach ($ingredients as $ing): ?>
                                     <option value="<?php echo (int)$ing['id']; ?>"
                                             data-unit="<?php echo htmlspecialchars($ing['unit']); ?>"
-                                            data-cost="<?php echo htmlspecialchars((string)$ing['cost_per_unit']); ?>">
+                                            data-cost="<?php echo htmlspecialchars((string)$ing['cost_per_unit']); ?>"
+                                            data-pack-name="<?php echo htmlspecialchars((string)($ing['pack_size'] !== null && (float)$ing['pack_size'] > 0 ? ($ing['pack_name'] ?: 'pack') : '')); ?>"
+                                            data-pack-size="<?php echo htmlspecialchars((string)((float)$ing['pack_size'] > 0 ? rtrim(rtrim(number_format((float)$ing['pack_size'], 3, '.', ''), '0'), '.') : '')); ?>">
                                         <?php echo htmlspecialchars($ing['name']); ?>
                                     </option>
                                 <?php endforeach; ?>
@@ -754,10 +777,15 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                         </div>
                         <div><label>Description</label><input type="text" name="description" id="al_desc" maxlength="255" placeholder="Item name"></div>
                         <div><label>Unit</label><input type="text" name="unit" id="al_unit" maxlength="50" class="mini"></div>
-                        <div><label>Qty</label><input type="number" name="ordered_qty" step="0.001" min="0.001" class="mini" required></div>
-                        <div><label>Unit cost</label><input type="number" name="unit_cost" id="al_cost" step="0.0001" min="0" class="mini"></div>
+                        <div id="al_orderin_wrap" hidden><label>Order in</label>
+                            <select name="order_in" id="al_orderin" onchange="alPackChange()"><option value="unit">Units</option></select></div>
+                        <div><label id="al_qty_lbl">Qty</label><input type="number" name="ordered_qty" id="al_qty" step="0.001" min="0.001" class="mini" required oninput="alPreview()"></div>
+                        <div><label>Price</label><input type="number" name="unit_cost" id="al_cost" step="0.0001" min="0" class="mini" oninput="alPreview()"></div>
+                        <div id="al_pricein_wrap" hidden><label>Price is per</label>
+                            <select name="price_in" id="al_pricein" onchange="alPackChange()"><option value="unit">Unit</option></select></div>
                         <div><button class="btn btn-primary"><i class="fas fa-plus"></i> Add</button></div>
                     </form>
+                    <p id="al_preview" style="margin:10px 0 0;color:#6a6255;font-size:.86rem;" hidden></p>
                 </div>
             <?php endif; ?>
 
@@ -819,12 +847,71 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
     </div>
 
     <script>
+        var alPack = null; // {name, size} of the chosen item when it is bought in packs, else null
+        function alOpts(sel, list) {
+            sel.textContent = '';
+            list.forEach(function (x) { var op = document.createElement('option'); op.value = x[0]; op.textContent = x[1]; sel.appendChild(op); });
+        }
+        function alMoney(n) { return n.toLocaleString('en-US', {maximumFractionDigits: 2}); }
+        function alNum(n) { return parseFloat(n.toFixed(3)).toLocaleString('en-US', {maximumFractionDigits: 3}); }
         function alFill(sel) {
             var o = sel.options[sel.selectedIndex];
-            if (!o || !o.value || o.value === '0') return;
+            var oi = document.getElementById('al_orderin'), pi = document.getElementById('al_pricein');
+            alPack = null;
+            if (!o || !o.value || o.value === '0') {
+                alOpts(oi, [['unit', 'Units']]); alOpts(pi, [['unit', 'Unit']]);
+                document.getElementById('al_orderin_wrap').hidden = true; document.getElementById('al_pricein_wrap').hidden = true;
+                alPreview();
+                return;
+            }
+            var unit = o.getAttribute('data-unit') || '';
+            var size = parseFloat(o.getAttribute('data-pack-size') || '0');
             document.getElementById('al_desc').value = o.textContent.trim();
-            document.getElementById('al_unit').value = o.getAttribute('data-unit') || '';
-            document.getElementById('al_cost').value = o.getAttribute('data-cost') || '';
+            document.getElementById('al_unit').value = unit;
+            if (size > 0) {
+                var pn = o.getAttribute('data-pack-name') || 'pack';
+                alPack = {name: pn, size: size, unit: unit};
+                alOpts(oi, [['pack', pn + 's (' + alNum(size) + ' ' + unit + ' each)'], ['unit', unit + ' (single)']]);
+                alOpts(pi, [['pack', 'per ' + pn], ['unit', 'per ' + unit]]);
+                alLastPriceIn = 'pack';
+                document.getElementById('al_orderin_wrap').hidden = false; document.getElementById('al_pricein_wrap').hidden = false;
+                // Packs by default; the item's current cost per unit becomes a price per pack.
+                var cu = parseFloat(o.getAttribute('data-cost') || '0');
+                document.getElementById('al_cost').value = cu > 0 ? parseFloat((cu * size).toFixed(2)) : '';
+            } else {
+                alOpts(oi, [['unit', 'Units']]); alOpts(pi, [['unit', 'Unit']]);
+                document.getElementById('al_orderin_wrap').hidden = true; document.getElementById('al_pricein_wrap').hidden = true;
+                document.getElementById('al_cost').value = o.getAttribute('data-cost') || '';
+            }
+            alPackChange();
+        }
+        // Switching what the price is "per" keeps the same money, re-expressed.
+        var alLastPriceIn = 'pack';
+        function alPackChange() {
+            var pi = document.getElementById('al_pricein');
+            var cost = document.getElementById('al_cost');
+            if (alPack && pi.value !== alLastPriceIn && cost.value !== '') {
+                var v = parseFloat(cost.value);
+                cost.value = parseFloat((pi.value === 'unit' ? v / alPack.size : v * alPack.size).toFixed(4));
+            }
+            alLastPriceIn = pi.value;
+            var oi = document.getElementById('al_orderin');
+            document.getElementById('al_qty_lbl').textContent = alPack && oi.value === 'pack' ? 'How many ' + alPack.name + 's' : 'Qty';
+            alPreview();
+        }
+        function alPreview() {
+            var p = document.getElementById('al_preview');
+            var q = parseFloat(document.getElementById('al_qty').value);
+            var c = parseFloat(document.getElementById('al_cost').value);
+            if (!alPack || !(q > 0)) { p.hidden = true; return; }
+            var oi = document.getElementById('al_orderin').value, pi = document.getElementById('al_pricein').value;
+            var units = oi === 'pack' ? q * alPack.size : q;
+            var txt = (oi === 'pack' ? alNum(q) + ' ' + alPack.name + (q === 1 ? '' : 's') + ' = ' : '') + alNum(units) + ' ' + (units === 1 || !/^[a-z]{4,}$/i.test(alPack.unit) || /s$/i.test(alPack.unit) ? alPack.unit : alPack.unit + 's');
+            if (c >= 0 && !isNaN(c)) {
+                var perUnit = pi === 'pack' ? c / alPack.size : c;
+                txt += ' \u00b7 ' + alMoney(perUnit) + ' each \u00b7 line total ' + alMoney(Math.round(units * perUnit * 100) / 100);
+            }
+            p.textContent = txt; p.hidden = false;
         }
     </script>
 
