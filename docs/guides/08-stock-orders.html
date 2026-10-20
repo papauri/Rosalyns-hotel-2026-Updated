@@ -105,6 +105,7 @@
     <li><strong>Min quantity (low-stock threshold)</strong>: when stock is at or below this, the ingredient shows Low.</li>
     <li><strong>Default yield %</strong>: the usable part after trimming or cooking. 100 means no loss. It can be 0.1 to 100.</li>
     <li>For buying: <strong>Reorder point</strong>, <strong>Par level (order up to)</strong>, <strong>Preferred supplier</strong> and <strong>Supplier lead time (days)</strong>. Notes are optional.</li>
+    <li>If you buy this item by the crate, case, tray or box, fill in <strong>Bought in packs?</strong> with the pack name (for example <em>crate</em>) and <strong>Units in one pack</strong> (this is the pack size, for example <em>24</em> for a crate of 24 bottles). Leave both blank if you never buy it in packs. If you type a size but no name, the pack is called <em>pack</em>. A name with no size is ignored. The stock, counts and recipes for the item stay in the <strong>Unit</strong> you chose above (for example bottles), never in packs.</li>
     <li>Click <strong>Save</strong>. You will see <em>"Ingredient &quot;Chicken breast&quot; added."</em></li>
   </ol>
   <p>Names are checked as you type. An ingredient name already used by another ingredient is flagged: <em>"A stock item with this name already exists (archived items count too)."</em> If the save is refused, the form stays open with what you typed and the reason shown.</p>
@@ -183,6 +184,7 @@
     <li>Each supplier group lists <strong>On hand</strong>, <strong>Reorder pt</strong>, <strong>Par</strong>, <strong>On order</strong>, <strong>Suggested</strong> and <strong>Est. cost</strong>. Suggested is the par level (or twice the reorder point if no par is set) minus what you hold and minus what is already on open purchase orders.</li>
     <li>Click <strong>Create draft PO</strong> to turn the group into a draft purchase order. The button is off for the <strong>Unassigned</strong> group: give those ingredients a preferred supplier first.</li>
   </ol>
+  <p>Items bought in packs are suggested in <strong>whole packs</strong>, rounded up, so the order matches what the supplier delivers. The <strong>Suggested</strong> column reads <em>Buy 2 crates (48 bottles)</em>, and the draft line is ordered per crate at the price of one crate. Buying never suggests part of a pack: if you need 50 bottles and a crate holds 24, it suggests 3 crates.</p>
   <p>The top of Buying shows <strong>Left to spend this month</strong> when a stock budget is set. The amount links to the <a href="#budget">Budget</a> section.</p>
   <p>If nothing is low the page says <em>"Nothing to reorder &mdash; every tracked item is above its reorder point."</em></p>
 
@@ -191,6 +193,7 @@
   <ol class="steps">
     <li>Click <strong>New PO</strong> (or use <strong>Create draft PO</strong> from Buying). Choose the <strong>Supplier</strong>, <strong>Order date</strong>, <strong>Expected date</strong> and <strong>Notes</strong>, then <strong>Create draft</strong>. <em>"Draft purchase order PO-... created."</em></li>
     <li>While it is a draft, use <strong>Add line</strong>: choose an <strong>Ingredient</strong> (or <strong>&mdash; Custom / non-stock &mdash;</strong>), a <strong>Description</strong>, <strong>Unit</strong>, <strong>Qty</strong> and <strong>Unit cost</strong>, then <strong>Add</strong>. <em>"Line added."</em> The bin icon removes a line.</li>
+    <li>An ingredient that is bought in packs shows two extra boxes. <strong>Order in</strong> is either the pack (for example <em>crates (24 bottles each)</em>) or the single unit (for example <em>bottles (single)</em>). The <strong>Qty</strong> box then reads <em>How many crates</em>. Choose the price basis with the second box: <em>per crate</em> or <em>per bottle</em>. Below the boxes you see the total in units, for example <em>2 crates = 48 bottles &middot; (price) each &middot; line total (amount)</em>, so check it before you press <strong>Add</strong>. The line is then saved in units, so stock, receiving and the budget always count in bottles.</li>
     <li>Click <strong>Mark as sent</strong> (<em>"Mark this PO as sent to the supplier?"</em>). It needs at least one line. <em>"Purchase order marked as sent."</em></li>
     <li>When goods arrive, fill in <strong>Receive now</strong> (and <strong>Expiry</strong>) on each line you received, then click <strong>Receive stock</strong> (<em>"Receive the entered quantities into stock?"</em>). <em>"Stock received against purchase order."</em></li>
     <li>If more arrived than was ordered, you can still type the larger number, because the stock is really there. Fill in the box <strong>Over-delivery note (needed if above outstanding)</strong> under that line, at least 5 characters, saying why. The line is then flagged <strong>over-delivered</strong> with your note.</li>
@@ -282,6 +285,8 @@
     <li>Ask a different manager or admin (not the person who counted) to open the count and click <strong>Approve &amp; post variances</strong>. If costs are missing, they click <strong>Reject &amp; send back</strong> with a reason, and the counter adds the costs and submits again.</li>
     <li>After approval the quantities and costs are in stock, and the <strong>Opening stock not recorded</strong> line goes away for those items.</li>
   </ol>
+  <p><strong>Opening batches with expiry dates.</strong> If the opening stock came from a stock sheet that lists expiry dates, the count can carry those batches too. They are not shown on the count page while you count. They become real stock batches only when a different manager or admin approves the count. The counted quantity is then split across them, earliest expiry first, so the expiry dates and the alerts are right from the start. Any quantity left over goes into one plain batch with no expiry date.</p>
+  <p>Quantities and costs on the count are always in the ingredient's stock unit, even when the item is bought in packs. Type the unit cost per unit (for example per bottle), not per crate.</p>
 
   <h2 id="wastage">How to record wastage (spoiled or thrown-away food)</h2>
   <ol class="steps">

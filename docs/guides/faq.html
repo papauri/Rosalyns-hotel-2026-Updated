@@ -246,6 +246,11 @@
     <p>An item with no cost cannot be received by barcode, and a count that adds stock for an item with no cost cannot be approved. Type the cost first. If more arrived than a purchase order says, you can receive it, but you must type an <strong>Over-delivery note</strong> of at least 5 characters. See <a href="08-stock-orders.html#po">How to raise and receive a purchase order</a>.</p>
   </details>
 
+  <details class="faq" id="faq-order-by-crate" data-module="stock">
+    <summary>How do I order by the crate?</summary>
+    <p>First tell the system the pack. Open <strong>Stock</strong> &rarr; <strong>Ingredients</strong>, click <strong>Edit</strong> on the item, fill in <strong>Bought in packs?</strong> (for example <em>crate</em>) and <strong>Units in one pack</strong> (for example <em>24</em>), then <strong>Save</strong>. On a purchase order, the <strong>Add line</strong> box then shows <strong>Order in</strong>: pick the crate or the single unit. Type how many crates, and the price per crate or per bottle. The box shows the total, for example <em>2 crates = 48 bottles</em>. Stock is always counted in bottles. See <a href="08-stock-orders.html#po">How to raise and receive a purchase order</a>, and <a href="08-stock-orders.html#ingredients">How to add and change ingredients</a>.</p>
+  </details>
+
   <details class="faq" id="faq-anti-theft" data-module="stock">
     <summary>How does the system stop stock theft?</summary>
     <p>It cannot stop a person, but it makes stock hard to lose without a trace. Every sale takes stock off by recipe. Wastage must be written down with a reason and a name. Stock counts are blind for the person counting, every shortage needs a reason, and a big shortage cannot be approved by the person who counted. Manual adjustments and batch write-offs are for managers only and need a reason. <strong>Theft Radar</strong> on the Stock Count page lists ingredients losing stock that no sale or wastage explains. Every change is saved with who made it. Run a surprise count each week. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
