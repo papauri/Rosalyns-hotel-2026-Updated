@@ -633,6 +633,14 @@
         var scripts = Array.from(container.querySelectorAll('script'));
         return scripts.reduce(function (chain, old) {
             return chain.then(function () {
+                // Data blocks (<script type="application/json"> etc.) are not code: leave them in the
+                // page untouched. Re-running them removed them, so pages that read their data
+                // (e.g. Stock Budget's #sbudData) found nothing after in-place navigation and their
+                // buttons stayed dead until a reload.
+                var type = (old.getAttribute('type') || '').trim().toLowerCase();
+                if (/json|template|^text\/(html|plain)$/.test(type)) {
+                    return;
+                }
                 var s = document.createElement('script');
 
                 function hasLoadedScript(src) {
