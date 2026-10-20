@@ -6,7 +6,9 @@
  * Approver = an active user who holds the 'stock_count_approve' permission (admin and manager roles by default,
  * grantable to anyone in User Management) AND can open the Stock Count page ('stock_count'). The person who
  * counted is never listed as an approver of their own count here; the server still enforces that an opening
- * count, and a count with shortages over the approval threshold, is approved by someone other than the counter.
+ * count, and a count with shortages over the approval threshold, is approved by someone other than the counter,
+ * unless a global admin has switched the two-person rule off (setting stock_count_second_approver = 0): then the
+ * counter may approve or reject their own count. Reminders: only the counter and holders of the permission.
  *
  * Emails: one short plain staff email per approver (not the counter, with a valid address). Sending never
  * blocks the caller. The "once per 10 minutes per count" reminder limit is read from admin_activity_log (no
@@ -50,6 +52,55 @@ if (!function_exists('rh_sca_approvers')) {
             ];
         }
         return $out;
+    }
+
+    /**
+     * Is the two-person rule on? Setting stock_count_second_approver: anything but '0' means ON (the default, and
+     * the safe reading of a missing or odd value). Only a global admin can switch it off (see the settings page).
+     */
+    function rh_sca_second_approver_required(): bool
+    {
+        return trim((string)getSetting('stock_count_second_approver', '1')) !== '0';
+    }
+
+    /** Is this user an active global admin (role 'admin')? Read from the database, not the session. */
+    function rh_sca_is_global_admin(int $userId): bool
+    {
+        global $pdo;
+        try {
+            $q = $pdo->prepare("SELECT role FROM admin_users WHERE id = ? AND is_active = 1");
+            $q->execute([$userId]);
+            return (string)$q->fetchColumn() === 'admin';
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * May this user approve or reject the count? Anyone with 'stock_count_approve'. With the two-person rule
+     * switched off, the person who counted it may too ("whoever counts can approve"); approving someone else's
+     * count always needs the permission.
+     */
+    function rh_sca_may_decide(int $userId, int $counterId, bool $hasApprovePerm, ?bool $ruleOn = null): bool
+    {
+        if ($hasApprovePerm) {
+            return true;
+        }
+        $ruleOn = $ruleOn ?? rh_sca_second_approver_required();
+        return !$ruleOn && $userId > 0 && $userId === $counterId;
+    }
+
+    /** Must this user NOT approve their own count (opening count or over-threshold shortage, rule on)? */
+    function rh_sca_self_approve_blocked(int $userId, int $counterId, bool $needsSecond, ?bool $ruleOn = null): bool
+    {
+        $ruleOn = $ruleOn ?? rh_sca_second_approver_required();
+        return $ruleOn && $needsSecond && $userId > 0 && $userId === $counterId;
+    }
+
+    /** Who may press "Remind approvers": the person who counted it and people with 'stock_count_approve'. */
+    function rh_sca_may_remind(int $userId, int $counterId, bool $hasApprovePerm): bool
+    {
+        return $hasApprovePerm || ($userId > 0 && $userId === $counterId);
     }
 
     /** Approver names for display, e.g. "Mary Banda, Joe Phiri". */
@@ -172,6 +223,10 @@ if (!function_exists('rh_sca_approvers')) {
                 return $res;
             }
             if ($kind === 'remind') {
+                if (!rh_sca_may_remind($byUserId, (int)$count['counted_by'], hasPermission($byUserId, 'stock_count_approve'))) {
+                    $res['message'] = 'Only the person who counted this or someone who can approve stock counts can remind the approvers.';
+                    return $res;
+                }
                 $wait = rh_sca_remind_wait($pdo, $countId);
                 if ($wait > 0) {
                     $res['rate_limited'] = true;
@@ -191,7 +246,7 @@ if (!function_exists('rh_sca_approvers')) {
                 'lines' => (int)$t['n'],
                 'shortage' => (float)$t['shortage'],
                 'surplus' => (float)$t['surplus'],
-                'needs_second' => rh_sca_needs_second_person($pdo, $count, $blockPct, $minCost),
+                'needs_second' => rh_sca_second_approver_required() && rh_sca_needs_second_person($pdo, $count, $blockPct, $minCost),
                 'is_reminder' => $kind === 'remind',
             ];
 

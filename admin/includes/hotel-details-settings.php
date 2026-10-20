@@ -66,9 +66,24 @@ if (!function_exists('rh_hotel_details_fields')) {
                 'stock_variance_alert_pct'      => ['label' => 'Stock count: alert at variance (%)', 'type' => 'decimal', 'min' => 0, 'max' => 100, 'default' => '2', 'help' => 'A counted shortage this size or bigger is shaded orange and counted as "over the alert level".'],
                 'stock_variance_block_pct'      => ['label' => 'Stock count: needs approval above (%)', 'type' => 'decimal', 'min' => 0, 'max' => 100, 'default' => '10', 'help' => 'A shortage this size or bigger is shaded red and the count needs a second approver.'],
                 'stock_variance_min_cost'       => ['label' => 'Stock count: ignore variances worth less than', 'type' => 'decimal', 'min' => 0, 'max' => 100000000, 'default' => '5000', 'help' => 'Small shortages below this value are never shaded or flagged.'],
-                'stock_count_reminder_days'     => ['label' => 'Remind to count stock after (days, 0 = off)', 'type' => 'int', 'min' => 0, 'max' => 365, 'default' => '7', 'help' => 'Shows a notice on the Stock Dashboard and Stock Count pages when no count has been approved for this many days.'],
+                // Administrator-only (role 'admin'): hidden from everyone else and ignored if anyone else posts it.
+                'stock_count_second_approver'   => ['label' => 'Stock count: a second person must approve', 'type' => 'select', 'options' => ['1', '0'], 'labels' => ['1' => 'On (recommended)', '0' => 'Off - whoever counts can approve'], 'default' => '1', 'admin_only' => true, 'activity' => 'stock_count_second_approver_changed', 'help' => 'On: an opening count, or a count with big shortages, must be approved by someone other than the person who counted it. Off: whoever counted can approve or reject their own count, so one person can count and approve and losses can be hidden. Only administrators see this setting.'],
+                'stock_count_reminder_days'    => ['label' => 'Remind to count stock after (days, 0 = off)', 'type' => 'int', 'min' => 0, 'max' => 365, 'default' => '7', 'help' => 'Shows a notice on the Stock Dashboard and Stock Count pages when no count has been approved for this many days.'],
             ],
         ];
+    }
+
+    /** Is this user an active global admin (role 'admin')? Read from the database, not the session. */
+    function rh_hotel_details_is_admin(int $userId): bool
+    {
+        global $pdo;
+        try {
+            $q = $pdo->prepare("SELECT role FROM admin_users WHERE id = ? AND is_active = 1");
+            $q->execute([$userId]);
+            return (string)$q->fetchColumn() === 'admin';
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 
     /** Current value as the consumers see it (stored value, else the shared default). */
@@ -158,12 +173,16 @@ if (!function_exists('rh_hotel_details_fields')) {
     {
         $uid = (int)($user['id'] ?? 0);
         $canFinance = hasPermission($uid, 'finance_settings');
+        $isAdmin = rh_hotel_details_is_admin($uid);
         $errors = [];
         $changes = [];
         foreach (rh_hotel_details_fields() as $fields) {
             foreach ($fields as $key => $spec) {
                 if (!array_key_exists($key, $post) || (!empty($spec['finance']) && !$canFinance)) {
                     continue; // finance fields are read-only without finance_settings
+                }
+                if (!empty($spec['admin_only']) && !$isAdmin) {
+                    continue; // administrator-only settings: ignored for everyone else
                 }
                 [$val, $err] = rh_hotel_details_clean($key, $spec, (string)$post[$key]);
                 if ($err !== null) {
@@ -187,6 +206,10 @@ if (!function_exists('rh_hotel_details_fields')) {
             if (!empty($spec['mirror'])) {
                 updateSetting($spec['mirror'], $new); // read under both names by older code
             }
+            if (!empty($spec['activity']) && function_exists('logActivity')) {
+                $lbl = $spec['labels'] ?? [];
+                logActivity($uid, (string)$spec['activity'], $spec['label'] . ' changed from "' . ($lbl[$old] ?? $old) . '" to "' . ($lbl[$new] ?? $new) . '" by ' . (string)($user['username'] ?? ('user #' . $uid)));
+            }
         }
         if ($changes && function_exists('rh_log_event')) {
             $mask = static fn(string $k, string $v): string => ($k === 'bank_account_number' && strlen($v) > 4)
@@ -206,6 +229,7 @@ if (!function_exists('rh_hotel_details_fields')) {
     function rh_hotel_details_render(array $user, string $csrf): void
     {
         $canFinance = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
+        $isAdmin = rh_hotel_details_is_admin((int)($user['id'] ?? 0));
         $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
         echo '<div class="rh-panel settings-card" id="hotel-details"><div class="rh-panel__head"><h2 class="rh-panel__title">Hotel details &amp; policies</h2></div>';
         echo '<form method="POST" action="booking-settings.php#hotel-details">';
@@ -217,6 +241,9 @@ if (!function_exists('rh_hotel_details_fields')) {
             }
             echo '<div class="bs-field-grid">';
             foreach ($fields as $key => $spec) {
+                if (!empty($spec['admin_only']) && !$isAdmin) {
+                    continue; // only administrators see this setting
+                }
                 $id = 'hd_' . $key;
                 $val = rh_hotel_details_value($key, $spec);
                 if ($spec['type'] === 'maps' && preg_match('/src="([^"]+)"/', $val, $m)) {
@@ -230,7 +257,7 @@ if (!function_exists('rh_hotel_details_fields')) {
                 } elseif ($spec['type'] === 'select') {
                     echo '<select id="' . $id . '" name="' . $key . '"' . $dis . '>';
                     foreach ($spec['options'] as $o) {
-                        echo '<option value="' . $e($o) . '"' . ($o === $val ? ' selected' : '') . '>' . $e($o) . '</option>';
+                        echo '<option value="' . $e($o) . '"' . ($o === $val ? ' selected' : '') . '>' . $e($spec['labels'][$o] ?? $o) . '</option>';
                     }
                     echo '</select>';
                 } else {

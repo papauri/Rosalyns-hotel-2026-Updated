@@ -9,6 +9,12 @@
  * the second-person rule helper, the approver email (once per approver, not the counter, nobody without a valid
  * address, right contents, link, activity log), the 10-minute reminder limit, and that nothing is left behind.
  *
+ * Also: who may press "Remind approvers" (the counter and holders of the permission only), the global-admin switch
+ * for the two-person rule (setting stock_count_second_approver: only role 'admin' can change it, the change is
+ * logged, default ON), and the real stock-count.php page in scripts/tests/page_harness.php (rolled back) for
+ * counter self-approval of an opening count and of an over-threshold count with the rule OFF, refused with it ON.
+ * The setting is put back exactly (value or absence) and checked at the end.
+ *
  * Runs on the live DB inside ONE transaction that is rolled back. Emails are CAPTURED (CLI-only seam
  * $GLOBALS['rh_test_email_capture']) and never sent. The existing counts are never touched.
  */
@@ -20,6 +26,7 @@ $_SERVER['REMOTE_ADDR'] = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../admin/includes/permissions.php';
 require_once __DIR__ . '/../../admin/includes/stock-count-approval-lib.php';
+require_once __DIR__ . '/../../admin/includes/hotel-details-settings.php';
 
 $pass = 0; $fail = 0;
 function ok(string $l): void { global $pass; $pass++; echo "PASS $l\n"; }
@@ -31,6 +38,7 @@ $run = strtoupper(bin2hex(random_bytes(3)));
 $orphanPerm = (int)col($pdo, "SELECT COUNT(*) FROM user_permissions up LEFT JOIN admin_users u ON u.id = up.user_id WHERE u.id IS NULL");
 $submittedBefore = $pdo->query("SELECT id, status, updated_at FROM stock_counts WHERE status = 'submitted' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
 
+$setRowBefore = $pdo->query("SELECT setting_value FROM site_settings WHERE setting_key = 'stock_count_second_approver'")->fetch(PDO::FETCH_NUM);
 $GLOBALS['rh_test_email_capture'] = [];
 $pdo->beginTransaction();
 try {
@@ -161,17 +169,127 @@ try {
     $nf = rh_sca_email_approvers($pdo, 999999999, $counter, 'submit');
     check(!$nf['ok'] && $nf['message'] !== '', 'Email: an unknown count is refused without an error');
 
+    // --- Who may press "Remind approvers" -----------------------------------------------------------------------------
+    [$rmId, $rmRef] = $mkCount('RM', 0, 'submitted', [[100, 99, 10]]);
+    $pdo->prepare("UPDATE stock_counts SET counted_by = ? WHERE id = ?")->execute([$denied, $rmId]); // counted by a user WITHOUT the permission
+    $GLOBALS['rh_test_email_capture'] = [];
+    $rem = rh_sca_email_approvers($pdo, $rmId, $plain, 'remind');
+    check(!$rem['ok'] && count($GLOBALS['rh_test_email_capture']) === 0 && strpos($rem['message'], 'Only the person who counted') === 0, 'Remind: refused for someone who is neither the counter nor an approver, nothing sent', json_encode($rem));
+    check(rh_sca_remind_wait($pdo, $rmId) === 0, 'Remind: a refused reminder does not start the 10 minute limit');
+    $rem = rh_sca_email_approvers($pdo, $rmId, $denied, 'remind');
+    check($rem['ok'] && count($GLOBALS['rh_test_email_capture']) === $rem['emailed'] && $rem['emailed'] > 0, 'Remind: allowed for the person who counted it, even without the approve permission', json_encode($rem));
+    $rem = rh_sca_email_approvers($pdo, $rmId, $mgr2, 'remind');
+    check(!$rem['ok'] && $rem['rate_limited'], 'Remind: an approver is not refused (only held back by the 10 minute limit)', json_encode($rem));
+    check(rh_sca_may_remind($mgr2, $denied, true) && rh_sca_may_remind($denied, $denied, false) && !rh_sca_may_remind($plain, $denied, false) && !rh_sca_may_remind(0, 0, false), 'Remind: helper allows the counter and approvers only');
+
+    // --- The administrator switch for the two-person rule ------------------------------------------------------------------
+    if ($setRowBefore === false) {
+        check(rh_sca_second_approver_required(), 'Switch: with no saved setting the rule is ON (default)');
+    }
+    updateSetting('stock_count_second_approver', '1');
+    check(rh_sca_second_approver_required(), 'Switch: value 1 means ON');
+    $fld = rh_hotel_details_fields()['Restaurant & stock']['stock_count_second_approver'] ?? null;
+    check($fld && !empty($fld['admin_only']) && $fld['default'] === '1', 'Switch: it is an administrator-only setting that defaults to ON');
+    $before = (int)col($pdo, "SELECT COUNT(*) FROM admin_activity_log WHERE action = 'stock_count_second_approver_changed'");
+    foreach ([$mgr2 => 'manager', $staffOk => 'staff member with the approve permission', $denied => 'manager without the approve permission'] as $uid => $nm) {
+        [$msg, $err] = rh_hotel_details_save(['stock_count_second_approver' => '0'], ['id' => $uid, 'username' => 'x', 'role' => 'admin']);
+        check(rh_sca_second_approver_required() && $err === '', "Switch: a $nm cannot change it (even when the request claims role admin)", $msg . $err);
+    }
+    check((int)col($pdo, "SELECT COUNT(*) FROM admin_activity_log WHERE action = 'stock_count_second_approver_changed'") === $before, 'Switch: a refused change is not logged as a change');
+    ob_start(); rh_hotel_details_render(['id' => $mgr2], 'tok'); $htmlMgr = ob_get_clean();
+    ob_start(); rh_hotel_details_render(['id' => $adm], 'tok'); $htmlAdm = ob_get_clean();
+    check(strpos($htmlMgr, 'stock_count_second_approver') === false, 'Switch: not shown to a non-administrator');
+    check(strpos($htmlAdm, 'name="stock_count_second_approver"') !== false && strpos($htmlAdm, 'whoever counts can approve') !== false, 'Switch: shown to an administrator');
+    [$msg, $err] = rh_hotel_details_save(['stock_count_second_approver' => 'maybe'], ['id' => $adm, 'username' => 'zzt_adm']);
+    check($err !== '' && rh_sca_second_approver_required(), 'Switch: a value other than On or Off is refused and saves nothing', $msg . $err);
+    [$msg, $err] = rh_hotel_details_save(['stock_count_second_approver' => '0'], ['id' => $adm, 'username' => 'zzt_adm']);
+    check($err === '' && !rh_sca_second_approver_required(), 'Switch: an administrator can switch it OFF', $msg . $err);
+    $lg = col($pdo, "SELECT details FROM admin_activity_log WHERE action = 'stock_count_second_approver_changed' AND user_id = ? ORDER BY id DESC LIMIT 1", [$adm]);
+    check(is_string($lg) && strpos($lg, 'zzt_adm') !== false && strpos($lg, 'Off') !== false && strpos($lg, 'On') !== false, 'Switch: the change is logged with who made it, from On to Off', (string)$lg);
+
+    // Rule OFF: the counter may decide their own count; someone else's still needs the permission.
+    check(rh_sca_may_decide($denied, $denied, false), 'Rule OFF: the counter may approve or reject their own count without the approve permission');
+    check(!rh_sca_may_decide($plain, $denied, false), 'Rule OFF: someone who did not count it still needs the approve permission');
+    check(rh_sca_may_decide($mgr2, $denied, true), 'Rule OFF: an approver can still approve someone else\'s count');
+    check(!rh_sca_self_approve_blocked($counter, $counter, true) && !rh_sca_self_approve_blocked($counter, $counter, false), 'Rule OFF: an opening or over-threshold count is not blocked for its counter');
+    $GLOBALS['rh_test_email_capture'] = [];
+    $r = rh_sca_email_approvers($pdo, $bigId, $counter, 'submit');
+    check($r['ok'] && strpos($GLOBALS['rh_test_email_capture'][0]['text'] ?? '', 'Second person needed: No') !== false, 'Rule OFF: the submit email still goes to approvers and no longer says a second person is needed');
+    [$msg, $err] = rh_hotel_details_save(['stock_count_second_approver' => '1'], ['id' => $adm, 'username' => 'zzt_adm']);
+    check($err === '' && rh_sca_second_approver_required(), 'Switch: an administrator can switch it back ON', $msg . $err);
+
+    // Rule ON: unchanged.
+    check(!rh_sca_may_decide($denied, $denied, false), 'Rule ON: a counter without the approve permission cannot decide their own count');
+    check(rh_sca_self_approve_blocked($counter, $counter, true) && !rh_sca_self_approve_blocked($counter, $counter, false) && !rh_sca_self_approve_blocked($mgr2, $counter, true), 'Rule ON: the counter is blocked from approving an opening/over-threshold count; others and small counts are not');
+    $GLOBALS['rh_test_email_capture'] = [];
+    $r = rh_sca_email_approvers($pdo, $bigId, $counter, 'submit');
+    check($r['ok'] && strpos($GLOBALS['rh_test_email_capture'][0]['text'] ?? '', 'Second person needed: Yes') !== false, 'Rule ON: the email says a second person is needed');
+
     // --- Page wiring (static) ------------------------------------------------------------------------------------
     $src = (string)file_get_contents(__DIR__ . '/../../admin/stock-count.php');
     check(strpos($src, "hasPermission((int)\$user['id'], 'stock_count_approve')") !== false && strpos($src, "['admin', 'manager'], true);\n\n\$message") === false, 'Page: $canApprove comes from the permission, not the role');
     check(strpos($src, "An opening stock count must be approved by a different manager") !== false, 'Page: an opening count still cannot be approved by its counter');
+    check(strpos($src, 'rh_sca_may_remind(') !== false && strpos($src, 'rh_sca_may_decide(') !== false && strpos($src, 'approved own count - second approver switched off') !== false, 'Page: reminders, own-count approval and the activity-log note are wired');
     check(strpos($src, 'name="email_approvers"') !== false && strpos($src, 'Remind approvers') !== false, 'Page: has the "Email the approvers" tickbox and the Remind button');
 } catch (Throwable $e) {
     bad('Unexpected error', $e->getMessage() . ' @' . $e->getFile() . ':' . $e->getLine());
 } finally {
     if ($pdo->inTransaction()) { $pdo->rollBack(); }
     unset($GLOBALS['rh_test_email_capture']);
+    // The settings read cache survives a rollback: drop it so the real value is read again.
+    unset($GLOBALS['_SITE_SETTINGS']['stock_count_second_approver']);
+    if (function_exists('deleteCache')) { deleteCache('setting_stock_count_second_approver'); }
 }
+
+// --- The real page, as the signed-in admin (page_harness.php: one outer transaction that never commits) ----------------
+$harness = __DIR__ . '/page_harness.php';
+$hRun = strtoupper(bin2hex(random_bytes(3)));
+$hScenario = function (array $post) use ($harness, $hRun): array {
+    $refLike = "'%20991231-CH" . $hRun . "%'";
+    $verify = [
+        "SELECT status, approved_by, counted_by FROM stock_counts WHERE reference LIKE '20991231-CH" . $hRun . "%'",
+        "SELECT COUNT(*) AS n FROM admin_activity_log WHERE action = 'stock_count_self_approved' AND details LIKE $refLike",
+        "SELECT COUNT(*) AS n FROM admin_activity_log WHERE action IN ('stock_count_approvers_emailed','stock_count_approvers_reminded') AND details LIKE $refLike",
+    ];
+    // "perm no" needs a signed-in user the admin role does not bypass: an existing active manager (the child denies them the permission).
+    $asUser = '';
+    if (($post['perm'] ?? '') === 'no') {
+        global $pdo;
+        $asUser = (string)$pdo->query("SELECT username FROM admin_users WHERE is_active = 1 AND role = 'manager' ORDER BY id LIMIT 1")->fetchColumn();
+    }
+    $cfg = base64_encode(json_encode(['post' => $post + ['run' => $hRun], 'verify' => $verify] + ($asUser !== '' ? ['as_username' => $asUser] : [])));
+    $out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' scripts/tests/stock_count_approval_child.php ' . escapeshellarg($cfg) . ' 2>&1');
+    $res = ['error' => 'no result', 'raw' => substr((string)$out, -600), 'rolled_back' => false];
+    if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $x = json_decode($m[1], true); if (is_array($x)) { $res = $x; } }
+    return $res;
+};
+$hs = [
+    ['opening, rule OFF, counter without the approve permission approves own', ['kind' => 'opening', 'rule' => 'off', 'perm' => 'no', 'counter' => 'me', 'do' => 'approve_count'], 'approved', 1],
+    ['opening, rule OFF, counter with the approve permission approves own', ['kind' => 'opening', 'rule' => 'off', 'perm' => 'yes', 'counter' => 'me', 'do' => 'approve_count'], 'approved', 1],
+    ['over-threshold shortage, rule OFF, counter approves own', ['kind' => 'big', 'rule' => 'off', 'perm' => 'yes', 'counter' => 'me', 'do' => 'approve_count'], 'approved', 1],
+    ['opening, rule ON, counter cannot approve own', ['kind' => 'opening', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'approve_count'], 'submitted', 0],
+    ['over-threshold shortage, rule ON, counter cannot approve own', ['kind' => 'big', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'approve_count'], 'submitted', 0],
+    ['rule ON, counter without the permission cannot approve own', ['kind' => 'opening', 'rule' => 'on', 'perm' => 'no', 'counter' => 'me', 'do' => 'approve_count'], 'submitted', 0],
+    ['rule OFF, someone else\'s count still needs the permission', ['kind' => 'opening', 'rule' => 'off', 'perm' => 'no', 'counter' => 'other', 'do' => 'approve_count'], 'submitted', 0],
+    ['rule OFF, an approver approves someone else\'s count (no self-approval note)', ['kind' => 'opening', 'rule' => 'off', 'perm' => 'yes', 'counter' => 'other', 'do' => 'approve_count'], 'approved', 0],
+    ['rule OFF, counter without the permission rejects own', ['kind' => 'big', 'rule' => 'off', 'perm' => 'no', 'counter' => 'me', 'do' => 'reject_count'], 'rejected', 0],
+    ['rule ON, counter without the permission cannot reject own', ['kind' => 'big', 'rule' => 'on', 'perm' => 'no', 'counter' => 'me', 'do' => 'reject_count'], 'submitted', 0],
+    ['remind refused for someone who is neither counter nor approver', ['kind' => 'big', 'rule' => 'on', 'perm' => 'no', 'counter' => 'other', 'do' => 'remind_count'], 'submitted', 0],
+];
+foreach ($hs as [$label, $post, $wantStatus, $wantLog]) {
+    $res = $hScenario($post);
+    check(!empty($res['rolled_back']) && empty($res['leak']) && empty($res['marker_lost']), "Page ($label): ran and rolled back", json_encode($res['raw'] ?? $res));
+    $st = (string)($res['verify'][0][0]['status'] ?? '?');
+    check($st === $wantStatus, "Page ($label): count ends $wantStatus", $st . ' ' . json_encode($res['output_flash'] ?? []));
+    check((int)($res['verify'][1][0]['n'] ?? -1) === $wantLog, "Page ($label): own-count approval note " . ($wantLog ? 'written to the activity log' : 'not written'), json_encode($res['verify'][1] ?? null));
+    if ($post['do'] === 'remind_count') {
+        check((int)($res['verify'][2][0]['n'] ?? -1) === 0, 'Page (remind refused): no email was logged or sent');
+    }
+}
+
+// The setting must end exactly as it started (the harness and this test both roll back).
+$setRowAfter = $pdo->query("SELECT setting_value FROM site_settings WHERE setting_key = 'stock_count_second_approver'")->fetch(PDO::FETCH_NUM);
+check($setRowAfter === $setRowBefore, 'Leak: the stock_count_second_approver setting is exactly as it was', json_encode([$setRowBefore, $setRowAfter]));
 
 // --- Leak check -----------------------------------------------------------------------------------------------------
 check((int)col($pdo, "SELECT COUNT(*) FROM stock_counts WHERE reference LIKE '20991231-%'") === 0, 'Leak: no test stock counts left behind');
