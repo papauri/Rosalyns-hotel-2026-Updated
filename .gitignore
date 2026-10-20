@@ -73,6 +73,8 @@ invoices/INV-*.pdf
 invoices/receipts/*.pdf
 invoices/credit-notes/*.pdf
 receipts/*.pdf
+# Generated guest quotation PDFs (guest names, prices) - never commit
+/quotations/
 
 # Private runtime storage (PHP sessions) - never commit
 storage/
