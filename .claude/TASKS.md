@@ -5,7 +5,10 @@ and when work ships. One line per task: status · what · where it stands · nex
 Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 
 ## Open
-- DOING · Liwonde dress rehearsal (readiness gate step 3) · guest johnpaulchirwa@gmail.com, name DRESS REHEARSAL.
+- DONE · Liwonde dress rehearsal (readiness gate step 3) · findings fixed and shipped 2026-10-20/21.
+- SHIPPED d1a4490 / Liwonde 674d2e4 · Receiving gaps: editable invoice price at PO receive (per pack or unit), receive pack lines in packs, barcode receive expiry date, barcode pack size defaults to the item's crate.
+- SHIPPED 4256596 / Liwonde 0988ecc · Stock count approval (follow-ups done; layout fixes shipped 85244f7 / Liwonde 2cd33ff): 'stock_count_approve' permission (not just managers), "needs a second person" labels, email approvers on submit (optional) + Remind approvers button.
+- SHIPPED 89d5cd4 / Liwonde 2a6b122 · Stock counts: admin switch to turn off the second approver (default ON); Remind approvers only for counter + approvers. Test email sent to 'test' only (count 20261020-4FB5).
 - TODO · Form validation across other admin create/edit forms (duplicates flagged while typing, form reopens with the reason) · page messages are visible again everywhere (alert fix), so server-side rejections now show; next: apply the user-management pattern to the busiest forms.
 
 ## Shipped 2026-10-20
