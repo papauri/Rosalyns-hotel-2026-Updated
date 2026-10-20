@@ -28,6 +28,7 @@ $availablePermissions = [
     'bookings.read' => 'Read booking details/status by booking ID or reference',
     'bookings.update' => 'Update booking details from an approved integration',
     'bookings.delete' => 'Cancel/delete bookings from an approved integration',
+    'rooms.block' => 'Block rooms from sale (blocked dates, Maintenance / Out of Order) - the integration equivalent of the Block Rooms permission',
 ];
 
 function buildMetaRoomPriceTemplate(PDO $pdo): string

@@ -187,6 +187,12 @@ if ($method === 'POST' || $method === 'PUT') {
     $input = json_decode($rawInput, true) ?? [];
 }
 
+// Creating, changing or removing a block takes rooms on or off sale: the API key needs "rooms.block"
+// (the integration equivalent of the staff "Block Rooms" permission). Reading blocks stays open to any key.
+if ($method !== 'GET' && !$auth->checkPermission($client, 'rooms.block')) {
+    sendError('This API key needs the Block Rooms permission (rooms.block) to block or unblock rooms.', 403);
+}
+
 // Handle different HTTP methods
 switch ($method) {
     case 'GET':

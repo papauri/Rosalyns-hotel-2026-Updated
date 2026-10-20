@@ -453,7 +453,7 @@ function createPayment(PDO $pdo)
 {
     require_once __DIR__ . '/../includes/idempotency.php';
     // Get request body
-    $rawInput = file_get_contents('php://input');
+    $rawInput = (PHP_SAPI === 'cli' && isset($GLOBALS['rh_test_raw_input'])) ? (string)$GLOBALS['rh_test_raw_input'] : file_get_contents('php://input'); // test seam (CLI only): CLI has no request body
     $input = json_decode($rawInput, true);
 
     if (!$input) {
@@ -638,14 +638,11 @@ function createPayment(PDO $pdo)
             }
         }
 
-        // Send receipt email automatically for completed/paid payments
+        // Send receipt email automatically for completed/paid payments (once; never throws)
+        $receiptOutcome = 'not_collected';
         if (in_array($input['payment_status'], ['completed', 'paid'], true)) {
-            try {
-                require_once __DIR__ . '/../config/receipts.php';
-                receipt_auto_send($pdo, (int)$paymentId, null);
-            } catch (Throwable $receiptEx) {
-                error_log('Auto receipt email failed for payment ' . $paymentId . ': ' . $receiptEx->getMessage());
-            }
+            require_once __DIR__ . '/../config/receipts.php';
+            $receiptOutcome = (string)(receipt_auto_send($pdo, (int)$paymentId, null)['reason'] ?? 'error');
         }
 
         // Fetch created payment
@@ -668,6 +665,7 @@ function createPayment(PDO $pdo)
                 ],
                 'payment_method' => $payment['payment_method'],
                 'status' => $payment['payment_status'],
+                'receipt_email' => $receiptOutcome, // sent | already_sent | no_email | bad_email | no_smtp | template_off | error | not_collected
                 'created_at' => $payment['created_at']
             ]
         ];
@@ -694,7 +692,7 @@ function updatePayment(PDO $pdo, int $paymentId)
     }
 
     // Get request body
-    $rawInput = file_get_contents('php://input');
+    $rawInput = (PHP_SAPI === 'cli' && isset($GLOBALS['rh_test_raw_input'])) ? (string)$GLOBALS['rh_test_raw_input'] : file_get_contents('php://input'); // test seam (CLI only): CLI has no request body
     $input = json_decode($rawInput, true);
 
     if (!$input) {
@@ -877,6 +875,13 @@ function updatePayment(PDO $pdo, int $paymentId)
             }
         }
 
+        // A pending payment marked completed/paid is money received now: send its receipt (once).
+        $receiptOutcome = 'not_collected';
+        if (in_array($resultingStatus, ['completed', 'paid'], true)) {
+            require_once __DIR__ . '/../config/receipts.php';
+            $receiptOutcome = (string)(receipt_auto_send($pdo, $paymentId, null)['reason'] ?? 'error');
+        }
+
         // Fetch updated payment
         $fetchStmt = $pdo->prepare("SELECT * FROM payments WHERE id = ?");
         $fetchStmt->execute([$paymentId]);
@@ -895,6 +900,7 @@ function updatePayment(PDO $pdo, int $paymentId)
                 ],
                 'payment_method' => $payment['payment_method'],
                 'status' => $payment['payment_status'],
+                'receipt_email' => $receiptOutcome,
                 'updated_at' => $payment['updated_at']
             ]
         ];

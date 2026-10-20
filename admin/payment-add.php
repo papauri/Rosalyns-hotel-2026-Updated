@@ -401,8 +401,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'by'           => $user['username'] ?? null,
                 ]);
 
+                // A pending payment marked completed/paid is money received now: send its receipt (once; a
+                // payment that already had its receipt emailed is skipped by receipt_auto_send).
+                $editReceiptNotice = '';
+                if (in_array($paymentStatus, ['completed', 'paid'], true)) {
+                    require_once __DIR__ . '/../config/receipts.php';
+                    $editReceiptNotice = receipt_after_payment($pdo, (int)$editId, $user)['notice'];
+                }
+
                 $_SESSION['alert'] = ['type' => 'success', 'message' => 'Payment updated successfully'
-                    . ($editOverpayCn ? ' Overpayment detected - credit note ' . $editOverpayCn['credit_note_number'] . ' for ' . number_format((float)$editOverpayCn['excess'], 2) . ' issued.' : '')];
+                    . ($editOverpayCn ? ' Overpayment detected - credit note ' . $editOverpayCn['credit_note_number'] . ' for ' . number_format((float)$editOverpayCn['excess'], 2) . ' issued.' : '')
+                    . $editReceiptNotice];
                 header('Location: payment-details.php?id=' . $editId);
                 exit;
             } else {
@@ -573,113 +582,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // Send payment confirmation email for room bookings
-                if ($bookingType === 'room' && in_array($paymentStatus, ['completed', 'paid'], true)) {
-                    try {
-                        // Merge default CC recipients with additional CCs from form
-                        $defaultCcRecipients = getEmailSetting('invoice_recipients', '');
-                        $smtpUsername = getEmailSetting('smtp_username', '');
-
-                        // Parse default recipients
-                        $allCcRecipients = array_filter(array_map('trim', explode(',', $defaultCcRecipients)));
-
-                        // Add SMTP username to CC list
-                        if (!empty($smtpUsername) && !in_array($smtpUsername, $allCcRecipients)) {
-                            $allCcRecipients[] = $smtpUsername;
-                        }
-
-                        // Add additional CCs from form — validate each address
-                        if (!empty($ccEmails)) {
-                            $additionalCc = array_filter(
-                                array_map('trim', explode(',', $ccEmails)),
-                                static function (string $e): bool {
-                                    return filter_var($e, FILTER_VALIDATE_EMAIL) !== false;
-                                }
-                            );
-                            foreach ($additionalCc as $email) {
-                                if (!in_array($email, $allCcRecipients, true)) {
-                                    $allCcRecipients[] = $email;
-                                }
-                            }
-                        }
-
-                        // Send payment invoice with CC recipients
-                        $email_result = sendPaymentInvoiceEmailWithCC($bookingId, $allCcRecipients);
-                        if (!$email_result['success']) {
-                            error_log("Failed to send room payment invoice email: " . $email_result['message']);
-                        } else {
-                            $logMsg = "Room payment invoice email sent successfully";
-                            if (isset($email_result['preview_url'])) {
-                                $logMsg .= " - Preview: " . $email_result['preview_url'];
-                            }
-                            if (!empty($allCcRecipients)) {
-                                $logMsg .= " - CC: " . implode(', ', $allCcRecipients);
-                            }
-                            error_log($logMsg);
-                        }
-                    } catch (Exception $e) {
-                        error_log("Error sending room payment invoice email: " . $e->getMessage());
-                    }
-
-                    // Send receipt email with PDF
-                    try {
-                        require_once __DIR__ . '/../config/receipts.php';
-                        receipt_auto_send($pdo, (int)$newPaymentId, $user);
-                    } catch (Throwable $rcptEx) {
-                        error_log('Receipt email failed for payment ' . $newPaymentId . ': ' . $rcptEx->getMessage());
-                    }
+                // RECEIPT: proof of money received. Every account type (room, conference, gym, event), once,
+                // right after the money is committed. An invoice is NOT sent here: invoices request payment
+                // (manual Send invoice button, or the final invoice at checkout when a balance is owed).
+                $receiptNotice = '';
+                if (in_array($paymentStatus, ['completed', 'paid'], true)) {
+                    require_once __DIR__ . '/../config/receipts.php';
+                    $receiptNotice = receipt_after_payment($pdo, (int)$newPaymentId, $user)['notice'];
                 }
 
-                // Send invoice email for conference bookings
-                if ($bookingType === 'conference' && in_array($paymentStatus, ['completed', 'paid'], true)) {
-                    try {
-                        // Merge default CC recipients with additional CCs from form
-                        $defaultCcRecipients = getEmailSetting('invoice_recipients', '');
-                        $smtpUsername = getEmailSetting('smtp_username', '');
-
-                        // Parse default recipients
-                        $allCcRecipients = array_filter(array_map('trim', explode(',', $defaultCcRecipients)));
-
-                        // Add SMTP username to CC list
-                        if (!empty($smtpUsername) && !in_array($smtpUsername, $allCcRecipients)) {
-                            $allCcRecipients[] = $smtpUsername;
-                        }
-
-                        // Add additional CCs from form — validate each address
-                        if (!empty($ccEmails)) {
-                            $additionalCc = array_filter(
-                                array_map('trim', explode(',', $ccEmails)),
-                                static function (string $e): bool {
-                                    return filter_var($e, FILTER_VALIDATE_EMAIL) !== false;
-                                }
-                            );
-                            foreach ($additionalCc as $email) {
-                                if (!in_array($email, $allCcRecipients, true)) {
-                                    $allCcRecipients[] = $email;
-                                }
-                            }
-                        }
-
-                        // Generate invoice and send with CC recipients
-                        $email_result = sendConferenceInvoiceEmailWithCC($bookingId, $allCcRecipients);
-                        if (!$email_result['success']) {
-                            error_log("Failed to send conference invoice email: " . $email_result['message']);
-                        } else {
-                            $logMsg = "Conference invoice email sent successfully";
-                            if (isset($email_result['preview_url'])) {
-                                $logMsg .= " - Preview: " . $email_result['preview_url'];
-                            }
-                            if (!empty($allCcRecipients)) {
-                                $logMsg .= " - CC: " . implode(', ', $allCcRecipients);
-                            }
-                            error_log($logMsg);
-                        }
-                    } catch (Exception $e) {
-                        error_log("Error sending conference invoice email: " . $e->getMessage());
-                    }
-                }
-
-                $successMsg = 'Payment recorded successfully.' . ($overpayMsg ?? '');
+                $successMsg = 'Payment recorded successfully.' . ($overpayMsg ?? '') . $receiptNotice;
                 $_SESSION['alert'] = ['type' => 'success', 'message' => $successMsg];
                 header('Location: payment-details.php?id=' . $newPaymentId . '&new_payment=1');
                 exit;

@@ -356,6 +356,34 @@ function rh_kb_sys_entries(): array
 }
 
 /**
+ * The guide section to open first for pages where the automatic match picks the wrong one
+ * (or none): admin page => [guide file, section anchor]. Every other page is matched
+ * automatically from the guides themselves. scripts/run_tests.php checks each anchor exists.
+ */
+function rh_kb_sys_page_guides(): array
+{
+    return [
+        'conference-management.php' => ['10-conference-events.html', 'screen'],
+        'payments.php' => ['13-finance-payments.html', 'screen'],
+        'payment-details.php' => ['13-finance-payments.html', 'find'],
+        'room-management.php' => ['09-packages-rates.html', 'screen'],
+        'rate-plans.php' => ['09-packages-rates.html', 'plan-add'],
+        'packages.php' => ['09-packages-rates.html', 'pkg-add'],
+        'stock-receipt.php' => ['08-stock-orders.html', 'stockin'],
+        'stock-recipes.php' => ['08-stock-orders.html', 'recipes'],
+        'kds-report.php' => ['02-kds-kitchen.html', 'report'],
+        'process-checkin.php' => ['07-reception-bookings.html', 'checkin'],
+        'gym-members.php' => ['17-gym-management.html', 'enrol'],
+        'gym-checkin.php' => ['17-gym-management.html', 'checkin'],
+        'gym-inquiries.php' => ['17-gym-management.html', 'inquiries'],
+        'gym-schedule.php' => ['17-gym-management.html', 'schedule'],
+        'gym-classes.php' => ['17-gym-management.html', 'classes'],
+        'gym-management.php' => ['17-gym-management.html', 'packages'],
+        'gym-reports.php' => ['17-gym-management.html', 'reports'],
+    ];
+}
+
+/**
  * Guide sections and problems that explain a page, best first: sections naming the page's file,
  * then sections titled with its label, then problems in those guides that name it.
  */
@@ -392,6 +420,16 @@ function rh_kb_sys_help_for_page(string $page, array $index, int $limit = 10): a
             $out[] = $e;
         }
     };
+    // -1. Pages whose best section the matching below cannot work out: named by hand, first in the list.
+    $named = rh_kb_sys_page_guides()[$page] ?? null;
+    if ($named !== null) {
+        foreach ($entries as $e) {
+            if ($e['type'] === 'section' && empty($e['heading']) && $e['file'] === $named[0] && $e['anchor'] === $named[1]) {
+                $take($e);
+                break;
+            }
+        }
+    }
     // 0. A page outside the menu (Edit Booking, Gym Check-In) has no menu label to match on:
     //    lead with the knowledge base's own best sections for the page's name.
     if ($label === '' && function_exists('rh_kb_search')) {

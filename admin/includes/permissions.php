@@ -140,6 +140,7 @@ function getAllRoles()
                 'checkout_guest',
                 'room_dashboard',
                 'individual_rooms',
+                'block_rooms', // already blocked dates / set rooms out of service before this permission was enforced
                 'room_service_view',
                 'room_service_manage'
             ]
@@ -156,7 +157,8 @@ function getAllRoles()
                 'housekeeping',
                 'room_maintenance',
                 'room_dashboard',
-                'individual_rooms'
+                'individual_rooms',
+                'block_rooms' // could already set a room to Maintenance / Out of Order on Individual Rooms
             ]
         ],
         'accountant' => [
@@ -391,7 +393,7 @@ function getAllPermissions()
         ],
         'block_rooms' => [
             'label' => 'Block Rooms',
-            'description' => 'Block individual rooms for maintenance or hold',
+            'description' => 'Take rooms off sale: block dates (room type or single room) and set a room to Maintenance or Out of Order',
             'icon' => 'fa-lock',
             'category' => 'Reservations',
             'page' => 'individual-rooms.php',
@@ -1420,6 +1422,33 @@ function logActivity(int $user_id, string $action, string $details = '')
 // ============================================
 // ACCESS CONTROL FUNCTIONS
 // ============================================
+
+/**
+ * "Block Rooms": taking rooms off sale. Needed to create/remove blocked dates and to set a room to
+ * Maintenance or Out of Order. The page's own permission still decides who can open the page.
+ */
+function rhCanBlockRooms(int $user_id): bool
+{
+    return $user_id > 0 && hasPermission($user_id, 'block_rooms');
+}
+
+/** Room statuses that take a room off sale (these need the Block Rooms permission). */
+function rhStatusBlocksRoom(string $status): bool
+{
+    return in_array($status, ['maintenance', 'out_of_order'], true);
+}
+
+/** Tooltip for a control hidden/disabled because the user lacks Block Rooms. */
+function rhBlockRoomsTooltip(): string
+{
+    return 'Needs the Block Rooms permission';
+}
+
+/** Message when the server refuses a block action. */
+function rhBlockRoomsDeniedMessage(): string
+{
+    return 'You need the Block Rooms permission to do this. Ask a manager to do it or to give you the permission.';
+}
 
 /**
  * Check if current page requires permission and redirect if not allowed

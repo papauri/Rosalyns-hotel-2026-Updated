@@ -35,6 +35,13 @@ if (!function_exists('receipt_table_columns')) {
 if (!function_exists('receipt_ensure_schema')) {
     function receipt_ensure_schema(PDO $pdo): void
     {
+        // Once per request: the CREATE TABLE IF NOT EXISTS below commits any open transaction in MySQL,
+        // so repeated calls (every receipt send) must not run it again.
+        static $done = false;
+        if ($done) {
+            return;
+        }
+        $done = true;
         $columns = receipt_table_columns($pdo, 'payments');
         $ddl = [];
         if (!isset($columns['receipt_path'])) {
@@ -136,11 +143,26 @@ if (!function_exists('receipt_hydrate_context')) {
             $description = trim('Room booking ' . (string)($booking['booking_reference'] ?? $payment['booking_reference'] ?? '') . ' ' . (string)($booking['room_name'] ?? ''));
         } elseif (($payment['booking_type'] ?? '') === 'conference' && !empty($payment['booking_id'])) {
             try {
-                $stmt = $pdo->prepare("SELECT COALESCE(company_name, organization_name, contact_name, contact_person) AS guest_name,
-                       COALESCE(contact_email, email, '') AS guest_email,
-                       COALESCE(contact_phone, phone, '') AS guest_phone,
-                       COALESCE(enquiry_reference, inquiry_reference, id) AS ref
-                    FROM conference_inquiries WHERE id = ?");
+                // Column names differ between installs: pick what exists (a missing column used to fail the
+                // whole query, leaving the receipt with no recipient so it was never emailed).
+                $cols = receipt_table_columns($pdo, 'conference_inquiries');
+                $pick = static function (array $names) use ($cols): string {
+                    foreach ($names as $n) {
+                        if (isset($cols[$n])) {
+                            return $n;
+                        }
+                    }
+                    return '';
+                };
+                $nameCol  = $pick(['contact_person', 'contact_name', 'company_name', 'organization_name']);
+                $emailCol = $pick(['email', 'contact_email']);
+                $phoneCol = $pick(['phone', 'contact_phone']);
+                $refCol   = $pick(['inquiry_reference', 'enquiry_reference']);
+                $stmt = $pdo->prepare('SELECT '
+                    . ($nameCol !== '' ? "`{$nameCol}`" : "''") . ' AS guest_name, '
+                    . ($emailCol !== '' ? "`{$emailCol}`" : "''") . ' AS guest_email, '
+                    . ($phoneCol !== '' ? "`{$phoneCol}`" : "''") . ' AS guest_phone, '
+                    . ($refCol !== '' ? "`{$refCol}`" : 'id') . ' AS ref FROM conference_inquiries WHERE id = ?');
                 $stmt->execute([(int)$payment['booking_id']]);
                 $booking = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
                 $guestName = (string)($booking['guest_name'] ?? $guestName);
@@ -149,6 +171,20 @@ if (!function_exists('receipt_hydrate_context')) {
                 $description = 'Conference booking ' . (string)($booking['ref'] ?? $payment['booking_reference'] ?? '');
             } catch (Throwable $e) {
                 $description = 'Conference payment ' . (string)($payment['booking_reference'] ?? '');
+            }
+        } elseif (in_array(($payment['booking_type'] ?? ''), ['gym', 'event'], true) && !empty($payment['booking_id'])) {
+            try {
+                $tbl = $payment['booking_type'] === 'gym' ? 'gym_inquiries' : 'event_inquiries';
+                $stmt = $pdo->prepare("SELECT name, email, phone, reference_number FROM {$tbl} WHERE id = ?");
+                $stmt->execute([(int)$payment['booking_id']]);
+                $booking = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                $guestName = (string)($booking['name'] ?? $guestName);
+                $guestEmail = (string)($booking['email'] ?? '');
+                $guestPhone = (string)($booking['phone'] ?? '');
+                $description = ($payment['booking_type'] === 'gym' ? 'Gym booking ' : 'Event booking ')
+                    . (string)($booking['reference_number'] ?? $payment['booking_reference'] ?? '');
+            } catch (Throwable $e) {
+                $description = ucfirst((string)$payment['booking_type']) . ' payment ' . (string)($payment['booking_reference'] ?? '');
             }
         } elseif (($payment['booking_type'] ?? '') === 'restaurant' && !empty($payment['booking_id'])) {
             try {
@@ -1057,6 +1093,12 @@ if (!function_exists('receipt_send_email')) {
 
         // Shared sender (verified TLS, retries, dev-mode preview) instead of a private PHPMailer.
         $ccList = array_filter(array_map('trim', explode(',', (string)getEmailSetting('invoice_recipients', ''))));
+        // Extra copy addresses typed on the payment form ("CC emails") get the receipt too.
+        foreach (array_map('trim', explode(',', (string)($payment['cc_emails'] ?? ''))) as $extraCc) {
+            if ($extraCc !== '' && filter_var($extraCc, FILTER_VALIDATE_EMAIL) && !in_array($extraCc, $ccList, true)) {
+                $ccList[] = $extraCc;
+            }
+        }
         // Payment receipt email body: POS-style layout in the shared brand palette
         $emailBody = receipt_build_pos_style_html($payment, $context, $pdo);
         $attachments = [];
@@ -1077,8 +1119,8 @@ if (!function_exists('receipt_send_email')) {
         if (empty($sendResult['success'])) {
             throw new RuntimeException((string)($sendResult['message'] ?? 'Receipt email failed.'));
         }
-        if (!empty($sendResult['preview'])) {
-            return ['success' => true, 'message' => 'Email preview generated (development mode). No live email sent.'];
+        if (!empty($sendResult['preview']) || !empty($sendResult['preview_url'])) { // development mode: a preview file, nothing delivered
+            return ['success' => true, 'preview' => true, 'message' => 'Email preview generated (development mode). No live email sent.'];
         }
 
         $pdo->prepare('UPDATE payments SET receipt_emailed_at = NOW(), receipt_email_count = receipt_email_count + 1, updated_at = NOW() WHERE id = ?')
@@ -1092,8 +1134,12 @@ if (!function_exists('receipt_send_email')) {
 
 /**
  * Automatically send a receipt email for a payment, safely.
- * - Only sends if payment is completed/paid and no receipt has been emailed yet.
- * - Never throws; always returns a result array so callers can log the outcome.
+ * - Only sends if payment is completed/paid and no receipt has been emailed yet (once per payment).
+ * - Never throws; always returns ['success'=>bool, 'message'=>string, 'reason'=>string] so callers can tell
+ *   staff exactly why nothing was sent. Reasons: sent, preview, not_found, not_collected, already_sent,
+ *   template_off, no_email, bad_email, no_smtp, error.
+ * - Honours the Booking Settings switch for the "Payment Receipt Email" template (off = no automatic send;
+ *   the manual "Email receipt" button still works).
  */
 if (!function_exists('receipt_auto_send')) {
     function receipt_auto_send(PDO $pdo, int $paymentId, ?array $user = null): array
@@ -1102,19 +1148,122 @@ if (!function_exists('receipt_auto_send')) {
             receipt_ensure_schema($pdo);
             $payment = receipt_get_payment($pdo, $paymentId);
             if (!$payment) {
-                return ['success' => false, 'message' => 'Payment not found'];
+                return ['success' => false, 'reason' => 'not_found', 'message' => 'Payment not found'];
             }
-            if (!in_array((string)($payment['payment_status'] ?? ''), ['completed', 'paid'], true)) {
-                return ['success' => false, 'message' => 'Payment not in completed/paid status'];
+            if (!in_array((string)($payment['payment_status'] ?? ''), ['completed', 'paid'], true)
+                || (string)($payment['payment_type'] ?? '') === 'refund') {
+                return ['success' => false, 'reason' => 'not_collected', 'message' => 'Payment not in completed/paid status'];
             }
             if (!empty($payment['receipt_emailed_at'])) {
-                return ['success' => false, 'message' => 'Receipt already emailed at ' . $payment['receipt_emailed_at']];
+                return ['success' => false, 'reason' => 'already_sent', 'message' => 'Receipt already emailed at ' . $payment['receipt_emailed_at']];
             }
-            return receipt_send_email($pdo, $paymentId, null, $user);
+            $tpl = function_exists('getBookingEmailTemplateConfig') ? getBookingEmailTemplateConfig('payment_receipt', []) : [];
+            if (is_array($tpl) && array_key_exists('is_active', $tpl) && (int)$tpl['is_active'] === 0) {
+                return ['success' => false, 'reason' => 'template_off', 'message' => 'Payment receipt emails are switched off in Booking Settings'];
+            }
+            $context = receipt_hydrate_context($pdo, $payment);
+            $to = trim((string)($context['guest_email'] ?? ''));
+            if ($to === '') {
+                return ['success' => false, 'reason' => 'no_email', 'message' => 'No guest email address on file'];
+            }
+            if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+                return ['success' => false, 'reason' => 'bad_email', 'message' => 'The guest email address is not valid'];
+            }
+            if (trim((string)getEmailSetting('smtp_host', '')) === '') {
+                return ['success' => false, 'reason' => 'no_smtp', 'message' => 'SMTP host is not configured'];
+            }
+            $res = receipt_send_email($pdo, $paymentId, null, $user);
+            $res['reason'] = !empty($res['preview']) ? 'preview' : 'sent';
+            return $res;
         } catch (Throwable $e) {
             error_log('receipt_auto_send failed for payment ' . $paymentId . ': ' . $e->getMessage());
-            return ['success' => false, 'message' => $e->getMessage()];
+            return ['success' => false, 'reason' => 'error', 'message' => $e->getMessage()];
         }
+    }
+}
+
+if (!function_exists('receipt_staff_notice')) {
+    /**
+     * Plain sentence for the staff success message, built from a receipt_auto_send() result.
+     * '' when there is nothing to add (already sent, or a payment that is not collected yet).
+     */
+    function receipt_staff_notice(array $result): string
+    {
+        switch ((string)($result['reason'] ?? '')) {
+            case 'sent':
+                return ' Receipt emailed to the guest.';
+            case 'preview':
+                return ' Receipt generated (development mode: preview only, no live email sent).';
+            case 'no_email':
+                return ' Receipt not emailed: guest has no email address - use Email receipt on the payment.';
+            case 'bad_email':
+                return ' Receipt not emailed: the guest email address is not valid - correct it, then use Email receipt on the payment.';
+            case 'no_smtp':
+                return ' Receipt not emailed: email sending is not set up yet (SMTP in Email settings) - use Email receipt on the payment once it is.';
+            case 'template_off':
+                return ' Receipt not emailed: payment receipt emails are switched off in Booking Settings - use Email receipt on the payment.';
+            case 'error':
+                error_log('Receipt email failed: ' . (string)($result['message'] ?? 'unknown error'));
+                return ' Receipt NOT emailed (the email could not be sent - details are in System Logs) - use Email receipt on the payment.';
+            default:
+                return '';
+        }
+    }
+}
+
+if (!function_exists('receipt_after_payment')) {
+    /**
+     * The one call every "payment received" path makes right after the money is committed:
+     * emails the receipt (once) and returns ['sent'=>bool, 'notice'=>string, 'result'=>array].
+     * Append 'notice' to the staff success message. Never throws.
+     */
+    function receipt_after_payment(PDO $pdo, int $paymentId, ?array $user = null): array
+    {
+        if ($paymentId <= 0) {
+            return ['sent' => false, 'notice' => '', 'result' => ['success' => false, 'reason' => 'not_found']];
+        }
+        $result = receipt_auto_send($pdo, $paymentId, $user);
+        return ['sent' => !empty($result['success']) && ($result['reason'] ?? '') === 'sent', 'notice' => receipt_staff_notice($result), 'result' => $result];
+    }
+}
+
+if (!function_exists('receipt_queue_after_request')) {
+    /**
+     * For code that records payments inside someone else's transaction (the till): queue the receipt and send
+     * it when the request ends, after the commit. A payment that was rolled back no longer exists by then and
+     * is skipped. receipt_auto_send() refuses duplicates, so a queued id is harmless if sent twice.
+     */
+    function receipt_queue_after_request(int $paymentId): void
+    {
+        static $registered = false;
+        if ($paymentId <= 0) {
+            return;
+        }
+        $GLOBALS['rh_receipt_queue'][$paymentId] = true;
+        if ($registered) {
+            return;
+        }
+        $registered = true;
+        register_shutdown_function(static function (): void {
+            $ids = array_keys($GLOBALS['rh_receipt_queue'] ?? []);
+            $GLOBALS['rh_receipt_queue'] = [];
+            if (!$ids || empty($GLOBALS['pdo']) || !($GLOBALS['pdo'] instanceof PDO)) {
+                return;
+            }
+            if (function_exists('fastcgi_finish_request')) {
+                @fastcgi_finish_request();
+            }
+            foreach ($ids as $id) {
+                try {
+                    if ($GLOBALS['pdo']->inTransaction()) {
+                        return; // never send on an open (possibly rolled-back) transaction
+                    }
+                    receipt_auto_send($GLOBALS['pdo'], (int)$id, null);
+                } catch (Throwable $e) {
+                    error_log('Queued receipt failed for payment ' . $id . ': ' . $e->getMessage());
+                }
+            }
+        });
     }
 }
 

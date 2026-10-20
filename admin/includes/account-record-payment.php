@@ -239,13 +239,13 @@ if (!function_exists('rh_account_after_payment_messages')) {
                 }
             }
         }
-        try {
-            require_once __DIR__ . '/../../config/receipts.php';
-            receipt_auto_send($pdo, (int)$res['payment_id'], $user);
-        } catch (Throwable $e) {
-            error_log('Receipt email failed for payment ' . (int)$res['payment_id'] . ': ' . $e->getMessage());
-        }
-        if ($wantInvoice) {
+        // RECEIPT = proof of money received: always, once, right now.
+        require_once __DIR__ . '/../../config/receipts.php';
+        $msg .= receipt_after_payment($pdo, (int)$res['payment_id'], $user)['notice'];
+        // INVOICE = request for payment: only worth sending while something is still owed.
+        if ($wantInvoice && $res['balance_after'] <= BALANCE_TOLERANCE) {
+            $msg .= ' No invoice sent: nothing is left to pay, the receipt covers this payment.';
+        } elseif ($wantInvoice) {
             if ($res['email'] === '' || !filter_var($res['email'], FILTER_VALIDATE_EMAIL)) {
                 $msg .= ' No valid email address is on file, so no invoice was sent.';
             } else {
@@ -316,8 +316,8 @@ if (!function_exists('rh_render_record_payment_modal')) {
                         <textarea name="payment_notes" id="rhRpNotes" class="form-control" rows="2" maxlength="500"></textarea>
                     </div>
                     <label style="display:flex;gap:8px;align-items:center;cursor:pointer;">
-                        <input type="checkbox" name="email_invoice" value="1" id="rhRpInvoice" checked>
-                        <span id="rhRpInvoiceLabel">Also email the invoice to the customer</span>
+                        <input type="checkbox" name="email_invoice" value="1" id="rhRpInvoice">
+                        <span id="rhRpInvoiceLabel">Also email an invoice for any balance still due</span>
                     </label>
                 </div>
                 <div class="modal-footer">
@@ -356,9 +356,9 @@ if (!function_exists('rh_render_record_payment_modal')) {
                 document.getElementById('rhRpNotes').value = '';
                 var hasMail = !!(a.email && String(a.email).indexOf('@') > 0);
                 var inv = document.getElementById('rhRpInvoice');
-                inv.checked = hasMail;
+                inv.checked = false; // a receipt is emailed automatically; an invoice only on request
                 inv.disabled = !hasMail;
-                document.getElementById('rhRpInvoiceLabel').textContent = hasMail ? 'Also email the invoice to ' + a.email : 'No email address on file - no invoice can be sent';
+                document.getElementById('rhRpInvoiceLabel').textContent = hasMail ? 'Also email an invoice for any balance still due to ' + a.email : 'No email address on file - no receipt or invoice can be emailed';
                 document.getElementById('rhRpSubmit').disabled = false;
                 syncOver();
                 document.getElementById('rhRecordPaymentModal').classList.add('show');

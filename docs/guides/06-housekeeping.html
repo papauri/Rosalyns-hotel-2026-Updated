@@ -83,8 +83,8 @@
       <tr><td><strong>Available</strong></td><td>The room is clean and ready for guests.</td></tr>
       <tr><td><strong>Occupied</strong></td><td>A guest is currently checked in.</td></tr>
       <tr><td><strong>Cleaning</strong></td><td>The room is being cleaned.</td></tr>
-      <tr><td><strong>Maintenance</strong></td><td>The room is under maintenance.</td></tr>
-      <tr><td><strong>Out of Order</strong></td><td>The room is not available for use.</td></tr>
+      <tr><td><strong>Maintenance</strong></td><td>The room is under maintenance. Setting it by hand on Individual Rooms needs the <strong>Block Rooms</strong> permission.</td></tr>
+      <tr><td><strong>Out of Order</strong></td><td>The room is not available for use. Setting it by hand on Individual Rooms needs the <strong>Block Rooms</strong> permission.</td></tr>
     </tbody>
   </table>
   <h3>Cleaning task statuses (Housekeeping screen)</h3>
@@ -309,6 +309,7 @@
       <tr><td><em>"Selected room is invalid or inactive."</em></td><td>The room has been switched off or removed.</td><td>Choose another room, or ask a manager to check the room in Settings &rarr; Rooms.</td></tr>
       <tr><td><em>"Assigned user is invalid."</em></td><td>The staff member is no longer active.</td><td>Choose another staff member or leave Unassigned.</td></tr>
       <tr><td><em>"Room 12 cannot be marked clean because it is occupied (a guest is in the room)."</em> / <em>"... because it is under maintenance."</em> / <em>"... because it is out of order."</em></td><td>Mark Clean will not release a room that is in use or out of service.</td><td>Occupied: wait for check-out. Maintenance: finish and verify the maintenance request, then clean the room. Out of Order: ask a manager to return the room to service first.</td></tr>
+      <tr><td><em>"You need the Block Rooms permission to do this. Ask a manager to do it or to give you the permission."</em> (or <strong>Maintenance</strong> / <strong>Out of Order</strong> greyed out on Individual Rooms)</td><td>Taking a room off sale by hand needs the <strong>Block Rooms</strong> permission. Maintenance requests are not affected: they still move the room to Maintenance by themselves.</td><td>Ask a manager to change the room, or to give you <strong>Block Rooms</strong> in Staff &amp; Access.</td></tr>
       <tr><td>A room stays in Maintenance after the job is done</td><td>The request is only Completed (it needs Verify), or staff set the room to Maintenance by hand.</td><td>Verify the request. For a hand-set room, change its status yourself.</td></tr>
       <tr><td><em>"Invalid recurring pattern."</em></td><td>Recurring ticked without a valid pattern.</td><td>Choose Daily, Weekly or Monthly, or untick Recurring Task.</td></tr>
       <tr><td><em>"Invalid date format."</em> / <em>"End date must be after start date."</em></td><td>The maintenance Start Date and End Date are missing, wrong or the wrong way round.</td><td>Set an End Date later than the Start Date.</td></tr>

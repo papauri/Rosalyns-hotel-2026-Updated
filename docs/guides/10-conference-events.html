@@ -229,7 +229,8 @@
     <li>Check the amount is correct (see above).</li>
     <li>On the enquiry row open <strong>More</strong> and click <strong>Record payment</strong>.</li>
     <li>Choose the <strong>Payment method</strong> and type the <strong>Amount received</strong> (gross, VAT included). Optional: <strong>Transaction reference</strong> and <strong>Notes</strong>. Click <strong>Record payment</strong>.</li>
-    <li>The system records the payment, issues a receipt and emails it, and shows a line such as <em>"Payment ... of MWK ... recorded. Balance still due: ..."</em> or <em>"The account is paid in full."</em> If the guest paid more than was owed, the extra becomes a credit note.</li>
+    <li>The system records the payment, issues a receipt and emails it to the guest by itself (once), and shows a line such as <em>"Payment ... of MWK ... recorded. Balance still due: ..."</em> or <em>"The account is paid in full."</em> followed by <em>"Receipt emailed to the guest."</em> If the receipt cannot be sent, the line says why, for example <em>"Receipt not emailed: guest has no email address - use Email receipt on the payment."</em> If the guest paid more than was owed, the extra becomes a credit note.</li>
+    <li>A payment never sends an invoice. If you want to ask for the rest of the money at the same time, tick <strong>Also email an invoice for any balance still due</strong> (it is off by default). If nothing is left to pay you will see <em>"No invoice sent: nothing is left to pay, the receipt covers this payment."</em></li>
   </ol>
   <ul>
     <li>Part payments are allowed: record each payment as it arrives.</li>
@@ -350,7 +351,7 @@
   <ol class="steps">
     <li>In the booking window click <strong>Record payment</strong>. It is greyed out (<em>"Set a total amount first (not for cancelled or waitlisted bookings)"</em>) until the amount is above zero.</li>
     <li>Choose the <strong>Payment method</strong> and type the <strong>Amount received</strong> (gross, VAT included). Optional: <strong>Transaction reference</strong> and <strong>Notes</strong>. Click <strong>Record payment</strong>.</li>
-    <li>The system records the payment, issues a receipt and emails it. You will see a line such as <em>"Payment ... of MWK ... recorded. Balance still due: ..."</em> or <em>"The account is paid in full."</em> Part payments are allowed. If the guest paid more than was owed, the extra becomes a credit note.</li>
+    <li>The system records the payment, issues a receipt and emails it to the guest by itself (once). You will see a line such as <em>"Payment ... of MWK ... recorded. Balance still due: ..."</em> or <em>"The account is paid in full."</em> and then whether the receipt was emailed. A payment never sends an invoice; tick <strong>Also email an invoice for any balance still due</strong> (off by default) if you also want to ask for the rest. Part payments are allowed. If the guest paid more than was owed, the extra becomes a credit note.</li>
     <li>To email the invoice again, click <strong>Send invoice</strong> in the same window.</li>
   </ol>
   <h3>Cancel a booking</h3>

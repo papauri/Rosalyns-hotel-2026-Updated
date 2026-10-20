@@ -31,7 +31,11 @@ if (!function_exists('rh_invoice_signed_payments')) {
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
-// Try to load TCPDF if available
+// Try to load TCPDF if available.
+// This file is sometimes first included from INSIDE a function (e.g. the checkout's final-invoice step); a plain
+// assignment would then stay local, generateInvoicePDF() would read an empty global and every invoice would fall
+// back to an HTML file instead of a PDF. `global` makes both cases work (at file scope it changes nothing).
+global $tcpdf_loaded;
 $tcpdf_loaded = false;
 if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
     // Try Composer autoload
@@ -73,9 +77,10 @@ if (!defined('PDF_PAGE_FORMAT')) {
  *
  * @param int $booking_id Booking ID
  * @param string|null $invoice_number_override Optional invoice number to reuse when regenerating an existing invoice
+ * @param bool $asStatement Paid-in-full checkout: the same itemised document, titled "Stay Statement - paid in full" (no balance-due wording), same invoice number
  * @return array|false Returns array with keys: filename, path, relative_path, invoice_number — or false on failure
  */
-function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = null)
+function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = null, bool $asStatement = false)
 {
     global $pdo, $tcpdf_loaded;
 
@@ -187,11 +192,11 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
 
         if ($tcpdf_loaded) {
             // Build HTML content
-            $html = buildInvoiceHTML($booking, $invoice_number, $site_name, $email_address, $phone_number, $address, $currency_symbol, $group_bookings);
+            $html = buildInvoiceHTML($booking, $invoice_number, $site_name, $email_address, $phone_number, $address, $currency_symbol, $group_bookings, null, $asStatement);
 
             // Use shared renderer so preview and generated PDF follow the same style rules.
             if (function_exists('bookingRenderPdfFromHtml')) {
-                file_put_contents($filepath, bookingRenderPdfFromHtml($html, 'Invoice ' . $invoice_number));
+                file_put_contents($filepath, bookingRenderPdfFromHtml($html, ($asStatement ? 'Stay Statement ' : 'Invoice ') . $invoice_number));
             } else {
                 if (!class_exists('JapandiTCPDF')) {
                     class JapandiTCPDF extends TCPDF {
@@ -206,8 +211,8 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
                 $pdf = new JapandiTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
                 $pdf->SetCreator($site_name);
                 $pdf->SetAuthor($site_name);
-                $pdf->SetTitle('Invoice ' . $invoice_number);
-                $pdf->SetSubject('Payment Invoice');
+                $pdf->SetTitle(($asStatement ? 'Stay Statement ' : 'Invoice ') . $invoice_number);
+                $pdf->SetSubject($asStatement ? 'Stay Statement - paid in full' : 'Payment Invoice');
                 $pdf->setPrintHeader(false);
                 $pdf->setPrintFooter(false);
                 $pdf->SetMargins(8, 8, 8);
@@ -219,7 +224,7 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
             }
         } else {
             // Fallback: Generate HTML invoice and save as file
-            $html = buildInvoiceHTML($booking, $invoice_number, $site_name, $email_address, $phone_number, $address, $currency_symbol, $group_bookings);
+            $html = buildInvoiceHTML($booking, $invoice_number, $site_name, $email_address, $phone_number, $address, $currency_symbol, $group_bookings, null, $asStatement);
 
             // Wrap in complete HTML document
             $fullHtml = '<!DOCTYPE html>
@@ -624,7 +629,7 @@ if (!function_exists('rh_inv_quotation_html')) {
 /**
  * Build HTML content for invoice - Stunning State-of-the-Art PDF Design
  */
-function buildInvoiceHTML(array $booking, string $invoice_number, string $site_name, string $email_address, string $phone_number, string $address, string $currency_symbol, array $group_bookings = [], ?array $preload = null)
+function buildInvoiceHTML(array $booking, string $invoice_number, string $site_name, string $email_address, string $phone_number, string $address, string $currency_symbol, array $group_bookings = [], ?array $preload = null, bool $asStatement = false)
 {
     global $pdo;
 
@@ -771,6 +776,8 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $statusText    = $isPaid ? 'PAID IN FULL' : 'BALANCE DUE';
     $statusBg      = $isPaid ? '#E7F4EA' : '#FCE8E6';
     $statusFg      = $isPaid ? '#1E6C43' : '#A63A3A';
+    // Paid-in-full checkout document: a STATEMENT (never asks for money), same number as the invoice record.
+    $statementMode = $asStatement && $isPaid;
     $totalDueDisplay = $currency_symbol . ' ' . number_format($totalWithVat, 2);
     $amountPaidDisplay = $currency_symbol . ' ' . number_format($amountPaid, 2);
     $balanceDueDisplay = $currency_symbol . ' ' . number_format($balanceDue, 2);
@@ -780,7 +787,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $customTemplate = function_exists('hotel_default_payment_invoice_document_html')
         ? rh_inv_custom_template('payment_invoice_document', hotel_default_payment_invoice_document_html())
         : rh_inv_custom_template('payment_invoice_document');
-    if ($customTemplate !== '') {
+    if ($customTemplate !== '' && !$statementMode) {
         return rh_inv_legacy_room_template(get_defined_vars(), $customTemplate);
     }
 
@@ -880,9 +887,14 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     if ($tourismLevyAmt > 0) {
         $totals[] = ['label' => 'Tourism levy' . ($tourismLevyPct > 0 ? ' (' . number_format($tourismLevyPct, 1) . '%)' : ''), 'value' => $money($tourismLevyAmt)];
     }
-    $totals[] = ['label' => 'Invoice total', 'value' => $money($totalWithVat), 'type' => 'strong'];
-    $totals[] = ['label' => 'Amount paid', 'value' => $money($amountPaid), 'type' => 'paid'];
-    $totals[] = ['label' => 'Balance due', 'value' => $money(max(0, $balanceDue)), 'type' => 'total'];
+    if ($statementMode) {
+        $totals[] = ['label' => 'Total charges', 'value' => $money($totalWithVat), 'type' => 'strong'];
+        $totals[] = ['label' => 'Total paid', 'value' => $money($amountPaid), 'type' => 'total'];
+    } else {
+        $totals[] = ['label' => 'Invoice total', 'value' => $money($totalWithVat), 'type' => 'strong'];
+        $totals[] = ['label' => 'Amount paid', 'value' => $money($amountPaid), 'type' => 'paid'];
+        $totals[] = ['label' => 'Balance due', 'value' => $money(max(0, $balanceDue)), 'type' => 'total'];
+    }
 
     $body = $itemsHtml . rh_pdf_spacer(3) . rh_inv_keep_together(rh_pdf_totals_table($totals))
         . rh_inv_payments_html($payments, $cur)
@@ -890,7 +902,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         . rh_inv_closing_html('Thank you for choosing us.');
 
     $meta = [
-        ['Invoice No.', $invoice_number],
+        [$statementMode ? 'Statement No.' : 'Invoice No.', $invoice_number],
         ['Issued', date('d M Y')],
         ['Billed to', (string)$booking['guest_name']],
         ['Booking ref', (string)$booking['booking_reference']],
@@ -903,7 +915,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         ['Guests', $guestCountStr],
     ];
 
-    return rh_pdf_document_shell('Invoice', $meta, $body, [
+    return rh_pdf_document_shell($statementMode ? 'Stay Statement - paid in full' : 'Invoice', $meta, $body, [
         'banner' => ['text' => $isPaid ? 'Paid in full' : 'Balance due', 'tone' => $isPaid ? 'neutral' : 'danger'],
     ]);
 }
@@ -1150,7 +1162,9 @@ function sendPaymentInvoiceEmail(int $booking_id)
         $latestPayment = $paymentStmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$latestPayment) {
-            throw new Exception("No payment record found for booking");
+            // An invoice requests payment, so it must be possible before any payment exists (balance owed
+            // on request). Nothing to cache the PDF against: it is generated fresh and not persisted.
+            $latestPayment = ['id' => 0, 'invoice_generated' => 0, 'invoice_path' => '', 'invoice_number' => (string)($booking['final_invoice_number'] ?? '')];
         }
 
         $invoice_file = '';
@@ -1186,7 +1200,13 @@ function sendPaymentInvoiceEmail(int $booking_id)
 
                 // Persist generated invoice against the latest payment row.
                 $update_stmt = $pdo->prepare("\n                UPDATE payments\n                SET invoice_path = ?, invoice_number = ?, invoice_generated = 1\n                WHERE id = ?\n            ");
-                $update_stmt->execute([$invoice_path, $invoice_number, (int)$latestPayment['id']]);
+                if ((int)$latestPayment['id'] > 0) {
+                    $update_stmt->execute([$invoice_path, $invoice_number, (int)$latestPayment['id']]);
+                } elseif (trim((string)($booking['final_invoice_number'] ?? '')) === '') {
+                    // No payment row to hold the number: remember it on the booking so a re-send reuses it.
+                    $pdo->prepare("UPDATE bookings SET final_invoice_number = ? WHERE id = ? AND (final_invoice_number IS NULL OR final_invoice_number = '')")
+                        ->execute([$invoice_number, $booking_id]);
+                }
             } elseif ($invoice_file === '') {
                 throw new Exception("Failed to generate invoice");
             }
@@ -1257,7 +1277,9 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
         $latestPayment = $paymentStmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$latestPayment) {
-            throw new Exception('No payment record found for booking');
+            // An invoice requests payment, so it must be possible before any payment exists (balance owed
+            // on request). Nothing to cache the PDF against: it is generated fresh and not persisted.
+            $latestPayment = ['id' => 0, 'invoice_generated' => 0, 'invoice_path' => '', 'invoice_number' => (string)($booking['final_invoice_number'] ?? '')];
         }
 
         $invoice_file = '';
@@ -1297,7 +1319,13 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
                 SET invoice_path = ?, invoice_number = ?, invoice_generated = 1
                 WHERE id = ?
             ");
-                $update_stmt->execute([$invoice_path, $invoice_number, (int)$latestPayment['id']]);
+                if ((int)$latestPayment['id'] > 0) {
+                    $update_stmt->execute([$invoice_path, $invoice_number, (int)$latestPayment['id']]);
+                } elseif (trim((string)($booking['final_invoice_number'] ?? '')) === '') {
+                    // No payment row to hold the number: remember it on the booking so a re-send reuses it.
+                    $pdo->prepare("UPDATE bookings SET final_invoice_number = ? WHERE id = ? AND (final_invoice_number IS NULL OR final_invoice_number = '')")
+                        ->execute([$invoice_number, $booking_id]);
+                }
             } elseif ($invoice_file === '') {
                 throw new Exception('Failed to generate invoice');
             }
@@ -1373,13 +1401,13 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
                 <!-- HEADER -->
                 <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2D2D2D 100%); padding: 40px 30px; text-align: center;">
                     ' . $logo_html_email . '
-                    <h1 style="color: #8B7355; margin: 0 0 10px 0; font-size: 28px; font-weight: 300; letter-spacing: 4px;">PAYMENT CONFIRMED</h1>
-                    <p style="color: #FFFFFF; margin: 0; font-size: 16px; opacity: 0.9;">Thank you for your payment</p>
+                    <h1 style="color: #8B7355; margin: 0 0 10px 0; font-size: 28px; font-weight: 300; letter-spacing: 4px;">INVOICE</h1>
+                    <p style="color: #FFFFFF; margin: 0; font-size: 16px; opacity: 0.9;">Thank you for choosing us</p>
                 </div>
 
                 <!-- SUCCESS BANNER -->
                 <div style="background: linear-gradient(135deg, #E8F5E9 0%, #C8E6C9 100%); padding: 20px 30px; text-align: center;">
-                    <span style="color: #2E7D32; font-size: 18px; font-weight: 600;">✓ Your booking is confirmed</span>
+                    <span style="color: #2E7D32; font-size: 18px; font-weight: 600;">Invoice attached</span>
                 </div>
 
                 <!-- CONTENT -->
@@ -1390,7 +1418,7 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
                     </p>
 
                     <p style="margin: 0 0 30px 0; font-size: 15px; color: #616161; line-height: 1.7;">
-                        We are pleased to confirm that your payment has been received. Your booking reference is <span style="color: #8B7355; font-weight: 600;">' . htmlspecialchars($booking['booking_reference']) . '</span>. Please find your detailed invoice attached to this email.
+                        Please find your invoice for booking <span style="color: #8B7355; font-weight: 600;">' . htmlspecialchars($booking['booking_reference']) . '</span> attached. It lists every charge and every payment made; if a balance is shown as due, please settle it at your earliest convenience. Each payment you made was acknowledged by its own receipt.
                     </p>
 
                     <!-- BOOKING DETAILS CARD -->
@@ -1422,8 +1450,9 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
 
                         <!-- TOTAL -->
                         <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #8B7355; text-align: center;">
-                            <span style="font-size: 12px; color: #9E9E9E; text-transform: uppercase; letter-spacing: 1px;">Total Amount Paid</span>
-                            <p style="margin: 8px 0 0 0; font-size: 28px; font-weight: 600; color: #8B7355;">' . $currency_symbol . ' ' . number_format($booking['total_amount'], 2) . '</p>
+                            <span style="font-size: 12px; color: #9E9E9E; text-transform: uppercase; letter-spacing: 1px;">Invoice Total</span>
+                            <p style="margin: 8px 0 0 0; font-size: 28px; font-weight: 600; color: #8B7355;">' . $currency_symbol . ' ' . number_format((float)(($booking['total_with_vat'] ?? 0) > 0 ? $booking['total_with_vat'] : $booking['total_amount']), 2) . '</p>
+                            ' . ((float)($booking['amount_due'] ?? 0) > BALANCE_TOLERANCE ? '<p style="margin: 8px 0 0 0; font-size: 15px; color: #B71C1C; font-weight: 600;">Balance due: ' . $currency_symbol . ' ' . number_format((float)$booking['amount_due'], 2) . '</p>' : '<p style="margin: 8px 0 0 0; font-size: 15px; color: #2E7D32; font-weight: 600;">Paid in full</p>') . '
                         </div>
                     </div>
 
@@ -1459,7 +1488,7 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
         </body>
         </html>';
 
-        $subject = 'Payment Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
+        $subject = 'Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
         $textBody = '';
         if ($dbTemplate) {
             $subject = $dbTemplate['subject'];
@@ -1740,9 +1769,12 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null)
 
         // Recalculate folio before generating invoice
         recalculateBookingFinancials($booking_id);
+        $dueStmt = $pdo->prepare("SELECT COALESCE(amount_due, 0) FROM bookings WHERE id = ?");
+        $dueStmt->execute([$booking_id]);
+        $balanceDueAtCheckout = round((float)$dueStmt->fetchColumn(), 2);
 
         // Generate final invoice
-        $invoice_result = generateInvoicePDF($booking_id);
+        $invoice_result = generateInvoicePDF($booking_id, null, $balanceDueAtCheckout <= BALANCE_TOLERANCE);
         if (!$invoice_result) {
             return ['success' => false, 'message' => 'Failed to generate final invoice'];
         }
@@ -1782,7 +1814,8 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null)
             }
 
             // Send email
-            $email_result = sendFinalInvoiceEmail($booking, $invoice_file, $cc_recipients);
+            // Final INVOICE only when a balance is still owed; paid in full -> a paid STATEMENT (see sendFinalInvoiceEmail).
+            $email_result = sendFinalInvoiceEmail($booking, $invoice_file, $cc_recipients, $balanceDueAtCheckout);
             $email_sent = $email_result['success'];
 
             if ($email_sent) {
@@ -1800,6 +1833,7 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null)
         return [
             'success' => true,
             'message' => 'Final invoice generated' . ($email_sent ? ' and sent' : ' (email failed)'),
+            'balance_due' => $balanceDueAtCheckout,
             'invoice_file' => $invoice_file,
             'invoice_number' => $invoice_number,
             'invoice_path' => $invoice_path,
@@ -1819,9 +1853,13 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null)
  * @param array $booking Booking details
  * @param string $invoice_file Path to invoice file
  * @param array $cc_recipients CC recipients
+ * @param float $balanceDue Balance still owed at checkout. Above BALANCE_TOLERANCE this is a FINAL INVOICE
+ *                          (a request for payment). Otherwise the guest already holds a receipt for every payment,
+ *                          so the same itemised PDF goes out as a paid-in-full STATEMENT of the stay, worded
+ *                          without any request for money.
  * @return array Result with success status
  */
-function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_recipients = [])
+function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_recipients = [], float $balanceDue = 0.0)
 {
     global $pdo, $email_from_name, $email_from_email, $email_site_name, $email_site_url;
 
@@ -1832,22 +1870,26 @@ function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_r
         $room = $stmt->fetch(PDO::FETCH_ASSOC);
 
         $currency_symbol = getSetting('currency_symbol');
+        $fiOwed = $balanceDue > BALANCE_TOLERANCE;
+        $fiDocName = $fiOwed ? 'final invoice' : 'statement of your stay';
 
         // Build email content
         $htmlBody = '
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                <h1 style="color: #8B7355; margin: 0; font-size: 32px;">✓ CHECKOUT COMPLETE</h1>
-                <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Thank you for your stay!</p>
+                <h1 style="color: #8B7355; margin: 0; font-size: 32px;">' . ($fiOwed ? 'FINAL INVOICE' : '✓ CHECKOUT COMPLETE') . '</h1>
+                <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">' . ($fiOwed ? 'Balance due: ' . htmlspecialchars($currency_symbol . ' ' . number_format($balanceDue, 2)) : 'Thank you for your stay!') . '</p>
             </div>
 
             <div style="background: #f8f9fa; padding: 30px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 10px 10px;">
                 <p>Dear ' . htmlspecialchars($booking['guest_name']) . ',</p>
 
-                <p>We hope you enjoyed your stay at <strong>' . htmlspecialchars($email_site_name) . '</strong>. Your checkout has been completed and your final invoice is ready.</p>
+                <p>We hope you enjoyed your stay at <strong>' . htmlspecialchars($email_site_name) . '</strong>. Your checkout has been completed. ' . ($fiOwed
+                    ? 'A balance of <strong>' . htmlspecialchars($currency_symbol . ' ' . number_format($balanceDue, 2)) . '</strong> remains to be paid; your final invoice is attached. Please settle it at your earliest convenience.'
+                    : 'Your account is paid in full, so nothing further is due. An itemised statement of your stay is attached for your records; each payment you made was acknowledged by its own receipt.') . '</p>
 
                 <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #8B7355;">
-                    <h3 style="color: #1A1A1A; margin-top: 0;">Final Invoice Details</h3>
+                    <h3 style="color: #1A1A1A; margin-top: 0;">' . ($fiOwed ? 'Final Invoice Details' : 'Stay Details') . '</h3>
 
                     <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
                         <span style="font-weight: bold; color: #333;">Booking Reference:</span>
@@ -1866,8 +1908,8 @@ function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_r
                 </div>
 
                 <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
-                    <h3 style="color: #155724; margin-top: 0;">✅ Final Invoice Attached</h3>
-                    <p style="color: #155724; margin: 0;">Please find your final invoice attached to this email. It includes all room charges, extras, and payments made during your stay.</p>
+                    <h3 style="color: #155724; margin-top: 0;">✅ ' . ($fiOwed ? 'Final Invoice Attached' : 'Statement Attached (paid in full)') . '</h3>
+                    <p style="color: #155724; margin: 0;">Please find your ' . $fiDocName . ' attached to this email. It includes all room charges, extras, and payments made during your stay.</p>
                 </div>
 
                 <div style="background: #e7f3ff; padding: 15px; border-left: 4px solid #0d6efd; border-radius: 5px;">
@@ -1875,7 +1917,7 @@ function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_r
                     <p style="color: #0d6efd; margin: 0;">Thank you for choosing ' . htmlspecialchars($email_site_name) . '. We look forward to welcoming you back soon.</p>
                 </div>
 
-                <p style="margin-top: 30px;">If you have any questions about your invoice or your stay, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
+                <p style="margin-top: 30px;">If you have any questions about your ' . ($fiOwed ? 'invoice' : 'statement') . ' or your stay, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
 
                 <p style="margin-top: 20px;">Safe travels!</p>
 
@@ -1886,7 +1928,7 @@ function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_r
             </div>
         </div>';
 
-        $subject = 'Final Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
+        $subject = ($fiOwed ? 'Final Invoice - ' : 'Stay Statement (paid in full) - ') . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
 
         // Send email with attachment
         return sendEmailWithAttachmentAndCC(
@@ -2377,18 +2419,18 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
             : null;
 
         // Prepare email content
-        $subject = 'Conference Payment Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $enquiry['inquiry_reference'] . ']';
+        $subject = 'Conference Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $enquiry['inquiry_reference'] . ']';
         $htmlBody = '
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                <h1 style="color: #8B7355; margin: 0; font-size: 32px;">✓ PAYMENT CONFIRMED</h1>
-                <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Thank you for your conference payment!</p>
+                <h1 style="color: #8B7355; margin: 0; font-size: 32px;">INVOICE</h1>
+                <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Thank you for choosing us for your conference</p>
             </div>
 
             <div style="background: #f8f9fa; padding: 30px; border:1px solid #ddd; border-top: none; border-radius: 0 0 10px 10px;">
                 <p>Dear ' . htmlspecialchars($enquiry['contact_person']) . ',</p>
 
-                <p>We are pleased to confirm that your payment has been received. Please find attached your official invoice/receipt for conference booking <strong>' . htmlspecialchars($enquiry['inquiry_reference']) . '</strong>.</p>
+                <p>Please find attached your invoice for conference booking <strong>' . htmlspecialchars($enquiry['inquiry_reference']) . '</strong>.</p>
 
                 <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #8B7355;">
                     <h3 style="color: #1A1A1A; margin-top: 0;">Conference Summary</h3>
@@ -2409,14 +2451,14 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
                     </div>
 
                     <div style="display: flex; justify-content: space-between; padding: 15px 0;">
-                        <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Total Paid:</span>
+                        <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Invoice total:</span>
                         <span style="color: #8B7355; font-weight: bold; font-size: 18px;">' . $currency_symbol . ' ' . number_format($enquiry['total_amount'], 0) . '</span>
                     </div>
                 </div>
 
                 <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
-                    <h3 style="color: #155724; margin-top: 0;">✅ Payment Status: PAID</h3>
-                    <p style="color: #155724; margin: 0;">Your conference booking is now fully paid and confirmed. We look forward to hosting your event!</p>
+                    <h3 style="color: #155724; margin-top: 0;">' . ((float)($enquiry['amount_due'] ?? 0) > BALANCE_TOLERANCE ? 'Balance due: ' . $currency_symbol . ' ' . number_format((float)$enquiry['amount_due'], 2) : 'Paid in full') . '</h3>
+                    <p style="color: #155724; margin: 0;">Payments you have made were acknowledged by their own receipts. We look forward to hosting your event!</p>
                 </div>
 
                 <div style="background: #e7f3ff; padding: 15px; border-left: 4px solid #0d6efd; border-radius: 5px;">
@@ -2725,18 +2767,18 @@ function sendGymInvoiceEmailToClient(array $inquiry, string $invoice_file, array
         $amountPaid = (float)($inquiry['amount_paid'] ?? $totalAmount);
         $amountDue = (float)($inquiry['amount_due'] ?? 0);
 
-        $subject = 'Gym Membership Payment Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']';
+        $subject = 'Gym Membership Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']';
         $htmlBody = '
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                <h1 style="color: #8B7355; margin: 0; font-size: 32px;">&#10003; PAYMENT CONFIRMED</h1>
-                <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Thank you for your gym membership payment!</p>
+                <h1 style="color: #8B7355; margin: 0; font-size: 32px;">INVOICE</h1>
+                <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Thank you for choosing our gym</p>
             </div>
 
             <div style="background: #f8f9fa; padding: 30px; border:1px solid #ddd; border-top: none; border-radius: 0 0 10px 10px;">
                 <p>Dear ' . htmlspecialchars($inquiry['name']) . ',</p>
 
-                <p>We are pleased to confirm that your payment has been received. Please find attached your official invoice/receipt for membership booking <strong>' . htmlspecialchars($inquiry['reference_number']) . '</strong>.</p>
+                <p>Please find attached your invoice for membership booking <strong>' . htmlspecialchars($inquiry['reference_number']) . '</strong>.</p>
 
                 <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #8B7355;">
                     <h3 style="color: #1A1A1A; margin-top: 0;">Membership Summary</h3>
@@ -2747,13 +2789,13 @@ function sendGymInvoiceEmailToClient(array $inquiry, string $invoice_file, array
                     </div>
 
                     <div style="display: flex; justify-content: space-between; padding: 15px 0;">
-                        <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Total Paid:</span>
+                        <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Paid so far:</span>
                         <span style="color: #8B7355; font-weight: bold; font-size: 18px;">' . $currency_symbol . ' ' . number_format($amountPaid, 2) . '</span>
                     </div>
                 </div>
 
                 <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
-                    <h3 style="color: #155724; margin-top: 0;">&#9989; Payment Status: ' . ($amountDue > 0 ? 'PARTIALLY PAID' : 'PAID IN FULL') . '</h3>
+                    <h3 style="color: #155724; margin-top: 0;">&#9989; ' . ($amountDue > BALANCE_TOLERANCE ? 'Balance due: ' . $currency_symbol . ' ' . number_format($amountDue, 2) : 'Paid in full') . '</h3>
                     <p style="color: #155724; margin: 0;">Your gym membership booking has been recorded. We look forward to seeing you!</p>
                 </div>
 
@@ -3053,18 +3095,18 @@ function sendEventInvoiceEmailToClient(array $inquiry, string $invoice_file, arr
         $amountPaid = (float)($inquiry['amount_paid'] ?? $totalAmount);
         $amountDue = (float)($inquiry['amount_due'] ?? 0);
 
-        $subject = 'Event Booking Payment Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']';
+        $subject = 'Event Booking Invoice - ' . htmlspecialchars($email_site_name) . ' [' . $inquiry['reference_number'] . ']';
         $htmlBody = '
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                <h1 style="color: #8B7355; margin: 0; font-size: 32px;">&#10003; PAYMENT CONFIRMED</h1>
-                <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Thank you for your event booking payment!</p>
+                <h1 style="color: #8B7355; margin: 0; font-size: 32px;">INVOICE</h1>
+                <p style="color: white; margin: 10px 0 0 0; font-size: 18px;">Thank you for booking with us</p>
             </div>
 
             <div style="background: #f8f9fa; padding: 30px; border:1px solid #ddd; border-top: none; border-radius: 0 0 10px 10px;">
                 <p>Dear ' . htmlspecialchars($inquiry['name']) . ',</p>
 
-                <p>We are pleased to confirm that your payment has been received. Please find attached your official invoice/receipt for event booking <strong>' . htmlspecialchars($inquiry['reference_number']) . '</strong>.</p>
+                <p>Please find attached your invoice for event booking <strong>' . htmlspecialchars($inquiry['reference_number']) . '</strong>.</p>
 
                 <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #8B7355;">
                     <h3 style="color: #1A1A1A; margin-top: 0;">Booking Summary</h3>
@@ -3075,13 +3117,13 @@ function sendEventInvoiceEmailToClient(array $inquiry, string $invoice_file, arr
                     </div>
 
                     <div style="display: flex; justify-content: space-between; padding: 15px 0;">
-                        <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Total Paid:</span>
+                        <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Paid so far:</span>
                         <span style="color: #8B7355; font-weight: bold; font-size: 18px;">' . $currency_symbol . ' ' . number_format($amountPaid, 2) . '</span>
                     </div>
                 </div>
 
                 <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
-                    <h3 style="color: #155724; margin-top: 0;">&#9989; Payment Status: ' . ($amountDue > 0 ? 'PARTIALLY PAID' : 'PAID IN FULL') . '</h3>
+                    <h3 style="color: #155724; margin-top: 0;">&#9989; ' . ($amountDue > BALANCE_TOLERANCE ? 'Balance due: ' . $currency_symbol . ' ' . number_format($amountDue, 2) : 'Paid in full') . '</h3>
                     <p style="color: #155724; margin: 0;">Your event booking has been recorded. We look forward to seeing you!</p>
                 </div>
 

@@ -45,6 +45,10 @@
     <p>Click <strong>Help</strong> in the admin top bar. It opens help for that page: where it is in the menu, which permission it needs and who has it, and the guide sections and common problems for that page.</p>
   </details>
 
+  <details class="faq" id="faq-hints-button">
+    <summary>How do I turn the on-screen hints (the round ? button) on or off?</summary>
+    <p>Click the round <strong>?</strong> button at the bottom right of the admin screen. When hints are on, small gold <strong>?</strong> marks appear on buttons and cards: hover over one (or press and hold on a phone) to read what it does. Click the button again to switch them off. You can also press <kbd>?</kbd> on the keyboard when you are not typing in a box. On the POS Till, open <strong>More</strong> and choose <strong>Help mode</strong> (<strong>Help Tooltips</strong> in the menu on a phone). On the Kitchen, Bar and Coffee screens it is the <strong>?</strong> in the top bar.</p>
+  </details>
   <details class="faq" id="faq-where-is">
     <summary>Where is a page, and who is allowed to open it?</summary>
     <p>The <a href="system-map.php">System map</a> lists every page in the admin menu with the permission it needs, the roles that have it by default and the module that must be switched on. It is read straight from the system, so it is always up to date. You can also type <em>"where is …"</em> in any search box.</p>
@@ -254,7 +258,22 @@
 
   <details class="faq" id="faq-theft-radar" data-module="stock">
     <summary>What is Theft Radar?</summary>
-    <p><strong>Theft Radar (last 30d)</strong> is a box on the <strong>Stock Count</strong> page. It lists up to 20 ingredients that lost stock in the last 30 days through count shortages or manual subtractions, which no sale or wastage entry explains. The columns are <strong>Ingredient</strong>, <strong>Shortage</strong>, <strong>Manual out</strong> and <strong>Cost lost</strong>. If nothing is found it says <em>"No unaccounted shortages detected. All stock movement traces to sales or recorded events."</em> It shows where to look, not who is to blame. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
+    <p><strong>Theft Radar (last 30 days)</strong> is a list on the <strong>Stock Count</strong> page. It shows up to 20 ingredients that lost stock in the last 30 days through count shortages or manual subtractions, which no sale or wastage entry explains, with the cost lost on the right. If nothing is found it says <em>"No unaccounted shortages detected. All stock movement traces to sales or recorded events."</em> Under it, <strong>Manual additions (last 30 days)</strong> lists stock added by hand, because an addition can hide an earlier loss. It shows where to look, not who is to blame. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-count-shading" data-module="stock">
+    <summary>Why are some stock count lines orange or red, and what is "N lines over the alert level"?</summary>
+    <p>A shortage worth at least the minimum value is shaded <strong>orange</strong> when it reaches the <strong>alert at variance</strong> share of the expected stock, and <strong>red</strong> when it reaches the <strong>needs approval above</strong> share (red needs a second approver). The yellow box above the lines counts them, for example <em>"2 lines over the alert level."</em> Surpluses and small shortages are not shaded. Change the limits in Hotel Settings. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-count-reminder" data-module="stock">
+    <summary>What is "No stock count approved for N days — start one."? Can I turn it off?</summary>
+    <p>It is the stock count reminder. It shows at the top of <strong>Stock Overview</strong> and <strong>Stock Count</strong> when no count has been approved for the number of days you chose. Click <strong>start one</strong> to begin a count. To change it or switch it off, open <strong>Hotel Settings</strong> &rarr; <strong>Hotel details &amp; policies</strong> &rarr; <strong>Restaurant &amp; stock</strong> and change <strong>Remind to count stock after (days, 0 = off)</strong>, then click <strong>Save Hotel Details</strong>. No email is sent. See <a href="20-stock-loss-prevention.html#setup">Setting it up</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-needs-review" data-module="stock">
+    <summary>What is "Needs review" on the Stock Overview, and what does Dismiss do?</summary>
+    <p>Managers and administrators see <strong>Needs review</strong>: big count shortages, stock changed by hand, and batches written off, recalled or expired in the last 7 days. Click <strong>Look</strong> to open the record. <strong>Dismiss</strong> hides one row and <strong>Dismiss all</strong> hides them all, but only for you. Other managers still see them and nothing is deleted. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
   </details>
 
   <details class="faq" id="faq-approve-own-count" data-module="stock">
@@ -275,6 +294,24 @@
   <details class="faq" id="faq-refund">
     <summary>How do I give a guest money back?</summary>
     <p>Open the payment and click <strong>Refund</strong>. Choose the amount, the reason and the status (use <strong>Pending</strong> until the money has actually gone out, then settle it). Mobile money refunds must start as Pending or Processing. See <a href="13-finance-payments.html#refund">How to refund a payment</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-no-receipt">
+    <summary>Why didn't the guest get a receipt?</summary>
+    <p>A receipt with a PDF is emailed by itself, once, whenever a payment is saved as Paid or Completed (room, conference, gym, event, and till or room-service sales that have a customer email). Read the green message you saw when you saved the payment. It says what happened: <em>"Receipt emailed to the guest."</em> or why not:</p>
+    <ul>
+      <li><em>"Receipt not emailed: guest has no email address - use Email receipt on the payment."</em> Add the address, then open the payment and click <strong>Send Receipt</strong>.</li>
+      <li><em>"Receipt not emailed: the guest email address is not valid - correct it..."</em> Fix the spelling, then use <strong>Send Receipt</strong>.</li>
+      <li><em>"Receipt not emailed: email sending is not set up yet (SMTP in Email settings)..."</em> Ask an administrator to set up email in Hotel Settings.</li>
+      <li><em>"Receipt not emailed: payment receipt emails are switched off in Booking Settings..."</em> Tick <strong>Active</strong> on the <strong>Receipt Email</strong> tab of Email Templates.</li>
+      <li><em>"Receipt NOT emailed (the email could not be sent - details are in System Logs)..."</em> Try <strong>Send Receipt</strong> again; if it keeps failing, tell your manager.</li>
+    </ul>
+    <p>A Pending payment gets no receipt until it is marked Paid or Completed. A receipt is sent only once per payment, so use <strong>Send Receipt</strong> to send it again. On the till, an order with no customer email sends nothing by itself. See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-quote-invoice-receipt">
+    <summary>Quote, invoice or receipt: which one is sent when?</summary>
+    <p>A <strong>quotation</strong> is the price before the stay: it goes with a front-desk booking that has nothing paid. An <strong>invoice</strong> asks for money: it is sent by hand (<strong>Send Invoice</strong>), or at check-out when the guest still owes. A <strong>receipt</strong> says money came in: it is sent by itself for every payment. A payment never sends an invoice. At check-out the guest gets a <strong>Final Invoice</strong> if a balance is owed, or a <strong>Stay Statement - paid in full</strong> if nothing is owed. When money goes back, the guest gets a refund notice or a credit note. See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</p>
   </details>
 
   <details class="faq" id="faq-delete-payment">
@@ -302,6 +339,11 @@
   <details class="faq" id="faq-block-room" data-module="bookings">
     <summary>How do I stop a room being sold (block a room, close dates, stop sales)?</summary>
     <p>For set nights: <strong>Front Desk</strong> &rarr; <strong>Blocked Dates</strong> &rarr; <strong>Block Single Date</strong> or <strong>Block Date Range</strong>, choose <strong>Individual Room Level (Specific room)</strong> (or <strong>Room Type Level</strong> for every room of a type), save. Until the room is fixed: <strong>Individual Rooms</strong> &rarr; <strong>Status</strong> &rarr; <strong>Maintenance</strong> or <strong>Out of Order</strong>. Existing bookings are not moved. See <a href="07-reception-bookings.html#blocked">How to block dates</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-block-rooms-permission" data-module="bookings">
+    <summary>Why can't I block a room? (the buttons are greyed out, or "You need the Block Rooms permission...")</summary>
+    <p>Taking a room off sale needs the <strong>Block Rooms</strong> permission. It covers blocking and unblocking dates on <strong>Blocked Dates</strong>, and choosing <strong>Maintenance</strong> or <strong>Out of Order</strong> on <strong>Individual Rooms</strong>. Without it the buttons are greyed out and say <em>"Needs the Block Rooms permission"</em>, and if you get past that the system answers <em>"You need the Block Rooms permission to do this. Ask a manager to do it or to give you the permission."</em> Managers, Receptionists and Housekeeping have it by default. To give it to someone else, open <strong>Staff &amp; Access</strong> and tick <strong>Block Rooms</strong> for them. Maintenance requests still put a room into Maintenance by themselves. See <a href="07-reception-bookings.html#blocked">How to block dates</a>.</p>
   </details>
 
   <details class="faq" id="faq-booking-page" data-module="bookings">

@@ -114,6 +114,8 @@ function __h_finish(): void
     $buf = '';
     while (ob_get_level() > 0) { $buf = ob_get_clean() . $buf; }
     $res['bytes'] = strlen($buf);
+    // Optional cfg.dump_html = <file path>: keep the rendered page so it can be opened in a browser (screenshots of a user state that cannot be signed in for real).
+    if (!empty($GLOBALS['__h_cfg']['dump_html'])) { @file_put_contents((string)$GLOBALS['__h_cfg']['dump_html'], $buf); }
     foreach (($GLOBALS['__h_cfg']['grep'] ?? []) as $needle) { $res['found'][$needle] = (stripos($buf, $needle) !== false); }
     if (preg_match_all('#<div class="alert[^"]*"[^>]*>.*?</div>#s', $buf, $m)) {
         foreach ($m[0] as $a) { $res['output_flash'][] = trim(preg_replace('/\s+/', ' ', strip_tags($a))); }
@@ -159,7 +161,14 @@ register_shutdown_function('__h_finish');
 ob_start();
 
 // Sign in as an existing active admin user via a throw-away session file in the scratch dir.
-$admin = $pdo->query("SELECT id, username, full_name, role FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch();
+if (!empty($cfg['as_username'])) {
+    // Optional: run as that existing active user instead (to test what a non-admin may do). Needs no new user.
+    $asSt = $pdo->prepare("SELECT id, username, full_name, role FROM admin_users WHERE is_active = 1 AND username = ? LIMIT 1");
+    $asSt->execute([(string)$cfg['as_username']]);
+    $admin = $asSt->fetch();
+} else {
+    $admin = $pdo->query("SELECT id, username, full_name, role FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch();
+}
 if (!$admin) { fwrite(STDERR, "no admin user\n"); exit(2); }
 $sessDir = __DIR__ . '/sessions';
 if (!is_dir($sessDir)) { mkdir($sessDir, 0777, true); }
@@ -179,6 +188,19 @@ session_write_close();
 // Optional seed rows (cfg.setup = [sql,...]): run inside the same never-committing transaction, before the page runs.
 foreach (($cfg['setup'] ?? []) as $setupSql) { $pdo->exec($setupSql); }
 
+// Optional cfg.fake_smtp = <port>: point the (rolled-back) SMTP settings at scripts/tests/fake-smtp.php on
+// 127.0.0.1 so every email the page sends is captured instead of delivered. Refuses to run the page if the
+// override did not take (a page must never reach the real mail server from a test).
+if (!empty($cfg['fake_smtp'])) {
+    $fs = $pdo->prepare("INSERT INTO email_settings (setting_key, setting_value, is_encrypted) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), is_encrypted = 0");
+    foreach (['smtp_host' => '127.0.0.1', 'smtp_port' => (string)(int)$cfg['fake_smtp'], 'smtp_secure' => '', 'smtp_username' => 'fake@example.invalid', 'smtp_password' => 'x', 'smtp_timeout' => '5',
+              'email_development_mode' => '0', 'email_preview_enabled' => '0', 'email_bcc_admin' => '0', 'email_log_enabled' => '0'] as $k => $v) {
+        $fs->execute([$k, $v]);
+    }
+    $chk = $pdo->query("SELECT setting_value FROM email_settings WHERE setting_key = 'smtp_host'")->fetchColumn();
+    if ($chk !== '127.0.0.1') { fwrite(STDERR, "fake smtp override failed\n"); exit(3); }
+}
+
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_SERVER['PHP_SELF'] = $_SERVER['SCRIPT_NAME'] = '/' . $page;
 $_SERVER['REQUEST_URI'] = '/' . $page;
@@ -187,6 +209,7 @@ $_SERVER['SERVER_NAME'] = 'localhost';
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 if (!empty($cfg['ajax'])) { $_SERVER['HTTP_X_REQUESTED_WITH'] = 'XMLHttpRequest'; }
 $_POST = ($cfg['post'] ?? []) + ['csrf_token' => $_SESSION['csrf_token']];
-$_REQUEST = $_POST;
+$_GET = $cfg['get'] ?? [];
+$_REQUEST = $_POST + $_GET;
 chdir($root . '/' . dirname($page));
 require $root . '/' . $page;

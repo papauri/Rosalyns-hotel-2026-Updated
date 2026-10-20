@@ -16,7 +16,7 @@
 
 .rh-help-bubble {
     position: fixed;
-    z-index: 9998;
+    z-index: 1000001; /* above every modal, so hints work inside dialogs */
     max-width: 320px;
     background: #1f1f24;
     color: #fff;
@@ -233,4 +233,10 @@ body.rh-help-on [data-help]::after {
     content: none !important;
     display: none !important;
     opacity: 0 !important;
+}
+
+/* The "Install App" bar sits along the bottom edge (admin/js/pwa-install.js): keep the round ?
+   button above it instead of on top of the bar. */
+body.rh-pwa-bar-on .rh-help-toggle:not([data-inline="1"]) {
+    bottom: 78px;
 }

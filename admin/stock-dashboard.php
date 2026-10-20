@@ -10,6 +10,7 @@ require_once '../includes/alert.php';
 require_once dirname(__DIR__) . '/config/cache.php';
 require_once 'includes/procurement-schema.php';
 require_once 'includes/stock-budget-lib.php';
+require_once dirname(__DIR__) . '/includes/stock-loss.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -26,6 +27,21 @@ if (!ensureStockTablesExist()) {
     $error = 'Stock tables not yet created. Please run admin/migrations/015_stock_management.php first.';
 } else {
     ensureProcurementSchema($pdo);
+}
+
+// "Needs review" list is for managers and admins; each person dismisses items for themselves.
+$canReview = in_array((string)($user['role'] ?? ''), ['admin', 'manager'], true);
+if (!$error && $canReview && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'dismiss_review') {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        $error = 'Security token invalid. Please try again.';
+    } else {
+        $keys = ($_POST['dismiss_all'] ?? '') === '1'
+            ? array_map(static fn(array $i): string => $i['key'], rh_stock_review_items($pdo, (float)(getSetting('stock_variance_block_pct') ?: 10), (float)(getSetting('stock_variance_min_cost') ?: 5000), ''))
+            : [(string)($_POST['key'] ?? '')];
+        rh_stock_review_dismiss((int)$user['id'], $keys);
+        header('Location: stock-dashboard.php#needs-review');
+        exit;
+    }
 }
 
 // Auto-run expiry sweep
@@ -162,6 +178,20 @@ if (!$error && hasPermission((int)$user['id'], 'stock_budget')) {
     }
 }
 
+// Count reminder + "Needs review" (live, never cached)
+$countReminder = null;
+$reviewItems = [];
+if (!$error) {
+    $countReminder = rh_stock_count_reminder($pdo);
+    if ($canReview) {
+        $dismissed = rh_stock_review_dismissed((int)$user['id']);
+        $reviewItems = array_values(array_filter(
+            rh_stock_review_items($pdo, (float)(getSetting('stock_variance_block_pct') ?: 10), (float)(getSetting('stock_variance_min_cost') ?: 5000), (string)$currency_symbol),
+            static fn(array $i): bool => !in_array($i['key'], $dismissed, true)
+        ));
+    }
+}
+
 // Health banner state
 $healthState = 'ok';
 if ($alertSummary['out'] > 0 || ($metrics['expiring_3d'] ?? 0) > 0 || ($metrics['expired_batches'] ?? 0) > 0) {
@@ -248,6 +278,47 @@ $csrf_token = generateCsrfToken();
                 <i class="fas fa-sync-alt"></i>
             </button>
         </div>
+
+        <?php echo rh_stock_count_reminder_html($countReminder, 'stock-count.php'); ?>
+
+        <?php if (!empty($reviewItems)): ?>
+        <!-- ═══ NEEDS REVIEW (last 7 days) ═══ -->
+        <div class="sdash-section" id="needs-review">
+            <div class="sdash-section__header">
+                <h3 class="sdash-section__title">
+                    Needs review
+                    <span class="sdash-badge sdash-badge--red"><?php echo count($reviewItems); ?></span>
+                </h3>
+                <form method="POST" style="margin:0;">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                    <input type="hidden" name="action" value="dismiss_review">
+                    <input type="hidden" name="dismiss_all" value="1">
+                    <button type="submit" class="sdash-btn sdash-btn--sm sdash-btn--ghost">Dismiss all</button>
+                </form>
+            </div>
+            <p style="color:#888;font-size:12px;margin:0 0 8px;">Big count shortages and manual stock changes from the last 7 days. Dismissing only hides an item for you.</p>
+            <?php foreach (array_slice($reviewItems, 0, 20) as $ri): ?>
+            <div class="sdash-alert-item">
+                <div class="sdash-alert-item__info">
+                    <span class="sdash-alert-item__name"><?php echo htmlspecialchars($ri['kind']); ?></span>
+                    <span class="sdash-alert-item__detail"><?php echo htmlspecialchars($ri['text']); ?> &middot; <?php echo htmlspecialchars(($ri['who'] !== '' ? $ri['who'] : 'Unknown') . ', ' . date('Y-m-d H:i', strtotime($ri['at']))); ?></span>
+                </div>
+                <div class="sdash-alert-item__actions">
+                    <a href="<?php echo htmlspecialchars($ri['link']); ?>" class="sdash-btn sdash-btn--sm sdash-btn--primary">Look</a>
+                    <form method="POST" style="margin:0;display:inline;">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                        <input type="hidden" name="action" value="dismiss_review">
+                        <input type="hidden" name="key" value="<?php echo htmlspecialchars($ri['key']); ?>">
+                        <button type="submit" class="sdash-btn sdash-btn--sm sdash-btn--ghost">Dismiss</button>
+                    </form>
+                </div>
+            </div>
+            <?php endforeach; ?>
+            <?php if (count($reviewItems) > 20): ?>
+                <p style="color:#888;font-size:12px;margin:8px 0 0;">Showing the newest 20 of <?php echo count($reviewItems); ?>.</p>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
 
         <?php if ($budgetTile && $budgetTile['notice'] !== ''): ?>
         <div class="sdash-setup-note" style="margin:0 0 16px;padding:12px 16px;border:1px solid <?php echo $budgetTile['status'] === 'over' ? '#edc9c3' : '#ecd4a6'; ?>;background:<?php echo $budgetTile['status'] === 'over' ? '#fbeeec' : '#fdf6e7'; ?>;color:<?php echo $budgetTile['status'] === 'over' ? '#8a3a3a' : '#8a6a2f'; ?>;border-radius:8px;">

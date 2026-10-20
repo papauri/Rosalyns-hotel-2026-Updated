@@ -372,7 +372,7 @@ $modules = [
     ['WhatsApp Notifications',   'Automated guest messaging for booking confirmation, reminders, and check-out summaries.'],
     ['Offline Capability',       'POS and KDS continue operating during internet outages; orders sync automatically on reconnection.'],
     ['API Layer',                'Authenticated API with rate limiting and structured JSON responses for all major operations.'],
-    ['Security Layer',           'CSRF protection, prepared statements (SQL injection prevention), CSP headers, and OWASP Top 10 compliance.'],
+    ['Security Layer',           'CSRF protection, prepared statements (SQL injection prevention) and CSP headers.'],
 ];
 foreach ($modules as [$name, $desc]) {
     bullet($pdf, $desc, $name . ':');
@@ -628,7 +628,7 @@ $schedule = [
     ['Audit Logs',                      'Yes',     ''],
     ['Offline Capability (POS/KDS)',    'Yes',     'Service Worker + auto-sync'],
     ['API Layer',                       'Yes',     'API key authenticated'],
-    ['Security (CSRF, CSP, PDO)',       'Yes',     'OWASP Top 10 compliant'],
+    ['Security (CSRF, CSP, PDO)',       'Yes',     'CSRF tokens, CSP headers, prepared statements'],
 ];
 
 $pdf->SetFillColor(...C_BROWN);

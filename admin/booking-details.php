@@ -1110,15 +1110,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
                 $_SESSION['success_message'] = 'Payment status updated. A completed payment was already '
                     . 'recorded for this booking, so no second payment was created.' . $auto_assign_msg;
             } else {
-                require_once '../config/invoice.php';
-                $invoice_result = sendPaymentInvoiceEmail($booking_id);
-
+                // Money received -> RECEIPT (not an invoice: an invoice requests payment).
                 require_once '../config/receipts.php';
-                $receipt_result = receipt_auto_send($pdo, $new_payment_id, $user);
+                $receipt_after = receipt_after_payment($pdo, $new_payment_id, $user);
 
-                $_SESSION['success_message'] = 'Payment status updated. Payment recorded.' . $auto_assign_msg .
-                    ($invoice_result['success'] ? ' Invoice sent!' : ' (Invoice email failed)') .
-                    ($receipt_result['success'] ? ' Receipt emailed.' : '');
+                $_SESSION['success_message'] = 'Payment status updated. Payment recorded.' . $auto_assign_msg . $receipt_after['notice'];
             }
         } else {
             $_SESSION['success_message'] = 'Payment status updated.';
@@ -1850,7 +1846,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
                         <?php if ($booking['payment_status'] !== 'paid'): ?>
                             <div class="payment-form">
-                                <?php if ($bd_perm_pay): ?><form method="POST" data-admin-confirm="Mark this booking payment as paid and send the payment invoice email?" data-admin-confirm-title="Record payment" data-admin-confirm-ok="Mark paid" data-admin-confirm-icon="fa-money-bill-wave" data-admin-submit-text="Recording payment...">
+                                <?php if ($bd_perm_pay): ?><form method="POST" data-admin-confirm="Mark this booking payment as paid and email the guest a receipt?" data-admin-confirm-title="Record payment" data-admin-confirm-ok="Mark paid" data-admin-confirm-icon="fa-money-bill-wave" data-admin-submit-text="Recording payment...">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                                     <input type="hidden" name="update_payment" value="1">
                                     <input type="hidden" name="payment_status" value="paid">

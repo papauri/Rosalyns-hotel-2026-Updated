@@ -35,6 +35,7 @@
       <li><a href="#add">How to record a payment</a></li>
       <li><a href="#overpay">What happens when a guest pays too much</a></li>
       <li><a href="#edit">How to edit a payment</a></li>
+      <li><a href="#sent">What the guest is sent, and when</a></li>
       <li><a href="#receipt">How to send or reprint a receipt</a></li>
       <li><a href="#refund">How to refund a payment</a></li>
       <li><a href="#settle">How to settle a pending refund</a></li>
@@ -92,12 +93,7 @@
   </ol>
   <p>Amount rules: it must be more than zero and not above 99,999,999. Example: a guest owes MWK 150,000 and hands over MWK 100,000 cash. Enter 100000, method Cash, status Completed. The balance becomes MWK 50,000.</p>
   <p>If the booking already has no balance, a box <em>"Booking fully paid"</em> appears and the amount box stays locked until you tick <strong>Allow payment anyway (adjustment / credit)</strong>.</p>
-  <p>What goes out automatically when you save as <strong>Paid</strong> or <strong>Completed</strong>:</p>
-  <ul>
-    <li>Room booking: an invoice email and a receipt email go to the guest, with your CC addresses and the hotel's invoice CC list.</li>
-    <li>Conference booking: an invoice email goes out with the same CC addresses.</li>
-    <li>Gym and Event: nothing is sent by itself. Use <strong>Send Receipt</strong> on the payment page (see below).</li>
-  </ul>
+  <p>What goes out automatically when you save as <strong>Paid</strong> or <strong>Completed</strong>: a <strong>receipt</strong> with a PDF goes to the guest's email, once, for every type (Room, Conference, Gym and Event). Your <strong>Additional CC Emails</strong> get it too. No invoice is sent, because an invoice asks for money and this guest has just paid. The success line tells you what happened, for example <em>"Receipt emailed to the guest."</em> See <a href="#sent">What the guest is sent, and when</a>. If the receipt cannot go, the same line says why (see Problems and fixes).</p>
   <div class="note"><p>Clicking <strong>Record Payment</strong> twice by accident does not record it twice. You will see <em>"Payment already recorded (reference). Duplicate submission ignored."</em></p></div>
 
   <h2 id="overpay">What happens when a guest pays too much</h2>
@@ -118,7 +114,7 @@
   </ol>
   <ul>
     <li>The amount is the full amount received. The VAT split keeps the rate the payment was first recorded with.</li>
-    <li>Marking a Pending payment as Paid or Completed gives it a receipt number and recalculates the balance.</li>
+    <li>Marking a Pending payment as Paid or Completed gives it a receipt number, recalculates the balance and emails the receipt to the guest (once; a payment that already had its receipt emailed is not sent again).</li>
     <li>Refund lines cannot be edited. Use <strong>Settle this refund</strong> instead.</li>
     <li>A payment with refunds against it is locked: its amount and status cannot be changed.</li>
     <li>If an edit raises the amount above what is owed, the extra becomes a credit note, as described above.</li>
@@ -128,7 +124,30 @@
   <p>Only a payment that was never received can be deleted: one that is still pending, or was cancelled or failed. It must have no receipt number and no invoice. A payment that has been received cannot be deleted, whatever its status: you will see <em>"Payments that have been received can't be deleted. Use a refund or credit note instead."</em> Refund it (see below), or issue a credit note. A payment that has refunds recorded against it cannot be deleted either, and a payment made by credit note is not deleted: void the credit note instead.</p>
   <div class="note"><p>Every edit and every refund is written to the <strong>payment audit log</strong>, with who did it and when. A deleted pending payment is written there too, with who removed it and the reason.</p></div>
 
+  <h2 id="sent">What the guest is sent, and when</h2>
+  <p>The rule is simple. A <strong>quotation</strong> is a price before the stay. An <strong>invoice</strong> asks for money. A <strong>receipt</strong> says money came in. A <strong>credit note</strong> or <strong>refund notice</strong> says money went back.</p>
+  <table>
+    <thead><tr><th>What happened</th><th>What the guest is sent</th><th>How</th></tr></thead>
+    <tbody>
+      <tr><td>A front-desk booking is made and nothing is paid yet</td><td>The booking email and a <strong>Quotation</strong> (the agreed price, with the balance due)</td><td>By itself when you create the booking</td></tr>
+      <tr><td>Money is owed and you want to ask for it</td><td>An <strong>Invoice</strong></td><td>By hand: <strong>Send Invoice</strong> on the booking, or <strong>Send invoice</strong> on a conference, gym or event enquiry</td></tr>
+      <tr><td>Any payment is saved as Paid or Completed (Room, Conference, Gym, Event)</td><td>A <strong>Receipt</strong> with a PDF, one per payment</td><td>By itself, once. Also when a Pending payment is later marked Paid or Completed</td></tr>
+      <tr><td>A restaurant or room-service sale is paid on the till</td><td>A <strong>Receipt</strong></td><td>By itself, only when the order has a customer email. A bill split between several people sends one receipt for each part, to the email on the order</td></tr>
+      <tr><td>Check-out and the guest still owes money</td><td>A <strong>Final Invoice</strong></td><td>By itself at check-out</td></tr>
+      <tr><td>Check-out and nothing is owed</td><td>A <strong>Stay Statement - paid in full</strong> (the same itemised list, with no request for money)</td><td>By itself at check-out</td></tr>
+      <tr><td>A payment comes in later for a balance</td><td>A <strong>Receipt</strong> (never an invoice)</td><td>By itself</td></tr>
+      <tr><td>Money goes back to the guest</td><td>A <strong>Refund Notice</strong> (refund to the original method, or unused nights at an early check-out) or a <strong>Credit Note</strong> (store credit or an overpayment)</td><td>By itself when the refund or credit note is saved, if the guest has an email</td></tr>
+    </tbody>
+  </table>
+  <ul>
+    <li>A payment never sends an invoice. In the Record Payment window for a conference, gym or event, the tick <strong>Also email an invoice for any balance still due</strong> is off by default. Tick it only if you also want the guest asked for the rest. If nothing is left to pay you will see <em>"No invoice sent: nothing is left to pay, the receipt covers this payment."</em></li>
+    <li>The guest needs a valid email address. Without one nothing can be emailed. The success line says so, and you can use <strong>Send Receipt</strong> on the payment later.</li>
+    <li>The automatic receipt uses the <strong>Receipt Email</strong> template. If it is switched off (see <a href="12-email-templates.php">Email templates</a>), no receipt goes by itself, but <strong>Send Receipt</strong> still works.</li>
+    <li>The receipt goes out once per payment. To send it again, use <strong>Send Receipt</strong> on the payment.</li>
+  </ul>
+
   <h2 id="receipt">How to send or reprint a receipt</h2>
+  <p>A receipt is emailed to the guest by itself when a payment is saved as Paid or Completed. Use this to send it again, to a different address, or by WhatsApp.</p>
   <ol class="steps">
     <li>Open the payment (Paid or Completed, not a refund).</li>
     <li>Click <strong>Send Receipt</strong>. A window opens. After you record a new payment this window may open for you.</li>
@@ -291,6 +310,13 @@
       <tr><td><em>You do not have permission to settle refunds.</em></td><td>Missing <strong>Issue &amp; settle refunds</strong>.</td><td>Ask an administrator.</td></tr>
       <tr><td><em>A pending refund cannot be moved to ...</em> style message</td><td>That change is not allowed.</td><td>See the allowed moves under "How to settle a pending refund".</td></tr>
       <tr><td><em>Security token invalid. Refresh and try again.</em></td><td>The page was open too long.</td><td>Reload the page and repeat.</td></tr>
+      <tr><td><em>Receipt not emailed: guest has no email address - use Email receipt on the payment.</em></td><td>The booking, enquiry or order has no email address.</td><td>Add the address, then open the payment and use <strong>Send Receipt</strong>.</td></tr>
+      <tr><td><em>Receipt not emailed: the guest email address is not valid - correct it, then use Email receipt on the payment.</em></td><td>The address is mistyped.</td><td>Correct it, then use <strong>Send Receipt</strong> on the payment.</td></tr>
+      <tr><td><em>Receipt not emailed: email sending is not set up yet (SMTP in Email settings) - use Email receipt on the payment once it is.</em></td><td>The hotel's outgoing email is not set up.</td><td>Ask an administrator to set up email in Hotel Settings, then resend the receipt.</td></tr>
+      <tr><td><em>Receipt not emailed: payment receipt emails are switched off in Booking Settings - use Email receipt on the payment.</em></td><td>The <strong>Receipt Email</strong> template is not active.</td><td>Tick <strong>Active</strong> on the Receipt Email tab in <a href="12-email-templates.php">Email templates</a>, or send receipts by hand.</td></tr>
+      <tr><td><em>Receipt NOT emailed (the email could not be sent - details are in System Logs) - use Email receipt on the payment.</em></td><td>The email server refused or failed.</td><td>Try <strong>Send Receipt</strong> on the payment again. If it keeps failing, tell your manager.</td></tr>
+      <tr><td><em>Receipt generated (development mode: preview only, no live email sent).</em></td><td>The system is in test mode.</td><td>Nothing was delivered. Not an error on a live system.</td></tr>
+      <tr><td>The guest says they got no receipt</td><td>No email on file, the template is off, or the receipt went to junk mail.</td><td>Read the success line you saw when you saved the payment, then use <strong>Send Receipt</strong>.</td></tr>
       <tr><td><em>Cannot accept an expired quotation</em></td><td>Valid Until date has passed.</td><td>Issue a new quotation.</td></tr>
       <tr><td><em>A void reason is required.</em></td><td>Void box empty.</td><td>Type the reason.</td></tr>
       <tr><td><em>This credit note has expired and can no longer be used.</em></td><td>Past its Expires date.</td><td>Issue a new credit note.</td></tr>

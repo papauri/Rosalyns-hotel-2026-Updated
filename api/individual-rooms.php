@@ -79,6 +79,17 @@ try {
 }
 
 /**
+ * Setting a room to Maintenance / Out of Order takes it off sale: the API key needs "rooms.block"
+ * (the integration equivalent of the staff "Block Rooms" permission).
+ */
+function requireBlockRoomsForStatus($status) {
+    global $auth, $client;
+    if (in_array($status, ['maintenance', 'out_of_order'], true) && !$auth->checkPermission($client, 'rooms.block')) {
+        ApiResponse::error('This API key needs the Block Rooms permission (rooms.block) to set a room to Maintenance or Out of Order.', 403);
+    }
+}
+
+/**
  * List all individual rooms with optional filtering
  */
 function listIndividualRooms() {
@@ -281,6 +292,8 @@ function createIndividualRoom() {
         ApiResponse::validationError(['fields' => 'Missing required fields: ' . implode(', ', $missing)]);
     }
     
+    requireBlockRoomsForStatus($input['status'] ?? 'available');
+
     // Check if room type exists (canonical rooms table)
     $typeCheck = $pdo->prepare("SELECT id, name FROM rooms WHERE id = ? AND is_active = 1");
     $typeCheck->execute([$input['room_type_id']]);
@@ -421,6 +434,8 @@ function updateRoomStatus($id) {
         ApiResponse::validationError(['status' => 'Invalid status. Must be one of: ' . implode(', ', $validStatuses)]);
     }
     
+    requireBlockRoomsForStatus($input['status']);
+
     // Get current room data
     $check = $pdo->prepare("SELECT id, status, room_number FROM individual_rooms WHERE id = ?");
     $check->execute([$id]);

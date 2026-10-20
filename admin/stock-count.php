@@ -23,6 +23,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/../includes/stock-loss.php';
 
 $user = [
     'id'        => $_SESSION['admin_user_id'],
@@ -35,7 +36,9 @@ $canApprove = in_array($user['role'] ?? '', ['admin', 'manager'], true);
 $message = '';
 $error = '';
 $currency = getSetting('currency_symbol');
-$alertPct = (float)(getSetting('stock_variance_alert_pct') ?: 2);
+$alertRaw = getSetting('stock_variance_alert_pct', null); // 0 is allowed (alert on any shortage worth the minimum)
+$alertPct = ($alertRaw === null || $alertRaw === false || trim((string)$alertRaw) === '') ? 2.0 : (float)$alertRaw;
+$fmtPct   = static fn(float $p): string => rtrim(rtrim(number_format($p, 2), '0'), '.');
 $blockPct = (float)(getSetting('stock_variance_block_pct') ?: 10);
 $minCost  = (float)(getSetting('stock_variance_min_cost') ?: 5000);
 
@@ -741,6 +744,18 @@ $theftRadar = $pdo->query("
     LIMIT 20
 ")->fetchAll(PDO::FETCH_ASSOC);
 
+/* Manual stock ADDITIONS (last 30 days, top 20 by cost): a manual add can hide an earlier loss. */
+$manualAdds = [];
+$countReminder = null;
+if (!$error && !$activeCount) {
+    try {
+        $manualAdds = rh_stock_manual_additions($pdo, 30, 20);
+    } catch (Throwable $e) {
+        error_log('stock-count manual additions: ' . $e->getMessage());
+    }
+    $countReminder = rh_stock_count_reminder($pdo);
+}
+
 $csrf_token = generateCsrfToken();
 ?>
 <!DOCTYPE html>
@@ -779,6 +794,7 @@ $csrf_token = generateCsrfToken();
             $hasCountedAt = scHasLineCol($pdo, 'counted_at');
             $uncountedTotal = 0;
             $anyOverThreshold = false;
+            $overAlertLines = 0;
             $pageNow = (string)$pdo->query("SELECT NOW()")->fetchColumn();
             /* BLIND COUNT: while a count is being taken the counter must commit to a physical reading
              * before seeing what the system expects - otherwise the anti-theft control is void (type
@@ -813,8 +829,12 @@ $csrf_token = generateCsrfToken();
                     $to = ($hasCountedAt && !empty($ln['counted_at'])) ? (string)$ln['counted_at'] : $pageNow;
                     $activeLines[$i]['_expected'] = (float)$ln['system_quantity'] + scMovementsBetween($pdo, (int)$ln['ingredient_id'], scSnapshotStart($activeCount), $to);
                 }
-                if ($isCounted && scOverThreshold((float)$ln['variance'], $vc, (float)($activeLines[$i]['_expected'] ?? $ln['system_quantity']), $blockPct, $minCost)) {
-                    $anyOverThreshold = true;
+                $activeLines[$i]['_level'] = 'none';
+                if ($isCounted) {
+                    $lvl = rh_stock_alert_level((float)$ln['variance'], $vc, (float)($activeLines[$i]['_expected'] ?? $ln['system_quantity']), $alertPct, $blockPct, $minCost);
+                    $activeLines[$i]['_level'] = $lvl;
+                    if ($lvl !== 'none') $overAlertLines++;
+                    if ($lvl === 'block') $anyOverThreshold = true;
                 }
             }
             $editable = $activeCount['status'] === 'draft';
@@ -864,6 +884,17 @@ $csrf_token = generateCsrfToken();
                 <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;"><i class="fas fa-eye-slash"></i> <strong>Blind count.</strong> Enter what you physically count. System quantities and variances are hidden while the count is open and are shown to the approver after you submit it.</p>
             <?php else: ?>
                 <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;">Variance is measured against <strong>expected stock at count time</strong> (the starting snapshot plus any sales, receipts or wastage recorded while the count was open), so movements during the count are not counted twice.</p>
+                <?php if ($overAlertLines > 0): ?>
+                    <div style="background:#fff7e6; border:1px solid #ffe0a3; color:#7a5200; padding:10px 14px; border-radius:8px; margin-bottom:12px;">
+                        <strong><?php echo (int)$overAlertLines; ?> line<?php echo $overAlertLines === 1 ? '' : 's'; ?> over the alert level.</strong>
+                        They are shaded below.
+                    </div>
+                <?php endif; ?>
+                <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;">
+                    <strong>How lines are shaded:</strong> a shortage worth at least <?php echo htmlspecialchars($currency . ' ' . number_format($minCost, 2)); ?> is shaded
+                    <span style="background:#fff7e6;padding:0 4px;">orange</span> when it is <?php echo htmlspecialchars($fmtPct($alertPct)); ?>% or more of the expected stock (the alert level), and
+                    <span style="background:#fde7e9;padding:0 4px;">red</span> when it is <?php echo htmlspecialchars($fmtPct($blockPct)); ?>% or more (the approval level, which needs a second approver). Both levels are set in Hotel Settings.
+                </p>
             <?php endif; ?>
 
             <?php if ($activeCount['status'] === 'draft' && trim((string)($activeCount['rejection_reason'] ?? '')) !== ''): ?>
@@ -946,10 +977,9 @@ $csrf_token = generateCsrfToken();
                                 $varCost = (float)$ln['variance_cost'];
                                 $lineCounted = !empty($ln['_counted']);
                                 $expectedAt = $ln['_expected'];
-                                $absVarPct = ($expectedAt !== null && $expectedAt > 0) ? abs($var) / $expectedAt * 100 : ($sys > 0 ? abs($var) / $sys * 100 : 0);
                                 $rowClass = '';
-                                if (!$blindCount && $lineCounted && $var < 0 && abs($varCost) >= $minCost) {
-                                    $rowClass = $absVarPct >= $blockPct ? 'row-block' : 'row-flag';
+                                if (!$blindCount && $lineCounted) {
+                                    $rowClass = ($ln['_level'] ?? 'none') === 'block' ? 'row-block' : (($ln['_level'] ?? 'none') === 'alert' ? 'row-flag' : '');
                                 }
                                 $varClass = (!$lineCounted || abs($var) < 0.0001) ? 'var-zero' : ($var > 0 ? 'var-pos' : 'var-neg');
                             ?>
@@ -1186,9 +1216,10 @@ $csrf_token = generateCsrfToken();
 
         <?php else: ?>
             <!-- ============= LIST + START ============= -->
+            <?php echo rh_stock_count_reminder_html($countReminder, '#start-count'); ?>
             <div class="grid-2">
                 <div>
-                    <div class="card">
+                    <div class="card" id="start-count">
                         <h3><i class="fas fa-plus-circle"></i> Start a Count</h3>
                         <p style="font-size:12px; color:#6c757d; margin-top:0;">Surprise counts catch shrinkage. Start narrow if you suspect a specific category.</p>
                         <form method="POST">
@@ -1238,33 +1269,42 @@ $csrf_token = generateCsrfToken();
                     </div>
 
                     <div class="card" style="margin-top:14px;">
-                        <h3 style="color:#c82333;"><i class="fas fa-shield-alt"></i> Theft Radar (last 30d)</h3>
-                        <p style="font-size:12px; color:#6c757d; margin-top:0;">Top ingredients losing stock to <strong>shortage variances</strong> or <strong>manual adjustments</strong> — i.e. drains <em>not</em> attributable to a sale or wastage.</p>
+                        <h3 style="color:#c82333;">Theft Radar (last 30 days)</h3>
+                        <p style="font-size:12px; color:#6c757d; margin-top:0;">Top ingredients losing stock to <strong>shortage variances</strong> or <strong>manual adjustments</strong> — i.e. drains <em>not</em> attributable to a sale or wastage. Manual additions are listed in the next card, because adding stock by hand can cover up a loss.</p>
                         <?php if (empty($theftRadar)): ?>
                             <div style="padding:14px; background:#e9f5ee; border-radius:6px; color:#155724;"><i class="fas fa-check-circle"></i> No unaccounted shortages detected. All stock movement traces to sales or recorded events.</div>
                         <?php else: ?>
-                            <table class="count-list no-card-mobile">
-                                <thead>
-                                    <tr>
-                                        <th>Ingredient</th>
-                                        <th style="text-align:right;">Shortage</th>
-                                        <th style="text-align:right;">Manual out</th>
-                                        <th style="text-align:right;">Cost lost</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($theftRadar as $r):
-                                        $cost = ((float)$r['shortage'] + (float)$r['manual_out']) * (float)$r['cost_per_unit'];
-                                    ?>
-                                        <tr>
-                                            <td data-label="Ingredient"><?php echo htmlspecialchars($r['name']); ?> <span style="color:#6c757d;font-size:11px;"><?php echo htmlspecialchars($r['unit']); ?></span></td>
-                                            <td data-label="Shortage" style="text-align:right; color:#c82333;"><?php echo number_format((float)$r['shortage'], 4); ?></td>
-                                            <td data-label="Manual out" style="text-align:right; color:#c82333;"><?php echo number_format((float)$r['manual_out'], 4); ?></td>
-                                            <td data-label="Cost lost" style="text-align:right; font-weight:600; color:#c82333;"><?php echo $currency . ' ' . number_format($cost, 2); ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                            <?php foreach ($theftRadar as $r):
+                                $cost = ((float)$r['shortage'] + (float)$r['manual_out']) * (float)$r['cost_per_unit'];
+                            ?>
+                                <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--admin-surface-border, #eaecef);font-size:13px;">
+                                    <div style="min-width:0;">
+                                        <?php echo htmlspecialchars($r['name']); ?> <span style="color:#6c757d;font-size:11px;"><?php echo htmlspecialchars($r['unit']); ?></span>
+                                        <div style="color:#6c757d;font-size:11px;">Shortage <?php echo rtrim(rtrim(number_format((float)$r['shortage'], 4, '.', ''), '0'), '.') ?: '0'; ?> &middot; Manual out <?php echo rtrim(rtrim(number_format((float)$r['manual_out'], 4, '.', ''), '0'), '.') ?: '0'; ?></div>
+                                    </div>
+                                    <div style="font-weight:600;white-space:nowrap;color:#c82333;"><?php echo htmlspecialchars($currency . ' ' . number_format($cost, 2)); ?></div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+
+                    <div class="card" style="margin-top:14px;">
+                        <h3>Manual additions (last 30 days)</h3>
+                        <p style="font-size:12px; color:#6c757d; margin-top:0;">Stock added by hand, not received from a supplier or found in a count. A manual addition can hide an earlier loss, so check these against the Theft Radar. Biggest 20 by cost.</p>
+                        <?php if (empty($manualAdds)): ?>
+                            <div style="padding:14px; background:#e9f5ee; border-radius:6px; color:#155724;">No manual additions in the last 30 days.</div>
+                        <?php else: ?>
+                            <?php foreach ($manualAdds as $m): ?>
+                                <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--admin-surface-border, #eaecef);font-size:13px;">
+                                    <div style="min-width:0;">
+                                        <?php echo htmlspecialchars($m['ingredient_name']); ?>
+                                        <strong style="font-size:12px;">+<?php echo rtrim(rtrim(number_format((float)$m['qty'], 4, '.', ''), '0'), '.'); ?> <?php echo htmlspecialchars($m['unit']); ?></strong>
+                                        <div style="color:#6c757d;font-size:11px;"><?php echo htmlspecialchars(($m['who'] ?: 'Unknown') . ' · ' . date('Y-m-d H:i', strtotime((string)$m['created_at']))); ?></div>
+                                        <div style="color:#6c757d;font-size:11px;overflow-wrap:anywhere;"><?php echo htmlspecialchars((string)$m['reason']); ?></div>
+                                    </div>
+                                    <div style="font-weight:600;white-space:nowrap;"><?php echo htmlspecialchars($currency . ' ' . number_format((float)$m['total_cost'], 2)); ?></div>
+                                </div>
+                            <?php endforeach; ?>
                         <?php endif; ?>
                     </div>
                 </div>

@@ -265,9 +265,9 @@ $bootstrap['fingerprint'] = md5(
                 </span>
             </div>
             <div class="filter">
-                <button class="active" data-filter="all" data-help="Show all|Every ticket that's still open in the kitchen — new, cooking, ready and recalled.">All</button>
+                <button class="active" data-filter="all" data-help="Show all|Every ticket still open at this station: new, cooking, ready and recalled.">All</button>
                 <button data-filter="new" data-help="New tickets|Tickets that just arrived from the till and haven't been started yet. Tap Start to begin cooking.">New</button>
-                <button data-filter="in_progress" data-help="Cooking|Tickets where at least one item has been started by the chef but not yet ready.">Cooking</button>
+                <button data-filter="in_progress" data-help="Cooking|Tickets where at least one item has been started but is not ready yet.">Cooking</button>
                 <button data-filter="ready" data-help="Ready for pickup|All food on the ticket is plated and waiting for a runner. Bump the ticket once it's been delivered to the table.">Ready</button>
             </div>
             <div class="right">
@@ -276,7 +276,7 @@ $bootstrap['fingerprint'] = md5(
                 <button class="toggle on" id="soundToggle" data-help="Sound chime|Play a sound when new tickets or notes arrive. Tap to mute."><i class="fas fa-volume-up"></i> <span>Sound</span></button>
                 <button id="soundSettingsBtn" title="Sound settings" aria-label="Open sound settings" onclick="RHSounds.openSettings()"><i class="fas fa-sliders"></i><span>Settings</span></button>
                 <button class="toggle" id="servedTodayBtn" data-loader-manual onclick="openServedToday('current', this)" data-help="Served menu|See served tickets for this station with guests, order taker, timestamps, item lines and station logs."><i class="fas fa-clipboard-check"></i> <span>Served</span></button>
-                <button type="button" class="rh-help-toggle toggle" data-inline="1" id="rhHelpToggle" aria-label="Toggle help tooltips" data-help="Help mode|Turn tooltip hints on or off for station actions."><span class="dot"></span><i class="fas fa-question-circle"></i> <span id="rhHelpLabel">Help</span></button>
+                <button type="button" class="rh-help-toggle toggle" data-inline="1" data-no-lock id="rhHelpToggle" aria-label="Toggle help tooltips" data-help="Help mode|Turn tooltip hints on or off for station actions."><span class="dot"></span><i class="fas fa-question-circle"></i> <span id="rhHelpLabel">Help</span></button>
                 <a href="<?php echo htmlspecialchars($STATION_GUIDE_HREF); ?>" target="_blank" rel="noopener" class="logout-link rh-guide-link" data-help="Station guide|Open the quick guide for this station."><i class="fas fa-book-open"></i> <span><?php echo htmlspecialchars($STATION_GUIDE_LABEL); ?></span></a>
                 <?php if (function_exists('hasPermission') && hasPermission((int)$user['id'], 'kds_reports')): ?>
                     <a href="kds-report.php?station=<?php echo urlencode($STATION); ?>" class="logout-link rh-report-link" data-help="Daily report|Open the end-of-day station report. CSV export and email delivery available."><i class="fas fa-file-invoice"></i> <span>Daily Report</span></a>
@@ -284,7 +284,7 @@ $bootstrap['fingerprint'] = md5(
                 <?php if ($kdsHasAdminPortal): ?>
                     <a href="dashboard.php" class="logout-link rh-dashboard-link" data-help="Back to admin|Returns to the admin dashboard. Station staff are locked to this screen — only managers/admins see this link."><i class="fas fa-arrow-left"></i> <span>Dashboard</span></a>
                 <?php endif; ?>
-                <a href="logout.php" class="logout-link" data-help="Sign out|End your session. Always sign out at the end of a shift so the next chef logs in as themselves — every action is logged per user."><i class="fas fa-sign-out-alt"></i> <span>Logout</span></a>
+                <a href="logout.php" class="logout-link" data-help="Sign out|End your session. Always sign out at the end of a shift so the next person logs in as themselves — every action is logged per user."><i class="fas fa-sign-out-alt"></i> <span>Logout</span></a>
             </div>
             <!-- Burger menu toggle (compact desktop + mobile) -->
             <button class="kds-menu-toggle" id="kdsMenuToggle" aria-label="Open menu" aria-expanded="false" aria-controls="kdsMenuDrawer">

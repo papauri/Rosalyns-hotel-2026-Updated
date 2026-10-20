@@ -22,6 +22,8 @@ require_once __DIR__ . '/includes/bulk-actions.php';
 $message = '';
 $messageType = '';
 $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+// Blocking / unblocking dates takes rooms off sale: it needs the Block Rooms permission (viewing does not).
+$canBlockRooms = rhCanBlockRooms((int)($user['id'] ?? 0));
 
 /**
  * Keep only valid, not-in-the-past blocked nights. A block is one NIGHT: blocking the 5th
@@ -129,7 +131,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $action = $_POST['action'] ?? '';
 
-    if ($action === 'block_date') {
+    if (!$canBlockRooms && in_array($action, ['block_date', 'block_multiple', 'unblock_date', 'bulk_unblock'], true)) {
+        // Server-side refusal: the buttons are disabled for this user, but never trust the page.
+        $message = rhBlockRoomsDeniedMessage();
+        $messageType = 'error';
+    } elseif ($action === 'block_date') {
         $block_scope = $_POST['block_scope'] ?? 'type'; // 'type' or 'individual'
 
         if ($block_scope === 'individual') {
@@ -563,15 +569,24 @@ $site_name = getSetting('site_name');
         <div class="blocked-dates-header">
             <div class="blocked-dates-header__title">
                 <h2 class="section-title">Blocked Dates</h2>
-                <p class="blocked-dates-header__subtitle">Block room types or individual rooms from being booked on specific dates</p>
+                <p class="blocked-dates-header__subtitle">Block room types or individual rooms from being booked on specific dates<?php echo $canBlockRooms ? '' : '. You can view blocked dates here; blocking or unblocking needs the Block Rooms permission.'; ?></p>
             </div>
             <div class="page-actions">
+                <?php if ($canBlockRooms): ?>
                 <button class="btn btn-primary" data-modal-open="blockSingleDateModal" data-help="Availability block|Block a single date for a room type or individual room.">
                     <i class="fas fa-calendar-day"></i> Block Single Date
                 </button>
                 <button class="btn btn-secondary" data-modal-open="blockDateRangeModal" data-help="Availability block|Block a date range for a room type or individual room.">
                     <i class="fas fa-calendar-week"></i> Block Date Range
                 </button>
+                <?php else: ?>
+                <button type="button" class="btn btn-primary" disabled aria-disabled="true" title="<?php echo htmlspecialchars(rhBlockRoomsTooltip(), ENT_QUOTES); ?>">
+                    <i class="fas fa-calendar-day"></i> Block Single Date
+                </button>
+                <button type="button" class="btn btn-secondary" disabled aria-disabled="true" title="<?php echo htmlspecialchars(rhBlockRoomsTooltip(), ENT_QUOTES); ?>">
+                    <i class="fas fa-calendar-week"></i> Block Date Range
+                </button>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -655,7 +670,7 @@ $site_name = getSetting('site_name');
                         <table class="table table-hover blocked-dates-table">
                             <thead>
                                 <tr>
-                                    <th class="admin-bulk-col"><?php echo adminBulkAllBox('Select all visible blocked dates'); ?></th>
+                                    <?php if ($canBlockRooms): ?><th class="admin-bulk-col"><?php echo adminBulkAllBox('Select all visible blocked dates'); ?></th><?php endif; ?>
                                     <th>Date</th>
                                     <th>Scope</th>
                                     <th>Room</th>
@@ -669,7 +684,7 @@ $site_name = getSetting('site_name');
                             <tbody>
                                 <?php foreach ($blocked_dates as $bd): ?>
                                     <tr>
-                                        <td class="admin-bulk-col"><input type="checkbox" class="admin-bulk-check" data-bulk-row value="<?php echo (($bd['block_scope'] ?? 'type') === 'individual' ? 'individual' : 'type') . '-' . (int)$bd['id']; ?>" aria-label="Select blocked date <?php echo htmlspecialchars((string)$bd['block_date'], ENT_QUOTES); ?>"></td>
+                                        <?php if ($canBlockRooms): ?><td class="admin-bulk-col"><input type="checkbox" class="admin-bulk-check" data-bulk-row value="<?php echo (($bd['block_scope'] ?? 'type') === 'individual' ? 'individual' : 'type') . '-' . (int)$bd['id']; ?>" aria-label="Select blocked date <?php echo htmlspecialchars((string)$bd['block_date'], ENT_QUOTES); ?>"></td><?php endif; ?>
                                         <td data-label="Date">
                                             <i class="fas fa-calendar-day blocked-dates-date-icon"></i>
                                             <?php echo date('M j, Y', strtotime($bd['block_date'])); ?>
@@ -725,6 +740,7 @@ $site_name = getSetting('site_name');
                                             <?php echo date('M j, Y g:i A', strtotime($bd['created_at'])); ?>
                                         </td>
                                         <td data-label="Actions">
+                                            <?php if ($canBlockRooms): ?>
                                             <form method="POST" class="blocked-dates-inline-form" data-admin-confirm="Unblock this date and make it available for booking again?" data-admin-confirm-title="Unblock date" data-admin-confirm-ok="Unblock" data-admin-confirm-icon="fa-unlock">
                                                 <input type="hidden" name="action" value="unblock_date">
                                                 <input type="hidden" name="id" value="<?php echo $bd['id']; ?>">
@@ -734,14 +750,21 @@ $site_name = getSetting('site_name');
                                                     <i class="fas fa-unlock"></i> Unblock
                                                 </button>
                                             </form>
+                                            <?php else: ?>
+                                            <button type="button" class="btn btn-danger btn-sm blocked-dates-unblock-btn" disabled aria-disabled="true" title="<?php echo htmlspecialchars(rhBlockRoomsTooltip(), ENT_QUOTES); ?>">
+                                                <i class="fas fa-unlock"></i> Unblock
+                                            </button>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                        <?php if ($canBlockRooms): ?>
                         <?php adminBulkBarStart('bulk_unblock', '#blockedDatesContainer', $csrf_token); ?>
                             <?php adminBulkButton('unblock', 'Unblock', 'fa-unlock', 'Unblock {n} selected date(s) and make them available for booking again?', 'btn-primary', '', 'Unblock'); ?>
                         <?php adminBulkBarEnd(); ?>
+                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
             </div>

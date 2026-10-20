@@ -17,8 +17,12 @@ $suites = [
     'Rooms linked data'     => 'scripts/tests/linked_rooms.php',
     'Money linked data'     => 'scripts/tests/linked_money.php',
     'Gym linked data'       => 'scripts/tests/linked_gym.php',
+    'Block Rooms permission' => 'scripts/tests/block_rooms.php',
     'API payment delete'    => 'scripts/tests/api_payment_delete.php',
     'Stock budget'          => 'scripts/tests/stock_budget.php',
+    'Documents flow'        => 'scripts/tests/documents_flow.php',
+    'Stock loss prevention' => 'scripts/tests/stock_loss.php',
+    'Help map (? button)'   => 'scripts/tests/help_map.php',
     'Linked data health'    => 'scripts/data-health.php',
 ];
 $failed = 0;

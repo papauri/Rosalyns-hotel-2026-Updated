@@ -96,8 +96,11 @@ function bookings_final_invoice_note(int $bookingId, int $userId): string
         if (empty($inv['success'])) {
             return ' Warning: the final invoice could not be generated.';
         }
-        return (empty($inv['idempotent']) ? ' Final invoice generated.' : '')
-            . (empty($inv['email_sent']) ? ' (Final invoice email not sent.)' : '');
+        // Balance owed -> final INVOICE; paid in full -> a paid STATEMENT (the guest already holds every receipt).
+        $owed = (float)($inv['balance_due'] ?? 0) > BALANCE_TOLERANCE;
+        $docName = $owed ? 'Final invoice' : 'Stay statement (paid in full)';
+        return (empty($inv['idempotent']) ? ' ' . $docName . ' generated.' : '')
+            . ((empty($inv['email_sent']) && empty($inv['idempotent'])) ? ' (' . $docName . ' email not sent.)' : '');
     } catch (Throwable $e) {
         error_log('Final invoice at checkout failed for booking ' . $bookingId . ': ' . $e->getMessage());
         return ' Warning: the final invoice could not be generated.';
@@ -1385,6 +1388,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $receipt_number,
                     $user['id']
                 ]);
+                $settlePayId = (int)$pdo->lastInsertId();
                 $settleCreated = true;
             }
 
@@ -1415,28 +1419,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // Send invoice email
-                require_once '../config/invoice.php';
-                $invoice_result = sendPaymentInvoiceEmail($booking_id);
-
-                if ($invoice_result['success']) {
-                    logBookingAudit((int)$booking_id, 'email_sent', null, null, 'Invoice emailed automatically on payment recorded', $booking_reference);
-                    $message .= ' Invoice sent successfully!';
-                } else {
-                    error_log("Invoice email failed: " . $invoice_result['message']);
-                    $message .= ' (Invoice email failed - check logs)';
-                }
-
-                // Send receipt email with PDF for this payment
-                $bk_pay_id_stmt = $pdo->prepare("SELECT id FROM payments WHERE booking_type = 'room' AND booking_id = ? AND payment_type != 'refund' AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
-                $bk_pay_id_stmt->execute([$booking_id]);
-                $bk_pay_id = (int)($bk_pay_id_stmt->fetchColumn() ?: 0);
+                // Money received -> RECEIPT with PDF (not an invoice: an invoice requests payment).
+                $bk_pay_id = (int)($settlePayId ?? 0);
                 if ($bk_pay_id > 0) {
                     require_once '../config/receipts.php';
-                    $receipt_result = receipt_auto_send($pdo, $bk_pay_id, $user);
-                    if ($receipt_result['success']) {
-                        $message .= ' Receipt emailed.';
-                    }
+                    $message .= receipt_after_payment($pdo, $bk_pay_id, $user)['notice'];
                 }
             }
         } elseif ($action === 'checkout') {
@@ -1691,6 +1678,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ppn_s = (float)($sbk['price_per_night'] ?? 0);
             }
 
+            $earlyRefundLegs = []; // refund notices go out after the commit (money returned = guest is told)
             $pdo->beginTransaction();
             try {
                 $settlementPaymentReference = null;
@@ -1787,13 +1775,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 payment_reference, booking_type, booking_id, booking_reference,
                                 payment_date, payment_amount, vat_rate, vat_amount, total_amount,
                                 payment_method, payment_type, payment_status, original_payment_id,
-                                refund_reason, refund_status, refund_amount,
+                                refund_reason, refund_status, refund_amount, refund_notes,
                                 recorded_by, created_at
                             ) VALUES (
                                 ?, 'room', ?, ?, ?,
                                 ?, ?, ?, ?,
                                 ?, 'refund', 'completed', ?,
-                                ?, 'completed', ?,
+                                'early_checkout', 'completed', ?, ?,
                                 ?, NOW()
                             )
                         ");
@@ -1802,8 +1790,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $leg  = (float)$alloc['amount'];
                             $vr   = (float)($orig['vat_rate'] ?? 0);
                             $va   = $vr > 0 ? round($leg * ($vr / (100 + $vr)), 2) : 0.0;
+                            $earlyLegRef = finance_next_refund_reference($pdo, $todayStr_s);
                             $insRef->execute([
-                                finance_next_refund_reference($pdo, $todayStr_s),
+                                $earlyLegRef,
                                 $booking_id,
                                 $sbk['booking_reference'],
                                 $todayStr_s,
@@ -1813,10 +1802,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $leg,
                                 $orig['payment_method'] ?: 'other',
                                 (int)$orig['id'],
-                                $refundReason,
                                 $leg,
+                                $refundReason, // free text belongs in refund_notes; refund_reason is an ENUM
                                 (int)($user['id'] ?? 0),
                             ]);
+                            $earlyRefundLegs[] = ['orig' => array_merge($orig, ['booking_type' => 'room', 'booking_id' => (int)$booking_id, 'booking_reference' => $sbk['booking_reference']]), 'ref' => $earlyLegRef, 'amount' => $leg, 'reason' => $refundReason];
                             if (!function_exists('rh_refresh_original_payment_status') && is_file(__DIR__ . '/includes/finance-account-sync.php')) {
                                 require_once __DIR__ . '/includes/finance-account-sync.php';
                             }
@@ -1873,20 +1863,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $pdo->commit();
 
-                // Send receipt email if an extra-night settlement payment was recorded
+                // Receipt for the extra-night settlement payment, if one was recorded.
+                $settlementReceiptNotice = '';
                 if (!empty($settlement_pay_id)) {
+                    require_once '../config/receipts.php';
+                    $settlementReceiptNotice = receipt_after_payment($pdo, (int)$settlement_pay_id, $user)['notice'];
+                }
+                // Refund notice for unused nights returned at an early checkout (one per refund leg).
+                foreach ($earlyRefundLegs as $erl) {
                     try {
-                        require_once '../config/receipts.php';
-                        receipt_auto_send($pdo, $settlement_pay_id, $user);
-                    } catch (Throwable $rcptEx) {
-                        error_log('Receipt email failed for settlement payment ' . $settlement_pay_id . ': ' . $rcptEx->getMessage());
+                        require_once '../config/email.php';
+                        $erlRes = sendRefundNotificationEmail($erl['orig'], $erl['ref'], (float)$erl['amount'], (string)$erl['reason']);
+                        if (empty($erlRes['success'])) {
+                            error_log('Early-checkout refund notice not sent for ' . $erl['ref'] . ': ' . ($erlRes['message'] ?? 'unknown'));
+                        }
+                    } catch (Throwable $rfEx) {
+                        error_log('Early-checkout refund notice failed for ' . $erl['ref'] . ': ' . $rfEx->getMessage());
                     }
                 }
 
                 header('Content-Type: application/json');
                 $checkoutMessage = 'Checkout completed successfully.';
                 if (!empty($settlementPaymentReference)) {
-                    $checkoutMessage .= ' Extra-night payment recorded (' . $settlementPaymentReference . ').';
+                    $checkoutMessage .= ' Extra-night payment recorded (' . $settlementPaymentReference . ').' . $settlementReceiptNotice;
                 }
                 $checkoutMessage .= bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0));
                 echo json_encode(['success' => true, 'message' => $checkoutMessage]);
@@ -2123,14 +2122,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // Send receipt email for this consolidation payment
+            // Receipt email for this consolidation payment
+            $consolidationReceiptNotice = '';
             if ($consolidation_pay_id > 0) {
-                try {
-                    require_once '../config/receipts.php';
-                    receipt_auto_send($pdo, $consolidation_pay_id, $user);
-                } catch (Throwable $rcptEx) {
-                    error_log('Receipt email failed for consolidation payment ' . $consolidation_pay_id . ': ' . $rcptEx->getMessage());
-                }
+                require_once '../config/receipts.php';
+                $consolidationReceiptNotice = receipt_after_payment($pdo, (int)$consolidation_pay_id, $user)['notice'];
             }
 
             // Fetch updated figures to return to JS
@@ -2159,7 +2155,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode([
                 'success'          => true,
                 'message'          => 'Payment of ' . $currency_symbol . ' ' . number_format($pay_amount, 2) . ' recorded successfully.'
-                    . ($overpayCn_cr ? ' The overpayment of ' . $currency_symbol . ' ' . number_format((float)$overpayCn_cr['excess'], 2) . ' was issued as credit note ' . $overpayCn_cr['credit_note_number'] . '.' : ''),
+                    . ($overpayCn_cr ? ' The overpayment of ' . $currency_symbol . ' ' . number_format((float)$overpayCn_cr['excess'], 2) . ' was issued as credit note ' . $overpayCn_cr['credit_note_number'] . '.' : '')
+                    . $consolidationReceiptNotice,
                 'payment_reference' => $payRef_cr,
                 'new_amount_paid'  => (float)($upd['amount_paid'] ?? 0),
                 'new_amount_due'   => (float)($upd['amount_due'] ?? 0),
@@ -3733,7 +3730,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                                                 <?php /* ── Money ── */ ?>
                                                 <?php if ($can_mark_paid && $_perm_pay): ?>
-                                                    <button class="quick-action paid" title="Record payment as paid" aria-label="Record payment as paid" data-help="Record Payment as Paid|Mark the full outstanding balance as paid in one click. Only available before any payment has been recorded — use Consolidation in the More menu for partial payments." onclick="updatePayment(<?php echo $bk_id; ?>, 'paid')">
+                                                    <button class="quick-action paid" title="Record payment as paid" aria-label="Record payment as paid" data-help="Record Payment as Paid|Mark the full outstanding balance as paid in one click. Only available before any payment has been recorded — use Payments &amp; balance in the More menu for part payments." onclick="updatePayment(<?php echo $bk_id; ?>, 'paid')">
                                                         <i class="fas fa-money-bill-wave"></i>
                                                     </button>
                                                 <?php endif; ?>

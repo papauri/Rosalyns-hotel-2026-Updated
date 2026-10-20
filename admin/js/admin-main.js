@@ -1092,7 +1092,7 @@
     }
 
     // ============================================
-    // ADMIN SMART HELP HINTS (LIGHTWEIGHT)
+    // ADMIN PAGE HINTS (shown by the round ? button)
     // ============================================
 
     function initAdminSmartHints() {
@@ -1128,13 +1128,13 @@
                 return 'Total value of records that reached paid status under the current filters.';
             }
             if (lower.indexOf('cash') >= 0) {
-                return 'Tracks cash-side totals used for till balancing and accountant reconciliation.';
+                return 'Cash totals, used to check that the till balances.';
             }
             if (lower.indexOf('mobile') >= 0 || lower.indexOf('card') >= 0) {
-                return 'Shows non-cash payment totals for reconciliation and payout checks.';
+                return 'Totals paid by mobile money or card.';
             }
             if (lower.indexOf('void') >= 0) {
-                return 'Counts and values voided records so exceptions stay visible in audit.';
+                return 'How many records were voided and their value, so nothing is hidden.';
             }
             if (lower.indexOf('occupancy') >= 0) {
                 return 'Shows current space utilization to guide operational decisions.';
@@ -1245,8 +1245,8 @@
 
             if (pageMatches(/bookings|create-booking|edit-booking|booking-details|tentative-bookings/)) {
                 if (/\b(view|details?)\b/i.test(text)) return 'Booking details|Open full guest, stay, and payment history for this booking.';
-                if (/\b(check\s*-?in)\b/i.test(text)) return 'Check in guest|Move this booking to in-house status and start the active-stay workflow.';
-                if (/\b(check\s*-?out)\b/i.test(text)) return 'Check out guest|Close the stay, finalize charges, and trigger checkout invoice actions.';
+                if (/\b(check\s*-?in)\b/i.test(text)) return 'Check in guest|Mark the guest as arrived and the room as occupied.';
+                if (/\b(check\s*-?out)\b/i.test(text)) return 'Check out guest|Close the stay and settle the bill. The room is then released for cleaning.';
                 if (/\b(cancel)\b/i.test(text)) return 'Cancel booking|Set this booking to cancelled and release dates back into availability.';
             }
 
@@ -1282,9 +1282,9 @@
             { regex: /\b(edit|update)\b/i, help: 'Edit record|Open this item with current values pre-filled so you can safely update it.' },
             { regex: /\b(view|details?)\b/i, help: 'View details|Open the complete record with related history and actions.' },
             { regex: /\b(assign)\b/i, help: 'Assign|Attach this item to the correct staff member, room, or workflow step.' },
-            { regex: /\b(status|approve|reject|confirm)\b/i, help: 'Update status|Move this item to the correct workflow state and save the timeline.' },
-            { regex: /\b(delete|remove|trash)\b/i, help: 'Delete record|Permanently remove this item after confirmation. This action may not be reversible.' },
-            { regex: /\b(save|apply|submit)\b/i, help: 'Save changes|Write the current form values to the database for this record.' },
+            { regex: /\b(status|approve|reject|confirm)\b/i, help: 'Update status|Change the status of this item. The change is saved in its history.' },
+            { regex: /\b(delete|remove|trash)\b/i, help: 'Delete|Remove this item after you confirm. Read the message first: some things cannot be brought back.' },
+            { regex: /\b(save|apply|submit)\b/i, help: 'Save|Keep what you have typed on this form.' },
             { regex: /\b(export|csv|download)\b/i, help: 'Export data|Download the currently filtered rows as a file for sharing or analysis.' },
             { regex: /\b(clear|reset)\b/i, help: 'Clear selection|Reset current filters or form values to their default state.' }
         ];

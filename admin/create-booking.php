@@ -1127,36 +1127,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 'room_name'              => $room_name_for_email,
             ];
             if ($payment_received && $amount_collected > 0) {
-                // Payment taken — send invoice email then receipt email
-                try {
-                    require_once '../config/invoice.php';
-                    $inv_cc = [];
-                    $inv_recipients_cfg = getEmailSetting('invoice_recipients', '');
-                    $inv_smtp_user = getEmailSetting('smtp_username', '');
-                    if (!empty($inv_recipients_cfg)) {
-                        $inv_cc = array_filter(array_map('trim', explode(',', $inv_recipients_cfg)));
-                    }
-                    if (!empty($inv_smtp_user) && !in_array($inv_smtp_user, $inv_cc)) {
-                        $inv_cc[] = $inv_smtp_user;
-                    }
-                    $inv_result = sendPaymentInvoiceEmailWithCC($primary_id, $inv_cc);
-                    $email_msg = $inv_result['success']
-                        ? ' Invoice emailed to guest.'
-                        : ' (Invoice email failed: ' . htmlspecialchars($inv_result['message'] ?? 'unknown error') . ')';
-                } catch (\Throwable $invEx) {
-                    error_log('Invoice email failed for ' . $primary_ref . ': ' . $invEx->getMessage());
-                    $email_msg = ' (Invoice email failed)';
-                }
-                // Send receipt email with PDF for the primary booking's latest payment
+                // Payment taken -> RECEIPT (proof of money received) for every payment this front-desk
+                // booking recorded (one per room when several were booked). No invoice: an invoice requests
+                // payment, and this guest has just paid.
+                // The booking confirmation (what the old payment-invoice email doubled as) is its own email.
+                $email_result = $booking_status === 'confirmed'
+                    ? sendBookingConfirmedEmail($booking_data)
+                    : sendBookingReceivedEmail($booking_data);
+                $email_msg = $email_result['success']
+                    ? ' Confirmation email sent.'
+                    : ' (Confirmation email failed: ' . htmlspecialchars($email_result['message'] ?? 'unknown error') . ')';
                 try {
                     require_once '../config/receipts.php';
-                    $latestPayStmt = $pdo->prepare("SELECT id FROM payments WHERE booking_type = 'room' AND booking_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
-                    $latestPayStmt->execute([$primary_id]);
-                    $latestPayId = (int)($latestPayStmt->fetchColumn() ?: 0);
-                    if ($latestPayId > 0) {
-                        $rcpt_result = receipt_auto_send($pdo, $latestPayId, $user);
-                        if ($rcpt_result['success']) {
-                            $email_msg .= ' Receipt emailed.';
+                    $rcptIdStmt = $pdo->prepare("SELECT id FROM payments WHERE booking_type = 'room' AND booking_id = ? AND payment_type <> 'refund' AND payment_status IN ('completed','paid') AND deleted_at IS NULL ORDER BY id ASC");
+                    foreach ($created_bookings as $cbRcpt) {
+                        $rcptIdStmt->execute([(int)$cbRcpt['id']]);
+                        foreach ($rcptIdStmt->fetchAll(PDO::FETCH_COLUMN) as $rcptPayId) {
+                            $rcptAfter = receipt_after_payment($pdo, (int)$rcptPayId, $user);
+                            if ((int)$cbRcpt['id'] === (int)$primary_id) {
+                                $email_msg .= $rcptAfter['notice'];
+                            }
                         }
                     }
                 } catch (\Throwable $rcptEx) {
@@ -1169,7 +1159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     ? ' Confirmation email sent.'
                     : ' (Email failed: ' . htmlspecialchars($email_result['message'] ?? 'unknown error') . ')';
             } else {
-                // No payment yet — send booking confirmation + proforma invoice
+                // No payment yet — send booking confirmation + quotation (fixed price before the stay)
                 if ($booking_status === 'confirmed') {
                     $email_result = sendBookingConfirmedEmail($booking_data);
                 } else {
@@ -1179,7 +1169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     ? ' Confirmation email sent.'
                     : ' (Email failed: ' . htmlspecialchars($email_result['message'] ?? 'unknown error') . ')';
 
-                // Also send proforma invoice showing balance due
+                // Also send the quotation showing the agreed price and balance due
                 if (in_array($booking_status, ['confirmed', 'pending'], true)) {
                     try {
                         if (!function_exists('sendTentativeQuotationEmail')) {
@@ -1196,12 +1186,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                         if ($qp_booking) {
                             $qp_result = sendTentativeQuotationEmail($qp_booking, [
                                 'valid_days'      => 30,
-                                'quotation_notes' => 'Payment is due upon arrival. Please bring this invoice with you.',
+                                'quotation_notes' => 'Payment is due upon arrival. Please bring this quotation with you.',
                                 'attach_pdf'      => true,
                                 'send_whatsapp'   => false,
                             ]);
                             if (!empty($qp_result['success'])) {
-                                $email_msg .= ' Invoice sent to guest.';
+                                $email_msg .= ' Quotation sent to guest.';
                             }
                         }
                     } catch (\Throwable $qpEx) {

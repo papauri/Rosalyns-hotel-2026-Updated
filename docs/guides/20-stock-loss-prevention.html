@@ -92,13 +92,23 @@
   <p>For each line that is short you must pick a <strong>Reason</strong>: <strong>Spillage</strong>, <strong>Expired</strong>, <strong>Staff meal</strong>, <strong>Sampling</strong>, <strong>Prep waste</strong>, <strong>Theft suspected</strong>, <strong>Correction</strong> or <strong>Other</strong>. You cannot submit the count without them. If sales during the count turn a line into a shortage that has no reason, nothing is posted and the count goes back to the counter. A blank line is never read as zero: a count cannot be submitted until every line has a reading.</p>
 
   <h3>The counter cannot approve a big shortage</h3>
-  <p>A shortage is "big" when it is worth at least the cost limit <em>and</em> is at least the percentage limit of the expected stock (set in Hotel Settings, see Setting it up). A big shortage cannot be approved by the person who counted. A different manager or admin must do it. The opening stock count always needs a different approver. Rows with a large shortage are shaded orange or red for the approver.</p>
+  <p>A shortage is "big" when it is worth at least the cost limit <em>and</em> is at least the percentage limit of the expected stock (set in Hotel Settings, see Setting it up). A big shortage cannot be approved by the person who counted. A different manager or admin must do it. The opening stock count always needs a different approver.</p>
+  <p>Lines are shaded for the approver by one simple rule. A shortage worth at least the minimum value (see Setting it up) is shaded <strong>orange</strong> when it is the <strong>alert at variance</strong> share of the expected stock or more, and <strong>red</strong> when it is the <strong>needs approval above</strong> share or more. Red needs a second approver. When any line is orange or red, a yellow box above the lines says, for example, <em>"2 lines over the alert level."</em> (<em>"1 line over the alert level."</em> for one). Surpluses and small shortages are never shaded. The shading and the box do not show on a blind count, only to people who may see the figures.</p>
 
   <h3>Approval is final, and a rejected count starts again from scratch</h3>
   <p>When a manager clicks <strong>Approve &amp; post variances</strong>, the differences are applied to stock and the approver's name and time are kept. It cannot be undone. <strong>Reject &amp; send back</strong> needs a reason of at least 8 characters. After a rejection, <strong>Reopen for re-count</strong> takes a fresh snapshot and puts every line back to <strong>Not counted</strong>, so old readings cannot be tweaked to fit.</p>
 
   <h3>Theft Radar points to the ingredients to watch</h3>
-  <p><strong>Theft Radar (last 30d)</strong> sits on the Stock Count page. It lists up to 20 ingredients that lost stock in the last 30 days through count shortages or manual subtractions, which no sale or wastage entry explains. The columns are <strong>Ingredient</strong>, <strong>Shortage</strong>, <strong>Manual out</strong> and <strong>Cost lost</strong>, biggest cost first. If nothing is found you see <em>"No unaccounted shortages detected. All stock movement traces to sales or recorded events."</em> Anyone who can open Stock Count can see it.</p>
+  <p><strong>Theft Radar (last 30 days)</strong> sits on the Stock Count page. It is a list of up to 20 ingredients that lost stock in the last 30 days through count shortages or manual subtractions, which no sale or wastage entry explains. Each row shows the ingredient, its <strong>Shortage</strong> and <strong>Manual out</strong> amounts in small print, and the cost lost on the right, biggest cost first. If nothing is found you see <em>"No unaccounted shortages detected. All stock movement traces to sales or recorded events."</em> Anyone who can open Stock Count can see it.</p>
+
+  <h3>Manual additions are listed too, because an addition can hide a loss</h3>
+  <p>Under Theft Radar, the card <strong>Manual additions (last 30 days)</strong> lists stock that someone added by hand, not received from a supplier and not found in a count. A manual addition can cover up an earlier loss, so compare this list with Theft Radar. Each row shows the ingredient, how much was added, who did it and when, the reason they gave, and the cost on the right. It shows the biggest 20 by cost. If there are none you see <em>"No manual additions in the last 30 days."</em></p>
+
+  <h3>The system reminds you to count</h3>
+  <p>When no stock count has been approved for a while, an amber notice appears at the top of the <strong>Stock Overview</strong> and the <strong>Stock Count</strong> page, for example <em>"No stock count approved for 9 days — start one."</em> Click <strong>start one</strong> to go to the count form. If no count has ever been approved it says <em>"No stock count has been approved yet"</em>. You choose the number of days in Hotel Settings (see Setting it up). It is only a notice on the screen: no email is sent.</p>
+
+  <h3>The Stock Overview lists what needs a manager's eyes</h3>
+  <p>Managers and administrators see a <strong>Needs review</strong> list on the <strong>Stock Overview</strong> (a red number shows how many). It gathers, from the last 7 days: counts that were approved with a big shortage (<strong>Big shortage</strong>), stock changed by hand (<strong>Manual adjustment</strong>), and batches that were written off, recalled or expired. Each row says what happened, who did it and when. Click <strong>Look</strong> to open the count or the Adjustments report. Click <strong>Dismiss</strong> to hide one row, or <strong>Dismiss all</strong> to hide the lot. Dismissing only hides it for you. Other managers still see it, and nothing is deleted from the trail. The list shows the newest 20. Other staff do not see this list.</p>
 
   <h3>Deliveries are checked against the order</h3>
   <p>Receive against a purchase order, not from memory. You cannot receive more than is outstanding unless you type an <strong>Over-delivery note</strong> of at least 5 characters, and the line is flagged <strong>over-delivered</strong> with your note. Items with no cost cannot be received. On <strong>Stock In</strong> by hand, a quantity more than 5 times what you hold, or an expiry date in the past, makes you confirm. Each received batch shows who received it. Where: <strong>Purchase Orders</strong> and <strong>Receive Stock</strong>; see the <strong>Stock-In</strong> tab in Stock Reports.</p>
@@ -129,7 +139,8 @@
   <h2 id="weekly">Weekly routine for managers</h2>
   <p>Set aside about 30 minutes, at the same time each week.</p>
   <ol class="steps">
-    <li>Open Admin menu &rarr; Stock &rarr; <strong>Stock Count</strong>. Read <strong>Theft Radar (last 30d)</strong>. Write down the top ingredients and their <strong>Cost lost</strong>.</li>
+    <li>Open Admin menu &rarr; Stock &rarr; <strong>Stock Overview</strong> and look at <strong>Needs review</strong>. Click <strong>Look</strong> on each row, then <strong>Dismiss</strong> it when you have dealt with it.</li>
+    <li>Open Admin menu &rarr; Stock &rarr; <strong>Stock Count</strong>. Read <strong>Theft Radar (last 30 days)</strong> and <strong>Manual additions (last 30 days)</strong>. Write down the top ingredients and their costs.</li>
     <li>Start a count without warning. Under <strong>Start a Count</strong> choose <strong>By category</strong> or <strong>Spot check (specific items)</strong>, pick the ingredients that Theft Radar and your high-cost items point to (spirits, meat, oil, cleaning supplies), and give it a <strong>Shift label</strong> such as "Surprise". Ask a storekeeper or a different manager to do the counting. Click <strong>Start count</strong>.</li>
     <li>When the count is submitted, open it and review the shortages. Look at the <strong>Reason</strong> given on each line. Be wary of <strong>Other</strong>, <strong>Correction</strong> and <strong>Staff meal</strong> on high-cost items. Approve it, or use <strong>Reject &amp; send back</strong> with a reason if the figures do not make sense.</li>
     <li>Open <strong>Stock Reports</strong> &rarr; <strong>Wastage</strong>. Set <strong>From</strong> and <strong>To</strong> to the last 7 days and click <strong>Apply</strong>. Look for entries that are large, repeated, all by one person, or of an item that is not normally wasted.</li>
@@ -159,12 +170,13 @@
   <h3>Variance limits</h3>
   <ol class="steps">
     <li>Open Admin menu &rarr; Settings &rarr; <strong>Hotel Settings</strong> &rarr; <strong>Hotel details &amp; policies</strong> and find the group <strong>Restaurant &amp; stock</strong>. You need the <strong>Hotel Settings</strong> permission.</li>
-    <li><strong>Stock count: needs approval above (%)</strong>: default 10. A shortage at or above this share of the expected stock may need a second approver.</li>
-    <li><strong>Stock count: ignore variances worth less than</strong>: default 5000 (MWK). A shortage worth less than this never needs a second approver and is not shaded on the count.</li>
-    <li>A different approver is needed only when <strong>both</strong> limits are passed. To make the rule apply to smaller shortages, lower both numbers.</li>
+    <li><strong>Stock count: alert at variance (%)</strong>: default 2. A counted shortage this size or bigger is shaded orange and counted in the box <em>"N lines over the alert level"</em>.</li>
+    <li><strong>Stock count: needs approval above (%)</strong>: default 10. A shortage at or above this share of the expected stock is shaded red and needs a second approver.</li>
+    <li><strong>Stock count: ignore variances worth less than</strong>: default 5000 (MWK). A shortage worth less than this is never shaded and never needs a second approver.</li>
+    <li><strong>Remind to count stock after (days, 0 = off)</strong>: default 7. When no count has been approved for this many days, a notice appears on the Stock Overview and Stock Count pages. Type 0 to switch the reminder off.</li>
+    <li>A different approver is needed only when <strong>both</strong> the approval limit and the minimum value are passed. To make the rule apply to smaller shortages, lower both numbers.</li>
     <li>Click <strong>Save Hotel Details</strong> at the bottom. Nothing is saved until you do.</li>
   </ol>
-  <div class="note"><p>The setting <strong>Stock count: alert at variance (%)</strong> is saved, but the count page does not use it yet. Only the other two settings change what the count does.</p></div>
   <h3>Permissions, so the counter is not the approver</h3>
   <ul>
     <li>Give <strong>Stock Count &amp; Variance</strong> to the storekeeper or chef who counts. Do not give them the Manager role. They can then count and submit, but they cannot approve or reject.</li>
@@ -183,7 +195,7 @@
 
   <h2 id="limits">What the system cannot do for you</h2>
   <ul>
-    <li>It does not make anyone count on a schedule. You have to start the counts.</li>
+    <li>It does not make anyone count on a schedule. It shows a reminder on the screen when no count has been approved for a while, but you have to start the counts. It sends no emails.</li>
     <li>It cannot tell theft from a mistake. <strong>Theft suspected</strong> is a label that a person chooses.</li>
     <li>It cannot see stock that leaves with no record at all, until a count finds it.</li>
     <li>It does not track sold items that have no recipe.</li>
@@ -211,6 +223,8 @@
       <tr><td><em>"... receiving 2 more than ordered needs an over-delivery note (at least 5 characters) explaining why."</em></td><td>More arrived than the purchase order line expects.</td><td>Type the reason in <strong>Over-delivery note</strong>. If you cannot explain it, find out before you receive it.</td></tr>
       <tr><td><em>"This order takes the budget over for [category]. A budget manager has to approve it before it can be sent."</em></td><td>The budget line needs approval.</td><td>Ask a manager with <strong>Stock Budget (set &amp; approve)</strong>.</td></tr>
       <tr><td><em>"Only admins or managers can void a paid order."</em></td><td>Wrong role.</td><td>Ask a manager.</td></tr>
+      <tr><td><em>"No stock count approved for 9 days — start one."</em></td><td>The count reminder. No count has been approved for the number of days set in Hotel Settings.</td><td>Click <strong>start one</strong> and do a count, or change <strong>Remind to count stock after (days, 0 = off)</strong>.</td></tr>
+      <tr><td>The <strong>Needs review</strong> list is missing, or an item you saw has gone</td><td>Only managers and administrators see it, it shows only the last 7 days, and an item you dismissed is hidden for you.</td><td>Ask a manager, or open <strong>Stock Reports</strong> &rarr; <strong>Adjustments</strong> to see the full trail.</td></tr>
       <tr><td>Theft Radar shows an ingredient with a large <strong>Cost lost</strong></td><td>It lost stock to count shortages or manual subtractions in the last 30 days.</td><td>Follow <a href="#short">When stock is short</a>.</td></tr>
       <tr><td>Stock shows below zero or <strong>Pending Reconciliation</strong> is not empty</td><td>Items were sold when no stock was on record.</td><td>Receive the missing delivery or fix it at the next count.</td></tr>
     </tbody>

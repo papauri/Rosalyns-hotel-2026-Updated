@@ -3,6 +3,31 @@
 require_once __DIR__ . '/../../includes/station-hours.php';
 
 /**
+ * Receipt for a restaurant / room-service sale: when the order carries a valid customer email, queue the
+ * payment receipt to go out when the request ends (after the till's own transaction has committed; a
+ * rolled-back sale is skipped). Orders without an email send nothing (walk-ins); the till can still email
+ * or print the itemised receipt by hand. receipt_auto_send() refuses duplicates.
+ */
+function rh_queue_restaurant_receipt(PDO $pdo, int $orderId, int $paymentId): void
+{
+    if ($orderId <= 0 || $paymentId <= 0) {
+        return;
+    }
+    try {
+        $st = $pdo->prepare('SELECT customer_email FROM stock_orders WHERE id = ?');
+        $st->execute([$orderId]);
+        $email = trim((string)$st->fetchColumn());
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return;
+        }
+        require_once __DIR__ . '/../../config/receipts.php';
+        receipt_queue_after_request($paymentId);
+    } catch (Throwable $e) {
+        error_log('rh_queue_restaurant_receipt: ' . $e->getMessage());
+    }
+}
+
+/**
  * Sync a restaurant/POS order into the central payments ledger.
  *
  * @param array<string,mixed> $vatParts Requires keys: net, vat_rate, vat, gross
@@ -66,6 +91,9 @@ function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?
             $keepActor,
             $paymentId,
         ]);
+        if (!$alreadyBooked) {
+            rh_queue_restaurant_receipt($pdo, $orderId, $paymentId);
+        }
         return $paymentId;
     }
 
@@ -85,7 +113,9 @@ function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?
         $notes,
         $recordedBy,
     ]);
-    return (int)$pdo->lastInsertId();
+    $newPaymentId = (int)$pdo->lastInsertId();
+    rh_queue_restaurant_receipt($pdo, $orderId, $newPaymentId);
+    return $newPaymentId;
 }
 
 
@@ -148,7 +178,11 @@ function rh_record_restaurant_split_leg_payment(PDO $pdo, int $orderId, string $
             $notes,
             $recordedBy,
         ]);
-    return (int)$pdo->lastInsertId();
+    $legPaymentId = (int)$pdo->lastInsertId();
+    // One receipt per leg (each leg is its own payment with its own receipt number), sent after the till's
+    // transaction commits and only when the order carries a customer email.
+    rh_queue_restaurant_receipt($pdo, $orderId, $legPaymentId);
+    return $legPaymentId;
 }
 
 /**

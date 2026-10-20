@@ -46,6 +46,8 @@ function ir_validate_room_fields(PDO $pdo, int $room_type_id, string $room_numbe
 
 $message = '';
 $error = '';
+// Setting a room to Maintenance / Out of Order takes it off sale: that needs the Block Rooms permission.
+$canBlockRooms = rhCanBlockRooms((int)($user['id'] ?? 0));
 // Allow other pages (e.g. room-management.php) to deep-link straight into the
 // joined-room manager via ?combinations=1.
 $autoOpenCombinations = isset($_GET['combinations']) && $_GET['combinations'] === '1';
@@ -187,6 +189,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = $fieldError;
             } elseif (!in_array($status, $validRoomStatuses, true)) {
                 $error = 'Invalid room status.';
+            } elseif (rhStatusBlocksRoom((string)$status) && !$canBlockRooms) {
+                $error = rhBlockRoomsDeniedMessage();
             } else {
                 // Check if room number already exists (case/space-insensitive, re-checked under a lock)
                 rh_with_create_lock($pdo, 'individual_room', function () use ($pdo, $user, $room_type_id, $room_number, $room_name, $floor, $status, $max_guests_override, $child_price_multiplier, $single_override, $double_override, $triple_override, $children_override, $notes, $display_order, $amenities_list, $photos_list, &$error, &$message) {
@@ -444,11 +448,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $validStatuses = ['available', 'occupied', 'maintenance', 'cleaning', 'out_of_order'];
             if (!in_array($new_status, $validStatuses)) {
                 $error = 'Invalid status.';
+            } elseif (rhStatusBlocksRoom((string)$new_status) && !$canBlockRooms) {
+                $error = rhBlockRoomsDeniedMessage();
             } else {
                 $pdo->beginTransaction();
                 try {
                     $currentStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ? FOR UPDATE");
-                    $stmt = $pdo->prepare("UPDATE individual_rooms SET status = ? WHERE id = ?");
+                    $stmt =$pdo->prepare("UPDATE individual_rooms SET status = ? WHERE id = ?");
                     $logStmt = $pdo->prepare("
                         INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by)
                         VALUES (?, ?, ?, ?, ?)
@@ -504,6 +510,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $validStatuses = ['available', 'occupied', 'maintenance', 'cleaning', 'out_of_order'];
                 if (!in_array($new_status, $validStatuses)) {
                     $error = 'Invalid status.';
+                } elseif (rhStatusBlocksRoom((string)$new_status) && !$canBlockRooms) {
+                    $error = rhBlockRoomsDeniedMessage();
                 } else {
                     // A joined room counts as ONE selected unit and moves both of its rooms.
                     $bulkPairMap = rh_joined_only_pair_map();
@@ -1658,8 +1666,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 <option value="available">Available</option>
                 <option value="occupied">Occupied</option>
                 <option value="cleaning">Cleaning</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="out_of_order">Out of Order</option>
+                <option value="maintenance"<?php echo $canBlockRooms ? '' : ' disabled data-needs-block-rooms="1" title="' . htmlspecialchars(rhBlockRoomsTooltip(), ENT_QUOTES) . '"'; ?>>Maintenance<?php echo $canBlockRooms ? '' : ' (needs Block Rooms permission)'; ?></option>
+                <option value="out_of_order"<?php echo $canBlockRooms ? '' : ' disabled data-needs-block-rooms="1" title="' . htmlspecialchars(rhBlockRoomsTooltip(), ENT_QUOTES) . '"'; ?>>Out of Order<?php echo $canBlockRooms ? '' : ' (needs Block Rooms permission)'; ?></option>
             </select>
             <?php adminBulkButton('status', 'Apply', 'fa-check', 'Change status of {n} room(s)?', 'btn-primary', 'bulk_status', 'Apply'); ?>
         <?php adminBulkBarEnd(); ?>
@@ -2051,8 +2059,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                 <option value="available">Available</option>
                                 <option value="occupied">Occupied</option>
                                 <option value="cleaning">Cleaning</option>
-                                <option value="maintenance">Maintenance</option>
-                                <option value="out_of_order">Out of Order</option>
+                                <option value="maintenance"<?php echo $canBlockRooms ? '' : ' disabled data-needs-block-rooms="1" title="' . htmlspecialchars(rhBlockRoomsTooltip(), ENT_QUOTES) . '"'; ?>>Maintenance<?php echo $canBlockRooms ? '' : ' (needs Block Rooms permission)'; ?></option>
+                                <option value="out_of_order"<?php echo $canBlockRooms ? '' : ' disabled data-needs-block-rooms="1" title="' . htmlspecialchars(rhBlockRoomsTooltip(), ENT_QUOTES) . '"'; ?>>Out of Order<?php echo $canBlockRooms ? '' : ' (needs Block Rooms permission)'; ?></option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -2166,8 +2174,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             <option value="available">Available</option>
                             <option value="occupied">Occupied</option>
                             <option value="cleaning">Cleaning</option>
-                            <option value="maintenance">Maintenance</option>
-                            <option value="out_of_order">Out of Order</option>
+                            <option value="maintenance"<?php echo $canBlockRooms ? '' : ' disabled data-needs-block-rooms="1" title="' . htmlspecialchars(rhBlockRoomsTooltip(), ENT_QUOTES) . '"'; ?>>Maintenance<?php echo $canBlockRooms ? '' : ' (needs Block Rooms permission)'; ?></option>
+                            <option value="out_of_order"<?php echo $canBlockRooms ? '' : ' disabled data-needs-block-rooms="1" title="' . htmlspecialchars(rhBlockRoomsTooltip(), ENT_QUOTES) . '"'; ?>>Out of Order<?php echo $canBlockRooms ? '' : ' (needs Block Rooms permission)'; ?></option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -2376,10 +2384,15 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             sel.value = currentStatus;
 
             // Re-enable all options first (in case re-opening after a different room)
+            // (Maintenance / Out of Order stay disabled for users without the Block Rooms permission.)
             Array.from(sel.options).forEach(o => {
-                o.disabled = false;
+                o.disabled = o.hasAttribute('data-needs-block-rooms');
                 o.textContent = o.textContent.replace(' ⚠', '');
             });
+            if (sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].disabled) {
+                // The room is already in a blocked status and this user cannot choose it: default to "Available".
+                sel.value = 'available';
+            }
 
             // If there's an active booking, warn and block "available" as a direct jump
             const warning = document.getElementById('statusActiveWarning');

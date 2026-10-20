@@ -63,9 +63,10 @@ if (!function_exists('rh_hotel_details_fields')) {
                 'restaurant_receipt_footer'     => ['label' => 'Restaurant receipt footer', 'type' => 'text', 'max' => 160, 'default' => 'Thank you for dining with us!'],
                 'restaurant_menu_pdf_url'       => ['label' => 'Menu PDF link (optional)', 'type' => 'url', 'default' => ''],
                 'restaurant_service_charge_pct' => ['label' => 'Restaurant service charge (%)', 'type' => 'decimal', 'min' => 0, 'max' => 25, 'default' => '0', 'finance' => true],
-                'stock_variance_alert_pct'      => ['label' => 'Stock count: alert at variance (%)', 'type' => 'decimal', 'min' => 0, 'max' => 100, 'default' => '2'],
-                'stock_variance_block_pct'      => ['label' => 'Stock count: needs approval above (%)', 'type' => 'decimal', 'min' => 0, 'max' => 100, 'default' => '10'],
-                'stock_variance_min_cost'       => ['label' => 'Stock count: ignore variances worth less than', 'type' => 'decimal', 'min' => 0, 'max' => 100000000, 'default' => '5000'],
+                'stock_variance_alert_pct'      => ['label' => 'Stock count: alert at variance (%)', 'type' => 'decimal', 'min' => 0, 'max' => 100, 'default' => '2', 'help' => 'A counted shortage this size or bigger is shaded orange and counted as "over the alert level".'],
+                'stock_variance_block_pct'      => ['label' => 'Stock count: needs approval above (%)', 'type' => 'decimal', 'min' => 0, 'max' => 100, 'default' => '10', 'help' => 'A shortage this size or bigger is shaded red and the count needs a second approver.'],
+                'stock_variance_min_cost'       => ['label' => 'Stock count: ignore variances worth less than', 'type' => 'decimal', 'min' => 0, 'max' => 100000000, 'default' => '5000', 'help' => 'Small shortages below this value are never shaded or flagged.'],
+                'stock_count_reminder_days'     => ['label' => 'Remind to count stock after (days, 0 = off)', 'type' => 'int', 'min' => 0, 'max' => 365, 'default' => '7', 'help' => 'Shows a notice on the Stock Dashboard and Stock Count pages when no count has been approved for this many days.'],
             ],
         ];
     }
@@ -244,6 +245,9 @@ if (!function_exists('rh_hotel_details_fields')) {
                         $attrs .= ' placeholder="2:00 PM"';
                     }
                     echo '<input type="' . $type . '" id="' . $id . '" name="' . $key . '" value="' . $e($val) . '"' . $attrs . $dis . '>';
+                }
+                if (!empty($spec['help'])) {
+                    echo '<small class="help-text">' . $e($spec['help']) . '</small>';
                 }
                 echo '</div>';
             }

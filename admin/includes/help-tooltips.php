@@ -388,6 +388,12 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
         bindToggleClicks();
         document.addEventListener('keydown', e => {
             if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+                // Typing a "?" in a box must type it, not flip the hints on and off.
+                const el = e.target;
+                if (e.ctrlKey || e.metaKey || e.altKey ||
+                    (el && el.closest && el.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'))) {
+                    return;
+                }
                 e.preventDefault();
                 setEnabled(!enabled);
             }
