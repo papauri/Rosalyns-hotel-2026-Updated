@@ -350,6 +350,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lineIds  = $_POST['line_id'] ?? [];
                 $recvQtys = $_POST['receive_qty'] ?? [];
                 $recvCosts = $_POST['receive_cost'] ?? [];
+                $recvQtyIn = $_POST['receive_qty_in'] ?? [];
+                $recvCostIn = $_POST['receive_cost_in'] ?? [];
                 $expiries = $_POST['expiry_date'] ?? [];
                 $overNotes = $_POST['over_note'] ?? [];
 
@@ -393,6 +395,17 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $line = $lineSel->fetch(PDO::FETCH_ASSOC);
                     if (!$line) continue;
 
+                    /* Packs: a pack line may be typed in packs or in units (quantity) and priced per pack or per unit.
+                     * The pack size is the one saved on the PO line - never a value from the form. Everything below
+                     * (over-delivery check, batch, cost) works in stock units. */
+                    $lnPackSize = (($line['order_in'] ?? 'unit') === 'pack' && (float)($line['pack_size_snapshot'] ?? 0) > 0) ? (float)$line['pack_size_snapshot'] : null;
+                    // A missing choice means units (what a receive form opened before packs existed posts).
+                    $qtyIn  = ($lnPackSize !== null && (string)($recvQtyIn[$k] ?? 'unit') === 'pack') ? 'pack' : 'unit';
+                    $costIn = ($lnPackSize !== null && (string)($recvCostIn[$k] ?? 'unit') === 'pack') ? 'pack' : 'unit';
+                    if ($qtyIn === 'pack') {
+                        $rq = round($rq * $lnPackSize, 4);
+                    }
+
                     /* Over-delivery is allowed (the stock is physically here and must be booked), but it needs
                      * a note saying why, and the line is flagged so the buyer can chase the supplier. */
                     $outstanding = max(0.0, (float)$line['ordered_qty'] - (float)$line['received_qty']);
@@ -407,10 +420,25 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         $overNote = mb_substr($overNote, 0, 200);
                     }
 
-                    $cost = isset($recvCosts[$k]) && trim((string)$recvCosts[$k]) !== '' ? rh_po_number($recvCosts[$k], 'Unit cost') : (float)$line['unit_cost'];
+                    // The price on the supplier's invoice (typed per pack or per unit); blank = the price on the PO line.
+                    // The PO line itself is not changed - only the stock batch and its cost use the received price.
+                    if (isset($recvCosts[$k]) && trim((string)$recvCosts[$k]) !== '') {
+                        $typedCost = rh_po_number($recvCosts[$k], 'Price');
+                        $cost = $costIn === 'pack' ? round($typedCost / $lnPackSize, 4) : round($typedCost, 4);
+                    } else {
+                        $cost = (float)$line['unit_cost'];
+                    }
                     $expiry = rh_po_date($expiries[$k] ?? '', 'Expiry date');
 
                     if (!empty($line['ingredient_id'])) {
+                        if ($cost <= 0.00001) {
+                            // Say which item needs a price before the batch is booked (no price on the order and no average yet).
+                            $avgChk = $pdo->prepare("SELECT cost_per_unit FROM stock_ingredients WHERE id = ?");
+                            $avgChk->execute([(int)$line['ingredient_id']]);
+                            if ((float)$avgChk->fetchColumn() <= 0.00001) {
+                                throw new RuntimeException('"' . (string)($line['description'] ?? 'Line') . '": enter the price on the supplier\'s invoice - this item has no price on the order and no average cost yet.');
+                            }
+                        }
                         rh_receive_stock_line(
                             $pdo,
                             (int)$line['ingredient_id'],
@@ -680,7 +708,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="receive">
                 <input type="hidden" name="po_id" value="<?php echo (int)$po['id']; ?>">
-                <table class="po-table">
+                <div style="overflow-x:auto;"><table class="po-table">
                     <thead>
                         <tr>
                             <th>Item</th>
@@ -688,13 +716,13 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                             <th class="num">Received</th>
                             <th class="num">Unit cost</th>
                             <th class="num">Line total</th>
-                            <?php if ($canReceive): ?><th class="num">Receive now</th><th>Expiry</th><?php endif; ?>
+                            <?php if ($canReceive): ?><th class="num">Receive now</th><th class="num">Price on invoice</th><th>Expiry</th><?php endif; ?>
                             <?php if ($isEditable): ?><th></th><?php endif; ?>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if (empty($lines)): ?>
-                            <tr><td colspan="8" style="text-align:center;padding:24px;color:#8a8172;">No lines yet. Add items below.</td></tr>
+                            <tr><td colspan="9" style="text-align:center;padding:24px;color:#8a8172;">No lines yet. Add items below.</td></tr>
                         <?php else: foreach ($lines as $ln):
                             $outstanding = (float)$ln['ordered_qty'] - (float)$ln['received_qty']; ?>
                             <tr>
@@ -717,14 +745,46 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                                     <?php if ($lnPack): ?><br><span style="color:#8a8172;font-size:.76rem;"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$ln['unit_cost'] * (float)$ln['pack_size_snapshot'], 2); ?> per <?php echo htmlspecialchars((string)($ln['pack_name_snapshot'] ?: 'pack')); ?></span><?php endif; ?></td>
                                 <td class="num"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$ln['line_total'], 2); ?></td>
                                 <?php if ($canReceive): ?>
+                                    <?php
+                                        $rcPackSize = $lnPack ? (float)$ln['pack_size_snapshot'] : 0.0;
+                                        $rcPackName = (string)($ln['pack_name_snapshot'] ?: 'pack');
+                                        $rcUnit     = trim((string)($ln['unit'] ?? '')) !== '' ? (string)$ln['unit'] : 'unit';
+                                        $rcOutPacks = $lnPack ? $outstanding / $rcPackSize : 0.0;
+                                        // Pack lines are received in packs by default; if what is left is not a whole number of packs, start in units.
+                                        $rcQtyInPack = $lnPack && ($outstanding <= 0.0001 || abs($rcOutPacks - round($rcOutPacks)) < 0.0005);
+                                        $rcQtyVal    = $outstanding > 0 ? ($rcQtyInPack ? round($rcOutPacks) : round($outstanding, 3)) : 0;
+                                        $rcCostVal   = (float)$ln['unit_cost'] > 0 ? ($lnPack ? round((float)$ln['unit_cost'] * $rcPackSize, 4) : (float)$ln['unit_cost']) : '';
+                                    ?>
                                     <td class="num">
                                         <input type="hidden" name="line_id[]" value="<?php echo (int)$ln['id']; ?>">
-                                        <input class="mini" type="number" name="receive_qty[]" step="0.001" min="0"
-                                               value="<?php echo $outstanding > 0 ? htmlspecialchars((string)round($outstanding, 3)) : '0'; ?>"
+                                        <input class="mini rc-qty" type="number" name="receive_qty[]" step="0.001" min="0"
+                                               value="<?php echo htmlspecialchars((string)$rcQtyVal); ?>"
                                                title="<?php echo $outstanding > 0 ? htmlspecialchars((string)round($outstanding, 3)) . ' still outstanding. Entering more is an over-delivery and needs a note.' : 'Fully received. Entering a quantity is an over-delivery and needs a note.'; ?>">
+                                        <?php if ($lnPack): ?>
+                                            <select name="receive_qty_in[]" class="rc-qty-in" data-pack="<?php echo htmlspecialchars((string)$rcPackSize); ?>" data-last="<?php echo $rcQtyInPack ? 'pack' : 'unit'; ?>" onchange="rcSwitch(this, 'qty')" aria-label="Quantity typed in">
+                                                <option value="pack"<?php echo $rcQtyInPack ? ' selected' : ''; ?>><?php echo htmlspecialchars(rh_pack_label($rcPackName, 2)); ?></option>
+                                                <option value="unit"<?php echo $rcQtyInPack ? '' : ' selected'; ?>><?php echo htmlspecialchars(rh_unit_label($rcUnit, 2)); ?></option>
+                                            </select>
+                                        <?php else: ?>
+                                            <input type="hidden" name="receive_qty_in[]" value="unit">
+                                        <?php endif; ?>
                                         <span class="recv-out"><?php echo $outstanding > 0 ? number_format($outstanding, 3) . ' ' . htmlspecialchars((string)($ln['unit'] ?? '')) . ' outstanding' : 'fully received'; ?><?php if ($lnPack && $outstanding > 0): ?> (<?php echo htmlspecialchars(rh_pack_num($outstanding / (float)$ln['pack_size_snapshot'])); ?> <?php echo htmlspecialchars(rh_pack_label((string)($ln['pack_name_snapshot'] ?: 'pack'), $outstanding / (float)$ln['pack_size_snapshot'])); ?>)<?php endif; ?></span>
                                         <input type="text" name="over_note[]" maxlength="200" placeholder="Over-delivery note (needed if above outstanding)" style="margin-top:4px;width:100%;font-size:.76rem;">
-                                        <input type="hidden" name="receive_cost[]" value="<?php echo htmlspecialchars((string)$ln['unit_cost']); ?>">
+                                    </td>
+                                    <td class="num">
+                                        <input class="mini" type="number" name="receive_cost[]" step="0.0001" min="0"
+                                               value="<?php echo htmlspecialchars((string)$rcCostVal); ?>"
+                                               placeholder="<?php echo $lnPack ? 'Price per ' . htmlspecialchars($rcPackName) : 'Price per ' . htmlspecialchars($rcUnit); ?>"
+                                               title="The price on the supplier's invoice. Leave it as it is if it matches the order; the order itself is not changed.">
+                                        <?php if ($lnPack): ?>
+                                            <select name="receive_cost_in[]" class="rc-cost-in" data-pack="<?php echo htmlspecialchars((string)$rcPackSize); ?>" data-last="pack" onchange="rcSwitch(this, 'cost')" aria-label="Price is per">
+                                                <option value="pack" selected>per <?php echo htmlspecialchars($rcPackName); ?></option>
+                                                <option value="unit">per <?php echo htmlspecialchars($rcUnit); ?></option>
+                                            </select>
+                                        <?php else: ?>
+                                            <input type="hidden" name="receive_cost_in[]" value="unit">
+                                            <span class="recv-out">per <?php echo htmlspecialchars($rcUnit); ?></span>
+                                        <?php endif; ?>
                                     </td>
                                     <td><input type="date" name="expiry_date[]"></td>
                                 <?php endif; ?>
@@ -736,7 +796,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                             </tr>
                         <?php endforeach; endif; ?>
                     </tbody>
-                </table>
+                </table></div>
                 <?php if ($canReceive): ?>
                     <div class="po-actions">
                         <button class="btn btn-primary" onclick="return confirm('Receive the entered quantities into stock?');"><i class="fas fa-truck-ramp-box"></i> Receive stock</button>
@@ -898,6 +958,22 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
             var oi = document.getElementById('al_orderin');
             document.getElementById('al_qty_lbl').textContent = alPack && oi.value === 'pack' ? 'How many ' + alPack.name + 's' : 'Qty';
             alPreview();
+        }
+        // Receive form: switching packs/units (or price per pack/unit) re-expresses the number already typed.
+        // The server converts again from the pack size saved on the order line; this is only for the screen.
+        function rcSwitch(sel, what) {
+            var size = parseFloat(sel.getAttribute('data-pack') || '0');
+            var last = sel.getAttribute('data-last');
+            var cell = sel.parentNode;
+            var inp = cell.querySelector(what === 'qty' ? 'input[name="receive_qty[]"]' : 'input[name="receive_cost[]"]');
+            if (inp && size > 0 && inp.value !== '' && last !== sel.value) {
+                var v = parseFloat(inp.value);
+                if (!isNaN(v)) {
+                    var toUnits = (what === 'qty') ? (sel.value === 'unit') : (sel.value === 'pack');
+                    inp.value = parseFloat((toUnits ? v * size : v / size).toFixed(what === 'qty' ? 3 : 4));
+                }
+            }
+            sel.setAttribute('data-last', sel.value);
         }
         function alPreview() {
             var p = document.getElementById('al_preview');

@@ -77,10 +77,19 @@ if (isset($_GET['ajax'])) {
         }
         try {
             // Check ingredient exists
-            $ing = $pdo->prepare("SELECT id, name, unit, current_quantity, cost_per_unit FROM stock_ingredients WHERE id = ? AND is_archived = 0");
+            $ing = $pdo->prepare("SELECT id, name, unit, current_quantity, cost_per_unit, pack_size AS item_pack_size, pack_name AS item_pack_name FROM stock_ingredients WHERE id = ? AND is_archived = 0");
             $ing->execute([$ingredientId]);
             $ingredient = $ing->fetch(PDO::FETCH_ASSOC);
             if (!$ingredient) { http_response_code(404); echo json_encode(['error' => 'Ingredient not found.']); exit; }
+            // Nothing typed: use the item's own pack (e.g. a crate of 24) when it has one.
+            $itemPack = (float)($ingredient['item_pack_size'] ?? 0);
+            if ($itemPack > 0) {
+                if ($packRaw === '') $packSize = $itemPack;
+                if ($packLabel === null && abs($packSize - $itemPack) < 0.0001 && trim((string)($ingredient['item_pack_name'] ?? '')) !== '') {
+                    $packLabel = mb_substr(trim((string)$ingredient['item_pack_name']), 0, 50);
+                }
+            }
+            unset($ingredient['item_pack_size'], $ingredient['item_pack_name']);
 
             // Ingredient registry only. A menu item holding the same label is the
             // retail twin of this stock line by design (pm_syncProductStockLink),
@@ -147,6 +156,17 @@ if (isset($_GET['ajax'])) {
             foreach (['quantity', 'cost_per_unit'] as $numKey) {
                 if (isset($chkItem[$numKey]) && $chkItem[$numKey] !== '' && (!is_numeric($chkItem[$numKey]) || (float)$chkItem[$numKey] < 0 || (float)$chkItem[$numKey] > 99999999)) {
                     http_response_code(400); echo json_encode(['error' => 'Quantities and costs must be numbers of 0 or more.']); exit;
+                }
+            }
+            // Optional expiry date for the line: a real date, not before the day the stock came in.
+            $exRaw = trim((string)($chkItem['expiry_date'] ?? ''));
+            if ($exRaw !== '') {
+                $exObj = DateTime::createFromFormat('!Y-m-d', $exRaw);
+                if (!$exObj || $exObj->format('Y-m-d') !== $exRaw) {
+                    http_response_code(400); echo json_encode(['error' => 'An expiry date is not a valid date. Use the date picker, or leave it blank.']); exit;
+                }
+                if ($exRaw < $receivedDate) {
+                    http_response_code(400); echo json_encode(['error' => 'An expiry date is before the date the stock was received. Check the date on the packaging.']); exit;
                 }
             }
         }
@@ -217,8 +237,9 @@ if (isset($_GET['ajax'])) {
 
                 // Same receipt engine as the manual stock-in and PO receiving: weighted-average cost,
                 // negative-stock deficit settlement, stock_in_log and ledger row.
+                $lineExpiry = trim((string)($item['expiry_date'] ?? ''));   // validated above (Y-m-d, not before received date)
                 $batchId = rh_receive_stock_line(
-                    $pdo, $ingId, $qty, $cost, $supplierId, $supplier, null, null, 7, null, (int)$user['id'],
+                    $pdo, $ingId, $qty, $cost, $supplierId, $supplier, null, $lineExpiry !== '' ? $lineExpiry : null, 7, null, (int)$user['id'],
                     'Received via barcode scanner' . ($supplier ? " - {$supplier}" : ''),
                     'Stock received via barcode scan'
                 );
@@ -257,7 +278,7 @@ if (isset($_GET['ajax'])) {
     // search_ingredients — autocomplete for the register modal
     if ($_GET['ajax'] === 'search_ingredients') {
         $q = '%' . rhEscapeLike(mb_substr(trim((string)($_GET['q'] ?? '')), 0, 60)) . '%';
-        $rows = $pdo->prepare("SELECT id, name, unit, category FROM stock_ingredients WHERE is_archived = 0 AND name LIKE ? ORDER BY name LIMIT 30");
+        $rows = $pdo->prepare("SELECT id, name, unit, category, pack_size, pack_name FROM stock_ingredients WHERE is_archived = 0 AND name LIKE ? ORDER BY name LIMIT 30");
         $rows->execute([$q]);
         echo json_encode($rows->fetchAll(PDO::FETCH_ASSOC));
         exit;
@@ -1332,6 +1353,10 @@ function renderBatch() {
                     <input type="number" min="0" step="0.01" value="${b.cost_per_unit || ''}"
                         placeholder="0.00" oninput="updateCost(${id}, this.value)">
                 </div>
+                <div class="batch-field">
+                    <label>Expiry (optional)</label>
+                    <input type="date" value="${esc(b.expiry_date || '')}" onchange="updateExpiry(${id}, this.value)">
+                </div>
             </div>`;
         list.appendChild(div);
     });
@@ -1347,6 +1372,7 @@ function adjustQty(id, delta) {
 }
 
 function updateCost(id, val) { batch[id].cost_per_unit = parseFloat(val) || 0; }
+function updateExpiry(id, val) { batch[id].expiry_date = val || ''; }
 
 // ── Submit batch ──────────────────────────────────────────────────────────
 async function submitBatch() {
@@ -1360,6 +1386,7 @@ async function submitBatch() {
         ingredient_id: batch[id].ingredient_id,
         quantity: batch[id].quantity,
         cost_per_unit: batch[id].cost_per_unit,
+        expiry_date: batch[id].expiry_date || '',
         name: batch[id].name,
     }));
 
@@ -1452,25 +1479,32 @@ function searchIngredients(q) {
             res.innerHTML = '<div style="padding:12px 14px;color:var(--ck-muted);font-size:13px;">No ingredients found</div>';
         } else {
             res.innerHTML = items.map(i =>
-                `<div class="ing-result-item" data-id="${i.id}" data-name="${esc(i.name)}" data-unit="${esc(i.unit)}" data-category="${esc(i.category || '')}">
+                `<div class="ing-result-item" data-id="${i.id}" data-name="${esc(i.name)}" data-unit="${esc(i.unit)}" data-category="${esc(i.category || '')}" data-pack-size="${esc(i.pack_size && parseFloat(i.pack_size) > 0 ? String(parseFloat(i.pack_size)) : '')}" data-pack-name="${esc(i.pack_size && parseFloat(i.pack_size) > 0 ? (i.pack_name || '') : '')}">
                     <div><div class="ing-name">${esc(i.name)}</div><div class="ing-meta">${esc(i.category || '')}</div></div>
                     <div class="ing-meta">${esc(i.unit)}</div>
                 </div>`
             ).join('');
             res.querySelectorAll('.ing-result-item').forEach(el => {
-                el.addEventListener('click', () => selectIngredient(el.dataset.id, el.dataset.name, el.dataset.unit, el.dataset.category));
+                el.addEventListener('click', () => selectIngredient(el.dataset.id, el.dataset.name, el.dataset.unit, el.dataset.category, el.dataset.packSize, el.dataset.packName));
             });
         }
         res.style.display = 'block';
     }, 250);
 }
 
-function selectIngredient(id, name, unit, category) {
+function selectIngredient(id, name, unit, category, packSize, packName) {
     _selectedIng = { id, name, unit };
     document.getElementById('regIngId').value = id;
     document.getElementById('regIngSearch').value = name;
     document.getElementById('ingResults').style.display = 'none';
-    if (!document.getElementById('regPackLabel').value) document.getElementById('regPackLabel').value = unit;
+    // Start from the item's own pack (e.g. a crate of 24) when it has one; staff can still change both boxes.
+    if (packSize && parseFloat(packSize) > 0) {
+        document.getElementById('regPackSize').value = packSize;
+        document.getElementById('regPackLabel').value = packName || unit;
+    } else {
+        document.getElementById('regPackSize').value = '1';
+        document.getElementById('regPackLabel').value = unit;
+    }
     document.getElementById('regPackSize').focus();
 }
 
