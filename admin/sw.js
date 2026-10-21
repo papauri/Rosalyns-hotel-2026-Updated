@@ -19,10 +19,12 @@
  *   handler posts a message back to all clients so offline-queue.js can flush.
  *   Falls back gracefully in browsers without Background Sync support.
  *
+ *   Sign-out: a request for login.php / logout.php empties the admin page cache.
+ *
  *   IMPORTANT: bumping SW_VERSION deletes all old caches on activate.
  *   Bump it whenever cached assets must be force-refreshed on all clients.
  */
-const SW_VERSION = 'rh-admin-v8-2026-07-09';
+const SW_VERSION = 'rh-admin-v9-2026-10-21';
 const ASSET_CACHE = `${SW_VERSION}-assets`;  // fonts, images, icons only
 const PAGE_CACHE  = `${SW_VERSION}-pages`;
 const DATA_CACHE  = `${SW_VERSION}-data`;
@@ -37,7 +39,10 @@ const MAX_DATA_ENTRIES  = 20;
 const isImmutableAsset = url => /\.(?:woff2?|ttf|eot|svg|png|jpe?g|webp|gif|ico)$/i.test(url.pathname);
 // JS and CSS use network-first: always fetch fresh, fall back to cache offline.
 const isStyleOrScript  = url => /\.(?:css|js)(\?.*)?$/i.test(url.pathname + url.search);
-const isPage           = url => /\/admin\/[^?]*\.php$/.test(url.pathname);
+// Real screens only. The till's ?ajax=... polls and the /admin/api/ endpoints are live JSON (one is a
+// state-changing GET): never stored or answered from the cache, so they cannot show stale money as
+// current, fake a success offline, or push the real pages out of the cache.
+const isPage           = url => /\/admin\/[^?]*\.php$/.test(url.pathname) && !/\/admin\/api\//.test(url.pathname) && !/[?&]ajax=/.test(url.search);
 const isData           = url => /\/api\/(?:room-types|page-content|site-settings|room-amenities)\.php/.test(url.pathname);
 
 /** Trim a named cache to at most `max` entries (oldest-first eviction). */
@@ -137,10 +142,17 @@ self.addEventListener('fetch', event => {
 
     // --- Admin pages: network-first with offline fallback ---
     if (isPage(url)) {
+        // Sign-out / sign-in screen: drop every cached admin page so the next person on a shared
+        // tablet (or the same tablet, offline) can never be shown the previous person's pages.
+        if (/\/admin\/(?:login|logout)\.php$/i.test(url.pathname)) {
+            event.waitUntil(caches.delete(PAGE_CACHE));
+        }
         event.respondWith(
             fetch(req)
                 .then(resp => {
-                    if (resp && resp.ok) {
+                    // A redirected answer (session expired -> sign-in page) is not the page that was
+                    // asked for; storing it would replace the real page with the login form.
+                    if (resp && resp.ok && !resp.redirected && /text\/html/i.test(resp.headers.get('Content-Type') || '')) {
                         const c = resp.clone();
                         caches.open(PAGE_CACHE).then(cs => {
                             cs.put(req, c).catch(() => { });

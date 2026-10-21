@@ -1394,12 +1394,22 @@ $bootstrap['fingerprint'] = md5(
                 fd.append('csrf_token', csrf);
                 fd.append('station', STATION);
                 fd.append('fingerprint', lastFeedFingerprint); /* skip full payload when board unchanged */
-                const r = await fetch(apiUrl, {
-                    method: 'POST',
-                    body: fd,
-                    credentials: 'same-origin'
-                });
-                const j = await r.json();
+                /* A request that hangs after the tablet slept or Wi-Fi dropped would leave `polling`
+                   true for good and freeze the board; give up after 20s so the next tick retries. */
+                const pollAbort = new AbortController();
+                const pollTimer = setTimeout(() => pollAbort.abort(), 20000);
+                let r, j;
+                try {
+                    r = await fetch(apiUrl, {
+                        method: 'POST',
+                        body: fd,
+                        credentials: 'same-origin',
+                        signal: pollAbort.signal
+                    });
+                    j = await r.json();
+                } finally {
+                    clearTimeout(pollTimer);
+                }
                 if (!j.ok) {
                     polling = false;
                     return;

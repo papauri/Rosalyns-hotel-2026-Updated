@@ -70,6 +70,7 @@ scripts/tests/sessions/
 
 # Generated invoice/receipt PDFs (output, not source)
 invoices/INV-*.pdf
+invoices/GYM-INV-*.pdf
 invoices/receipts/*.pdf
 invoices/credit-notes/*.pdf
 receipts/*.pdf

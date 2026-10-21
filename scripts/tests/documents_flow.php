@@ -17,6 +17,11 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
  */
 $root = dirname(__DIR__, 2);
 chdir($root);
+// Hotel time, like the app (config/database.php): "today" and "yesterday" below must be the same day the page
+// under test sees. Left on the CLI default (UTC) the checkout bookings were dated a day behind from 00:00 to
+// 02:00 Malawi time and checkout was refused as a late departure.
+$tzTest = trim((string)(getenv('HOTEL_TIMEZONE') ?: 'Africa/Blantyre'));
+date_default_timezone_set(in_array($tzTest, timezone_identifiers_list(), true) ? $tzTest : 'Africa/Blantyre');
 $harness = $root . '/scripts/tests/page_harness.php';
 $pass = 0; $fail = 0;
 function ok(string $name, bool $cond, string $detail = ''): void {

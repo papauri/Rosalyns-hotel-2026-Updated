@@ -9,7 +9,7 @@
  *
  * BUMP SW_VERSION whenever cached assets must be force-refreshed on all clients.
  */
-const SW_VERSION = 'rh-public-v4-2026-10-03';
+const SW_VERSION = 'rh-public-v5-2026-10-21';
 const ASSET_CACHE = `${SW_VERSION}-assets`;
 const PAGE_CACHE  = `${SW_VERSION}-pages`;
 
@@ -27,7 +27,7 @@ const isImmutableAsset = url => /\.(?:woff2?|ttf|eot|svg|png|jpe?g|webp|gif|ico)
 const isStyleOrScript  = url => /\.(?:css|js)(\?.*)?$/i.test(url.pathname + url.search);
 // Match .php pages AND directory-style URLs (e.g. / /rooms/ /about/)
 // Personalised / private pages: never stored in the cache (shared devices, stale guest data).
-const isPrivatePage    = url => /(?:booking-lookup|booking-confirmation|review-confirmation|submit-review)\.php$/i.test(url.pathname);
+const isPrivatePage    = url => /(?:booking-lookup|submit-review|[a-z]+-confirmation)\.php$/i.test(url.pathname);
 const isPage           = url => /\.php(\?.*)?$/.test(url.pathname) || /\/$/.test(url.pathname);
 
 self.addEventListener('install', e => {
