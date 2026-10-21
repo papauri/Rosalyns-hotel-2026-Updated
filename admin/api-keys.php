@@ -14,9 +14,6 @@ if (($_SESSION['admin_role'] ?? '') !== 'admin') {
     exit;
 }
 
-if (function_exists('ensureApiKeyRetrievableColumn')) {
-    ensureApiKeyRetrievableColumn($pdo);
-}
 
 $message = '';
 $messageType = 'success';
@@ -126,21 +123,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
 
                 $rawApiKey = bin2hex(random_bytes(32));
+                // Only a one-way hash is stored (checked with password_verify); the key itself is shown once, below.
                 $hashedApiKey = password_hash($rawApiKey, PASSWORD_DEFAULT);
-                $encryptedApiKey = encryptApiKey($rawApiKey);
 
-                rh_with_create_lock($pdo, 'api_key_client', function () use ($pdo, $hashedApiKey, $encryptedApiKey, $clientName, $clientWebsite, $clientEmail, $permissions, $rateLimit) {
+                rh_with_create_lock($pdo, 'api_key_client', function () use ($pdo, $hashedApiKey, $clientName, $clientWebsite, $clientEmail, $permissions, $rateLimit) {
                     $dupNow = rh_find_duplicate($pdo, 'api_keys', 'client_name', $clientName);
                     if ($dupNow) {
                         throw new RuntimeException(rh_duplicate_message('API client', (string)$dupNow['value']));
                     }
                     $stmt = $pdo->prepare(
-                        'INSERT INTO api_keys (api_key, api_key_plain, client_name, client_website, client_email, permissions, rate_limit_per_hour, is_active)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, 1)'
+                        'INSERT INTO api_keys (api_key, client_name, client_website, client_email, permissions, rate_limit_per_hour, is_active)
+                         VALUES (?, ?, ?, ?, ?, ?, 1)'
                     );
                     $stmt->execute([
                         $hashedApiKey,
-                        $encryptedApiKey,
                         $clientName,
                         $clientWebsite,
                         $clientEmail,
@@ -151,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
                 $safeClientName = htmlspecialchars($clientName, ENT_QUOTES, 'UTF-8');
                 $safeRaw = htmlspecialchars($rawApiKey, ENT_QUOTES, 'UTF-8');
-                $message = "API key created successfully.<br><br><strong>Client:</strong> {$safeClientName}<br><strong>API Key:</strong> <code>{$safeRaw}</code><br><br><strong>Important:</strong> You can reveal/copy this key anytime from the list below.";
+                $message = "API key created successfully.<br><br><strong>Client:</strong> {$safeClientName}<br><strong>API Key:</strong> <code>{$safeRaw}</code><br><br><strong>Important:</strong> copy this key now and give it to the client. It is not stored and will not be shown again; if it is lost, use Regenerate.";
                 $messageType = 'success';
                 rh_log_event('api_keys', 'info', 'API key created', ['client' => $clientName, 'permissions' => $permissions, 'rate_limit_per_hour' => $rateLimit]);
                 break;
@@ -172,10 +168,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $keyId = (int)($_POST['key_id'] ?? 0);
                 $rawApiKey = bin2hex(random_bytes(32));
                 $hashedApiKey = password_hash($rawApiKey, PASSWORD_DEFAULT);
-                $encryptedApiKey = encryptApiKey($rawApiKey);
 
-                $stmt = $pdo->prepare('UPDATE api_keys SET api_key = ?, api_key_plain = ?, usage_count = 0, last_used_at = NULL WHERE id = ?');
-                $stmt->execute([$hashedApiKey, $encryptedApiKey, $keyId]);
+                // api_key_plain is cleared: no recoverable copy of any key is kept.
+                $stmt = $pdo->prepare('UPDATE api_keys SET api_key = ?, api_key_plain = NULL, usage_count = 0, last_used_at = NULL WHERE id = ?');
+                $stmt->execute([$hashedApiKey, $keyId]);
 
                 $nameStmt = $pdo->prepare('SELECT client_name FROM api_keys WHERE id = ?');
                 $nameStmt->execute([$keyId]);
@@ -183,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
                 $safeClientName = htmlspecialchars((string)$client['client_name'], ENT_QUOTES, 'UTF-8');
                 $safeRaw = htmlspecialchars($rawApiKey, ENT_QUOTES, 'UTF-8');
-                $message = "API key regenerated for <strong>{$safeClientName}</strong>.<br><br><strong>New API Key:</strong> <code>{$safeRaw}</code><br><br><strong>Important:</strong> You can reveal/copy this key anytime from the list below.";
+                $message = "API key regenerated for <strong>{$safeClientName}</strong>.<br><br><strong>New API Key:</strong> <code>{$safeRaw}</code><br><br><strong>Important:</strong> copy this key now and give it to the client. It is not stored and will not be shown again; the old key has stopped working.";
                 $messageType = 'success';
                 rh_log_event('api_keys', 'warning', 'API key regenerated', ['key_id' => $keyId, 'client' => $client['client_name'] ?? 'Client']);
                 break;
@@ -333,35 +329,13 @@ $roomPriceTemplate = buildMetaRoomPriceTemplate($pdo);
                                         </thead>
                                         <tbody>
                                             <?php foreach ($apiKeys as $key): ?>
-                                                <?php
-                                                $decryptedKey = decryptApiKey((string)($key['api_key_plain'] ?? ''));
-                                                $hasPlainKey = !empty($decryptedKey);
-                                                $masked = str_repeat('•', 32);
-                                                ?>
                                                 <tr>
                                                     <td>
                                                         <strong><?php echo htmlspecialchars((string)$key['client_name'], ENT_QUOTES, 'UTF-8'); ?></strong><br>
                                                         <small class="text-muted"><?php echo htmlspecialchars((string)$key['client_email'], ENT_QUOTES, 'UTF-8'); ?></small>
                                                     </td>
                                                     <td class="api-keys-key-cell">
-                                                        <?php if ($hasPlainKey): ?>
-                                                            <div class="api-key-display">
-                                                                <code
-                                                                    class="api-key-value"
-                                                                    id="key_<?php echo (int)$key['id']; ?>"
-                                                                    data-key="<?php echo htmlspecialchars((string)$decryptedKey, ENT_QUOTES, 'UTF-8'); ?>"
-                                                                    data-masked="<?php echo $masked; ?>"><?php echo $masked; ?></code>
-                                                                <button type="button" class="btn-api-key reveal-btn" data-target="key_<?php echo (int)$key['id']; ?>" title="Reveal key">
-                                                                    <i class="fas fa-eye"></i>
-                                                                </button>
-                                                                <button type="button" class="btn-api-key copy-btn" data-target="key_<?php echo (int)$key['id']; ?>" title="Copy key">
-                                                                    <i class="fas fa-copy"></i>
-                                                                </button>
-                                                            </div>
-                                                        <?php else: ?>
-                                                            <span class="text-muted">Hidden</span>
-                                                            <span class="legacy-key-badge">legacy</span>
-                                                        <?php endif; ?>
+                                                        <span class="text-muted" title="Keys are shown once when created. Use Regenerate to issue a new one.">Shown once at creation</span>
                                                     </td>
                                                     <td>
                                                         <?php
@@ -549,44 +523,6 @@ $roomPriceTemplate = buildMetaRoomPriceTemplate($pdo);
             }
 
             document.addEventListener('click', function(event) {
-                var revealBtn = event.target.closest('.reveal-btn');
-                if (revealBtn && isApiKeysTarget(revealBtn)) {
-                    var revealTarget = document.getElementById(revealBtn.getAttribute('data-target') || '');
-                    if (!revealTarget) return;
-
-                    var isRevealed = revealTarget.classList.contains('revealed');
-                    if (isRevealed) {
-                        revealTarget.textContent = revealTarget.getAttribute('data-masked') || '********************************';
-                        revealTarget.classList.remove('revealed');
-                        revealBtn.innerHTML = '<i class="fas fa-eye"></i>';
-                        revealBtn.setAttribute('title', 'Reveal key');
-                    } else {
-                        revealTarget.textContent = revealTarget.getAttribute('data-key') || '';
-                        revealTarget.classList.add('revealed');
-                        revealBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
-                        revealBtn.setAttribute('title', 'Hide key');
-                    }
-                    return;
-                }
-
-                var copyBtn = event.target.closest('.copy-btn');
-                if (copyBtn && isApiKeysTarget(copyBtn)) {
-                    var keyTarget = document.getElementById(copyBtn.getAttribute('data-target') || '');
-                    if (!keyTarget) return;
-
-                    var key = keyTarget.getAttribute('data-key') || '';
-                    if (!key) return;
-
-                    copyText(key)
-                        .then(function() {
-                            flashButton(copyBtn, '<i class="fas fa-check"></i>', 'Copied key', 1300);
-                        })
-                        .catch(function() {
-                            flashButton(copyBtn, '<i class="fas fa-xmark"></i>', 'Copy failed', 1300);
-                        });
-                    return;
-                }
-
                 var copyMetaTemplateBtn = event.target.closest('#copyMetaTemplate');
                 if (copyMetaTemplateBtn && isApiKeysTarget(copyMetaTemplateBtn)) {
                     var template = document.getElementById('metaRoomsTemplate');

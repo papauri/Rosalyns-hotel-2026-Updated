@@ -171,9 +171,8 @@ try {
         // Ensure per-room capacity overrides and joined-room booking ledger exist
         ensureRoomCombinationSchema($pdo);
 
-        // Ensure external API key tables exist and have retrievable storage support
+        // Ensure external API key tables exist (keys are stored as a one-way hash only)
         ensureApiTables($pdo);
-        ensureApiKeyRetrievableColumn($pdo);
 
         // Ensure individual room blocked dates table exists
         ensureIndividualRoomBlockedDatesTable($pdo);
@@ -8285,81 +8284,6 @@ function ensureApiTables(PDO $pdo): void
     } catch (Throwable $e) {
         error_log('ensureApiTables warning: ' . $e->getMessage());
     }
-}
-
-/**
- * Ensure api_keys table has api_key_plain column for retrievable storage.
- * Stores AES-256 encrypted API key for admin view/copy functionality.
- * The api_key column remains hashed for authentication (password_verify).
- */
-function ensureApiKeyRetrievableColumn(PDO $pdo): void
-{
-    static $checked = false;
-    if ($checked) {
-        return;
-    }
-    $checked = true;
-
-    try {
-        $columnExistsStmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
-
-        // Check if api_key_plain column exists
-        $columnExistsStmt->execute(['api_keys', 'api_key_plain']);
-        $exists = (int)$columnExistsStmt->fetchColumn() > 0;
-
-        if (!$exists) {
-            // Add the column for storing encrypted retrievable key
-            $pdo->exec("ALTER TABLE api_keys ADD COLUMN api_key_plain TEXT NULL DEFAULT NULL COMMENT 'AES-256 encrypted retrievable API key for admin view' AFTER api_key");
-        }
-    } catch (Throwable $e) {
-        error_log('ensureApiKeyRetrievableColumn warning: ' . $e->getMessage());
-    }
-}
-
-/**
- * Encrypt API key for storage using AES-256-CBC.
- *
- * @param string $plainKey The plain API key to encrypt
- * @return string Base64-encoded encrypted data with IV
- */
-function encryptApiKey(string $plainKey): string
-{
-    // Salt comes from APP_ENCRYPTION_SALT in .env so each hotel installation is isolated
-    $salt = (string)($_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: '');
-    if ($salt === '') {
-        // No built-in default: a known salt would make every stored key readable by anyone with a database copy.
-        throw new RuntimeException('APP_ENCRYPTION_SALT is not set in .env, so API keys cannot be stored yet.');
-    }
-    $encryptionKey = hash('sha256', $salt . ($_SERVER['SERVER_NAME'] ?? 'localhost'), true);
-    $iv = random_bytes(16);
-    $encrypted = openssl_encrypt($plainKey, 'AES-256-CBC', $encryptionKey, 0, $iv);
-    return base64_encode($iv . $encrypted);
-}
-
-/**
- * Decrypt API key for admin viewing.
- *
- * @param string $encryptedKey Base64-encoded encrypted data with IV
- * @return string|null Plain API key or null on failure
- */
-function decryptApiKey(string $encryptedKey): ?string
-{
-    if (empty($encryptedKey)) {
-        return null;
-    }
-    $salt = (string)($_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: '');
-    if ($salt === '') {
-        return null;
-    }
-    $encryptionKey = hash('sha256', $salt . ($_SERVER['SERVER_NAME'] ?? 'localhost'), true);
-    $data = base64_decode($encryptedKey);
-    if ($data === false || strlen($data) < 16) {
-        return null;
-    }
-    $iv = substr($data, 0, 16);
-    $encrypted = substr($data, 16);
-    $decrypted = openssl_decrypt($encrypted, 'AES-256-CBC', $encryptionKey, 0, $iv);
-    return $decrypted !== false ? $decrypted : null;
 }
 
 // ============================================================================

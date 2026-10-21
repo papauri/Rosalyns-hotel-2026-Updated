@@ -35,9 +35,9 @@ function isFacebookPostingEnabled(): bool
 // ── Secret storage (independent of the host name) ─────────────────────────────
 
 /**
- * Encrypt a Facebook secret (app secret / page token). Unlike encryptApiKey() the key does not
+ * Encrypt a Facebook secret (app secret / page token). The key does not
  * depend on SERVER_NAME, so a token saved on one host alias (www / non-www / CLI) still decrypts
- * on another. Values are prefixed "fb1:" so old encryptApiKey() rows keep working.
+ * on another. Values are prefixed "fb1:".
  */
 function facebookEncryptSecret(string $plain): string
 {
@@ -49,13 +49,14 @@ function facebookEncryptSecret(string $plain): string
     $iv   = random_bytes(16);
     $enc  = openssl_encrypt($plain, 'AES-256-CBC', $key, OPENSSL_RAW_DATA, $iv);
     if ($enc === false) {
-        return function_exists('encryptApiKey') ? encryptApiKey($plain) : $plain;
+        error_log('facebookEncryptSecret: openssl_encrypt failed; secret not saved');
+        return '';
     }
     return 'fb1:' . base64_encode($iv . $enc);
 }
 
 /**
- * Decrypt a value stored by facebookEncryptSecret(), the older encryptApiKey(), or plaintext.
+ * Decrypt a value stored by facebookEncryptSecret(), or an older plaintext value.
  * Returns '' when it cannot be read (for example the host name changed under an old row).
  */
 function facebookDecryptSecret(string $stored): string
@@ -72,12 +73,6 @@ function facebookDecryptSecret(string $stored): string
         $key  = hash('sha256', $salt . '|facebook', true);
         $dec  = openssl_decrypt(substr($data, 16), 'AES-256-CBC', $key, OPENSSL_RAW_DATA, substr($data, 0, 16));
         return $dec === false ? '' : $dec;
-    }
-    if (function_exists('decryptApiKey')) {
-        $dec = decryptApiKey($stored);
-        if ($dec !== null && $dec !== '') {
-            return $dec;
-        }
     }
     // Older rows may be plaintext (Facebook tokens start with "EA"; app secrets are 32 hex chars).
     if (preg_match('/^(EA[A-Za-z0-9_\-]{20,}|[0-9a-f]{32})$/', $stored)) {

@@ -186,8 +186,8 @@ function sendWhatsAppViaTwilio(string $to, string $body): array
 // ============================================================
 
 /**
- * WhatsApp access-token encryption. Keyed only on APP_ENCRYPTION_SALT (not the web host name,
- * unlike encryptApiKey) so scheduled CLI jobs can decrypt what the admin page saved.
+ * WhatsApp access-token encryption. Keyed only on APP_ENCRYPTION_SALT (not the web host name)
+ * so scheduled CLI jobs can decrypt what the admin page saved.
  * Stored as "wa1:" + base64(iv . ciphertext).
  */
 function whatsAppTokenKey(): string
@@ -204,8 +204,8 @@ function encryptWhatsAppToken(string $plain): string
 }
 
 /**
- * The Meta access token in plain form. Handles the current "wa1:" format, the older
- * encryptApiKey format, and tokens saved before encryption (plain text, used as-is).
+ * The Meta access token in plain form. Handles the current "wa1:" format and tokens saved
+ * before encryption (plain text, used as-is).
  */
 function getWhatsAppAccessToken(): string
 {
@@ -223,12 +223,6 @@ function getWhatsAppAccessToken(): string
             return '';
         }
         return $plain;
-    }
-    if (function_exists('decryptApiKey')) {
-        $plain = decryptApiKey($stored);
-        if (is_string($plain) && $plain !== '' && !preg_match('/\s/', $plain)) {
-            return $plain;
-        }
     }
     return $stored;
 }
