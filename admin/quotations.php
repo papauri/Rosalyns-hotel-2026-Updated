@@ -281,6 +281,11 @@ $quotations = [];
 $stats      = ['total' => 0, 'sent' => 0, 'accepted' => 0, 'expired' => 0, 'declined' => 0, 'total_value' => 0];
 
 try {
+    // Expire lapsed quotations BEFORE reading, so the tiles, the Status filter and the table all
+    // agree (previously the tiles counted a lapsed quotation as "Sent" while the table showed "Expired").
+    $pdo->exec("UPDATE quotations SET status = 'expired', updated_at = NOW()
+                WHERE status = 'sent' AND valid_until IS NOT NULL AND DATE(valid_until) < CURDATE()");
+
     $listStmt   = $pdo->prepare($sql);
     $listStmt->execute($params);
     $quotations = $listStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -298,11 +303,6 @@ try {
         $stats['total']++;
         $stats[$q['status'] ?? 'sent'] = ($stats[$q['status'] ?? 'sent'] ?? 0) + 1;
         $stats['total_value']          += (float)($q['total_amount'] ?? 0);
-
-        // Auto-expire
-        if ($q['status'] === 'sent' && !empty($q['valid_until']) && strtotime($q['valid_until']) < strtotime('today')) {
-            $pdo->prepare("UPDATE quotations SET status = 'expired', updated_at = NOW() WHERE id = ?")->execute([$q['id']]);
-        }
     }
 } catch (Throwable $e) {
     $error = 'Failed to load quotations: ' . $e->getMessage();

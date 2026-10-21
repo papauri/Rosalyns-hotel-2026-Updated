@@ -176,6 +176,7 @@ $csrf_token = generateCsrfToken();
         <p style="margin:0 0 14px;color:#1e3a8a;"><i class="fas fa-clipboard-list"></i> Opening stock not recorded (<?php echo (int)$neverListed; ?> items below) &mdash; <a href="<?php echo htmlspecialchars(rh_stock_opening_count_url()); ?>">record a stock count</a> instead of buying what you may already have.</p>
         <?php endif; ?>
 
+        <?php if (!$error): /* a failed build must not show 0 items as fact */ ?>
         <div class="ck-kpis ck-kpis--3 ro-summary">
             <div class="ck-kpi ck-kpi--warn"><span class="ck-kpi__label">Items to reorder</span><span class="ck-kpi__value"><?php echo (int)$itemCount; ?></span></div>
             <div class="ck-kpi"><span class="ck-kpi__label">Supplier orders</span><span class="ck-kpi__value"><?php echo count($groups); ?></span></div>
@@ -186,7 +187,10 @@ $csrf_token = generateCsrfToken();
             </div>
         </div>
 
-        <?php if (empty($groups)): ?>
+        <?php endif; ?>
+
+        <?php if ($error): ?>
+        <?php elseif (empty($groups)): ?>
             <div class="empty-ro">
                 <i class="fas fa-check-circle" style="font-size:2rem;color:#5a8a5a;"></i>
                 <p>Nothing to reorder — every tracked item is above its reorder point.<br>

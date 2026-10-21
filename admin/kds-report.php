@@ -115,13 +115,18 @@ $byCategory = []; // item_name → counts (for top-items)
 foreach ($rows as $r) {
     $st = $r['station'] ?: 'unknown';
     if (!isset($byStation[$st])) $byStation[$st] = ['items' => 0, 'qty' => 0, 'revenue' => 0, 'voids' => 0, 'avg_seconds' => []];
-    $byStation[$st]['items']++;
     if ($r['kds_status'] === 'void' || $r['order_status'] === 'voided' || $r['order_status'] === 'cancelled') {
         $totalVoid++;
         $totalVoidValue += (float)$r['line_total'];
         $byStation[$st]['voids']++;
         continue;
     }
+    // Items Served / Qty / Revenue / prep times count served items only; tickets still pending,
+    // cooking or ready stay in the ticket list below but are not "served" yet.
+    if ($r['kds_status'] !== 'served') {
+        continue;
+    }
+    $byStation[$st]['items']++;
     $totalItems++;
     $totalQty += (float)$r['quantity'];
     $totalRevenue += (float)$r['line_total'];
@@ -171,7 +176,7 @@ if (($_GET['format'] ?? '') === 'csv') {
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     $out = fopen('php://output', 'w');
     fputcsv($out, ['Date', $reqDate, 'Station', $STATION_OPTIONS[$reqStation]]);
-    fputcsv($out, ['Total items served', $totalItems, 'Revenue', number_format($totalRevenue, 2)]);
+    fputcsv($out, ['Total items served', $totalItems, 'Value served', number_format($totalRevenue, 2)]);
     fputcsv($out, ['Avg prep (s)', $avgPrep, 'Voids', $totalVoid]);
     fputcsv($out, []);
     fputcsv($out, ['Order Ref', 'Type', 'Table/Customer', 'Item', 'Qty', 'Unit Price', 'Line Total', 'Station', 'Status', 'Created', 'Fired', 'Started', 'Ready', 'Served', 'Prep (mm:ss)', 'Bumped by', 'Opened by', 'Item Notes']);
@@ -298,7 +303,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                 <span class="ck-kpi__value"><?php echo number_format($totalQty, 2); ?></span>
             </div>
             <div class="ck-kpi">
-                <span class="ck-kpi__label">Revenue</span>
+                <span class="ck-kpi__label">Value served</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($totalRevenue, 2); ?></span>
             </div>
             <div class="ck-kpi">
@@ -307,7 +312,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
             </div>
             <div class="ck-kpi">
                 <span class="ck-kpi__label">Min · Max</span>
-                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo rh_fmt_dur($minPrep) . ' · ' . rh_fmt_dur($maxPrep); ?></span>
+                <span class="ck-kpi__value"><?php echo rh_fmt_dur($minPrep) . ' · ' . rh_fmt_dur($maxPrep); ?></span>
             </div>
             <div class="ck-kpi ck-kpi--alert">
                 <span class="ck-kpi__label">Voided / Cancelled</span>
@@ -324,7 +329,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                             <th>Station</th>
                             <th>Items</th>
                             <th>Qty</th>
-                            <th>Revenue</th>
+                            <th>Value served</th>
                             <th>Avg Prep</th>
                             <th>Voids</th>
                         </tr>
@@ -355,7 +360,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                             <th>Item</th>
                             <th>Station</th>
                             <th>Qty sold</th>
-                            <th>Revenue</th>
+                            <th>Value served</th>
                         </tr>
                     </thead>
                     <tbody>

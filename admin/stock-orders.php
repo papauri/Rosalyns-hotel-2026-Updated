@@ -933,7 +933,11 @@ if (!$error || strpos($error, 'not yet') === false) {
         $whereClauses   = [];
         $whereParams    = [];
         if ($filterDate === 'today') {
-            $whereClauses[] = 'DATE(o.created_at) = CURDATE()';
+            // Settled orders belong to the day they were PAID (a tab opened last night and paid today is
+            // today's sale, as on the dashboard card); everything else to the day it was opened.
+            $whereClauses[] = in_array($filterStatus, ['paid', 'completed', 'settled'], true)
+                ? 'DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()'
+                : 'DATE(o.created_at) = CURDATE()';
         }
         if ($filterMethod === 'unassigned') {
             $whereClauses[] = "(o.payment_method IS NULL OR TRIM(o.payment_method) = '')";
@@ -953,7 +957,10 @@ if (!$error || strpos($error, 'not yet') === false) {
         } else {
             $filterHour = '';
         }
-        if (in_array($filterStatus, $allowedStatus, true)) {
+        if ($filterStatus === 'settled') {
+            // Paid at the till or closed through another path (both are sales).
+            $whereClauses[] = "o.status IN ('paid','completed')";
+        } elseif (in_array($filterStatus, $allowedStatus, true)) {
             $whereClauses[] = 'o.status = ?';
             $whereParams[]  = $filterStatus;
         }

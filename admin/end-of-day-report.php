@@ -103,8 +103,9 @@ if ($mod_bookings) {
                 SUM(CASE WHEN check_in_date < :d AND check_out_date > :d AND status = 'checked-in' THEN 1 ELSE 0 END) AS stayovers,
                 SUM(CASE WHEN DATE(created_at) = :d THEN 1 ELSE 0 END) AS new_bookings,
                 SUM(CASE WHEN DATE(updated_at) = :d AND status = 'cancelled' THEN 1 ELSE 0 END) AS cancellations,
-                SUM(CASE WHEN check_in_date = :d AND status = 'expired' THEN 1 ELSE 0 END) AS no_shows
+                SUM(CASE WHEN check_in_date = :d AND status = 'no-show' THEN 1 ELSE 0 END) AS no_shows
             FROM bookings
+            WHERE deleted_at IS NULL
         ");
         $opsStmt->execute([':d' => $report_date]);
         $ops = array_merge($ops, $opsStmt->fetch(PDO::FETCH_ASSOC) ?: []);
@@ -172,7 +173,8 @@ try {
             COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) AS refunds,
             COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN vat_amount   ELSE 0 END), 0) AS refund_vat,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS pending,
-            COUNT(*) AS txn_count
+            COUNT(*) AS txn_count,
+            COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS collected_count
         FROM payments
         WHERE DATE(payment_date) = :d
           AND deleted_at IS NULL
@@ -187,6 +189,7 @@ try {
 // rata between the room charges and the F&B charges (food / drink / room service) on that booking's
 // folio (rh_eod_folio_fnb_allocation), so the F&B part leaves room revenue (and ADR / RevPAR).
 // The total is unchanged. A deposit on a stay with no F&B charges stays room revenue.
+$room_received_gross = (float)$rev['room_gross']; // all room payments received, before F&B is moved out (room-type shares use this)
 $folioFnb = rh_eod_folio_fnb_allocation($pdo, $report_date);
 $folioFnbMoved = max(0.0, min((float)$folioFnb['gross'], (float)$rev['room_gross']));
 if ($folioFnbMoved > 0) {
@@ -313,8 +316,11 @@ if ($mod_housekeeping) {
 $outstanding_folio = 0.0;
 if ($mod_bookings) {
     try {
-        $oStmt = $pdo->query("SELECT COALESCE(SUM(amount_due),0) FROM bookings WHERE amount_due > 0 AND status IN ('checked-in','confirmed','tentative')");
-        $outstanding_folio = (float)$oStmt->fetchColumn();
+        // Same receivable rule as the dashboard, Accounting and the Outstanding balances list: every live
+        // booking that still owes money, including guests already checked out and the kept first night on
+        // cancellations (a checked-out guest who left owing money is the one to chase).
+        // One shared helper (admin/includes/eod-revenue.php) so the PDF and e-mail show the same figure.
+        $outstanding_folio = rh_eod_outstanding_folio($pdo);
     } catch (Throwable $e) { /* ignore */
     }
 }
@@ -409,15 +415,7 @@ if ($mod_bookings) {
 $tomorrow_preview = ['arrivals' => 0, 'departures' => 0, 'rev_forecast' => 0.0];
 if ($mod_bookings) {
     try {
-        $tp = $pdo->prepare("
-            SELECT
-                SUM(CASE WHEN check_in_date  = :t AND status IN ('confirmed','tentative','pending') THEN 1 ELSE 0 END) AS arrivals,
-                SUM(CASE WHEN check_out_date = :t AND status IN ('checked-in','confirmed')           THEN 1 ELSE 0 END) AS departures,
-                COALESCE(SUM(CASE WHEN check_in_date = :t AND status IN ('confirmed','tentative','pending') THEN total_amount ELSE 0 END), 0) AS rev_forecast
-            FROM bookings
-        ");
-        $tp->execute([':t' => $tomorrow]);
-        $tomorrow_preview = array_merge($tomorrow_preview, $tp->fetch(PDO::FETCH_ASSOC) ?: []);
+        $tomorrow_preview = array_merge($tomorrow_preview, rh_eod_tomorrow_preview($pdo, $tomorrow)); // shared with the PDF / e-mail
     } catch (Throwable $e) { /* ignore */
     }
 }
@@ -519,8 +517,18 @@ foreach ($method_mix as $method_row) {
         $method_totals['other'] += $method_total;
     }
 }
+// Cash refunds paid out today leave the till, so they come off the cash to reconcile (refund rows keep the
+// original payment method). Other methods stay as received.
+$cash_refunds_out = 0.0;
+try {
+    $cash_refunds_out = rh_eod_cash_refunds_out($pdo, $report_date); // shared with the PDF / e-mail
+} catch (Throwable $e) {
+    error_log('EOD cash refunds: ' . $e->getMessage());
+}
+$method_totals['cash'] -= $cash_refunds_out;
 $non_cash_total = $method_totals['mobile_money'] + $method_totals['card'] + $method_totals['bank_transfer'] + $method_totals['other'];
-$revenue_per_transaction = (int)$rev['txn_count'] > 0 ? $gross_revenue / (int)$rev['txn_count'] : 0;
+// Average per payment received: refund and pending rows are not payments received, so they are not in the divisor.
+$revenue_per_transaction = (int)($rev['collected_count'] ?? 0) > 0 ? $gross_revenue / (int)$rev['collected_count'] : 0;
 $fnb_per_occupied_room = $rooms_occupied > 0 ? (float)$pos_totals['gross'] / $rooms_occupied : 0;
 $unpaid_risk = (float)$rev['pending'] + $outstanding_folio;
 
@@ -591,7 +599,7 @@ if ($mod_bookings) {
         $addAlert('warn', 'fa-door-open', 'Departures still open', $departures_remaining . ' expected departure' . ($departures_remaining === 1 ? '' : 's') . ' not checked out.');
     }
     if ($outstanding_folio > 0) {
-        $addAlert('warn', 'fa-file-invoice-dollar', 'Outstanding guest folio', $money($outstanding_folio) . ' unpaid across in-house / active stays.');
+        $addAlert('warn', 'fa-file-invoice-dollar', 'Outstanding guest folio', $money($outstanding_folio) . ' still owed on open bookings (in-house, upcoming and checked out).');
     }
     if ($rooms_oo > 0) {
         $addAlert('watch', 'fa-screwdriver-wrench', 'Rooms out of order', $rooms_oo . ' room' . ($rooms_oo === 1 ? '' : 's') . ' unavailable for sale.');
@@ -1074,7 +1082,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
             'fa-triangle-exclamation'   => 'stock-orders.php',
             'fa-rotate-left'            => 'payments.php?refund_status=pending',
             'fa-broom'                  => 'housekeeping.php',
-            'fa-sack-dollar'            => 'payments.php?date=' . $report_date,
+            'fa-sack-dollar'            => 'payments.php?start_date=' . $report_date . '&end_date=' . $report_date,
         ];
         $alertsOpen = array_values(array_filter($closeout_alerts, static fn($a) => $a['level'] !== 'good'));
         $alertsGood = array_values(array_filter($closeout_alerts, static fn($a) => $a['level'] === 'good'));
@@ -1295,6 +1303,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 </ul>
                 <?php endif; ?>
                 <ul class="ck-kv eod-kv">
+                    <?php if ($cash_refunds_out > 0.004) { echo $kv('Cash refunds already taken off', '&minus;' . $money($cash_refunds_out)); } ?>
                     <?php echo $kv('Cash collected (all methods, after refunds)', $money($cash_collected)); ?>
                     <?php echo $kv('Non-cash collected', $money($non_cash_total)); ?>
                     <?php echo $kv('Pending today', $money($rev['pending']), (float)$rev['pending'] > 0 ? 'eod-warn' : ''); ?>
@@ -1424,7 +1433,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                     <div class="ck-mini"><strong><?php echo (int)$ops['stayovers']; ?></strong><span>Stay-overs</span></div>
                 </div>
                 <ul class="ck-kv eod-kv">
-                    <?php echo $kv('Forecast revenue', $money($tomorrow_preview['rev_forecast'])); ?>
+                    <?php echo $kv('Booked value of arrivals', $money($tomorrow_preview['rev_forecast']) . $sub('whole stay, incl. VAT')); ?>
                 </ul>
             </section>
             <?php endif; ?>
@@ -1668,7 +1677,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                             <thead><tr><th>Room type</th><th class="num">Bookings</th><th class="num">Received</th><th class="num">Share</th></tr></thead>
                             <tbody>
                                 <?php foreach ($room_type_perf as $rt):
-                                    $rt_share = $rev['room_gross'] > 0 ? min(100, ((float)$rt['revenue'] / (float)$rev['room_gross']) * 100) : 0;
+                                    $rt_share = $room_received_gross > 0 ? min(100, ((float)$rt['revenue'] / $room_received_gross) * 100) : 0;
                                 ?>
                                     <tr>
                                         <td><?php echo htmlspecialchars((string)$rt['room_type']); ?></td>

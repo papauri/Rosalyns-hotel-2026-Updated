@@ -118,11 +118,11 @@ switch ($filter_range) {
         $date_end = date('Y-m-d 23:59:59');
         break;
     case '7days':
-        $date_start = date('Y-m-d 00:00:00', strtotime('-7 days'));
+        $date_start = date('Y-m-d 00:00:00', strtotime('-6 days')); // today + the 6 days before = 7 days
         $date_end = date('Y-m-d 23:59:59');
         break;
     case '30days':
-        $date_start = date('Y-m-d 00:00:00', strtotime('-30 days'));
+        $date_start = date('Y-m-d 00:00:00', strtotime('-29 days')); // today + the 29 days before = 30 days
         $date_end = date('Y-m-d 23:59:59');
         break;
     case 'custom':
@@ -196,6 +196,16 @@ try {
         $stats_stmt = $pdo->prepare($stats_sql);
         $stats_stmt->execute($params);
         $stats = $stats_stmt->fetch(PDO::FETCH_ASSOC) ?: $stats;
+
+        // "New visitors" = addresses (IPs) first seen in this period, i.e. never logged before it started.
+        // (is_first_visit only marks the first page of each browser session, so summing it just repeated "Unique sessions".)
+        $new_stmt = $pdo->prepare("
+            SELECT COUNT(DISTINCT v.ip_address) FROM site_visitors v
+            WHERE v.created_at BETWEEN ? AND ?" . (($filter_device && $filter_device !== 'all') ? " AND v.device_type = ?" : "") . "
+              AND NOT EXISTS (SELECT 1 FROM site_visitors p WHERE p.ip_address = v.ip_address AND p.created_at < ?)
+        ");
+        $new_stmt->execute(array_merge($params, [$date_start]));
+        $stats['new_visitors'] = (int)$new_stmt->fetchColumn();
 
         // Device breakdown
         $device_stmt = $pdo->prepare("
@@ -283,13 +293,24 @@ try {
             return $b['count'] <=> $a['count'];
         });
 
+        // Source reports count visits that ARRIVED from outside. Every click inside the site also carries our own
+        // domain as its referrer, which would otherwise show up as the biggest "referral site".
+        $own_host = strtolower((string)preg_replace('/:\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? '')));
+        $own_hosts = array_values(array_unique(array_filter([$own_host, preg_replace('/^www\./', '', $own_host), $own_host !== '' ? 'www.' . preg_replace('/^www\./', '', $own_host) : ''])));
+        $ext_where = $where;
+        $ext_params = $params;
+        if ($own_hosts) {
+            $ext_where .= " AND (referrer_domain IS NULL OR referrer_domain = '' OR LOWER(referrer_domain) NOT IN (" . implode(',', array_fill(0, count($own_hosts), '?')) . "))";
+            $ext_params = array_merge($params, $own_hosts);
+        }
+
         // Top referrers
         $ref_stmt = $pdo->prepare("
             SELECT referrer_domain, COUNT(*) as count
-            FROM site_visitors WHERE {$where} AND referrer_domain != '' AND referrer_domain IS NOT NULL
+            FROM site_visitors WHERE {$ext_where} AND referrer_domain != '' AND referrer_domain IS NOT NULL
             GROUP BY referrer_domain ORDER BY count DESC LIMIT 10
         ");
-        $ref_stmt->execute($params);
+        $ref_stmt->execute($ext_params);
         $referrers = $ref_stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Top visitor IPs
@@ -362,10 +383,10 @@ try {
         ];
         $funnel_stmt = $pdo->prepare("
             SELECT
-                SUM(CASE WHEN page_url LIKE '%/index.php%' OR page_url = '/' OR page_url = '' THEN 1 ELSE 0 END) as homepage,
-                SUM(CASE WHEN page_url LIKE '%room%' OR page_url LIKE '%accommodation%' THEN 1 ELSE 0 END) as rooms,
-                SUM(CASE WHEN page_url LIKE '%booking.php%' THEN 1 ELSE 0 END) as booking,
-                SUM(CASE WHEN page_url LIKE '%booking-confirmation%' THEN 1 ELSE 0 END) as confirmation
+                COUNT(DISTINCT CASE WHEN page_url LIKE '%/index.php%' OR page_url = '/' OR page_url = '' THEN session_id END) as homepage,
+                COUNT(DISTINCT CASE WHEN page_url LIKE '%room%' OR page_url LIKE '%accommodation%' THEN session_id END) as rooms,
+                COUNT(DISTINCT CASE WHEN page_url LIKE '%booking.php%' THEN session_id END) as booking,
+                COUNT(DISTINCT CASE WHEN page_url LIKE '%booking-confirmation%' THEN session_id END) as confirmation
             FROM site_visitors WHERE {$where}
         ");
         $funnel_stmt->execute($params);
@@ -431,20 +452,24 @@ try {
                 COUNT(*) as visits,
                 COUNT(DISTINCT session_id) as sessions,
                 COUNT(DISTINCT ip_address) as unique_visitors,
-                AVG(CASE
+                COUNT(DISTINCT CASE
                     WHEN session_id IN (
-                        SELECT DISTINCT session_id FROM site_visitors WHERE page_url LIKE '%booking-confirmation%'
-                    ) THEN 100
-                    ELSE 0
-                END) as conversion_rate
+                        SELECT DISTINCT session_id FROM site_visitors WHERE page_url LIKE '%booking-confirmation%' AND {$where}
+                    ) THEN session_id
+                END) as converted_sessions
             FROM site_visitors
-            WHERE {$where}
+            WHERE {$ext_where}
             GROUP BY source_category, referrer_domain
             ORDER BY visits DESC
             LIMIT 20
         ");
-        $traffic_source_detail_stmt->execute($params);
+        // Conversion = share of this source's SESSIONS that reached the booking confirmation (it used to average page views, unscoped by date).
+        $traffic_source_detail_stmt->execute(array_merge($params, $ext_params));
         $traffic_source_details = $traffic_source_detail_stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($traffic_source_details as &$tsdRow) {
+            $tsdRow['conversion_rate'] = (int)$tsdRow['sessions'] > 0 ? round(((int)$tsdRow['converted_sessions'] / (int)$tsdRow['sessions']) * 100, 1) : 0;
+        }
+        unset($tsdRow);
 
         // Group by category for summary
         $traffic_by_category = [];
@@ -460,16 +485,16 @@ try {
                     'sources' => []
                 ];
             }
+            $traffic_by_category[$cat]['conversions'] += (int)$tsd['converted_sessions'];
             $traffic_by_category[$cat]['visits'] += (int)$tsd['visits'];
             $traffic_by_category[$cat]['sessions'] += (int)$tsd['sessions'];
             $traffic_by_category[$cat]['unique_visitors'] += (int)$tsd['unique_visitors'];
-            $traffic_by_category[$cat]['conversions'] += round((float)$tsd['conversion_rate']);
             $traffic_by_category[$cat]['sources'][] = $tsd;
         }
 
         // Calculate conversion rate per category
         foreach ($traffic_by_category as &$tbc) {
-            $tbc['conversion_rate'] = count($tbc['sources']) > 0 ? round($tbc['conversions'] / count($tbc['sources']), 1) : 0;
+            $tbc['conversion_rate'] = $tbc['sessions'] > 0 ? round($tbc['conversions'] / $tbc['sessions'] * 100, 1) : 0;
         }
         unset($tbc);
 
@@ -488,7 +513,7 @@ try {
                     WHEN session_id IN (
                         SELECT DISTINCT session_id
                         FROM site_visitors
-                        WHERE page_url LIKE '%booking%'
+                        WHERE page_url LIKE '%booking%' AND {$where}
                     ) THEN session_id
                 END) as booking_attempts
             FROM site_visitors
@@ -499,7 +524,7 @@ try {
             ORDER BY views DESC
             LIMIT 15
         ");
-        $problem_pages_stmt->execute($params);
+        $problem_pages_stmt->execute(array_merge($params, $params)); // booking sessions are counted inside the same period/device only
         $problem_pages = $problem_pages_stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Calculate conversion efficiency
@@ -606,11 +631,11 @@ try {
                 COUNT(*) as visits,
                 COUNT(DISTINCT session_id) as sessions
             FROM site_visitors
-            WHERE {$where}
+            WHERE {$ext_where}
             GROUP BY source_type
             ORDER BY visits DESC
         ");
-        $source_stmt->execute($params);
+        $source_stmt->execute($ext_params);
         $traffic_sources = $source_stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Average pages per session
@@ -632,30 +657,33 @@ try {
             SELECT HOUR(created_at) as hour, COUNT(*) as count
             FROM bookings
             WHERE created_at BETWEEN ? AND ?
+              AND deleted_at IS NULL AND status <> 'expired'
             GROUP BY HOUR(created_at)
             ORDER BY hour
         ");
-        $booking_hours_stmt->execute($params);
+        // Always exactly two values: $params also carries the device filter, which made this query fail ("could not load") whenever a device was picked.
+        $booking_hours_stmt->execute([$date_start, $date_end]);
         foreach ($booking_hours_stmt->fetchAll(PDO::FETCH_ASSOC) as $bh) {
             $booking_hours[$bh['hour']] = (int)$bh['count'];
         }
 
-        // Geographic opportunity: high traffic, check if correlates with bookings
+        // Geographic opportunity: countries with the most visits. Bookings are NOT matched to a country here (the old
+        // join attached every booking made on the same day to every country, so each country showed the same booking count).
         $geo_opportunity_stmt = $pdo->prepare("
-            SELECT
-                sv.country,
-                COUNT(DISTINCT sv.session_id) as visitor_sessions,
-                COUNT(DISTINCT b.id) as bookings
-            FROM site_visitors sv
-            LEFT JOIN bookings b ON DATE(sv.created_at) = DATE(b.created_at)
-            WHERE sv.created_at BETWEEN ? AND ?
-            GROUP BY sv.country
-            HAVING visitor_sessions > 5
-            ORDER BY visitor_sessions DESC
-            LIMIT 10
+            SELECT country, COUNT(DISTINCT session_id) as visitor_sessions
+            FROM site_visitors
+            WHERE {$where}
+            GROUP BY country
         ");
         $geo_opportunity_stmt->execute($params);
-        $geo_opportunities = $geo_opportunity_stmt->fetchAll(PDO::FETCH_ASSOC);
+        $geo_by_label = [];
+        foreach ($geo_opportunity_stmt->fetchAll(PDO::FETCH_ASSOC) as $g) {
+            $lbl = normalizeCountryLabel($g['country'] ?? null); // "City, Country" rows roll up to the country
+            $geo_by_label[$lbl] = ['country' => $lbl, 'visitor_sessions' => ($geo_by_label[$lbl]['visitor_sessions'] ?? 0) + (int)$g['visitor_sessions']];
+        }
+        $geo_opportunities = array_values(array_filter($geo_by_label, static fn(array $g): bool => $g['visitor_sessions'] > 5));
+        usort($geo_opportunities, static fn(array $a, array $b): int => $b['visitor_sessions'] <=> $a['visitor_sessions']);
+        $geo_opportunities = array_slice($geo_opportunities, 0, 10);
     }
 } catch (PDOException $e) {
     $table_exists = false;
@@ -987,7 +1015,7 @@ try {
                     <div class="rh-panel__body">
                         <table class="visitors-table va-table no-auto-pagination">
                             <thead>
-                                <tr><th>Step</th><th class="num">Visitors</th><th>Of top step</th><th class="num">Drop-off</th><th class="num">Conversion</th></tr>
+                                <tr><th>Step</th><th class="num">Sessions</th><th>Of top step</th><th class="num">Drop-off</th><th class="num">Conversion</th></tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($funnel_steps as $idx => $step):
@@ -1050,7 +1078,7 @@ try {
 
                     <!-- Visitor Loyalty -->
                     <div class="rh-panel"><div class="rh-panel__head"><h2 class="rh-panel__title">Visitor Loyalty</h2></div>
-                        <p class="va-note">New vs returning visitors</p>
+                        <p class="va-note">Visitor addresses in the selected period: one day only vs more than one day</p>
                         <?php
                         $new_vis = (int)($visitor_loyalty['new_unique'] ?? 0);
                         $ret_vis = (int)($visitor_loyalty['returning'] ?? 0);
@@ -1060,8 +1088,8 @@ try {
                         ?>
                         <table class="rh-kv no-auto-pagination">
                             <tbody>
-                                <tr><th scope="row">New visitors</th><td><?php echo number_format($new_vis); ?> <small class="va-muted"><?php echo $new_pct; ?>%</small></td></tr>
-                                <tr><th scope="row">Returning visitors</th><td><?php echo number_format($ret_vis); ?> <small class="va-muted"><?php echo $ret_pct; ?>%</small></td></tr>
+                                <tr><th scope="row">Came on one day only</th><td><?php echo number_format($new_vis); ?> <small class="va-muted"><?php echo $new_pct; ?>%</small></td></tr>
+                                <tr><th scope="row">Came back on another day</th><td><?php echo number_format($ret_vis); ?> <small class="va-muted"><?php echo $ret_pct; ?>%</small></td></tr>
                             </tbody>
                         </table>
                         <p class="va-note"><i class="fas fa-info-circle"></i> Returning visitors indicate brand loyalty and satisfaction</p>
@@ -1163,18 +1191,18 @@ try {
                             <p class="va-note">High-traffic countries - potential for targeted campaigns</p>
                             <ul style="list-style: none; padding: 0; margin: 0;">
                                 <?php foreach (array_slice($geo_opportunities, 0, 6) as $geo):
-                                    $conv_rate = $geo['visitor_sessions'] > 0 ? round(($geo['bookings'] / $geo['visitor_sessions']) * 100, 1) : 0;
+                                    $geo_share = $total_sessions > 0 ? round(($geo['visitor_sessions'] / $total_sessions) * 100, 1) : 0;
                                     $label = normalizeCountryLabel($geo['country']);
                                 ?>
                                     <li style="padding: 12px; border-bottom: 1px solid #eee;">
                                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                                             <strong style="color: #333;"><?php echo htmlspecialchars($label); ?></strong>
-                                            <span style="font-size: 12px; padding: 3px 8px; background: <?php echo $conv_rate > 5 ? '#4CAF50' : '#FF9800'; ?>; color: #fff; border-radius: 10px;">
-                                                <?php echo $conv_rate; ?>% conversion
+                                            <span style="font-size: 12px; padding: 3px 8px; background: #8F6A35; color: #fff; border-radius: 10px;">
+                                                <?php echo $geo_share; ?>% of sessions
                                             </span>
                                         </div>
                                         <div style="font-size: 12px; color: #666;">
-                                            <?php echo number_format($geo['visitor_sessions']); ?> sessions • <?php echo number_format($geo['bookings']); ?> bookings
+                                            <?php echo number_format($geo['visitor_sessions']); ?> sessions
                                         </div>
                                     </li>
                                 <?php endforeach; ?>
@@ -1212,7 +1240,7 @@ try {
                         <?php else: ?>
                             <ul class="breakdown-list">
                                 <?php
-                                $total_country = max(1, array_sum(array_column($country_breakdown, 'count')));
+                                $total_country = max(1, (int)($stats['total_views'] ?? 0)); // share of ALL page views, not of the rows shown
                                 foreach ($country_breakdown as $c):
                                     $pct = round(($c['count'] / $total_country) * 100);
                                 ?>
@@ -1261,7 +1289,7 @@ try {
                         <?php else: ?>
                             <ul class="breakdown-list">
                                 <?php
-                                $total_browser = max(1, array_sum(array_column($browsers, 'count')));
+                                $total_browser = max(1, (int)($stats['total_views'] ?? 0));
                                 foreach ($browsers as $b):
                                     $pct = round(($b['count'] / $total_browser) * 100);
                                 ?>
@@ -1284,7 +1312,7 @@ try {
                         <?php else: ?>
                             <ul class="breakdown-list">
                                 <?php
-                                $total_os = max(1, array_sum(array_column($operating_systems, 'count')));
+                                $total_os = max(1, (int)($stats['total_views'] ?? 0));
                                 foreach ($operating_systems as $o):
                                     $pct = round(($o['count'] / $total_os) * 100);
                                 ?>

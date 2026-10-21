@@ -420,12 +420,18 @@ $kpiSql = "SELECT
         COUNT(*) AS orders_today,
         COALESCE(SUM(total_amount),0) AS revenue_today,
         COALESCE(AVG(CASE WHEN fired_at IS NOT NULL AND served_at IS NOT NULL THEN TIMESTAMPDIFF(SECOND, fired_at, served_at) END),0) AS avg_seconds,
-        SUM(CASE WHEN kitchen_status NOT IN ('served') AND status<>'cancelled' THEN 1 ELSE 0 END) AS in_progress
+        0 AS in_progress
     FROM stock_orders
-    WHERE order_type='room_service' AND DATE(created_at)=?";
+    WHERE order_type='room_service' AND DATE(created_at)=?
+      AND status NOT IN ('cancelled','voided')"; // cancelled/voided orders are not orders, revenue or deliveries
 $st = $pdo->prepare($kpiSql);
 $st->execute([$today]);
 $kpis = $st->fetch(PDO::FETCH_ASSOC) ?: ['orders_today' => 0, 'revenue_today' => 0, 'avg_seconds' => 0, 'in_progress' => 0];
+
+// "In progress" = every open room-service order (any day), the same set the Active queue lists
+// (it was limited to today's orders, so it disagreed with the queue when an order carried over midnight).
+$kpis['in_progress'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders
+    WHERE order_type='room_service' AND kitchen_status<>'served' AND status NOT IN ('cancelled','voided')")->fetchColumn();
 
 $st = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items oi JOIN stock_orders o ON o.id=oi.order_id WHERE o.order_type='room_service' AND DATE(oi.served_at)=? AND oi.kds_status='served'");
 $st->execute([$today]);
@@ -441,7 +447,7 @@ $activeSql = "SELECT o.id, o.reference, o.table_number, o.customer_name, o.notes
               LEFT JOIN stock_order_items oi ON oi.order_id=o.id
               WHERE o.order_type='room_service'
                 AND o.kitchen_status<>'served'
-                AND o.status<>'cancelled'
+                AND o.status NOT IN ('cancelled','voided')
               GROUP BY o.id
               ORDER BY o.created_at DESC
               LIMIT 50";

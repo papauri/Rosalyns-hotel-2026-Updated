@@ -167,7 +167,7 @@ try {
                TIMESTAMPDIFF(SECOND, NOW(), b.tentative_expires_at) AS seconds_remaining
         FROM   bookings b
         LEFT JOIN rooms r ON b.room_id = r.id
-        WHERE  b.status = 'tentative' AND b.is_tentative = 1
+        WHERE  b.status = 'tentative' AND b.is_tentative = 1 AND b.deleted_at IS NULL
         ORDER  BY b.tentative_expires_at ASC
     ");
     $active = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -184,20 +184,28 @@ try {
         LEFT JOIN rooms r ON b.room_id = r.id
         WHERE  b.status = 'expired'
           AND  b.converted_from_tentative = 0
+          AND  b.deleted_at IS NULL
           AND  b.expired_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
         ORDER  BY b.expired_at DESC
         LIMIT  30
     ");
     $recently_expired = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // The list is capped at 30 rows; the tile must still show the true 14-day total.
+    $recently_expired_total = (int)$pdo->query("
+        SELECT COUNT(*) FROM bookings
+        WHERE status = 'expired' AND converted_from_tentative = 0 AND deleted_at IS NULL
+          AND expired_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
+    ")->fetchColumn();
 } catch (PDOException $e) {
     $recently_expired = [];
+    $recently_expired_total = null; // unknown: show a dash, not a fake 0
 }
 
 // ── Calculate stats ───────────────────────────────────────────────────────────
 $stat_total           = count($active);
 $stat_expiring_today  = 0;
 $stat_reminder_due    = 0;
-$stat_expired_14d     = count($recently_expired);
+$stat_expired_14d     = $recently_expired_total; // null when the query failed
 
 $now = new DateTime();
 foreach ($active as $bk) {
@@ -298,7 +306,7 @@ foreach ($active as $bk) {
             </div>
             <div class="ck-kpi">
                 <span class="ck-kpi__label">Expired (14 days)</span>
-                <span class="ck-kpi__value"><?php echo $stat_expired_14d; ?></span>
+                <span class="ck-kpi__value"><?php echo $stat_expired_14d === null ? '–' : (int)$stat_expired_14d; ?></span>
                 <span class="ck-kpi__sub">Lapsed holds for review</span>
             </div>
         </div>
@@ -565,7 +573,7 @@ foreach ($active as $bk) {
             <div class="acct-panel">
                 <div class="acct-panel__head">
                     <h3 class="acct-panel__title"><i class="fas fa-calendar-xmark"></i> Recently Expired Holds</h3>
-                    <span class="acct-panel__sub">Last 14 days · <?php echo count($recently_expired); ?> records</span>
+                    <span class="acct-panel__sub">Last 14 days · <?php echo count($recently_expired); ?><?php echo ($stat_expired_14d !== null && $stat_expired_14d > count($recently_expired)) ? ' of ' . (int)$stat_expired_14d . ' (latest shown)' : ''; ?> records</span>
                 </div>
                 <div class="acct-table-wrap">
                     <table class="acct-table">

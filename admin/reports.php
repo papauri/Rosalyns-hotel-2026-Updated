@@ -172,6 +172,7 @@ try {
     $statusStmt = $pdo->prepare("
         SELECT payment_status, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total_amount
         FROM payments WHERE deleted_at IS NULL
+        AND COALESCE(payment_type, '') <> 'refund'
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY payment_status
     ");
@@ -223,6 +224,7 @@ try {
         LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
         LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
         WHERE p.payment_status IN ('pending', 'partial') AND p.deleted_at IS NULL
+          AND COALESCE(p.payment_type, '') <> 'refund'
           AND p.payment_date <= ?
         ORDER BY p.payment_date ASC
     ");
@@ -264,11 +266,13 @@ try {
     $monthlyRevenueStmt = $pdo->prepare("
         SELECT DATE_FORMAT(payment_date, '%Y-%m') as month,
                DATE_FORMAT(payment_date, '%b %Y') as month_label,
-               COUNT(*) as transaction_count,
-               COALESCE(SUM(total_amount), 0) as monthly_revenue,
-               COALESCE(SUM(vat_amount), 0) as monthly_vat
+               SUM(CASE WHEN payment_type = 'refund' THEN 0 ELSE 1 END) as transaction_count,
+               COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN 0 ELSE total_amount END), 0) as monthly_revenue,
+               COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END), 0) as monthly_vat
         FROM payments
-        WHERE payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND deleted_at IS NULL
+        WHERE ((payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund')
+               OR (payment_type = 'refund' AND refund_status IN ('completed', 'processing')))
+        AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY month, month_label ORDER BY month ASC
     ");
@@ -277,7 +281,7 @@ try {
 
     // 7. VAT Collected
     $vatCollectedStmt = $pdo->prepare("
-        SELECT DATE(payment_date) as date, COUNT(*) as transaction_count,
+        SELECT DATE(payment_date) as date, SUM(CASE WHEN payment_type = 'refund' THEN 0 ELSE 1 END) as transaction_count,
                COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
                                  WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
                                  ELSE 0 END), 0) as vat_collected,
@@ -602,8 +606,9 @@ try {
     // 20. Conference Inquiry Stats
     $conferenceStatsStmt = $pdo->prepare("
         SELECT status, COUNT(*) as count,
-               COALESCE(SUM(total_amount), 0) as total_value,
+               COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), COALESCE(total_amount, 0) + COALESCE(vat_amount, 0))), 0) as total_value,
                COALESCE(SUM(amount_paid), 0) as total_paid,
+               COALESCE(SUM(amount_due), 0) as total_due,
                COALESCE(AVG({$conferenceFields['expected_attendees']}), 0) as avg_attendees
         FROM conference_inquiries
         WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
@@ -632,8 +637,9 @@ try {
     // 22. Gym Inquiry Stats
     $gymStatsStmt = $pdo->prepare("
         SELECT status, COUNT(*) as count,
-               COALESCE(SUM(total_amount), 0) as total_value,
-               COALESCE(SUM(amount_paid), 0) as total_paid
+               COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), COALESCE(total_amount, 0) + COALESCE(vat_amount, 0))), 0) as total_value,
+               COALESCE(SUM(amount_paid), 0) as total_paid,
+               COALESCE(SUM(amount_due), 0) as total_due
         FROM gym_inquiries
         WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status
@@ -657,8 +663,9 @@ try {
     // 22b. Event Booking Stats
     $eventStatsStmt = $pdo->prepare("
         SELECT status, COUNT(*) as count,
-               COALESCE(SUM(total_amount), 0) as total_value,
-               COALESCE(SUM(amount_paid), 0) as total_paid
+               COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), COALESCE(total_amount, 0) + COALESCE(vat_amount, 0))), 0) as total_value,
+               COALESCE(SUM(amount_paid), 0) as total_paid,
+               COALESCE(SUM(amount_due), 0) as total_due
         FROM event_inquiries
         WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status
@@ -721,7 +728,7 @@ try {
     // 26. Revenue Forecast (from future confirmed bookings)
     $forecastStmt = $pdo->query("
         SELECT COUNT(*) as upcoming_bookings,
-               COALESCE(SUM(total_amount), 0) as forecast_revenue,
+               COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0))), 0) as forecast_revenue,
                COALESCE(SUM(number_of_nights), 0) as upcoming_nights
         FROM bookings
         WHERE deleted_at IS NULL AND status IN ('confirmed', 'tentative')
@@ -774,8 +781,8 @@ try {
         SELECT COALESCE(SUM(total_cost), 0) as total_cogs,
                COALESCE(SUM(total_amount), 0) as fnb_gross
         FROM stock_orders
-        WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
-        AND status NOT IN ('voided','cancelled')
+        WHERE COALESCE(paid_at, created_at) >= ? AND COALESCE(paid_at, created_at) < DATE_ADD(?, INTERVAL 1 DAY)
+        AND status IN ('paid','completed','refunded')
     ");
     $plCogsStmt->execute([$start_date, $end_date]);
     $plCogs = $plCogsStmt->fetch(PDO::FETCH_ASSOC);
@@ -796,9 +803,10 @@ try {
     }
     $grossRevenue   = $roomsRevPl + $confRevPl + $fnbRevPl + $gymRevPl + $eventsRevPl;
     $totalCogs      = (float)($plCogs['total_cogs'] ?? 0);
-    $grossProfit    = $grossRevenue - $totalCogs;
+    // VAT is not income and refunded money is not kept, so profit is measured on net revenue.
     $netRevenue     = $grossRevenue - $totalRefunds - $totalVatCollected;
-    $grossMarginPct = $grossRevenue > 0 ? round(($grossProfit / $grossRevenue) * 100, 1) : 0.0;
+    $grossProfit    = $netRevenue - $totalCogs;
+    $grossMarginPct = $netRevenue > 0 ? round(($grossProfit / $netRevenue) * 100, 1) : 0.0;
 
     // ============================================
     // VAT REGISTER TAB QUERIES
@@ -1198,7 +1206,7 @@ try {
                             </div>
                             <div>
                                 <h4>📉 Gross Profit &amp; Margin</h4>
-                                <p><strong>Gross Profit</strong> = Revenue minus <?php echo htmlspecialchars(rh_pos_short_label()); ?> Cost of Goods (COGS). It does <em>not</em> include staff wages, utilities, or depreciation — those come later in a full P&amp;L. A margin above 60% is healthy for a business with <?php echo htmlspecialchars(rh_pos_short_label()); ?>.</p>
+                                <p><strong>Gross Profit</strong> = Net Revenue (after refunds and VAT) minus <?php echo htmlspecialchars(rh_pos_short_label()); ?> Cost of Goods (COGS). It does <em>not</em> include staff wages, utilities, or depreciation — those come later in a full P&amp;L. A margin above 60% is healthy for a business with <?php echo htmlspecialchars(rh_pos_short_label()); ?>.</p>
                             </div>
                             <div>
                                 <h4>🏨 ADR &amp; RevPAR</h4>
@@ -1243,7 +1251,7 @@ try {
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">VAT Collected</span>
                         <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalVatCollected, 2); ?></strong>
-                        <span class="rh-strip__sub">At <?php echo $vatRate; ?>% · Payable to MRA</span>
+                        <span class="rh-strip__sub">At <?php echo $vatRate; ?>% · VAT payable</span>
                     </div>
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Outstanding</span>
@@ -1318,18 +1326,6 @@ try {
                                     <td style="text-align:right"><?php echo number_format($grossRevenue, 2); ?></td>
                                     <td style="text-align:right"><?php echo rh_reports_delta($grossRevenue, $priorRevenue); ?></td>
                                 </tr>
-                                <?php if ($mod_pos): ?>
-                                <tr style="color: var(--color-text-secondary)">
-                                    <td title="<?php echo isRestaurantEnabled() ? 'COGS (Cost of Goods Sold) — the actual cost of food and drink ingredients used to make F&B items sold through the restaurant.' : 'COGS (Cost of Goods Sold) — the actual cost of stock/ingredients used to fulfil POS/till sales.'; ?>">– <?php echo htmlspecialchars(rh_pos_short_label()); ?> COGS</td>
-                                    <td style="text-align:right">(<?php echo number_format($totalCogs, 2); ?>)</td>
-                                    <td style="text-align:right"></td>
-                                </tr>
-                                <?php endif; ?>
-                                <tr style="font-weight:600; color: var(--color-lux-gold)">
-                                    <td>= Gross Profit</td>
-                                    <td style="text-align:right"><?php echo number_format($grossProfit, 2); ?></td>
-                                    <td style="text-align:right"></td>
-                                </tr>
                                 <tr style="color: var(--color-text-secondary)">
                                     <td>– Refunds Issued</td>
                                     <td style="text-align:right">(<?php echo number_format($totalRefunds, 2); ?>)</td>
@@ -1343,6 +1339,18 @@ try {
                                 <tr style="font-weight:700; border-top: 2px solid var(--color-lux-clay-50)">
                                     <td>= Net Revenue (ex-VAT, ex-refunds)</td>
                                     <td style="text-align:right; color: <?php echo $netRevenue >= 0 ? 'var(--color-lux-gold)' : '#c82333'; ?>"><?php echo number_format($netRevenue, 2); ?></td>
+                                    <td style="text-align:right"></td>
+                                </tr>
+                                <?php if ($mod_pos): ?>
+                                <tr style="color: var(--color-text-secondary)">
+                                    <td title="<?php echo isRestaurantEnabled() ? 'COGS (Cost of Goods Sold) — the actual cost of food and drink ingredients used to make F&B items sold through the restaurant.' : 'COGS (Cost of Goods Sold) — the actual cost of stock/ingredients used to fulfil POS/till sales.'; ?>">– <?php echo htmlspecialchars(rh_pos_short_label()); ?> COGS</td>
+                                    <td style="text-align:right">(<?php echo number_format($totalCogs, 2); ?>)</td>
+                                    <td style="text-align:right"></td>
+                                </tr>
+                                <?php endif; ?>
+                                <tr style="font-weight:600; color: var(--color-lux-gold)">
+                                    <td>= Gross Profit</td>
+                                    <td style="text-align:right"><?php echo number_format($grossProfit, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
                                 <?php if ($totalCreditNotesIssued > 0): ?>
@@ -1376,7 +1384,7 @@ try {
                                     <td style="text-align:right; font-weight:600"><?php echo $overallOccupancyRate; ?>%</td>
                                 </tr>
                                 <tr>
-                                    <td title="ADR (Average Daily Rate) — total room revenue divided by number of rooms sold.">ADR (Avg Daily Rate)</td>
+                                    <td title="ADR (Average Daily Rate) — room revenue (tourism levy included, VAT excluded) divided by number of rooms sold.">ADR (Avg Daily Rate)</td>
                                     <td style="text-align:right; font-weight:600"><?php echo $currency_symbol . ' ' . number_format($adr); ?></td>
                                 </tr>
                                 <tr>
@@ -1437,7 +1445,7 @@ try {
                                     <tr>
                                         <th>Source</th>
                                         <th title="Transactions — number of individual payment records">Txns</th>
-                                        <th>Revenue</th><?php if ($vatEnabled): ?><th title="VAT (Value Added Tax) — the tax portion collected. Must be remitted to MRA.">VAT</th><?php endif; ?><th>Share</th>
+                                        <th>Revenue</th><?php if ($vatEnabled): ?><th title="VAT (Value Added Tax) — the tax portion collected. Owed as VAT, not income.">VAT</th><?php endif; ?><th>Share</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1817,7 +1825,10 @@ try {
                         <div class="rh-strip__cell">
                             <span class="rh-strip__label">Completed Refunds</span>
                             <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($completedRefunds, 2); ?></strong>
-                            <span class="rh-strip__sub">Successfully processed</span>
+                            <span class="rh-strip__sub">Successfully processed<?php
+                                $processingRefunds = 0.0;
+                                foreach ($refundStatuses as $rs0) { if (($rs0['refund_status'] ?? '') === 'processing') { $processingRefunds += (float)$rs0['total_amount']; } }
+                                echo $processingRefunds > 0.004 ? ' · plus ' . $currency_symbol . ' ' . number_format($processingRefunds, 2) . ' being processed (counted in Total)' : ''; ?></span>
                         </div>
                         <div class="rh-strip__cell">
                             <span class="rh-strip__label">Net Revenue</span>
@@ -2115,7 +2126,7 @@ try {
                 <?php if (!empty($vatByQuarter)): ?>
                     <div class="rh-panel">
                         <div class="rh-panel__head"><h2 class="rh-panel__title">VAT by Quarter (calendar quarters)</h2></div>
-                        <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">Use these quarterly totals for the Output VAT on your VAT return. Net VAT payable to MRA = Output VAT (below) − Input VAT on your supplier invoices.</p>
+                        <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">Use these quarterly totals for the Output VAT on your VAT return. Net VAT payable = Output VAT (below) − Input VAT on your supplier invoices.</p>
                         <table class="acct-table">
                             <thead>
                                 <tr>
@@ -2586,7 +2597,7 @@ try {
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Room Inventory</span>
                         <strong class="rh-strip__value"><?php echo number_format($totalRoomInventory); ?></strong>
-                        <span class="rh-strip__sub">Active rooms</span>
+                        <span class="rh-strip__sub">In service (excludes out of order / maintenance)</span>
                     </div>
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Guests Served</span>
@@ -2872,36 +2883,46 @@ try {
         </details>
 
         <?php
+            // Cancelled / rejected / expired accounts are not revenue and owe nothing (the status tables
+            // below still show them). Balances come from amount_due, the same figure the dashboard and
+            // Outstanding balances use, so the screens agree. Values are VAT-inclusive like payments.
+            $deadStatuses = ['cancelled', 'rejected', 'expired'];
             $totalConfEvents = 0;
             $totalConfRevenue = 0;
             $totalConfPaid = 0;
+            $confOutstanding = 0;
             foreach ($conferenceStats as $cs) {
                 $totalConfEvents += $cs['count'];
+                if (in_array($cs['status'], $deadStatuses, true)) { continue; }
                 $totalConfRevenue += $cs['total_value'];
                 $totalConfPaid += $cs['total_paid'];
+                $confOutstanding += $cs['total_due'];
             }
             $totalGymInquiries = 0;
             $totalGymRevenue = 0;
             $totalGymPaid = 0;
+            $gymOutstanding = 0;
             foreach ($gymInquiryStats as $gi) {
                 $totalGymInquiries += $gi['count'];
+                if (in_array($gi['status'], $deadStatuses, true)) { continue; }
                 $totalGymRevenue += $gi['total_value'];
                 $totalGymPaid += $gi['total_paid'];
+                if ($gi['status'] !== 'closed') { $gymOutstanding += $gi['total_due']; }
             }
-            $gymOutstanding = $totalGymRevenue - $totalGymPaid;
 
             $totalEventBookings = 0;
             $totalEventRevenue = 0;
             $totalEventPaid = 0;
+            $eventOutstanding = 0;
             foreach ($eventInquiryStats as $ei) {
                 $totalEventBookings += $ei['count'];
+                if (in_array($ei['status'], $deadStatuses, true)) { continue; }
                 $totalEventRevenue += $ei['total_value'];
                 $totalEventPaid += $ei['total_paid'];
+                $eventOutstanding += $ei['total_due'];
             }
-            $eventOutstanding = $totalEventRevenue - $totalEventPaid;
 
             $confCollectionPct = $totalConfRevenue > 0 ? round(($totalConfPaid / $totalConfRevenue) * 100, 0) : 0;
-            $confOutstanding = $totalConfRevenue - $totalConfPaid;
         ?>
 
         <div class="rh-strip" role="group" aria-label="Summary">
@@ -2909,7 +2930,7 @@ try {
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Conference Revenue</span>
                 <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalConfRevenue, 2); ?></strong>
-                <span class="rh-strip__sub"><?php echo number_format($totalConfEvents); ?> inquiries</span>
+                <span class="rh-strip__sub"><?php echo number_format($totalConfEvents); ?> inquiries · cancelled not counted</span>
             </div>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Amount Collected</span>
@@ -2926,7 +2947,7 @@ try {
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Gym Revenue</span>
                 <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalGymRevenue, 2); ?></strong>
-                <span class="rh-strip__sub"><?php echo number_format($totalGymInquiries); ?> inquiries</span>
+                <span class="rh-strip__sub"><?php echo number_format($totalGymInquiries); ?> inquiries · cancelled not counted</span>
             </div>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Outstanding (Gym)</span>
@@ -2938,7 +2959,7 @@ try {
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Event Revenue</span>
                 <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalEventRevenue, 2); ?></strong>
-                <span class="rh-strip__sub"><?php echo number_format($totalEventBookings); ?> bookings</span>
+                <span class="rh-strip__sub"><?php echo number_format($totalEventBookings); ?> bookings · cancelled not counted</span>
             </div>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Outstanding (Events)</span>

@@ -2851,6 +2851,17 @@ try {
         $params = array_merge($params, array_fill(0, 12, $search_param));
     }
 
+    // Date filters belong to the shared scope (search + dates) so the tab counts and insight cards
+    // match the list; they were added after the snapshot, so the counts ignored the dates.
+    if (!empty($filter_date_from)) {
+        $where_clauses[] = "b.check_in_date >= ?";
+        $params[]        = $filter_date_from;
+    }
+    if (!empty($filter_date_to)) {
+        $where_clauses[] = "b.check_out_date <= ?";
+        $params[]        = $filter_date_to;
+    }
+
     // Deleted bookings are only ever shown under the Deleted filter; every count/insight excludes them.
     $deleted_scope_clauses = $where_clauses;
     $deleted_scope_params  = $params;
@@ -2869,16 +2880,6 @@ try {
     if (!empty($filter_status) && $filter_status !== 'deleted') {
         $where_clauses[] = "b.status = ?";
         $params[] = $filter_status;
-    }
-
-    if (!empty($filter_date_from)) {
-        $where_clauses[] = "b.check_in_date >= ?";
-        $params[]        = $filter_date_from;
-    }
-
-    if (!empty($filter_date_to)) {
-        $where_clauses[] = "b.check_out_date <= ?";
-        $params[]        = $filter_date_to;
     }
 
     // Overdue arrivals (no-show candidates): booking whose arrival date has
@@ -2905,8 +2906,8 @@ try {
             SUM(b.status = 'cancelled')                                                                   AS cancelled,
             SUM(b.status = 'no-show')                                                                     AS no_show,
             SUM(b.payment_status IN ('paid','completed'))                                                  AS paid,
-            SUM(b.payment_status NOT IN ('paid','completed'))                                              AS unpaid,
-            SUM(b.status = 'confirmed' AND b.check_in_date = CURDATE())                                   AS today_checkins,
+            SUM(b.payment_status NOT IN ('paid','completed','refunded') AND b.status NOT IN ('cancelled','no-show','expired')) AS unpaid,
+            SUM(b.status IN ('confirmed','pending') AND b.check_in_date = CURDATE())                      AS today_checkins,
             SUM(b.status = 'checked-in' AND b.check_out_date = CURDATE())                                 AS today_checkouts,
             SUM(DATE(b.created_at) = CURDATE())                                                           AS today_bookings,
             SUM(b.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY))                                          AS week_bookings,
@@ -3103,7 +3104,7 @@ try {
 
     if ($active_tab_override === 'today-checkins') {
         $tab_extra_clauses[] = "b.check_in_date = CURDATE()";
-        $tab_extra_clauses[] = "b.status = 'confirmed'";
+        $tab_extra_clauses[] = "b.status IN ('confirmed','pending')";
         $list_order_by = 'b.check_in_date ASC, b.created_at DESC';
     } elseif ($active_tab_override === 'today-checkouts') {
         $tab_extra_clauses[] = "b.check_out_date = CURDATE()";
@@ -3117,7 +3118,8 @@ try {
     } elseif ($active_tab_override === 'paid') {
         $tab_extra_clauses[] = "b.payment_status IN ('paid', 'completed')";
     } elseif ($active_tab_override === 'unpaid') {
-        $tab_extra_clauses[] = "b.payment_status NOT IN ('paid', 'completed')";
+        $tab_extra_clauses[] = "b.payment_status NOT IN ('paid', 'completed', 'refunded')";
+        $tab_extra_clauses[] = "b.status NOT IN ('cancelled', 'no-show', 'expired')";
     } elseif ($active_tab_override === 'today-bookings') {
         $tab_extra_clauses[] = "DATE(b.created_at) = CURDATE()";
     } elseif ($active_tab_override === 'week-bookings') {
@@ -4345,7 +4347,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                 const isExpiringSoon = row.dataset.expiringSoon === '1';
                 const isTentative = row.dataset.tentative === '1';
-                const isTodayCheckIn = checkInDateStr === todayStr && status === 'confirmed';
+                const isTodayCheckIn = checkInDateStr === todayStr && (status === 'confirmed' || status === 'pending');
                 const isTodayCheckOut = checkOutDateStr === todayStr && status === 'checked-in';
                 const isTodayBooking = createdDateStr === todayStr;
                 const isWeekBooking = createdDate && createdDate >= weekStart;
@@ -4391,7 +4393,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         isVisible = payment === 'paid' || payment === 'completed';
                         break;
                     case 'unpaid':
-                        isVisible = payment !== 'paid' && payment !== 'completed';
+                        isVisible = payment !== 'paid' && payment !== 'completed' && payment !== 'refunded'
+                            && status !== 'cancelled' && status !== 'no-show' && status !== 'expired';
                         break;
                     case 'today-bookings':
                         isVisible = isTodayBooking;

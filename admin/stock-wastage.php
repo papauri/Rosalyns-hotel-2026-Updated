@@ -207,7 +207,7 @@ if (!$error || strpos($error, 'not yet') === false) {
             SELECT i.name, i.unit, SUM(w.quantity) AS total_qty, SUM(w.wastage_cost) AS total_cost
             FROM stock_wastage w
             INNER JOIN stock_ingredients i ON i.id = w.ingredient_id
-            WHERE w.recorded_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+            WHERE w.recorded_date > DATE_SUB(CURDATE(), INTERVAL 30 DAY)
             GROUP BY i.id, i.name, i.unit
             ORDER BY total_cost DESC
             LIMIT 5

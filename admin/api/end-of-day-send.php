@@ -88,8 +88,9 @@ try {
             SUM(CASE WHEN check_in_date < ? AND check_out_date > ? AND status = 'checked-in' THEN 1 ELSE 0 END) AS stayovers,
             SUM(CASE WHEN DATE(created_at) = ? THEN 1 ELSE 0 END) AS new_bookings,
             SUM(CASE WHEN DATE(updated_at) = ? AND status = 'cancelled' THEN 1 ELSE 0 END) AS cancellations,
-            SUM(CASE WHEN check_in_date = ? AND status = 'expired' THEN 1 ELSE 0 END) AS no_shows
+            SUM(CASE WHEN check_in_date = ? AND status = 'no-show' THEN 1 ELSE 0 END) AS no_shows
         FROM bookings
+        WHERE deleted_at IS NULL
     ");
     $opsStmt->execute(array_fill(0, 9, $date));
     $ops = $opsStmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -172,6 +173,14 @@ try {
             $method_totals['non_cash'] += $methodTotal;
         }
     }
+    // Cash refunds paid out today leave the till: same rule as the on-screen report (shared helper).
+    $cash_refunds_out = 0.0;
+    try {
+        $cash_refunds_out = rh_eod_cash_refunds_out($pdo, $date);
+    } catch (Throwable $e) {
+        $cash_refunds_out = 0.0;
+    }
+    $method_totals['cash'] -= $cash_refunds_out;
 
     // POS totals
     $pos = ['orders' => 0, 'gross' => 0, 'cogs' => 0, 'voided_value' => 0, 'voided_count' => 0];
@@ -205,19 +214,11 @@ try {
 
     // Tomorrow
     $tomorrow = date('Y-m-d', strtotime($date . ' +1 day'));
-    $tp = $pdo->prepare("
-        SELECT
-            SUM(CASE WHEN check_in_date  = :t1 AND status IN ('confirmed','tentative','pending') THEN 1 ELSE 0 END) AS arrivals,
-            SUM(CASE WHEN check_out_date = :t2 AND status IN ('checked-in','confirmed')           THEN 1 ELSE 0 END) AS departures,
-            COALESCE(SUM(CASE WHEN check_in_date = :t3 AND status IN ('confirmed','tentative','pending') THEN total_amount ELSE 0 END),0) AS rev_forecast
-        FROM bookings
-    ");
-    $tp->execute([':t1' => $tomorrow, ':t2' => $tomorrow, ':t3' => $tomorrow]);
-    $tom = $tp->fetch(PDO::FETCH_ASSOC) ?: ['arrivals' => 0, 'departures' => 0, 'rev_forecast' => 0];
+    $tom = rh_eod_tomorrow_preview($pdo, $tomorrow); // shared with the on-screen report
 
     $outstanding = 0.0;
     try {
-        $outstanding = (float)$pdo->query("SELECT COALESCE(SUM(amount_due),0) FROM bookings WHERE amount_due > 0 AND status IN ('checked-in','confirmed','tentative')")->fetchColumn();
+        $outstanding = rh_eod_outstanding_folio($pdo); // shared receivable rule, same as the on-screen report
     } catch (Throwable $e) {
         $outstanding = 0.0;
     }
@@ -336,6 +337,7 @@ try {
     $reviews = $reviews ?? ['c' => 0, 'a' => 0];
     $tom = $tom ?? ['arrivals' => 0, 'departures' => 0];
     $outstanding = $outstanding ?? 0.0;
+    $cash_refunds_out = $cash_refunds_out ?? 0.0;
     $housekeeping = $housekeeping ?? ['pending' => 0, 'in_progress' => 0, 'completed' => 0];
     $previous = $previous ?? ['net' => 0.0, 'pos_gross' => 0.0, 'rooms_occupied' => 0, 'occupancy_pct' => 0.0];
 
@@ -414,7 +416,7 @@ if ($departures_remaining > 0)
 if ((float)($rev['pending'] ?? 0) > 0)
     $pdf_closeout_alerts[] = ['level' => 'warn', 'title' => 'Pending payments', 'detail' => _money($currency_symbol, (float)$rev['pending']) . ' still pending.'];
 if ($outstanding > 0)
-    $pdf_closeout_alerts[] = ['level' => 'warn', 'title' => 'Outstanding folio', 'detail' => _money($currency_symbol, $outstanding) . ' unpaid across active stays.'];
+    $pdf_closeout_alerts[] = ['level' => 'warn', 'title' => 'Outstanding folio', 'detail' => _money($currency_symbol, $outstanding) . ' still owed on open bookings (in-house, upcoming and checked out).'];
 if ((int)($pos['voided_count'] ?? 0) > 0)
     $pdf_closeout_alerts[] = ['level' => 'watch', 'title' => 'POS voids', 'detail' => (int)$pos['voided_count'] . ' void(s) worth ' . _money($currency_symbol, (float)($pos['voided_value'] ?? 0)) . '.'];
 if (((int)($housekeeping['pending'] ?? 0) + (int)($housekeeping['in_progress'] ?? 0)) > 0)
@@ -504,6 +506,9 @@ if ($channel === 'whatsapp') {
     }
     $lines[] = '';
     $lines[] = "━━━━━━━━━━ 💵 CASHIER ━━━━━━━━━━";
+    if ($cash_refunds_out > 0.004) {
+        $lines[] = "Cash refunds paid: -" . _money($currency_symbol, $cash_refunds_out);
+    }
     $lines[] = "Cash to reconcile: *" . _money($currency_symbol, (float)$method_totals['cash']) . "*";
     $lines[] = "Non-cash:          " . _money($currency_symbol, (float)$method_totals['non_cash']);
     $lines[] = "Capture rate:      " . number_format((float)$payment_capture_rate, 1) . "%";
@@ -530,7 +535,7 @@ if ($channel === 'whatsapp') {
         $lines[] = "━━━━━━━━━━ 📅 TOMORROW ━━━━━━━━━━";
         $lines[] = date('D, j M Y', strtotime($date . ' +1 day'));
         $lines[] = "Arrivals: " . (int)$tom['arrivals'] . "   Departures: " . (int)$tom['departures'];
-        $lines[] = "Forecast: " . _money($currency_symbol, (float)$tom['rev_forecast']);
+        $lines[] = "Booked value of arrivals: " . _money($currency_symbol, (float)$tom['rev_forecast']);
         $lines[] = '';
     }
     $lines[] = "— " . ($user['full_name'] ?: 'Admin') . " · " . date('H:i') . " · " . $site_name;
@@ -603,7 +608,7 @@ $email_alerts = [];
 if ($arrivals_remaining > 0)     $email_alerts[] = ['warn', '⚠️ Arrivals still open', $arrivals_remaining . ' expected arrival(s) not checked in.'];
 if ($departures_remaining > 0)   $email_alerts[] = ['warn', '⚠️ Departures still open', $departures_remaining . ' expected departure(s) not checked out.'];
 if ((float)($rev['pending'] ?? 0) > 0) $email_alerts[] = ['warn', '💳 Pending payments', _money($currency_symbol, (float)$rev['pending']) . ' still pending.'];
-if ($outstanding > 0)            $email_alerts[] = ['warn', '📋 Outstanding folio', _money($currency_symbol, $outstanding) . ' unpaid across active stays.'];
+if ($outstanding > 0)            $email_alerts[] = ['warn', '📋 Outstanding folio', _money($currency_symbol, $outstanding) . ' still owed on open bookings (in-house, upcoming and checked out).'];
 if ((int)$pos['voided_count'] > 0) $email_alerts[] = ['warn', '🚫 POS voids', (int)$pos['voided_count'] . ' void(s) worth ' . _money($currency_symbol, (float)$pos['voided_value']) . ' — review required.'];
 if (((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) > 0) {
     $email_alerts[] = ['info', '🧹 Housekeeping open', ((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) . ' task(s) not completed.'];
@@ -765,6 +770,7 @@ if (!empty($methods)) {
         $mShare = $gross > 0 ? ((float)$mRow['total'] / $gross) * 100 : 0;
         $html  .= $row($mLabel . ' (' . (int)$mRow['cnt'] . ' txn)', _money($currency_symbol, (float)$mRow['total']) . ' &nbsp;<small style="color:#8A775F;">(' . number_format($mShare, 1) . '%)</small>');
     }
+    if ($cash_refunds_out > 0.004) { $html .= $row("Less cash refunds paid", "-" . _money($currency_symbol, $cash_refunds_out)); }
     $html .= '<tr style="background:#F3ECE4;"><td style="padding:8px 12px;font-weight:700;border-bottom:1px solid #e5d9c9;">Cash to Reconcile</td><td style="padding:8px 12px;text-align:right;font-weight:700;border-bottom:1px solid #e5d9c9;">' . _money($currency_symbol, (float)$method_totals['cash']) . '</td></tr>';
     $html .= '<tr style="background:#F3ECE4;"><td style="padding:8px 12px;font-weight:700;border-bottom:1px solid #e5d9c9;">Non-Cash Collected</td><td style="padding:8px 12px;text-align:right;font-weight:700;border-bottom:1px solid #e5d9c9;">' . _money($currency_symbol, (float)$method_totals['non_cash']) . '</td></tr>';
 }
@@ -810,7 +816,7 @@ if ($eodModBookings) {
     $html .= '<tr>';
     $html .= '<td style="text-align:center;padding:10px;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Arrivals</div><div style="font-size:22px;font-weight:700;color:#ffffff;">' . (int)$tom['arrivals'] . '</div></td>';
     $html .= '<td style="text-align:center;padding:10px;border-left:1px solid #3d3733;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Departures</div><div style="font-size:22px;font-weight:700;color:#ffffff;">' . (int)$tom['departures'] . '</div></td>';
-    $html .= '<td style="text-align:center;padding:10px;border-left:1px solid #3d3733;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Revenue Forecast</div><div style="font-size:22px;font-weight:700;color:#B18247;">' . _money($currency_symbol, (float)$tom['rev_forecast']) . '</div></td>';
+    $html .= '<td style="text-align:center;padding:10px;border-left:1px solid #3d3733;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Booked value of arrivals</div><div style="font-size:22px;font-weight:700;color:#B18247;">' . _money($currency_symbol, (float)$tom['rev_forecast']) . '</div></td>';
     $html .= '</tr>';
     $html .= '</table></div>';
 }
@@ -841,6 +847,7 @@ try {
         'revpar'                 => $revpar,
         'methods'                => $methods,
         'cash_total'             => (float)($method_totals['cash'] ?? 0),
+        'cash_refunds_out'       => (float)$cash_refunds_out,
         'pos'                    => $pos,
         'pos_by_type'            => [],
         'top_items'              => $top,
@@ -1044,7 +1051,10 @@ if (false) {
             $pmLabel = ucwords(str_replace('_', ' ', (string)$pmRow['method']));
             $pdfRowA($pmLabel, _money($currency_symbol, (float)$pmRow['total']), false, $pmi);
         }
-        $pdfRowA('Cash to Reconcile', _money($currency_symbol, (float)$method_totals['cash']), true, count($methods));
+        if ($cash_refunds_out > 0.004) {
+            $pdfRowA('Less cash refunds paid', '-' . _money($currency_symbol, $cash_refunds_out), false, count($methods));
+        }
+        $pdfRowA('Cash to Reconcile',_money($currency_symbol, (float)$method_totals['cash']), true, count($methods));
         $py += 3.0;
     }
 
@@ -1082,7 +1092,7 @@ if (false) {
         $pdfSec('Tomorrow Preview - ' . date('D, M j', strtotime($tomorrow)));
         $pdfRowA('Expected Arrivals',   (string)(int)$tom['arrivals'], false, 0);
         $pdfRowA('Expected Departures', (string)(int)$tom['departures'], false, 1);
-        $pdfRowA('Revenue Forecast',    _money($currency_symbol, (float)($tom['rev_forecast'] ?? 0)), true, 2);
+        $pdfRowA('Booked value of arrivals',    _money($currency_symbol, (float)($tom['rev_forecast'] ?? 0)), true, 2);
     }
 
     $pa->SetY(-10);

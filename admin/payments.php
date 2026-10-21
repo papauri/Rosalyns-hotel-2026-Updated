@@ -217,7 +217,7 @@ if ($showOutstanding) {
     $confContact = $conferenceFields['contact_name'] ?? 'contact_person';
     $outstandingSources = [];
     if ($mod_bookings) {
-        $outstandingSources[] = "SELECT 'room' AS src, id, booking_reference AS ref, guest_name AS client, status, total_amount, amount_paid, amount_due FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))";
+        $outstandingSources[] = "SELECT 'room' AS src, id, booking_reference AS ref, guest_name AS client, status, total_amount, amount_paid, amount_due FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))";
     }
     if ($mod_conference) {
         $outstandingSources[] = "SELECT 'conference' AS src, id, {$confRef} AS ref, COALESCE(NULLIF({$confCompany},''), {$confContact}) AS client, status, total_amount, amount_paid, amount_due FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')";
@@ -377,8 +377,8 @@ $kpiStmt = $pdo->prepare("
         COUNT(*) AS txn_count,
         COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gross_collected,
         COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS vat_collected,
-        COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') THEN total_amount ELSE 0 END), 0) AS pending_total,
-        COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') THEN 1 ELSE 0 END), 0) AS pending_count,
+        COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS pending_total,
+        COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS pending_count,
         COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN total_amount ELSE 0 END), 0) AS refunds_total,
         COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN 1 ELSE 0 END), 0) AS refunds_count
     FROM payments
@@ -428,7 +428,7 @@ $byMethod = $byMethodStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Status mix for the visual pill bar
 $byStatusStmt = $pdo->prepare("
-    SELECT payment_status, COUNT(*) AS txns, COALESCE(SUM(total_amount),0) AS amt
+    SELECT payment_status, COUNT(*) AS txns, COALESCE(SUM(CASE WHEN COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END),0) AS amt
     FROM payments
     $analyticsWhereSql
     GROUP BY payment_status
@@ -597,13 +597,14 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <span class="ck-kpi__label">Today</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($period['today_collected'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub">                    <?php echo number_format((int)($period['today_count'] ?? 0)); ?> today ·
-                    <?php echo $currency_symbol . number_format((float)($period['week_collected'] ?? 0), 0); ?> last 7d
+                    <?php echo $currency_symbol . number_format((float)($period['week_collected'] ?? 0), 0); ?> last 7d ·
+                    <?php echo $currency_symbol . number_format((float)($period['month_collected'] ?? 0), 0); ?> this month
                 </span>
             </div>
             <div class="ck-kpi ck-kpi--info">
                 <span class="ck-kpi__label">Refunds (filtered)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($kpi['refunds_total'] ?? 0), 0); ?></span>
-                <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['refunds_count'] ?? 0)); ?> txns · MTD <?php echo $currency_symbol . number_format((float)($period['month_collected'] ?? 0), 0); ?></span>
+                <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['refunds_count'] ?? 0)); ?> refund<?php echo (int)($kpi['refunds_count'] ?? 0) === 1 ? '' : 's'; ?> paid or in progress</span>
             </div>
         </div>
 
@@ -718,7 +719,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             <div class="acct-panel" style="margin-bottom: 18px;">
                 <div class="acct-panel__head">
                     <h3 class="acct-panel__title">Status Breakdown</h3>
-                    <span class="acct-panel__sub"><?php echo number_format(array_sum(array_column($byStatus, 'txns'))); ?> transactions</span>
+                    <span class="acct-panel__sub"><?php echo number_format(array_sum(array_column($byStatus, 'txns'))); ?> transactions (amounts exclude refund rows)</span>
                 </div>
                 <div style="padding: 14px 18px; display:flex; flex-wrap:wrap; gap:8px;">
                     <?php foreach ($byStatus as $s): ?>

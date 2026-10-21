@@ -129,6 +129,11 @@ if (strtotime($dateFrom) > strtotime($dateTo)) {
 $page = max(1, (int)($_GET['page'] ?? 1));
 $perPage = 50;
 $offset = ($page - 1) * $perPage;
+if (($_GET['export'] ?? '') === 'csv') {
+    // The CSV is the whole date range, not just the 50 rows of the page on screen.
+    $perPage = 100000;
+    $offset = 0;
+}
 
 $vwSa = rh_voided_wastage_sql('sa');
 $vwPlain = rh_voided_wastage_sql('');
@@ -143,7 +148,7 @@ try {
     if ($tab === 'inventory') {
         $rows = $pdo->query("
             SELECT i.*, GREATEST(0, i.current_quantity) * i.cost_per_unit AS stock_value,
-                   (SELECT COUNT(*) FROM stock_batches b WHERE b.ingredient_id = i.id AND b.status = 'active') AS active_batches
+                   (SELECT COUNT(*) FROM stock_batches b WHERE b.ingredient_id = i.id AND b.status = 'active' AND b.quantity_remaining > 0) AS active_batches
             FROM stock_ingredients i
             WHERE i.is_archived = 0
             ORDER BY stock_value DESC
@@ -378,11 +383,11 @@ try {
         ];
     } elseif ($tab === 'expiry') {
         $rows = $pdo->query("
-            SELECT b.*, i.name AS ingredient_name, i.unit, i.cost_per_unit, DATEDIFF(b.expiry_date, CURDATE()) AS days_left
+            SELECT b.*, i.name AS ingredient_name, i.unit, COALESCE(NULLIF(b.cost_per_unit, 0), i.cost_per_unit) AS cost_per_unit, DATEDIFF(b.expiry_date, CURDATE()) AS days_left
             FROM stock_batches b
             INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
             WHERE b.expiry_date IS NOT NULL
-              AND (b.status = 'active' OR (b.status = 'expired' AND b.expiry_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)))
+              AND ((b.status = 'active' AND b.quantity_remaining > 0) OR (b.status = 'expired' AND b.expiry_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)))
             ORDER BY b.expiry_date ASC
         ")->fetchAll(PDO::FETCH_ASSOC);
         $expiringSoon = 0;
@@ -659,7 +664,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                             $expired = (float)$r['expired'];
                             $totalOut = $used + $wasted + $expired;
                             $yieldPct = $totalOut > 0 ? ($used / $totalOut) * 100 : 0;
-                            $lossCost = ($wasted + $expired) * (float)$r['cost_per_unit'];
+                            $lossCost = (float)$r['loss_value']; // valued at the cost when it happened, so rows add up to the Loss cost card
                         ?>
                             <tr>
                                 <td <?php echo stock_reports_label_attr('Ingredient'); ?>><?php echo htmlspecialchars($r['name']); ?></td>

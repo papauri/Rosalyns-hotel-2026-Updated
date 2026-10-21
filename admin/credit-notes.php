@@ -221,7 +221,7 @@ $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 // KPIs for this filter set
 $kpiStmt = $pdo->prepare("
     SELECT
-        COUNT(*)                                                                        AS total_issued,
+        COALESCE(SUM(CASE WHEN cn.status <> 'voided' THEN 1 ELSE 0 END), 0)                    AS total_issued,
         COALESCE(SUM(CASE WHEN cn.status <> 'voided' THEN cn.original_amount ELSE 0 END), 0)   AS total_value,
         COALESCE(SUM(cn.amount_used), 0)                                                AS total_redeemed,
         COALESCE(SUM(CASE WHEN cn.status IN ('active','partially_applied') THEN cn.balance ELSE 0 END), 0) AS total_outstanding,

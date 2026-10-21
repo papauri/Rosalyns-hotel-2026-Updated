@@ -79,9 +79,26 @@ $rdCanWork = hasPermission((int)$user['id'], 'housekeeping') || hasPermission((i
 
 // Get dashboard data
 $summary = getRoomDashboardSummary();
-$cleaningQueue = getRoomsRequiringHousekeeping('cleaning');
-$inspectionQueue = getRoomsRequiringInspection();
-$allRooms = getRoomsRequiringHousekeeping('all');
+// A failed summary query returns [] - say so instead of showing zeros as fact.
+$summaryFailed = empty($summary);
+// One row per room: a room with two open housekeeping tasks (or two inspection rows) comes back
+// from the query once per task; keep the first (highest-priority) row so the queue badge and the
+// list count rooms, not tasks.
+$rdUniqueRooms = static function (array $rows): array {
+    $seen = [];
+    $out = [];
+    foreach ($rows as $row) {
+        $rid = (int)($row['id'] ?? 0);
+        if (isset($seen[$rid])) {
+            continue;
+        }
+        $seen[$rid] = true;
+        $out[] = $row;
+    }
+    return $out;
+};
+$cleaningQueue = $rdUniqueRooms(getRoomsRequiringHousekeeping('cleaning'));
+$inspectionQueue = $rdUniqueRooms(getRoomsRequiringInspection());
 
 // Get room statuses for display
 $roomStatuses = getRoomStatuses();
@@ -123,12 +140,18 @@ $roomStatuses = getRoomStatuses();
     </div>
     <?php endif; ?>
 
+    <?php if ($summaryFailed): ?>
+    <div class="alert alert-danger" style="background: #f8d7da; color: #721c24; padding: 12px 20px; border-radius: 8px; margin-bottom: 20px;">
+        <i class="fas fa-exclamation-circle"></i> Room figures could not be loaded, so the counts below are not reliable. Refresh the page; if it keeps happening, tell your manager.
+    </div>
+    <?php endif; ?>
+
     <?php if (($summary['no_show_candidates'] ?? 0) > 0): ?>
     <div class="alert alert-warning" style="background: #fff3cd; color: #856404; padding: 12px 20px; border-radius: 8px; margin-bottom: 20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
         <span>
             <i class="fas fa-user-clock"></i>
             <strong><?php echo (int)$summary['no_show_candidates']; ?></strong>
-            confirmed booking<?php echo (int)$summary['no_show_candidates'] === 1 ? '' : 's'; ?>
+            confirmed or pending booking<?php echo (int)$summary['no_show_candidates'] === 1 ? '' : 's'; ?>
             passed the arrival date without checking in — review and mark no-show to free the room(s).
         </span>
         <a href="bookings.php?arrival=overdue" style="background:#856404;color:#fff;padding:6px 14px;border-radius:4px;text-decoration:none;font-size:.85rem;white-space:nowrap;">Review arrivals</a>
@@ -139,23 +162,23 @@ $roomStatuses = getRoomStatuses();
     <div class="ck-kpis ck-kpis--4">
         <div class="ck-kpi">
             <span class="ck-kpi__icon"><i class="fas fa-sign-out-alt"></i></span>
-            <span class="ck-kpi__label">Check-outs Today</span>
-            <span class="ck-kpi__value"><?php echo $summary['checkouts_today'] ?? 0; ?></span>
+            <span class="ck-kpi__label">Check-outs Due Today</span>
+            <span class="ck-kpi__value"><?php echo $summaryFailed ? '–' : (int)$summary['checkouts_today']; ?></span>
         </div>
         <div class="ck-kpi">
             <span class="ck-kpi__icon"><i class="fas fa-sign-in-alt"></i></span>
-            <span class="ck-kpi__label">Check-ins Today</span>
-            <span class="ck-kpi__value"><?php echo $summary['checkins_today'] ?? 0; ?></span>
+            <span class="ck-kpi__label">Check-ins Due Today</span>
+            <span class="ck-kpi__value"><?php echo $summaryFailed ? '–' : (int)$summary['checkins_today']; ?></span>
         </div>
         <div class="ck-kpi ck-kpi--warn">
             <span class="ck-kpi__icon"><i class="fas fa-broom"></i></span>
             <span class="ck-kpi__label">Rooms to Clean</span>
-            <span class="ck-kpi__value"><?php echo $summary['cleaning_queue'] ?? 0; ?></span>
+            <span class="ck-kpi__value"><?php echo $summaryFailed ? '–' : (int)$summary['cleaning_queue']; ?></span>
         </div>
         <div class="ck-kpi ck-kpi--good">
             <span class="ck-kpi__icon"><i class="fas fa-check-circle"></i></span>
             <span class="ck-kpi__label">Available Now</span>
-            <span class="ck-kpi__value"><?php echo $summary['available_now'] ?? 0; ?></span>
+            <span class="ck-kpi__value"><?php echo $summaryFailed ? '–' : (int)$summary['available_now']; ?></span>
         </div>
     </div>
 
@@ -171,11 +194,10 @@ $roomStatuses = getRoomStatuses();
     ?>
     <div class="ck-kpis">
         <?php foreach ($roomStatuses as $status => $info): ?>
-        <?php $count = $summary['status_counts'][$status] ?? 0; ?>
-        <div data-filter-card data-status="<?php echo htmlspecialchars($status); ?>" class="ck-kpi<?php echo $statusKpiVariant[$status] ?? ''; ?>">
+        <?php $count = $summary['status_counts'][$status] ?? 0; ?>        <div data-filter-card data-status="<?php echo htmlspecialchars($status); ?>" class="ck-kpi<?php echo $statusKpiVariant[$status] ?? ''; ?>">
             <span class="ck-kpi__icon"><i class="fas <?php echo htmlspecialchars($info['icon']); ?>"></i></span>
             <span class="ck-kpi__label"><?php echo htmlspecialchars($info['label']); ?></span>
-            <span class="ck-kpi__value"><?php echo (int)$count; ?></span>
+            <span class="ck-kpi__value"><?php echo $summaryFailed ? '–' : (int)$count; ?></span>
         </div>
         <?php endforeach; ?>
     </div>
@@ -183,7 +205,7 @@ $roomStatuses = getRoomStatuses();
     <!-- Occupancy Bar -->
     <div class="occupancy-section">
         <h3 style="margin: 0 0 16px 0; font-family: 'Cormorant Garamond', serif; font-size: 20px;">
-            Room Occupancy: <?php echo $summary['occupancy_rate'] ?? 0; ?>%
+            Room Occupancy: <?php echo $summaryFailed ? '–' : (float)$summary['occupancy_rate'] . '%'; ?>
         </h3>
         <div class="occupancy-bar">
             <?php

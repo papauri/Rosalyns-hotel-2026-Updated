@@ -1246,7 +1246,18 @@ $bookingsStmt = $pdo->query("
 $bookings = $bookingsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get rooms needing maintenance
-$roomsNeedingMaintenance = getRoomsNeedingMaintenance($pdo);
+// One card per room: the query joins bookings, so a room with two matching bookings came back twice
+// and the "(N)" heading counted bookings, not rooms.
+$roomsNeedingMaintenance = [];
+foreach (getRoomsNeedingMaintenance($pdo) as $rnmRow) {
+    $rnmId = (int)$rnmRow['id'];
+    // keep the checked-in guest's row if there is one (not a departed guest's)
+    if (!isset($roomsNeedingMaintenance[$rnmId])
+        || (($roomsNeedingMaintenance[$rnmId]['booking_status'] ?? '') !== 'checked-in' && ($rnmRow['booking_status'] ?? '') === 'checked-in')) {
+        $roomsNeedingMaintenance[$rnmId] = $rnmRow;
+    }
+}
+$roomsNeedingMaintenance = array_values($roomsNeedingMaintenance);
 
 // Get staff workload
 $staffWorkload = getMaintenanceStaffWorkload($pdo);
@@ -1316,7 +1327,7 @@ foreach ($schedules as $s) {
         $stats[$status] = ($stats[$status] ?? 0) + 1;
     }
 
-    if ($hasPriority && in_array((string)($s['priority'] ?? ''), ['high', 'urgent'], true) && in_array($status, ['pending', 'in_progress', 'completed'], true)) {
+    if ($hasPriority && in_array((string)($s['priority'] ?? ''), ['high', 'urgent'], true) && in_array($status, ['pending', 'in_progress'], true)) {
         $stats['high_priority']++;
     }
 
@@ -1338,7 +1349,8 @@ foreach ($schedules as $s) {
         $stats['verified_today']++;
     }
 
-    if ($hasMaintenanceType && ($s['maintenance_type'] ?? null) === 'emergency') {
+    // open emergency jobs only - finished or cancelled ones are history, not an alert
+    if ($hasMaintenanceType && ($s['maintenance_type'] ?? null) === 'emergency' && in_array($status, ['pending', 'in_progress'], true)) {
         $stats['emergency_type']++;
     }
 }
@@ -1443,7 +1455,7 @@ try {
                 <span class="ck-kpi__value"><?php echo (int)$stats['high_priority']; ?></span>
                 <span class="ck-kpi__sub"><i class="fas fa-circle-info"></i> Hover for insight • Click for details</span>
             </button>
-            <button type="button" class="ck-kpi ck-kpi--alert" data-stat-key="emergency_type" data-stat-title="Emergency" data-stat-description="Emergency maintenance items across rooms.">
+            <button type="button" class="ck-kpi ck-kpi--alert" data-stat-key="emergency_type" data-stat-title="Emergency" data-stat-description="Open emergency maintenance jobs across rooms.">
                 <span class="ck-kpi__icon"><i class="fas fa-bolt"></i></span>
                 <span class="ck-kpi__label">Emergency</span>
                 <span class="ck-kpi__value"><?php echo (int)$stats['emergency_type']; ?></span>
@@ -1962,14 +1974,14 @@ try {
                 title: 'High/Urgent Priority',
                 description: 'Critical tasks that must be resolved first.',
                 match: function(item) {
-                    return (item.priority === 'high' || item.priority === 'urgent') && (item.status === 'pending' || item.status === 'in_progress' || item.status === 'completed');
+                    return (item.priority === 'high' || item.priority === 'urgent') && (item.status === 'pending' || item.status === 'in_progress');
                 }
             },
             emergency_type: {
                 title: 'Emergency Type',
-                description: 'Emergency maintenance jobs across rooms.',
+                description: 'Open emergency maintenance jobs across rooms.',
                 match: function(item) {
-                    return item.type === 'emergency';
+                    return item.type === 'emergency' && (item.status === 'pending' || item.status === 'in_progress');
                 }
             }
         };

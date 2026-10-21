@@ -280,12 +280,12 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                 <span class="ck-kpi__label">Average rating · <?php echo $approved_count; ?> published</span>
                 <span class="ck-kpi__value"><?php echo $avg_rating !== null ? number_format($avg_rating, 1) . ' / 5' : '—'; ?></span>
             </a>
-            <a class="ck-kpi reviews-stat-link ck-kpi--warn" href="<?php echo htmlspecialchars($filter_url(['status' => 'pending', 'rating' => '', 'reply' => '', 'type' => '', 'search' => '', 'sort' => 'oldest'])); ?>">
+            <a class="ck-kpi reviews-stat-link ck-kpi--warn" href="<?php echo htmlspecialchars($filter_url(['status' => 'pending', 'rating' => '', 'reply' => '', 'type' => '', 'source' => '', 'search' => '', 'sort' => 'oldest'])); ?>">
                 <span class="ck-kpi__icon"><i class="fas fa-hourglass-half"></i></span>
                 <span class="ck-kpi__label">Awaiting moderation</span>
                 <span class="ck-kpi__value"><?php echo $pending_count; ?></span>
             </a>
-            <a class="ck-kpi reviews-stat-link ck-kpi--info" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'reply' => 'needs', 'rating' => '', 'type' => '', 'search' => '', 'sort' => 'newest'])); ?>">
+            <a class="ck-kpi reviews-stat-link ck-kpi--info" href="<?php echo htmlspecialchars($filter_url(['status' => 'approved', 'reply' => 'needs', 'rating' => '', 'type' => '', 'source' => '', 'search' => '', 'sort' => 'newest'])); ?>">
                 <span class="ck-kpi__icon"><i class="fas fa-reply"></i></span>
                 <span class="ck-kpi__label">Published, no reply yet</span>
                 <span class="ck-kpi__value"><?php echo $awaiting_reply; ?></span>

@@ -68,8 +68,9 @@ try {
             SUM(CASE WHEN check_in_date < ? AND check_out_date > ? AND status = 'checked-in' THEN 1 ELSE 0 END) AS stayovers,
             SUM(CASE WHEN DATE(created_at) = ? THEN 1 ELSE 0 END) AS new_bookings,
             SUM(CASE WHEN DATE(updated_at) = ? AND status = 'cancelled' THEN 1 ELSE 0 END) AS cancellations,
-            SUM(CASE WHEN check_in_date = ? AND status = 'expired' THEN 1 ELSE 0 END) AS no_shows
+            SUM(CASE WHEN check_in_date = ? AND status = 'no-show' THEN 1 ELSE 0 END) AS no_shows
         FROM bookings
+        WHERE deleted_at IS NULL
     ");
     $opsStmt->execute(array_fill(0, 9, $date));
     $ops = $opsStmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -153,6 +154,9 @@ try {
             $ncash_total += (float)$mRow['total'];
         }
     }
+    // Cash refunds paid out today leave the till: same rule as the on-screen report (shared helper).
+    $cash_refunds_out = rh_eod_cash_refunds_out($pdo, $date);
+    $cash_total -= $cash_refunds_out;
 
     // 5) POS
     // Same shared block as the on-screen report: sales by paid_at in the business window,
@@ -186,7 +190,7 @@ try {
     $hk = array_merge(['pending' => 0, 'in_progress' => 0, 'completed' => 0], $hkStmt->fetch(PDO::FETCH_ASSOC) ?: []);
 
     // 10) Outstanding folio
-    $outstanding = (float)$pdo->query("SELECT COALESCE(SUM(amount_due),0) FROM bookings WHERE amount_due > 0 AND status IN ('checked-in','confirmed','tentative')")->fetchColumn();
+    $outstanding = rh_eod_outstanding_folio($pdo); // shared receivable rule, same as the on-screen report
 
     // 11) Previous day comparison
     $prevDay = date('Y-m-d', strtotime($date . ' -1 day'));
@@ -213,14 +217,7 @@ try {
     $pos_change = (float)$pos['gross'] - $prev_pos_gross;
 
     // 12) Tomorrow preview
-    $tp = $pdo->prepare("
-        SELECT SUM(CASE WHEN check_in_date  = :t1 AND status IN ('confirmed','tentative','pending') THEN 1 ELSE 0 END) AS arrivals,
-               SUM(CASE WHEN check_out_date = :t2 AND status IN ('checked-in','confirmed')           THEN 1 ELSE 0 END) AS departures,
-               COALESCE(SUM(CASE WHEN check_in_date = :t3 AND status IN ('confirmed','tentative','pending') THEN total_amount ELSE 0 END),0) AS rev_forecast
-        FROM bookings
-    ");
-    $tp->execute([':t1' => $tomorrow, ':t2' => $tomorrow, ':t3' => $tomorrow]);
-    $tom = $tp->fetch(PDO::FETCH_ASSOC) ?: ['arrivals' => 0, 'departures' => 0, 'rev_forecast' => 0];
+    $tom = rh_eod_tomorrow_preview($pdo, $tomorrow); // shared with the on-screen report
 
     // 13) Health score
     $arrivals_remaining   = max(0, (int)($ops['expected_arrivals'] ?? 0) - (int)($ops['arrivals_completed'] ?? 0));
@@ -327,7 +324,7 @@ if ($departures_remaining2 > 0)
 if ((float)($rev['pending'] ?? 0) > 0)
     $closeout_alerts[] = ['level' => 'warn', 'title' => 'Pending payments', 'detail' => pdfMoney($currency_symbol, (float)$rev['pending']) . ' still pending.'];
 if ($outstanding > 0)
-    $closeout_alerts[] = ['level' => 'warn', 'title' => 'Outstanding folio', 'detail' => pdfMoney($currency_symbol, $outstanding) . ' unpaid across active stays.'];
+    $closeout_alerts[] = ['level' => 'warn', 'title' => 'Outstanding folio', 'detail' => pdfMoney($currency_symbol, $outstanding) . ' still owed on open bookings (in-house, upcoming and checked out).'];
 if ((int)$pos['voided_count'] > 0)
     $closeout_alerts[] = ['level' => 'watch', 'title' => 'POS voids to review', 'detail' => (int)$pos['voided_count'] . ' void(s) worth ' . pdfMoney($currency_symbol, (float)$pos['voided_value']) . '.'];
 if (((int)$hk['pending'] + (int)$hk['in_progress']) > 0)
@@ -347,6 +344,7 @@ $d = [
     'revpar'                 => $revpar,
     'methods'                => $methods,
     'cash_total'             => $cash_total,
+    'cash_refunds_out'       => $cash_refunds_out,
     'pos'                    => $pos,
     'pos_by_type'            => $pos_by_type,
     'top_items'              => $top_items,
@@ -671,6 +669,14 @@ $pdf->SetFillColorArray($CREAM);
 $pdf->SetDrawColorArray($DIVIDER);
 $pdf->SetFont('helvetica', 'B', 7.5);
 $pdf->SetTextColorArray($BROWN);
+if ($cash_refunds_out > 0.004) {
+    $pdf->SetXY($colR, $yR);
+    $pdf->Cell(43, 5, '  Less cash refunds paid', 'B', 0, 'L', true);
+    $pdf->SetTextColorArray($CHARCOAL);
+    $pdf->Cell(39, 5, '-' . pdfMoney($currency_symbol, $cash_refunds_out), 'B', 0, 'R', true);
+    $yR += 5;
+    $pdf->SetTextColorArray($BROWN);
+}
 $pdf->SetXY($colR, $yR);
 $pdf->Cell(43, 5, '  Cash to reconcile', 'B', 0, 'L', true);
 $pdf->SetTextColorArray($CHARCOAL);
@@ -791,7 +797,7 @@ $y = pdfSection($pdf, '  Tomorrow Preview — ' . date('D, M j', strtotime($tomo
 $tomRows = [
     ['Expected Arrivals',    (string)(int)$tom['arrivals']],
     ['Expected Departures',  (string)(int)$tom['departures']],
-    ['Revenue Forecast',     pdfMoney($currency_symbol, (float)$tom['rev_forecast'])],
+    ['Booked value of arrivals (incl. VAT)', pdfMoney($currency_symbol, (float)$tom['rev_forecast'])],
 ];
 foreach ($tomRows as $i => $tr) {
     $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;

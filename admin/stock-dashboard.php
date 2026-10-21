@@ -55,14 +55,14 @@ if (!$metrics && !$error) {
         $metrics['ingredient_count'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
         $metrics['total_inventory_value'] = rh_stock_valuation($pdo);
         $metrics['active_batches'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0")->fetchColumn();
-        $metrics['expiring_3d'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)")->fetchColumn();
-        $metrics['expiring_7d'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN DATE_ADD(CURDATE(), INTERVAL 4 DAY) AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)")->fetchColumn();
+        $metrics['expiring_3d'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)")->fetchColumn();
+        $metrics['expiring_7d'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date BETWEEN DATE_ADD(CURDATE(), INTERVAL 4 DAY) AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)")->fetchColumn();
 
         $metrics['orders_today'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE status NOT IN ('voided','cancelled') AND DATE(created_at) = CURDATE()")->fetchColumn();
         $metrics['orders_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE status = 'placed' AND DATE(created_at) = CURDATE()")->fetchColumn();
         $metrics['revenue_today'] = (float)$pdo->query("SELECT COALESCE(SUM(total_amount), 0) FROM stock_orders WHERE status = 'paid' AND DATE(created_at) = CURDATE()")->fetchColumn();
         $metrics['wastage_today'] = (float)$pdo->query("SELECT COALESCE(SUM(wastage_cost), 0) FROM stock_wastage WHERE recorded_date = CURDATE()")->fetchColumn();
-        $metrics['wastage_30d'] = (float)$pdo->query("SELECT COALESCE(SUM(wastage_cost), 0) FROM stock_wastage WHERE recorded_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();
+        $metrics['wastage_30d'] = (float)$pdo->query("SELECT COALESCE(SUM(wastage_cost), 0) FROM stock_wastage WHERE recorded_date > DATE_SUB(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();
         $metrics['expired_batches'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date < CURDATE()")->fetchColumn();
 
         $metrics['pending_reconcile'] = (int)$pdo->query("
@@ -72,14 +72,14 @@ if (!$metrics && !$error) {
               AND source_item_id IS NOT NULL
         ")->fetchColumn();
 
-        $metrics['food_with_recipe'] = (int)$pdo->query("SELECT COUNT(DISTINCT menu_item_id) FROM stock_recipes WHERE menu_type = 'food'")->fetchColumn();
-        $metrics['food_total'] = (int)$pdo->query("SELECT COUNT(mi.id) FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE mc.slug = 'food'")->fetchColumn();
-        $metrics['drink_with_recipe'] = (int)$pdo->query("SELECT COUNT(DISTINCT menu_item_id) FROM stock_recipes WHERE menu_type = 'drink'")->fetchColumn();
+        $metrics['food_with_recipe'] = (int)$pdo->query("SELECT COUNT(*) FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE mc.is_active = 1 AND mi.station = 'kitchen' AND EXISTS (SELECT 1 FROM stock_recipes sr JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id WHERE sr.menu_item_id = mi.id AND sr.menu_type = mc.slug)")->fetchColumn();
+        $metrics['food_total'] = (int)$pdo->query("SELECT COUNT(*) FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE mc.is_active = 1 AND mi.station = 'kitchen'")->fetchColumn();
+        $metrics['drink_with_recipe'] = (int)$pdo->query("SELECT COUNT(*) FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE mc.is_active = 1 AND mi.station <> 'kitchen' AND EXISTS (SELECT 1 FROM stock_recipes sr JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id WHERE sr.menu_item_id = mi.id AND sr.menu_type = mc.slug)")->fetchColumn();
     } catch (Throwable $e) {
         // menu_items may not exist yet; continue silently
     }
     try {
-        $metrics['drink_total'] = (int)$pdo->query("SELECT COUNT(mi.id) FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE mc.slug = 'drink'")->fetchColumn();
+        $metrics['drink_total'] = (int)$pdo->query("SELECT COUNT(*) FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE mc.is_active = 1 AND mi.station <> 'kitchen'")->fetchColumn();
     } catch (Throwable $e) { $metrics['drink_total'] = 0; }
     if (function_exists('setCache')) setCache($cacheKey, $metrics, 300);
 }
@@ -90,6 +90,34 @@ if (!$error && $metrics) {
     $alertSummary = rh_stock_alert_summary($pdo, 10);
     $metrics['low_stock'] = $alertSummary['low'];
     $metrics['critical_stock'] = $alertSummary['out'];
+
+    // Sales cards are live too. "Settled today" = paid orders by the day they were PAID (a tab opened
+    // last night and settled today counts today, as on the Orders screen); "Open tabs" = every order
+    // still open, whatever day it was started, so the number matches the list it links to.
+    // Settled = 'paid' or 'completed'. Room-service orders charged to a guest folio are left out, as on
+    // End of Day: the folio payment already counts them. An order refunded or voided later drops out of
+    // this card (it shows what still stands as sold today); End of Day instead nets it on the reversal day.
+    $metrics['orders_paid_today'] = null;
+    try {
+        $liveSales = $pdo->query("
+            SELECT SUM(CASE WHEN settled = 1 THEN 1 ELSE 0 END) AS paid_n,
+                   COALESCE(SUM(CASE WHEN settled = 1 THEN total_amount ELSE 0 END), 0) AS paid_amt,
+                   SUM(CASE WHEN status = 'placed' THEN 1 ELSE 0 END) AS open_n
+            FROM (
+                SELECT o.status, o.total_amount,
+                       (o.status IN ('paid','completed') AND DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()
+                        AND NOT (o.order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = o.id))) AS settled
+                FROM stock_orders o
+            ) x
+        ")->fetch(PDO::FETCH_ASSOC);
+        if ($liveSales) {
+            $metrics['orders_paid_today'] = (int)$liveSales['paid_n'];
+            $metrics['revenue_today']     = (float)$liveSales['paid_amt'];
+            $metrics['orders_pending']    = (int)$liveSales['open_n'];
+        }
+    } catch (Throwable $e) {
+        error_log('stock-dashboard sales cards: ' . $e->getMessage());
+    }
 }
 
 // Live operational data (always fresh — not cached)
@@ -102,7 +130,8 @@ if (!$error) {
                    COUNT(DISTINCT o.id) AS order_count
             FROM stock_order_items oi
             INNER JOIN stock_orders o ON o.id = oi.order_id
-            WHERE o.status = 'paid' AND DATE(o.created_at) = CURDATE()
+            WHERE o.status IN ('paid','completed') AND DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()
+              AND NOT (o.order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = o.id))
             GROUP BY oi.item_name, oi.menu_type
             ORDER BY qty_sold DESC, revenue DESC
             LIMIT 8
@@ -114,7 +143,7 @@ if (!$error) {
             SELECT i.name, i.unit, SUM(w.quantity) AS total_qty, SUM(w.wastage_cost) AS total_cost, COUNT(*) AS entries
             FROM stock_wastage w
             INNER JOIN stock_ingredients i ON i.id = w.ingredient_id
-            WHERE w.recorded_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+            WHERE w.recorded_date > DATE_SUB(CURDATE(), INTERVAL 30 DAY)
             GROUP BY i.id, i.name, i.unit
             ORDER BY total_cost DESC
             LIMIT 6
@@ -137,7 +166,7 @@ if (!$error) {
             SELECT b.batch_number, i.name, b.expiry_date, b.quantity_remaining, b.cost_per_unit, DATEDIFF(b.expiry_date, CURDATE()) AS days_left
             FROM stock_batches b
             INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
-            WHERE b.status = 'active' AND b.expiry_date IS NOT NULL AND b.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)
+            WHERE b.status = 'active' AND b.quantity_remaining > 0 AND b.expiry_date IS NOT NULL AND b.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)
             ORDER BY b.expiry_date ASC LIMIT 10
         ")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -329,14 +358,18 @@ $csrf_token = generateCsrfToken();
 
         <!-- ═══ TOP KPI ROW ═══ -->
         <div class="ck-kpis ck-kpis--4">
-            <a class="ck-kpi ck-kpi--info" href="stock-orders.php?date=today&status=paid">
+            <a class="ck-kpi ck-kpi--info" href="stock-orders.php?date=today&status=settled">
                 <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
                 <span class="ck-kpi__label">Settled Today</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['revenue_today'], 0); ?></span>
                 <span class="ck-kpi__sub">
-                    <?php echo number_format((int)$metrics['orders_today']); ?> paid order<?php echo (int)$metrics['orders_today'] !== 1 ? 's' : ''; ?>
-                    <?php if ((int)$metrics['orders_today'] > 0 && $metrics['revenue_today'] > 0): ?>
-                        &middot; avg <?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($metrics['revenue_today'] / $metrics['orders_today'], 0); ?>
+                    <?php if (($metrics['orders_paid_today'] ?? null) === null): ?>
+                        Could not load today's sales
+                    <?php else: ?>
+                    <?php echo number_format((int)$metrics['orders_paid_today']); ?> paid order<?php echo (int)$metrics['orders_paid_today'] !== 1 ? 's' : ''; ?>
+                    <?php if ((int)$metrics['orders_paid_today'] > 0 && $metrics['revenue_today'] > 0): ?>
+                        &middot; avg <?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($metrics['revenue_today'] / $metrics['orders_paid_today'], 0); ?>
+                    <?php endif; ?>
                     <?php endif; ?>
                 </span>
             </a>
@@ -446,7 +479,7 @@ $csrf_token = generateCsrfToken();
             <div class="sdash-alert-group sdash-alert-group--warn js-sdash-alert-group" data-open="true">
                 <button type="button" class="sdash-alert-group__header" onclick="toggleAlertGroup(this)" aria-expanded="true">
                     <i class="fas fa-clock"></i>
-                    <span>Expiring Soon <em>(<?php echo count($expiringSoon); ?>)</em></span>
+                    <span>Expiring Soon <em>(<?php echo (int)($metrics['expiring_3d'] ?? count($expiringSoon)); ?><?php echo (int)($metrics['expiring_3d'] ?? 0) > count($expiringSoon) ? ', showing ' . count($expiringSoon) : ''; ?>)</em></span>
                     <i class="fas fa-chevron-down sdash-alert-group__chevron"></i>
                 </button>
                 <div class="sdash-alert-group__body">
@@ -480,7 +513,7 @@ $csrf_token = generateCsrfToken();
             <div class="sdash-alert-group sdash-alert-group--critical js-sdash-alert-group" data-open="true">
                 <button type="button" class="sdash-alert-group__header" onclick="toggleAlertGroup(this)" aria-expanded="true">
                     <i class="fas fa-skull-crossbones"></i>
-                    <span>Expired Batches Still Active <em>(<?php echo count($expiredBatches); ?>)</em></span>
+                    <span>Expired Batches Still Active <em>(<?php echo (int)($metrics['expired_batches'] ?? count($expiredBatches)); ?><?php echo (int)($metrics['expired_batches'] ?? 0) > count($expiredBatches) ? ', showing ' . count($expiredBatches) : ''; ?>)</em></span>
                     <i class="fas fa-chevron-down sdash-alert-group__chevron"></i>
                 </button>
                 <div class="sdash-alert-group__body">
@@ -612,7 +645,7 @@ $csrf_token = generateCsrfToken();
         <div class="sdash-section">
             <div class="sdash-section__header">
                 <h3 class="sdash-section__title"><i class="fas fa-fire"></i> Top Items Sold Today</h3>
-                <a href="stock-orders.php?date=today&status=paid" class="sdash-section__action">All orders →</a>
+                <a href="stock-orders.php?date=today&status=settled" class="sdash-section__action">All orders →</a>
             </div>
             <?php if (empty($topItemsToday)): ?>
                 <p style="color:#888;font-size:13px;padding:10px 0;">No settled orders today yet.</p>

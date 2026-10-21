@@ -50,6 +50,10 @@ try {
         if (isset($gr_m[$st])) { $gr_m[$st] = (int)$c; }
         $gr_m['total'] += (int)$c;
     }
+    // Active / Expired by END DATE, the same rule as the Gym Members tabs (nothing flips status to 'expired' by itself,
+    // so a lapsed member still has status 'active' and must not be counted as active).
+    $gr_m['active']  = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active' AND (expiry_date IS NULL OR expiry_date >= CURDATE())")->fetchColumn();
+    $gr_m['expired'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='expired' OR (expiry_date IS NOT NULL AND expiry_date < CURDATE())")->fetchColumn();
     $s = $pdo->prepare("SELECT COUNT(*) FROM gym_members WHERE start_date BETWEEN ? AND ?");
     $s->execute([$gr_start, $gr_end]);
     $gr_m['new_in_range'] = (int)$s->fetchColumn();
@@ -65,6 +69,7 @@ try {
 // ── Unpaid / outstanding balances ────────────────────────────────────────────
 $gr_outstanding_rows = [];
 $gr_outstanding_total = 0.0;
+$gr_outstanding_count = 0;
 try {
     $gr_outstanding_rows = $pdo->query("
         SELECT gi.id, gi.reference_number, gi.name, gi.membership_type,
@@ -76,7 +81,10 @@ try {
         ORDER BY gi.amount_due DESC
         LIMIT 100
     ")->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($gr_outstanding_rows as $r) { $gr_outstanding_total += (float)$r['amount_due']; }
+    // Totals cover EVERY unpaid account; only the table below is capped at the 100 biggest.
+    $gr_tot = $pdo->query("SELECT COUNT(*) n, COALESCE(SUM(amount_due), 0) t FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')")->fetch(PDO::FETCH_ASSOC) ?: [];
+    $gr_outstanding_total = (float)($gr_tot['t'] ?? 0);
+    $gr_outstanding_count = (int)($gr_tot['n'] ?? 0);
 } catch (PDOException $e) { /* inquiries financial columns pending */ }
 
 // ── Attendance analytics (range-filtered) ────────────────────────────────────
@@ -95,7 +103,8 @@ if ($gr_att_ready) {
         $gr_a['checkins']    = (int)($row['c'] ?? 0);
         $gr_a['unique']      = (int)($row['u'] ?? 0);
         $gr_a['avg_minutes'] = (int)round((float)($row['avg_min'] ?? 0));
-        $gr_a['in_now']      = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE checked_out_at IS NULL")->fetchColumn();
+        // Today's open visits only: an open visit from an earlier day is a forgotten scan-out (the auto check-out closes it), not someone still training.
+        $gr_a['in_now']      = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE checked_out_at IS NULL AND checked_in_at >= CURDATE()")->fetchColumn();
 
         $s = $pdo->prepare("SELECT HOUR(checked_in_at) h, COUNT(*) c FROM gym_attendance WHERE checked_in_at BETWEEN ? AND ? GROUP BY h");
         $s->execute([$gr_start_dt, $gr_end_dt]);
@@ -208,7 +217,7 @@ $gr_fmt_dur = static function (int $mins): string {
             <div class="ck-kpi <?php echo $gr_outstanding_total > 0 ? 'ck-kpi--warn' : ''; ?>">
                 <span class="ck-kpi__label">Outstanding</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($gr_currency); ?></span><?php echo number_format($gr_outstanding_total, 0); ?></span>
-                <span class="ck-kpi__sub"><?php echo count($gr_outstanding_rows); ?> unpaid account<?php echo count($gr_outstanding_rows) === 1 ? '' : 's'; ?> · churn: <?php echo $gr_m['churn_in_range']; ?></span>
+                <span class="ck-kpi__sub"><?php echo $gr_outstanding_count; ?> unpaid account<?php echo $gr_outstanding_count === 1 ? '' : 's'; ?> · churn: <?php echo $gr_m['churn_in_range']; ?></span>
             </div>
         </div>
 

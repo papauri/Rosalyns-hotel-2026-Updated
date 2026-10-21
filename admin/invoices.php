@@ -512,7 +512,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
             <div class="ck-kpi ck-kpi--info">
                 <span class="ck-kpi__label">Refunded / Credit</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($invoiceKpi['refunded_total'] ?? 0), 0); ?></span>
-                <span class="ck-kpi__sub"><?php echo number_format((int)($invoiceKpi['refunded_count'] ?? 0)); ?> credit notes</span>
+                <span class="ck-kpi__sub"><?php echo number_format((int)($invoiceKpi['refunded_count'] ?? 0)); ?> refund<?php echo (int)($invoiceKpi['refunded_count'] ?? 0) === 1 ? '' : 's'; ?> paid or in progress</span>
             </div>
         </div>
 

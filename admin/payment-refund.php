@@ -593,7 +593,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             <div class="ck-kpis ck-kpis--4">
                 <div class="ck-kpi ck-kpi--good">
                     <span class="ck-kpi__label">Original Payment</span>
-                    <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)$payment['total_amount'], 0); ?></span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)$payment['total_amount'], 2); ?></span>
                     <span class="ck-kpi__sub">                        Ref <strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong> ·
                         <?php echo date('M j, Y', strtotime($payment['payment_date'])); ?> ·
                         <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?>
@@ -601,12 +601,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                 </div>
                 <div class="ck-kpi ck-kpi--warn">
                     <span class="ck-kpi__label">Already Refunded</span>
-                    <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($alreadyRefunded, 0); ?></span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($alreadyRefunded, 2); ?></span>
                     <span class="ck-kpi__sub"><?php echo $refundCount; ?> prior refund<?php echo $refundCount === 1 ? '' : 's'; ?></span>
                 </div>
                 <div class="ck-kpi">
                     <span class="ck-kpi__label">Refundable Balance</span>
-                    <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($maxRefundable, 0); ?></span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($maxRefundable, 2); ?></span>
                     <span class="ck-kpi__sub">Maximum amount you can refund now</span>
                 </div>
                 <div class="ck-kpi ck-kpi--info">
@@ -641,7 +641,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                                     <tr>
                                         <td><a class="acct-link" href="payment-details.php?id=<?php echo (int)$r['id']; ?>"><?php echo htmlspecialchars($r['payment_reference']); ?></a></td>
                                         <td><?php echo date('M j, Y', strtotime($r['payment_date'])); ?></td>
-                                        <td class="num"><strong><?php echo $currency_symbol . number_format((float)($r['refund_amount'] ?: $r['total_amount']), 0); ?></strong></td>
+                                        <td class="num"><strong><?php echo $currency_symbol . number_format((float)($r['refund_amount'] ?: $r['total_amount']), 2); ?></strong></td>
                                         <td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($r['refund_reason'] ?? '—')))); ?></td>
                                         <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars((string)($r['refund_status'] ?? 'pending')); ?>"><?php echo htmlspecialchars(ucfirst((string)($r['refund_status'] ?? 'pending'))); ?></span></td>
                                         <td class="acct-muted"><?php echo nl2br(htmlspecialchars((string)($r['refund_notes'] ?? ''))); ?></td>

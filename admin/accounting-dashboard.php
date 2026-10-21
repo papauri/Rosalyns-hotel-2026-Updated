@@ -387,7 +387,7 @@ try {
     // Outstanding payments summary (filtered by enabled modules)
     $outstandingParts = [];
     if ($mod_bookings) {
-        $outstandingParts[] = "SELECT 'room' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))";
+        $outstandingParts[] = "SELECT 'room' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))";
     }
     if ($mod_conference) {
         $outstandingParts[] = "SELECT 'conference' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled', 'rejected', 'expired')";
@@ -418,11 +418,12 @@ try {
                 COALESCE(SUM(CASE WHEN status = 'voided' THEN total_amount ELSE 0 END), 0) AS voided_amount,
                 COALESCE(SUM(CASE WHEN status = 'voided' THEN 1 ELSE 0 END), 0) AS voided_count
             FROM stock_orders
-            WHERE created_at BETWEEN ? AND ?
+            WHERE (status IN ('paid','completed') AND COALESCE(paid_at, created_at) BETWEEN ? AND ?)
+               OR (status = 'voided' AND COALESCE(voided_at, created_at) BETWEEN ? AND ?)
             GROUP BY order_type
             ORDER BY gross_revenue DESC
         ");
-        $posByTypeStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+        $posByTypeStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59', $startDate . ' 00:00:00', $endDate . ' 23:59:59']);
         $posByType = $posByTypeStmt->fetchAll(PDO::FETCH_ASSOC);
 
         $posTotalsStmt = $pdo->prepare("
@@ -430,7 +431,7 @@ try {
                 COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
                 COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost ELSE 0 END), 0) AS cogs
             FROM stock_orders
-            WHERE created_at BETWEEN ? AND ?
+            WHERE status IN ('paid','completed') AND COALESCE(paid_at, created_at) BETWEEN ? AND ?
         ");
         $posTotalsStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
         $posTotals = $posTotalsStmt->fetch(PDO::FETCH_ASSOC) ?: ['gross_revenue' => 0, 'cogs' => 0];
@@ -609,6 +610,9 @@ try {
     ");
     $cnStmt->execute([$startDate, $endDate]);
     $cnRow = $cnStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    // What is still owed on credit notes does not depend on the date filter: every live note counts,
+    // whenever it was issued (issued / redeemed above stay within the selected period).
+    $cnRow['total_outstanding'] = $pdo->query("SELECT COALESCE(SUM(balance), 0) FROM credit_notes WHERE status IN ('active','partially_applied')")->fetchColumn();
     foreach ($cnRow as $k => $v) {
         $cnStats[$k] = isset($cnStats[$k]) && is_float($cnStats[$k]) ? (float)$v : (is_int($cnStats[$k]) ? (int)$v : $v);
     }
@@ -700,7 +704,7 @@ if (!isset($folio_fnb)) {
         $levyEnabled = in_array(getSetting('tourism_levy_enabled'), ['1', 1, true, 'true', 'on'], true);
         if ($levyEnabled && $mod_bookings) {
             try {
-                $levyStmt = $pdo->prepare("SELECT COALESCE(SUM(tourism_levy_amount),0) FROM bookings WHERE status NOT IN ('cancelled','expired','no-show') AND DATE(created_at) BETWEEN ? AND ?");
+                $levyStmt = $pdo->prepare("SELECT COALESCE(SUM(tourism_levy_amount),0) FROM bookings WHERE deleted_at IS NULL AND status NOT IN ('cancelled','expired','no-show') AND DATE(created_at) BETWEEN ? AND ?");
                 $levyStmt->execute([$startDate, $endDate]);
                 $cat_levy_period = (float)$levyStmt->fetchColumn();
             } catch (Throwable $e) { /* ignore */
@@ -831,25 +835,25 @@ if (!isset($folio_fnb)) {
                     </tr>
                     <?php if ($mod_bookings): ?>
                     <tr>
-                        <td>Room balances outstanding</td>
+                        <td>Room balances outstanding (accounts paid on in this period)</td>
                         <td class="num"><?php echo $currency_symbol . number_format((float)($roomSummary['total_room_outstanding'] ?? 0), 2); ?></td>
                     </tr>
                     <?php endif; ?>
                     <?php if ($mod_conference): ?>
                     <tr>
-                        <td>Conference balances outstanding</td>
+                        <td>Conference balances outstanding (accounts paid on in this period)</td>
                         <td class="num"><?php echo $currency_symbol . number_format((float)($confSummary['total_conf_outstanding'] ?? 0), 2); ?></td>
                     </tr>
                     <?php endif; ?>
                     <?php if ($mod_gym): ?>
                     <tr>
-                        <td>Gym balances outstanding</td>
+                        <td>Gym balances outstanding (accounts paid on in this period)</td>
                         <td class="num"><?php echo $currency_symbol . number_format((float)($gymSummary['total_gym_outstanding'] ?? 0), 2); ?></td>
                     </tr>
                     <?php endif; ?>
                     <?php if ($mod_events): ?>
                     <tr>
-                        <td>Event balances outstanding</td>
+                        <td>Event balances outstanding (accounts paid on in this period)</td>
                         <td class="num"><?php echo $currency_symbol . number_format((float)($eventsSummary['total_events_outstanding'] ?? 0), 2); ?></td>
                     </tr>
                     <?php endif; ?>
@@ -897,7 +901,7 @@ if (!isset($folio_fnb)) {
         </template>
 
         <template id="acct-insight-template-vat-collected">
-            <p class="acct-insight-intro">VAT collected is tax held on behalf of MRA. Keep these figures aligned with your VAT settings.</p>
+            <p class="acct-insight-intro">VAT collected is tax you owe, not income. Keep these figures aligned with your VAT settings.</p>
             <table class="acct-insight-table">
                 <thead>
                     <tr>
@@ -1619,7 +1623,7 @@ if (!isset($folio_fnb)) {
                 <span class="ck-kpi__icon"><i class="fas fa-file-invoice-dollar"></i></span>
                 <span class="ck-kpi__label">Owed to us</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_recv_total); ?></span>
-                <span class="ck-kpi__sub"><?php echo (int)$cat_recv_count; ?> open invoice<?php echo (int)$cat_recv_count === 1 ? '' : 's'; ?> &middot; pending <?php echo $ckPlain($cat_pending); ?></span>
+                <span class="ck-kpi__sub"><?php echo (int)$cat_recv_count; ?> account<?php echo (int)$cat_recv_count === 1 ? '' : 's'; ?> with a balance &middot; pending <?php echo $ckPlain($cat_pending); ?></span>
             </div>
             <div class="ck-kpi js-acct-insight-trigger" title="Cash Position (Today) - cash and mobile money received today. Does not include card, bank transfer or credit." <?php echo $ckTrig('cash-today', 'Cash Position Detail'); ?> aria-label="Open cash position detail">
                 <span class="ck-kpi__icon"><i class="fas fa-money-bill-wave"></i></span>
@@ -1627,7 +1631,7 @@ if (!isset($folio_fnb)) {
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_cash_today); ?></span>
                 <span class="ck-kpi__sub">Cash + mobile money &middot; <a class="ck-link" href="payments.php?start_date=<?php echo $ckH($today); ?>&amp;end_date=<?php echo $ckH($today); ?>">Today's payments <i class="fas fa-arrow-right"></i></a></span>
             </div>
-            <div class="ck-kpi js-acct-insight-trigger" title="VAT Collected - tax held on behalf of MRA. It is not the business's income." <?php echo $ckTrig('vat-collected', 'VAT Compliance Snapshot'); ?> aria-label="Open VAT compliance snapshot">
+            <div class="ck-kpi js-acct-insight-trigger" title="VAT Collected - tax owed as VAT. It is not the business's income." <?php echo $ckTrig('vat-collected', 'VAT Compliance Snapshot'); ?> aria-label="Open VAT compliance snapshot">
                 <span class="ck-kpi__icon"><i class="fas fa-percent"></i></span>
                 <span class="ck-kpi__label">VAT collected</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_vat); ?></span>
@@ -1746,9 +1750,9 @@ if (!isset($folio_fnb)) {
                             <thead>
                                 <tr>
                                     <th>Source</th>
-                                    <th class="num" title="Number of individual payment transactions for this source">Txns</th>
+                                    <th class="num" title="Number of bookings, orders or accounts that had a payment in this period">Accounts</th>
                                     <th class="num" title="Gross Revenue - total amount received before deducting refunds or VAT">Gross</th>
-                                    <th class="num" title="VAT collected within this revenue. Not income - must be remitted to MRA.">VAT</th>
+                                    <th class="num" title="VAT collected within this revenue. Not income - it is VAT payable.">VAT</th>
                                     <th class="num" title="Share of total gross revenue from all sources combined">Share</th>
                                     <th><span class="screen-reader-text" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Drill-down</span></th>
                                 </tr>
@@ -1947,7 +1951,7 @@ if (!isset($folio_fnb)) {
                                         <td data-label="Reference"><strong><?php echo $ckH($payment['payment_reference']); ?></strong></td>
                                         <td data-label="Booking"><?php echo $ckH($payment['booking_description']); ?></td>
                                         <td data-label="Type"><span class="ck-pill ck-pill--muted"><?php echo $ckH(ucfirst((string)$payment['booking_type'])); ?></span></td>
-                                        <td data-label="Date"><?php echo $ckH(date('M j, Y', strtotime($payment['payment_date']))); ?> <small><?php echo $ckH(date('H:i', strtotime($payment['payment_date']))); ?></small></td>
+                                        <td data-label="Date"><?php echo $ckH(date('M j, Y', strtotime($payment['payment_date']))); ?> <small><?php echo $ckH(date('H:i', strtotime((string)($payment['created_at'] ?? $payment['payment_date'])))); ?></small></td>
                                         <td class="num" data-label="Amount"><strong><?php echo $ckPlain($payment['total_amount']); ?></strong><?php if ((float)$payment['vat_amount'] > 0): ?><small>incl. VAT</small><?php endif; ?></td>
                                         <td data-label="Method"><?php echo $ckH(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?></td>
                                         <?php
@@ -1975,7 +1979,7 @@ if (!isset($folio_fnb)) {
                                 <?php if (!$recvRows): ?>
                                     <tr><td colspan="4" class="ck-table__empty"><i class="fas fa-check-circle"></i> All booking balances settled.</td></tr>
                                 <?php else: foreach ($recvRows as $os):
-                                    $linkBase = $os['type'] === 'room' ? 'bookings.php?payment_status=unpaid' : 'conference-management.php?payment_status=pending';
+                                    $linkBase = ['room' => 'bookings.php?payment_status=unpaid', 'gym' => 'gym-inquiries.php', 'event' => 'events-inquiries.php'][$os['type']] ?? 'conference-management.php?payment_status=pending';
                                 ?>
                                     <tr>
                                         <td><strong><?php echo $ckH(ucfirst((string)$os['type'])); ?> bookings</strong></td>

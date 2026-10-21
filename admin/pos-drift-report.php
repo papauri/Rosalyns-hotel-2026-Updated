@@ -180,7 +180,8 @@ $closesStmt = $pdo->prepare("
     ORDER BY shift_date DESC, id DESC
     LIMIT 300
 ");
-$closesStmt->execute([$startDate, $allTime ? $today : $endDate]);
+// "All time" must reach back past the 90-day default start, same as the tip register above.
+$closesStmt->execute([$allTime ? $queryStart : $startDate, $allTime ? $today : $endDate]);
 $closeRows = $closesStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
 $shiftDrift = [];

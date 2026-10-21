@@ -228,3 +228,54 @@ if (!function_exists('rh_eod_earned_series')) {
         return $series;
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Cash-side and receivable figures shared by the End of Day page, PDF and e-mail, so all three always agree.
+// ---------------------------------------------------------------------------------------------------------------
+
+if (!function_exists('rh_eod_outstanding_folio')) {
+    /**
+     * Money still owed on room bookings: the shared receivable rule (dashboard, Accounting, Outstanding balances).
+     * Every live booking with a balance, including guests already checked out and the first night kept on cancellations.
+     */
+    function rh_eod_outstanding_folio(PDO $pdo): float
+    {
+        return (float)$pdo->query("SELECT COALESCE(SUM(amount_due),0) FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))")->fetchColumn();
+    }
+}
+
+if (!function_exists('rh_eod_cash_refunds_out')) {
+    /**
+     * Cash refunds paid out of the till on $date (completed / processing). Refund rows keep the original payment
+     * method, and "cash" is matched the same way as the payment-method mix (any method containing "cash").
+     */
+    function rh_eod_cash_refunds_out(PDO $pdo, string $date): float
+    {
+        $st = $pdo->prepare("SELECT COALESCE(SUM(refund_amount),0) FROM payments
+            WHERE DATE(payment_date) = ? AND deleted_at IS NULL AND payment_type = 'refund'
+              AND refund_status IN ('completed','processing') AND LOWER(COALESCE(payment_method,'')) LIKE '%cash%'");
+        $st->execute([$date]);
+        return (float)$st->fetchColumn();
+    }
+}
+
+if (!function_exists('rh_eod_tomorrow_preview')) {
+    /**
+     * Tomorrow's arrivals / departures and the booked value of the arrivals (whole stay, VAT included, the same gross
+     * basis as the earned-revenue calculation above). Not a forecast of the day's takings.
+     * @return array{arrivals:mixed, departures:mixed, rev_forecast:mixed}
+     */
+    function rh_eod_tomorrow_preview(PDO $pdo, string $tomorrow): array
+    {
+        $tp = $pdo->prepare("
+            SELECT
+                SUM(CASE WHEN check_in_date  = ? AND status IN ('confirmed','tentative','pending') THEN 1 ELSE 0 END) AS arrivals,
+                SUM(CASE WHEN check_out_date = ? AND status IN ('checked-in','confirmed')           THEN 1 ELSE 0 END) AS departures,
+                COALESCE(SUM(CASE WHEN check_in_date = ? AND status IN ('confirmed','tentative','pending') THEN COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0)) ELSE 0 END), 0) AS rev_forecast
+            FROM bookings
+            WHERE deleted_at IS NULL
+        ");
+        $tp->execute([$tomorrow, $tomorrow, $tomorrow]);
+        return $tp->fetch(PDO::FETCH_ASSOC) ?: ['arrivals' => 0, 'departures' => 0, 'rev_forecast' => 0];
+    }
+}

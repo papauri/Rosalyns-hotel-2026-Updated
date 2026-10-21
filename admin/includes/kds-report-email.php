@@ -39,7 +39,7 @@ $rows             = $rows             ?? [];
                 <div style="font-size:22px; font-weight:600;"><?php echo number_format($totalItems); ?></div>
             </td>
             <td style="padding:12px; background:#f8f9fa; border:1px solid #eaecef; width:33%;">
-                <div style="font-size:11px; color:#6c757d; text-transform:uppercase;">Revenue</div>
+                <div style="font-size:11px; color:#6c757d; text-transform:uppercase;">Value served</div>
                 <div style="font-size:22px; font-weight:600; color:#0c8d6c;"><?php echo $currency_symbol.' '.number_format($totalRevenue, 2); ?></div>
             </td>
             <td style="padding:12px; background:#f8f9fa; border:1px solid #eaecef; width:33%;">
@@ -63,7 +63,7 @@ $rows             = $rows             ?? [];
             <tr style="background:#f8f9fa;">
                 <th align="left" style="padding:8px; border-bottom:2px solid #eaecef;">Station</th>
                 <th align="right" style="padding:8px; border-bottom:2px solid #eaecef;">Items</th>
-                <th align="right" style="padding:8px; border-bottom:2px solid #eaecef;">Revenue</th>
+                <th align="right" style="padding:8px; border-bottom:2px solid #eaecef;">Value served</th>
                 <th align="right" style="padding:8px; border-bottom:2px solid #eaecef;">Avg prep</th>
                 <th align="right" style="padding:8px; border-bottom:2px solid #eaecef;">Voids</th>
             </tr>
@@ -90,7 +90,7 @@ $rows             = $rows             ?? [];
                 <th align="left" style="padding:8px; border-bottom:2px solid #eaecef;">Item</th>
                 <th align="left" style="padding:8px; border-bottom:2px solid #eaecef;">Station</th>
                 <th align="right" style="padding:8px; border-bottom:2px solid #eaecef;">Qty</th>
-                <th align="right" style="padding:8px; border-bottom:2px solid #eaecef;">Revenue</th>
+                <th align="right" style="padding:8px; border-bottom:2px solid #eaecef;">Value served</th>
             </tr>
         </thead>
         <tbody>

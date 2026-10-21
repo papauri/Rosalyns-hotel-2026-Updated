@@ -150,6 +150,7 @@ function buildEodPdf(
     $revpar  = (float)($d['revpar'] ?? 0);
     $methods = (array)($d['methods'] ?? []);
     $cash_total  = (float)($d['cash_total'] ?? 0);
+    $cash_refunds_out = (float)($d['cash_refunds_out'] ?? 0);
     $pos     = (array)($d['pos'] ?? ['orders' => 0, 'gross' => 0, 'cogs' => 0, 'voided_count' => 0, 'voided_value' => 0]);
     $pos_by_type  = (array)($d['pos_by_type'] ?? []);
     $top_items    = (array)($d['top_items']   ?? []);
@@ -679,6 +680,14 @@ function buildEodPdf(
     $pdf->SetDrawColorArray($DIVIDER);
     $pdf->SetFont('helvetica', 'B', 7);
     $pdf->SetTextColorArray($BROWN);
+    if ($cash_refunds_out > 0.004) {
+        $pdf->SetXY($CRX, $yR);
+        $pdf->Cell(58, $ROW, '  Less cash refunds paid', 'B', 0, 'L', true);
+        $pdf->SetTextColorArray($CHARCOAL);
+        $pdf->Cell(33, $ROW, '-' . $m($cash_refunds_out), 'B', 0, 'R', true);
+        $yR += $ROW;
+        $pdf->SetTextColorArray($BROWN);
+    }
     $pdf->SetXY($CRX, $yR);
     $pdf->Cell(58, $ROW, '  Cash to reconcile', 'B', 0, 'L', true);
     $pdf->SetTextColorArray($CHARCOAL);
@@ -978,7 +987,7 @@ function buildEodPdf(
     $tomCols = [
         ['label' => 'ARRIVALS',         'val' => (string)(int)($tom['arrivals']   ?? 0), 'gold' => false],
         ['label' => 'DEPARTURES',       'val' => (string)(int)($tom['departures'] ?? 0), 'gold' => false],
-        ['label' => 'REVENUE FORECAST', 'val' => $m((float)($tom['rev_forecast'] ?? 0)), 'gold' => true],
+        ['label' => 'BOOKED VALUE OF ARRIVALS', 'val' => $m((float)($tom['rev_forecast'] ?? 0)), 'gold' => true],
     ];
 
     foreach ($tomCols as $ci => $tc) {

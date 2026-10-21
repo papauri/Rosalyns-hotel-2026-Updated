@@ -1390,7 +1390,7 @@ foreach ($assignments as $a) {
         $stats[$status] = ($stats[$status] ?? 0) + 1;
     }
 
-    if ($hasPriority && ($a['priority'] ?? '') === 'high' && in_array($status, ['pending', 'in_progress', 'completed', 'blocked'], true)) {
+    if ($hasPriority && ($a['priority'] ?? '') === 'high' && in_array($status, ['pending', 'in_progress', 'blocked'], true)) {
         $stats['high_priority']++;
     }
 
@@ -1912,7 +1912,7 @@ foreach ($assignments as $a) {
                 title: 'High Priority',
                 description: 'Urgent housekeeping tasks that should be handled first.',
                 match: function(item) {
-                    return item.priority === 'high' && (item.status === 'pending' || item.status === 'in_progress' || item.status === 'completed' || item.status === 'blocked');
+                    return item.priority === 'high' && (item.status === 'pending' || item.status === 'in_progress' || item.status === 'blocked');
                 }
             },
             blocked: {

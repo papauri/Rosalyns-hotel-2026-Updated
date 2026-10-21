@@ -558,7 +558,7 @@ try {
             <div data-filter-card class="ck-kpi">
                 <span class="ck-kpi__label">Paid POS sales</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)$summary['paid_total'], 2); ?></span>
-                <span class="ck-kpi__sub"><?php echo (int)$summary['orders']; ?> total order rows</span>
+                <span class="ck-kpi__sub"><?php echo (int)$summary["orders"]; ?> paid order<?php echo (int)$summary["orders"] === 1 ? "" : "s"; ?> (tips not included)</span>
             </div>
             <div data-filter-card class="ck-kpi ck-kpi--good">
                 <span class="ck-kpi__label">Cash collected</span>

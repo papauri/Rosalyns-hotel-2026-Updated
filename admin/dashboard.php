@@ -65,6 +65,8 @@ $finance = [
     'outstanding' => 0.0,
     'outstanding_count' => 0,
     'refunds_pending' => 0,
+    'failed' => false,
+    'ledger_today' => 0.0,
 ];
 $guestSvc = [
     'pending_reviews' => 0,
@@ -148,24 +150,68 @@ $mod_receivables = $raw_bookings || $raw_conference || $raw_gym || $raw_events;
 // Till revenue must still reach the finance totals when the viewer has finance
 // but no till permission.
 $pos_rev_needed  = $raw_pos && ($pos_sales || $mod_finance);
+// A room-service order charged to a guest folio is not a till sale: it is already part of the guest's
+// bill and is paid through a booking payment (End of Day excludes it the same way, eod-revenue.php).
+// Without this it was counted once here and again when the folio was paid.
+$posNotFolioSql = " AND NOT (order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = stock_orders.id))";
+// Takings counts money actually collected: the statuses the End of Day cash view uses (paid / completed,
+// plus payments since partly or fully refunded). 'partial' means not yet collected, so it is not takings.
+$ledgerCollectedSql = "payment_status IN ('paid','completed','refunded','partially_refunded')";
+/**
+ * Takings per day between two dates (Y-m-d, inclusive) in hotel time: ledger payments collected
+ * (non-restaurant) plus POS sales paid (paid / completed / since-refunded, room-service-on-folio left
+ * out), less refunds paid out that day. Days with no money are 0. Throws on a failed query so the
+ * caller can show "unavailable" instead of a false 0.
+ */
+$takingsByDay = static function (string $from, string $to, bool $withLedger, bool $withPos) use ($pdo, $ledgerCollectedSql, $posNotFolioSql): array {
+    $by = [];
+    $add = static function (array $rows, int $sign) use (&$by): void {
+        foreach ($rows as $row) { $by[$row['d']] = ($by[$row['d']] ?? 0.0) + $sign * (float)$row['v']; }
+    };
+    if ($withLedger) {
+        $st = $pdo->prepare("SELECT DATE(payment_date) d, COALESCE(SUM(total_amount),0) v FROM payments
+            WHERE DATE(payment_date) BETWEEN ? AND ? AND {$ledgerCollectedSql}
+              AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund' AND booking_type <> 'restaurant'
+            GROUP BY DATE(payment_date)");
+        $st->execute([$from, $to]);
+        $add($st->fetchAll(PDO::FETCH_ASSOC), 1);
+    }
+    if ($withPos) {
+        $st = $pdo->prepare("SELECT DATE(COALESCE(paid_at, created_at)) d, COALESCE(SUM(total_amount),0) v FROM stock_orders
+            WHERE status IN ('paid','completed','refunded') AND DATE(COALESCE(paid_at, created_at)) BETWEEN ? AND ?{$posNotFolioSql}
+            GROUP BY DATE(COALESCE(paid_at, created_at))");
+        $st->execute([$from, $to]);
+        $add($st->fetchAll(PDO::FETCH_ASSOC), 1);
+    }
+    if ($withLedger || $withPos) {
+        $typeSql = ($withLedger && $withPos) ? '' : ($withLedger ? " AND booking_type <> 'restaurant'" : " AND booking_type = 'restaurant'");
+        $st = $pdo->prepare("SELECT DATE(payment_date) d, COALESCE(SUM(refund_amount),0) v FROM payments
+            WHERE DATE(payment_date) BETWEEN ? AND ? AND payment_type = 'refund'
+              AND refund_status IN ('completed','processing') AND deleted_at IS NULL{$typeSql}
+            GROUP BY DATE(payment_date)");
+        $st->execute([$from, $to]);
+        $add($st->fetchAll(PDO::FETCH_ASSOC), -1);
+    }
+    return $by;
+};
 
 if (!$is_card_insight_ajax) {
 
     // Fetch dashboard statistics — skip queries for disabled modules
     try {
         if ($mod_bookings) {
-            $checkins_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE check_in_date = ? AND status IN ('confirmed', 'pending')");
+            $checkins_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE deleted_at IS NULL AND check_in_date = ? AND status IN ('confirmed', 'pending')");
             $checkins_stmt->execute([$today]);
             $today_checkins = $checkins_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-            $checkouts_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE check_out_date = ? AND status = 'checked-in'");
+            $checkouts_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE deleted_at IS NULL AND check_out_date = ? AND status = 'checked-in'");
             $checkouts_stmt->execute([$today]);
             $today_checkouts = $checkouts_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-            $pending_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'pending'");
+            $pending_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE deleted_at IS NULL AND status = 'pending'");
             $pending_bookings = $pending_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
-            $current_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE status = 'checked-in'");
+            $current_stmt = $pdo->query("SELECT COUNT(*) as count FROM bookings WHERE deleted_at IS NULL AND status = 'checked-in'");
             $current_guests = $current_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
             $upcoming_stmt = $pdo->prepare("
@@ -260,7 +306,7 @@ if (!$is_card_insight_ajax) {
                         )")->fetchColumn();
                 $ops['room_service_reminders_due'] = $roomServiceReminderDueNow ? (int)$ops['room_service_reminder_pending'] : 0;
             }
-            $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at))=CURDATE()")->fetch(PDO::FETCH_ASSOC);
+            $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at))=CURDATE()" . $posNotFolioSql)->fetch(PDO::FETCH_ASSOC);
             $ops['orders_today'] = (int)$r['c'];
             $ops['restaurant_rev_today'] = (float)$r['v'];
         } catch (Throwable $e) { /* legacy schema — keep zeros */ }
@@ -268,7 +314,7 @@ if (!$is_card_insight_ajax) {
 
     if (!$mod_pos && $pos_rev_needed) {
         try {
-            $ops['restaurant_rev_today'] = (float)$pdo->query("SELECT COALESCE(SUM(total_amount),0) FROM stock_orders WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at))=CURDATE()")->fetchColumn();
+            $ops['restaurant_rev_today'] = (float)$pdo->query("SELECT COALESCE(SUM(total_amount),0) FROM stock_orders WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at))=CURDATE()" . $posNotFolioSql)->fetchColumn();
         } catch (Throwable $e) { /* legacy schema */ }
     }
 
@@ -290,17 +336,18 @@ if (!$is_card_insight_ajax) {
 
     if ($mod_finance) {
         try {
-            // Gross takings today. POS sales sync into payments as booking_type='restaurant',
-            // so counting them here AND adding restaurant_rev_today would double-count —
-            // exclude restaurant rows from the ledger sum and add the POS gross figure once.
-            $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM payments WHERE DATE(payment_date)=CURDATE() AND payment_status IN ('paid','completed','partial') AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund' AND booking_type <> 'restaurant'")->fetch(PDO::FETCH_ASSOC);
+            // Takings today = money collected today less refunds paid out today (the End of Day
+            // "cash collected" rule). One helper feeds this KPI and the 7-day chart so they agree.
+            // POS sales sync into payments as booking_type='restaurant', so the ledger sum leaves those
+            // rows out and the POS side is added once from stock_orders.
+            $r = $pdo->query("SELECT COUNT(*) c FROM payments WHERE DATE(payment_date)=CURDATE() AND {$ledgerCollectedSql} AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund' AND booking_type <> 'restaurant'")->fetch(PDO::FETCH_ASSOC);
             $finance['payments_today'] = (int)$r['c'];
-            $finance['revenue_today']  = (float)$r['v'];
-            $finance['revenue_today'] += (float)($ops['restaurant_rev_today'] ?? 0);
+            $finance['revenue_today']  = (float)($takingsByDay($today, $today, true, $pos_rev_needed)[$today] ?? 0);
+            $finance['ledger_today']   = (float)($takingsByDay($today, $today, true, false)[$today] ?? 0); // everything except the till
             // Outstanding receivables from every module this preset actually runs —
             // a gym must not be shown "bookings with amount due" it can never have.
             $outstandingSql = [];
-            if ($raw_bookings)   { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
+            if ($raw_bookings)   { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
             if ($raw_conference) { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
             if ($raw_gym)        { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
             if ($raw_events)     { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
@@ -312,7 +359,7 @@ if (!$is_card_insight_ajax) {
                 } catch (Throwable $e) { /* per-module table may not exist yet */ }
             }
             $finance['refunds_pending']   = (int)$pdo->query("SELECT COUNT(*) FROM payments WHERE payment_type='refund' AND refund_status IN ('pending','processing') AND deleted_at IS NULL")->fetchColumn();
-        } catch (Throwable $e) { /* fine */ }
+        } catch (Throwable $e) { $finance['failed'] = true; /* shown as "unavailable", never as a false 0 */ }
     }
 
     try {
@@ -401,34 +448,18 @@ if (!$is_card_insight_ajax) {
         }
     }
 
-    // Takings over the last 7 days — same rules as "revenue today" (ledger
-    // without restaurant rows + POS gross), so today's bar matches the KPI.
+    // Takings over the last 7 days: the same helper as the "Takings today" KPI (collected less
+    // refunds paid out, POS added once), so today's bar always equals the KPI.
     for ($i = 6; $i >= 0; $i--) {
         $revenueTrend[date('Y-m-d', strtotime($today . " -{$i} day"))] = 0.0;
     }
     $trendStart = array_key_first($revenueTrend);
-    if ($mod_finance) {
+    if ($mod_finance || $pos_rev_needed) {
         try {
-            $st = $pdo->prepare("SELECT DATE(payment_date) d, COALESCE(SUM(total_amount),0) v FROM payments
-                WHERE DATE(payment_date) BETWEEN ? AND ? AND payment_status IN ('paid','completed','partial')
-                  AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund' AND booking_type <> 'restaurant'
-                GROUP BY DATE(payment_date)");
-            $st->execute([$trendStart, $today]);
-            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                if (isset($revenueTrend[$r['d']])) { $revenueTrend[$r['d']] += (float)$r['v']; }
+            foreach ($takingsByDay($trendStart, $today, $mod_finance, $pos_rev_needed) as $d => $v) {
+                if (isset($revenueTrend[$d])) { $revenueTrend[$d] += (float)$v; }
             }
-        } catch (Throwable $e) { /* fine */ }
-    }
-    if ($pos_rev_needed) {
-        try {
-            $st = $pdo->prepare("SELECT DATE(COALESCE(paid_at, created_at)) d, COALESCE(SUM(total_amount),0) v FROM stock_orders
-                WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at)) BETWEEN ? AND ?
-                GROUP BY DATE(COALESCE(paid_at, created_at))");
-            $st->execute([$trendStart, $today]);
-            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                if (isset($revenueTrend[$r['d']])) { $revenueTrend[$r['d']] += (float)$r['v']; }
-            }
-        } catch (Throwable $e) { /* fine */ }
+        } catch (Throwable $e) { $finance['failed'] = true; }
     }
 }
 
@@ -882,7 +913,7 @@ if ($is_card_insight_ajax) {
                 // exceed Total — total_amount alone is the NET base and would read
                 // lower than the gross balance due.
                 $ob_union = [];
-                if ($raw_bookings)   { $ob_union[] = "SELECT id, booking_reference AS ref, guest_name AS who, status, amount_paid, amount_due, 'booking' AS src FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
+                if ($raw_bookings)   { $ob_union[] = "SELECT id, booking_reference AS ref, guest_name AS who, status, amount_paid, amount_due, 'booking' AS src FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
                 if ($raw_conference) { $ob_union[] = "SELECT id, inquiry_reference AS ref, COALESCE(NULLIF(company_name,''), contact_person) AS who, status, amount_paid, amount_due, 'conference' AS src FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
                 if ($raw_gym)        { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'gym' AS src FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
                 if ($raw_events)     { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'event' AS src FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
@@ -1288,7 +1319,7 @@ if ($is_card_insight_ajax) {
                 $stmt = $pdo->query("SELECT id AS order_id, reference, order_type, payment_method, total_amount, COALESCE(paid_at, created_at) AS settled_at
                                      FROM stock_orders
                                      WHERE status IN ('paid','completed')
-                                       AND DATE(COALESCE(paid_at, created_at)) = CURDATE()
+                                       AND DATE(COALESCE(paid_at, created_at)) = CURDATE()" . $posNotFolioSql . "
                                      ORDER BY COALESCE(paid_at, created_at) DESC
                                      LIMIT 30");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1308,8 +1339,8 @@ if ($is_card_insight_ajax) {
             case 'total_revenue_today':
                 $payload['title'] = 'Total Revenue Today';
                 $payload['subtitle'] = $pos_rev_needed
-                    ? ('Payments ledger plus settled ' . (isRestaurantEnabled() ? 'restaurant' : 'POS') . ' orders')
-                    : 'Payments ledger';
+                    ? ('Payments collected plus settled ' . (isRestaurantEnabled() ? 'restaurant' : 'POS') . ' orders, less refunds paid out today (latest entries shown)')
+                    : 'Payments collected, less refunds paid out today (latest entries shown)';
                 $payload['columns'] = [
                     ['key' => 'source', 'label' => 'Source'],
                     ['key' => 'reference', 'label' => 'Reference'],
@@ -1318,18 +1349,18 @@ if ($is_card_insight_ajax) {
                     ['key' => 'amount', 'label' => 'Amount'],
                     ['key' => 'time', 'label' => 'Time'],
                 ];
-                $payload['link'] = ['href' => 'payments.php?date=' . urlencode($today), 'label' => 'Open payments captured today'];
+                $payload['link'] = ['href' => 'payments.php?start_date=' . urlencode($today) . '&end_date=' . urlencode($today), 'label' => 'Open payments captured today'];
                 $combined = [];
 
                 $payStmt = $pdo->query("SELECT id AS payment_id,
                                                 COALESCE(payment_reference, CONCAT('PAY-', id)) AS payment_reference,
                                                 COALESCE(booking_reference, booking_type, 'Payment') AS context_label,
                                                 COALESCE(payment_method, 'other') AS payment_method,
-                                                COALESCE(payment_amount, total_amount, 0) AS amount,
+                                                COALESCE(total_amount, 0) AS amount,
                                                 COALESCE(created_at, CONCAT(payment_date, ' 00:00:00')) AS ts
                                          FROM payments
                                          WHERE DATE(payment_date) = CURDATE()
-                                           AND payment_status IN ('paid','completed','partial')
+                                           AND {$ledgerCollectedSql}
                                            AND deleted_at IS NULL
                                            AND COALESCE(payment_type, '') <> 'refund'
                                            AND booking_type <> 'restaurant'
@@ -1348,11 +1379,38 @@ if ($is_card_insight_ajax) {
                     ];
                 }
 
+                // Refunds paid out today are deducted from the Takings figure, so they are listed (negative).
+                $refStmt = $pdo->query("SELECT id AS payment_id,
+                                                COALESCE(payment_reference, CONCAT('PAY-', id)) AS payment_reference,
+                                                COALESCE(booking_reference, booking_type, 'Refund') AS context_label,
+                                                COALESCE(payment_method, 'other') AS payment_method,
+                                                COALESCE(refund_amount, total_amount, 0) AS amount,
+                                                COALESCE(created_at, CONCAT(payment_date, ' 00:00:00')) AS ts
+                                         FROM payments
+                                         WHERE DATE(payment_date) = CURDATE()
+                                           AND payment_type = 'refund' AND refund_status IN ('completed','processing')
+                                           AND deleted_at IS NULL"
+                                           . ($pos_rev_needed ? '' : " AND booking_type <> 'restaurant'") . "
+                                         ORDER BY COALESCE(created_at, CONCAT(payment_date, ' 00:00:00')) DESC
+                                         LIMIT 20");
+                foreach ($refStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $combined[] = [
+                        'payment_id' => (int)($row['payment_id'] ?? 0),
+                        'source' => 'Refund',
+                        'reference' => (string)$row['payment_reference'],
+                        'context' => (string)$row['context_label'],
+                        'method' => ucwords(str_replace('_', ' ', (string)$row['payment_method'])),
+                        'amount' => '-' . $formatMoney((float)($row['amount'] ?? 0)),
+                        'time' => $formatDateTime((string)$row['ts']),
+                        '_ts' => (string)$row['ts'],
+                    ];
+                }
+
                 if ($pos_rev_needed) {
                 $restStmt = $pdo->query("SELECT id AS order_id, reference, order_type, payment_method, total_amount, COALESCE(paid_at, created_at) AS ts
                                           FROM stock_orders
-                                          WHERE status IN ('paid','completed')
-                                            AND DATE(COALESCE(paid_at, created_at)) = CURDATE()
+                                          WHERE status IN ('paid','completed','refunded')
+                                            AND DATE(COALESCE(paid_at, created_at)) = CURDATE()" . $posNotFolioSql . "
                                           ORDER BY COALESCE(paid_at, created_at) DESC
                                           LIMIT 15");
                 foreach ($restStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -1560,10 +1618,10 @@ if ($is_card_insight_ajax) {
                     } catch (Throwable $e) { /* events table may not exist yet */ }
                 }
                 if ($mod_bookings) {
-                    $todayCheckinsStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE check_in_date = ? AND status IN ('confirmed', 'pending')");
+                    $todayCheckinsStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND check_in_date = ? AND status IN ('confirmed', 'pending')");
                     $todayCheckinsStmt->execute([$today]);
                     $todayCheckins = (int)$todayCheckinsStmt->fetchColumn();
-                    $inHouseGuests = (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE status = 'checked-in'")->fetchColumn();
+                    $inHouseGuests = (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND status = 'checked-in'")->fetchColumn();
                     $payload['rows'][] = [
                         'queue' => "Today's check-ins",
                         'count' => (string)$todayCheckins,
@@ -1666,7 +1724,7 @@ if ($is_card_insight_ajax) {
                     $outstandingCount = 0;
                     $outstandingValue = 0.0;
                     $ofUnion = [];
-                    if ($raw_bookings)   { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
+                    if ($raw_bookings)   { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
                     if ($raw_conference) { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
                     if ($raw_gym)        { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
                     if ($raw_events)     { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
@@ -2156,10 +2214,10 @@ $currency_symbol = getSetting('currency_symbol');
                 </a>
             <?php endif; ?>
             <?php if ($mod_finance): ?>
-                <a class="ck-kpi js-dashboard-insight" data-insight-card="total_revenue_today" data-insight-label="Total revenue today" href="payments.php?date=<?php echo $today; ?>">
+                <a class="ck-kpi js-dashboard-insight" data-insight-card="total_revenue_today" data-insight-label="Total revenue today" href="payments.php?start_date=<?php echo $today; ?>&end_date=<?php echo $today; ?>">
                     <span class="ck-kpi__icon"><i class="fas fa-coins"></i></span>
                     <span class="ck-kpi__label">Takings today</span>
-                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($finance['revenue_today']); ?></span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo !empty($finance['failed']) ? 'Unavailable' : $money($finance['revenue_today']); ?></span>
                     <span class="ck-spark" aria-hidden="true">
                         <?php foreach ($revenueTrend as $d => $v): ?><span style="height:<?php echo max(6, round($v / $trendMax * 100)); ?>%"<?php echo $d === $today ? ' class="is-today"' : ''; ?>></span><?php endforeach; ?>
                     </span>
@@ -2169,7 +2227,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <a class="ck-kpi<?php echo $finance['outstanding'] > 0.01 ? ' ck-kpi--alert' : ''; ?> js-dashboard-insight" data-insight-card="outstanding_balances" data-insight-label="Outstanding balances" href="payments.php?balance=outstanding">
                     <span class="ck-kpi__icon"><i class="fas fa-file-invoice-dollar"></i></span>
                     <span class="ck-kpi__label">Owed to us</span>
-                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($finance['outstanding']); ?></span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo !empty($finance['failed']) ? 'Unavailable' : $money($finance['outstanding']); ?></span>
                     <span class="ck-kpi__sub"><?php echo (int)$finance['outstanding_count']; ?> <?php echo $mod_bookings ? 'booking(s)' : 'account(s)'; ?> with a balance</span>
                 </a>
                 <?php endif; ?>
@@ -2424,7 +2482,7 @@ $currency_symbol = getSetting('currency_symbol');
                 </div>
                 <ul class="ck-kv">
                     <?php if ($mod_finance && $pos_rev_needed): ?>
-                        <li><span><i class="fas fa-bed"></i> <?php echo $mod_bookings ? 'Rooms &amp; services' : 'Invoiced sales'; ?> today</span><strong><?php echo $money(max(0, $finance['revenue_today'] - $ops['restaurant_rev_today'])); ?></strong></li>
+                        <li><span><i class="fas fa-bed"></i> <?php echo $mod_bookings ? 'Rooms &amp; services' : 'Invoiced sales'; ?> today</span><strong><?php echo !empty($finance['failed']) ? 'Unavailable' : $money($finance['ledger_today']); ?></strong></li>
                     <?php endif; ?>
                     <?php if ($pos_sales): ?>
                         <li><a class="js-dashboard-insight" data-insight-card="restaurant_revenue_today" data-insight-label="Till sales today" href="reports.php?type=accounting&range=today"><span><i class="fas fa-cash-register"></i> <?php echo isRestaurantEnabled() ? 'Restaurant &amp; bar' : 'Till sales'; ?> today · <?php echo (int)$ops['orders_today']; ?> order(s)</span><strong><?php echo $money($ops['restaurant_rev_today']); ?></strong></a></li>
@@ -2488,7 +2546,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <header class="ck-panel__head">
                     <div>
                         <h2 class="ck-panel__title">Week ahead</h2>
-                        <p class="ck-panel__sub"><?php echo count($upcoming_checkins); ?> arrival(s)<?php echo $mod_conference ? ' · ' . count($upcoming_conferences) . ' event(s)' : ''; ?> in the next 7 days — tap a day to filter.</p>
+                        <p class="ck-panel__sub"><?php echo count($upcoming_checkins); ?> arrival(s)<?php echo $mod_conference ? ' · ' . count(array_filter($upcoming_conferences, static fn($c) => (string)$c['event_date'] > $today)) . ' event(s)' : ''; ?> in the next 7 days — tap a day to filter.</p>
                     </div>
                     <div class="ck-panel__tools">
                         <button type="button" class="ck-link" data-ck-day="" hidden>Show all</button>

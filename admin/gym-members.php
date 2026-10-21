@@ -745,7 +745,7 @@ $gm_counts = ['active' => 0, 'expiring' => 0, 'expired' => 0, 'all' => 0];
 $gm_filter = (string)($_GET['filter'] ?? 'all');
 try {
     $gm_counts['all']      = (int)$pdo->query("SELECT COUNT(*) FROM gym_members")->fetchColumn();
-    $gm_counts['active']   = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active'")->fetchColumn();
+    $gm_counts['active']   = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active' AND (expiry_date IS NULL OR expiry_date >= CURDATE())")->fetchColumn(); // a lapsed member (end date passed) is Expired, never also Active
     $gm_counts['expiring'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();
     $gm_counts['expired']  = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='expired' OR (expiry_date IS NOT NULL AND expiry_date < CURDATE())")->fetchColumn();
 
@@ -753,7 +753,7 @@ try {
     // value never reaches the SQL string, so an unexpected ?filter= falls back to
     // '1=1' rather than being interpolated.
     $gm_whereByFilter = [
-        'active'   => "status = 'active'",
+        'active'   => "status = 'active' AND (expiry_date IS NULL OR expiry_date >= CURDATE())",
         'expiring' => "status = 'active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)",
         'expired'  => "(status = 'expired' OR (expiry_date IS NOT NULL AND expiry_date < CURDATE()))",
     ];
@@ -1003,7 +1003,8 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                                 <span style="display:inline-block;margin-top:2px;padding:1px 8px;border-radius:10px;font-size:.7rem;font-weight:700;color:#fff;background:<?php echo $seg['color']; ?>;" title="<?php echo htmlspecialchars($seg['hint']); ?>"><?php echo htmlspecialchars($seg['segment']); ?></span>
                             </td>
                             <?php endif; ?>
-                            <td><span style="font-weight:600;color:<?php echo $statusColor; ?>;"><?php echo ucfirst($m['status']); ?></span></td>
+                            <?php $gmLapsed = $m['status'] === 'active' && !empty($m['expiry_date']) && $m['expiry_date'] < date('Y-m-d'); ?>
+                            <td><span style="font-weight:600;color:<?php echo $gmLapsed ? '#9e4040' : $statusColor; ?>;"><?php echo $gmLapsed ? 'Expired' : ucfirst($m['status']); ?></span></td>
                             <td class="actions-cell">
                                 <div class="action-buttons">
                                     <button class="btn-action" title="Edit" onclick="gmOpenModal(<?php echo htmlspecialchars(json_encode($m), ENT_QUOTES); ?>)"><i class="fas fa-pen"></i></button>

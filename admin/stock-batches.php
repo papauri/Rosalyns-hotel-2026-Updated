@@ -168,6 +168,9 @@ if (!$error || strpos($error, 'not yet') === false) {
             $sql .= " AND b.status = ?";
             $params[] = $statusFilter;
         }
+        if (in_array($expiryFilter, ['critical', 'soon', 'upcoming'], true)) {
+            $sql .= " AND b.quantity_remaining > 0"; // emptied batches are not "expiring" stock (matches the tiles)
+        }
         if ($expiryFilter === 'critical') {
             $sql .= " AND b.expiry_date IS NOT NULL AND b.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)";
         } elseif ($expiryFilter === 'soon') {
@@ -232,21 +235,26 @@ function expiry_tier(?string $expiry, ?int $days): array
 
         <?php
         // Quick metrics
+        // Tiles count ALL active batches that still have stock, whatever the filters below are set to
+        // (they used to be counted from the filtered list, so picking "Expired" or "≤ 3 days" zeroed them).
         $cntCritical = $cntSoon = $cntUpcoming = $cntActive = 0;
         $valueAtRisk = 0.0;
-        foreach ($batches as $b) {
-            if ($b['status'] === 'active') {
-                $cntActive++;
-                $d = $b['days_to_expiry'];
-                if ($d !== null && $d >= 0 && $d <= 3) {
-                    $cntCritical++;
-                    $valueAtRisk += (float)$b['quantity_remaining'] * (float)$b['cost_per_unit'];
-                } elseif ($d !== null && $d > 3 && $d <= 7) {
-                    $cntSoon++;
-                } elseif ($d !== null && $d > 7 && $d <= 30) {
-                    $cntUpcoming++;
-                }
-            }
+        try {
+            $kpi = $pdo->query("
+                SELECT COUNT(*) AS n_active,
+                       COALESCE(SUM(CASE WHEN expiry_date IS NOT NULL AND DATEDIFF(expiry_date, CURDATE()) BETWEEN 0 AND 3 THEN 1 ELSE 0 END), 0) AS n_crit,
+                       COALESCE(SUM(CASE WHEN expiry_date IS NOT NULL AND DATEDIFF(expiry_date, CURDATE()) BETWEEN 0 AND 3 THEN quantity_remaining * cost_per_unit ELSE 0 END), 0) AS crit_value,
+                       COALESCE(SUM(CASE WHEN expiry_date IS NOT NULL AND DATEDIFF(expiry_date, CURDATE()) BETWEEN 4 AND 7 THEN 1 ELSE 0 END), 0) AS n_soon,
+                       COALESCE(SUM(CASE WHEN expiry_date IS NOT NULL AND DATEDIFF(expiry_date, CURDATE()) BETWEEN 8 AND 30 THEN 1 ELSE 0 END), 0) AS n_upcoming
+                FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0
+            ")->fetch(PDO::FETCH_ASSOC) ?: [];
+            $cntActive = (int)($kpi['n_active'] ?? 0);
+            $cntCritical = (int)($kpi['n_crit'] ?? 0);
+            $valueAtRisk = (float)($kpi['crit_value'] ?? 0);
+            $cntSoon = (int)($kpi['n_soon'] ?? 0);
+            $cntUpcoming = (int)($kpi['n_upcoming'] ?? 0);
+        } catch (Throwable $e) {
+            error_log('stock-batches tiles: ' . $e->getMessage());
         }
         ?>
         <div class="ck-kpis ck-kpis--4">
