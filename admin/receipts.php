@@ -45,8 +45,9 @@ function receipts_build_where(array $input, array &$params): string
         foreach ($input['_scope_types'] as $t) { $params[] = $t; }
     }
     if (($input['status'] ?? 'all') === 'missing') {
-        // "Missing" = no receipt number yet, or no PDF on file: the same rows the list marks "Missing" / "Needs PDF".
-        $where[] = "(((p.receipt_number IS NULL OR p.receipt_number = '') AND COALESCE(p.payment_type, '') <> 'refund') OR COALESCE(p.receipt_generated, 0) <> 1)";
+        // "Missing" = a collected payment with no receipt number yet, or no PDF on file: the same rows the list marks "Missing" / "Needs PDF".
+        // Refund rows are not receipts, so they are never "missing".
+        $where[] = "(COALESCE(p.payment_type, '') <> 'refund' AND ((p.receipt_number IS NULL OR p.receipt_number = '') OR COALESCE(p.receipt_generated, 0) <> 1))";
     } elseif (($input['status'] ?? 'all') === 'generated') {
         $where[] = 'p.receipt_generated = 1';
     } elseif (($input['status'] ?? 'all') === 'emailed') {
@@ -111,8 +112,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $result = receipt_send_email($pdo, $paymentId, $recipient !== '' ? $recipient : null, $user);
                 $message = $result['message'];
             } elseif ($action === 'backfill_receipts') {
-                // Every collected payment without a receipt number or without its PDF (refund rows only need the PDF).
-                $stmt = $pdo->query("SELECT id FROM payments WHERE deleted_at IS NULL AND payment_status IN ('completed','paid','refunded','partially_refunded') AND (((receipt_number IS NULL OR receipt_number = '') AND COALESCE(payment_type, '') != 'refund') OR COALESCE(receipt_generated, 0) <> 1) ORDER BY payment_date ASC, id ASC LIMIT 500");
+                // Every collected payment without a receipt number or without its PDF (refund rows are not receipts: skipped).
+                $stmt = $pdo->query("SELECT id FROM payments WHERE deleted_at IS NULL AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' AND ((receipt_number IS NULL OR receipt_number = '') OR COALESCE(receipt_generated, 0) <> 1) ORDER BY payment_date ASC, id ASC LIMIT 500");
                 $ids = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN) : [];
                 $count = 0;
                 $failed = 0;
@@ -168,7 +169,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 
 $summaryStmt = $pdo->prepare("SELECT COUNT(*) AS total_receipts,
         COALESCE(SUM(CASE WHEN (p.receipt_number IS NULL OR p.receipt_number = '') AND COALESCE(p.payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS missing_numbers,
-        COALESCE(SUM(CASE WHEN COALESCE(p.receipt_generated, 0) <> 1 THEN 1 ELSE 0 END), 0) AS missing_receipts,
+        COALESCE(SUM(CASE WHEN COALESCE(p.receipt_generated, 0) <> 1 AND COALESCE(p.payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS missing_receipts,
         COALESCE(SUM(CASE WHEN p.receipt_generated = 1 THEN 1 ELSE 0 END), 0) AS generated_receipts,
         COALESCE(SUM(CASE WHEN p.receipt_emailed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS emailed_receipts,
         COALESCE(SUM(CASE WHEN COALESCE(p.payment_type,'') = 'refund' THEN -p.total_amount ELSE p.total_amount END), 0) AS receipt_value
@@ -389,8 +390,9 @@ $site_name = getSetting('site_name', 'Hotel');
                                 <td><?php echo htmlspecialchars(date('d M Y', strtotime((string)$payment['payment_date']))); ?></td>
                                 <td class="text-right"><strong><?php echo receipts_money((float)$payment['total_amount'], $currency_symbol); ?></strong></td>
                                 <td>
-                                    <span class="badge <?php echo !empty($payment['receipt_generated']) ? 'badge-success' : 'badge-warning'; ?>">
-                                        <?php echo !empty($payment['receipt_generated']) ? 'PDF ready' : 'Needs PDF'; ?>
+                                    <?php $isRefundRow = (string)($payment['payment_type'] ?? '') === 'refund'; ?>
+                                    <span class="badge <?php echo !empty($payment['receipt_generated']) ? 'badge-success' : ($isRefundRow ? 'badge-info' : 'badge-warning'); ?>">
+                                        <?php echo !empty($payment['receipt_generated']) ? 'PDF ready' : ($isRefundRow ? 'Refund' : 'Needs PDF'); ?>
                                     </span>
                                     <?php if (!empty($payment['receipt_emailed_at'])): ?>
                                         <small class="text-muted" style="display:block;margin-top:2px;">Emailed <?php echo htmlspecialchars(date('d M Y', strtotime((string)$payment['receipt_emailed_at']))); ?></small>

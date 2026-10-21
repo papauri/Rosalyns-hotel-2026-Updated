@@ -158,6 +158,9 @@ function buildEodPdf(
     $hk           = (array)($d['hk'] ?? ['pending' => 0, 'in_progress' => 0, 'completed' => 0]);
     $reviewRow    = (array)($d['reviewRow'] ?? ['cnt' => 0, 'avg_rating' => 0]);
     $outstanding  = (float)($d['outstanding'] ?? 0);
+    $outstanding_accounts = (float)($d['outstanding_accounts'] ?? 0);
+    $outstanding_tabs = (float)($d['outstanding_tabs'] ?? 0);
+    $outstanding_failed = !empty($d['outstanding_failed']);
     $rooms_total    = (int)($d['rooms_total']    ?? 0);
     $rooms_occupied = (int)($d['rooms_occupied'] ?? 0);
     $rooms_oo       = (int)($d['rooms_oo']       ?? 0);
@@ -544,6 +547,15 @@ function buildEodPdf(
     }
     if ($outstanding > 0) {
         $rowL('Outstanding Folio', $m($outstanding), false, $i++);
+    }
+    if ($outstanding_accounts > 0) {
+        $rowL('Outstanding Accounts', $m($outstanding_accounts), false, $i++);
+    }
+    if ($outstanding_tabs > 0) {
+        $rowL('Open Tabs (unpaid)', $m($outstanding_tabs), false, $i++);
+    }
+    if ($outstanding_failed) {
+        $rowL('Outstanding total', 'Unavailable', false, $i++);
     }
     if ($payment_capture_rate < 99.5) {
         $rowL('Payment Capture Rate', number_format($payment_capture_rate, 1) . '%', false, $i++);

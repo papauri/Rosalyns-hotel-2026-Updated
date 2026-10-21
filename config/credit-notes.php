@@ -1277,6 +1277,9 @@ if (!function_exists('sendCreditNoteEmail')) {
                         '{{currency_symbol}}'    => htmlspecialchars($currency_symbol),
                         '{{contact_email}}'      => htmlspecialchars($fromEmail),
                         '{{logo_html}}'          => $cnLogoHtml,
+                        '{{address}}'            => htmlspecialchars($hotel_address),
+                        '{{contact_phone}}'      => htmlspecialchars($hotel_phone !== '' ? $hotel_phone : (string)getSetting('phone_main', '')),
+                        '{{guest_email}}'        => htmlspecialchars((string)($cn['guest_email'] ?? '')),
                     ];
                     $htmlBody = str_replace(array_keys($cnPlaceholders), array_values($cnPlaceholders), $dbTpl['html_body']);
                     if (!empty($dbTpl['subject'])) {

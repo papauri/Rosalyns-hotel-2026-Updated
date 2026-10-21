@@ -1909,7 +1909,7 @@ function ensureBookingEmailTemplateDefaults()
                         ['Valid Until',        '{{valid_until}}'],
                         ['Total',             '{{total_amount}}', true],
                     ]),
-                '{{contact_email}}'
+                '{{guest_email}}'
             ),
         ],
         'conference_quotation_document' => [
@@ -2377,6 +2377,12 @@ function logCancellationToDatabase(int $booking_id, string $booking_reference, s
 {
     global $pdo;
 
+    // cancellation_log.booking_id is a foreign key to bookings: only room bookings can be logged here.
+    // Conference/event/gym cancellations are recorded in the cancellation file log and their own history.
+    if ($booking_type !== 'room') {
+        return false;
+    }
+
     try {
         $stmt = $pdo->prepare("
             INSERT INTO cancellation_log
@@ -2394,7 +2400,7 @@ function logCancellationToDatabase(int $booking_id, string $booking_reference, s
             $email_status
         ]);
         return true;
-    } catch (Exception $e) {
+    } catch (\Throwable $e) {
         error_log("Failed to log cancellation to database: " . $e->getMessage());
         return false;
     }
@@ -2970,7 +2976,7 @@ function sendConferenceEnquiryEmail(array $data)
         }
 
         $currency_symbol = getSetting('currency_symbol');
-        $total_amount = $data['total_amount'] ? number_format($data['total_amount'], 0) : 'To be determined';
+        $total_amount = rh_conf_gross($data) > 0 ? number_format(rh_conf_gross($data), 0) : 'To be determined';
 
         // Prepare template data
         $template_data = [
@@ -3100,7 +3106,7 @@ function sendConferenceAdminNotificationEmail(array $data)
         }
 
         $currency_symbol = getSetting('currency_symbol');
-        $total_amount = $data['total_amount'] ? number_format($data['total_amount'], 0) : 'To be determined';
+        $total_amount = rh_conf_gross($data) > 0 ? number_format(rh_conf_gross($data), 0) : 'To be determined';
 
         // Get conference email with fallback to main contact email
         $conference_email = getSetting('conference_email');
@@ -3353,7 +3359,7 @@ function sendConferenceConfirmedEmail(array $enquiry)
         }
 
         $currency_symbol = getSetting('currency_symbol');
-        $total_amount = $enquiry['total_amount'] ? number_format($enquiry['total_amount'], 0) : 'To be determined';
+        $total_amount = rh_conf_gross($enquiry) > 0 ? number_format(rh_conf_gross($enquiry), 0) : 'To be determined';
 
         // Prepare email content
         $htmlBody = '
@@ -3382,7 +3388,6 @@ function sendConferenceConfirmedEmail(array $enquiry)
             <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
                 <h3 style="color: #155724; margin-top: 0;;text-align:left;">✅ Booking Status: Confirmed</h3>
                 <p style="color: #155724; margin: 0;">
-                    <strong>Your conference booking is now confirmed!</strong><br>
                     We look forward to hosting your event at ' . htmlspecialchars($email_site_name) . '.
                 </p>
             </div>';
@@ -6510,6 +6515,111 @@ function sendEmailWithBinaryAttachment(
     }
 }
 
+/** Logo <img> for email template tags ('' when no logo is configured). */
+function rh_email_logo_html_tag(string $siteName): string
+{
+    $src = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
+    return $src !== ''
+        ? '<img src="' . htmlspecialchars($src, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8') . '" style="max-width:110px;height:auto;display:block;margin:0 auto;">'
+        : '';
+}
+
+/**
+ * Delete saved quotation PDFs, only paths that resolve inside the quotations/ folder. Call after the
+ * register rows are gone. Never throws.
+ *
+ * @param string[] $relPaths pdf_path values (e.g. quotations/CQ-X-20261022.pdf)
+ */
+function rh_unlink_quotation_pdfs(array $relPaths): int
+{
+    $root = realpath(dirname(__DIR__) . '/quotations');
+    if ($root === false) {
+        return 0;
+    }
+    $n = 0;
+    foreach ($relPaths as $rel) {
+        $rel = trim((string)$rel);
+        if ($rel === '') {
+            continue;
+        }
+        $abs = realpath(dirname(__DIR__) . '/' . ltrim($rel, '/\\'));
+        if ($abs !== false && strpos($abs, $root . DIRECTORY_SEPARATOR) === 0 && is_file($abs) && @unlink($abs)) {
+            $n++;
+        }
+    }
+    return $n;
+}
+
+/**
+ * Write a sent conference / event quotation to the quotations register and keep its PDF
+ * (same table and quotations/ folder the room quotations use), so it shows on the Quotations page,
+ * counts in the KPIs and is picked up by the expiry-reminder job. Never throws: the email is already sent.
+ *
+ * @param string      $type        'conference' or 'event'
+ * @param int         $sourceId    conference_inquiries.id / events.id / event_inquiries.id
+ * @param string|null $pdfBinary   The PDF that was emailed (null when sent without an attachment)
+ */
+function rh_register_sent_quotation(string $type, int $sourceId, string $quoteRef, string $sourceRef, string $guestName, string $guestEmail, string $itemName, float $total, int $validDays, string $notes, ?string $pdfBinary): bool
+{
+    global $pdo;
+    try {
+        if (!in_array($type, ['conference', 'event'], true) || $sourceId <= 0 || !($pdo instanceof PDO)) {
+            return false;
+        }
+        $pdfRel = null;
+        if ($pdfBinary !== null && $pdfBinary !== '') {
+            $dir = dirname(__DIR__) . '/quotations';
+            if (!is_dir($dir)) {
+                @mkdir($dir, 0755, true);
+            }
+            $safeRef = preg_replace('/[^A-Za-z0-9_-]/', '', $quoteRef);
+            $fname = $safeRef . '-' . date('Ymd') . '.pdf';
+            if (@file_put_contents($dir . '/' . $fname, $pdfBinary) !== false) {
+                $pdfRel = 'quotations/' . $fname;
+            }
+        }
+        $sentBy = (int)($_SESSION['admin_user_id'] ?? 0);
+        $sourceRef = mb_substr($sourceRef, 0, 100);
+        $itemName = mb_substr($itemName, 0, 200);
+        $guestName = mb_substr($guestName, 0, 200);
+        $guestEmail = mb_substr($guestEmail, 0, 200);
+
+        // A resend refreshes the one open row for this quotation (no second row: the pipeline value and the
+        // expiry reminder must count it once).
+        $find = $pdo->prepare("SELECT id, pdf_path FROM quotations WHERE booking_type = ? AND booking_id = ? AND quote_reference = ? AND status = 'sent' ORDER BY id DESC LIMIT 1");
+        $find->execute([$type, $sourceId, $quoteRef]);
+        $existing = $find->fetch(PDO::FETCH_ASSOC);
+        if ($existing) {
+            $upd = $pdo->prepare("UPDATE quotations SET booking_reference = ?, guest_name = ?, guest_email = ?, room_name = ?, total_amount = ?, valid_days = ?,
+                    valid_until = DATE_ADD(CURDATE(), INTERVAL ? DAY), quotation_notes = ?, pdf_path = ?, sent_at = NOW(), sent_by = ? WHERE id = ?");
+            $upd->execute([
+                $sourceRef, $guestName, $guestEmail, $itemName, round($total, 2), $validDays, $validDays,
+                $notes !== '' ? $notes : null, $pdfRel ?? ($existing['pdf_path'] ?: null), $sentBy > 0 ? $sentBy : null, (int)$existing['id'],
+            ]);
+            if ($pdfRel !== null && !empty($existing['pdf_path']) && $existing['pdf_path'] !== $pdfRel) {
+                rh_unlink_quotation_pdfs([(string)$existing['pdf_path']]);
+            }
+            return true;
+        }
+        $ins = $pdo->prepare("
+            INSERT INTO quotations
+                (booking_id, booking_type, quote_reference, booking_reference, guest_name,
+                 guest_email, room_name, total_amount, valid_days, valid_until,
+                 quotation_notes, pdf_path, status, sent_at, sent_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(CURDATE(), INTERVAL ? DAY), ?, ?, 'sent', NOW(), ?)
+        ");
+        $ins->execute([
+            $sourceId, $type, $quoteRef, $sourceRef, $guestName, $guestEmail, $itemName,
+            round($total, 2), $validDays, $validDays,
+            $notes !== '' ? $notes : null, $pdfRel, $sentBy > 0 ? $sentBy : null,
+        ]);
+        return true;
+    } catch (\Throwable $e) {
+        error_log('rh_register_sent_quotation: ' . $e->getMessage());
+        return false;
+    }
+}
+
 /**
  * Send conference quotation email with optional PDF and WhatsApp message.
  */
@@ -6607,6 +6717,9 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
                     '{{quotation_notes}}' => nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')),
                     '{{contact_phone}}' => htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8'),
                     '{{contact_email}}' => htmlspecialchars((string)($email_from_email ?: getSetting('email_main', '')), ENT_QUOTES, 'UTF-8'),
+                    '{{logo_html}}' => rh_email_logo_html_tag($siteName),
+                    '{{address}}' => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
+                    '{{guest_email}}' => htmlspecialchars($recipientEmail, ENT_QUOTES, 'UTF-8'),
                 ];
                 $subject = strtr((string)$tplConfig['subject'], $tagMap);
                 $htmlBody = strtr((string)$tplConfig['html_body'], $tagMap);
@@ -6614,6 +6727,7 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
         }
 
         $result = ['success' => false, 'message' => 'Unable to send quotation email.'];
+        $pdfContent = null;
         if ($attachPdf) {
             if (!function_exists('generateConferenceQuotationPDF')) {
                 require_once __DIR__ . '/../includes/quotation-pdf.php';
@@ -6639,6 +6753,10 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
 
         if (!empty($result['success']) && $email_log_enabled) {
             logEmail($recipientEmail, (string)($enquiry['contact_person'] ?? ''), $subject, 'sent');
+        }
+
+        if (!empty($result['success'])) {
+            rh_register_sent_quotation('conference', (int)($enquiry['id'] ?? 0), $quoteRef, (string)($enquiry['inquiry_reference'] ?? ''), (string)($enquiry['contact_person'] ?? ''), $recipientEmail, (string)($room['name'] ?? 'Conference Room'), $totalAmount, $validDays, $notes, $pdfContent);
         }
 
         if (!empty($result['success']) && $sendWhatsapp && empty($result['preview_url']) && function_exists('sendConferenceQuotationWhatsApp')) {
@@ -6748,6 +6866,9 @@ function sendEventQuotationEmail(array $event, array $options = []): array
                     '{{quotation_notes}}' => nl2br(htmlspecialchars($notes, ENT_QUOTES, 'UTF-8')),
                     '{{contact_phone}}' => htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8'),
                     '{{contact_email}}' => htmlspecialchars((string)($email_from_email ?: getSetting('email_main', '')), ENT_QUOTES, 'UTF-8'),
+                    '{{logo_html}}' => rh_email_logo_html_tag($siteName),
+                    '{{address}}' => htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8'),
+                    '{{guest_email}}' => htmlspecialchars($recipientEmail, ENT_QUOTES, 'UTF-8'),
                 ];
                 $subject = strtr((string)$tplConfig['subject'], $tagMap);
                 $htmlBody = strtr((string)$tplConfig['html_body'], $tagMap);
@@ -6755,6 +6876,7 @@ function sendEventQuotationEmail(array $event, array $options = []): array
         }
 
         $result = ['success' => false, 'message' => 'Unable to send quotation email.'];
+        $pdfContent = null;
         if ($attachPdf) {
             if (!function_exists('generateEventQuotationPDF')) {
                 require_once __DIR__ . '/../includes/quotation-pdf.php';
@@ -6785,6 +6907,10 @@ function sendEventQuotationEmail(array $event, array $options = []): array
 
         if (!empty($result['success']) && $email_log_enabled) {
             logEmail($recipientEmail, $recipientName, $subject, 'sent');
+        }
+
+        if (!empty($result['success'])) {
+            rh_register_sent_quotation('event', (int)($event['id'] ?? 0), $quoteRef, (string)($event['title'] ?? ''), $recipientName, $recipientEmail, $eventTitle, $totalAmount, $validDays, $notes, $pdfContent);
         }
 
         if (!empty($result['success']) && $sendWhatsapp && empty($result['preview_url']) && function_exists('sendEventQuotationWhatsApp')) {

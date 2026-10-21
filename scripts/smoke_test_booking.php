@@ -27,6 +27,8 @@ register_shutdown_function(function () use (&$createdIds, $pdo) {
     }
     try {
         $placeholders = implode(',', array_fill(0, count($createdIds), '?'));
+        // markTentativeBookingExpired() writes a tentative_booking_log row: remove it with the booking.
+        try { $pdo->prepare("DELETE FROM tentative_booking_log WHERE booking_id IN ($placeholders)")->execute($createdIds); } catch (Throwable $e) { /* table is optional */ }
         $pdo->prepare("DELETE FROM bookings WHERE id IN ($placeholders)")->execute($createdIds);
     } catch (Throwable $e) {
         // Best-effort cleanup; do not mask the original failure.
@@ -352,6 +354,7 @@ assert_true(
 echo "\n=== 17. Cleanup ===\n";
 if (!empty($createdIds)) {
     $placeholders = implode(',', array_fill(0, count($createdIds), '?'));
+    try { $pdo->prepare("DELETE FROM tentative_booking_log WHERE booking_id IN ($placeholders)")->execute($createdIds); } catch (Throwable $e) { /* table is optional */ }
     $pdo->prepare("DELETE FROM bookings WHERE id IN ($placeholders)")->execute($createdIds);
     ok('Test bookings cleaned up (ids: ' . implode(', ', $createdIds) . ')');
 }

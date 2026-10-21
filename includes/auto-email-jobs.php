@@ -394,6 +394,15 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
                     continue;
                 }
             }
+            if (($q['booking_type'] ?? '') === 'conference' && !empty($q['booking_id'])) {
+                $c = $pdo->prepare('SELECT status FROM conference_inquiries WHERE id = ?');
+                $c->execute([(int)$q['booking_id']]);
+                $cs = $c->fetchColumn();
+                if ($cs === false || (string)$cs !== 'pending') {
+                    $res['skipped']++; // enquiry confirmed / cancelled / completed / gone - nothing to chase
+                    continue;
+                }
+            }
             $vars = rh_auto_template_vars((string)$q['guest_name'], $email, [
                 'quote_reference' => $q['quote_reference'],
                 'valid_until' => date('F j, Y', strtotime((string)$q['valid_until'])),

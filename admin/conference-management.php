@@ -432,6 +432,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
             $enquiry['amount_due'] = $paymentSnapshot['amount_due'];
             $enquiry['deposit_paid'] = $paymentSnapshot['deposit_paid'];
         }
+        // The sync may have just locked the VAT-inclusive figures on this row: re-read them so quotations
+        // and emails sent below show the same total the account bills.
+        $lockedTotals = $pdo->prepare("SELECT total_amount, vat_rate, vat_amount, total_with_vat FROM conference_inquiries WHERE id = ?");
+        $lockedTotals->execute([$enquiry_id]);
+        if ($lockedRow = $lockedTotals->fetch(PDO::FETCH_ASSOC)) {
+            $enquiry = array_merge($enquiry, $lockedRow);
+        }
 
         if (in_array($action, ['confirm', 'complete'], true)) {
             $depositRequired = (float)($paymentSnapshot['deposit_required'] ?? $enquiry['deposit_required'] ?? 0);
@@ -543,6 +550,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 }
                 // Refund settings: 'refund_all' pays the net paid back inside this same transaction.
                 rh_cancel_auto_refund_account($pdo, 'conference', (int)$enquiry_id, (int)($user['id'] ?? 0));
+                // A cancelled enquiry's open quotations stop being chased (history stays in the register).
+                try {
+                    $pdo->prepare("UPDATE quotations SET status = 'expired', updated_at = NOW() WHERE booking_type = 'conference' AND booking_id = ? AND status = 'sent'")->execute([$enquiry_id]);
+                } catch (Throwable $qEx) {
+                    error_log('Conference cancel: could not expire open quotations: ' . $qEx->getMessage());
+                }
                 $pdo->commit();
             } catch (Throwable $cancelEx) {
                 if ($pdo->inTransaction()) {
@@ -800,9 +813,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                     throw new Exception($delBlocked);
                 }
                 // Rows that belong only to this enquiry (sent-quotation log entries), then the enquiry itself.
+                $qPdfSel = $pdo->prepare("SELECT pdf_path FROM quotations WHERE booking_type = 'conference' AND booking_id = ?");
+                $qPdfSel->execute([$enquiry_id]);
+                $qPdfPaths = $qPdfSel->fetchAll(PDO::FETCH_COLUMN);
                 $pdo->prepare("DELETE FROM quotations WHERE booking_type = 'conference' AND booking_id = ?")->execute([$enquiry_id]);
                 $pdo->prepare("DELETE FROM conference_inquiries WHERE id = ?")->execute([$enquiry_id]);
                 $pdo->commit();
+                rh_unlink_quotation_pdfs($qPdfPaths);
             } catch (Throwable $delEx) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();

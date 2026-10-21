@@ -461,7 +461,9 @@ try {
                             $statusIcons   = ['sent' => 'fa-paper-plane', 'accepted' => 'fa-circle-check', 'expired' => 'fa-clock', 'declined' => 'fa-circle-xmark'];
                             $bookingLink   = $q['booking_type'] === 'conference'
                                 ? 'conference-management.php'
-                                : 'booking-details.php?id=' . (int)$q['booking_id'];
+                                : ($q['booking_type'] === 'event'
+                                    ? 'events-management.php'
+                                    : 'booking-details.php?id=' . (int)$q['booking_id']);
                         ?>
                             <tr>
                                 <td data-label="Quote Ref">

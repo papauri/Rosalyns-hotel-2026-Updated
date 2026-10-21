@@ -12,6 +12,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/api-init.php';
 require_once __DIR__ . '/../includes/pos-shift-totals.php';
 require_once __DIR__ . '/../includes/eod-revenue.php';
+require_once __DIR__ . '/../includes/receivables.php';
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -134,18 +135,7 @@ try {
     $revpar = $rooms_total    > 0 ? ((float)$earned['rooms_gross'] / $rooms_total)    : 0;
 
     // 4) Payment mix
-    $mStmt = $pdo->prepare("
-        SELECT COALESCE(NULLIF(payment_method,''),'Unassigned') AS method,
-               COUNT(*) AS cnt, COALESCE(SUM(total_amount),0) AS total
-        FROM payments
-        WHERE DATE(payment_date) = :d
-          AND payment_status IN ('completed','paid','refunded','partially_refunded')
-          AND COALESCE(payment_type,'') <> 'refund'
-          AND deleted_at IS NULL
-        GROUP BY method ORDER BY total DESC
-    ");
-    $mStmt->execute([':d' => $date]);
-    $methods     = $mStmt->fetchAll(PDO::FETCH_ASSOC);
+    $methods     = rh_eod_payment_mix($pdo, $date, 'Unassigned'); // non-cash net of refunds, same as the on-screen report
     $cash_total  = 0.0;
     $ncash_total = 0.0;
     foreach ($methods as $mRow) {
@@ -192,7 +182,13 @@ try {
     $hk = array_merge(['pending' => 0, 'in_progress' => 0, 'completed' => 0], $hkStmt->fetch(PDO::FETCH_ASSOC) ?: []);
 
     // 10) Outstanding folio
-    $outstanding = rh_eod_outstanding_folio($pdo); // shared receivable rule, same as the on-screen report
+    // Same shared receivables rule as the page, Dashboard, Accounting, Reports and Invoices.
+    $outSplit = ['folio' => 0.0, 'accounts' => 0.0, 'tabs' => 0.0, 'total' => 0.0, 'failed' => true];
+    try { $outSplit = rh_eod_outstanding_split($pdo, rh_receivable_mods()); } catch (Throwable $e) { /* stays failed */ }
+    $outstanding = $outSplit['folio'];
+    $outstanding_accounts = $outSplit['accounts'];
+    $outstanding_tabs = $outSplit['tabs'];
+    $outstanding_failed = $outSplit['failed'];
 
     // 11) Previous day comparison
     $prevDay = date('Y-m-d', strtotime($date . ' -1 day'));
@@ -232,7 +228,7 @@ try {
     $score -= min(12, (int)($ops['cancellations'] ?? 0) * 3);
     $score -= min(12, (int)$pos['voided_count'] * 4);
     $score -= (float)$rev['pending'] > 0 ? 8 : 0;
-    $score -= $outstanding > 0 ? 8 : 0;
+    $score -= ($outstanding + $outstanding_accounts + $outstanding_tabs) > BALANCE_TOLERANCE ? 8 : 0;
     $score -= ((int)$hk['pending'] + (int)$hk['in_progress']) > 0 ? 8 : 0;
     $score -= $rooms_oo > 0 ? 5 : 0;
     $score = max(0, min(100, $score));
@@ -327,6 +323,12 @@ if ((float)($rev['pending'] ?? 0) > 0)
     $closeout_alerts[] = ['level' => 'warn', 'title' => 'Pending payments', 'detail' => pdfMoney($currency_symbol, (float)$rev['pending']) . ' still pending.'];
 if ($outstanding > 0)
     $closeout_alerts[] = ['level' => 'warn', 'title' => 'Outstanding folio', 'detail' => pdfMoney($currency_symbol, $outstanding) . ' still owed on open bookings (in-house, upcoming and checked out).'];
+if ($outstanding_tabs > 0)
+    $closeout_alerts[] = ['level' => 'warn', 'title' => 'Open tabs (unpaid)', 'detail' => pdfMoney($currency_symbol, $outstanding_tabs) . ' still owed on open tabs.'];
+if ($outstanding_failed)
+    $closeout_alerts[] = ['level' => 'warn', 'title' => 'Outstanding figure incomplete', 'detail' => 'Some accounts could not be read, so the amount still owed may be understated.'];
+if ($outstanding_accounts > 0)
+    $closeout_alerts[] = ['level' => 'warn', 'title' => 'Outstanding accounts', 'detail' => pdfMoney($currency_symbol, $outstanding_accounts) . ' still owed on conference, event and gym accounts.'];
 if ((int)$pos['voided_count'] > 0)
     $closeout_alerts[] = ['level' => 'watch', 'title' => 'POS voids to review', 'detail' => (int)$pos['voided_count'] . ' void(s) worth ' . pdfMoney($currency_symbol, (float)$pos['voided_value']) . '.'];
 if (((int)$hk['pending'] + (int)$hk['in_progress']) > 0)
@@ -354,6 +356,9 @@ $d = [
     'hk'                     => $hk,
     'reviewRow'              => $reviewRow,
     'outstanding'            => $outstanding,
+    'outstanding_accounts'   => $outstanding_accounts,
+    'outstanding_tabs'       => $outstanding_tabs,
+    'outstanding_failed'     => $outstanding_failed,
     'rooms_total'            => $rooms_total,
     'rooms_occupied'         => $rooms_occupied,
     'rooms_oo'               => $rooms_oo,
@@ -547,6 +552,9 @@ $revRows[] = ['VAT Collected',   pdfMoney($currency_symbol, (float)$rev['total_v
 $revRows[] = ['Transactions',    (string)(int)$rev['txn_count'],              false];
 $revRows[] = ['Pending',         pdfMoney($currency_symbol, (float)$rev['pending']), false];
 $revRows[] = ['Outstanding Folio', pdfMoney($currency_symbol, $outstanding),  false];
+if ($outstanding_accounts > 0) { $revRows[] = ['Outstanding Accounts', pdfMoney($currency_symbol, $outstanding_accounts), false]; }
+if ($outstanding_tabs > 0) { $revRows[] = ['Open Tabs (unpaid)', pdfMoney($currency_symbol, $outstanding_tabs), false]; }
+if ($outstanding_failed) { $revRows[] = ['Outstanding total', 'Unavailable', false]; }
 
 foreach ($revRows as $i => $rr) {
     $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;

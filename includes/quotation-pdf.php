@@ -231,7 +231,11 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
     $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
     $siteAddress = trim((string)getSetting('address_line1', ''));
     $currency = (string)getSetting('currency_symbol', 'MWK');
-    $paymentPolicy = (string)getSetting('payment_policy', 'Payment terms apply as agreed with our reservations team.');
+    // Conference bookings are not paid at check-in: the room payment policy does not apply here.
+    $paymentPolicy = trim((string)getSetting('conference_payment_terms', ''));
+    if ($paymentPolicy === '') {
+        $paymentPolicy = 'A deposit may be required to confirm the booking. Payment terms are agreed with our events team when the booking is confirmed.';
+    }
 
     $validDays = max(1, (int)($options['valid_days'] ?? 7));
     $validUntil = (new DateTime())->modify('+' . $validDays . ' days');

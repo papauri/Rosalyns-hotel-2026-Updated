@@ -1295,7 +1295,7 @@ if (!function_exists('receipt_ensure_pdf')) {
     {
         try {
             $payment = receipt_get_payment($pdo, $paymentId);
-            if (!$payment || !in_array((string)($payment['payment_status'] ?? ''), ['completed', 'paid'], true)
+            if (!$payment || !in_array((string)($payment['payment_status'] ?? ''), ['completed', 'paid', 'partially_refunded'], true)
                 || (string)($payment['payment_type'] ?? '') === 'refund') {
                 return false;
             }
@@ -1333,7 +1333,7 @@ if (!function_exists('receipt_auto_send_mail')) {
             if (!$payment) {
                 return ['success' => false, 'reason' => 'not_found', 'message' => 'Payment not found'];
             }
-            if (!in_array((string)($payment['payment_status'] ?? ''), ['completed', 'paid'], true)
+            if (!in_array((string)($payment['payment_status'] ?? ''), ['completed', 'paid', 'partially_refunded'], true)
                 || (string)($payment['payment_type'] ?? '') === 'refund') {
                 return ['success' => false, 'reason' => 'not_collected', 'message' => 'Payment not in completed/paid status'];
             }

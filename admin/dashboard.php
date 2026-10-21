@@ -9,6 +9,7 @@ require_once '../includes/alert.php';
 require_once '../includes/room-management.php';
 require_once '../includes/station-hours.php';
 require_once '../includes/conference-pricing.php';
+require_once __DIR__ . '/includes/receivables.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -348,18 +349,12 @@ if (!$is_card_insight_ajax) {
             $finance['ledger_today']   = (float)($takingsByDay($today, $today, true, false)[$today] ?? 0); // everything except the till
             // Outstanding receivables from every module this preset actually runs —
             // a gym must not be shown "bookings with amount due" it can never have.
-            $outstandingSql = [];
-            if ($raw_bookings)   { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
-            if ($raw_conference) { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
-            if ($raw_gym)        { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
-            if ($raw_events)     { $outstandingSql[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
-            foreach ($outstandingSql as $q) {
-                try {
-                    $r = $pdo->query($q)->fetch(PDO::FETCH_ASSOC);
-                    $finance['outstanding_count'] += (int)($r['c'] ?? 0);
-                    $finance['outstanding']       += (float)($r['v'] ?? 0);
-                } catch (Throwable $e) { /* per-module table may not exist yet */ }
-            }
+            // One rule on every screen (admin/includes/receivables.php): rooms, confirmed conference / event / gym
+            // accounts and open unpaid tabs. A source that can not be read shows "Unavailable", never a lower figure.
+            $rcvDash = rh_receivable_summary($pdo, rh_receivable_mods());
+            $finance['outstanding_count'] = $rcvDash['count'];
+            $finance['outstanding']       = $rcvDash['total'];
+            $finance['outstanding_failed'] = !empty($rcvDash['failed']);
             $finance['refunds_pending']   = (int)$pdo->query("SELECT COUNT(*) FROM payments WHERE payment_type='refund' AND refund_status IN ('pending','processing') AND deleted_at IS NULL")->fetchColumn();
         } catch (Throwable $e) { $finance['failed'] = true; /* shown as "unavailable", never as a false 0 */ }
     }
@@ -914,16 +909,12 @@ if ($is_card_insight_ajax) {
                 // owed, plus any folio extras for rooms) so Outstanding can never
                 // exceed Total — total_amount alone is the NET base and would read
                 // lower than the gross balance due.
-                $ob_union = [];
-                if ($raw_bookings)   { $ob_union[] = "SELECT id, booking_reference AS ref, guest_name AS who, status, amount_paid, amount_due, 'booking' AS src FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
-                if ($raw_conference) { $ob_union[] = "SELECT id, inquiry_reference AS ref, COALESCE(NULLIF(company_name,''), contact_person) AS who, status, amount_paid, amount_due, 'conference' AS src FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
-                if ($raw_gym)        { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'gym' AS src FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
-                if ($raw_events)     { $ob_union[] = "SELECT id, reference_number AS ref, name AS who, status, amount_paid, amount_due, 'event' AS src FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
                 $rows = [];
-                foreach ($ob_union as $obSql) {
-                    try {
-                        foreach ($pdo->query($obSql)->fetchAll(PDO::FETCH_ASSOC) as $obRow) { $rows[] = $obRow; }
-                    } catch (Throwable $e) { /* module table may not exist yet */ }
+                $obFailed = [];
+                foreach (rh_receivable_rows($pdo, rh_receivable_mods(), $obFailed) as $obr) {
+                    $rows[] = ['id' => $obr['id'], 'ref' => $obr['reference'], 'who' => $obr['client'], 'status' => $obr['status'],
+                               'amount_paid' => $obr['amount_paid'], 'amount_due' => $obr['amount_due'],
+                               'src' => $obr['type'] === 'room' ? 'booking' : $obr['type']];
                 }
                 usort($rows, static fn($a, $b) => (float)$b['amount_due'] <=> (float)$a['amount_due']);
                 $rows = array_slice($rows, 0, 30);
@@ -934,7 +925,7 @@ if ($is_card_insight_ajax) {
                 // Which department the receivable belongs to, so the modal makes
                 // clear whether an outstanding balance is for a room booking, the
                 // gym, an event, etc.
-                $ob_departments = ['booking' => 'Rooms', 'conference' => 'Conference', 'gym' => 'Gym', 'event' => 'Events'];
+                $ob_departments = ['booking' => 'Rooms', 'conference' => 'Conference', 'gym' => 'Gym', 'event' => 'Events', 'restaurant' => 'Open tabs (unpaid)'];
                 foreach ($rows as $row) {
                     $bid = (int)($row['id'] ?? 0);
                     $src = (string)($row['src'] ?? '');
@@ -956,6 +947,11 @@ if ($is_card_insight_ajax) {
                     ];
                 }
                 $payload['empty'] = 'No outstanding balances right now.';
+                if (!empty($obFailed)) {
+                    // A source could not be read: never present a shorter list as the full picture.
+                    $payload['rows'] = [];
+                    $payload['empty'] = 'Unavailable - some figures could not be loaded (see System Logs).';
+                }
                 break;
 
             case 'open_tabs':
@@ -1723,24 +1719,13 @@ if ($is_card_insight_ajax) {
                 if ($mod_finance && $mod_receivables) {
                     // Same multi-module receivables union as the Outstanding
                     // Balances tile — not just bookings.
-                    $outstandingCount = 0;
-                    $outstandingValue = 0.0;
-                    $ofUnion = [];
-                    if ($raw_bookings)   { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))"; }
-                    if ($raw_conference) { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
-                    if ($raw_gym)        { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')"; }
-                    if ($raw_events)     { $ofUnion[] = "SELECT COUNT(*) c, COALESCE(SUM(amount_due),0) v FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')"; }
-                    foreach ($ofUnion as $ofSql) {
-                        try {
-                            $ofRow = $pdo->query($ofSql)->fetch(PDO::FETCH_ASSOC);
-                            $outstandingCount += (int)($ofRow['c'] ?? 0);
-                            $outstandingValue += (float)($ofRow['v'] ?? 0);
-                        } catch (Throwable $e) { /* module table may not exist yet */ }
-                    }
+                    $rcvOf = rh_receivable_summary($pdo, rh_receivable_mods());
+                    $outstandingCount = $rcvOf['count'];
+                    $outstandingValue = $rcvOf['total'];
                     $payload['rows'][] = [
                         'metric' => ($mod_bookings ? 'Bookings' : 'Accounts') . ' with balance due',
                         'current' => (string)$outstandingCount,
-                        'detail' => $formatMoney($outstandingValue) . ' still receivable',
+                        'detail' => (!empty($rcvOf['failed']) ? 'Unavailable (some accounts could not be read)' : $formatMoney($outstandingValue) . ' still receivable'),
                         'action' => ['href' => 'payments.php?balance=outstanding', 'label' => 'Balances', 'target' => '_blank'],
                     ];
                 }
@@ -2228,11 +2213,11 @@ $currency_symbol = getSetting('currency_symbol');
                     <span class="ck-kpi__sub"><?php echo (int)$finance['payments_today']; ?> payment(s)<?php echo $mod_pos ? ' + till' : ''; ?></span>
                 </a>
                 <?php if ($mod_receivables): ?>
-                <a class="ck-kpi<?php echo $finance['outstanding'] > 0.01 ? ' ck-kpi--alert' : ''; ?> js-dashboard-insight" data-insight-card="outstanding_balances" data-insight-label="Outstanding balances" href="payments.php?balance=outstanding">
+                <a class="ck-kpi<?php echo $finance['outstanding'] > BALANCE_TOLERANCE ? ' ck-kpi--alert' : ''; ?> js-dashboard-insight" data-insight-card="outstanding_balances" data-insight-label="Outstanding balances" href="payments.php?balance=outstanding">
                     <span class="ck-kpi__icon"><i class="fas fa-file-invoice-dollar"></i></span>
                     <span class="ck-kpi__label">Owed to us</span>
-                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo !empty($finance['failed']) ? 'Unavailable' : $money($finance['outstanding']); ?></span>
-                    <span class="ck-kpi__sub"><?php echo (int)$finance['outstanding_count']; ?> <?php echo $mod_bookings ? 'booking(s)' : 'account(s)'; ?> with a balance</span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo (!empty($finance['failed']) || !empty($finance['outstanding_failed'])) ? 'Unavailable' : $money($finance['outstanding']); ?></span>
+                    <span class="ck-kpi__sub"><?php echo (int)$finance['outstanding_count']; ?> <?php echo $mod_bookings ? 'item(s)' : 'account(s)'; ?> with a balance (incl. open tabs)</span>
                 </a>
                 <?php endif; ?>
             <?php endif; ?>

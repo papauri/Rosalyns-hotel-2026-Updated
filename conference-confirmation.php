@@ -108,7 +108,7 @@ try {
             $start_fmt       = !empty($enquiry['start_time']) ? date('g:i A', strtotime($enquiry['start_time'])) : '—';
             $end_fmt         = !empty($enquiry['end_time'])   ? date('g:i A', strtotime($enquiry['end_time']))   : '—';
             $attendees       = (int)($enquiry['number_of_attendees'] ?? 0);
-            $total           = (float)($enquiry['total_amount'] ?? 0);
+            $total           = rh_conf_gross($enquiry);
             $catering        = !empty($enquiry['catering_required']) && $enquiry['catering_required'] != '0';
             $event_type      = trim((string)($enquiry['event_type'] ?? ''));
             $av_equipment    = trim((string)($enquiry['av_equipment'] ?? ''));

@@ -440,7 +440,7 @@ if (!function_exists('rh_inv_payments_html')) {
 
 if (!function_exists('rh_inv_bank_terms_html')) {
     /** Bank details + payment terms (from settings) and the shared document terms. */
-    function rh_inv_bank_terms_html(string $siteName, string $email, string $phone, bool $owing): string
+    function rh_inv_bank_terms_html(string $siteName, string $email, string $phone, bool $owing, string $fallbackTerms = ''): string
     {
         $out = '';
         if ($owing) {
@@ -453,7 +453,11 @@ if (!function_exists('rh_inv_bank_terms_html')) {
             if ($bank !== '') {
                 $out .= rh_pdf_spacer(5) . rh_pdf_section_title('Bank details') . rh_pdf_spacer(1) . $bank;
             }
-            $terms = trim((string)getSetting('invoice_terms', getSetting('payment_terms', '')));
+            // Room documents fall back to the room payment terms; conference/event/gym pass their own neutral wording.
+            $terms = trim((string)getSetting('invoice_terms', $fallbackTerms !== '' ? $fallbackTerms : getSetting('payment_terms', '')));
+            if ($terms === '' && $fallbackTerms !== '') {
+                $terms = $fallbackTerms;
+            }
             if ($terms !== '') {
                 $terms = strtr($terms, ['{{contact_email}}' => $email, '{{contact_phone}}' => $phone, '{{site_name}}' => $siteName]);
                 $out .= rh_pdf_spacer(5) . rh_pdf_section_title('Payment terms') . rh_pdf_spacer(1) . rh_pdf_note($terms);
@@ -544,10 +548,16 @@ if (!function_exists('rh_inv_flat_invoice')) {
             $totals[] = ['label' => 'Amount paid', 'value' => $money($paid), 'type' => 'paid'];
         }
 
+        // A balance is still due: do not thank the client for a payment in full.
+        $closingText = (string)($a['closing'] ?? 'Thank you for your payment.');
+        if ($owing) {
+            $closingText = trim((string)preg_replace('/^Thank you for your payment[.!]?\s*/i', 'Thank you for your business. ', $closingText));
+        }
+
         $body = $items . rh_pdf_spacer(3) . rh_inv_keep_together(rh_pdf_totals_table($totals))
             . rh_inv_payments_html((array)($a['payments'] ?? []), $cur)
-            . rh_inv_bank_terms_html((string)($a['site_name'] ?? ''), (string)($a['email'] ?? ''), (string)($a['phone'] ?? ''), $owing)
-            . rh_inv_closing_html((string)($a['closing'] ?? 'Thank you for your payment.'));
+            . rh_inv_bank_terms_html((string)($a['site_name'] ?? ''), (string)($a['email'] ?? ''), (string)($a['phone'] ?? ''), $owing, (string)($a['terms_fallback'] ?? ''))
+            . rh_inv_closing_html($closingText);
 
         $meta = array_merge([
             ['Invoice No.', (string)$a['invoice_number']],
@@ -2225,6 +2235,7 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
         ],
         'payments' => $payments,
         'closing' => 'Thank you for your payment! We look forward to hosting your event.',
+        'terms_fallback' => 'Payment is due on receipt of this invoice. Please quote the reference when paying.',
         'site_name' => $site_name,
         'email' => $email_address,
         'phone' => $phone_number,
@@ -2592,6 +2603,7 @@ function buildGymInvoiceHTML(array $inquiry, string $invoice_number, string $sit
         ],
         'payments' => $payments,
         'closing' => 'Thank you for your payment! We look forward to seeing you at the gym.',
+        'terms_fallback' => 'Payment is due on receipt of this invoice. Please quote the reference when paying.',
         'site_name' => $site_name,
         'email' => $email_address,
         'phone' => $phone_number,
@@ -2919,6 +2931,7 @@ function buildEventInvoiceHTML(array $inquiry, string $invoice_number, string $s
         ],
         'payments' => $payments,
         'closing' => 'Thank you for your payment! We look forward to seeing you at the event.',
+        'terms_fallback' => 'Payment is due on receipt of this invoice. Please quote the reference when paying.',
         'site_name' => $site_name,
         'email' => $email_address,
         'phone' => $phone_number,

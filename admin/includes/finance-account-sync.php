@@ -240,18 +240,9 @@ if (!function_exists('syncConferenceInquiryPaymentSnapshot')) {
         $depositFlag = ($depositRequired > 0 && $depositPaid + (defined('BALANCE_TOLERANCE') ? BALANCE_TOLERANCE : 0.01) >= $depositRequired) ? 1 : 0;
         $lastPaymentDate = rh_last_account_payment_date($pdo, 'conference', $inquiryId);
 
-        // Derive the conference payment_status enum from the ledger.
-        $tol = defined('BALANCE_TOLERANCE') ? BALANCE_TOLERANCE : 0.01;
-        if ((string)($inquiry['status'] ?? '') === 'cancelled' && (string)($inquiry['payment_status'] ?? '') !== '') {
-            // Cancelled: the bill is void, so the paid/due ratio no longer describes it — keep the stored label.
-            $paymentStatus = (string)$inquiry['payment_status'];
-        } elseif ($grossTotal > $tol && $amountDue <= $tol) {
-            $paymentStatus = 'full_paid';
-        } elseif ($amountPaid > $tol) {
-            $paymentStatus = 'deposit_paid';
-        } else {
-            $paymentStatus = 'pending';
-        }
+        // Derive the conference payment_status enum from the ledger: the same rule as gym and events
+        // (a cancelled account keeps its stored label unless every payment has been refunded).
+        $paymentStatus = rh_account_derive_payment_status($pdo, 'conference', $inquiryId, $inquiry, $grossTotal, $amountPaid, $amountDue);
 
         // Only (re)populate the VAT breakdown when it was never locked, so a
         // conference invoiced at a historical rate keeps its original figures.

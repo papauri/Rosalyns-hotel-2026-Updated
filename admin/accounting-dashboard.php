@@ -3,6 +3,7 @@
 require_once 'admin-init.php';
 /** @var string $csrf_token */
 require_once 'includes/finance-schema.php';
+require_once __DIR__ . '/includes/receivables.php';
 require_once '../config/credit-notes.php';
 
 $user = [
@@ -191,6 +192,7 @@ try {
     $financialStmt->execute([$startDate, $endDate]);
     $financialSummary = $financialStmt->fetch(PDO::FETCH_ASSOC);
 
+    $balTol = BALANCE_TOLERANCE;
     if ($mod_bookings) {
         // Room bookings financial summary
         $roomStmt = $pdo->prepare("
@@ -209,7 +211,7 @@ try {
                         AND p2.payment_date BETWEEN ? AND ?
                         AND p2.deleted_at IS NULL
                     )
-                    AND b2.amount_due > 0.01
+                    AND b2.amount_due > {$balTol}
                     AND (b2.status IN ('pending','confirmed','checked-in','checked-out') OR (b2.status = 'cancelled' AND COALESCE(b2.cancellation_retained_amount,0) > 0))
                 ) as total_room_outstanding
             FROM payments p
@@ -239,7 +241,7 @@ try {
                         AND p2.payment_date BETWEEN ? AND ?
                         AND p2.deleted_at IS NULL
                     )
-                    AND ci2.status NOT IN ('cancelled', 'rejected', 'expired')
+                    AND ci2.status IN ('confirmed','completed')
                 ) as total_conf_outstanding
             FROM payments p
             WHERE p.booking_type = 'conference'
@@ -268,7 +270,7 @@ try {
                         AND p2.payment_date BETWEEN ? AND ?
                         AND p2.deleted_at IS NULL
                     )
-                    AND gi2.status NOT IN ('cancelled')
+                    AND gi2.status IN ('confirmed','converted')
                 ) as total_gym_outstanding
             FROM payments p
             WHERE p.booking_type = 'gym'
@@ -297,7 +299,7 @@ try {
                         AND p2.payment_date BETWEEN ? AND ?
                         AND p2.deleted_at IS NULL
                     )
-                    AND ei2.status NOT IN ('cancelled')
+                    AND ei2.status IN ('confirmed','completed')
                 ) as total_events_outstanding
             FROM payments p
             WHERE p.booking_type = 'event'
@@ -385,22 +387,12 @@ try {
     $recentPayments = $recentStmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Outstanding payments summary (filtered by enabled modules)
-    $outstandingParts = [];
-    if ($mod_bookings) {
-        $outstandingParts[] = "SELECT 'room' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))";
-    }
-    if ($mod_conference) {
-        $outstandingParts[] = "SELECT 'conference' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled', 'rejected', 'expired')";
-    }
-    if ($mod_gym) {
-        $outstandingParts[] = "SELECT 'gym' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')";
-    }
-    if ($mod_events) {
-        $outstandingParts[] = "SELECT 'event' as type, COUNT(*) as count, SUM(amount_due) as total_outstanding FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')";
-    }
-    if (!empty($outstandingParts)) {
-        $outstandingStmt = $pdo->query(implode(' UNION ALL ', $outstandingParts));
-        $outstandingSummary = $outstandingStmt->fetchAll(PDO::FETCH_ASSOC);
+    // One rule on every screen (admin/includes/receivables.php): rooms, confirmed conference / event / gym accounts
+    // and open unpaid tabs. A source that can not be read is flagged so the figure shows "Unavailable".
+    $rcvAcct = rh_receivable_summary($pdo, ['bookings' => $mod_bookings, 'conference' => $mod_conference, 'gym' => $mod_gym, 'events' => $mod_events, 'tabs' => $mod_pos]);
+    $recvFailed = !empty($rcvAcct['failed']);
+    foreach ($rcvAcct['by_type'] as $rcvType => $rcvRow) {
+        $outstandingSummary[] = ['type' => $rcvType, 'count' => $rcvRow['count'], 'total_outstanding' => $rcvRow['amount']];
     }
 
     // ====================================================================
@@ -829,7 +821,7 @@ if (!isset($folio_fnb)) {
                 <tbody>
                     <tr>
                         <td>Total receivables</td>
-                        <td class="num"><strong><?php echo $currency_symbol . number_format($cat_recv_total, 2); ?></strong></td>
+                        <td class="num"><strong><?php echo $recvFailed ? 'Unavailable' : $currency_symbol . number_format($cat_recv_total, 2); ?></strong></td>
                     </tr>
                     <tr>
                         <td>Open invoices / balances</td>
@@ -1413,7 +1405,7 @@ if (!isset($folio_fnb)) {
                 'href' => $row['action_link'], 'link' => $row['action_label'],
             ];
         }
-        if ($cat_recv_total > 0.01) {
+        if ($cat_recv_total > BALANCE_TOLERANCE) {
             $attn[] = [
                 'tone' => 'red', 'icon' => 'fa-file-invoice-dollar', 'value' => $ckShort($cat_recv_total), 'money' => true,
                 'label' => 'Balances owed to us', 'hint' => number_format((int)$cat_recv_count) . ' open - chase these first',
@@ -1555,7 +1547,7 @@ if (!isset($folio_fnb)) {
         // ---- Hero sentence ----
         $ledeBits = [];
         $ledeBits[] = number_format($cat_revenue_net, 2) . ' net revenue';
-        if ($cat_recv_total > 0.01) { $ledeBits[] = number_format($cat_recv_total, 2) . ' still owed'; }
+        if ($cat_recv_total > BALANCE_TOLERANCE) { $ledeBits[] = number_format($cat_recv_total, 2) . ' still owed'; }
         $ledeText = $currency_symbol . ' ' . implode(', ', $ledeBits) . ' - ' . ($attnCount
             ? $attnCount . ' thing' . ($attnCount === 1 ? '' : 's') . ' need' . ($attnCount === 1 ? 's' : '') . ' fixing.'
             : 'nothing needs fixing.');
@@ -1625,10 +1617,10 @@ if (!isset($folio_fnb)) {
                 <span class="ck-meter"><span style="width:<?php echo $cat_revenue_gross > 0 ? max(0, min(100, round($cat_revenue_net / $cat_revenue_gross * 100))) : 0; ?>%"></span></span>
                 <span class="ck-kpi__sub">Gross <?php echo $ckPlain($cat_revenue_gross); ?> &minus; refunds <?php echo $ckPlain($cat_refunds); ?></span>
             </div>
-            <div class="ck-kpi<?php echo $cat_recv_total > 0.01 ? ' ck-kpi--alert' : ''; ?> js-acct-insight-trigger" title="Receivables - money that <?php echo $ckH($acct_party); ?>s/clients owe but have not yet paid." <?php echo $ckTrig('receivables', 'Receivables Follow-up'); ?> aria-label="Open receivables follow-up">
+            <div class="ck-kpi<?php echo $cat_recv_total > BALANCE_TOLERANCE ? ' ck-kpi--alert' : ''; ?> js-acct-insight-trigger" title="Receivables - money that <?php echo $ckH($acct_party); ?>s/clients owe but have not yet paid." <?php echo $ckTrig('receivables', 'Receivables Follow-up'); ?> aria-label="Open receivables follow-up">
                 <span class="ck-kpi__icon"><i class="fas fa-file-invoice-dollar"></i></span>
                 <span class="ck-kpi__label">Owed to us</span>
-                <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_recv_total); ?></span>
+                <span class="ck-kpi__value ck-kpi__value--money"><?php echo $recvFailed ? 'Unavailable' : $ckMoney($cat_recv_total); ?></span>
                 <span class="ck-kpi__sub"><?php echo (int)$cat_recv_count; ?> account<?php echo (int)$cat_recv_count === 1 ? '' : 's'; ?> with a balance &middot; pending <?php echo $ckPlain($cat_pending); ?></span>
             </div>
             <div class="ck-kpi js-acct-insight-trigger" title="Cash Position (Today) - cash and mobile money received today. Does not include card, bank transfer or credit." <?php echo $ckTrig('cash-today', 'Cash Position Detail'); ?> aria-label="Open cash position detail">
@@ -1988,12 +1980,12 @@ if (!isset($folio_fnb)) {
                                 <?php if (!$recvRows): ?>
                                     <tr><td colspan="4" class="ck-table__empty"><i class="fas fa-check-circle"></i> All booking balances settled.</td></tr>
                                 <?php else: foreach ($recvRows as $os):
-                                    $linkBase = ['room' => 'bookings.php?payment_status=unpaid', 'gym' => 'gym-inquiries.php', 'event' => 'events-inquiries.php'][$os['type']] ?? 'conference-management.php?payment_status=pending';
+                                    $linkBase = ['room' => 'bookings.php?payment_status=unpaid', 'gym' => 'gym-inquiries.php', 'event' => 'events-inquiries.php', 'conference' => 'conference-management.php?payment_status=pending'][$os['type']] ?? 'stock-orders.php?status=placed';
                                 ?>
                                     <tr>
-                                        <td><strong><?php echo $ckH(ucfirst((string)$os['type'])); ?> bookings</strong></td>
+                                        <td><strong><?php echo $ckH(rh_receivable_type_label((string)$os['type'])); ?></strong></td>
                                         <td class="num"><?php echo (int)$os['count']; ?></td>
-                                        <td class="num"><strong><?php echo $ckPlain($os['total_outstanding']); ?></strong></td>
+                                        <td class="num"><strong><?php echo $recvFailed ? 'Unavailable' : $ckPlain($os['total_outstanding']); ?></strong></td>
                                         <td><a href="<?php echo $ckH($linkBase); ?>" class="ck-link">View <i class="fas fa-arrow-right"></i></a></td>
                                     </tr>
                                 <?php endforeach; endif; ?>

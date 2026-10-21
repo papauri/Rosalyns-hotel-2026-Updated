@@ -214,6 +214,9 @@ $r = dx_child('account', ['type' => 'gym', 'email' => $mail, 'amount' => '40', '
 ok('part-payment + "also email an invoice" with a balance left: receipt AND the requested invoice', dx_count($r['emails'], 'receipt') === 1 && dx_count($r['emails'], 'invoice') === 1, json_encode([dx_kinds($r['emails']), $r['json'] ?? $r['raw'] ?? '']));
 $r = dx_child('account', ['type' => 'event', 'email' => $mail, 'want_invoice' => 1]);
 ok('payment that settles the account + "also email an invoice": receipt only, no invoice (nothing is owed)', dx_count($r['emails'], 'receipt') === 1 && dx_count($r['emails'], 'invoice') === 0 && strpos((string)($r['json']['message'] ?? ''), 'No invoice sent') !== false, json_encode([dx_kinds($r['emails']), $r['json'] ?? $r['raw'] ?? '']));
+$r = dx_child('account', ['type' => 'conference', 'email' => $mail, 'amount' => '150', 'confirm_overpay' => 1, 'want_invoice' => 0]);
+ok('deliberate OVERPAYMENT (credit note makes the payment partially_refunded): the collected payment still gets its receipt, PDF on file and emailed', ($r['json']['payment_status'] ?? '') === 'partially_refunded' && !empty($r['json']['pdf_on_file']) && dx_count($r['emails'], 'receipt') === 1 && dx_has_pdf($r['emails'], 'receipt'), json_encode([dx_kinds($r['emails']), $r['json'] ?? $r['raw'] ?? '']));
+ok('  (overpayment) rolled back', dx_clean($r), json_encode($r));
 $r = dx_child('account', ['type' => 'gym', 'email' => '', 'want_invoice' => 0]);
 ok('gym payment, customer has no email: nothing emailed and staff are told', count($r['emails']) === 0 && strpos((string)($r['json']['message'] ?? ''), 'Receipt not emailed: guest has no email address') !== false, json_encode([dx_kinds($r['emails']), $r['json'] ?? $r['raw'] ?? '']));
 
@@ -257,6 +260,24 @@ $j = $r['json'] ?? [];
 ok('balance owed: stays an INVOICE (Invoice No., Balance due, no statement title)', empty($j['has_stmt_title']) && !empty($j['has_invoice_no']) && !empty($j['has_balance_due']) && !empty($j['has_invoice_title']), json_encode($j));
 ok('balance owed: the PDF title is not the statement', !empty($j['pdf_ok']) && empty($j['pdf_title_statement']), json_encode($j));
 ok('  statement/invoice docs rolled back', dx_clean($r), json_encode($r));
+echo "== QUOTATION REGISTER: resend = one row; deleting removes the saved PDF ==\n";
+$r = dx_child('quote_register');
+$j = $r['json'] ?? [];
+ok('quotation sent twice: one register row (refreshed total and validity), PDF saved, long title accepted', !empty($j['inserted_ok']) && ($j['row_count'] ?? 0) === 1 && abs(($j['total'] ?? 0) - 250) < 0.01 && ($j['valid_days'] ?? 0) === 14 && !empty($j['pdf_saved']) && !empty($j['long_title_ok']), json_encode($j ?: $r));
+ok('quotation PDF cleanup removes the file but never a path outside quotations/', !empty($j['unlinked']) && !empty($j['outside_kept']), json_encode($j ?: $r));
+ok('  quotation register rolled back', dx_clean($r), json_encode($r));
+$qid = dx_next_id(); $qref = 'DQ' . ($qid % 100000); $qfile = 'quotations/DX-TEST-' . $qid . '.pdf';
+if (!is_dir($root . '/quotations')) { @mkdir($root . '/quotations', 0755, true); }
+file_put_contents($root . '/' . $qfile, '%PDF-1.4 delete test');
+$r = dx_run('admin/conference-management.php', ['enquiry_action' => 'delete_enquiry', 'enquiry_id' => $qid], [
+    'setup' => [str_replace("'confirmed'", "'pending'", dx_conf_sql($qid, $qref, $mail)),
+        "INSERT INTO quotations (booking_id, booking_type, quote_reference, total_amount, valid_days, valid_until, pdf_path, status, sent_at) VALUES ($qid, 'conference', " . dx_q('CQ-' . $qref) . ", 100, 7, DATE_ADD(CURDATE(), INTERVAL 7 DAY), " . dx_q($qfile) . ", 'sent', NOW())"],
+    'verify' => ["SELECT (SELECT COUNT(*) FROM conference_inquiries WHERE id = $qid) AS enq, (SELECT COUNT(*) FROM quotations WHERE booking_id = $qid AND booking_type = 'conference') AS q"]]);
+$gone = !is_file($root . '/' . $qfile);
+@unlink($root . '/' . $qfile);
+ok('deleting a conference enquiry removes its register row and its saved quotation PDF', $gone && (int)($r['verify'][0][0]['enq'] ?? 1) === 0 && (int)($r['verify'][0][0]['q'] ?? 1) === 0, json_encode([$r['output_flash'] ?? '', $r['verify'] ?? $r, $gone]));
+ok('  conference delete rolled back', dx_clean($r), json_encode($r));
+
 echo "== API: api/payments.php ==\n";
 $apiV = ["SELECT p.payment_status, p.receipt_number IS NOT NULL AS has_receipt_no, p.receipt_emailed_at IS NOT NULL AS emailed, p.receipt_email_count AS cnt FROM payments p JOIN bookings b ON b.id = p.booking_id WHERE b.guest_name = 'DOCS TEST'"];
 $r = dx_child('api_create', ['status' => 'completed'], ['verify' => $apiV]);

@@ -9,6 +9,7 @@
 // Include admin initialization (PHP-only, no HTML output)
 require_once __DIR__ . '/admin-init.php';
 require_once __DIR__ . '/includes/finance-schema.php';
+require_once __DIR__ . '/includes/receivables.php';
 
 // Get date range from query parameters or default to current month
 $start_date = $_GET['start_date'] ?? date('Y-m-01');
@@ -204,35 +205,19 @@ try {
         $totalTransactions += $revenue['count'];
     }
 
-    // 3. Outstanding Payments (all-time — show all unpaid regardless of date filter)
-    $outstandingStmt = $pdo->prepare("
-        SELECT p.*,
-            CASE WHEN p.booking_type = 'room' THEN b.booking_reference
-                 WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['reference']}
-                 WHEN p.booking_type = 'gym' THEN gi.reference_number
-                 WHEN p.booking_type = 'event' THEN ei.reference_number
-            END as ref_number,
-            CASE WHEN p.booking_type = 'room' THEN b.guest_name
-                 WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['company']}
-                 WHEN p.booking_type = 'gym' THEN gi.name
-                 WHEN p.booking_type = 'event' THEN ei.name
-            END as client_name,
-            DATEDIFF(CURDATE(), p.payment_date) as days_overdue
-        FROM payments p
-        LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
-        LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
-        LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
-        LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
-        WHERE p.payment_status IN ('pending', 'partial') AND p.deleted_at IS NULL
-          AND COALESCE(p.payment_type, '') <> 'refund'
-          AND p.payment_date <= ?
-        ORDER BY p.payment_date ASC
-    ");
-    $outstandingStmt->execute([$end_date]);
-    $outstandingPayments = $outstandingStmt->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($outstandingPayments as $payment) {
-        $totalOutstanding += $payment['total_amount'];
+    // 3. Outstanding (all-time): the accounts' amount_due through the one shared receivables rule
+    // (rooms, confirmed conference / event / gym accounts, tabs) - the same figure as Aging, Invoices and End of Day.
+    $receivables = rh_receivable_summary($pdo, ['bookings' => $mod_bookings, 'conference' => $mod_conference, 'gym' => $mod_gym, 'events' => $mod_events, 'tabs' => $mod_pos]);
+    $receivablesFailed = !empty($receivables['failed']);
+    $outstandingPayments = [];
+    foreach ($receivables['rows'] as $rcv) {
+        $outstandingPayments[] = [
+            'payment_reference' => $rcv['reference'], 'client_name' => $rcv['client'],
+            'total_amount' => $rcv['amount_due'], 'days_overdue' => $rcv['days_outstanding'],
+            'booking_type' => $rcv['type'],
+        ];
     }
+    $totalOutstanding = $receivables['total'];
 
     // ============================================
     // REVENUE TAB QUERIES
@@ -870,39 +855,15 @@ try {
     // AGING & AR TAB QUERIES
     // ============================================
 
-    $agingDetailStmt = $pdo->prepare("
-        SELECT p.payment_reference, p.payment_date, p.total_amount, p.payment_status,
-               p.booking_type, p.payment_method,
-               DATEDIFF(CURDATE(), p.payment_date) AS days_outstanding,
-               COALESCE(b.guest_name, ci.{$conferenceFields['contact_name']}, so.customer_name, gi.name, ei.name, 'N/A') AS client_name
-        FROM payments p
-        LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
-        LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
-        LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
-        LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
-        LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
-        WHERE p.payment_status IN ('pending', 'partial')
-        AND COALESCE(p.payment_type, '') != 'refund'
-        AND p.deleted_at IS NULL
-        ORDER BY days_outstanding DESC
-        LIMIT 200
-    ");
-    $agingDetailStmt->execute();
-    $agingDetail = $agingDetailStmt->fetchAll(PDO::FETCH_ASSOC);
-
-    $agingBuckets = [
-        '0-30'  => ['count' => 0, 'amount' => 0.0],
-        '31-60' => ['count' => 0, 'amount' => 0.0],
-        '61-90' => ['count' => 0, 'amount' => 0.0],
-        '90+'   => ['count' => 0, 'amount' => 0.0],
-    ];
-    foreach ($agingDetail as $ag) {
-        $d  = (int)$ag['days_outstanding'];
-        $bk = $d <= 30 ? '0-30' : ($d <= 60 ? '31-60' : ($d <= 90 ? '61-90' : '90+'));
-        $agingBuckets[$bk]['count']++;
-        $agingBuckets[$bk]['amount'] += (float)$ag['total_amount'];
+    $agingDetail = [];
+    foreach (array_slice($receivables['rows'], 0, 200) as $rcv) {
+        $agingDetail[] = [
+            'payment_reference' => $rcv['reference'], 'client_name' => $rcv['client'], 'booking_type' => $rcv['type'],
+            'days_outstanding' => $rcv['days_outstanding'], 'total_amount' => $rcv['amount_due'],
+        ];
     }
-    $totalAgingAmount = array_sum(array_column($agingBuckets, 'amount'));
+    $agingBuckets = $receivables['buckets'];
+    $totalAgingAmount = $receivables['total'];
 
     // ============================================
     // PERIOD-OVER-PERIOD COMPARISON
@@ -1255,8 +1216,8 @@ try {
                     </div>
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Outstanding</span>
-                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalOutstanding, 2); ?></strong>
-                        <span class="rh-strip__sub"><?php echo count($outstandingPayments); ?> pending · <a href="?tab=aging&start_date=<?php echo htmlspecialchars($start_date); ?>&end_date=<?php echo htmlspecialchars($end_date); ?>" class="acct-link">View aging →</a></span>
+                        <strong class="rh-strip__value"><?php echo !empty($receivablesFailed) ? 'Unavailable' : $currency_symbol . ' ' . number_format($totalOutstanding, 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo count($outstandingPayments); ?> unpaid · <a href="?tab=aging&start_date=<?php echo htmlspecialchars($start_date); ?>&end_date=<?php echo htmlspecialchars($end_date); ?>" class="acct-link">View aging →</a></span>
                     </div>
                 </div>
 
@@ -2262,8 +2223,8 @@ try {
                 <div class="rh-strip" role="group" aria-label="Summary">
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Total Outstanding AR</span>
-                        <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalAgingAmount, 2); ?></strong>
-                        <span class="rh-strip__sub"><?php echo count($agingDetail); ?> unpaid accounts</span>
+                        <strong class="rh-strip__value"><?php echo !empty($receivablesFailed) ? 'Unavailable' : $currency_symbol . ' ' . number_format($totalAgingAmount, 2); ?></strong>
+                        <span class="rh-strip__sub"><?php echo !empty($receivablesFailed) ? 'Some accounts could not be read - see System Logs' : count($agingDetail) . ' unpaid accounts'; ?></span>
                     </div>
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Current (0–30 days)</span>
@@ -2343,10 +2304,7 @@ try {
                                     <th>Reference</th>
                                     <th>Client</th>
                                     <th>Type</th>
-                                    <th>Method</th>
-                                    <th>Invoice Date</th>
                                     <th>Days O/S</th>
-                                    <th>Status</th>
                                     <th>Amount</th>
                                     <th></th>
                                 </tr>
@@ -2359,11 +2317,8 @@ try {
                                     <tr>
                                         <td><a href="payments.php?search=<?php echo urlencode($ag['payment_reference']); ?>" class="acct-link"><?php echo htmlspecialchars($ag['payment_reference']); ?></a></td>
                                         <td><?php echo htmlspecialchars($ag['client_name']); ?></td>
-                                        <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars($ag['booking_type']); ?>"><?php echo ucfirst(htmlspecialchars($ag['booking_type'])); ?></span></td>
-                                        <td class="acct-muted"><?php echo htmlspecialchars(str_replace('_', ' ', $ag['payment_method'])); ?></td>
-                                        <td class="acct-muted"><?php echo date('d M Y', strtotime($ag['payment_date'])); ?></td>
+                                        <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars($ag['booking_type']); ?>"><?php echo htmlspecialchars(rh_receivable_type_label((string)$ag['booking_type'])); ?></span></td>
                                         <td class="<?php echo $bk === '90+' ? 'acct-danger' : ($bk !== '0-30' ? 'acct-warn' : ''); ?>"><?php echo $d; ?>d</td>
-                                        <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars($ag['payment_status']); ?>"><?php echo ucfirst(htmlspecialchars($ag['payment_status'])); ?></span></td>
                                         <td style="font-weight:600"><?php echo $currency_symbol . ' ' . number_format($ag['total_amount'], 2); ?></td>
                                         <td><a href="payment-add.php?booking_type=<?php echo urlencode($ag['booking_type']); ?>" class="acct-link">Record →</a></td>
                                     </tr>
@@ -2886,17 +2841,19 @@ try {
         </details>
 
         <?php
-            // Cancelled / rejected / expired accounts are not revenue and owe nothing (the status tables
-            // below still show them). Balances come from amount_due, the same figure the dashboard and
-            // Outstanding balances use, so the screens agree. Values are VAT-inclusive like payments.
-            $deadStatuses = ['cancelled', 'rejected', 'expired'];
+            // Only confirmed / completed accounts count as revenue and receivables (an unconfirmed enquiry
+            // is neither; the status tables below still show every status). Balances come from amount_due,
+            // the same figure as the dashboard, Aging and Outstanding, so the screens agree. Values are
+            // VAT-inclusive like payments.
+            $confCountStatuses = ['confirmed', 'completed'];
+            $gymCountStatuses  = ['confirmed', 'converted', 'closed'];
             $totalConfEvents = 0;
             $totalConfRevenue = 0;
             $totalConfPaid = 0;
             $confOutstanding = 0;
             foreach ($conferenceStats as $cs) {
                 $totalConfEvents += $cs['count'];
-                if (in_array($cs['status'], $deadStatuses, true)) { continue; }
+                if (!in_array($cs['status'], $confCountStatuses, true)) { continue; }
                 $totalConfRevenue += $cs['total_value'];
                 $totalConfPaid += $cs['total_paid'];
                 $confOutstanding += $cs['total_due'];
@@ -2907,7 +2864,7 @@ try {
             $gymOutstanding = 0;
             foreach ($gymInquiryStats as $gi) {
                 $totalGymInquiries += $gi['count'];
-                if (in_array($gi['status'], $deadStatuses, true)) { continue; }
+                if (!in_array($gi['status'], $gymCountStatuses, true)) { continue; }
                 $totalGymRevenue += $gi['total_value'];
                 $totalGymPaid += $gi['total_paid'];
                 if ($gi['status'] !== 'closed') { $gymOutstanding += $gi['total_due']; }
@@ -2919,7 +2876,7 @@ try {
             $eventOutstanding = 0;
             foreach ($eventInquiryStats as $ei) {
                 $totalEventBookings += $ei['count'];
-                if (in_array($ei['status'], $deadStatuses, true)) { continue; }
+                if (!in_array($ei['status'], $confCountStatuses, true)) { continue; }
                 $totalEventRevenue += $ei['total_value'];
                 $totalEventPaid += $ei['total_paid'];
                 $eventOutstanding += $ei['total_due'];

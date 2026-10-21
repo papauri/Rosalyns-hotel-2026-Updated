@@ -18,6 +18,7 @@ require_once '../config/credit-notes.php';
 require_once '../includes/station-hours.php';
 require_once __DIR__ . '/includes/pos-shift-totals.php';
 require_once __DIR__ . '/includes/eod-revenue.php';
+require_once __DIR__ . '/includes/receivables.php';
 
 // This page reuses one named placeholder (:d) several times per statement. The shared connection
 // prepares natively, which rejects a repeated name (HY093), so those queries threw, were swallowed
@@ -229,20 +230,8 @@ $revpar = $rooms_total > 0 ? ((float)$earned['rooms_gross'] / $rooms_total) : 0;
 // ---------------------------------------------------------------------------
 $method_mix = [];
 try {
-    $mStmt = $pdo->prepare("
-        SELECT COALESCE(NULLIF(payment_method,''),'unassigned') AS method,
-               COUNT(*) AS cnt,
-               COALESCE(SUM(total_amount),0) AS total
-        FROM payments
-        WHERE DATE(payment_date) = :d
-          AND payment_status IN ('completed','paid','refunded','partially_refunded')
-          AND COALESCE(payment_type, '') <> 'refund'
-          AND deleted_at IS NULL
-        GROUP BY method
-        ORDER BY total DESC
-    ");
-    $mStmt->execute([':d' => $report_date]);
-    $method_mix = $mStmt->fetchAll(PDO::FETCH_ASSOC);
+    // Non-cash methods net of refunds paid out today (shared with the PDF / e-mail): admin/includes/eod-revenue.php.
+    $method_mix = rh_eod_payment_mix($pdo, $report_date);
 } catch (Throwable $e) {
     error_log('EOD method mix: ' . $e->getMessage());
 }
@@ -317,16 +306,20 @@ if ($mod_housekeeping) {
 // ---------------------------------------------------------------------------
 // 7) Outstanding folio (across all in-house guests)
 // ---------------------------------------------------------------------------
+// One shared rule with Dashboard, Accounting, Reports and Invoices (admin/includes/receivables.php): room folios,
+// conference / event / gym accounts (confirmed or completed) and open unpaid tabs. Shared with the PDF and e-mail.
 $outstanding_folio = 0.0;
-if ($mod_bookings) {
-    try {
-        // Same receivable rule as the dashboard, Accounting and the Outstanding balances list: every live
-        // booking that still owes money, including guests already checked out and the kept first night on
-        // cancellations (a checked-out guest who left owing money is the one to chase).
-        // One shared helper (admin/includes/eod-revenue.php) so the PDF and e-mail show the same figure.
-        $outstanding_folio = rh_eod_outstanding_folio($pdo);
-    } catch (Throwable $e) { /* ignore */
-    }
+$outstanding_accounts = 0.0;
+$outstanding_tabs = 0.0;
+$outstanding_failed = false;
+try {
+    $outSplit = rh_eod_outstanding_split($pdo, rh_receivable_mods());
+    $outstanding_folio = $outSplit['folio'];
+    $outstanding_accounts = $outSplit['accounts'];
+    $outstanding_tabs = $outSplit['tabs'];
+    $outstanding_failed = $outSplit['failed'];
+} catch (Throwable $e) {
+    $outstanding_failed = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -534,7 +527,7 @@ $non_cash_total = $method_totals['mobile_money'] + $method_totals['card'] + $met
 // Average per payment received: refund and pending rows are not payments received, so they are not in the divisor.
 $revenue_per_transaction = (int)($rev['collected_count'] ?? 0) > 0 ? $gross_revenue / (int)$rev['collected_count'] : 0;
 $fnb_per_occupied_room = $rooms_occupied > 0 ? (float)$pos_totals['gross'] / $rooms_occupied : 0;
-$unpaid_risk = (float)$rev['pending'] + $outstanding_folio;
+$unpaid_risk = $outstanding_folio + $outstanding_accounts + $outstanding_tabs; // the same total as every other screen
 
 // Revenue EARNED by source (same figures as the headline). A source whose module is off is hidden
 // unless it actually earned something, so the rows always add up to the headline.
@@ -572,7 +565,7 @@ if ($mod_bookings) {
     $daily_health_score -= min(16, $departures_remaining * 4);
     $daily_health_score -= min(16, (int)$ops['no_shows'] * 8);
     $daily_health_score -= min(12, (int)$ops['cancellations'] * 3);
-    $daily_health_score -= $outstanding_folio > 0 ? 8 : 0;
+    $daily_health_score -= $unpaid_risk > BALANCE_TOLERANCE ? 8 : 0;
     $daily_health_score -= $rooms_oo > 0 ? 5 : 0;
 }
 if ($mod_pos) {
@@ -602,12 +595,21 @@ if ($mod_bookings) {
     if ($departures_remaining > 0) {
         $addAlert('warn', 'fa-door-open', 'Departures still open', $departures_remaining . ' expected departure' . ($departures_remaining === 1 ? '' : 's') . ' not checked out.');
     }
-    if ($outstanding_folio > 0) {
-        $addAlert('warn', 'fa-file-invoice-dollar', 'Outstanding guest folio', $money($outstanding_folio) . ' still owed on open bookings (in-house, upcoming and checked out).');
-    }
     if ($rooms_oo > 0) {
         $addAlert('watch', 'fa-screwdriver-wrench', 'Rooms out of order or in maintenance', $rooms_oo . ' room' . ($rooms_oo === 1 ? '' : 's') . ' unavailable for sale.');
     }
+}
+if ($outstanding_folio > 0) {
+    $addAlert('warn', 'fa-file-invoice-dollar', 'Outstanding guest folio', $money($outstanding_folio) . ' still owed on open bookings (in-house, upcoming and checked out).');
+}
+if ($outstanding_tabs > 0) {
+    $addAlert('warn', 'fa-file-invoice-dollar', 'Open tabs (unpaid)', $money($outstanding_tabs) . ' still owed on open tabs.');
+}
+if ($outstanding_failed) {
+    $addAlert('warn', 'fa-triangle-exclamation', 'Outstanding figure incomplete', 'Some accounts could not be read, so the amount still owed may be understated (see System Logs).');
+}
+if ($outstanding_accounts > 0) {
+    $addAlert('warn', 'fa-file-invoice-dollar', 'Outstanding accounts', $money($outstanding_accounts) . ' still owed on conference, event and gym accounts.');
 }
 if ((float)$rev['pending'] > 0) {
     $addAlert('warn', 'fa-hourglass-half', 'Same-day pending payments', $money((float)$rev['pending']) . ' still pending or partial in today\'s ledger.');
@@ -920,6 +922,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         'Transactions',
         'Pending Payments',
         'Outstanding Folio',
+        'Outstanding Accounts',
+        'Open Tabs (unpaid)',
         'Payment Capture Rate %',
         'Cash',
         'Mobile Money',
@@ -985,7 +989,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         number_format((float)$revpar, 2, '.', ''),
         (int)$rev['txn_count'],
         number_format((float)$rev['pending'], 2, '.', ''),
-        number_format($outstanding_folio, 2, '.', ''),
+        $outstanding_failed ? 'Unavailable' : number_format($outstanding_folio, 2, '.', ''),
+        $outstanding_failed ? 'Unavailable' : number_format($outstanding_accounts, 2, '.', ''),
+        $outstanding_failed ? 'Unavailable' : number_format($outstanding_tabs, 2, '.', ''),
         number_format($payment_capture_rate, 2, '.', ''),
         number_format($method_totals['cash'], 2, '.', ''),
         number_format($method_totals['mobile_money'], 2, '.', ''),
@@ -1226,11 +1232,11 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 <span class="ck-kpi__sub">Non-cash <?php echo $money($non_cash_total); ?> &middot; <?php echo number_format($payment_capture_rate, 0); ?>% collected</span>
             </a>
 
-            <a class="ck-kpi<?php echo $unpaid_risk > 0.01 ? ' ck-kpi--alert' : ''; ?>" href="payments.php?balance=outstanding">
+            <a class="ck-kpi<?php echo $unpaid_risk > BALANCE_TOLERANCE ? ' ck-kpi--alert' : ''; ?>" href="payments.php?balance=outstanding">
                 <span class="ck-kpi__icon"><i class="fas fa-file-invoice-dollar"></i></span>
                 <span class="ck-kpi__label">Still owed</span>
-                <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($unpaid_risk); ?></span>
-                <span class="ck-kpi__sub">Folio <?php echo $money($outstanding_folio); ?> &middot; pending <?php echo $money($rev['pending']); ?></span>
+                <span class="ck-kpi__value ck-kpi__value--money"><?php echo $outstanding_failed ? 'Unavailable' : $money($unpaid_risk); ?></span>
+                <span class="ck-kpi__sub">Folio <?php echo $money($outstanding_folio); ?> &middot; accounts <?php echo $money($outstanding_accounts); ?> &middot; open tabs <?php echo $money($outstanding_tabs); ?> &middot; pending <?php echo $money($rev['pending']); ?></span>
             </a>
 
             <a class="ck-kpi <?php echo $scoreKpi; ?>" href="#eodAttn">
@@ -1537,21 +1543,21 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                                 <tr class="eod-table__total">
                                     <td>Total received</td>
                                     <td class="num"><?php echo $money($gross_revenue); ?></td>
-                                    <td class="num"><?php echo $money($total_vat); ?></td>
+                                    <td class="num"><?php echo $money($total_vat + (float)($rev['refund_vat'] ?? 0)); ?></td>
                                     <td class="num">100%</td>
                                 </tr>
                                 <?php if ((float)$rev['refunds'] > 0): ?>
                                     <tr class="eod-table__neg">
                                         <td>Less: refunds</td>
                                         <td class="num">&minus;<?php echo $money($rev['refunds']); ?></td>
-                                        <td class="num">&mdash;</td>
+                                        <td class="num"><?php echo (float)($rev['refund_vat'] ?? 0) > 0.004 ? '&minus;' . $money($rev['refund_vat']) : '&mdash;'; ?></td>
                                         <td class="num">&mdash;</td>
                                     </tr>
                                 <?php endif; ?>
                                 <tr class="eod-table__net">
                                     <td><strong>Cash collected (net)</strong></td>
                                     <td class="num"><strong><?php echo $money($cash_collected); ?></strong></td>
-                                    <td class="num">&mdash;</td>
+                                    <td class="num"><strong><?php echo $money($total_vat); ?></strong></td>
                                     <td class="num">&mdash;</td>
                                 </tr>
                             </tbody>
@@ -1562,6 +1568,15 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                         echo $kv('VAT collected', $money($total_vat) . $sub('VAT ' . ($vatEnabled ? 'enabled' : 'disabled')));
                         echo $kv('Transactions', (int)$rev['txn_count'] . $sub('avg ' . $money($revenue_per_transaction)));
                         echo $kv('Outstanding folio', $money($outstanding_folio) . ' <a class="eod-link" href="payments.php">Collect &rarr;</a>', $outstanding_folio > 0 ? 'eod-warn' : '');
+                        if ($outstanding_accounts > 0) {
+                            echo $kv('Outstanding accounts', $money($outstanding_accounts) . $sub('conference, events, gym'), 'eod-warn');
+                        }
+                        if ($outstanding_tabs > 0) {
+                            echo $kv('Open tabs (unpaid)', $money($outstanding_tabs), 'eod-warn');
+                        }
+                        if ($outstanding_failed) {
+                            echo $kv('Outstanding total', 'Unavailable' . $sub('some accounts could not be read'), 'eod-warn');
+                        }
                         if ($cn_issued_count > 0 || $cn_redeemed_today > 0) {
                             $cnLink = (function_exists('rh_module_key_enabled') && rh_module_key_enabled('advance_booking')) ? ' <a class="eod-link" href="credit-notes.php">View &rarr;</a>' : '';
                             echo $kv('Credit notes issued', $money($cn_issued_today) . $sub((int)$cn_issued_count . ' note' . ($cn_issued_count !== 1 ? 's' : '')) . $cnLink);
@@ -1771,7 +1786,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                             <ul class="ck-kv eod-kv">
                                 <?php
                                 echo $kv('Top POS item', htmlspecialchars($top_item_name) . ($top_item_revenue > 0 ? $sub($money($top_item_revenue)) : ''));
-                                echo $kv('Unpaid exposure', $money($unpaid_risk) . $sub('pending + folio'), $unpaid_risk > 0 ? 'eod-warn' : '');
+                                echo $kv('Unpaid exposure', $money($unpaid_risk) . $sub('folio + accounts + open tabs'), $unpaid_risk > 0 ? 'eod-warn' : '');
                                 ?>
                             </ul>
                         </div>

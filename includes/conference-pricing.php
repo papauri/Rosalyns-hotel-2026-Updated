@@ -16,9 +16,11 @@ if (!function_exists('rh_conf_has_column')) {
         $key = $table . '.' . $column;
         if (!array_key_exists($key, $cache)) {
             try {
-                $stmt = $pdo->prepare("SHOW COLUMNS FROM `" . str_replace('`', '', $table) . "` LIKE ?");
-                $stmt->execute([$column]);
-                $cache[$key] = $stmt->rowCount() > 0;
+                /* information_schema, not SHOW COLUMNS ... LIKE ?: a placeholder there is a syntax error
+                 * under real (non-emulated) prepares, which made the columns look missing. */
+                $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+                $stmt->execute([$table, $column]);
+                $cache[$key] = ((int)$stmt->fetchColumn() > 0);
             } catch (Throwable $e) {
                 $cache[$key] = false;
             }
@@ -75,6 +77,26 @@ if (!function_exists('rh_conf_format_range')) {
             $out .= ' – ' . date($fmt, strtotime($endDate));
         }
         return $out;
+    }
+}
+
+if (!function_exists('rh_conf_gross')) {
+    /**
+     * The VAT-inclusive total the account actually bills: the locked total_with_vat when present, else
+     * total_amount (already inclusive in inclusive mode) or total_amount + vat_amount (VAT-on-top mode).
+     * Estimates and quotations show this so they never understate what the account will lock.
+     */
+    function rh_conf_gross(array $row): float
+    {
+        $gross = (float)($row['total_with_vat'] ?? 0);
+        if ($gross > 0) {
+            return $gross;
+        }
+        $base = (float)($row['total_amount'] ?? 0);
+        if (function_exists('vat_mode') && vat_mode() === 'inclusive') {
+            return $base;
+        }
+        return $base + (float)($row['vat_amount'] ?? 0);
     }
 }
 

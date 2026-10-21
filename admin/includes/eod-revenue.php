@@ -233,14 +233,88 @@ if (!function_exists('rh_eod_earned_series')) {
 // Cash-side and receivable figures shared by the End of Day page, PDF and e-mail, so all three always agree.
 // ---------------------------------------------------------------------------------------------------------------
 
-if (!function_exists('rh_eod_outstanding_folio')) {
+if (!function_exists('rh_eod_outstanding_split')) {
     /**
-     * Money still owed on room bookings: the shared receivable rule (dashboard, Accounting, Outstanding balances).
-     * Every live booking with a balance, including guests already checked out and the first night kept on cancellations.
+     * Money still owed, from the ONE shared receivables rule (admin/includes/receivables.php) that Dashboard,
+     * Accounting, Reports and Invoices also use: room folios, conference / event / gym accounts (confirmed or
+     * completed) and open unpaid tabs. 'failed' is true when a source could not be read - show "Unavailable".
+     * @return array{folio:float,accounts:float,tabs:float,total:float,failed:bool}
      */
+    function rh_eod_outstanding_split(PDO $pdo, array $mods = []): array
+    {
+        require_once __DIR__ . '/receivables.php';
+        $failed = [];
+        $out = ['folio' => 0.0, 'accounts' => 0.0, 'tabs' => 0.0, 'total' => 0.0, 'failed' => false];
+        foreach (rh_receivable_rows($pdo, $mods, $failed) as $r) {
+            $k = $r['type'] === 'room' ? 'folio' : (in_array($r['type'], ['conference', 'event', 'gym'], true) ? 'accounts' : 'tabs');
+            $out[$k] += $r['amount_due'];
+        }
+        foreach (['folio', 'accounts', 'tabs'] as $k) { $out[$k] = round($out[$k], 2); }
+        $out['total'] = round($out['folio'] + $out['accounts'] + $out['tabs'], 2);
+        $out['failed'] = !empty($failed);
+        return $out;
+    }
+}
+
+if (!function_exists('rh_eod_outstanding_folio')) {
+    /** Room-folio part of the shared receivables rule (kept for older callers). */
     function rh_eod_outstanding_folio(PDO $pdo): float
     {
-        return (float)$pdo->query("SELECT COALESCE(SUM(amount_due),0) FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))")->fetchColumn();
+        return rh_eod_outstanding_split($pdo, ['conference' => false, 'gym' => false, 'events' => false, 'tabs' => false])['folio'];
+    }
+}
+
+if (!function_exists('rh_eod_outstanding_accounts')) {
+    /** Conference / event / gym part of the shared receivables rule (kept for older callers). */
+    function rh_eod_outstanding_accounts(PDO $pdo, array $mods = []): float
+    {
+        $mods['bookings'] = false;
+        $mods['tabs'] = false;
+        return rh_eod_outstanding_split($pdo, $mods)['accounts'];
+    }
+}
+
+if (!function_exists('rh_eod_payment_mix')) {
+    /**
+     * Payments received on $date grouped by method, for the End of Day payment mix (screen, PDF, e-mail).
+     * Non-cash methods are shown NET of refunds paid out on the day (refund rows keep the original method), so a
+     * refunded card payment no longer inflates "Non-cash". Cash stays as received: cash refunds are taken off
+     * separately (rh_eod_cash_refunds_out) so the till figure and the "less cash refunds" line still foot.
+     * @return array<int,array{method:string,cnt:int,total:float}> largest first
+     */
+    function rh_eod_payment_mix(PDO $pdo, string $date, string $unassignedLabel = 'unassigned'): array
+    {
+        $st = $pdo->prepare("
+            SELECT COALESCE(NULLIF(payment_method,''), :u) AS method, COUNT(*) AS cnt, COALESCE(SUM(total_amount),0) AS total
+            FROM payments
+            WHERE DATE(payment_date) = :d
+              AND payment_status IN ('completed','paid','refunded','partially_refunded')
+              AND COALESCE(payment_type, '') <> 'refund'
+              AND deleted_at IS NULL
+            GROUP BY method
+        ");
+        $st->execute([':d' => $date, ':u' => $unassignedLabel]);
+        $mix = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $mix[(string)$r['method']] = ['method' => (string)$r['method'], 'cnt' => (int)$r['cnt'], 'total' => (float)$r['total']];
+        }
+        $rf = $pdo->prepare("
+            SELECT COALESCE(NULLIF(payment_method,''), :u) AS method, COALESCE(SUM(refund_amount),0) AS refunded
+            FROM payments
+            WHERE DATE(payment_date) = :d AND deleted_at IS NULL AND payment_type = 'refund'
+              AND refund_status IN ('completed','processing')
+              AND LOWER(COALESCE(payment_method,'')) NOT LIKE '%cash%'
+            GROUP BY method
+        ");
+        $rf->execute([':d' => $date, ':u' => $unassignedLabel]);
+        foreach ($rf->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $m = (string)$r['method'];
+            $mix[$m] = $mix[$m] ?? ['method' => $m, 'cnt' => 0, 'total' => 0.0];
+            $mix[$m]['total'] -= (float)$r['refunded'];
+        }
+        $mix = array_values($mix);
+        usort($mix, static function (array $a, array $b): int { return $b['total'] <=> $a['total']; });
+        return $mix;
     }
 }
 

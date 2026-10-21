@@ -7,6 +7,7 @@ require_once '../includes/alert.php';
 require_once 'includes/finance-schema.php';
 require_once __DIR__ . '/includes/booking-lifecycle.php';
 require_once __DIR__ . '/includes/finance-account-sync.php';
+require_once __DIR__ . '/includes/receivables.php';
 require_once __DIR__ . '/includes/account-receipt-send.php';
 $message = '';
 $error = '';
@@ -370,8 +371,6 @@ try {
         SELECT
             COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS paid_total,
             COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS paid_count,
-            COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS outstanding_total,
-            COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS outstanding_count,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN total_amount ELSE 0 END), 0) AS refunded_total,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN 1 ELSE 0 END), 0) AS refunded_count,
             COALESCE(SUM(CASE WHEN YEAR(payment_date)=YEAR(CURDATE()) AND MONTH(payment_date)=MONTH(CURDATE()) AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS mtd_collected
@@ -380,46 +379,23 @@ try {
     ");
     $invoiceKpi = $invoiceKpiStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
-    // Aging buckets for outstanding invoices (days since record was created = invoice issue date)
-    $agingStmt = $pdo->query("
-        SELECT
-            SUM(CASE WHEN DATEDIFF(CURDATE(), created_at) BETWEEN 0  AND 30 THEN total_amount ELSE 0 END) AS bucket_0_30,
-            SUM(CASE WHEN DATEDIFF(CURDATE(), created_at) BETWEEN 0  AND 30 THEN 1 ELSE 0 END)            AS count_0_30,
-            SUM(CASE WHEN DATEDIFF(CURDATE(), created_at) BETWEEN 31 AND 60 THEN total_amount ELSE 0 END) AS bucket_31_60,
-            SUM(CASE WHEN DATEDIFF(CURDATE(), created_at) BETWEEN 31 AND 60 THEN 1 ELSE 0 END)            AS count_31_60,
-            SUM(CASE WHEN DATEDIFF(CURDATE(), created_at) BETWEEN 61 AND 90 THEN total_amount ELSE 0 END) AS bucket_61_90,
-            SUM(CASE WHEN DATEDIFF(CURDATE(), created_at) BETWEEN 61 AND 90 THEN 1 ELSE 0 END)            AS count_61_90,
-            SUM(CASE WHEN DATEDIFF(CURDATE(), created_at) > 90 THEN total_amount ELSE 0 END)              AS bucket_90p,
-            SUM(CASE WHEN DATEDIFF(CURDATE(), created_at) > 90 THEN 1 ELSE 0 END)                         AS count_90p
-        FROM payments
-        WHERE deleted_at IS NULL
-          AND payment_status IN ('pending','partial')
-          AND COALESCE(payment_type, '') <> 'refund'
-    ");
-    $aging = $agingStmt->fetch(PDO::FETCH_ASSOC) ?: [
-        'bucket_0_30' => 0,
-        'count_0_30' => 0,
-        'bucket_31_60' => 0,
-        'count_31_60' => 0,
-        'bucket_61_90' => 0,
-        'count_61_90' => 0,
-        'bucket_90p' => 0,
-        'count_90p' => 0
+    // Outstanding, aging and outstanding-by-source: the accounts' amount_due through the one shared receivables
+    // rule (rooms, confirmed conference / event / gym accounts, tabs), the same as Reports, Dashboard and End of Day.
+    $rcv = rh_receivable_summary($pdo, rh_receivable_mods());
+    $receivablesFailed = !empty($rcv['failed']);
+    $invoiceKpi['outstanding_total'] = $rcv['total'];
+    $invoiceKpi['outstanding_count'] = $rcv['count'];
+    $aging = [
+        'bucket_0_30' => $rcv['buckets']['0-30']['amount'], 'count_0_30' => $rcv['buckets']['0-30']['count'],
+        'bucket_31_60' => $rcv['buckets']['31-60']['amount'], 'count_31_60' => $rcv['buckets']['31-60']['count'],
+        'bucket_61_90' => $rcv['buckets']['61-90']['amount'], 'count_61_90' => $rcv['buckets']['61-90']['count'],
+        'bucket_90p' => $rcv['buckets']['90+']['amount'], 'count_90p' => $rcv['buckets']['90+']['count'],
     ];
-
-    // Outstanding split by source
-    $outstandingBySourceStmt = $pdo->query("
-        SELECT booking_type,
-               COUNT(*) AS cnt,
-               COALESCE(SUM(total_amount), 0) AS amt
-        FROM payments
-        WHERE deleted_at IS NULL
-          AND payment_status IN ('pending','partial')
-          AND COALESCE(payment_type, '') <> 'refund'
-        GROUP BY booking_type
-        ORDER BY amt DESC
-    ");
-    $outstandingBySource = $outstandingBySourceStmt->fetchAll(PDO::FETCH_ASSOC);
+    $outstandingBySource = [];
+    foreach ($rcv['by_type'] as $srcType => $srcRow) {
+        $outstandingBySource[] = ['booking_type' => $srcType, 'cnt' => $srcRow['count'], 'amt' => $srcRow['amount']];
+    }
+    usort($outstandingBySource, static function (array $x, array $y): int { return $y['amt'] <=> $x['amt']; });
 } catch (PDOException $e) {
     $error = 'Error fetching invoices: ' . $e->getMessage();
     $invoices = [];
@@ -492,8 +468,8 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
             </div>
             <div class="ck-kpi ck-kpi--warn">
                 <span class="ck-kpi__label">Outstanding</span>
-                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($invoiceKpi['outstanding_total'] ?? 0), 0); ?></span>
-                <span class="ck-kpi__sub">                    <?php echo number_format((int)($invoiceKpi['outstanding_count'] ?? 0)); ?> awaiting ·
+                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo !empty($receivablesFailed) ? 'n/a' : number_format((float)($invoiceKpi['outstanding_total'] ?? 0), 0); ?></span>
+                <span class="ck-kpi__sub">                    <?php echo !empty($receivablesFailed) ? 'some accounts unreadable (System Logs)' : number_format((int)($invoiceKpi['outstanding_count'] ?? 0)) . ' awaiting'; ?> ·
                     <a href="?filter_status=pending" class="acct-link">view pending</a>
                 </span>
             </div>
@@ -528,6 +504,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                     <span class="acct-panel__sub">Pending / partial only</span>
                 </div>
                 <div class="acct-table-wrap">
+                    <?php if (!empty($receivablesFailed)): ?><p class="acct-empty" style="padding:14px;">Unavailable &mdash; some figures could not be loaded (see System Logs).</p><?php else: ?>
                     <table class="acct-table">
                         <thead>
                             <tr>
@@ -577,6 +554,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                             </tr>
                         </tfoot>
                     </table>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -586,6 +564,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                     <span class="acct-panel__sub">Where the receivables sit</span>
                 </div>
                 <div class="acct-table-wrap">
+                    <?php if (!empty($receivablesFailed)): ?><p class="acct-empty" style="padding:14px;">Unavailable &mdash; some figures could not be loaded (see System Logs).</p><?php else: ?>
                     <table class="acct-table">
                         <thead>
                             <tr>
@@ -601,7 +580,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                     <td colspan="4" class="acct-empty acct-empty--good" style="text-align:center;"><i class="fas fa-check-circle"></i> All clear — no outstanding invoices</td>
                                 </tr>
                                 <?php else: foreach ($outstandingBySource as $o):
-                                    $label = ['room' => 'Rooms', 'conference' => 'Conferences', 'restaurant' => htmlspecialchars(rh_pos_category_label())][$o['booking_type']] ?? ucfirst((string)$o['booking_type']);
+                                    $label = ['room' => 'Rooms', 'conference' => 'Conferences', 'restaurant' => 'Open tabs (unpaid)'][$o['booking_type']] ?? ucfirst((string)$o['booking_type']);
                                 ?>
                                     <tr>
                                         <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars((string)$o['booking_type']); ?>"><?php echo $label; ?></span></td>
@@ -615,6 +594,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                             endif; ?>
                         </tbody>
                     </table>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>

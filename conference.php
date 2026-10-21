@@ -361,7 +361,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'special_requirements' => $special_requirements,
             'catering_required' => $catering,
             'av_equipment' => $av_equipment,
-            'total_amount' => $total_amount
+            'total_amount' => $total_amount,
+            'vat_amount' => $conference_vat_amount,
+            'total_with_vat' => $conference_total_wv
         ];
 
         // Send confirmation email to customer

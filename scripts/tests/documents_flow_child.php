@@ -66,12 +66,18 @@ switch ($sc) {
     case 'account': // gym | event | conference: Record payment helper (the shared modal's server side)
         $type = (string)$prm['type'];
         [$aid, $aref] = dx_account($pdo, $run, $type, (string)($prm['email'] ?? 'docs-test@example.invalid'));
-        $res = rh_record_account_payment($pdo, $type, $aid, ['method' => 'cash', 'amount' => (string)($prm['amount'] ?? ''), 'transaction_reference' => '', 'notes' => '', 'confirm_overpay' => false, 'client_uuid' => null], $user['id'], (string)$user['full_name']);
+        $res = rh_record_account_payment($pdo, $type, $aid, ['method' => 'cash', 'amount' => (string)($prm['amount'] ?? ''), 'transaction_reference' => '', 'notes' => '', 'confirm_overpay' => !empty($prm['confirm_overpay']), 'client_uuid' => null], $user['id'], (string)$user['full_name']);
         $sender = $type === 'gym' ? 'sendGymInvoiceEmail' : ($type === 'event' ? 'sendEventInvoiceEmail' : 'sendConferenceInvoiceEmail');
         if ($type === 'gym' || $type === 'event' || $type === 'conference') { require_once $root . '/config/invoice.php'; }
         $out['message'] = rh_account_after_payment_messages($pdo, $res, !empty($prm['want_invoice']), $sender, $aid, $user, 'MWK ');
         $out['balance_after'] = $res['balance_after'];
         $out['payment_id'] = $res['payment_id'];
+        $pq = $pdo->prepare('SELECT payment_status, receipt_generated, receipt_path FROM payments WHERE id = ?');
+        $pq->execute([$res['payment_id']]);
+        $prow = $pq->fetch(PDO::FETCH_ASSOC) ?: [];
+        $out['payment_status'] = (string)($prow['payment_status'] ?? '');
+        $out['pdf_on_file'] = !empty($prow['receipt_generated']) && !empty($prow['receipt_path']) && is_file($root . '/' . $prow['receipt_path']);
+        if (!empty($prm['confirm_overpay']) && !empty($prow['receipt_path'])) { @unlink($root . '/' . $prow['receipt_path']); } // rows roll back; remove the PDF the test wrote
         break;
 
     case 'dedupe': // a receipt is emailed once however many paths ask for it
@@ -170,6 +176,26 @@ switch ($sc) {
         $out['leg_numbers_distinct'] = count(array_filter($legNums)) === 2 && count(array_unique($legNums)) === 2;
         $out['slip_has_all_legs'] = count(array_filter($legNums, function ($n) use ($slip) { return $n !== '' && strpos($slip, $n) !== false; })) === 2;
         $out['slip_has_order_label'] = strpos($slip, 'Order #') !== false && strpos($slip, 'DXS' . $run) !== false;
+        break;
+
+    case 'quote_register': // conference/event quotation register: a resend refreshes the one row; saved PDFs are removed safely
+        $cid = dx_id();
+        $qr = 'CQ-DX' . $run;
+        $r1 = rh_register_sent_quotation('conference', $cid, $qr, 'CONF-DX', 'DOCS', 'docs-test@example.invalid', 'Board Room', 100, 7, '', '%PDF-1.4 one');
+        $r2 = rh_register_sent_quotation('conference', $cid, $qr, 'CONF-DX', 'DOCS', 'docs-test@example.invalid', 'Board Room', 250, 14, 'again', '%PDF-1.4 two');
+        $rows = $pdo->prepare("SELECT total_amount, valid_days, pdf_path FROM quotations WHERE booking_type = 'conference' AND booking_id = ?");
+        $rows->execute([$cid]);
+        $all = $rows->fetchAll(PDO::FETCH_ASSOC);
+        $out['inserted_ok'] = $r1 && $r2;
+        $out['row_count'] = count($all);
+        $out['total'] = (float)($all[0]['total_amount'] ?? 0);
+        $out['valid_days'] = (int)($all[0]['valid_days'] ?? 0);
+        $pdfRel = (string)($all[0]['pdf_path'] ?? '');
+        $out['pdf_saved'] = $pdfRel !== '' && is_file($root . '/' . $pdfRel);
+        $long = rh_register_sent_quotation('event', $cid, 'EQ-DX' . $run, str_repeat('Long title ', 30), 'DOCS', 'docs-test@example.invalid', 'Event', 10, 7, '', null);
+        $out['long_title_ok'] = $long;
+        $out['outside_kept'] = rh_unlink_quotation_pdfs(['config/database.php', '../README.md', 'quotations/../config/database.php']) === 0 && is_file($root . '/config/database.php');
+        $out['unlinked'] = rh_unlink_quotation_pdfs([$pdfRel]) === 1 && !is_file($root . '/' . $pdfRel);
         break;
 
     case 'statement_pdf': // paid-in-full statement vs balance-owed invoice: titles, wording and the shared invoice number

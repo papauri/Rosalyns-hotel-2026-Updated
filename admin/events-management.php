@@ -401,8 +401,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 upsertManagedMediaForSource('events', $eventId, 'video_path', null, ['source_context' => '']);
             }
 
+            // Sent-quotation register rows that belong only to this event (refs are EQ-<event id>-<hash>).
+            $qPdfSel = $pdo->prepare("SELECT pdf_path FROM quotations WHERE booking_type = 'event' AND booking_id = ? AND quote_reference LIKE ?");
+            $qPdfSel->execute([$eventId, 'EQ-' . $eventId . '-%']);
+            $qPdfPaths = $qPdfSel->fetchAll(PDO::FETCH_COLUMN);
+            $pdo->prepare("DELETE FROM quotations WHERE booking_type = 'event' AND booking_id = ? AND quote_reference LIKE ?")->execute([$eventId, 'EQ-' . $eventId . '-%']);
             $stmt = $pdo->prepare("DELETE FROM events WHERE id = ?");
             $stmt->execute([$_POST['id']]);
+            rh_unlink_quotation_pdfs($qPdfPaths);
             $message = 'Event deleted successfully!';
             if ($is_ajax) {
                 header('Content-Type: application/json; charset=utf-8');
