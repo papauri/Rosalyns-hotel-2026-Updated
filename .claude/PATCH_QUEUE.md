@@ -8,7 +8,7 @@ Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner). One commit per it
 Owner lead = the department lead whose files it is; the patch lead plans, briefs, gates and ships.
 
 ## Security patches (standing — always allowed, highest priority)
-- TODO · SWEEP 2026-10-22 findings (fix in this order; details in the sweep report):
+- REVIEW · SWEEP 2026-10-22 findings F1-F13 fixed in Rosalyn's 2026-10-22, awaiting QA + ship + port (tests 3/3 OK, browser 1400/390 clean, download endpoint checked in page_harness). Owner follow-ups: WhatsApp 'Send invoice' link (admin/booking-details.php) now points at a denied static URL - needs a signed-link decision; delete/rotate error_log files on the live hosts; confirm APP_ENCRYPTION_SALT in each host .env; existing keys keep GET access, writes to housekeeping/maintenance-schedules/room-photos/room-amenities now need the new rooms.manage scope. Original findings:
   F1 high: invoice/receipt/credit-note/quotation PDFs in web-served folders with no deny rule; admin links point at the static file; guessable names → deny-all .htaccess on invoices/ (+subfolders) and quotations/, one permission-checked download endpoint, repoint admin links, check email links/attachments.
   F2 high: api/housekeeping.php, api/maintenance-schedules.php, api/room-photos.php, api/room-amenities.php writes without checkPermission → any valid API key can write; add a write scope per method, show it in admin/api-keys.php.
   F3 high: extensionless error_log files in admin/, api/, admin/api/ are web-served (.htaccess denies *.log only) → add error_log to the deny rule (root + subfolders); owner deletes/rotates them on the live hosts.
@@ -27,6 +27,9 @@ Owner lead = the department lead whose files it is; the patch lead plans, briefs
   forms, admin API module/permission gates, secrets in repo. Findings → fix → re-sweep monthly.
 - TODO · Payments-page refund that is still pending closes kitchen lines irreversibly; close lines
   only when the covering refund is completed (finance-account-sync.php). · accounting lead
+
+- TODO · Security follow-ups from the F1-F13 QA: facebook/WhatsApp/review-source helpers still use the literal default salt (includes/facebook-functions.php:47) → use APP_ENCRYPTION_SALT; document-download type=invoice accepts 'bookings' for any payments.id → narrow per account type; order-lifecycle (stock module) calls void/cancel APIs now gated on pos. · patch lead
+- TODO · WhatsApp "send invoice" (admin/booking-details.php ~360) sends a static invoice URL that now 403s. WhatsApp is OFF in both hotels today (whatsapp_enabled=0), so nothing breaks now; before anyone switches WhatsApp on, send a private expiring link instead. · patch lead
 
 ## Public site follows the business setup (gym-only, bar, shop, supermarket rehearsals)
 - TODO · Home/footer/header hide room booking, room cards, gym and conference sections when their
@@ -57,6 +60,16 @@ Owner lead = the department lead whose files it is; the patch lead plans, briefs
 - TODO · Split payment + settle takes ~9 s — profile and speed up. · restaurant lead
 - TODO · Stock Dashboard "Settled today": hint that room service charged to rooms is excluded. · stock lead
 - TODO · Per-product VAT: exempt / zero-rated flag for supermarkets (needs a column → owner OK'd as part of this batch; migration only). · accounting lead
+
+## Conference venue rehearsal 2026-10-22 (P1/P2 first)
+- TODO · F1 high: includes/conference-pricing.php:19 SHOW COLUMNS LIKE ? fails with native prepares → end_date/half_day_rate look missing: reschedule, multi-day, half-day pricing and multi-day clash all off. · events-gym lead
+- TODO · F2 high: config/email.php:2397 catch (Exception) misses PDOException from logCancellationToDatabase → every conference cancel shows staff a raw SQL error, credit message lost. Catch Throwable, skip non-room types. · events-gym lead
+- TODO · F3 high: overpayment's credit-note refund row makes the payment partially_refunded before the receipt step, which skips it → no receipt PDF/email (config/receipts.php:1336, account-record-payment.php:166-176). · accounting lead
+- TODO · F4 high: Reports Aging/AR and Invoices "Outstanding" read only pending payment rows → conference/event/gym money owed shows 0 (EOD "Still owed" too). · accounting lead
+- TODO · F5 medium: unconfirmed enquiries counted as receivables/revenue on accounting dashboard, dashboard, reports conference tab → count confirmed/completed only. · accounting lead
+- TODO · F6 medium: conference/event quotations never written to the quotations register (no PDF kept, no expiry reminder). · events-gym lead + accounting
+- TODO · F7 medium: conference quotation email shows literal {{logo_html}}/{{address}}; credit-note email shows {{address}} {{contact_phone}} {{guest_email}}. · events-gym lead + accounting
+- TODO · F8 (latent, VAT-on-top mode) first quotation/public estimate show net; F9 conference sync lacks 'refunded' state; F10 conference_venue preset keeps bookings on (public site sells rooms) — decide with the public-site item; F11 off-module links/wording; F12 refund rows listed "Needs PDF"; F13 EOD payment mix gross of refunds, VAT column doesn't add up; F14 conference details modal lacks VAT/paid/balance and attendee/room edit; F15 smoke_test_booking leaves a tentative_booking_log row; F16 email wording. IDEAs: conference deposits setter, events reserving conference rooms, pre-event reminder for unpaid confirmed conferences.
 
 ## Installed app (PWA)
 - TODO · 8-hour idle sign-out sends the person's unsent sales first (or warns on next sign-in). · pwa lead
