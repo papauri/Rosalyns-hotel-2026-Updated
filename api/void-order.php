@@ -42,6 +42,7 @@ if (empty($_SESSION['admin_user'])) vjerr('Not authenticated', 401);
 $user = $_SESSION['admin_user'];
 if (!hasPermission((int)$user['id'], 'pos_void')) vjerr('You do not have permission to void orders', 403);
 if (!hasPermission((int)$user['id'], 'stock_orders')) vjerr('Forbidden', 403);
+rhApiModuleGate('pos.php'); // blocked when the till/POS module is switched off, as the page is
 if (!validateCsrfToken($_POST['csrf_token'] ?? '')) vjerr('Invalid CSRF token', 403);
 
 $orderId  = (int)($_POST['order_id'] ?? 0);

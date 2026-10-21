@@ -29,6 +29,7 @@ $availablePermissions = [
     'bookings.update' => 'Update booking details from an approved integration',
     'bookings.delete' => 'Cancel/delete bookings from an approved integration',
     'rooms.block' => 'Block rooms from sale (blocked dates, Maintenance / Out of Order) - the integration equivalent of the Block Rooms permission',
+    'rooms.manage' => 'Change room amenities, room photos, housekeeping assignments and maintenance schedules (create, update, delete)',
 ];
 
 function buildMetaRoomPriceTemplate(PDO $pdo): string
@@ -286,6 +287,7 @@ $roomPriceTemplate = buildMetaRoomPriceTemplate($pdo);
                         <li><span class="endpoint-code">rooms.read</span> lets a website or app read room names, descriptions, guest limits and prices.</li>
                         <li><span class="endpoint-code">availability.check</span> checks available rooms for selected dates before a guest books.</li>
                         <li><span class="endpoint-code">bookings.create</span> creates bookings from an approved outside website or Meta flow.</li>
+                        <li><span class="endpoint-code">rooms.manage</span> lets an approved system change room amenities, photos, housekeeping and maintenance schedules. Reading them needs no extra permission.</li>
                         <li>Send the key in the <span class="endpoint-code">X-API-Key</span> header. Keep keys private and disable any key you no longer use.</li>
                         <li>For Facebook/Instagram/Meta copy, use the room-price template on the right. It is generated from the live room table.</li>
                     </ul>

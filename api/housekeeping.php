@@ -22,6 +22,10 @@ if (!defined('API_ACCESS_ALLOWED')) {
 
 global $pdo, $auth, $client;
 $method = $_SERVER['REQUEST_METHOD'];
+// Writes change live room operations: the API key needs the "rooms.manage" scope. Reads stay open to any key.
+if ($method !== 'GET' && !$auth->checkPermission($client, 'rooms.manage')) {
+    ApiResponse::error('This API key needs the rooms.manage permission to make changes.', 403);
+}
 $path   = $_SERVER['PATH_INFO'] ?? '';
 $id     = null;
 $statusPath = false;

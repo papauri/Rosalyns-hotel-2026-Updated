@@ -45,6 +45,7 @@ $userId = (int)($_SESSION['admin_user']['id'] ?? 0);
 if ($userId <= 0 || !hasPermission($userId, 'pos_delete_order')) {
     dj_err('You do not have permission to delete orders.', 403);
 }
+rhApiModuleGate('pos.php'); // blocked when the till/POS module is switched off, as the page is
 
 $orderId = (int)($_POST['order_id'] ?? 0);
 $reason = trim((string)($_POST['delete_reason'] ?? ''));

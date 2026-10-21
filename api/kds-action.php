@@ -54,6 +54,7 @@ $csrfToken = (string)($_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? 
 if (!validateCsrfToken($csrfToken)) jerr('Invalid CSRF token', 403);
 
 require_once __DIR__ . '/../admin/includes/permissions.php';
+rhApiModuleGate('pos.php'); // blocked when the till/POS module is switched off, as the page is
 require_once __DIR__ . '/../admin/includes/offline-log.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';

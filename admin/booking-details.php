@@ -1940,7 +1940,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                     </div>
                                     <div class="invoice-actions">
                                         <?php if ($invoice['invoice_path']): ?>
-                                            <a href="../<?php echo htmlspecialchars($invoice['invoice_path']); ?>" target="_blank" class="invoice-btn view">
+                                            <a href="document-download.php?type=<?php echo !empty($invoice['id']) ? 'invoice&amp;id=' . (int)$invoice['id'] : 'booking_invoice&amp;id=' . (int)$booking_id; ?>" target="_blank" class="invoice-btn view">
                                                 <i class="fas fa-eye"></i> View
                                             </a>
                                         <?php endif; ?>

@@ -68,6 +68,7 @@ $canOperate = $isPrivileged
 if (!$canOperate) {
     cjerr('Forbidden', 403);
 }
+rhApiModuleGate('pos.php'); // blocked when the till/POS module is switched off, as the page is
 
 $orderId = (int)($_POST['order_id'] ?? 0);
 $reason = trim((string)($_POST['cancel_reason'] ?? ''));

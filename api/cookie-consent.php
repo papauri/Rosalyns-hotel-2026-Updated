@@ -13,6 +13,14 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/public-csrf.php';
+
+// Unauthenticated endpoint: limit per IP so it cannot be used to fill the table.
+if (!pub_ip_rate_limit('cookie_consent', 20, 600)) {
+    http_response_code(429);
+    echo json_encode(['error' => 'Too many requests']);
+    exit;
+}
 
 $consent_level = $_POST['consent_level'] ?? '';
 if (!in_array($consent_level, ['all', 'essential', 'declined'])) {
@@ -21,10 +29,8 @@ if (!in_array($consent_level, ['all', 'essential', 'declined'])) {
     exit;
 }
 
-$ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-if (strpos($ip, ',') !== false) {
-    $ip = trim(explode(',', $ip)[0]);
-}
+// REMOTE_ADDR only: X-Forwarded-For is client-controlled and would let anyone write any "IP".
+$ip = substr((string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'), 0, 45);
 $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
 $timestamp = date('Y-m-d H:i:s');
 
@@ -40,6 +46,14 @@ try {
             INDEX `idx_created` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     ");
+
+    // One row per IP, per choice, per day.
+    $dupe = $pdo->prepare("SELECT 1 FROM cookie_consent_log WHERE ip_address = ? AND consent_level = ? AND created_at >= CURDATE() LIMIT 1");
+    $dupe->execute([$ip, $consent_level]);
+    if ($dupe->fetchColumn()) {
+        echo json_encode(['success' => true]);
+        exit;
+    }
 
     $stmt = $pdo->prepare("INSERT INTO cookie_consent_log (ip_address, user_agent, consent_level) VALUES (?, ?, ?)");
     $stmt->execute([$ip, substr($ua, 0, 500), $consent_level]);

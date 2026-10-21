@@ -8325,7 +8325,11 @@ function ensureApiKeyRetrievableColumn(PDO $pdo): void
 function encryptApiKey(string $plainKey): string
 {
     // Salt comes from APP_ENCRYPTION_SALT in .env so each hotel installation is isolated
-    $salt = $_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: 'DEFAULT_SALT_CHANGE_IN_ENV';
+    $salt = (string)($_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: '');
+    if ($salt === '') {
+        // No built-in default: a known salt would make every stored key readable by anyone with a database copy.
+        throw new RuntimeException('APP_ENCRYPTION_SALT is not set in .env, so API keys cannot be stored yet.');
+    }
     $encryptionKey = hash('sha256', $salt . ($_SERVER['SERVER_NAME'] ?? 'localhost'), true);
     $iv = random_bytes(16);
     $encrypted = openssl_encrypt($plainKey, 'AES-256-CBC', $encryptionKey, 0, $iv);
@@ -8343,7 +8347,10 @@ function decryptApiKey(string $encryptedKey): ?string
     if (empty($encryptedKey)) {
         return null;
     }
-    $salt = $_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: 'DEFAULT_SALT_CHANGE_IN_ENV';
+    $salt = (string)($_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: '');
+    if ($salt === '') {
+        return null;
+    }
     $encryptionKey = hash('sha256', $salt . ($_SERVER['SERVER_NAME'] ?? 'localhost'), true);
     $data = base64_decode($encryptedKey);
     if ($data === false || strlen($data) < 16) {

@@ -54,6 +54,14 @@ if (!function_exists('rh_session_start')) {
             @ini_set('session.gc_probability', '1');
             @ini_set('session.gc_divisor', '500');
         }
+        // Secure flag whenever the request came in over HTTPS (also behind a proxy/load balancer).
+        $https = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off')
+            || (string)($_SERVER['SERVER_PORT'] ?? '') === '443'
+            || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+        if ($https) {
+            @ini_set('session.cookie_secure', '1');
+        }
+        @ini_set('session.cookie_httponly', '1');
         session_start();
     }
 }

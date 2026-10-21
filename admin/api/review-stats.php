@@ -243,9 +243,9 @@ try {
     }
 } catch (PDOException $e) {
     error_log("Database error in review-stats.php: " . $e->getMessage());
-    sendError('Database error occurred', 500, $e->getMessage());
+    sendError('Database error occurred', 500);
 } catch (Exception $e) {
     error_log("Error in review-stats.php: " . $e->getMessage());
-    sendError('An error occurred', 500, $e->getMessage());
+    sendError('An error occurred', 500);
 }
 

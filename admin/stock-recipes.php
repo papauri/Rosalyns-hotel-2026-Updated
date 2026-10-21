@@ -596,6 +596,7 @@ $csrf_token = generateCsrfToken();
             try {
                 const fd = new FormData();
                 fd.set('action', 'add_ingredient');
+                fd.set('csrf_token', <?php echo json_encode($csrf_token); ?>);
                 fd.set('name', name);
                 fd.set('category', cat);
                 fd.set('unit', unit);

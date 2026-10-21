@@ -95,7 +95,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$email]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if ($user && $user['is_active']) {
+            // The reset link is only ever built from the configured site_url, never from the Host header
+            // (a forged Host would put an attacker's domain in a genuine reset email).
+            $resetBase = trim((string)getSetting('site_url', ''));
+            if ($user && $user['is_active'] && $resetBase === '') {
+                error_log('[forgot-password] Reset not sent: the site_url setting is empty.');
+            }
+            if ($user && $user['is_active'] && $resetBase !== '') {
                 // Generate a secure token
                 $token = bin2hex(random_bytes(32));
                 $expires = date('Y-m-d H:i:s', strtotime('+1 hour'));
@@ -112,12 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $log_stmt->execute([$user['username'], 'Reset token issued', $ip, $ua]);
 
                 // Build reset URL
-                $site_url = getSetting('site_url', '');
-                if (empty($site_url)) {
-                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-                    $site_url = $protocol . '://' . $_SERVER['HTTP_HOST'];
-                }
-                $reset_url = rtrim($site_url, '/') . '/admin/reset-password.php?token=' . $token;
+                $reset_url = rtrim($resetBase, '/') . '/admin/reset-password.php?token=' . $token;
 
                 // Send reset email
                 require_once '../config/email.php';

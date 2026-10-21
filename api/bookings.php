@@ -554,5 +554,5 @@ try {
     ApiResponse::error('Database error occurred while creating booking', 500);
 } catch (Exception $e) {
     error_log("Booking API Error: " . $e->getMessage());
-    ApiResponse::error('Failed to create booking: ' . $e->getMessage(), 500);
+    ApiResponse::error('Failed to create booking. Please try again or contact the hotel.', 500);
 }

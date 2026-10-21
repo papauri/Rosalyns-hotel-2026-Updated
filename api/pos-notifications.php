@@ -39,6 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') pn_err('POST only', 405);
 if (empty($_SESSION['admin_user'])) pn_err('Not authenticated', 401);
 $user = $_SESSION['admin_user'];
 $userId = (int)$user['id'];
+rhApiModuleGate('pos.php'); // blocked when the till/POS module is switched off, as the page is
 
 $csrfToken = (string)($_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ''));
 if (!validateCsrfToken($csrfToken)) pn_err('Invalid CSRF token', 403);

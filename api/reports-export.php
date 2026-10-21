@@ -32,6 +32,8 @@ if (!in_array($_exportRole, ['admin', 'manager', 'accountant'], true)) {
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../admin/includes/finance-schema.php';
+require_once __DIR__ . '/../admin/includes/permissions.php';
+rhApiModuleGate('reports.php'); // blocked when the finance module is switched off, as the page is
 
 // Get dynamic conference field names for compatibility
 $conferenceFields = finance_conference_fields($pdo);

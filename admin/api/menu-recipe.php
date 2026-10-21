@@ -29,6 +29,16 @@ if (!function_exists('ensureStockTablesExist') || !ensureStockTablesExist()) {
 
 $action = $_REQUEST['action'] ?? '';
 
+// Every non-GET call changes recipes/ingredients: it must carry the admin CSRF token.
+if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+    $csrfSent = (string)($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['csrf_token'] ?? ''));
+    if (!validateCsrfToken($csrfSent)) {
+        http_response_code(403);
+        echo json_encode(['ok' => false, 'error' => 'Security token invalid. Refresh the page and try again.']);
+        exit;
+    }
+}
+
 try {
     switch ($action) {
 

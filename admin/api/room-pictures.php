@@ -200,6 +200,14 @@ if ($method === 'POST' || $method === 'PUT') {
     }
 }
 
+// CSRF: every change (POST/PUT/DELETE) must carry the admin token (X-CSRF-Token header, or csrf_token in the body).
+if ($method !== 'GET') {
+    $csrfSent = (string)($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($input['csrf_token'] ?? ''));
+    if (!validateCsrfToken($csrfSent)) {
+        sendError('Security token invalid. Refresh the page and try again.', 403);
+    }
+}
+
 try {
     switch ($method) {
         case 'GET':
@@ -503,9 +511,9 @@ try {
     
 } catch (PDOException $e) {
     error_log("Database error in room-pictures.php: " . $e->getMessage());
-    sendError('Database error occurred', 500, $e->getMessage());
+    sendError('Database error occurred', 500);
 } catch (Exception $e) {
     error_log("Error in room-pictures.php: " . $e->getMessage());
-    sendError('An error occurred', 500, $e->getMessage());
+    sendError('An error occurred', 500);
 }
 

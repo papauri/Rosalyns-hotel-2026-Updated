@@ -764,7 +764,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                         <div class="action-buttons">
                                             <!-- View generated document -->
                                             <?php if ($invoice['invoice_path'] && file_exists(__DIR__ . '/../' . $invoice['invoice_path'])): ?>
-                                                <a href="../<?php echo htmlspecialchars($invoice['invoice_path']); ?>"
+                                                <a href="document-download.php?type=invoice&amp;id=<?php echo (int)$invoice['id']; ?>"
                                                     target="_blank"
                                                     class="btn-action btn-view"
                                                     title="<?php echo $invoice['payment_type'] === 'refund' ? 'View Credit Note' : 'View Invoice'; ?>">

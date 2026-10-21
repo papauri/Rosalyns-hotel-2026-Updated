@@ -1327,6 +1327,7 @@ if ($stockReady) {
                 quantity: l.quantity
             }))));
             try {
+                fd.append('csrf_token', <?= json_encode($csrf_token) ?>);
                 const res = await fetch(RECIPE_API, {
                     method: 'POST',
                     body: fd
@@ -1348,6 +1349,7 @@ if ($stockReady) {
             fd.append('menu_item_id', _rmContext.menu_item_id);
             fd.append('menu_type', _rmContext.menu_type);
             try {
+                fd.append('csrf_token', <?= json_encode($csrf_token) ?>);
                 const res = await fetch(RECIPE_API, {
                     method: 'POST',
                     body: fd
@@ -1390,6 +1392,7 @@ if ($stockReady) {
             fd.append('cost_per_unit', document.getElementById('ig-cost').value || 0);
             fd.append('yield_percent', document.getElementById('ig-yield').value || 100);
             try {
+                fd.append('csrf_token', <?= json_encode($csrf_token) ?>);
                 const res = await fetch(RECIPE_API, {
                     method: 'POST',
                     body: fd

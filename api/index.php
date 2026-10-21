@@ -114,9 +114,15 @@ class ApiAuth {
             $this->sendError('API key is required', 401);
         }
         
+        // Throttle guessing: once an IP has failed too often, refuse before the (slow) bcrypt scan.
+        if ($this->failedAuthBlocked()) {
+            $this->sendError('Too many failed attempts. Please try again later.', 429);
+        }
+
         $client = $this->validateApiKey($apiKey);
         
         if (!$client) {
+            $this->recordFailedAuth();
             $this->sendError('Invalid API key', 401);
         }
         
@@ -165,11 +171,37 @@ class ApiAuth {
             return $headerKey;
         }
 
-        if (isset($_GET['api_key']) && $_GET['api_key'] !== '') {
-            return (string)$_GET['api_key'];
-        }
-
+        // Header only: a key in the query string ends up in access logs, browser history and Referer headers.
         return null;
+    }
+
+    private const FAILED_AUTH_LIMIT = 10;
+    private const FAILED_AUTH_WINDOW = 600;
+
+    private function failedAuthFile(): string {
+        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+        return sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'apifail_' . substr(hash('sha256', $ip), 0, 24) . '.json';
+    }
+
+    private function failedAuthHits(): array {
+        $file = $this->failedAuthFile();
+        $raw = is_file($file) ? @file_get_contents($file) : false;
+        $hits = $raw ? json_decode($raw, true) : [];
+        if (!is_array($hits)) {
+            return [];
+        }
+        $now = time();
+        return array_values(array_filter($hits, fn($ts) => is_int($ts) && ($now - $ts) < self::FAILED_AUTH_WINDOW));
+    }
+
+    private function failedAuthBlocked(): bool {
+        return count($this->failedAuthHits()) >= self::FAILED_AUTH_LIMIT;
+    }
+
+    private function recordFailedAuth(): void {
+        $hits = $this->failedAuthHits();
+        $hits[] = time();
+        @file_put_contents($this->failedAuthFile(), json_encode($hits), LOCK_EX);
     }
     
     /**
@@ -521,5 +553,5 @@ try {
     rh_api_log_current_response(500);
     rh_log_event('api', 'error', 'API request failed with exception', ['endpoint' => $endpoint ?? 'unknown', 'error' => $e->getMessage()]);
     
-    ApiResponse::error('Internal server error', 500, $e->getMessage());
+    ApiResponse::error('Internal server error', 500);
 }

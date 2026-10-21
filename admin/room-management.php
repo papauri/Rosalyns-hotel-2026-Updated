@@ -1521,7 +1521,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
-                            'X-Requested-With': 'XMLHttpRequest'
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-CSRF-Token': <?php echo json_encode($csrf_token); ?>
                         },
                         credentials: 'same-origin',
                         body: JSON.stringify({
@@ -1554,7 +1555,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                         method: 'DELETE',
                         credentials: 'same-origin',
                         headers: {
-                            'X-Requested-With': 'XMLHttpRequest'
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-CSRF-Token': <?php echo json_encode($csrf_token); ?>
                         }
                     })
                     .then(function(r) {
@@ -1578,7 +1580,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                         body: new FormData(self),
                         credentials: 'same-origin',
                         headers: {
-                            'X-Requested-With': 'XMLHttpRequest'
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-CSRF-Token': <?php echo json_encode($csrf_token); ?>
                         }
                     })
                     .then(function(r) {

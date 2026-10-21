@@ -152,6 +152,7 @@ try {
 // Max failed attempts before temporary lockout
 $max_attempts = 5;
 $lockout_minutes = 15;
+$generic_login_error = 'Invalid username or password. If this keeps happening, wait ' . $lockout_minutes . ' minutes and try again.';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = substr(trim((string)($_POST['username'] ?? '')), 0, 100); // admin_activity_log.username is VARCHAR(100)
@@ -185,7 +186,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if ($user && !$user['is_active']) {
-                    $error_message = 'This account has been deactivated. Contact your administrator.';
+                    $error_message = $generic_login_error; // same text as a wrong password: do not reveal which usernames exist
 
                     $log_stmt = $pdo->prepare("INSERT INTO admin_activity_log (user_id, username, action, details, ip_address, user_agent) VALUES (?, ?, 'login_failed', ?, ?, ?)");
                     $log_stmt->execute([$user['id'], $username, 'Account deactivated', $ip, $ua]);
@@ -202,7 +203,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     if ($last_fail_time && strtotime($last_fail_time) > strtotime("-{$lockout_minutes} minutes")) {
                         $remaining = $lockout_minutes - floor((time() - strtotime($last_fail_time)) / 60);
-                        $error_message = 'Account temporarily locked due to too many failed attempts. Try again in ' . max(1, $remaining) . ' minute(s).';
+                        $error_message = $generic_login_error; // lockout stays; the screen does not say which account is locked
 
                         $log_stmt = $pdo->prepare("INSERT INTO admin_activity_log (user_id, username, action, details, ip_address, user_agent) VALUES (?, ?, 'login_blocked', ?, ?, ?)");
                         $log_stmt->execute([$user['id'], $username, 'Account locked (' . $user['failed_login_attempts'] . ' failed attempts)', $ip, $ua]);
@@ -266,11 +267,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             rh_log_event('auth', 'warning', 'Admin login failed — wrong password', ['username' => $username, 'user_id' => $user['id'], 'attempt' => $attempts, 'ip' => $ip]);
 
                             if ($remaining > 0 && $remaining <= 2) {
-                                $error_message = 'Invalid username or password. ' . $remaining . ' attempt(s) remaining before lockout.';
+                                $error_message = $generic_login_error;
                             } elseif ($remaining <= 0) {
-                                $error_message = 'Account locked for ' . $lockout_minutes . ' minutes due to too many failed attempts.';
+                                $error_message = $generic_login_error;
                             } else {
-                                $error_message = 'Invalid username or password.';
+                                $error_message = $generic_login_error;
                             }
                         } else {
                             // Unknown username
@@ -278,7 +279,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $log_stmt->execute([$username, $ip, $ua]);
                             rh_log_event('auth', 'warning', 'Admin login failed — unknown username', ['username' => $username, 'ip' => $ip]);
 
-                            $error_message = 'Invalid username or password.';
+                            $error_message = $generic_login_error;
                         }
                     }
                 }

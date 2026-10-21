@@ -238,7 +238,7 @@ try {
 
 } catch (Exception $e) {
     error_log("Availability API Error: " . $e->getMessage());
-    ApiResponse::error('Failed to check availability: ' . $e->getMessage(), 500);
+    ApiResponse::error('Failed to check availability. Please try again.', 500);
 }
 
 /**

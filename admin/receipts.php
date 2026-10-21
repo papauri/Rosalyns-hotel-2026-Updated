@@ -405,7 +405,7 @@ $site_name = getSetting('site_name', 'Hotel');
                                         </button>
                                     </form>
                                     <?php if (!empty($payment['receipt_path'])): ?>
-                                        <a class="quick-action" href="../<?php echo htmlspecialchars((string)$payment['receipt_path']); ?>" target="_blank" title="View PDF">
+                                        <a class="quick-action" href="document-download.php?type=receipt&amp;id=<?php echo (int)$payment['id']; ?>" target="_blank" title="View PDF">
                                             <i class="fas fa-eye"></i>
                                         </a>
                                     <?php endif; ?>

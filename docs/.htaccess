@@ -1,0 +1,11 @@
+# Contract and equipment PDFs are private: no direct web access. (docs/contract.php and
+# docs/equipment.php need an administrator session; the staff guides in guides/ stay open.)
+<FilesMatch "(?i)\.pdf$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

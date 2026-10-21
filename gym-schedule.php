@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gym_slot_form'])) {
         $resError = 'Slot booking is not available right now.';
     } elseif (!pub_csrf_validate($_POST['csrf_token'] ?? '', 'gym_slot')) {
         $resError = 'Your session expired. Please refresh and try again.';
-    } elseif (!pub_rate_limit('gym_slot_form', 6, 600)) {
+    } elseif ((!pub_rate_limit('gym_slot_form', 6, 600) || !pub_ip_rate_limit('gym_slot_form', 12, 600))) {
         $resError = 'Too many reservations from this device. Please wait a few minutes.';
     } else {
         $result = gymScheduleCreateReservation($pdo, [

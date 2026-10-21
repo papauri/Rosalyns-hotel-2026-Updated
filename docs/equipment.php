@@ -6,6 +6,17 @@
  */
 declare(strict_types=1);
 
+require_once __DIR__ . '/../includes/admin-session.php';
+rh_admin_session_start();
+// Commercial terms: administrators only, never public.
+if (empty($_SESSION['admin_user_id']) || ($_SESSION['admin_role'] ?? '') !== 'admin') {
+    http_response_code(empty($_SESSION['admin_user_id']) ? 401 : 403);
+    if (empty($_SESSION['admin_user_id'])) {
+        header('Location: ../admin/login.php');
+    }
+    exit;
+}
+
 $dbConfig = __DIR__ . '/../config/database.php';
 $dbAvailable = false;
 if (file_exists($dbConfig)) {
