@@ -3590,6 +3590,49 @@ function rh_sellable_room_units(): int
     return rh_room_units_count(['out_of_order', 'maintenance'], true);
 }
 
+/**
+ * Sellable room units per room type (room type id => units), same basis as rh_sellable_room_units():
+ * active rooms minus out-of-order minus maintenance, a joined-only pair counted once (under its "Book As"
+ * type, status = most restrictive of its two rooms). The values add up to rh_sellable_room_units().
+ *
+ * @return array<int,int>
+ */
+function rh_sellable_room_units_by_type(): array
+{
+    global $pdo;
+    try {
+        $rooms = $pdo->query('SELECT id, room_type_id, status FROM individual_rooms WHERE is_active = 1')->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return [];
+    }
+    $byId = [];
+    foreach ($rooms as $r) {
+        $byId[(int)$r['id']] = $r;
+    }
+    $paired = [];
+    $out = [];
+    $bad = ['out_of_order', 'maintenance'];
+    foreach (rh_joined_only_pairs(true) as $pair) {
+        $a = $byId[$pair['room_a_id']] ?? null;
+        $b = $byId[$pair['room_b_id']] ?? null;
+        if (!$a || !$b) {
+            continue;
+        }
+        $paired[$pair['room_a_id']] = $paired[$pair['room_b_id']] = true;
+        $tid = (int)$pair['combined_room_type_id'];
+        $out[$tid] = ($out[$tid] ?? 0)
+            + (in_array(rh_joined_pair_status((string)$a['status'], (string)$b['status']), $bad, true) ? 0 : 1);
+    }
+    foreach ($byId as $rid => $r) {
+        if (isset($paired[$rid])) {
+            continue;
+        }
+        $tid = (int)$r['room_type_id'];
+        $out[$tid] = ($out[$tid] ?? 0) + (in_array((string)$r['status'], $bad, true) ? 0 : 1);
+    }
+    return $out;
+}
+
 /** Room units that cannot be sold right now (out of order + maintenance), on the same unit basis as above. */
 function rh_unsellable_room_units(): int
 {

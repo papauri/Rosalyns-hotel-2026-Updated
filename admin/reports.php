@@ -1051,8 +1051,10 @@ try {
             + $rhOverlapParams('t3', $start_date, $end_date) + $rhOverlapParams('t4', $start_date, $end_date)
             + $rhOverlapParams('t5', $start_date, $end_date));
         $roomTypeAdr = $rtAdrStmt->fetchAll(PDO::FETCH_ASSOC);
+        // Per-type RevPAR base = that type's sellable units (same basis as rh_sellable_room_units()).
+        $sellableByType = rh_sellable_room_units_by_type();
         foreach ($roomTypeAdr as &$adrRow) {
-            $adrRow['total_rooms'] = rh_room_type_unit_total((int)$adrRow['room_type_id'], (int)$adrRow['total_rooms']);
+            $adrRow['total_rooms'] = (int)($sellableByType[(int)$adrRow['room_type_id']] ?? 0);
         }
         unset($adrRow);
     } catch (Throwable $rtEx) { /* safe fallback */
@@ -2662,7 +2664,7 @@ try {
                 <!-- Per Room Type ADR / RevPAR -->
                 <div class="rh-panel">
                     <div class="rh-panel__head"><h2 class="rh-panel__title">ADR &amp; RevPAR by Room Type</h2></div>
-                    <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">ADR = Revenue incl. VAT ÷ Nights Sold. RevPAR = Revenue incl. VAT ÷ (Rooms of this type × Days in Period); this per-type table uses every room of the type, so it can differ from the headline RevPAR, which uses sellable rooms only. RevPAR below 40% of ADR means significant empty nights.</p>
+                    <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">ADR = Revenue incl. VAT ÷ Nights Sold. RevPAR = Revenue incl. VAT ÷ (Sellable rooms of this type × Days in Period). Sellable rooms = the type's rooms minus out of order and maintenance, a joined pair counted once; the types add up to the hotel's sellable rooms used by the headline RevPAR. A type with no sellable rooms shows a dash. RevPAR below 40% of ADR means significant empty nights.</p>
                     <table class="acct-table">
                         <thead>
                             <tr>
@@ -2677,20 +2679,23 @@ try {
                         <tbody>
                             <?php foreach ($roomTypeAdr as $rt):
                                 $rtAvailNights = $rt['total_rooms'] * $daysInPeriod;
-                                $rtRevpar = $rtAvailNights > 0 ? round((float)$rt['revenue'] / $rtAvailNights, 0) : 0;
-                                $rtRatio  = (float)$rt['adr'] > 0 ? round(($rtRevpar / (float)$rt['adr']) * 100, 1) : 0;
+                                $rtHasBase = $rtAvailNights > 0;
+                                $rtRevpar = $rtHasBase ? round((float)$rt['revenue'] / $rtAvailNights, 0) : 0;
+                                $rtRatio  = ($rtHasBase && (float)$rt['adr'] > 0) ? round(($rtRevpar / (float)$rt['adr']) * 100, 1) : 0;
                             ?>
                                 <tr>
                                     <td><strong><?php echo htmlspecialchars($rt['room_name']); ?></strong></td>
                                     <td><?php echo $currency_symbol . ' ' . number_format((float)$rt['revenue'], 0); ?></td>
                                     <td><?php echo number_format((int)$rt['nights_sold']); ?></td>
                                     <td style="font-weight:600"><?php echo $currency_symbol . ' ' . number_format((float)$rt['adr'], 0); ?></td>
-                                    <td style="font-weight:600; color: var(--color-lux-gold)"><?php echo $currency_symbol . ' ' . number_format($rtRevpar, 0); ?></td>
+                                    <td style="font-weight:600; color: var(--color-lux-gold)"><?php echo $rtHasBase ? $currency_symbol . ' ' . number_format($rtRevpar, 0) : '&ndash;'; ?></td>
                                     <td>
+                                        <?php if ($rtHasBase): ?>
                                         <div class="acct-bar">
                                             <div class="acct-bar__fill <?php echo $rtRatio < 40 ? 'acct-bar__fill--danger' : ''; ?>" style="width: <?php echo min(100, $rtRatio); ?>%"></div>
                                             <span class="acct-bar__label"><?php echo $rtRatio; ?>%</span>
                                         </div>
+                                        <?php else: ?>&ndash;<?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
