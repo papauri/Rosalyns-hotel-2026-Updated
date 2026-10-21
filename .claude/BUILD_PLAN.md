@@ -15,7 +15,7 @@
 
 Purpose: know when the system is ready and stop patching things that don't need it.
 
-**1. Feature freeze (from the 2026-10-20 push).** No new features, redesigns or polish without
+**1. Feature freeze (from the 2026-10-20 push).** 2026-10-22: owner approved the monthly batch — every item in `.claude/PATCH_QUEUE.md` may be built (by/through `dept-patch-lead`); security patches are always allowed. No new features, redesigns or polish without
 explicit owner approval. New ideas go to "Future Ideas" with one line each — never into a phase
 table, never built proactively.
 

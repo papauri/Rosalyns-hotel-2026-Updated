@@ -14,6 +14,7 @@ Every `dept-*-lead` and `ui-lead` reads this file after
 | `dept-guest-site-lead` | Guest website (13 + the public side of 1, 7, 8) | public pages, booking flow, in-site navigation, loader, SEO (PWA mechanics: `dept-pwa-lead`) — may differ per hotel |
 | `dept-events-gym-lead` | Gym, conference & events (7, 8) | conference enquiries, event bookings/RSVPs/waitlist, gym packages, memberships, check-in, classes, slots |
 | `dept-pwa-lead` | Installed app / PWA (part of 4, 11, 13) | service workers, manifests, install, offline queue + replay, station reconnect/wake, sign-out cache safety — admin, POS, KDS/BDS/CDS and public site mechanics. **Patch only** |
+| `dept-patch-lead` | Feature + security patches (all) | `.claude/PATCH_QUEUE.md` (owner-approved backlog), standing security sweep, briefs the owning lead, gates and hands to ship; small cross-cutting/security fixes itself |
 | `dept-backup-lead` | Backups & data safety (part of 11) | nightly backup, Run Backup Now, rotation, download/delete/restore, backup log, health checks, backup failure/stale/off-site alerts |
 | `ui-lead` | Cross-system UI | one visual language across every department; reviews UI requests from the leads |
 
