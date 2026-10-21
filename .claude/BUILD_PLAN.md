@@ -37,7 +37,7 @@ triaged with rule 2. Then Rosalyn's, by the owner/staff on a real stay.
 **4. Owner items that must be done before go-live:**
 - [ ] Rosalyn's email sender: use an address the SMTP account owns (Gmail sender via another
       server is DMARC-blocked — receipts may go to spam).
-- [ ] Rosalyn's: create a manager account.
+- [x] Rosalyn's: create a manager account. Done: Pamela Msukwa (P.Msukwa, manager); also admin Mphatso Nthani. Note 2026-10-22: a "test" user (role manager) is still active - owner to decide.
 - [ ] Opening stock count recorded (Stock → Stock Count) in each hotel that uses stock.
 - [ ] Confirm restaurant tables match the real floor plan; replace placeholder reviews.
 - [ ] Decide the DRESS REHEARSAL rows in Liwonde (keep for reference or clear).

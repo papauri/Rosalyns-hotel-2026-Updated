@@ -47,5 +47,5 @@ Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 - Set the Admin email in Email Settings so backup alerts reach someone; download a backup copy weekly.
 - Deploy both hotels; Facebook: add redirect URI, App ID/Secret, Save and connect.
 - Costs for 7 zero-cost ingredients, then opening stock count (second manager approves).
-- Grant Edit Booking / Add Payments / Cancel Bookings to receptionists who need them.
+- Grant Edit Booking / Cancel Bookings to receptionists who need them (Add Payments + Receipts are now receptionist defaults, 2026-10-21).
 - Try Orders & Tabs bulk actions and one PO over-delivery once real orders exist.
