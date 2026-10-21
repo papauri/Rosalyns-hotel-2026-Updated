@@ -18,7 +18,11 @@ function ok(string $name, bool $cond, string $detail = ''): void {
 function run_page(string $page, array $post, array $verify = [], bool $ajax = false, array $grep = []): array {
     global $h;
     $cfg = base64_encode(json_encode(['post' => $post, 'ajax' => $ajax, 'verify' => $verify, 'grep' => $grep]));
-    $out = shell_exec('php ' . escapeshellarg($h) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg($cfg) . ' 2>&1');
+    $cmd = 'php ' . escapeshellarg($h) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg($cfg) . ' 2>&1';
+    $out = shell_exec($cmd);
+    // A child that printed nothing at all never ran (Windows could not start it under memory
+    // pressure); nothing was written, so run it once more instead of reporting a false FAIL.
+    if (trim((string)$out) === '') { usleep(500000); $out = shell_exec($cmd); }
     if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $r = json_decode($m[1], true); if (is_array($r)) { return $r; } }
     return ['error' => 'no result', 'raw' => substr((string)$out, -400), 'rolled_back' => false];
 }
