@@ -433,6 +433,7 @@ explicit confirmation):**
       needed.
 
 ## Future Ideas (not in scope — logged only, never auto-queued)
+- AI help assistant (owner 2026-10-22: future idea, not now): "Ask a question" for managers — answers "how do I" from the guides and read-only figure questions via the existing helpers (EOD, receivables, availability); never changes data, follows permissions, no AI-looking UI, no MRA claims. Design notes in the 2026-10-22 session.
 
 - OTA/channel-manager sync (rate parity, subscription cost — needs owner input first)
 - Framework rewrite / migrating off procedural PHP
