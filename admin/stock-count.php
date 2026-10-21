@@ -633,6 +633,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                             /* Sales beyond the batches left the ingredient total negative with no batch behind it;
                              * settle that deficit first so the batch sum stays equal to current_quantity. */
                             $settle = rh_stock_receipt_settlement($pdo, $ingredientId, $liveQty, $sliceQty);
+                            if ($settle['settled'] > 0 && $costAtTime > 0) {
+                                // Late cost: sales made at zero cost for this deficit get costed at the count line's unit cost (no cost = left at 0).
+                                rh_stock_backcost_settled_deficit($pdo, $ingredientId, (float)$settle['deficit'], (float)$settle['settled'], (float)$costAtTime, (int)($user['id'] ?? 0) ?: null, 'stock count ' . ($count['reference'] ?? ''));
+                            }
                             $batchIns->execute([
                                 $ingredientId,
                                 $tmpBatchNumber,

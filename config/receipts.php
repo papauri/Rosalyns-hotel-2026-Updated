@@ -122,6 +122,32 @@ if (!function_exists('receipt_get_payment')) {
     }
 }
 
+if (!function_exists('receipt_shop_mode')) {
+    /**
+     * Shop / supermarket / retail till = the restaurant module is off (same test as isRestaurantEnabled(),
+     * read straight from the setting so CLI scripts need no extra includes). Customer documents for till
+     * sales then use neutral wording; a hotel with the restaurant on keeps the dining wording exactly.
+     */
+    function receipt_shop_mode(): bool
+    {
+        return (string)getSetting('restaurant_system_enabled', '1') !== '1';
+    }
+}
+
+if (!function_exists('receipt_till_footer')) {
+    /** Footer line of a till receipt: the hotel's own text wins; the default depends on restaurant vs shop. */
+    function receipt_till_footer(): string
+    {
+        $dining = 'Thank you for dining with us!';
+        $custom = trim((string)getSetting('restaurant_receipt_footer', ''));
+        if (receipt_shop_mode()) {
+            // The stock dining default (never customised) reads wrongly on a shop receipt.
+            return ($custom === '' || $custom === $dining) ? 'Thank you for shopping with us!' : $custom;
+        }
+        return $custom !== '' ? $custom : $dining;
+    }
+}
+
 if (!function_exists('receipt_hydrate_context')) {
     function receipt_hydrate_context(PDO $pdo, array $payment): array
     {
@@ -129,6 +155,8 @@ if (!function_exists('receipt_hydrate_context')) {
         $guestEmail = '';
         $guestPhone = '';
         $description = ucfirst(str_replace('_', ' ', (string)($payment['booking_type'] ?? 'payment')));
+        $orderItems = [];
+        $orderTotals = [];
 
         if (($payment['booking_type'] ?? '') === 'room' && !empty($payment['booking_id'])) {
             $stmt = $pdo->prepare("SELECT b.guest_name, b.guest_email, b.guest_phone, b.booking_reference, r.name AS room_name
@@ -188,15 +216,22 @@ if (!function_exists('receipt_hydrate_context')) {
             }
         } elseif (($payment['booking_type'] ?? '') === 'restaurant' && !empty($payment['booking_id'])) {
             try {
-                $stmt = $pdo->prepare("SELECT reference, customer_name, customer_email, customer_phone, order_type FROM stock_orders WHERE id = ?");
+                $stmt = $pdo->prepare("SELECT id, reference, customer_name, customer_email, customer_phone, order_type, subtotal, discount_amount, service_charge, total_amount, split_count FROM stock_orders WHERE id = ?");
                 $stmt->execute([(int)$payment['booking_id']]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
                 $guestName = (string)($order['customer_name'] ?? $guestName);
                 $guestEmail = (string)($order['customer_email'] ?? '');
                 $guestPhone = (string)($order['customer_phone'] ?? '');
-                $description = 'Restaurant order ' . (string)($order['reference'] ?? $payment['booking_reference'] ?? '');
+                $description = (receipt_shop_mode() ? 'Sale ' : 'Restaurant order ') . (string)($order['reference'] ?? $payment['booking_reference'] ?? '');
+                // The till sale's lines, so the payment receipt PDF can list what was bought.
+                if ($order) {
+                    $itemStmt = $pdo->prepare("SELECT item_name, quantity, unit_price, line_total FROM stock_order_items WHERE order_id = ? AND kds_status <> 'void' ORDER BY id");
+                    $itemStmt->execute([(int)$order['id']]);
+                    $orderItems = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+                    $orderTotals = $order;
+                }
             } catch (Throwable $e) {
-                $description = 'Restaurant payment ' . (string)($payment['booking_reference'] ?? '');
+                $description = (receipt_shop_mode() ? 'Sale' : 'Restaurant') . ' payment ' . (string)($payment['booking_reference'] ?? '');
             }
         }
 
@@ -209,6 +244,8 @@ if (!function_exists('receipt_hydrate_context')) {
             'guest_email' => $guestEmail,
             'guest_phone' => $guestPhone,
             'description' => trim($description),
+            'order_items' => $orderItems,
+            'order_totals' => $orderTotals,
         ];
     }
 }
@@ -554,7 +591,7 @@ if (!function_exists('receipt_build_restaurant_email_html_raw')) {
             . '<h1 style="margin:0;color:#8B7355;font-size:24px;font-weight:600;">' . $site . '</h1>'
             . ($addr ? '<div style="margin-top:6px;font-size:12px;color:#5a534c;">' . $addr . '</div>' : '')
             . ($phone ? '<div style="margin-top:2px;font-size:12px;color:#5a534c;">Tel: ' . $phone . ($email ? ' · Email: ' . $email : '') . '</div>' : '')
-            . '<div style="margin-top:10px;font-size:12px;letter-spacing:0.12em;font-weight:700;color:#8B7355;">RESTAURANT RECEIPT</div>'
+            . '<div style="margin-top:10px;font-size:12px;letter-spacing:0.12em;font-weight:700;color:#8B7355;">' . (receipt_shop_mode() ? 'RECEIPT' : 'RESTAURANT RECEIPT') . '</div>'
             . '</td></tr>'
             . '<tr><td style="padding:16px 24px 10px;">'
             . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#3f3933;">'
@@ -693,7 +730,7 @@ if (!function_exists('receipt_restaurant_context')) {
             'address'    => (string)(getSetting('hotel_address') ?: ''),
             'phone'      => (string)(getSetting('hotel_phone') ?: getSetting('phone_main', '')),
             'email'      => $tok['hotel']['email'],
-            'footer'     => (string)(getSetting('restaurant_receipt_footer') ?: 'Thank you for dining with us!'),
+            'footer'     => receipt_till_footer(),
             'cashier'    => $cashier,
             'split_legs' => $splitLegs,
         ] + receipt_restaurant_receipt_ctx($pdo, (int)($order['id'] ?? 0));
@@ -883,7 +920,7 @@ if (!function_exists('receipt_render_restaurant_pdf_html')) {
         $body .= rh_pdf_spacer(6) . '<table width="100%" cellpadding="4" cellspacing="0" border="0"><tr><td align="center" style="font-family:times;font-size:11pt;color:' . $t['muted_dark'] . ';">'
             . rh_pdf_e($ctx['footer'] ?? '') . '</td></tr></table>';
 
-        return rh_pdf_document_shell('Restaurant Receipt', $meta, $body, [
+        return rh_pdf_document_shell(receipt_shop_mode() ? 'Receipt' : 'Restaurant Receipt', $meta, $body, [
             'banner' => $isVoid ? ['text' => 'Void / not valid', 'tone' => 'danger'] : null,
         ]);
     }
@@ -957,15 +994,80 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
         if ($typeLabel !== '') {
             $desc .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">' . rh_pdf_e($typeLabel) . '</span>';
         }
-        $items = rh_pdf_items_table([
+        $itemCols = [
             ['label' => 'Item', 'width' => 52, 'align' => 'left'],
             ['label' => 'Qty', 'width' => 10, 'align' => 'right'],
             ['label' => 'Unit', 'width' => 18, 'align' => 'right'],
             ['label' => 'Total', 'width' => 20, 'align' => 'right'],
-        ], [[$desc, '1', rh_pdf_e($money($lineAmount)), rh_pdf_e($money($lineAmount))]]);
-
+        ];
+        $itemRows = [[$desc, '1', rh_pdf_e($money($lineAmount)), rh_pdf_e($money($lineAmount))]];
         $totals = [];
-        if ($mode === 'exclusive' && $showVatAmount) {
+        $itemisedNet = false;
+
+        // A till sale paid in one go lists what was bought (item, qty, price, line total) instead of one lump
+        // line. Only when the lines reconcile with the payment (subtotal - discount + service = amount paid);
+        // split legs, refunds and anything that does not add up keep the single summary line.
+        $saleLines = is_array($context['order_items'] ?? null) ? $context['order_items'] : [];
+        $saleOrder = is_array($context['order_totals'] ?? null) ? $context['order_totals'] : [];
+        if ((string)($payment['booking_type'] ?? '') === 'restaurant' && !$isRefund && $saleLines && $saleOrder
+            && (int)($saleOrder['split_count'] ?? 1) <= 1
+            && strpos((string)($payment['payment_reference'] ?? ''), '~L') === false) {
+            $linesSum = 0.0;
+            foreach ($saleLines as $sl) {
+                $linesSum += (float)$sl['line_total'];
+            }
+            $saleDiscount = (float)($saleOrder['discount_amount'] ?? 0);
+            $saleService = (float)($saleOrder['service_charge'] ?? 0);
+            $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+            // The till's order lines are VAT-inclusive (gross). In exclusive mode the receipt shows net lines
+            // (each scaled by net/gross, the last line takes any 1-tetri rounding) so lines + VAT = total.
+            $netLines = ($mode === 'exclusive' && $showVatAmount);
+            $reconciles = abs(round($linesSum - $saleDiscount + $saleService, 2) - round($gross, 2)) <= $tol;
+            if ($netLines && (abs(round($net + $vat, 2) - round($gross, 2)) > $tol || $gross <= 0)) {
+                $reconciles = false; // payment row's net + VAT does not equal the total: keep the summary line
+            }
+            if ($reconciles) {
+                $f = $netLines ? ($net / $gross) : 1.0;
+                $lineNets = [];
+                foreach ($saleLines as $sl) {
+                    $lineNets[] = round((float)($sl['line_total'] ?? 0) * $f, 2);
+                }
+                $discShown = $netLines ? round($saleDiscount * $f, 2) : $saleDiscount;
+                $svcShown = $netLines ? round($saleService * $f, 2) : $saleService;
+                if ($netLines && $lineNets) {
+                    $residual = round($net - (array_sum($lineNets) - $discShown + $svcShown), 2);
+                    $lineNets[count($lineNets) - 1] = round($lineNets[count($lineNets) - 1] + $residual, 2);
+                }
+                $itemRows = [];
+                $i = 0;
+                foreach ($saleLines as $sl) {
+                    $qtyN = (float)($sl['quantity'] ?? 0);
+                    $unitShown = $netLines ? ($qtyN > 0 ? round($lineNets[$i] / $qtyN, 2) : $lineNets[$i]) : ($sl['unit_price'] ?? 0);
+                    $lineShown = $netLines ? $lineNets[$i] : ($sl['line_total'] ?? 0);
+                    $itemRows[] = [
+                        rh_pdf_e((string)$sl['item_name']),
+                        rh_pdf_e(receipt_qty_text($sl['quantity'] ?? 0)),
+                        rh_pdf_e($money($unitShown)),
+                        rh_pdf_e($money($lineShown)),
+                    ];
+                    $i++;
+                }
+                if ($saleDiscount > 0 || $saleService > 0) {
+                    $totals[] = ['label' => 'Subtotal', 'value' => $money($netLines ? array_sum($lineNets) : $linesSum)];
+                    if ($saleDiscount > 0) {
+                        $totals[] = ['label' => 'Discount', 'value' => '-' . $money($discShown), 'type' => 'discount'];
+                    }
+                    if ($saleService > 0) {
+                        $totals[] = ['label' => 'Service charge', 'value' => $money($svcShown)];
+                    }
+                }
+                $itemisedNet = $netLines;
+            }
+        }
+        $items = rh_pdf_items_table($itemCols, $itemRows);
+
+        // Itemised net lines (no discount/service) already add up to the net, so the subtotal row would repeat it.
+        if ($mode === 'exclusive' && $showVatAmount && !($itemisedNet && !$totals)) {
             $totals[] = ['label' => 'Subtotal (net)', 'value' => $money($net)];
         }
         foreach (rh_pdf_vat_rows($vat, $rate, $cur) as $row) {

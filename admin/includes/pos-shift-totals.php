@@ -409,6 +409,47 @@ if (!function_exists('rh_pos_shift_totals')) {
     }
 }
 
+if (!function_exists('rh_pos_close_revenue')) {
+    /**
+     * Net sales of a stored shift close (net takings across tenders, the figure written to
+     * stock_shift_closes.total_revenue). Closes recorded before that column was filled carry 0/NULL:
+     * for those the window is rebuilt exactly as the Z-report does (business window of the close date,
+     * from this user's previous close to this close) and the till maths is re-read. Nothing is stored.
+     */
+    function rh_pos_close_revenue(PDO $pdo, array $close): float
+    {
+        $stored = (float)($close['total_revenue'] ?? 0);
+        if (abs($stored) > 0.004) {
+            return $stored;
+        }
+        if (empty($close['user_id']) || empty($close['shift_date']) || empty($close['closed_at'])) {
+            return 0.0;
+        }
+        try {
+            require_once __DIR__ . '/../../includes/station-hours.php';
+            $biz = rh_station_union_window_for_date((string)$close['shift_date']);
+            $start = $biz['start_sql'];
+            $end = $biz['end_sql'];
+            $closedTs = strtotime((string)$close['closed_at']);
+            if ($closedTs) {
+                $closedEnd = date('Y-m-d H:i:s', $closedTs + 1);
+                if ($closedEnd < $end) {
+                    $end = $closedEnd;
+                }
+            }
+            $pst = $pdo->prepare("SELECT MAX(closed_at) FROM stock_shift_closes WHERE user_id = ? AND id < ? AND closed_at >= ? AND closed_at < ?");
+            $pst->execute([(int)$close['user_id'], (int)($close['id'] ?? 0), $start, $end]);
+            $prev = $pst->fetchColumn();
+            $from = ($prev && $prev > $start) ? (string)$prev : $start;
+            $t = rh_pos_shift_totals($pdo, (int)$close['user_id'], $from, $end, $biz['start_sql']);
+            return round((float)$t['cash'] + (float)$t['mobile'] + (float)$t['card'], 2);
+        } catch (Throwable $e) {
+            error_log('rh_pos_close_revenue: ' . $e->getMessage());
+            return 0.0;
+        }
+    }
+}
+
 if (!function_exists('rh_pos_shift_user_ids')) {
     /** Every user with till activity (sales taken, tabs opened, payouts, voids) in [start,end). */
     function rh_pos_shift_user_ids(PDO $pdo, string $start, string $end): array
@@ -442,6 +483,28 @@ if (!function_exists('rh_pos_shift_user_ids')) {
     }
 }
 
+if (!function_exists('rh_pos_margin_basis')) {
+    /**
+     * The ONE POS margin basis (End of Day page/PDF/email, Accounting dashboard): sales that stand
+     * (paid/completed, so refunded and voided sales are out), measured ex-VAT (F&B prices are gross, VAT is
+     * not income), less COGS (paid/completed/refunded orders by paid date). Returns net_ex_vat, margin, pct.
+     */
+    function rh_pos_margin_basis(float $standingGross, float $cogs): array
+    {
+        $div = 1.0;
+        if (function_exists('getSetting')) {
+            $on = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+            $rate = (float)getSetting('vat_rate');
+            if ($on && $rate > 0) {
+                $div = 1 + ($rate / 100);
+            }
+        }
+        $net = round($standingGross / $div, 2);
+        $margin = round($net - $cogs, 2);
+        return ['net_ex_vat' => $net, 'margin' => $margin, 'pct' => $net > 0 ? ($margin / $net) * 100 : 0.0];
+    }
+}
+
 if (!function_exists('rh_pos_eod_summary')) {
     /**
      * End-of-day POS block for a business date, on the same rules as the till and the ledger:
@@ -461,12 +524,13 @@ if (!function_exists('rh_pos_eod_summary')) {
         $hasRefundedAt = rh_pos_col_exists($pdo, 'stock_orders', 'refunded_at');
 
         $out = [
-            'totals' => ['orders' => 0, 'gross' => 0.0, 'cogs' => 0.0, 'voided_value' => 0.0, 'voided_count' => 0, 'refunded_value' => 0.0, 'refunded_count' => 0],
+            'totals' => ['orders' => 0, 'gross' => 0.0, 'cogs' => 0.0, 'net_ex_vat' => 0.0, 'margin' => 0.0, 'margin_pct' => 0.0, 'voided_value' => 0.0, 'voided_count' => 0, 'refunded_value' => 0.0, 'refunded_count' => 0],
             'by_type' => [], 'top_items' => [], 'void_reasons' => [],
             'window_start' => $a, 'window_end' => $b,
         ];
 
         $st = $pdo->prepare("SELECT COUNT(*) AS orders, COALESCE(SUM(o.total_amount),0) AS gross,
+                COALESCE(SUM(CASE WHEN o.status IN ('paid','completed') THEN o.total_amount ELSE 0 END),0) AS standing_gross,
                 COALESCE(SUM(CASE WHEN o.status IN ('paid','completed','refunded') THEN o.total_cost ELSE 0 END),0) AS cogs
             FROM stock_orders o WHERE $saleCond");
         $st->execute($saleParams);
@@ -474,6 +538,10 @@ if (!function_exists('rh_pos_eod_summary')) {
         $out['totals']['orders'] = (int)($r['orders'] ?? 0);
         $out['totals']['gross'] = (float)($r['gross'] ?? 0);
         $out['totals']['cogs'] = (float)($r['cogs'] ?? 0);
+        $mb = rh_pos_margin_basis((float)($r['standing_gross'] ?? 0), $out['totals']['cogs']);
+        $out['totals']['net_ex_vat'] = $mb['net_ex_vat'];
+        $out['totals']['margin'] = $mb['margin'];
+        $out['totals']['margin_pct'] = $mb['pct'];
 
         $st = $pdo->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(o.total_amount),0) AS v FROM stock_orders o WHERE o.status = 'voided' AND o.voided_at >= ? AND o.voided_at < ?");
         $st->execute([$a, $b]);

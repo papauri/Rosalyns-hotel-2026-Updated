@@ -743,9 +743,12 @@ if (!isset($folio_fnb)) {
         $pos_cogs    = (float)($posTotals['cogs'] ?? 0);
         // F&B prices are VAT-inclusive, so margin is measured on sales excluding VAT (VAT is not income).
         $pos_vat_div = ($vatEnabled && (float)$vatRate > 0) ? (1 + ((float)$vatRate / 100)) : 1.0;
-        $pos_net     = round($pos_gross / $pos_vat_div, 2);
-        $pos_margin  = $pos_net - $pos_cogs;
-        $pos_margin_pct = $pos_net > 0 ? ($pos_margin / $pos_net) * 100 : 0;
+        // Same basis as End of Day (rh_pos_margin_basis): standing sales (paid/completed) ex-VAT less COGS.
+        require_once __DIR__ . '/includes/pos-shift-totals.php';
+        $pos_mb      = rh_pos_margin_basis($pos_gross, $pos_cogs);
+        $pos_net     = $pos_mb['net_ex_vat'];
+        $pos_margin  = $pos_mb['margin'];
+        $pos_margin_pct = $pos_mb['pct'];
 
         $order_type_labels = [
             'walk_in'      => 'Walk-in / Dine-in',

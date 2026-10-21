@@ -264,6 +264,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $settle = rh_stock_receipt_settlement($pdo, $id, $oldQty, $qty);
                 $settledTxt = rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.');
                 if ($settle['settled'] > 0) {
+                    // Late cost: sales made at zero cost for this deficit get costed at this receipt's unit cost.
+                    rh_stock_backcost_settled_deficit($pdo, $id, (float)$settle['deficit'], (float)$settle['settled'], $cost, (int)($user['id'] ?? 0) ?: null, 'manual receipt');
                     $batchNotes = trim(($batchNotes !== '' ? $batchNotes . ' | ' : '') . 'Settled ' . $settledTxt . ' unallocated deficit');
                 }
 
@@ -359,6 +361,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $batchIns = $pdo->prepare("\n                        INSERT INTO stock_batches (\n                            ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,\n                            supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by\n                        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, CURDATE(), NULL, 7, 'active', ?, ?)\n                    ");
                     // Settle any unallocated deficit (sales beyond batches) first so batch sum == current_quantity.
                     $settle = rh_stock_receipt_settlement($pdo, $id, $currentQty, $qty);
+                    if ($settle['settled'] > 0 && $costAtTime > 0) {
+                        // Late cost: sales made at zero cost for this deficit get costed at the ingredient's cost (no cost = left at 0).
+                        rh_stock_backcost_settled_deficit($pdo, $id, (float)$settle['deficit'], (float)$settle['settled'], $costAtTime, (int)($user['id'] ?? 0) ?: null, 'manual adjustment');
+                    }
                     $batchIns->execute([
                         $id,
                         $tmpBatchNumber,

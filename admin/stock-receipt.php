@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Restaurant Order Receipt / Invoice
+ * Till / Restaurant Order Receipt / Invoice
  *
  * - GET ?id=N           → show printable receipt + email/WhatsApp actions
  * - GET ?id=N&print=1   → minimal print stylesheet auto-trigger
@@ -25,7 +25,8 @@ $hotelAddr = getSetting('hotel_address') ?: '';
 $hotelPhone = getSetting('hotel_phone') ?: '';
 $hotelEmail = getSetting('hotel_email') ?: '';
 $invoicePrefix = getSetting('restaurant_invoice_prefix') ?: 'RST-';
-$footerLine = getSetting('restaurant_receipt_footer') ?: 'Thank you for dining with us!';
+require_once __DIR__ . '/../config/receipts.php';
+$footerLine = receipt_till_footer(); // shop mode: neutral wording; restaurant keeps the dining line
 $whatsappEnabled = (getSetting('restaurant_whatsapp_enabled') ?: '0') === '1';
 $whatsappNumber = trim((string)getSetting('whatsapp_number', getSetting('whatsapp_hotel_number', '')));
 $whatsappApiToken = trim((string)getSetting('whatsapp_api_token', getSetting('whatsapp_meta_access_token', '')));
@@ -228,6 +229,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $waBody = 'Hello' . ($waName !== '' ? ' ' . $waName : '') . ', thank you for visiting ' . $siteName . '. '
                     . 'Your receipt ' . ($waRcp !== '' ? $waRcp . ' (order ' . $orderRow['reference'] . ')' : 'for order ' . $orderRow['reference']) . ': total ' . $currency . ' ' . number_format((float)($orderRow['total_amount'] ?? 0), 2) . '.';
                 $waFooter = trim((string)getSetting('restaurant_receipt_footer', ''));
+                if ($waFooter === 'Thank you for dining with us!' && receipt_shop_mode()) $waFooter = receipt_till_footer();
                 if ($waFooter !== '') $waBody .= ' ' . $waFooter;
 
                 require_once __DIR__ . '/../includes/whatsapp-functions.php';

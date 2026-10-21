@@ -11491,10 +11491,180 @@ function rh_stock_receipt_settlement(PDO $pdo, int $ingredientId, float $oldQty,
     $st->execute([$ingredientId]);
     $deficit = (float)$st->fetchColumn() - $oldQty;
     if ($deficit <= 0.0001) {
-        return ['remaining' => $receivedQty, 'settled' => 0.0];
+        return ['remaining' => $receivedQty, 'settled' => 0.0, 'deficit' => 0.0];
     }
     $settled = min($deficit, $receivedQty);
-    return ['remaining' => max(0.0, round($receivedQty - $settled, 4)), 'settled' => round($settled, 4)];
+    return ['remaining' => max(0.0, round($receivedQty - $settled, 4)), 'settled' => round($settled, 4), 'deficit' => round($deficit, 4)];
+}
+
+/**
+ * Late cost (owner 2026-10-22): stock sold before it had a cost (a deficit sold at 0) gets its sale
+ * cost filled in by the delivery that settles the deficit, so COGS and profit become right.
+ *
+ * Call inside the receipt's transaction right after rh_stock_receipt_settlement() when 'settled' > 0.
+ * The deficit's sold-at-zero lines are the ingredient's most recent POS deductions (source_type
+ * 'pos_order' only) that went beyond the batches (unallocated) at a zero unit cost, newest first until
+ * they add up to the deficit; the settled quantity is then spread over them in FIFO order (oldest sale
+ * first) and never exceeds what the receipt settled. For each affected order stock_orders.total_cost
+ * grows by quantity x the receipt's unit cost (stock_order_items has no cost column; revenue, VAT and
+ * receipts are never touched) and a 'cost_filled' audit row is written.
+ * Already-filled quantity is remembered through those audit rows (order + ingredient + quantity): it is
+ * taken off the order's lines before picking, so a later deficit (wastage, count-down, room service,
+ * or a settle that filled nothing) can never cost the same sale twice. Lines that were restored/voided,
+ * and voided orders, are skipped.
+ * Atomic: every change is worked out first, then the cost updates and audit rows are applied together
+ * under a savepoint; on any failure nothing is half-applied and the delivery carries on (empty result).
+ *
+ * @return array{orders: int, amount: float}
+ */
+function rh_stock_backcost_settled_deficit(PDO $pdo, int $ingredientId, float $deficit, float $settledQty, float $unitCost, ?int $userId, string $source = 'receipt'): array
+{
+    $result = ['orders' => 0, 'amount' => 0.0];
+    if ($settledQty <= 0.0001 || $deficit <= 0.0001 || $unitCost <= 0.00001) {
+        return $result;
+    }
+    $settledQty = min($settledQty, $deficit);
+    $perOrder = [];
+    try {
+        $st = $pdo->prepare("
+            SELECT a.id AS adj_id, a.source_id AS line_id, (-a.quantity_change) AS qty, a.cost_at_time,
+                   COALESCE((SELECT SUM(bd.quantity_deducted) FROM stock_batch_deductions bd WHERE bd.adjustment_id = a.id), 0) AS alloc_qty,
+                   COALESCE((SELECT SUM(bd.quantity_deducted * b.cost_per_unit) FROM stock_batch_deductions bd INNER JOIN stock_batches b ON b.id = bd.batch_id WHERE bd.adjustment_id = a.id), 0) AS alloc_cost,
+                   o.id AS order_id
+            FROM stock_adjustments a
+            INNER JOIN stock_order_items soi ON soi.id = a.source_id
+            INNER JOIN stock_orders o ON o.id = soi.order_id
+            WHERE a.ingredient_id = ? AND a.source_type = 'pos_order' AND a.quantity_change < 0
+              AND o.status <> 'voided'
+              AND NOT EXISTS (SELECT 1 FROM stock_adjustments r WHERE r.source_type = 'void_restore' AND r.ingredient_id = a.ingredient_id AND r.source_id = a.source_id)
+            ORDER BY a.id DESC
+            LIMIT 400
+        ");
+        $st->execute([$ingredientId]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!$rows) {
+            return $result;
+        }
+
+        // Quantity already back-costed per order for this ingredient (from the 'cost_filled' audit rows).
+        $orderIds = array_values(array_unique(array_map(static fn($r) => (int)$r['order_id'], $rows)));
+        $filled = [];
+        foreach (array_chunk($orderIds, 200) as $chunk) {
+            $ph = implode(',', array_fill(0, count($chunk), '?'));
+            $as = $pdo->prepare("SELECT order_id, details FROM stock_order_audit WHERE event = 'cost_filled' AND order_id IN ($ph)");
+            $as->execute($chunk);
+            foreach ($as->fetchAll(PDO::FETCH_ASSOC) as $ar) {
+                $d = json_decode((string)$ar['details'], true);
+                if (is_array($d) && (int)($d['ingredient_id'] ?? 0) === $ingredientId) {
+                    $oid = (int)$ar['order_id'];
+                    $filled[$oid] = ($filled[$oid] ?? 0.0) + (float)($d['quantity'] ?? 0);
+                }
+            }
+        }
+
+        // Each line's still-open portion. Filled quantity comes off the order's oldest zero-cost lines first.
+        $lines = [];
+        foreach ($rows as $r) {
+            $unalloc = (float)$r['qty'] - (float)$r['alloc_qty'];
+            if ($unalloc <= 0.0001) continue;
+            // Cost the unallocated part was booked at = whole-line cost less the batch part.
+            $unallocCost = (((float)$r['cost_at_time'] * (float)$r['qty']) - (float)$r['alloc_cost']) / $unalloc;
+            $lines[] = ['adj_id' => (int)$r['adj_id'], 'order_id' => (int)$r['order_id'], 'unalloc' => $unalloc, 'zero' => $unallocCost <= 0.0005];
+        }
+        usort($lines, static fn($x, $y) => $x['adj_id'] <=> $y['adj_id']);
+        foreach ($lines as &$ln) {
+            if (!$ln['zero']) continue;
+            $used = min($ln['unalloc'], $filled[$ln['order_id']] ?? 0.0);
+            if ($used > 0) {
+                $filled[$ln['order_id']] -= $used;
+                $ln['unalloc'] -= $used; // already costed by an earlier delivery: not part of an open deficit
+            }
+        }
+        unset($ln);
+
+        // Newest first: keep the open zero-cost portions that add up to the deficit.
+        $need = $deficit;
+        $picked = [];
+        foreach (array_reverse($lines) as $ln) {
+            if ($need <= 0.0001) break;
+            if ($ln['unalloc'] <= 0.0001) continue;
+            $take = min($ln['unalloc'], $need);
+            $need -= $take;
+            if (!$ln['zero']) continue; // it was costed: nothing to fill (still part of the deficit)
+            $picked[] = ['order_id' => $ln['order_id'], 'qty' => $take];
+        }
+        if (!$picked) {
+            return $result;
+        }
+        // FIFO: oldest sale gets the settled quantity first.
+        $picked = array_reverse($picked);
+        $left = $settledQty;
+        foreach ($picked as $p) {
+            if ($left <= 0.0001) break;
+            $q = min($p['qty'], $left);
+            $left -= $q;
+            $perOrder[$p['order_id']] = ($perOrder[$p['order_id']] ?? 0.0) + $q;
+        }
+    } catch (Throwable $e) {
+        error_log('rh_stock_backcost_settled_deficit: ' . $e->getMessage());
+        return ['orders' => 0, 'amount' => 0.0]; // nothing applied yet; the delivery itself carries on
+    }
+    if (!$perOrder) {
+        return $result;
+    }
+
+    // Apply every cost update + audit row together, or none.
+    $ownTx = false;
+    $savepoint = false;
+    try {
+        if ($pdo->inTransaction()) {
+            $pdo->exec('SAVEPOINT rh_backcost');
+            $savepoint = true;
+        } else {
+            $pdo->beginTransaction();
+            $ownTx = true;
+        }
+        $upd = $pdo->prepare("UPDATE stock_orders SET total_cost = total_cost + ? WHERE id = ?");
+        $aud = $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, NULL, 'cost_filled', ?, ?)");
+        $orders = 0;
+        $amount = 0.0;
+        foreach ($perOrder as $orderId => $q) {
+            $add = round($q * $unitCost, 4);
+            if ($add <= 0) continue;
+            $upd->execute([$add, $orderId]);
+            $aud->execute([$orderId, $userId, json_encode(['ingredient_id' => $ingredientId, 'quantity' => round($q, 4), 'unit_cost' => $unitCost, 'cost_added' => $add, 'source' => $source]), $_SERVER['REMOTE_ADDR'] ?? null]);
+            $orders++;
+            $amount += $add;
+        }
+        if ($savepoint) {
+            $pdo->exec('RELEASE SAVEPOINT rh_backcost');
+        } elseif ($ownTx) {
+            $pdo->commit();
+        }
+        $result = ['orders' => $orders, 'amount' => round($amount, 4)];
+    } catch (Throwable $e) {
+        error_log('rh_stock_backcost_settled_deficit: ' . $e->getMessage());
+        try {
+            if ($savepoint && $pdo->inTransaction()) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT rh_backcost');
+                $pdo->exec('RELEASE SAVEPOINT rh_backcost');
+            } elseif ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        } catch (Throwable $e2) {
+            error_log('rh_stock_backcost_settled_deficit rollback: ' . $e2->getMessage());
+        }
+        // A failed back-cost must not block the delivery itself (the receipt is the source of truth).
+        return ['orders' => 0, 'amount' => 0.0];
+    }
+    if ($result['orders'] > 0 && function_exists('rh_log_event')) {
+        try {
+            rh_log_event('stock', 'info', sprintf('Late cost filled on %d sale(s) for ingredient #%d: +%.4f COGS at unit cost %.4f (%s).', $result['orders'], $ingredientId, $result['amount'], $unitCost, $source), ['ingredient_id' => $ingredientId, 'orders' => array_keys($perOrder)]);
+        } catch (Throwable $e) {
+            error_log('rh_stock_backcost_settled_deficit log: ' . $e->getMessage());
+        }
+    }
+    return $result;
 }
 
 /**

@@ -2,6 +2,39 @@
 
 require_once __DIR__ . '/../../includes/station-hours.php';
 
+if (!function_exists('rh_pos_shop_mode')) {
+    /**
+     * Shop / supermarket mode = the restaurant module is off (same test as isRestaurantEnabled(), read
+     * straight from the setting so CLI scripts and API endpoints need no extra includes). Till sales
+     * there are retail products auto-served at payment: a void or refund puts the goods back on the shelf
+     * (owner 2026-10-22) instead of writing them off like cooked food.
+     */
+    function rh_pos_shop_mode(): bool
+    {
+        return (string)getSetting('restaurant_system_enabled', '1') !== '1';
+    }
+}
+
+if (!function_exists('rh_pos_sale_label')) {
+    /** "Restaurant order" for a hotel with a restaurant, "Sale" for a shop (customer-facing / ledger wording). */
+    function rh_pos_sale_label(): string
+    {
+        return rh_pos_shop_mode() ? 'Sale' : 'Restaurant order';
+    }
+}
+
+if (!function_exists('rh_pos_damaged_flag')) {
+    /** Staff marked the returned goods "damaged": book them as waste instead of putting them back. */
+    function rh_pos_damaged_flag(array $opts = []): bool
+    {
+        if (array_key_exists('damaged', $opts)) {
+            return (bool)$opts['damaged'];
+        }
+        $v = $_POST['damaged'] ?? '';
+        return is_scalar($v) && in_array(strtolower((string)$v), ['1', 'true', 'yes', 'on'], true);
+    }
+}
+
 /**
  * Receipt for a restaurant / room-service sale: queue the payment receipt to be produced when the request
  * ends (after the till's own transaction has committed; a rolled-back sale is skipped). Every payment gets
@@ -51,7 +84,7 @@ function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?
         return $firstLegId;
     }
 
-    $notes = trim('Restaurant order ' . $reference . ($customerName !== null && $customerName !== '' ? ' - ' . $customerName : ''));
+    $notes = trim(rh_pos_sale_label() . ' ' . $reference . ($customerName !== null && $customerName !== '' ? ' - ' . $customerName : ''));
 
     $existing = $pdo->prepare("\n        SELECT id, receipt_number, payment_date, payment_status, recorded_by FROM payments\n        WHERE booking_type = 'restaurant'\n          AND COALESCE(payment_type, '') != 'refund'\n          AND deleted_at IS NULL\n          AND (payment_reference = ? OR booking_id = ?)\n        ORDER BY CASE WHEN payment_reference = ? THEN 0 ELSE 1 END, id DESC\n        LIMIT 1\n    ");
     $existing->execute([$paymentReference, $orderId, $paymentReference]);
@@ -150,7 +183,7 @@ function rh_record_restaurant_split_leg_payment(PDO $pdo, int $orderId, string $
         return $existingId;
     }
 
-    $notes = trim('Restaurant order ' . $reference . ' - split leg ' . $legNumber . ($customerName !== null && $customerName !== '' ? ' - ' . $customerName : ''));
+    $notes = trim(rh_pos_sale_label() . ' ' . $reference . ' - split leg ' . $legNumber . ($customerName !== null && $customerName !== '' ? ' - ' . $customerName : ''));
     $receiptNumber = finance_next_receipt_number($pdo, $businessDate);
     $pdo->prepare("INSERT INTO payments (
             payment_reference, booking_type, booking_id, booking_reference,
@@ -560,6 +593,10 @@ function rh_create_pending_refund_allocation(PDO $pdo, int $orderId, string $ref
  *   - preparing/ready/served  -> the food exists / was consumed: recorded as WASTAGE, never restored
  *                                (stock already deducted -> log row only; not yet deducted -> the
  *                                wastage deduction is taken)
+ * SHOP MODE (restaurant off; $opts['shop_mode'] overrides): a started/served line whose stock was
+ * deducted is put BACK on the shelf (restore matched on the line's own deduction, so FIFO-safe and
+ * never twice) unless the return is flagged damaged ($opts['damaged'] or POST 'damaged'), which books
+ * wastage as above. $summary receives ['restored' => n, 'wasted' => n] lines actually handled.
  * Lines an 86 already handled (kds_status='void') are skipped. Room-service orders use the same
  * per-line rule for stock taken at the KDS (source 'pos_order'); a line whose stock was booked
  * against a stock-tracked folio charge (source 'room_service') is left to
@@ -568,11 +605,16 @@ function rh_create_pending_refund_allocation(PDO $pdo, int $orderId, string $ref
  *
  * @return int number of order lines processed
  */
-function rh_restore_pos_order_stock(PDO $pdo, int $orderId, ?int $doneBy, string $reason): int
+function rh_restore_pos_order_stock(PDO $pdo, int $orderId, ?int $doneBy, string $reason, array $opts = [], ?array &$summary = null): int
 {
+    $summary = ['restored' => 0, 'wasted' => 0];
     if ($orderId <= 0) {
         return 0;
     }
+    // Shop / supermarket mode (owner 2026-10-22): goods sold over the till come BACK to the shelf on a
+    // void; only a "damaged" return (opts['damaged'] or the 'damaged' POST flag) books waste instead.
+    $shopMode = array_key_exists('shop_mode', $opts) ? (bool)$opts['shop_mode'] : rh_pos_shop_mode();
+    $damaged = $shopMode && rh_pos_damaged_flag($opts);
     $typeSel = $pdo->prepare("SELECT order_type FROM stock_orders WHERE id = ?");
     $typeSel->execute([$orderId]);
     $isRoomService = ((string)$typeSel->fetchColumn() === 'room_service');
@@ -615,13 +657,32 @@ function rh_restore_pos_order_stock(PDO $pdo, int $orderId, ?int $doneBy, string
                 }
                 $flag->execute([$lineId]);
                 $done++;
+                $summary['restored']++;
             }
             continue;
         }
         $alreadyOff = ((int)$line['stock_deducted'] === 1);
-        rh_record_item_wastage($pdo, (int)$line['menu_item_id'], (string)$line['menu_type'], (float)$line['quantity'], !$alreadyOff, (int)$doneBy, $reason . ' - wastage (' . $line['item_name'] . ', ' . $line['kds_status'] . ')', 'pos_order', $lineId);
+        if ($shopMode) {
+            // Goods that never left the shelf (not deducted) have nothing to put back or write off.
+            if (!$alreadyOff) {
+                continue;
+            }
+            if (!$damaged) {
+                if ((int)$line['has_trail'] === 1) {
+                    if (!restoreStockForMenuItem((int)$line['menu_item_id'], (string)$line['menu_type'], (float)$line['quantity'], $reason . ' - returned to shelf (' . $line['item_name'] . ')', $doneBy, $lineId, 'pos_order')) {
+                        throw new RuntimeException('Stock restore failed for ' . $line['item_name'] . ' - nothing was changed. Please retry or contact a manager.');
+                    }
+                    $summary['restored']++;
+                }
+                $flag->execute([$lineId]);
+                $done++;
+                continue;
+            }
+        }
+        rh_record_item_wastage($pdo, (int)$line['menu_item_id'], (string)$line['menu_type'], (float)$line['quantity'], !$alreadyOff, (int)$doneBy, $reason . ($shopMode ? ' - damaged goods (' : ' - wastage (') . $line['item_name'] . ', ' . $line['kds_status'] . ')', 'pos_order', $lineId);
         $flag->execute([$lineId]);
         $done++;
+        $summary['wasted']++;
     }
     return $done;
 }
@@ -638,9 +699,15 @@ function rh_restore_pos_order_stock(PDO $pdo, int $orderId, ?int $doneBy, string
  *
  * @return array{closed:int,restored:int,wasted:int}
  */
-function rh_close_refunded_order_lines(PDO $pdo, int $orderId, int $userId, string $reason): array
+function rh_close_refunded_order_lines(PDO $pdo, int $orderId, int $userId, string $reason, array $opts = []): array
 {
-    $out = ['closed' => 0, 'restored' => 0, 'wasted' => 0];
+    $out = ['closed' => 0, 'restored' => 0, 'wasted' => 0, 'shop_mode' => false, 'damaged' => false];
+    // Shop mode (owner 2026-10-22): refunded goods, served ones included, go BACK on the shelf, or are
+    // booked as waste when staff flag the refund "damaged" ($opts['damaged'] / POST 'damaged').
+    $shopMode = array_key_exists('shop_mode', $opts) ? (bool)$opts['shop_mode'] : rh_pos_shop_mode();
+    $damaged = $shopMode && rh_pos_damaged_flag($opts);
+    $out['shop_mode'] = $shopMode;
+    $out['damaged'] = $damaged;
     if ($orderId <= 0) {
         return $out;
     }
@@ -658,7 +725,7 @@ function rh_close_refunded_order_lines(PDO $pdo, int $orderId, int $userId, stri
                                  EXISTS (SELECT 1 FROM stock_adjustments sa
                                           WHERE sa.source_type = 'pos_order' AND sa.source_id = stock_order_items.id AND sa.quantity_change < 0) AS has_trail
                             FROM stock_order_items
-                           WHERE order_id = ? AND kds_status NOT IN ('served', 'void')
+                           WHERE order_id = ? AND kds_status NOT IN (" . ($shopMode ? "'void'" : "'served', 'void'") . ")
                         ORDER BY id ASC FOR UPDATE");
     $sel->execute([$orderId]);
     $lines = $sel->fetchAll(PDO::FETCH_ASSOC);
@@ -685,6 +752,28 @@ function rh_close_refunded_order_lines(PDO $pdo, int $orderId, int $userId, stri
                     throw new RuntimeException('Stock restore failed for ' . $ln['item_name'] . ' - nothing was changed. Please retry or contact a manager.');
                 }
                 $out['restored']++;
+            }
+        } elseif ($shopMode) {
+            // Goods already sold: back on the shelf unless damaged. Nothing was taken (not deducted) = nothing to do.
+            $alreadyOff = ((int)$ln['stock_deducted'] === 1);
+            if ($alreadyOff && $damaged) {
+                $n = rh_record_item_wastage($pdo, (int)$ln['menu_item_id'], (string)$ln['menu_type'], (float)$ln['quantity'], false, $userId, 'Order refunded - damaged goods (' . $ln['item_name'] . ', ' . $ref . ', ' . $k . ')', 'pos_order', $lineId);
+                if ($n > 0) {
+                    $out['wasted']++;
+                }
+            } elseif ($alreadyOff && (int)$ln['has_trail'] === 1) {
+                if (!restoreStockForMenuItem((int)$ln['menu_item_id'], (string)$ln['menu_type'], (float)$ln['quantity'], 'Order refunded: returned to shelf (' . $ref . ')', $userId, $lineId, 'pos_order')) {
+                    throw new RuntimeException('Stock restore failed for ' . $ln['item_name'] . ' - nothing was changed. Please retry or contact a manager.');
+                }
+                $out['restored']++;
+            }
+            if ($k === 'served') {
+                // A served sale stays on record as served (it was sold); only its stock flag is cleared.
+                $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 0 WHERE id = ?")->execute([$lineId]);
+                continue;
+            }
+            if (in_array((string)$ln['station'], ['kitchen', 'bar', 'coffee_bar'], true)) {
+                $stopStations[(string)$ln['station']] = true;
             }
         } else {
             $alreadyOff = ((int)$ln['stock_deducted'] === 1);

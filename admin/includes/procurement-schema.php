@@ -379,6 +379,8 @@ if (!function_exists('rh_receive_stock_line')) {
         $batchRemaining = $settle['remaining'];
         $batchStatus = $batchRemaining < 0.0001 ? 'depleted' : 'active';
         if ($settle['settled'] > 0) {
+            // Late cost: sales made at zero cost for this deficit get costed at this delivery's unit cost.
+            rh_stock_backcost_settled_deficit($pdo, $ingredientId, (float)$settle['deficit'], (float)$settle['settled'], $cost, $doneBy, $purchaseOrderId ? 'PO #' . $purchaseOrderId : 'receipt');
             $notes = trim(($notes ? $notes . ' | ' : '') . 'Settled ' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' unallocated deficit');
         }
         // Combined batch / stock_in_log note stays short (PO ref + over-delivery note + settlement text).

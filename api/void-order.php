@@ -2,10 +2,12 @@
 /**
  * api/void-order.php — Admin/manager void of a restaurant order from any UI (POS, lifecycle, etc.).
  *
- *   POST: csrf_token, order_id, void_reason (>=8 chars), [void_notes]
+ *   POST: csrf_token, order_id, void_reason (>=8 chars), [void_notes], [damaged=1]
  *   Auth: session admin_user with the pos_void AND stock_orders permissions.
  *   Effects:
- *     - Restores stock (FIFO batch credit + adjustments row)
+ *     - Stock: lines not started are restored (FIFO batch credit + adjustments row); started/served food
+ *       is wastage. SHOP MODE (restaurant off, owner 2026-10-22): sold goods go BACK on the shelf, or
+ *       are booked as waste when "damaged" is posted. The response message says which happened.
  *     - Marks order voided (kitchen_status='served', served_at stamped, void_reason+notes saved)
  *     - Voids any open KDS/BDS/CDS items (kds_status='void')
  *     - Cancels the linked payment row, appends VOID note
@@ -99,7 +101,7 @@ try {
     // Shared close (stock restore / wastage, folio charges, order + lines, payment reversal with contra
     // rows, ready pings, STOP note, audit + KDS event): admin/includes/pos-order-close.php.
     // Booking balances are re-derived here, inside the transaction.
-    $closed = rh_close_pos_order($pdo, $orderId, (int)$user['id'], $details, 'void');
+    $closed = rh_close_pos_order($pdo, $orderId, (int)$user['id'], $details, 'void', ['damaged' => rh_pos_damaged_flag()]);
     $folioVoided = (int)$closed['folio_voided'];
     foreach ($closed['booking_ids'] as $closedBookingId) {
         recalculateBookingFinancials((int)$closedBookingId);
@@ -125,15 +127,26 @@ try {
             'entity_id' => $orderId,
             'entity_reference' => $order['reference'] ?? null,
             'response_status' => 200,
-            'response_summary' => 'Order voided + stock/folio restored',
+            'response_summary' => 'Order voided (stock put back: ' . (int)($closed['stock_restored'] ?? 0) . ', waste: ' . (int)($closed['stock_wasted'] ?? 0) . ')',
             'details' => ['reason' => $reason],
         ]);
     }
-    $message = "Order {$order['reference']} voided. Stock restored.";
+    $stockRestored = (int)($closed['stock_restored'] ?? 0);
+    $stockWasted = (int)($closed['stock_wasted'] ?? 0);
+    $message = "Order {$order['reference']} voided.";
+    if ($stockRestored > 0 && $stockWasted > 0) {
+        $message .= " Stock put back for {$stockRestored} line(s); {$stockWasted} line(s) recorded as waste.";
+    } elseif ($stockRestored > 0) {
+        $message .= ' Stock put back.';
+    } elseif ($stockWasted > 0) {
+        $message .= !empty($closed['shop_mode']) ? ' Recorded as waste (damaged goods).' : ' Recorded as waste.';
+    } else {
+        $message .= ' No stock to put back.';
+    }
     if ($folioVoided > 0) {
         $message .= " {$folioVoided} room folio charge(s) voided.";
     }
-    vjok(['order_id'=>$orderId,'reference'=>$order['reference'],'folio_charges_voided'=>$folioVoided,'message'=>$message]);} catch (Throwable $e) {
+    vjok(['order_id'=>$orderId,'reference'=>$order['reference'],'folio_charges_voided'=>$folioVoided,'stock_restored'=>$stockRestored,'stock_wasted'=>$stockWasted,'message'=>$message]);} catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     vjerr($e->getMessage(), 500);
 }

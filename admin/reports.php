@@ -2617,9 +2617,8 @@ try {
                         <span class="acct-bar__label"><?php echo $overallOccupancyRate; ?>%</span>
                     </div>
                 </div>
-            </div>
 
-            <!-- Occupancy by Room Type -->
+            <!-- Occupancy by Room Type (inside the occupancy pane) -->
             <div class="rh-panel">
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Occupancy by Room Type</h2></div>
                 <?php if (empty($occupancyData)): ?>
@@ -2703,6 +2702,7 @@ try {
                     </table>
                 </div>
             <?php endif; ?>
+            </div><!-- /#tab-occupancy -->
     </div>
 
     <!-- ============================================ -->

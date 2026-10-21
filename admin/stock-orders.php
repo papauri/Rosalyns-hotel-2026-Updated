@@ -738,7 +738,11 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
 
-                $message = "Order {$order['reference']} voided. " . ($folioVoids > 0 ? "{$folioVoids} folio charge(s) voided and stock restored." : 'Stock restored.') . ' Reason logged.';
+                $voidStockRestored = (int)($closed['stock_restored'] ?? 0);
+                $voidStockWasted = (int)($closed['stock_wasted'] ?? 0);
+                $voidStockNote = $voidStockRestored > 0 && $voidStockWasted > 0 ? "Stock put back for {$voidStockRestored} line(s); {$voidStockWasted} recorded as waste."
+                    : ($voidStockRestored > 0 ? 'Stock put back.' : ($voidStockWasted > 0 ? 'Recorded as waste.' : 'No stock to put back.'));
+                $message = "Order {$order['reference']} voided. " . ($folioVoids > 0 ? "{$folioVoids} folio charge(s) voided. " : '') . $voidStockNote . ' Reason logged.';
             } elseif ($action === 'reconcile_order') {
                 if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
                     throw new RuntimeException('Only admins or managers can reconcile orders.');
@@ -2831,6 +2835,11 @@ $csrf_token = generateCsrfToken();
             <div class="modal-body">
                 <p style="margin:0 0 12px;font-size:14px;color:#374151;">Provide a reason for voiding this paid order. This is logged with your name.</p>
                 <textarea id="soVoidReason" rows="3" placeholder="Reason (min 8 characters)…" style="width:100%;padding:8px;border:1px solid #ced4da;border-radius:4px;font-size:14px;resize:vertical;box-sizing:border-box;"></textarea>
+                <?php if (getSetting('restaurant_system_enabled', '1') !== '1'): ?>
+                <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;color:#374151;">
+                    <input type="checkbox" id="soVoidDamaged"> Goods are damaged (record as waste instead of putting them back in stock)
+                </label>
+                <?php endif; ?>
                 <span id="soVoidErr" style="color:#c82333;font-size:13px;display:none;"></span>
             </div>
             <div class="modal-footer">
@@ -3101,7 +3110,7 @@ $csrf_token = generateCsrfToken();
             var ids = _soVoidIds.slice();
             if (!ids.length) return;
             soCloseVoid();
-            var res = await soRunEach(ids, function(id) { return soPost({ action: 'void_order', order_id: id, void_reason: reason }); });
+            var res = await soRunEach(ids, function(id) { var dmg = document.getElementById('soVoidDamaged'); var p = { action: 'void_order', order_id: id, void_reason: reason }; if (dmg && dmg.checked) p.damaged = '1'; return soPost(p); });
             soReportBulk('voided', res);
         }
 

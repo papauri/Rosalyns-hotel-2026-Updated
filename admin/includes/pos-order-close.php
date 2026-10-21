@@ -44,11 +44,12 @@ if (!function_exists('rh_close_pos_order')) {
      * @param string $reason  text stored as void_reason / audit details; for the creator notice only the
      *                        part before "\nNotes: " is quoted
      * @param string $mode    'cancel' | 'void'
+     * @param array $opts   optional: 'damaged' (bool), 'shop_mode' (bool, test override); see rh_restore_pos_order_stock()
      * @return array{mode:string,order_id:int,reference:string,order_type:string,created_by:int,
      *               status:string,kitchen_status_before:string,lines:int,stock_restored:int,stock_wasted:int,
      *               folio_voided:int,booking_ids:int[],reversal:array,stopped_stations:string[],notices:array}
      */
-    function rh_close_pos_order(PDO $pdo, int $orderId, int $userId, string $reason, string $mode): array
+    function rh_close_pos_order(PDO $pdo, int $orderId, int $userId, string $reason, string $mode, array $opts = []): array
     {
         if (!$pdo->inTransaction()) {
             throw new RuntimeException('rh_close_pos_order must run inside the caller\'s transaction.');
@@ -113,7 +114,16 @@ if (!function_exists('rh_close_pos_order')) {
 
         // Stock first: the POS restore skips lines whose folio charge is still live, so voiding the
         // charges first would waste their stock twice.
-        rh_restore_pos_order_stock($pdo, $orderId, $userId, $isVoid ? 'POS order voided (admin)' : 'POS order cancelled before prep');
+        // Shop / supermarket mode: sold goods go back on the shelf unless the void is flagged "damaged"
+        // ($opts['damaged'] or POST 'damaged'); restaurant / bar keeps the kitchen rule (started = wastage).
+        $restoreSummary = ['restored' => 0, 'wasted' => 0];
+        rh_restore_pos_order_stock($pdo, $orderId, $userId, $isVoid ? 'POS order voided (admin)' : 'POS order cancelled before prep', $opts, $restoreSummary);
+        $shopMode = array_key_exists('shop_mode', $opts) ? (bool)$opts['shop_mode'] : rh_pos_shop_mode();
+        $damaged = $shopMode && rh_pos_damaged_flag($opts);
+        if ($shopMode) {
+            $stockRestored = $restoreSummary['restored'];
+            $stockWasted = $restoreSummary['wasted'];
+        }
 
         $folioVoided = 0;
         $bookingIds = [];
@@ -232,6 +242,8 @@ if (!function_exists('rh_close_pos_order')) {
             'lines'                 => count($lines),
             'stock_restored'        => $stockRestored,
             'stock_wasted'          => $stockWasted,
+            'shop_mode'             => $shopMode,
+            'damaged'               => $damaged,
             'folio_voided'          => $folioVoided,
             'booking_ids'           => array_keys($bookingIds),
             'reversal'              => $reversal,

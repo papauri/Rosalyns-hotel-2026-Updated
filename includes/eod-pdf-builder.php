@@ -190,8 +190,9 @@ function buildEodPdf(
 
     $pos_gross      = (float)$pos['gross'];
     $pos_cogs       = (float)$pos['cogs'];
-    $pos_margin     = $pos_gross - $pos_cogs;
-    $pos_margin_pct = $pos_gross > 0 ? ($pos_margin / $pos_gross) * 100 : 0;
+    // One margin basis (rh_pos_margin_basis): standing sales ex-VAT less COGS, supplied by rh_pos_eod_summary.
+    $pos_margin     = (float)($pos['margin'] ?? ($pos_gross - $pos_cogs));
+    $pos_margin_pct = (float)($pos['margin_pct'] ?? ($pos_gross > 0 ? ($pos_margin / $pos_gross) * 100 : 0));
     $avg_order      = (int)$pos['orders'] > 0 ? $pos_gross / (int)$pos['orders'] : 0;
 
     // Non-cash total derived from methods
@@ -578,7 +579,7 @@ function buildEodPdf(
     $rowR('Total Orders',    (string)(int)$pos['orders'], false, $i++);
     $rowR('Gross Revenue',   $m($pos_gross), false, $i++);
     $rowR('Cost of Goods',   $m($pos_cogs),  false, $i++);
-    $rowR('Gross Margin',    $m($pos_margin) . ' (' . number_format($pos_margin_pct, 1) . '%)', false, $i++);
+    $rowR('Margin (ex-VAT)', $m($pos_margin) . ' (' . number_format($pos_margin_pct, 1) . '%)', false, $i++);
     $rowR('Avg Order Value', $m($avg_order),  false, $i++);
     $rowR('Voids',           (int)$pos['voided_count'] . ' — ' . $m((float)$pos['voided_value']), false, $i++);
     if ($pos_change !== 0.0) {

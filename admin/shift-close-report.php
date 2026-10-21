@@ -76,6 +76,7 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
         echo '<p style="font-family:sans-serif;padding:40px;">Record not found or access denied.</p>';
         exit;
     }
+    $close['total_revenue'] = rh_pos_close_revenue($pdo, $close); // 0/NULL on older closes: rebuilt on read
 
     // Reconstruct this close window exactly as the till does: the business window for the
     // close business date (same helper as admin/pos.php), starting at this user's previous
@@ -207,6 +208,8 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
     ");
     $stmt->execute([$reportDate]);
     $closes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($closes as &$cRow) { $cRow['total_revenue'] = rh_pos_close_revenue($pdo, $cRow); }
+    unset($cRow);
 
     // Aggregate for summary
     $agg = [
@@ -242,6 +245,8 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
         $stmt->execute([$user['id']]);
     }
     $closes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($closes as &$cRow) { $cRow['total_revenue'] = rh_pos_close_revenue($pdo, $cRow); }
+    unset($cRow);
     $mode   = 'list';
     $reportDate = date('Y-m-d');
 }

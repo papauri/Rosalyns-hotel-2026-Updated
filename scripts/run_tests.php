@@ -27,7 +27,9 @@ $suites = [
     'Documents flow'        => 'scripts/tests/documents_flow.php',
     'Payment limits'        => 'scripts/tests/payment_limits.php',
     'Rehearsal fixes'       => 'scripts/tests/rehearsal_fixes.php',
+    'Shop returns + wording' => 'scripts/tests/shop_returns.php',
     'Stock loss prevention' => 'scripts/tests/stock_loss.php',
+    'Stock late costing'    => 'scripts/tests/backcost.php',
     'Help map (? button)'   => 'scripts/tests/help_map.php',
     'Linked data health'    => 'scripts/data-health.php',
 ];

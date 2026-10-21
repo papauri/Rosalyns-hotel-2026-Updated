@@ -416,6 +416,7 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
     'use strict';
     const CSRF = <?php echo json_encode($_SESSION['csrf_token'] ?? ''); ?>;
     const ORDER_ID = <?php echo $orderId; ?>;
+    const SHOP_MODE = <?php echo getSetting('restaurant_system_enabled', '1') !== '1' ? 'true' : 'false'; ?>;
 
     function setLoading(btn, on) {
         if (on) { btn.disabled = true; btn.classList.add('btn-loading'); }
@@ -444,11 +445,15 @@ function fmt_dur(?int $from, ?int $to) { if (!$from || !$to) return '—'; $s = 
         const btn = document.getElementById('btnVoid');
         const reason = prompt('Void reason (minimum 8 characters, required):');
         if (!reason || reason.trim().length < 8) { if (reason !== null) alert('Reason must be at least 8 characters.'); return; }
+        // Shop: sold goods normally go back on the shelf; the cashier says if they are damaged instead.
+        const damaged = SHOP_MODE && !confirm('Put the goods back in stock?' + String.fromCharCode(10, 10) + 'OK = back on the shelf' + String.fromCharCode(10) + 'Cancel = the goods are damaged (record as waste)');
+        const params = { csrf_token: CSRF, order_id: ORDER_ID, void_reason: reason.trim() };
+        if (damaged) params.damaged = '1';
         setLoading(btn, true);
         fetch('../api/void-order.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
-            body: new URLSearchParams({ csrf_token: CSRF, order_id: ORDER_ID, void_reason: reason.trim() })
+            body: new URLSearchParams(params)
         })
         .then(r => r.json())
         .then(d => {

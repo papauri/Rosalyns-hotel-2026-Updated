@@ -267,8 +267,9 @@ if ($mod_pos) {
         error_log('EOD POS: ' . $e->getMessage());
     }
 }
-$pos_margin = (float)$pos_totals['gross'] - (float)$pos_totals['cogs'];
-$pos_margin_pct = $pos_totals['gross'] > 0 ? ($pos_margin / (float)$pos_totals['gross']) * 100 : 0;
+// One margin basis everywhere (rh_pos_margin_basis): sales that stand (refunds/voids out), ex-VAT, less COGS.
+$pos_margin = (float)($pos_totals['margin'] ?? 0);
+$pos_margin_pct = (float)($pos_totals['margin_pct'] ?? 0);
 
 $top_items = [];
 if ($mod_pos) {
@@ -630,7 +631,7 @@ $cash_share = $gross_revenue > 0 ? ($method_totals['cash'] / $gross_revenue) * 1
 if ($cash_share > 60 && $method_totals['cash'] > 0) {
     $addAlert('watch', 'fa-sack-dollar', 'High cash day — reconcile drawers', sprintf('%.0f%% of today\'s revenue collected in cash. Ensure cashier drawers are counted and closed before end of shift.', $cash_share));
 }
-if ($mod_pos && $pos_margin_pct < 25 && (float)$pos_totals['gross'] > 500) {
+if ($mod_pos && $pos_margin_pct < 25 && (float)($pos_totals['net_ex_vat'] ?? 0) > 500) {
     $addAlert('watch', 'fa-chart-pie', 'Low ' . rh_pos_short_label() . ' gross margin', sprintf('POS margin is %.1f%% today (healthy target ≥ 35%%). Review high-cost items or check COGS recipe costs.', $pos_margin_pct));
 }
 if ($mod_bookings && $occupancy_pct < 40 && $rooms_total > 0 && $isToday) {
@@ -1603,7 +1604,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                             echo $kv('Orders', (string)(int)$pos_totals['orders']);
                             echo $kv('Gross', $money($pos_totals['gross']));
                             echo $kv('COGS', $money($pos_totals['cogs']));
-                            echo $kv('Margin', number_format($pos_margin_pct, 1) . '%');
+                            echo $kv('Margin (ex-VAT, net of refunds)', number_format($pos_margin_pct, 1) . '%');
                             echo $kv('Voids', (int)$pos_totals['voided_count'] . ' &middot; ' . $money($pos_totals['voided_value']), (int)$pos_totals['voided_count'] > 0 ? 'eod-warn' : '');
                             if ((int)($pos_totals['refunded_count'] ?? 0) > 0) {
                                 echo $kv('Refunds paid out', (int)$pos_totals['refunded_count'] . ' &middot; ' . $money($pos_totals['refunded_value']), 'eod-warn');

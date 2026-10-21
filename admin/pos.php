@@ -1049,8 +1049,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $shiftNote = trim('[OVERRIDE by ' . $user['username'] . '] ' . $overrideReason . ($shiftNote !== '' ? ' | ' . $shiftNote : ''));
                 }
 
-                $pdo->prepare("INSERT INTO stock_shift_closes (user_id, user_name, shift_date, closed_at, expected_cash, declared_cash, variance_cash, expected_mobile, declared_mobile, variance_mobile, expected_card, declared_card, variance_card, orders_count, voids_count, voids_amount, notes, ip_address) VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                    ->execute([$user['id'], $user['full_name'], $restaurantWindow['business_date'], $expCashDrawer, $declCash, $vCash, (float)$E['mobile'], $declMobile, $vMobile, (float)$E['card'], $declCard, $vCard, (int)$E['orders_count'], (int)$E['voids_count'], (float)$E['voids_amount'], $shiftNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null]);
+                // Net sales for this window = net takings across tenders (same figure as admin/pos-accounting.php).
+                $closeRevenue = round((float)$E['cash'] + (float)$E['mobile'] + (float)$E['card'], 2);
+                $closeCols = "user_id, user_name, shift_date, closed_at, expected_cash, declared_cash, variance_cash, expected_mobile, declared_mobile, variance_mobile, expected_card, declared_card, variance_card, orders_count, voids_count, voids_amount, notes, ip_address";
+                $closePh = "?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?";
+                $closeVals = [$user['id'], $user['full_name'], $restaurantWindow['business_date'], $expCashDrawer, $declCash, $vCash, (float)$E['mobile'], $declMobile, $vMobile, (float)$E['card'], $declCard, $vCard, (int)$E['orders_count'], (int)$E['voids_count'], (float)$E['voids_amount'], $shiftNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null];
+                if (rh_pos_col_exists($pdo, 'stock_shift_closes', 'total_revenue')) {
+                    $closeCols .= ', total_revenue';
+                    $closePh .= ', ?';
+                    $closeVals[] = $closeRevenue;
+                }
+                $pdo->prepare("INSERT INTO stock_shift_closes ($closeCols) VALUES ($closePh)")->execute($closeVals);
                 $closeId = (int)$pdo->lastInsertId();
                 pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'shift_closed', json_encode(['close_id' => $closeId, 'window_start' => $shiftFrom, 'window_end' => $windowEnd, 'refund_cash' => $E['refund_cash'], 'refund_mobile' => $E['refund_mobile'], 'refund_card' => $E['refund_card'], 'opening_float' => $E['float'], 'float_recorded' => $E['float_recorded'], 'cash_sales' => $E['gross_cash'], 'expected_cash' => $expCashDrawer, 'declared_cash' => $declCash, 'variance_cash' => $vCash, 'expected_mobile' => $E['mobile'], 'declared_mobile' => $declMobile, 'variance_mobile' => $vMobile, 'expected_card' => $E['card'], 'declared_card' => $declCard, 'variance_card' => $vCard, 'tips_total' => $E['tips_total'] ?? 0, 'orders' => $E['orders_count'], 'voids' => $E['voids_count'], 'settled_from_tabs_count' => $E['settled_from_tabs_count'], 'settled_from_tabs_amount' => $E['settled_from_tabs_amount'], 'override' => $overrideRequested && $maxVar > $threshold, 'override_reason' => $overrideRequested ? $overrideReason : null]));
 
@@ -3065,7 +3074,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
                     <div id="ext-cash" style="display:none;">
                         <label class="field-label">Tendered (<?php echo $currency_symbol; ?>)</label>
-                        <input type="number" step="0.01" min="0" name="tendered_amount" id="tendered" oninput="updChange()">
+                        <input type="number" step="0.01" min="0" name="tendered_amount" id="tendered" oninput="updChange()" onfocus="this.select()" onclick="this.select()">
                         <div class="change-banner">Change: <span id="changeOut"><?php echo $currency_symbol; ?> 0.00</span></div>
                         <div class="quick-tend-row">
                             <button type="button" onclick="quickTend(500)" class="quick-tend">+500</button>
@@ -10482,7 +10491,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     tEl.value = total.toFixed(2);
                     updChange();
                 }
-                if (tEl) tEl.focus();
+                if (tEl) { tEl.focus(); tEl.select(); }
             }
             updConfirm();
         }

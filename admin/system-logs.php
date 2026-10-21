@@ -423,7 +423,7 @@ if (rh_logs_table_exists($pdo, 'station_messages')) {
 if (rh_logs_table_exists($pdo, 'stock_shift_closes')) {
     try {
         $stmt = $pdo->prepare("
-            SELECT id, user_name, shift_date, closed_at, total_revenue, orders_count,
+            SELECT id, user_id, user_name, shift_date, closed_at, total_revenue, orders_count,
                    voids_count, voids_amount, declared_cash, variance_cash, notes
             FROM stock_shift_closes
             ORDER BY closed_at DESC
@@ -431,6 +431,9 @@ if (rh_logs_table_exists($pdo, 'stock_shift_closes')) {
         ");
         $stmt->execute();
         $shiftCloses = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        require_once __DIR__ . '/includes/pos-shift-totals.php';
+        foreach ($shiftCloses as &$scRow) { $scRow['total_revenue'] = rh_pos_close_revenue($pdo, $scRow); }
+        unset($scRow);
     } catch (Throwable $e) {
     }
 }

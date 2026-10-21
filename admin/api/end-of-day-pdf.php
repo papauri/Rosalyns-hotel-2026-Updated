@@ -166,8 +166,8 @@ try {
     $posSummary = rh_pos_eod_summary($pdo, $date);
     $pos = array_merge(['orders' => 0, 'gross' => 0, 'cogs' => 0, 'voided_value' => 0, 'voided_count' => 0], $posSummary['totals']);
 
-    $pos_margin     = (float)$pos['gross'] - (float)$pos['cogs'];
-    $pos_margin_pct = (float)$pos['gross'] > 0 ? ($pos_margin / (float)$pos['gross']) * 100 : 0;
+    $pos_margin     = (float)($pos['margin'] ?? 0);
+    $pos_margin_pct = (float)($pos['margin_pct'] ?? 0);
     $avg_order      = (int)$pos['orders'] > 0 ? (float)$pos['gross'] / (int)$pos['orders'] : 0;
 
     // 6) POS by type
@@ -597,7 +597,7 @@ $posRows = [
     ['Total Orders',      (string)(int)$pos['orders']],
     ['Gross Revenue',     pdfMoney($currency_symbol, (float)$pos['gross'])],
     ['Cost of Goods',     pdfMoney($currency_symbol, (float)$pos['cogs'])],
-    ['Gross Margin',      pdfMoney($currency_symbol, $pos_margin) . ' (' . number_format($pos_margin_pct, 1) . '%)'],
+    ['Margin (ex-VAT)',   pdfMoney($currency_symbol, $pos_margin) . ' (' . number_format($pos_margin_pct, 1) . '%)'],
     ['Avg Order Value',   pdfMoney($currency_symbol, $avg_order)],
     ['Voids (count)',     (string)(int)$pos['voided_count']],
     ['Voided Value',      pdfMoney($currency_symbol, (float)$pos['voided_value'])],

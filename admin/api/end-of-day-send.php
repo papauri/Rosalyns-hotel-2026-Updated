@@ -758,9 +758,9 @@ $html .= $section_head(isRestaurantEnabled() ? 'POS / F&B' : 'POS');
 $html .= $row('Total Orders', (string)(int)$pos['orders']);
 $html .= $row('Gross Revenue', _money($currency_symbol, (float)$pos['gross']));
 $html .= $row('Cost of Goods (COGS)', _money($currency_symbol, (float)$pos['cogs']));
-$pos_margin_val = (float)$pos['gross'] - (float)$pos['cogs'];
-$pos_marg_pct   = (float)$pos['gross'] > 0 ? ($pos_margin_val / (float)$pos['gross']) * 100 : 0;
-$html .= $row('Gross Margin', _money($currency_symbol, $pos_margin_val) . ' (' . number_format($pos_marg_pct, 1) . '%)');
+$pos_margin_val = (float)($pos['margin'] ?? 0);
+$pos_marg_pct   = (float)($pos['margin_pct'] ?? 0);
+$html .= $row('Margin (ex-VAT)', _money($currency_symbol, $pos_margin_val) . ' (' . number_format($pos_marg_pct, 1) . '%)');
 $html .= $row('POS vs Yesterday', ($pos_sign ?: '') . _money($currency_symbol, $pos_change));
 $html .= $row('POS Voids', (int)$pos['voided_count'] . ' orders worth ' . _money($currency_symbol, (float)$pos['voided_value']));
 
@@ -1039,7 +1039,7 @@ if (false) {
     $pdfSec(isRestaurantEnabled() ? 'POS / F&B' : 'POS');
     $pdfRowA('Total Orders',  (string)(int)$pos['orders'], false, 0);
     $pdfRowA('Gross Revenue', _money($currency_symbol, (float)$pos['gross']), false, 1);
-    $pdfRowA('Gross Margin',  _money($currency_symbol, $pos_margin_val) . ' (' . number_format($pos_marg_pct, 1) . '%)', false, 2);
+    $pdfRowA('Margin (ex-VAT)', _money($currency_symbol, $pos_margin_val) . ' (' . number_format($pos_marg_pct, 1) . '%)', false, 2);
     $pdfRowA('Voids',         (int)$pos['voided_count'] . ' orders  -  ' . _money($currency_symbol, (float)$pos['voided_value']), false, 3);
     $py += 3.0;
 
