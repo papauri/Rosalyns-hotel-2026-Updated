@@ -22,8 +22,11 @@ if (!defined('ADMIN_ACCESS')) {
     exit;
 }
 
+require_once __DIR__ . '/../../includes/form-validation.php';
+
 $pm_message = '';
 $pm_error = '';
+$pm_barcode_tried = ''; // the barcode of the product being saved, for a plain message if the database refuses it
 $pm_stock_on = function_exists('moduleEnabled') && moduleEnabled('stock');
 
 $pm_json = static function (bool $ok, string $msg, array $extra = []): void {
@@ -138,18 +141,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pm_action'])) {
     try {
         if ($action === 'cat_save') {
             $catId = (int)($_POST['id'] ?? 0);
-            $name = trim((string)($_POST['name'] ?? ''));
+            $name = rh_clean_text($_POST['name'] ?? '');
             $order = (int)($_POST['display_order'] ?? 0);
             if ($name === '' || mb_strlen($name) > 100) {
                 $pm_json(false, 'Category name is required (max 100 characters).');
+            }
+            // Two categories with one name would show as two identical tabs on the till (the web
+            // address made from the name is made unique separately, so nothing else would stop it).
+            $pm_catRetailOnly = "COALESCE(business_context, 'food_service') = 'retail'";
+            $pm_catDup = rh_find_duplicate($pdo, 'menu_categories', 'name', $name, [], $catId > 0 ? $catId : null, 'id', $pm_catRetailOnly);
+            if ($pm_catDup) {
+                $pm_json(false, rh_duplicate_message('category', (string)$pm_catDup['value']));
             }
             if ($catId > 0) {
                 $stmt = $pdo->prepare("UPDATE menu_categories SET name = ?, display_order = ?, sort_order = ? WHERE id = ?");
                 $stmt->execute([$name, $order, max(0, $order), $catId]);
                 $pm_json(true, 'Category updated.');
             }
-            $stmt = $pdo->prepare("INSERT INTO menu_categories (name, slug, business_context, description, icon, default_station, sort_order, shows_on_pos, shows_on_room_service, display_order, is_active) VALUES (?, ?, 'retail', '', 'fa-tag', 'bar', ?, 1, 0, ?, 1)");
-            $stmt->execute([$name, $pm_slugify($name), max(0, $order), $order]);
+            // Check and insert together, so a double click or two people saving at once cannot add it twice.
+            $pm_catError = rh_with_create_lock($pdo, 'menu_category', function () use ($pdo, $name, $order, $pm_slugify, $pm_catRetailOnly) {
+                $dupNow = rh_find_duplicate($pdo, 'menu_categories', 'name', $name, [], null, 'id', $pm_catRetailOnly);
+                if ($dupNow) {
+                    return rh_duplicate_message('category', (string)$dupNow['value']);
+                }
+                $stmt = $pdo->prepare("INSERT INTO menu_categories (name, slug, business_context, description, icon, default_station, sort_order, shows_on_pos, shows_on_room_service, display_order, is_active) VALUES (?, ?, 'retail', '', 'fa-tag', 'bar', ?, 1, 0, ?, 1)");
+                $stmt->execute([$name, $pm_slugify($name), max(0, $order), $order]);
+                return '';
+            });
+            if ($pm_catError !== '') {
+                $pm_json(false, $pm_catError);
+            }
             $pm_json(true, 'Category added.');
         }
 
@@ -189,8 +210,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pm_action'])) {
                 // EAN-13 on another cannot end up on two separate products.
                 $dupRow = rhLookupBarcode($pdo, $barcode, 'menu_item');
                 if ($dupRow !== null && (int)($dupRow['row']['id'] ?? 0) !== $itemId) {
-                    $pm_json(false, 'Barcode already assigned to "' . htmlspecialchars((string)$dupRow['row']['name']) . '".');
+                    $pm_json(false, 'This barcode is already used by "' . rh_msg_value((string)$dupRow['row']['name']) . '". Scan a different code or edit that product.');
                 }
+                $pm_barcode_tried = $barcode;
             }
 
             if ($itemId > 0) {
@@ -260,7 +282,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pm_action'])) {
         $pm_json(false, 'Unknown action.');
     } catch (PDOException $e) {
         error_log('product-management: ' . $e->getMessage());
+        if ($e->getCode() === '23000') {
+            // A UNIQUE value was taken between the check and the save (two people at once).
+            try { $pm_who = $pm_barcode_tried !== '' ? rhLookupBarcode($pdo, $pm_barcode_tried, 'menu_item') : null; } catch (Throwable $lookupErr) { $pm_who = null; } // fall back to the generic message
+            if ($pm_who !== null) {
+                $pm_json(false, 'This barcode is already used by "' . rh_msg_value((string)($pm_who['row']['name'] ?? '')) . '". Scan a different code or edit that product.');
+            }
+            $pm_json(false, 'Someone else just saved the same thing. Refresh the page and check before trying again.');
+        }
         $pm_json(false, 'Database error — please try again.');
+    } catch (RuntimeException $e) {
+        // Plain text from the code itself (e.g. someone else is saving a category right now).
+        $pm_json(false, $e->getMessage());
     }
 }
 
@@ -437,7 +470,7 @@ $pm_currency = (string)getSetting('currency_symbol', 'MWK');
             </div>
             <div class="mm-modal-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;">
                 <button class="mm-btn mm-btn-ghost" onclick="pmClose('pmCatModal')">Cancel</button>
-                <button class="mm-btn mm-btn-primary" onclick="pmCatSave()">Save Category</button>
+                <button class="mm-btn mm-btn-primary" id="pmCatSaveBtn" onclick="pmCatSave()">Save Category</button>
             </div>
         </div>
     </div>
@@ -471,7 +504,7 @@ $pm_currency = (string)getSetting('currency_symbol', 'MWK');
             </div>
             <div class="mm-modal-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;">
                 <button class="mm-btn mm-btn-ghost" onclick="pmClose('pmItemModal')">Cancel</button>
-                <button class="mm-btn mm-btn-primary" onclick="pmItemSave()">Save Product</button>
+                <button class="mm-btn mm-btn-primary" id="pmItemSaveBtn" onclick="pmItemSave()">Save Product</button>
             </div>
         </div>
     </div>
@@ -491,6 +524,7 @@ $pm_currency = (string)getSetting('currency_symbol', 'MWK');
         </div>
     </div>
 
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-form-guard.js'); ?>"></script>
     <script>
         function pmOpen(id) { document.getElementById(id).classList.add('open'); }
         function pmClose(id) { document.getElementById(id).classList.remove('open'); }
@@ -512,7 +546,51 @@ $pm_currency = (string)getSetting('currency_symbol', 'MWK');
                 .catch(function () { pmToast('Network error — please try again.', false); });
         }
 
+        // A save that is refused shows its reason inside the open form (what was typed stays), and the
+        // Save button is busy until the answer arrives so a second click cannot save twice.
+        function pmSaveInModal(modalId, btnId, fields, busyText) {
+            var btn = document.getElementById(btnId);
+            var modal = document.getElementById(modalId);
+            if (btn.disabled) { return; }
+            var flagged = modal.querySelector('.rh-input-invalid');
+            if (flagged) { flagged.focus(); return; }
+            if (window.RHFormGuard) { RHFormGuard.showError(modal, ''); }
+            var label = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = busyText;
+            var fd = new FormData();
+            Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+            fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d.success) {
+                        pmToast(d.message || 'Saved.', true);
+                        setTimeout(function () { window.location.reload(); }, 700);
+                        return;
+                    }
+                    btn.disabled = false;
+                    btn.textContent = label;
+                    var reason = d.message || 'It could not be saved.';
+                    if (window.RHFormGuard) { RHFormGuard.showError(modal, reason); } else { pmToast(reason, false); }
+                })
+                .catch(function () {
+                    btn.disabled = false;
+                    btn.textContent = label;
+                    var reason = 'Network error. Please try again.';
+                    if (window.RHFormGuard) { RHFormGuard.showError(modal, reason); } else { pmToast(reason, false); }
+                });
+        }
+        if (window.RHFormGuard) {
+            RHFormGuard.watch(document.getElementById('pmCatName'), function () {
+                return { form: 'retail_category', excludeId: document.getElementById('pmCatId').value };
+            });
+            RHFormGuard.watch(document.getElementById('pmItemBarcode'), function () {
+                return { form: 'menu_item_barcode', excludeId: document.getElementById('pmItemId').value };
+            });
+        }
+
         function pmOpenCatModal(cat) {
+            if (window.RHFormGuard) { RHFormGuard.clearErrors(document.getElementById('pmCatModal')); }
             document.getElementById('pmCatModalTitle').textContent = cat ? 'Edit Category' : 'Add Category';
             document.getElementById('pmCatId').value = cat ? cat.id : 0;
             document.getElementById('pmCatName').value = cat ? cat.name : '';
@@ -522,11 +600,12 @@ $pm_currency = (string)getSetting('currency_symbol', 'MWK');
         function pmCatSave() {
             var name = document.getElementById('pmCatName').value.trim();
             if (!name) { pmToast('Category name is required.', false); return; }
-            pmPost({ pm_action: 'cat_save', id: document.getElementById('pmCatId').value, name: name, display_order: document.getElementById('pmCatOrder').value });
+            pmSaveInModal('pmCatModal', 'pmCatSaveBtn', { pm_action: 'cat_save', id: document.getElementById('pmCatId').value, name: name, display_order: document.getElementById('pmCatOrder').value }, 'Saving...');
         }
         function pmCatToggle(id) { pmPost({ pm_action: 'cat_toggle', id: id }); }
 
         function pmOpenItemModal(catId, item) {
+            if (window.RHFormGuard) { RHFormGuard.clearErrors(document.getElementById('pmItemModal')); }
             document.getElementById('pmItemModalTitle').textContent = item ? 'Edit Product' : 'Add Product';
             document.getElementById('pmItemId').value = item ? item.id : 0;
             document.getElementById('pmItemCat').value = catId;
@@ -543,7 +622,7 @@ $pm_currency = (string)getSetting('currency_symbol', 'MWK');
             var price = document.getElementById('pmItemPrice').value;
             if (!name) { pmToast('Product name is required.', false); return; }
             if (price === '' || parseFloat(price) < 0) { pmToast('Enter a valid price.', false); return; }
-            pmPost({
+            pmSaveInModal('pmItemModal', 'pmItemSaveBtn', {
                 pm_action: 'item_save',
                 id: document.getElementById('pmItemId').value,
                 category_id: document.getElementById('pmItemCat').value,
@@ -552,7 +631,7 @@ $pm_currency = (string)getSetting('currency_symbol', 'MWK');
                 barcode: document.getElementById('pmItemBarcode').value.trim(),
                 description: document.getElementById('pmItemDesc').value.trim(),
                 display_order: document.getElementById('pmItemOrder').value
-            });
+            }, 'Saving...');
         }
         function pmItemToggle(id) { pmPost({ pm_action: 'item_toggle', id: id }); }
         function pmItemDelete(id) { pmPost({ pm_action: 'item_delete', id: id }); }

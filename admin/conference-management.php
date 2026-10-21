@@ -362,7 +362,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     } catch (PDOException $e) {
-        $error = 'Error: ' . $e->getMessage();
+        error_log('conference-management DB error: ' . $e->getMessage());
+        $error = 'The change could not be saved. Please try again.';
         if ($is_ajax) {
             header('Content-Type: application/json');
             echo json_encode(['success' => false, 'message' => $error]);
@@ -1414,6 +1415,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         </div>
     </div>
 
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
         const CONFERENCE_CSRF_TOKEN = <?php echo json_encode($csrf_token); ?>;
         const CONF_HAS_END_DATE = <?php echo $confHasEndDate ? 'true' : 'false'; ?>;
@@ -1510,6 +1512,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
 
         // ===== ADD MODAL =====
         function openAddModal() {
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('addForm'));
             document.getElementById('addModal').style.display = 'flex';
         }
 
@@ -1538,6 +1541,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             document.getElementById('editOrder').value = room.display_order || 0;
             document.getElementById('editAmenities').value = room.amenities || '';
             document.getElementById('editIsActive').checked = room.is_active == 1;
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('editForm'));
             document.getElementById('editModal').style.display = 'flex';
             const fb = document.getElementById('editModalFeedback');
             if (fb) {
@@ -1592,6 +1596,19 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                     fb.className = 'admin-modal-feedback admin-modal-feedback--error visible';
                     fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error — please try again.';
                 });
+        }
+        // A room name that is already in use is flagged under the field while typing and a flagged form
+        // cannot be saved. The forms save in place (the reason shows inside the form, with what was
+        // typed kept); the server checks again on save.
+        if (window.RHFormGuard) {
+            RHFormGuard.watch(document.querySelector('#addForm input[name="name"]'), function () {
+                return { form: 'conference_room' };
+            });
+            RHFormGuard.watch(document.getElementById('editName'), function () {
+                return { form: 'conference_room', excludeId: document.getElementById('editId').value };
+            });
+            RHFormGuard.guardSubmit(document.getElementById('addForm'), { busy: false });
+            RHFormGuard.guardSubmit(document.getElementById('editForm'), { busy: false });
         }
         document.getElementById('addForm').addEventListener('submit', function(e) {
             e.preventDefault();

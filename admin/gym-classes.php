@@ -284,6 +284,7 @@ try {
         </div>
     </div>
 
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
         var GC_CSRF = <?php echo json_encode($csrf_token); ?>;
         var GC_CAN_EDIT = <?php echo $gc_can_edit ? 'true' : 'false'; ?>;
@@ -326,11 +327,29 @@ try {
             document.getElementById('gcLevel').value = c ? (c.level_label || 'All Levels') : 'All Levels';
             document.getElementById('gcOrder').value = c ? (c.display_order || 0) : 0;
             document.getElementById('gcActive').checked = c ? (parseInt(c.is_active, 10) === 1) : true;
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('gcClassModal'));
             gcOpen('gcClassModal');
+        }
+
+        // The same class (title, days and time) already on the schedule is flagged while typing, and
+        // a refused save shows its reason inside the form with what was typed kept. The server checks
+        // again on save.
+        if (window.RHFormGuard) {
+            RHFormGuard.watch(document.getElementById('gcTitle'), function () {
+                return {
+                    form: 'gym_class',
+                    excludeId: document.getElementById('gcClassId').value,
+                    params: { day: document.getElementById('gcDay').value, time: document.getElementById('gcTime').value }
+                };
+            }, [document.getElementById('gcDay'), document.getElementById('gcTime')]);
         }
         function gcSaveClass() {
             var gcSaveBtn = document.getElementById('gcSaveBtn');
             if (gcSaveBtn.disabled) return;
+            var gcModalEl = document.getElementById('gcClassModal');
+            var flagged = gcModalEl.querySelector('.rh-input-invalid');
+            if (flagged) { flagged.focus(); return; }
+            if (window.RHFormGuard) RHFormGuard.showError(gcModalEl, '');
             gcSaveBtn.disabled = true;
             gcPost({
                 gc_action: 'class_save',
@@ -343,11 +362,18 @@ try {
                 display_order: document.getElementById('gcOrder').value,
                 is_active: document.getElementById('gcActive').checked ? 1 : 0
             }).then(function (d) {
-                gcToast(d.message, d.success);
-                if (d.success) { setTimeout(function () { location.reload(); }, 650); } else { gcSaveBtn.disabled = false; }
+                if (d.success) {
+                    gcToast(d.message, true);
+                    setTimeout(function () { location.reload(); }, 650);
+                } else {
+                    gcSaveBtn.disabled = false;
+                    if (window.RHFormGuard) RHFormGuard.showError(gcModalEl, d.message || 'The class could not be saved.');
+                    else gcToast(d.message, false);
+                }
             }).catch(function () {
                 gcSaveBtn.disabled = false;
-                gcToast('Network error — please try again.', false);
+                if (window.RHFormGuard) RHFormGuard.showError(gcModalEl, 'Network error. Please try again.');
+                else gcToast('Network error — please try again.', false);
             });
         }
         function gcDeleteClass(id) {

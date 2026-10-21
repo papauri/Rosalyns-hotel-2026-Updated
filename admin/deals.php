@@ -734,6 +734,7 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 </div>
 </div>
 
+<script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
 <script>
 const _dealsData = <?php echo json_encode(array_values($deals), JSON_HEX_TAG | JSON_HEX_AMP); ?>;
 const _dealsCsrf = <?php echo json_encode($csrf_token); ?>;
@@ -909,8 +910,23 @@ function openDealModal(id) {
         addComboGroup(); addComboGroup();
     }
 
+    _dmClearErrors();
     document.getElementById('dmBg').classList.add('show');
     setTimeout(() => document.getElementById('dmName').focus(), 60);
+}
+
+/* The reason a save was refused is shown inside the form (not a pop-up), and a deal name that is
+   already in use is flagged under the field while typing. The server checks again on save. */
+function _dmBox() { return document.querySelector('#dmBg .dm-box'); }
+function _dmClearErrors() { if (window.RHFormGuard) RHFormGuard.clearErrors(_dmBox()); }
+function _dmShowError(msg) {
+    if (window.RHFormGuard) RHFormGuard.showError(_dmBox(), msg);
+    else alert(msg);
+}
+if (window.RHFormGuard) {
+    RHFormGuard.watch(document.getElementById('dmName'), function () {
+        return { form: 'pos_deal', excludeId: _dmEditId };
+    });
 }
 
 function closeDealModal() {
@@ -930,8 +946,12 @@ function buildComboJson() {
 }
 
 async function saveDeal() {
+    if (document.getElementById('dmSaveBtn').disabled) return;
     const name = document.getElementById('dmName').value.trim();
-    if (!name) { alert('Please enter a deal name.'); return; }
+    const flagged = document.querySelector('#dmBg .rh-input-invalid');
+    if (flagged) { flagged.focus(); return; }
+    if (window.RHFormGuard) RHFormGuard.showError(_dmBox(), '');
+    if (!name) { _dmShowError('Please enter a deal name.'); document.getElementById('dmName').focus(); return; }
     const type = document.getElementById('dmType').value;
 
     const data = new FormData();
@@ -993,8 +1013,8 @@ async function saveDeal() {
         const res  = await fetch('deals.php', { method: 'POST', body: data });
         const json = await res.json();
         if (json.ok) { closeDealModal(); location.reload(); }
-        else { alert(json.error || 'Save failed.'); }
-    } catch(e) { alert('Network error.'); }
+        else { _dmShowError(json.error || 'Save failed.'); }
+    } catch(e) { _dmShowError('Network error. Please try again.'); }
     btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Save Deal';
 }
 

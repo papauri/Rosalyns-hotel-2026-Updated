@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? $_POST['price_type'] : 'per_night';
             $priceRaw         = trim((string)($_POST['price_amount'] ?? '0'));
             $priceAmount      = is_numeric($priceRaw) ? round((float)$priceRaw, 2) : -1.0;
-            $appliesTo        = in_array($_POST['applies_to'] ?? 'all', ['all', 'room_types'], true) ? $_POST['applies_to'] : 'all';
+            $appliesTo        = in_array($_POST['applies_to'] ?? 'all', ['all', 'room_types'], true) ? ($_POST['applies_to'] ?? 'all') : 'all';
             $roomTypeIds      = ($appliesTo === 'room_types' && !empty($_POST['room_type_ids']))
                 ? json_encode(array_values(array_unique(array_map('intval', (array)$_POST['room_type_ids']))))
                 : null;
@@ -58,11 +58,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (empty($slug)) {
                 $slug = 'package-' . time();
             }
-            // Ensure uniqueness
+            // The slug is UNIQUE in the database: "Spa & Dine" and "Spa Dine" are different names but
+            // the same slug, so keep adding a number until it is free.
             $existCheck = $pdo->prepare("SELECT COUNT(*) FROM room_packages WHERE slug=? AND id != ?");
-            $existCheck->execute([$slug, $id ?? 0]);
-            if ((int)$existCheck->fetchColumn() > 0) {
-                $slug .= '-' . random_int(100, 999);
+            $slugBase = substr($slug, 0, 80);
+            for ($slugTry = 2; $slugTry < 60; $slugTry++) {
+                $existCheck->execute([$slug, $id ?? 0]);
+                if ((int)$existCheck->fetchColumn() === 0) {
+                    break;
+                }
+                $slug = $slugBase . '-' . $slugTry;
             }
 
             $validRoomIds = array_map('intval', array_column($allRooms, 'id'));
@@ -156,12 +161,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $message = 'Package created successfully.';
                     }
                     $messageType = 'success';
-                } catch (RuntimeException $e) {
-                    $message = $e->getMessage();
-                    $messageType = 'error';
                 } catch (PDOException $e) {
                     error_log('room_packages save error: ' . $e->getMessage());
-                    $message = 'Database error saving package.';
+                    // 23000 = a UNIQUE value (the name, or the web address made from it) is already taken,
+                    // e.g. someone saved the same package a moment ago.
+                    $message = $e->getCode() === '23000'
+                        ? 'A package with this name (or a very similar one) already exists. Use a different name or edit the existing one.'
+                        : 'The package could not be saved. Please try again.';
+                    $messageType = 'error';
+                } catch (RuntimeException $e) {
+                    // PDOException is a RuntimeException, so it must be caught above this: this is the
+                    // plain "already exists" / "someone else is saving" text thrown by the code itself.
+                    $message = $e->getMessage();
                     $messageType = 'error';
                 }
             }
@@ -857,6 +868,7 @@ $priceTypeLabels = [
         </div>
     </div>
 
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
         const pkgOverlay = document.getElementById('pkgModalOverlay');
         let _isComplimentary = false;
@@ -932,7 +944,18 @@ $priceTypeLabels = [
                 chk.checked = ids.includes(+chk.value);
             });
 
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('pkgForm'));
             pkgOverlay.classList.add('active');
+        }
+
+        // A package name that is already in use is flagged under the field while typing and a flagged
+        // form cannot be saved. The form saves in place (the reason shows inside it, with what was
+        // typed kept); the server checks again on save.
+        if (window.RHFormGuard) {
+            RHFormGuard.watch(document.getElementById('fpName'), function () {
+                return { form: 'room_package', excludeId: document.getElementById('fieldPkgId').value };
+            });
+            RHFormGuard.guardSubmit(document.getElementById('pkgForm'), { busy: false });
         }
 
         function editPkg(pkg) {

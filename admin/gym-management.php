@@ -747,7 +747,29 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
        only swaps that container, so markup printed after it is lost on in-place navigation. */ ?>
     <?php require_once 'includes/admin-footer.php'; ?>
 
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
+        // A package name that is already in use is flagged under the field while typing and a flagged
+        // form cannot be saved. These forms save in place (the reason shows inside the form, with what
+        // was typed kept), so only the duplicate check is added; the server checks again on save.
+        (function () {
+            if (!window.RHFormGuard) return;
+            var addForm = document.getElementById('addGymPackageForm');
+            var editForm = document.getElementById('editGymPackageForm');
+            if (addForm) {
+                RHFormGuard.watch(addForm.querySelector('input[name="name"]'), function () {
+                    return { form: 'gym_package' };
+                });
+                RHFormGuard.guardSubmit(addForm, { busy: false });
+            }
+            if (editForm) {
+                RHFormGuard.watch(editForm.querySelector('input[name="name"]'), function () {
+                    return { form: 'gym_package', excludeId: document.getElementById('editGymId').value };
+                });
+                RHFormGuard.guardSubmit(editForm, { busy: false });
+            }
+        })();
+
         // ── Package data injected from PHP ──────────────────────────────────────────
         window._gymPackages = <?php echo json_encode(array_values($gym_packages), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 
@@ -1059,6 +1081,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
             document.getElementById('editGymFeatured').checked = !!pkg.is_featured;
             document.getElementById('editGymFeedback').className = 'admin-modal-feedback';
             document.getElementById('editGymFeedback').innerHTML = '';
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('editGymPackageForm'));
             document.getElementById('editGymPackageModal').style.display = 'flex';
         }
 

@@ -53,6 +53,44 @@ $forms = [
         'table' => 'restaurant_tables', 'column' => 'table_number', 'page' => 'restaurant-tables.php',
         'message' => 'Another table already has this name.',
     ],
+    'pos_deal' => [
+        'table' => 'pos_deals', 'column' => 'name', 'page' => 'deals.php',
+        'message' => 'A deal with this name already exists.',
+    ],
+    'gym_package' => [
+        'table' => 'gym_packages', 'column' => 'name', 'page' => 'gym-management.php',
+        'message' => 'A gym package with this name already exists.',
+    ],
+    // Same class = same title on the same days at the same time.
+    'gym_class' => [
+        'table' => 'gym_classes', 'column' => 'title', 'page' => 'gym-classes.php',
+        'scope' => ['day' => 'day_label', 'time' => 'time_label'],
+        'message' => 'A class with this title already runs on these days at this time.',
+    ],
+    'room_package' => [
+        'table' => 'room_packages', 'column' => 'name', 'page' => 'packages.php',
+        'message' => 'A package with this name already exists.',
+    ],
+    // Same event = same title on the same date.
+    'event_title' => [
+        'table' => 'events', 'column' => 'title', 'page' => 'events-management.php',
+        'scope' => ['date' => 'event_date'],
+        'message' => 'An event with this title already exists on this date.',
+    ],
+    'conference_room' => [
+        'table' => 'conference_rooms', 'column' => 'name', 'page' => 'conference-management.php',
+        'message' => 'A conference room with this name already exists.',
+    ],
+    // Product categories on the non-restaurant menu page (retail context only).
+    'retail_category' => [
+        'table' => 'menu_categories', 'column' => 'name', 'page' => 'menu-management.php',
+        'extra' => "COALESCE(business_context, 'food_service') = 'retail'",
+        'message' => 'A product category with this name already exists.',
+    ],
+    // Barcodes are matched on every spelling of the same code (UPC-A / EAN-13), not on the typed text.
+    'menu_item_barcode' => [
+        'barcode_scope' => 'menu_item', 'page' => 'menu-management.php',
+    ],
 ];
 
 $key = (string)($_GET['form'] ?? '');
@@ -65,6 +103,29 @@ $def = $forms[$key];
 
 if (!rhCanOpenPage((int)$user['id'], $def['page'])) {
     api_json_forbidden();
+}
+
+if (isset($def['barcode_scope'])) {
+    // The match is variant-aware and the message names the item that already has the code.
+    $code = rhNormalizeBarcode((string)($_GET['value'] ?? ''));
+    $exclude = (int)($_GET['exclude_id'] ?? 0);
+    $hit = null;
+    if ($code !== '' && strlen($code) <= 100) {
+        try {
+            $hit = rhLookupBarcode($pdo, $code, $def['barcode_scope']);
+        } catch (Throwable $e) {
+            $hit = null;
+        }
+    }
+    if ($hit !== null && $def['barcode_scope'] === 'menu_item' && $exclude > 0 && (int)($hit['row']['id'] ?? 0) === $exclude) {
+        $hit = null; // the item being edited keeps its own code
+    }
+    echo json_encode([
+        'success' => true,
+        'taken' => $hit !== null,
+        'message' => $hit !== null ? 'This barcode is already used by "' . rh_msg_value((string)($hit['row']['name'] ?? '')) . '".' : '',
+    ]);
+    exit;
 }
 
 $value = rh_clean_text($_GET['value'] ?? '');
@@ -89,7 +150,7 @@ foreach (($def['scope'] ?? []) as $param => $column) {
 }
 
 try {
-    $dup = rh_find_duplicate($pdo, $def['table'], $def['column'], $value, $scope, $excludeId > 0 ? $excludeId : null);
+    $dup = rh_find_duplicate($pdo, $def['table'], $def['column'], $value, $scope, $excludeId > 0 ? $excludeId : null, 'id', (string)($def['extra'] ?? ''));
 } catch (Throwable $e) {
     // A table that does not exist yet (module not installed) is simply "not taken".
     $dup = null;

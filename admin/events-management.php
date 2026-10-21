@@ -512,7 +512,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     } catch (PDOException $e) {
-        $error = 'Error: ' . $e->getMessage();
+        error_log('events-management DB error: ' . $e->getMessage());
+        $error = 'The change could not be saved. Please try again.';
         if ($is_ajax) {
             header('Content-Type: application/json; charset=utf-8');
             echo json_encode(['success' => false, 'message' => $error]);
@@ -1000,10 +1001,12 @@ $fb_share_attrs       = facebookShareButtonAttrs('Post to Facebook'); // title, 
     ?>
 
     <script src="js/admin-components.js"></script>
+    <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
         // Direct modal control - works regardless of Modal object
         function openEventModal() {
             const modal = document.getElementById('eventModal');
+            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('eventForm'));
             if (modal) {
                 modal.classList.add('active');
                 document.body.classList.add('modal-open');
@@ -1143,6 +1146,20 @@ $fb_share_attrs       = facebookShareButtonAttrs('Post to Facebook'); // title, 
             }
 
             openEventModal();
+        }
+
+        // The same event (title on the same date) is flagged while typing and a flagged form cannot be
+        // saved. The form saves in place (the reason shows inside it, with what was typed kept); the
+        // server checks again on save.
+        if (window.RHFormGuard) {
+            RHFormGuard.watch(document.getElementById('eventTitle'), function () {
+                return {
+                    form: 'event_title',
+                    excludeId: document.getElementById('eventId').value,
+                    params: { date: document.getElementById('eventDate').value }
+                };
+            }, [document.getElementById('eventDate')]);
+            RHFormGuard.guardSubmit(document.getElementById('eventForm'), { busy: false });
         }
 
         // ── AJAX save — keep modal open ──────────────────────────────────────

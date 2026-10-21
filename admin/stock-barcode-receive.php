@@ -98,7 +98,7 @@ if (isset($_GET['ajax'])) {
             $taken = rhLookupBarcode($pdo, $barcode, 'ingredient');
             if ($taken !== null) {
                 http_response_code(409);
-                echo json_encode(['error' => 'This barcode is already registered to another ingredient.']);
+                echo json_encode(['error' => 'This barcode is already registered to "' . rh_msg_value((string)($taken['row']['name'] ?? 'another stock item')) . '". Scan a different code or edit that item.']);
                 exit;
             }
 
@@ -327,9 +327,10 @@ if (isset($_GET['ajax'])) {
             $taken = rhLookupBarcode($pdo, $barcode, 'stock_first');
             if ($taken !== null) {
                 http_response_code(409);
+                $takenName = rh_msg_value((string)($taken['row']['name'] ?? ''));
                 echo json_encode(['error' => $taken['kind'] === 'menu_item'
-                    ? 'This barcode is already registered to a POS item.'
-                    : 'This barcode is already registered as a stock ingredient.']);
+                    ? 'This barcode is already registered to the POS item "' . $takenName . '".'
+                    : 'This barcode is already registered to the stock item "' . $takenName . '".']);
                 exit;
             }
             $catExists = $pdo->prepare("SELECT COUNT(*) FROM menu_categories WHERE id = ?");

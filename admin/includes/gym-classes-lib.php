@@ -140,7 +140,7 @@ if (!function_exists('gymClassSave')) {
                     $st = $pdo->prepare("SELECT id FROM gym_classes WHERE LOWER(TRIM(title)) = LOWER(?) AND LOWER(TRIM(day_label)) = LOWER(?) AND LOWER(TRIM(time_label)) = LOWER(?) AND id <> ? LIMIT 1");
                     $st->execute([$title, $day, $time, (int)$excludeId]);
                     if ($st->fetchColumn()) {
-                        return 'A class called "' . $dup['value'] . '" already runs on ' . $day . ' at ' . $time . '. Edit that one or change the day/time.';
+                        return 'A class called "' . $dup['value'] . '" already runs on ' . rh_msg_value($day) . ' at ' . rh_msg_value($time) . '. Edit that one or change the day/time.';
                     }
                 }
                 return null;
