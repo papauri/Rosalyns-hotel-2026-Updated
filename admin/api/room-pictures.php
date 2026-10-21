@@ -34,9 +34,12 @@ if (!isset($_SESSION['admin_user_id'])) {
 
 $method = $_SERVER['REQUEST_METHOD'];
 $required_permission = ($method === 'GET') ? 'rooms' : 'media_edit';
-if (!hasPermission((int)$_SESSION['admin_user_id'], $required_permission) && !hasPermission((int)$_SESSION['admin_user_id'], 'rooms')) {
-    sendError('Access denied', 403);
+// Viewing needs Rooms; uploading, editing or removing pictures needs Media edit (owner 2026-10-21:
+// read-only roles such as Viewer must not change room photos).
+if (!hasPermission((int)$_SESSION['admin_user_id'], $required_permission)) {
+    sendError($method === 'GET' ? 'Access denied' : 'Changing room pictures needs the Media edit permission.', 403);
 }
+rhApiModuleGate('room-management.php');
 
 // Helper function to send JSON response
 function sendResponse($data, $statusCode = 200) {

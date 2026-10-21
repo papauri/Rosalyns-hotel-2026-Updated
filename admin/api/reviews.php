@@ -141,6 +141,7 @@ if (!isset($_SESSION['admin_user_id'])) {
 if (!hasPermission((int)$_SESSION['admin_user_id'], 'reviews')) {
     sendError('Access denied', 403);
 }
+rhApiModuleGate('reviews.php');
 
 // Parse request body for PUT/POST requests
 $input = [];

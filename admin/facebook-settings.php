@@ -350,16 +350,18 @@ $h = static function ($v): string {
     <?php require_once 'includes/admin-header.php'; ?>
 
     <div class="content">
-        <a href="booking-settings.php" class="back-link">
-            <i class="fas fa-arrow-left"></i> Back to Settings
-        </a>
-
-        <div class="page-header">
-            <h1 class="page-title">
-                <i class="fab fa-facebook-f fb-icon"></i>
-                Facebook Settings
-            </h1>
-        </div>
+        <header class="rh-page-head">
+            <div class="rh-page-head__main">
+                <div class="rh-page-head__title">
+                    <h1>Facebook Settings</h1>
+                </div>
+            </div>
+            <div class="rh-page-head__actions">
+                <a href="booking-settings.php" class="back-link">
+                    <i class="fas fa-arrow-left"></i> Back to Settings
+                </a>
+            </div>
+        </header>
 
         <?php if ($message): ?>
             <div class="alert alert-success">
@@ -384,14 +386,13 @@ $h = static function ($v): string {
 
         <?php if (is_array($fb_pending)): ?>
             <!-- Several Pages came back from Facebook: choose which one this hotel posts to -->
-            <div class="settings-card fb-card">
-                <h2><i class="fab fa-facebook-f" style="color:#1877F2;"></i> Choose the Page to post to</h2>
-                <form method="POST" action="" class="fb-actions">
+            <div class="rh-panel fb-card">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Choose the Page to post to</h2></div>
+                <form method="POST" action="" class="rh-panel__body fb-actions">
                     <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
                     <input type="hidden" name="action" value="choose_page">
                     <?php foreach ($fb_pending['pages'] as $pid => $pg): ?>
                         <button type="submit" name="page_id" value="<?php echo $h($pid); ?>" class="btn btn-secondary">
-                            <i class="fab fa-facebook-f" style="color:#1877F2;"></i>
                             <strong><?php echo $h($pg['name']); ?></strong> <small>(<?php echo $h($pid); ?>)</small>
                         </button>
                     <?php endforeach; ?>
@@ -400,8 +401,9 @@ $h = static function ($v): string {
         <?php endif; ?>
 
         <!-- Connection status -->
-        <div class="settings-card fb-card" id="fbStatusCard" data-state="<?php echo $h($fb_state); ?>" data-has-token="<?php echo $fb_has_token ? '1' : '0'; ?>">
-            <h2><i class="fas fa-plug" style="color:var(--color-lux-gold,#8F6A35);"></i> Connection</h2>
+        <div class="rh-panel fb-card" id="fbStatusCard" data-state="<?php echo $h($fb_state); ?>" data-has-token="<?php echo $fb_has_token ? '1' : '0'; ?>">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Connection</h2></div>
+            <div class="rh-panel__body">
 
             <div class="fb-status fb-status--<?php echo $h($fb_state); ?>" id="fbStatusBadge">
                 <?php if ($fb_state === 'ok'): ?>
@@ -450,24 +452,25 @@ $h = static function ($v): string {
                     <button type="button" id="fbCheckBtn" class="btn btn-secondary">
                         <i class="fas fa-stethoscope"></i> Test connection
                     </button>
-                    <button type="submit" form="fbMainForm" name="action" value="connect" class="btn fb-btn">
+                    <button type="submit" form="fbMainForm" name="action" value="connect" class="btn btn-primary">
                         <i class="fab fa-facebook-f"></i> Reconnect
                     </button>
-                    <form method="POST" action="" style="display:inline;" onsubmit="return confirm('Disconnect from Facebook? Share buttons will be disabled until you reconnect.');">
+                    <form method="POST" action="" class="fb-inline-form" onsubmit="return confirm('Disconnect from Facebook? Share buttons will be disabled until you reconnect.');">
                         <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
                         <input type="hidden" name="action" value="disconnect">
                         <button type="submit" class="btn btn-secondary"><i class="fas fa-unlink"></i> Disconnect</button>
                     </form>
                 <?php else: ?>
-                    <button type="submit" form="fbMainForm" name="action" value="connect" class="btn fb-btn">
+                    <button type="submit" form="fbMainForm" name="action" value="connect" class="btn btn-primary">
                         <i class="fab fa-facebook-f"></i> Connect with Facebook
                     </button>
                 <?php endif; ?>
             </div>
-            <p class="help-text" style="margin-top:10px;">
+            <p class="help-text fb-note">
                 <i class="fas fa-info-circle"></i>
                 Test connection only reads from Facebook; it never posts anything.
             </p>
+            </div>
         </div>
 
         <!-- Main settings form -->
@@ -477,13 +480,14 @@ $h = static function ($v): string {
             <button type="submit" name="action" value="save" class="fb-default-submit" tabindex="-1" aria-hidden="true">Save</button>
 
             <!-- Facebook app -->
-            <div class="settings-card fb-card">
-                <h2><i class="fas fa-key" style="color:var(--color-lux-gold,#8F6A35);"></i> Facebook App</h2>
+            <div class="rh-panel fb-card">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Facebook App</h2></div>
+                <div class="rh-panel__body">
 
-                <div class="info-box" style="background:#e7f0ff;border-left-color:#1877F2;">
-                    <h4><i class="fas fa-info-circle" style="color:#1877F2;"></i> Add this address to your Facebook app</h4>
+                <div class="info-box fb-info">
+                    <h4><i class="fas fa-info-circle"></i> Add this address to your Facebook app</h4>
                     <p style="margin:6px 0;">In <strong>developers.facebook.com</strong> &gt; your app &gt; <strong>Facebook Login &gt; Settings</strong> &gt; <strong>Valid OAuth Redirect URIs</strong>, add exactly:</p>
-                    <p style="margin:6px 0;"><code id="fbRedirectUri" style="user-select:all;word-break:break-all;"><?php echo $h($redirectUri); ?></code></p>
+                    <p style="margin:6px 0;"><code id="fbRedirectUri" class="fb-uri"><?php echo $h($redirectUri); ?></code></p>
                     <p style="margin:6px 0;font-size:0.85rem;">Keep <em>Client OAuth Login</em> and <em>Web OAuth Login</em> switched on. The app needs the permissions <code>pages_show_list</code>, <code>pages_read_engagement</code> and <code>pages_manage_posts</code>, and the Facebook user who clicks Connect needs full control of the Page.</p>
                 </div>
 
@@ -511,18 +515,20 @@ $h = static function ($v): string {
                 </div>
 
                 <div class="fb-actions">
-                    <button type="submit" name="action" value="connect" class="btn fb-btn">
+                    <button type="submit" name="action" value="connect" class="btn btn-primary">
                         <i class="fab fa-facebook-f"></i> <?php echo $fb_has_token ? 'Save and reconnect' : 'Save and connect with Facebook'; ?>
                     </button>
+                </div>
                 </div>
             </div>
 
             <!-- Page + posting options -->
-            <div class="settings-card">
-                <h2><i class="fas fa-share-alt" style="color:var(--color-lux-gold,#8F6A35);"></i> Posting</h2>
+            <div class="rh-panel fb-card">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Posting</h2></div>
+                <div class="rh-panel__body">
 
                 <div class="form-group">
-                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                    <label class="fb-check">
                         <input type="checkbox" id="facebook_posting_enabled" name="facebook_posting_enabled" value="1"
                             <?php echo $fb_enabled === '1' ? 'checked' : ''; ?>>
                         <span style="font-weight:600;">Enable Facebook Page Posting</span>
@@ -551,56 +557,58 @@ $h = static function ($v): string {
                     <p class="help-text">Added to the end of every auto-generated post caption. Can be edited per post before sending.</p>
                 </div>
 
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:15px;">
+                <div class="fb-checks">
                     <div class="form-group">
-                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <label class="fb-check">
                             <input type="checkbox" name="facebook_rooms_enabled" value="1"
                                 <?php echo $fb_rooms_enabled === '1' ? 'checked' : ''; ?>>
                             <span>Show share button on Rooms</span>
                         </label>
                     </div>
                     <div class="form-group">
-                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <label class="fb-check">
                             <input type="checkbox" name="facebook_events_enabled" value="1"
                                 <?php echo $fb_events_enabled === '1' ? 'checked' : ''; ?>>
                             <span>Show share button on Events</span>
                         </label>
                     </div>
                     <div class="form-group">
-                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <label class="fb-check">
                             <input type="checkbox" name="facebook_conference_enabled" value="1"
                                 <?php echo $fb_conference_enabled === '1' ? 'checked' : ''; ?>>
                             <span>Show share button on Conference rooms</span>
                         </label>
                     </div>
                     <div class="form-group">
-                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <label class="fb-check">
                             <input type="checkbox" name="facebook_gym_enabled" value="1"
                                 <?php echo $fb_gym_enabled === '1' ? 'checked' : ''; ?>>
                             <span>Show share button on Gym packages</span>
                         </label>
                     </div>
                     <div class="form-group">
-                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <label class="fb-check">
                             <input type="checkbox" name="facebook_menu_enabled" value="1"
                                 <?php echo $fb_menu_enabled === '1' ? 'checked' : ''; ?>>
                             <span>Show share button on Menu items</span>
                         </label>
                     </div>
                     <div class="form-group">
-                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <label class="fb-check">
                             <input type="checkbox" name="facebook_post_log_enabled" value="1"
                                 <?php echo $fb_log_enabled === '1' ? 'checked' : ''; ?>>
                             <span>Log all post attempts to system log</span>
                         </label>
                     </div>
                 </div>
+                </div>
             </div>
 
             <!-- Advanced: manual token + Page ID -->
-            <details class="settings-card fb-advanced"<?php echo ($fb_state === 'none' && $fb_page_id !== '') ? ' open' : ''; ?>>
-                <summary><i class="fas fa-tools" style="color:var(--color-lux-gold,#8F6A35);"></i> Advanced: paste a token by hand</summary>
-                <p class="help-text" style="margin:12px 0;">
+            <details class="rh-panel fb-card fb-advanced"<?php echo ($fb_state === 'none' && $fb_page_id !== '') ? ' open' : ''; ?>>
+                <summary class="rh-panel__head"><span class="rh-panel__title">Advanced: paste a token by hand</span></summary>
+                <div class="rh-panel__body">
+                <p class="help-text" style="margin:0 0 12px;">
                     Only needed if you cannot use Connect with Facebook. Tokens from the Graph API Explorer expire after about an hour, so Connect is strongly recommended. A pasted token is checked with Facebook (read-only) before it is saved.
                 </p>
 
@@ -644,9 +652,10 @@ $h = static function ($v): string {
                     </button>
                     <div id="fbTestResult" style="margin-top:14px;display:none;border-radius:8px;padding:12px 16px;font-size:0.9rem;line-height:1.5;"></div>
                 </div>
+                </div>
             </details>
 
-            <div style="margin-top:24px;">
+            <div class="fb-save-row">
                 <button type="submit" name="action" value="save" class="btn btn-primary">
                     <i class="fas fa-save"></i> Save Facebook Settings
                 </button>

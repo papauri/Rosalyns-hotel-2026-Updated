@@ -54,6 +54,25 @@ require_once __DIR__ . '/../includes/permissions.php';
 // Load audit logging functions
 require_once __DIR__ . '/../includes/audit-functions.php';
 
+// A page's JSON endpoint is blocked for staff when the page's module is switched off (direct URL), as the page itself is.
+$_rh_api_module_pages = [
+    'gym-checkin.php'            => 'gym-checkin.php',
+    'credit-notes.php'           => 'credit-notes.php',
+    'end-of-day-pdf.php'         => 'end-of-day-report.php',
+    'end-of-day-send.php'        => 'end-of-day-report.php',
+    'guest-lookup.php'           => 'create-booking.php',
+    'search-bookings.php'        => 'payment-add.php',
+    'tentative-actions.php'      => 'tentative-bookings.php',
+    'send-quotation.php'         => 'create-booking.php', // also sent from Bookings / booking details / tentative (bookings module)
+    'get-housekeeping-audit.php' => 'housekeeping.php',
+    'get-maintenance-audit.php'  => 'room-maintenance.php',
+    'facebook-fetch-pages.php'   => 'facebook-settings.php',
+    'facebook-test-post.php'     => 'facebook-settings.php',
+];
+if (isset($_rh_api_module_pages[$current_page])) {
+    rhApiModuleGate($_rh_api_module_pages[$current_page]);
+}
+
 if (!function_exists('api_json_forbidden')) {
     function api_json_forbidden(string $message = 'Permission denied'): void
     {

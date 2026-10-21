@@ -143,7 +143,9 @@ function getAllRoles()
                 'individual_rooms',
                 'block_rooms', // already blocked dates / set rooms out of service before this permission was enforced
                 'room_service_view',
-                'room_service_manage'
+                'room_service_manage',
+                'payment_add', // owner 2026-10-21: reception takes the payment and prints the receipt at checkout
+                'receipts'
             ]
         ],
         'housekeeping' => [
@@ -1739,6 +1741,27 @@ function rh_module_key_enabled(string $key): bool
         return moduleEnabled('bookings') || moduleEnabled('conference') || moduleEnabled('gym');
     }
     return function_exists('moduleEnabled') && moduleEnabled($key);
+}
+
+/**
+ * JSON endpoints follow their page's module: when the module that owns $page is switched off, a
+ * non-admin gets a 403 from the endpoint too (same rule as the page gate in admin-init.php), so the
+ * feature cannot be reached by calling the endpoint directly. Admins are never blocked, as on pages.
+ */
+function rhApiModuleGate(string $page): void
+{
+    $module = getModuleForPage($page);
+    if ($module === null || (string)($_SESSION['admin_role'] ?? '') === 'admin') {
+        return;
+    }
+    foreach ((is_array($module) ? $module : [$module]) as $moduleKey) {
+        if (!rh_module_key_enabled((string)$moduleKey)) {
+            http_response_code(403);
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'error' => 'This feature is switched off in Modules.']);
+            exit;
+        }
+    }
 }
 
 /**

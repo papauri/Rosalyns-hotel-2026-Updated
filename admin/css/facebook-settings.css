@@ -6,7 +6,75 @@
 }
 
 .fb-card {
-    border-left: 4px solid #1877F2;
+    margin-bottom: 1rem;
+}
+
+.fb-card .rh-panel__body > .form-group:last-child {
+    margin-bottom: 0;
+}
+
+.fb-card .form-group + .fb-actions {
+    margin-top: 14px;
+}
+
+.fb-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+}
+
+.fb-check input[type="checkbox"] {
+    flex: 0 0 auto;
+    margin: 2px 0 0;
+}
+
+.fb-checks {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 6px 15px;
+}
+
+.fb-checks .form-group {
+    margin-bottom: 0;
+}
+
+.fb-note {
+    margin-top: 10px;
+}
+
+.fb-inline-form {
+    margin: 0;
+}
+
+.fb-info {
+    margin-bottom: 14px;
+    background: #faf8f5;
+}
+
+.fb-info h4 {
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.fb-card .form-group label small {
+    display: inline;
+    font-weight: 400;
+    color: #6b7280;
+}
+
+.fb-info p {
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+
+.fb-uri {
+    user-select: all;
+    word-break: break-all;
+}
+
+.fb-save-row {
+    margin: 4px 0 24px;
 }
 
 .fb-btn {
@@ -84,10 +152,13 @@
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 16px;
-    border-radius: 8px;
-    font-size: 1rem;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.6;
     margin-bottom: 8px;
+    max-width: 100%;
 }
 
 .fb-status--ok {
@@ -175,11 +246,40 @@
 
 .fb-advanced summary {
     cursor: pointer;
-    font-weight: 600;
     min-height: 44px;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
+    list-style: none;
+}
+
+.fb-advanced summary::-webkit-details-marker {
+    display: none;
+}
+
+.fb-advanced summary::after {
+    content: "";
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    margin: -4px 4px 0 0;
+}
+
+.fb-advanced[open] summary::after {
+    transform: rotate(-135deg);
+    margin-top: 4px;
+}
+
+.fb-advanced[open] summary {
+    border-bottom: 1px solid var(--rh-line, #d7dde6);
+}
+
+.fb-advanced:not([open]) summary {
+    border-bottom: 0;
 }
 
 /* Share buttons are shown but unusable until Facebook is connected (title carries the hint). */

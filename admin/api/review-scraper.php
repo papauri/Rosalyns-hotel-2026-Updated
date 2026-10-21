@@ -1333,6 +1333,7 @@ if (!isset($_SESSION['admin_user_id'])) {
 if (!hasPermission((int)$_SESSION['admin_user_id'], 'reviews')) {
     json_error('Access denied', 403);
 }
+rhApiModuleGate('reviews.php');
 
 $input = read_json_input();
 $action = (string)($input['action'] ?? '');
