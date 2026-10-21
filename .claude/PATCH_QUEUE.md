@@ -8,6 +8,20 @@ Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner). One commit per it
 Owner lead = the department lead whose files it is; the patch lead plans, briefs, gates and ships.
 
 ## Security patches (standing — always allowed, highest priority)
+- TODO · SWEEP 2026-10-22 findings (fix in this order; details in the sweep report):
+  F1 high: invoice/receipt/credit-note/quotation PDFs in web-served folders with no deny rule; admin links point at the static file; guessable names → deny-all .htaccess on invoices/ (+subfolders) and quotations/, one permission-checked download endpoint, repoint admin links, check email links/attachments.
+  F2 high: api/housekeeping.php, api/maintenance-schedules.php, api/room-photos.php, api/room-amenities.php writes without checkPermission → any valid API key can write; add a write scope per method, show it in admin/api-keys.php.
+  F3 high: extensionless error_log files in admin/, api/, admin/api/ are web-served (.htaccess denies *.log only) → add error_log to the deny rule (root + subfolders); owner deletes/rotates them on the live hosts.
+  F4 medium: admin/api/menu-recipe.php writes and admin/api/room-pictures.php POST/PUT/DELETE have no CSRF check → validateCsrfToken on non-GET + callers' JS.
+  F5 medium: forgot-password builds the reset link from the Host header when site_url is empty → never use HTTP_HOST.
+  F6 medium: gym-schedule.php reservation has no per-IP limit → pub_ip_rate_limit.
+  F7 medium: api/cookie-consent.php unauthenticated, no limit, trusts X-Forwarded-For → limit, REMOTE_ADDR, one row per IP per day.
+  F8 low-med: raw exception text in API JSON (api/index.php, availability, bookings, admin/api/room-pictures, review-stats) → generic message, log the detail.
+  F9 low-med: invalid API keys never throttled (bcrypt over all keys per attempt); key accepted in ?api_key= → per-IP failed-auth limit, header only.
+  F10 low: API-key encryption falls back to a literal default salt → refuse without APP_ENCRYPTION_SALT (owner checks .env on each host).
+  F11 low: session cookie without Secure on HTTPS → set dynamically.
+  F12 low: login reveals real usernames via "attempts remaining"; strangers can lock accounts → same message for all failures.
+  F13 low: docs/ contract/equipment PDFs public; POS APIs (kds-action, void-order, cancel-order, delete-order, pos-notifications, reports-export) lack rhApiModuleGate → admin session for docs, add the module gate.
 - TODO · Standing security sweep, both hotels (shared code): auth/session, CSRF on every POST,
   SQL injection, output escaping/XSS, file uploads, path traversal, API key/rate limits, public
   forms, admin API module/permission gates, secrets in repo. Findings → fix → re-sweep monthly.
@@ -34,6 +48,9 @@ Owner lead = the department lead whose files it is; the patch lead plans, briefs
   slot reservation confirmation email and member-number check. · events-gym lead
 
 ## Till / stock / F&B
+- TODO · Payments-page refund (finance-account-sync.php) also needs the shop-mode "damaged" choice (today a shop refund always restocks). · accounting lead
+- TODO · Till (admin/pos.php) shop-mode void and refund dialogs: "Damaged goods (record as waste)" checkbox sending damaged=1 (server side shipped; owner decision 2026-10-22). · restaurant lead + ui-lead
+- TODO · Stock-count surplus that settles a sold-at-zero deficit should also fill in the sale cost (deliveries already do). · stock lead
 - TODO · Out-of-stock alert misses items that went negative with no batch ever received. · stock lead
 - TODO · Till "Delivery history" says nothing sent when the email was logged. · restaurant lead
 - TODO · "Reversed order still has an active payment" false alarm on a voided paid order. · accounting lead
