@@ -152,7 +152,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             $a = ['name' => $r['contact_person'] ?: $r['company_name'], 'email' => $r['email'], 'ref' => $r['inquiry_reference'],
                 'due' => date('Y-m-d', strtotime($base . ' +' . $terms . ' days')), 'invoice_no' => 'STMT-' . $r['inquiry_reference']];
         } elseif ($type === 'gym') {
-            $st = $pdo->prepare("SELECT gi.* FROM gym_inquiries gi WHERE gi.id = ? AND gi.status IN ('confirmed','completed') AND gi.amount_due > ?");
+            $st = $pdo->prepare("SELECT gi.* FROM gym_inquiries gi WHERE gi.id = ? AND gi.status IN ('confirmed','converted','completed') AND gi.amount_due > ?");
             $st->execute([$id, $tol]);
             $r = $st->fetch(PDO::FETCH_ASSOC);
             if (!$r) {
@@ -208,7 +208,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
                 ORDER BY ei.id LIMIT 200", [$tol, $terms, $lookback, $minDays]);
         }
         if (rh_auto_module_on('gym')) {
-            $out['gym'] = $run("SELECT gi.id FROM gym_inquiries gi WHERE gi.status IN ('confirmed','completed') AND gi.amount_due > ? AND gi.email <> ''
+            $out['gym'] = $run("SELECT gi.id FROM gym_inquiries gi WHERE gi.status IN ('confirmed','converted','completed') AND gi.amount_due > ? AND gi.email <> ''
                 AND DATE_ADD(DATE(gi.created_at), INTERVAL ? DAY) BETWEEN (CURDATE() - INTERVAL ? DAY) AND (CURDATE() - INTERVAL ? DAY)
                 ORDER BY gi.id LIMIT 200", [$tol, $terms, $lookback, $minDays]);
         }

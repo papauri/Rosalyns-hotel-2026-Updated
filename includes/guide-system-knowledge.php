@@ -102,7 +102,7 @@ function rh_kb_sys_modules(): array
     $memo += [
         'events' => ['label' => $memo['events_page']['label'] ?? 'Events Page', 'desc' => $memo['events_page']['desc'] ?? 'Guest events page and event bookings.'],
         'billing' => ['label' => 'Bookings, Conference or Gym', 'desc' => 'Invoices and quotations exist for businesses that bill a named client in advance (rooms, conferences, gym memberships).'],
-        'advance_booking' => ['label' => 'Bookings or Conference', 'desc' => 'Credit notes exist for businesses that take deposits against future stays or events.'],
+        'advance_booking' => ['label' => 'Bookings, Conference or Gym', 'desc' => 'Credit notes exist for businesses that take deposits or payments in advance against stays, events or gym accounts.'],
     ];
     return $memo;
 }

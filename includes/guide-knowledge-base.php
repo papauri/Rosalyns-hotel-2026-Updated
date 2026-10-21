@@ -721,7 +721,7 @@ function rh_kb_key_on(string $key, ?array $state): bool
         return ($m['bookings'] ?? true) || ($m['conference'] ?? true) || ($m['gym'] ?? true);
     }
     if ($key === 'advance_booking') {
-        return ($m['bookings'] ?? true) || ($m['conference'] ?? true);
+        return ($m['bookings'] ?? true) || ($m['conference'] ?? true) || ($m['gym'] ?? true);
     }
     return $m[$key] ?? true;
 }

@@ -172,6 +172,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 if ($expiry === '' || !$gm_can_financials) {
                     $expiry = (string)(gymComputeExpiry($start, $pkgDurationDays) ?? '');
                 }
+                // A paid package with no length would make an open-ended member: never expires, never
+                // reminded, cannot be renewed (owner 2026-10-22: refuse new enrolments; edits of existing members still save).
+                if ($memberId <= 0 && !$isComplimentary && $expiry === '') {
+                    $gm_json(false, 'Set how many days this package lasts (Gym > Packages) before enrolling members on it.');
+                }
             } else {
                 // No package selected.
                 if ($isComplimentary) {

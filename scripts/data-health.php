@@ -73,7 +73,9 @@ foreach (['receipt_events', 'mra_submission_queue', 'payment_audit_log', 'credit
 }
 foreach (['gym_attendance', 'gym_class_enrollments', 'gym_slot_reservations', 'gym_reminder_log'] as $t) {
     $checks[] = ['WARN', "$t rows whose member is missing",
-        "SELECT x.id FROM $t x LEFT JOIN gym_members m ON m.id = x.member_id WHERE m.id IS NULL"];
+        "SELECT x.id FROM $t x LEFT JOIN gym_members m ON m.id = x.member_id WHERE m.id IS NULL"
+        // A public slot reservation by a non-member has no member_id; only a dangling id is a fault.
+        . ($t === 'gym_slot_reservations' ? ' AND x.member_id IS NOT NULL' : '')];
 }
 foreach (['individual_room_amenities', 'individual_room_photos', 'housekeeping_assignments', 'room_maintenance_schedules', 'room_maintenance_blocks', 'booking_rooms'] as $t) {
     $checks[] = ['WARN', "$t rows whose individual room is missing",

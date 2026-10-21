@@ -6871,6 +6871,25 @@ function sendRefundNotificationEmail(array $payment, string $refundRef, float $r
                     error_log('sendRefundNotificationEmail restaurant lookup: ' . $soEx->getMessage());
                 }
             }
+        } elseif ($bookingType === 'gym' || $bookingType === 'event') {
+            // Same lookup the receipt path uses for these account types.
+            $guestName  = $payment['customer_name']  ?? '';
+            $guestEmail = $payment['customer_email'] ?? '';
+            if (empty($guestEmail) && !empty($payment['booking_id'])) {
+                try {
+                    $acctTbl = $bookingType === 'gym' ? 'gym_inquiries' : 'event_inquiries';
+                    $acStmt = $pdo->prepare("SELECT name, email, reference_number FROM {$acctTbl} WHERE id = ? LIMIT 1");
+                    $acStmt->execute([(int)$payment['booking_id']]);
+                    $acRow = $acStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                    $guestName  = $acRow['name']  ?? $guestName;
+                    $guestEmail = $acRow['email'] ?? '';
+                    if (empty($payment['booking_reference']) && !empty($acRow['reference_number'])) {
+                        $payment['booking_reference'] = $acRow['reference_number'];
+                    }
+                } catch (\Throwable $acEx) {
+                    error_log('sendRefundNotificationEmail ' . $bookingType . ' lookup: ' . $acEx->getMessage());
+                }
+            }
         }
 
         if (empty($guestEmail) || !filter_var($guestEmail, FILTER_VALIDATE_EMAIL)) {

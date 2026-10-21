@@ -1716,14 +1716,15 @@ function rh_module_key_enabled(string $key): bool
         return function_exists('isEventsEnabled') && isEventsEnabled();
     }
     if ($key === 'advance_booking') {
-        // Accounts-receivable businesses only (rooms, conferences): deposits,
-        // balances due, credit notes against future stays/events. A gym,
-        // supermarket, retail shop or bar refunds at source (POS refund)
-        // instead of issuing credit notes.
+        // Accounts-receivable businesses (rooms, conferences, gym memberships): deposits,
+        // balances due, credit notes. A gym account that is overpaid or cancelled with
+        // money paid issues/owes a credit note, so Credit Notes must stay reachable there
+        // (the money owed back must be visible). A supermarket, retail shop or bar refunds
+        // at source (POS refund) instead.
         if (!function_exists('moduleEnabled')) {
             return true;
         }
-        return moduleEnabled('bookings') || moduleEnabled('conference');
+        return moduleEnabled('bookings') || moduleEnabled('conference') || moduleEnabled('gym');
     }
     if ($key === 'billing') {
         // "Billing businesses" — anyone who invoices/quotes a named client in

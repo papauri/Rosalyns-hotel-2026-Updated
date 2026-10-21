@@ -30,6 +30,12 @@ if (!$gymEnabled) {
 $cfg = gymScheduleSettings();
 $currency = (string)getSetting('currency_symbol', 'MWK');
 
+// The public CSRF token lives in the session; without a started session it never persisted and
+// every reservation was refused as "session expired" (same start as gym.php).
+if (session_status() === PHP_SESSION_NONE) {
+    require_once __DIR__ . '/includes/session-boot.php'; rh_session_start();
+}
+
 $slotCsrf = pub_csrf_generate('gym_slot');
 
 // ── Reservation submission (self-POST) ──────────────────────────────────────
