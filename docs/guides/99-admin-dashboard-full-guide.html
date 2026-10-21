@@ -542,7 +542,7 @@
   <h2 id="duplicates">Duplicates and required fields</h2>
   <p>Every add and edit form checks what you type before saving. Extra spaces are removed, and names are compared without caring about capital letters or doubled spaces, so <em>"Deluxe&nbsp;&nbsp;room"</em> counts as the same name as <em>"Deluxe Room"</em>.</p>
   <p>If you try to add something that already exists, nothing is saved and you see a message such as <em>"A supplier called "…" already exists. Use a different name or edit the existing one."</em> Edit the existing record instead.</p>
-  <p>On the staff, room type, individual room, menu item, restaurant table, stock item and supplier forms, a name or number that is already used is flagged in red under the box while you type (for example <em>"Another table already has this name."</em>). If the save is still refused, the form stays open with what you typed and the reason at the top, so nothing has to be typed again.</p>
+  <p>On the staff, room type, individual room, menu item, shop (retail) product, shop category, restaurant table, stock item, supplier, deal, room package, conference room, gym package, event and gym class forms, a name or number that is already used is flagged in red under the box while you type (for example <em>"Another table already has this name."</em>). If the save is still refused, the form stays open with what you typed and the reason at the top, so nothing has to be typed again.</p>
   <table>
     <thead><tr><th>What you add</th><th>Counts as a duplicate when…</th></tr></thead>
     <tbody>
@@ -551,6 +551,9 @@
       <tr><td>Individual room</td><td>Same room number. Joined rooms: same name, or the same two rooms already joined.</td></tr>
       <tr><td>Rate plan, room package, deal, conference room, gym package, supplier, stock item, API client</td><td>Same name.</td></tr>
       <tr><td>Menu item</td><td>Same name in the same category of the same menu (food or drinks).</td></tr>
+      <tr><td>Shop (retail) product</td><td>Same barcode, in any spelling of the code, as another product. The message names that product.</td></tr>
+      <tr><td>Shop (retail) category</td><td>Same name as another shop category.</td></tr>
+      <tr><td>Receive Stock barcode</td><td>The scanned barcode is already registered to a stock item or a shop product. The message names it.</td></tr>
       <tr><td>Recipe</td><td>A menu item already has a recipe, or the same ingredient is listed twice.</td></tr>
       <tr><td>Event</td><td>Same title on the same date.</td></tr>
       <tr><td>Gym class</td><td>Same title on the same days at the same time.</td></tr>
