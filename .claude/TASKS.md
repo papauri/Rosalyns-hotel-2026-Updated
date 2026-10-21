@@ -5,6 +5,7 @@ and when work ships. One line per task: status · what · where it stands · nex
 Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 
 ## Open
+- DOING (owner approved 2026-10-22) · Preset dress rehearsals on Liwonde, one at a time (shared module state): 1 Bar/Restaurant DONE, fixes SHIPPED 5560513 / Liwonde 7fe88ff + TODO one receipt number per till sale (owner chose 2026-10-22) -> 2 Retail/Shop + Supermarket (stock lead) -> 3 Conference Venue (events lead) -> 4 Hotel (No Restaurant) (rooms lead). Fixes shipped between rehearsals, never during one.
 - SHIPPED cd72895 / Liwonde 319ee2a · Gym-only dress rehearsal on Liwonde DONE, fixes shipped (slot booking session, refund email, Credit Notes with gym, gym bill reminders, paid package needs a length; Liwonde packages set 1/7/30 days). Batch for owner: room links on a gym-only home page, stock banner with stock off, hotel wording on a gym till, start-date timezone default, owed-back list. Was: (gym_fitness preset, guest GYM REHEARSAL, johnpaulchirwa@gmail.com): signup, payment, check-in, class, till, renewal/expiry, refund, EOD/reports; teardown + modules restored. Findings -> fixes in Rosalyn's, ported.
 - SHIPPED 4cf7e69 / Liwonde 7ab6dd2 · Modules gate admin API endpoints; nav fixes; receptionist payment_add+receipts; room pictures need media_edit; Facebook Settings on shared layout.
 - DONE 2026-10-21 · Liwonde rehearsal + Test bookings removed completely (backup db-20261021-142200.sql.gz); 0 bookings/payments; data-health green. Owner: remove the same PDFs on the live server if copied there.

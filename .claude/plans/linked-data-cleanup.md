@@ -39,7 +39,8 @@ maintenance_audit_log (CASCADE). Everything else is an id column with NO FK — 
   for 'restaurant' it is the stock_orders.id), quotations, reviews, **stock_orders** (room tabs /
   room service), tentative_booking_log
 - `booking_reference`: conference_bookings, credit_notes, payments, quotations, logs
-- `order_id`: pos_ready_notifications, station_messages, stock_kds_events (+ booking_charges.stock_order_id)
+- `order_id`: pos_ready_notifications, station_messages, stock_kds_events (+ booking_charges.stock_order_id);
+  stock_order_items unserved lines of a REFUNDED order are CLOSED by `rh_close_refunded_order_lines()` (till refund + payments refund sync); data-health FAIL check covers it
 - `payment_id`: credit_note_applications, mra_submission_queue, payment_audit_log, receipt_events
 - `member_id`: gym_attendance, gym_class_enrollments, gym_member_audit_log, gym_reminder_log, gym_slot_reservations
 - `event_id`: event_inquiries · `conference_id`: payments
