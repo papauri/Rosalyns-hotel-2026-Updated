@@ -21,6 +21,7 @@ require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
+require_once __DIR__ . '/../config/receipts.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
 require_once __DIR__ . '/includes/restaurant-order-serve.php';
 require_once __DIR__ . '/includes/finance-account-sync.php';
@@ -948,6 +949,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $itemsStmt2 = $pdo->prepare("SELECT item_name, quantity, unit_price FROM stock_order_items WHERE order_id = ? ORDER BY id");
                     $itemsStmt2->execute([$orderId]);
                     $receiptItems = $itemsStmt2->fetchAll(PDO::FETCH_ASSOC);
+                    $receiptNoCtx = receipt_restaurant_receipt_ctx($pdo, $orderId);
                     $changeMsg = ($paymentMethod === 'cash' && ($extras['change'] ?? 0) > 0) ? ' Change: ' . $currency_symbol . ' ' . number_format($extras['change'], 2) . '.' : '';
                     $message = "Paid {$row['reference']} — {$currency_symbol} " . number_format((float)$row['total_amount'], 2) . " · {$methodLabel}." . $changeMsg;
                     header('Content-Type: application/json; charset=utf-8');
@@ -955,6 +957,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'ok'             => true,
                         'order_id'       => $orderId,
                         'reference'      => $row['reference'],
+                        'receipt_number' => $receiptNoCtx['receipt_numbers'],
                         'total'          => (float)$row['total_amount'],
                         'tip_amount'     => $tipAmount,
                         'split_count'    => $splitCount,
@@ -1733,6 +1736,7 @@ function pos_fetch_shift_summary(PDO $pdo, array $restaurantWindow, int $userId)
     return [
         'orders_today' => (int)$t['orders_count'],
         'revenue_today' => (float)$t['sales_total'],
+        'refund_today' => (float)($t['refund_amount'] ?? 0),
         'cash_today' => (float)$t['gross_cash'],
         'mobile_today' => (float)$t['gross_mobile'],
         'card_today' => (float)$t['gross_card'],
@@ -2821,7 +2825,8 @@ if ($posCanStations) {
             <div class="tb-row2">
                 <span class="stat"><strong id="tbStatOrders"><?php echo (int)($shift['orders_today'] ?? 0); ?></strong><span class="stat-label">Orders</span></span>
 <?php if ($posCanSeeTakings): ?>
-                    <span class="stat"><strong id="tbStatRevenue"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 0); ?></strong><span class="stat-label">Revenue</span></span>
+                    <span class="stat" title="Sales taken this shift by payment time, before any refunds paid out and before voids."><strong id="tbStatRevenue"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 0); ?></strong><span class="stat-label">Gross sales<span class="stat-label-long"> (before refunds and voids)</span></span></span>
+                    <span class="stat" title="Gross sales less refunds and voids of paid orders paid out from this till this shift."><strong id="tbStatNet"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0) - (float)($shift['refund_today'] ?? 0), 0); ?></strong><span class="stat-label">Net</span></span>
                     <span class="stat"><strong id="tbStatCash"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 0); ?></strong><span class="stat-label">Cash</span></span>
                     <span class="stat"><strong id="tbStatMobile"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 0); ?></strong><span class="stat-label">Mobile</span></span>
                     <span class="stat"><strong id="tbStatCard"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 0); ?></strong><span class="stat-label">Card</span></span>
@@ -3177,7 +3182,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     style="position:absolute; top:10px; right:14px; background:transparent; border:none; font-size:26px; line-height:1; cursor:pointer; color:#6c757d;">&times;</button>
                 <div class="icon"><i class="fas fa-<?php echo $justParked ? 'fire' : 'check-circle'; ?>"></i></div>
                 <h2><?php echo $justParked ? 'Order Fired' : 'Payment received'; ?></h2>
-                <div class="ref"><?php echo htmlspecialchars($lastOrderRef); ?></div>
+                <?php $lastReceiptNos = $justParked ? '' : receipt_restaurant_receipt_ctx($pdo, (int)$lastOrderId)['receipt_numbers']; ?>
+                <?php if ($lastReceiptNos !== ''): ?><div class="ref">Receipt <?php echo htmlspecialchars($lastReceiptNos); ?></div><?php endif; ?>
+                <div class="<?php echo $lastReceiptNos !== '' ? '' : 'ref'; ?>"<?php echo $lastReceiptNos !== '' ? ' style="font-size:12px;color:#6c757d;"' : ''; ?>><?php echo $lastReceiptNos !== '' ? 'Order # ' : ''; ?><?php echo htmlspecialchars($lastOrderRef); ?></div>
                 <div style="font-size:14px; color:#155724;"><?php echo htmlspecialchars($message); ?></div>
                 <div class="actions">
                     <a class="a-print" href="stock-receipt.php?id=<?php echo (int)$lastOrderId; ?>&print=1&kot=<?php echo $justParked ? '1' : '0'; ?>" target="_blank" data-help="<?php echo $justParked ? 'Print KOT|Kitchen Order Ticket — the chef-side slip listing what to cook. Opens in a new tab so you can keep the till open.' : 'Print receipt|Customer-facing slip with totals, VAT and payment method. Opens in a new tab.'; ?>"><i class="fas fa-print"></i> <?php echo $justParked ? 'Print KOT' : 'Print'; ?></a>
@@ -3703,7 +3710,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     <div id="stationsTotals" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; font-size:12px;">
                         <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;">Open tabs system-wide: <strong id="stOpenTabs">0</strong></span>
                         <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;">Orders today: <strong id="stOrdersToday">0</strong></span>
-                        <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;">Revenue today: <strong id="stRevenueToday"><?php echo $currency_symbol; ?> 0.00</strong></span>
+                        <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;">Paid sales today (before refunds and voids): <strong id="stRevenueToday"><?php echo $currency_symbol; ?> 0.00</strong></span>
                     </div>
                     <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:14px;">
                         <?php foreach (['kitchen' => ['Kitchen', 'fa-utensils', '#d4a843'], 'bar' => ['Bar', 'fa-wine-glass', '#6f42c1'], 'coffee_bar' => ['Coffee Bar', 'fa-mug-hot', '#8B5A2B']] as $stKey => $meta): ?>
@@ -6069,6 +6076,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
 
             setText('tbStatOrders', String(orders));
             setText('tbStatRevenue', currencySymbol + ' ' + fmtMoneyNoDecimals(revenue));
+            setText('tbStatNet', currencySymbol + ' ' + fmtMoneyNoDecimals(revenue - Number(shift.refund_today || 0)));
             setText('tbStatCash', currencySymbol + ' ' + fmtMoneyNoDecimals(cash));
             setText('tbStatMobile', currencySymbol + ' ' + fmtMoneyNoDecimals(mobile));
             setText('tbStatCard', currencySymbol + ' ' + fmtMoneyNoDecimals(card));
@@ -10259,8 +10267,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const displayMethod = splitCount > 1 ? `Split ×${splitCount}` : (mLabel[data.payment_method] || data.payment_method);
 
             const titleSuffix = splitCount > 1 ? ' — split ×' + splitCount : '';
-            document.getElementById('rmTitle').textContent = 'Payment received — ' + (data.reference || '') + titleSuffix;
-            document.getElementById('rmSubtitle').textContent = displayMethod + ' · ' + sym + ' ' + fmtMoney(grandTotal);
+            document.getElementById('rmTitle').textContent = 'Payment received' + (data.receipt_number ? ' — Receipt ' + data.receipt_number : '') + titleSuffix;
+            document.getElementById('rmSubtitle').textContent = 'Order # ' + (data.reference || '') + ' · ' + displayMethod + ' · ' + sym + ' ' + fmtMoney(grandTotal);
 
             let summaryHtml = `
                 <div><span style="color:#6c757d;font-size:11px;font-weight:600;text-transform:uppercase;">Order total</span><div style="font-size:20px;font-weight:700;color:#166534;">${sym} ${fmtMoney(data.total)}</div></div>

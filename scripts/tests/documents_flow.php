@@ -94,7 +94,11 @@ function dx_has_pdf(array $emails, string $kind): bool {
 function dx_run(string $page, array $post = [], array $opts = []): array {
     global $harness, $port;
     $cfg = base64_encode(json_encode(['post' => $post, 'get' => $opts['get'] ?? [], 'ajax' => !empty($opts['ajax']), 'verify' => $opts['verify'] ?? [], 'setup' => $opts['setup'] ?? [], 'fake_smtp' => $port]));
-    $out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg($cfg) . ' 2>&1');
+    $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg($cfg) . ' 2>&1';
+    $out = shell_exec($cmd);
+    // A child that printed nothing never ran (Windows could not start it under memory pressure) and wrote
+    // nothing; run it once more instead of reporting a false FAIL (same as settings_pages.php).
+    if (trim((string)$out) === '') { usleep(500000); $out = shell_exec($cmd); }
     $res = ['error' => 'no result', 'raw' => substr((string)$out, -500), 'rolled_back' => false];
     if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $r = json_decode($m[1], true); if (is_array($r)) { $res = $r; } }
     $res['emails'] = dx_new_emails();
@@ -233,13 +237,15 @@ echo "== RESTAURANT / TILL ==\n";
 $r = dx_child('restaurant', ['email' => 1]);
 ok('till sale with a customer email: the receipt is queued and goes out once', ($r['json']['queued'] ?? false) === true && dx_count($r['emails'], 'receipt') === 1 && count($r['emails']) === 1, json_encode([dx_kinds($r['emails']), $r['json'] ?? $r['raw'] ?? '']));
 $r = dx_child('restaurant', ['email' => 0]);
-ok('walk-in till sale (no email): nothing queued, nothing sent', ($r['json']['queued'] ?? true) === false && count($r['emails']) === 0, json_encode([dx_kinds($r['emails']), $r['json'] ?? $r['raw'] ?? '']));
+ok('walk-in till sale (no email): queued for its PDF, nothing emailed', ($r['json']['queued'] ?? false) === true && count($r['emails']) === 0, json_encode([dx_kinds($r['emails']), $r['json'] ?? $r['raw'] ?? '']));
+ok('  walk-in till sale: the PDF exists and the slip + PDF show the payment RCP number, the order reference as "Order #"', !empty($r['json']['pdf_generated']) && !empty($r['json']['slip_has_rcp']) && !empty($r['json']['slip_has_order_label']) && !empty($r['json']['slip_receipt_not_order_ref']) && !empty($r['json']['pdf_has_rcp']), json_encode($r['json'] ?? $r['raw'] ?? ''));
 
 $r = dx_child('restaurant_split', ['email' => 1]);
 ok('split bill, order with a customer email: BOTH legs queue a receipt, one email per leg, never twice', ($r['json']['queued'] ?? 0) === 2 && dx_count($r['emails'], 'receipt') === 2 && count($r['emails']) === 2, json_encode([dx_kinds($r['emails']), $r['json'] ?? $r['raw'] ?? '']));
 ok('  split legs rolled back', dx_clean($r), json_encode($r));
 $r = dx_child('restaurant_split', ['email' => 0]);
-ok('split bill, walk-in (no email): nothing queued, nothing sent', ($r['json']['queued'] ?? 1) === 0 && count($r['emails']) === 0, json_encode([dx_kinds($r['emails']), $r['json'] ?? $r['raw'] ?? '']));
+ok('split bill, walk-in (no email): both legs queued for their PDF, nothing emailed', ($r['json']['queued'] ?? 0) === 2 && count($r['emails']) === 0, json_encode([dx_kinds($r['emails']), $r['json'] ?? $r['raw'] ?? '']));
+ok('  split bill: every leg has its own RCP and its own PDF; the slip lists both and shows "Order #"', ($r['json']['leg_pdfs'] ?? 0) === 2 && !empty($r['json']['leg_numbers_distinct']) && !empty($r['json']['slip_has_all_legs']) && !empty($r['json']['slip_has_order_label']), json_encode($r['json'] ?? $r['raw'] ?? ''));
 
 echo "== CHECKOUT DOCUMENT TITLE: statement vs invoice ==\n";
 $r = dx_child('statement_pdf', ['paid' => 1]);

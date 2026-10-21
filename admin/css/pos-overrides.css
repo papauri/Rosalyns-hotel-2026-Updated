@@ -555,7 +555,7 @@ a.recent-toggle span {
 @media (min-width: 1281px) and (max-width: 1540px) {
     .till-bar .tb-row2 {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         height: 36px;
         padding: 0 10px;
         gap: 0;
@@ -1005,7 +1005,7 @@ a.recent-toggle span {
 
     .till-bar .tb-row2 {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         height: 42px;
         padding: 3px 6px;
         gap: 0;
@@ -1526,7 +1526,7 @@ a.recent-toggle span {
 
     .till-bar .tb-row2 {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         height: 38px;
         padding: 0 8px;
         gap: 0;
@@ -7833,5 +7833,19 @@ html.page-zoomed .pos-ready-card {
     .till-grid > .cart .cart-foot .park-btn,
     .till-grid > .cart .cart-foot .pay-btn {
         min-height: 44px;
+    }
+}
+
+/* Till header: the gross-sales label carries its full wording ("before refunds and voids") where there is room;
+   on narrow bars it drops to "Gross sales" (the full text stays in the cell's tooltip). */
+.till-bar .stat .stat-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+@media (max-width: 1100px) {
+    .till-bar .stat .stat-label .stat-label-long {
+        display: none;
     }
 }

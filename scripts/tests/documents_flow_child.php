@@ -119,6 +119,22 @@ switch ($sc) {
             $r = receipt_auto_send($pdo, (int)$qid, null);
             $out['flush_reason'] = $r['reason'] ?? '';
         }
+        // One receipt number per sale: the payment's RCP number. The till slip shows it as "Receipt #" and the
+        // order reference separately as "Order #"; the payment's PDF exists even for a walk-in (no email).
+        $pr = $pdo->prepare('SELECT receipt_number, receipt_generated, receipt_path FROM payments WHERE id = ?');
+        $pr->execute([$payId]);
+        $prow = $pr->fetch(PDO::FETCH_ASSOC) ?: [];
+        $od = receipt_load_restaurant_order($pdo, $id);
+        $slip = $od ? receipt_build_restaurant_email_html($od['order'], $od['items'], $od['ctx']) : '';
+        $pdfHtml = $od ? receipt_render_restaurant_pdf_html($od['order'], $od['items'], $od['ctx']) : '';
+        $out['rcp'] = (string)($prow['receipt_number'] ?? '');
+        $out['pdf_generated'] = !empty($prow['receipt_generated']) && !empty($prow['receipt_path']) && is_file($root . '/' . $prow['receipt_path']);
+        $out['slip_has_rcp'] = $out['rcp'] !== '' && strpos($slip, $out['rcp']) !== false;
+        $out['slip_has_order_label'] = strpos($slip, 'Order #') !== false && strpos($slip, 'DXR' . $run) !== false;
+        $out['slip_receipt_not_order_ref'] = !preg_match('~Receipt #</strong></td><td[^>]*>DXR~', $slip);
+        $out['pdf_has_rcp'] = $out['rcp'] !== '' && strpos($pdfHtml, $out['rcp']) !== false;
+        // The rows roll back; remove the PDF the test wrote so no stale file is left under that number.
+        if (!empty($prow['receipt_path'])) { @unlink($root . '/' . $prow['receipt_path']); }
         break;
 
     case 'restaurant_split': // split bill, two legs, order with / without a customer email: one receipt per leg
@@ -137,6 +153,23 @@ switch ($sc) {
             receipt_auto_send($pdo, (int)$qid, null);
             receipt_auto_send($pdo, (int)$qid, null); // the once-only rule: a second ask sends nothing
         }
+        // Every leg has its own RCP and its own PDF; the combined slip lists them and names the order.
+        $pr = $pdo->prepare('SELECT receipt_number, receipt_generated, receipt_path FROM payments WHERE id = ?');
+        $legPdfs = 0; $legNums = []; $legPaths = [];
+        foreach ($legIds as $lid) {
+            $pr->execute([$lid]);
+            $prow = $pr->fetch(PDO::FETCH_ASSOC) ?: [];
+            $legNums[] = (string)($prow['receipt_number'] ?? '');
+            if (!empty($prow['receipt_generated']) && !empty($prow['receipt_path']) && is_file($root . '/' . $prow['receipt_path'])) { $legPdfs++; }
+            if (!empty($prow['receipt_path'])) { $legPaths[] = $root . '/' . $prow['receipt_path']; }
+        }
+        $od = receipt_load_restaurant_order($pdo, $id);
+        $slip = $od ? receipt_build_restaurant_email_html($od['order'], $od['items'], $od['ctx']) : '';
+        $out['leg_pdfs'] = $legPdfs;
+        foreach ($legPaths as $lp) { @unlink($lp); } // rows roll back; leave no stale PDFs
+        $out['leg_numbers_distinct'] = count(array_filter($legNums)) === 2 && count(array_unique($legNums)) === 2;
+        $out['slip_has_all_legs'] = count(array_filter($legNums, function ($n) use ($slip) { return $n !== '' && strpos($slip, $n) !== false; })) === 2;
+        $out['slip_has_order_label'] = strpos($slip, 'Order #') !== false && strpos($slip, 'DXS' . $run) !== false;
         break;
 
     case 'statement_pdf': // paid-in-full statement vs balance-owed invoice: titles, wording and the shared invoice number

@@ -159,6 +159,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $emailSplitLegs = $esl->fetchAll(PDO::FETCH_ASSOC);
                     } catch (Throwable $eslEx) { /* pre-migration guard */ }
                 }
+                // The receipt number is the payment's RCP number (one per sale; one per leg on a split bill).
+                $rcpCtx = receipt_restaurant_receipt_ctx($pdo, $orderId);
                 $html = buildReceiptHtml($orderRow, $items, [
                     'currency'   => $currency,
                     'site'       => $siteName,
@@ -168,8 +170,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'footer'     => $footerLine,
                     'cashier'    => $cashier ?: '',
                     'split_legs' => $emailSplitLegs,
-                ]);
-                $subject = $siteName . ' — Receipt ' . ($orderRow['invoice_number'] ?: $orderRow['reference']);
+                ] + $rcpCtx);
+                $subject = $siteName . ' — Receipt ' . ($rcpCtx['receipt_numbers'] !== '' ? $rcpCtx['receipt_numbers'] : 'for order ' . $orderRow['reference']);
                 $toName = $orderRow['customer_name'] ?: 'Guest';
 
                 // Insert delivery row first so we have a row to update
@@ -187,9 +189,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'footer'     => $footerLine,
                             'cashier'    => $cashier ?: '',
                             'split_legs' => $emailSplitLegs,
-                        ]);
+                        ] + $rcpCtx);
                         if ($pdfBytes !== '') {
-                            $pdfName = preg_replace('/[^A-Za-z0-9_-]+/', '-', $orderRow['invoice_number'] ?: $orderRow['reference']) . '.pdf';
+                            $pdfName = trim((string)preg_replace('/[^A-Za-z0-9_-]+/', '-', $rcpCtx['receipt_numbers'] !== '' ? $rcpCtx['receipt_numbers'] : (string)$orderRow['reference']), '-') . '.pdf';
                             $pdfAttachments = [['content' => $pdfBytes, 'name' => $pdfName, 'mime' => 'application/pdf']];
                         }
                     } catch (Throwable $pdfEx) {
@@ -221,10 +223,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($phone === '') throw new RuntimeException('Phone number required.');
 
                 // Receipt text (plain WhatsApp message).
-                $waRef = (string)($orderRow['invoice_number'] ?: $orderRow['reference']);
+                $waRcp = receipt_restaurant_receipt_ctx($pdo, $orderId)['receipt_numbers'];
                 $waName = trim((string)($orderRow['customer_name'] ?? ''));
                 $waBody = 'Hello' . ($waName !== '' ? ' ' . $waName : '') . ', thank you for visiting ' . $siteName . '. '
-                    . 'Your receipt ' . $waRef . ': total ' . $currency . ' ' . number_format((float)($orderRow['total_amount'] ?? 0), 2) . '.';
+                    . 'Your receipt ' . ($waRcp !== '' ? $waRcp . ' (order ' . $orderRow['reference'] . ')' : 'for order ' . $orderRow['reference']) . ': total ' . $currency . ' ' . number_format((float)($orderRow['total_amount'] ?? 0), 2) . '.';
                 $waFooter = trim((string)getSetting('restaurant_receipt_footer', ''));
                 if ($waFooter !== '') $waBody .= ' ' . $waFooter;
 
@@ -328,8 +330,9 @@ $ctx = [
     'footer'     => $footerLine,
     'cashier'    => $order['cashier_name'] ?? '',
     'split_legs' => $splitLegs,
-];
+] + receipt_restaurant_receipt_ctx($pdo, $orderId);
 $receiptHtml = buildReceiptHtml($order, $items, $ctx);
+$receiptNoLabel = $ctx['receipt_numbers'] !== '' ? $ctx['receipt_numbers'] : '';
 
 /* ---------- PDF view: same bytes that are emailed ---------- */
 if (!empty($_GET['pdf'])) {
@@ -340,7 +343,7 @@ if (!empty($_GET['pdf'])) {
         http_response_code(500);
         exit('PDF unavailable.');
     }
-    $pdfName = preg_replace('/[^A-Za-z0-9_-]+/', '-', (string)($order['invoice_number'] ?: $order['reference'])) . '.pdf';
+    $pdfName = trim((string)preg_replace('/[^A-Za-z0-9_-]+/', '-', $receiptNoLabel !== '' ? $receiptNoLabel : (string)$order['reference']), '-') . '.pdf';
     header('Content-Type: application/pdf');
     header('Content-Disposition: inline; filename="' . $pdfName . '"');
     header('Content-Length: ' . strlen($pdfBytes));
@@ -469,7 +472,7 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Receipt — <?php echo htmlspecialchars($order['reference']); ?></title>
+    <title>Receipt <?php echo htmlspecialchars($receiptNoLabel !== '' ? $receiptNoLabel : 'for order ' . $order['reference']); ?></title>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
@@ -482,7 +485,7 @@ $canConsolidate = in_array($user['role'] ?? '', ['admin', 'manager'], true);
     <div class="content">
         <div class="page-header" style="display:flex;align-items:center;gap:14px;">
             <a href="stock-orders.php" class="btn-secondary"><i class="fas fa-arrow-left"></i> Back to orders</a>
-            <h2 class="page-title" style="flex:1;"><i class="fas fa-receipt" style="color:#7E684B;"></i> Receipt — <?php echo htmlspecialchars($order['reference']); ?></h2>
+            <h2 class="page-title" style="flex:1;"><i class="fas fa-receipt" style="color:#7E684B;"></i> Receipt <?php echo htmlspecialchars($receiptNoLabel !== '' ? $receiptNoLabel : ''); ?><small style="font-weight:400;color:#6c757d;margin-left:8px;">Order # <?php echo htmlspecialchars($order['reference']); ?></small></h2>
             <a href="stock-receipt.php?id=<?php echo (int)$orderId; ?>&pdf=1" target="_blank" class="btn-secondary"><i class="fas fa-file-pdf"></i> PDF</a>
             <a href="stock-receipt.php?id=<?php echo (int)$orderId; ?>&print=1" target="_blank" class="btn-primary"><i class="fas fa-print"></i> Print</a>
         </div>

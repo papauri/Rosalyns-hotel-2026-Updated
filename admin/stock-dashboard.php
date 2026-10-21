@@ -370,6 +370,7 @@ $csrf_token = generateCsrfToken();
                     <?php if ((int)$metrics['orders_paid_today'] > 0 && $metrics['revenue_today'] > 0): ?>
                         &middot; avg <?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($metrics['revenue_today'] / $metrics['orders_paid_today'], 0); ?>
                     <?php endif; ?>
+                    &middot; refunded and voided orders left out
                     <?php endif; ?>
                 </span>
             </a>

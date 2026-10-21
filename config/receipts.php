@@ -342,7 +342,7 @@ if (!function_exists('receipt_build_pos_style_html_raw')) {
         $details .= '<tr><td style="padding:4px 0;"><strong>Receipt #</strong></td><td align="right" style="padding:4px 0;">' . $receiptNumber . '</td></tr>';
         $details .= '<tr><td style="padding:4px 0;"><strong>Date</strong></td><td align="right" style="padding:4px 0;">' . $date . '</td></tr>';
         if ($bookingRef !== '' && $bookingRef !== $payRef) {
-            $details .= '<tr><td style="padding:4px 0;"><strong>Booking ref</strong></td><td align="right" style="padding:4px 0;">' . $bookingRef . '</td></tr>';
+            $details .= '<tr><td style="padding:4px 0;"><strong>' . ((string)($payment['booking_type'] ?? '') === 'restaurant' ? 'Order #' : 'Booking ref') . '</strong></td><td align="right" style="padding:4px 0;">' . $bookingRef . '</td></tr>';
         }
         $details .= '<tr><td style="padding:4px 0;"><strong>Payment ref</strong></td><td align="right" style="padding:4px 0;">' . $payRef . '</td></tr>';
         $details .= '<tr><td style="padding:4px 0;"><strong>Guest</strong></td><td align="right" style="padding:4px 0;">' . $guestName . '</td></tr>';
@@ -480,6 +480,8 @@ if (!function_exists('receipt_build_restaurant_email_html_raw')) {
         $footer = receipt_h($ctx['footer']);
         $invNum = receipt_h($order['invoice_number'] ?? '');
         $ref    = receipt_h($order['reference']);
+        // The receipt number is the payment's RCP number; the order reference is printed separately as "Order #".
+        $rcpNum = receipt_h($ctx['receipt_numbers'] ?? '');
         $date   = $order['paid_at'] ? date('Y-m-d H:i', strtotime($order['paid_at'])) : date('Y-m-d H:i', strtotime($order['created_at']));
         $cust   = receipt_h($order['customer_name'] ?: 'Walk-in customer');
         $custEm = receipt_h($order['customer_email'] ?: '');
@@ -495,6 +497,7 @@ if (!function_exists('receipt_build_restaurant_email_html_raw')) {
         $roomNo = receipt_h($roomNumber);
         $cashier    = receipt_h($ctx['cashier'] ?: '');
         $splitLegs  = $ctx['split_legs'] ?? [];
+        $receiptByLeg = is_array($ctx['receipt_by_leg'] ?? null) ? $ctx['receipt_by_leg'] : [];
         $notes  = receipt_h($order['notes'] ?: '');
         $method = receipt_h(ucwords(str_replace('_', ' ', $order['payment_method'] ?: '—')));
         $statusLabel = receipt_h(ucfirst($order['status']));
@@ -540,7 +543,7 @@ if (!function_exists('receipt_build_restaurant_email_html_raw')) {
             ? '<img src="' . receipt_h($logoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . $site . '" style="max-height:60px;width:auto;display:block;margin:0 auto 10px;">'
             : '';
     
-        return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' . $ref . '</title></head>'
+        return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' . ($rcpNum !== '' ? $rcpNum : $ref) . '</title></head>'
             . '<body style="margin:0;padding:0;background:#f7f3ee;font-family:Arial,Helvetica,sans-serif;color:#1f1c18;">'
             . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f7f3ee;padding:22px 10px;">'
             . '<tr><td align="center">'
@@ -555,7 +558,8 @@ if (!function_exists('receipt_build_restaurant_email_html_raw')) {
             . '</td></tr>'
             . '<tr><td style="padding:16px 24px 10px;">'
             . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#3f3933;">'
-            . '<tr><td style="padding:4px 0;"><strong>Receipt #</strong></td><td align="right" style="padding:4px 0;">' . $ref . '</td></tr>'
+            . ($rcpNum !== '' ? '<tr><td style="padding:4px 0;"><strong>Receipt #</strong></td><td align="right" style="padding:4px 0;">' . $rcpNum . '</td></tr>' : '')
+            . '<tr><td style="padding:4px 0;"><strong>Order #</strong></td><td align="right" style="padding:4px 0;">' . $ref . '</td></tr>'
             . ($invNum ? '<tr><td style="padding:4px 0;"><strong>Invoice #</strong></td><td align="right" style="padding:4px 0;">' . $invNum . '</td></tr>' : '')
             . '<tr><td style="padding:4px 0;"><strong>Date</strong></td><td align="right" style="padding:4px 0;">' . receipt_h($date) . '</td></tr>'
             . '<tr><td style="padding:4px 0;"><strong>Order type</strong></td><td align="right" style="padding:4px 0;">' . $orderType . (!$isRoomService && $tableNo ? ' · Table ' . $tableNo : '') . '</td></tr>'
@@ -590,7 +594,7 @@ if (!function_exists('receipt_build_restaurant_email_html_raw')) {
             . ($extras ? '<tr><td colspan="2" style="padding:4px 10px;font-size:11px;color:#5a534c;">' . $extras . '</td></tr>' : '')
             . '</table>'
             . '</td></tr>'
-            . (!empty($splitLegs) ? (function() use ($splitLegs, $cur): string {
+            . (!empty($splitLegs) ? (function() use ($splitLegs, $cur, $receiptByLeg): string {
                 $rows = '';
                 $methodNames = ['cash' => 'Cash', 'mobile_money' => 'Mobile Money', 'card_manual' => 'Card (manual)', 'card_pos' => 'Card POS', 'other' => 'Other'];
                 foreach ($splitLegs as $leg) {
@@ -598,7 +602,8 @@ if (!function_exists('receipt_build_restaurant_email_html_raw')) {
                     $legAmt = (float)$leg['split_amount'] + (float)$leg['tip_amount'];
                     $tipNote = (float)$leg['tip_amount'] > 0 ? ' <span style="color:#059669;">(+tip ' . $cur . ' ' . number_format((float)$leg['tip_amount'], 2) . ')</span>' : '';
                     $changeNote = ($leg['change_due'] !== null && (float)$leg['change_due'] > 0) ? ' · Chg ' . $cur . ' ' . number_format((float)$leg['change_due'], 2) : '';
-                    $rows .= '<tr><td style="padding:5px 8px;border-bottom:1px solid #ede7df;">#' . (int)$leg['split_number'] . '</td>'
+                    $legRcp = (string)(($receiptByLeg[(int)$leg['split_number']] ?? ''));
+                    $rows .= '<tr><td style="padding:5px 8px;border-bottom:1px solid #ede7df;">#' . (int)$leg['split_number'] . ($legRcp !== '' ? '<div style="font-size:10px;color:#7a6f63;">' . receipt_h($legRcp) . '</div>' : '') . '</td>'
                         . '<td style="padding:5px 8px;border-bottom:1px solid #ede7df;">' . $legMethod . '</td>'
                         . '<td align="right" style="padding:5px 8px;border-bottom:1px solid #ede7df;white-space:nowrap;">' . $cur . ' ' . number_format($legAmt, 2) . $tipNote . $changeNote . '</td></tr>';
                 }
@@ -625,6 +630,41 @@ if (!function_exists('receipt_build_restaurant_email_html')) {
     function receipt_build_restaurant_email_html(array $order, array $items, array $ctx): string
     {
         return receipt_apply_theme(receipt_build_restaurant_email_html_raw($order, $items, $ctx));
+    }
+}
+
+if (!function_exists('receipt_restaurant_receipt_ctx')) {
+    /**
+     * The receipt number(s) of a till sale = the RCP number(s) on its payment row(s), never the order
+     * reference. One sale paid in one go has ONE number; a split bill has one per leg (each leg is its
+     * own payment). Returns ['receipt_numbers' => 'RCP-A, RCP-B' ('' while unpaid), 'receipt_by_leg' => [leg => number]].
+     */
+    function receipt_restaurant_receipt_ctx(PDO $pdo, int $orderId): array
+    {
+        $out = ['receipt_numbers' => '', 'receipt_by_leg' => []];
+        if ($orderId <= 0) {
+            return $out;
+        }
+        try {
+            $st = $pdo->prepare("SELECT payment_reference, receipt_number FROM payments
+                WHERE booking_type = 'restaurant' AND booking_id = ? AND deleted_at IS NULL
+                  AND COALESCE(payment_type, '') <> 'refund'
+                  AND payment_status IN ('completed','paid','refunded','partially_refunded')
+                  AND receipt_number IS NOT NULL AND receipt_number <> ''
+                ORDER BY id ASC");
+            $st->execute([$orderId]);
+            $numbers = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $numbers[] = (string)$row['receipt_number'];
+                if (preg_match('/~L(\d+)$/', (string)$row['payment_reference'], $m)) {
+                    $out['receipt_by_leg'][(int)$m[1]] = (string)$row['receipt_number'];
+                }
+            }
+            $out['receipt_numbers'] = implode(', ', array_unique($numbers));
+        } catch (Throwable $e) {
+            error_log('receipt_restaurant_receipt_ctx: ' . $e->getMessage());
+        }
+        return $out;
     }
 }
 
@@ -656,7 +696,7 @@ if (!function_exists('receipt_restaurant_context')) {
             'footer'     => (string)(getSetting('restaurant_receipt_footer') ?: 'Thank you for dining with us!'),
             'cashier'    => $cashier,
             'split_legs' => $splitLegs,
-        ];
+        ] + receipt_restaurant_receipt_ctx($pdo, (int)($order['id'] ?? 0));
     }
 }
 
@@ -716,7 +756,8 @@ if (!function_exists('receipt_render_restaurant_pdf_html')) {
         $customer = (string)($order['customer_name'] ?? '');
 
         $meta = [
-            ['Receipt No.', (string)($order['reference'] ?? '')],
+            ['Receipt No.', (string)($ctx['receipt_numbers'] ?? '')],
+            ['Order No.', (string)($order['reference'] ?? '')],
             ['Invoice No.', (string)($order['invoice_number'] ?? '')],
             ['Date', date('d M Y, H:i', strtotime((string)$dateRaw))],
             ['Order type', $orderType],
@@ -822,7 +863,8 @@ if (!function_exists('receipt_render_restaurant_pdf_html')) {
                 if (isset($leg['change_due']) && (float)$leg['change_due'] > 0) {
                     $extra .= ' change ' . $money($leg['change_due']);
                 }
-                $legRows[] = ['#' . (int)($leg['split_number'] ?? 0), rh_pdf_e($m), rh_pdf_e($money($amt) . $extra)];
+                $legRcp = (string)(($ctx['receipt_by_leg'][(int)($leg['split_number'] ?? 0)] ?? ''));
+                $legRows[] = ['#' . (int)($leg['split_number'] ?? 0), rh_pdf_e($m), rh_pdf_e(($legRcp !== '' ? $legRcp . ' - ' : '') . $money($amt) . $extra)];
             }
             $body .= rh_pdf_spacer(4) . rh_pdf_section_title('Split payment breakdown') . rh_pdf_spacer(1)
                 . rh_pdf_items_table([
@@ -862,7 +904,7 @@ if (!function_exists('receipt_build_restaurant_pdf_html')) {
 if (!function_exists('receipt_restaurant_pdf_bytes')) {
     function receipt_restaurant_pdf_bytes(array $order, array $items, array $ctx, array $opts = []): string
     {
-        $ref = (string)($order['invoice_number'] ?? '');
+        $ref = (string)($ctx['receipt_numbers'] ?? '');
         if ($ref === '') {
             $ref = (string)($order['reference'] ?? '');
         }
@@ -899,7 +941,7 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
         $meta = [
             ['Receipt No.', (string)($payment['receipt_number'] ?? '')],
             ['Date', $date],
-            ['Booking ref', $bookingRef !== $payRef ? $bookingRef : ''],
+            [(string)($payment['booking_type'] ?? '') === 'restaurant' ? 'Order No.' : 'Booking ref', $bookingRef !== $payRef ? $bookingRef : ''],
             ['Payment ref', $payRef],
             ['Received from', (string)($context['guest_name'] ?? 'Guest')],
             ['Email', (string)($context['guest_email'] ?? '')],
@@ -1141,8 +1183,47 @@ if (!function_exists('receipt_send_email')) {
  * - Honours the Booking Settings switch for the "Payment Receipt Email" template (off = no automatic send;
  *   the manual "Email receipt" button still works).
  */
+if (!function_exists('receipt_ensure_pdf')) {
+    /**
+     * Make sure a collected payment has its receipt PDF on file, whether or not an email could go out
+     * (walk-in till sales, tabs and split legs have no address). Never throws; skips anything not collected
+     * and anything that already has its PDF. Returns true when a PDF exists afterwards.
+     */
+    function receipt_ensure_pdf(PDO $pdo, int $paymentId): bool
+    {
+        try {
+            $payment = receipt_get_payment($pdo, $paymentId);
+            if (!$payment || !in_array((string)($payment['payment_status'] ?? ''), ['completed', 'paid'], true)
+                || (string)($payment['payment_type'] ?? '') === 'refund') {
+                return false;
+            }
+            if (!empty($payment['receipt_generated']) && !empty($payment['receipt_path'])) {
+                return true;
+            }
+            receipt_generate_pdf($pdo, $paymentId, null);
+            return true;
+        } catch (Throwable $e) {
+            error_log('receipt_ensure_pdf failed for payment ' . $paymentId . ': ' . $e->getMessage());
+            return false;
+        }
+    }
+}
+
 if (!function_exists('receipt_auto_send')) {
     function receipt_auto_send(PDO $pdo, int $paymentId, ?array $user = null): array
+    {
+        $res = receipt_auto_send_mail($pdo, $paymentId, $user);
+        // Whatever stopped the email (no address, switched off, no SMTP, error), the receipt document is still
+        // produced so the Receipts page never lists a collected payment as "Needs PDF".
+        if (empty($res['success']) && in_array((string)($res['reason'] ?? ''), ['template_off', 'no_email', 'bad_email', 'no_smtp', 'error'], true)) {
+            receipt_ensure_pdf($pdo, $paymentId);
+        }
+        return $res;
+    }
+}
+
+if (!function_exists('receipt_auto_send_mail')) {
+    function receipt_auto_send_mail(PDO $pdo, int $paymentId, ?array $user = null): array
     {
         try {
             receipt_ensure_schema($pdo);

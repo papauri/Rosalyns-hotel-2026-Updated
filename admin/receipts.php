@@ -45,7 +45,8 @@ function receipts_build_where(array $input, array &$params): string
         foreach ($input['_scope_types'] as $t) { $params[] = $t; }
     }
     if (($input['status'] ?? 'all') === 'missing') {
-        $where[] = "(p.receipt_number IS NULL OR p.receipt_number = '') AND COALESCE(p.payment_type, '') <> 'refund'";
+        // "Missing" = no receipt number yet, or no PDF on file: the same rows the list marks "Missing" / "Needs PDF".
+        $where[] = "(((p.receipt_number IS NULL OR p.receipt_number = '') AND COALESCE(p.payment_type, '') <> 'refund') OR COALESCE(p.receipt_generated, 0) <> 1)";
     } elseif (($input['status'] ?? 'all') === 'generated') {
         $where[] = 'p.receipt_generated = 1';
     } elseif (($input['status'] ?? 'all') === 'emailed') {
@@ -110,14 +111,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $result = receipt_send_email($pdo, $paymentId, $recipient !== '' ? $recipient : null, $user);
                 $message = $result['message'];
             } elseif ($action === 'backfill_receipts') {
-                $stmt = $pdo->query("SELECT id FROM payments WHERE deleted_at IS NULL AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND (receipt_number IS NULL OR receipt_number = '') ORDER BY payment_date ASC, id ASC LIMIT 500");
+                // Every collected payment without a receipt number or without its PDF (refund rows only need the PDF).
+                $stmt = $pdo->query("SELECT id FROM payments WHERE deleted_at IS NULL AND payment_status IN ('completed','paid','refunded','partially_refunded') AND (((receipt_number IS NULL OR receipt_number = '') AND COALESCE(payment_type, '') != 'refund') OR COALESCE(receipt_generated, 0) <> 1) ORDER BY payment_date ASC, id ASC LIMIT 500");
                 $ids = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN) : [];
                 $count = 0;
+                $failed = 0;
                 foreach ($ids as $id) {
-                    receipt_generate_pdf($pdo, (int)$id, $user);
-                    $count++;
+                    try {
+                        receipt_generate_pdf($pdo, (int)$id, $user);
+                        $count++;
+                    } catch (Throwable $genEx) {
+                        $failed++;
+                        error_log('receipts backfill payment ' . (int)$id . ': ' . $genEx->getMessage());
+                    }
                 }
-                $message = 'Generated receipts for ' . $count . ' completed payment(s).';
+                $message = 'Generated receipts for ' . $count . ' payment(s).' . ($failed > 0 ? ' ' . $failed . ' could not be generated - see System Logs.' : '');
             }
         } catch (Throwable $e) {
             $error = $e->getMessage();
@@ -159,7 +167,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 }
 
 $summaryStmt = $pdo->prepare("SELECT COUNT(*) AS total_receipts,
-        COALESCE(SUM(CASE WHEN (p.receipt_number IS NULL OR p.receipt_number = '') AND COALESCE(p.payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS missing_receipts,
+        COALESCE(SUM(CASE WHEN (p.receipt_number IS NULL OR p.receipt_number = '') AND COALESCE(p.payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS missing_numbers,
+        COALESCE(SUM(CASE WHEN COALESCE(p.receipt_generated, 0) <> 1 THEN 1 ELSE 0 END), 0) AS missing_receipts,
         COALESCE(SUM(CASE WHEN p.receipt_generated = 1 THEN 1 ELSE 0 END), 0) AS generated_receipts,
         COALESCE(SUM(CASE WHEN p.receipt_emailed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS emailed_receipts,
         COALESCE(SUM(CASE WHEN COALESCE(p.payment_type,'') = 'refund' THEN -p.total_amount ELSE p.total_amount END), 0) AS receipt_value
@@ -261,9 +270,9 @@ $site_name = getSetting('site_name', 'Hotel');
                 <span class="rh-strip__sub">payment records</span>
             </div>
             <div class="rh-strip__cell">
-                <span class="rh-strip__label">Missing numbers</span>
+                <span class="rh-strip__label">Missing / Needs PDF</span>
                 <strong class="rh-strip__value <?php echo (int)($summary['missing_receipts'] ?? 0) > 0 ? 'rh-strip__value--alert' : ''; ?>"><?php echo number_format((int)($summary['missing_receipts'] ?? 0)); ?></strong>
-                <span class="rh-strip__sub">need generation</span>
+                <span class="rh-strip__sub"><?php echo number_format((int)($summary['missing_numbers'] ?? 0)); ?> without a number</span>
             </div>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Generated PDFs</span>
@@ -297,7 +306,7 @@ $site_name = getSetting('site_name', 'Hotel');
                 </select>
                 <select name="status" class="filter-select">
                     <option value="all">All Statuses</option>
-                    <option value="missing" <?php echo $filters['status'] === 'missing' ? 'selected' : ''; ?>>Missing No.</option>
+                    <option value="missing" <?php echo $filters['status'] === 'missing' ? 'selected' : ''; ?>>Missing No. / PDF</option>
                     <option value="generated" <?php echo $filters['status'] === 'generated' ? 'selected' : ''; ?>>Generated</option>
                     <option value="emailed" <?php echo $filters['status'] === 'emailed' ? 'selected' : ''; ?>>Emailed</option>
                 </select>

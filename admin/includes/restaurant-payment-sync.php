@@ -3,10 +3,11 @@
 require_once __DIR__ . '/../../includes/station-hours.php';
 
 /**
- * Receipt for a restaurant / room-service sale: when the order carries a valid customer email, queue the
- * payment receipt to go out when the request ends (after the till's own transaction has committed; a
- * rolled-back sale is skipped). Orders without an email send nothing (walk-ins); the till can still email
- * or print the itemised receipt by hand. receipt_auto_send() refuses duplicates.
+ * Receipt for a restaurant / room-service sale: queue the payment receipt to be produced when the request
+ * ends (after the till's own transaction has committed; a rolled-back sale is skipped). Every payment gets
+ * its receipt PDF (cash sale, tab settle, each split leg); when the order carries a valid customer email the
+ * receipt is also emailed, otherwise (walk-ins) nothing is sent and the till can still email or print the
+ * itemised receipt by hand. receipt_auto_send() refuses duplicates.
  */
 function rh_queue_restaurant_receipt(PDO $pdo, int $orderId, int $paymentId): void
 {
@@ -14,12 +15,6 @@ function rh_queue_restaurant_receipt(PDO $pdo, int $orderId, int $paymentId): vo
         return;
     }
     try {
-        $st = $pdo->prepare('SELECT customer_email FROM stock_orders WHERE id = ?');
-        $st->execute([$orderId]);
-        $email = trim((string)$st->fetchColumn());
-        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            return;
-        }
         require_once __DIR__ . '/../../config/receipts.php';
         receipt_queue_after_request($paymentId);
     } catch (Throwable $e) {
