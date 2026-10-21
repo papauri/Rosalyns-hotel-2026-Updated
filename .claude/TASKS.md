@@ -5,6 +5,9 @@ and when work ships. One line per task: status · what · where it stands · nex
 Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 
 ## Open
+- SHIPPED 4cf7e69 / Liwonde 7ab6dd2 · Modules gate admin API endpoints; nav fixes; receptionist payment_add+receipts; room pictures need media_edit; Facebook Settings on shared layout.
+- DONE 2026-10-21 · Liwonde rehearsal + Test bookings removed completely (backup db-20261021-142200.sql.gz); 0 bookings/payments; data-health green. Owner: remove the same PDFs on the live server if copied there.
+- TODO (P3, owner approval, after go-live) · Code parity pass between hotels: config/database.php (cancellation log type 'financial' vs 'cancellation'), includes/room-management.php (room-status error handling inside a caller's transaction), admin/booking-settings.php, admin/section-headers-management.php. Front-end files (header/footer/seo) may differ by design.
 - DONE · Liwonde dress rehearsal (readiness gate step 3) · findings fixed and shipped 2026-10-20/21.
 - SHIPPED d1a4490 / Liwonde 674d2e4 · Receiving gaps: editable invoice price at PO receive (per pack or unit), receive pack lines in packs, barcode receive expiry date, barcode pack size defaults to the item's crate.
 - SHIPPED 4256596 / Liwonde 0988ecc · Stock count approval (follow-ups done; layout fixes shipped 85244f7 / Liwonde 2cd33ff): 'stock_count_approve' permission (not just managers), "needs a second person" labels, email approvers on submit (optional) + Remind approvers button.
