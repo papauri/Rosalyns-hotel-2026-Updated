@@ -13,7 +13,9 @@ Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 - SHIPPED 3a23665 / Liwonde d9ab6ae · Offline sales held for the cashier who took them (A+B) + sign-out sends first, never traps (8s wait, 20s replay timeout). Not covered: 8-hour idle sign-out (B still holds), entries queued before the update. Guides update dispatched.
 - SHIPPED 69f2a51 / Liwonde b4e8408 (guides 8f2bdd6 / 16ddb37) · Cards & graphs accuracy audit + patch, all 3 batches (money, rooms/F&B, stock/gym/other): ~35 wrong figures fixed; accounting + QA reviewed; browser-checked 30 screens. Guides update dispatched.
 - SHIPPED 3ee4ed1 / Liwonde c700fb7 · Occupancy = sellable rooms on every screen; ADR incl. VAT; cancellations from booking history (incl. Liwonde's 'cancellation' log type); EOD published reviews; Rooms to Clean one meaning; Missed check-ins incl. pending. Guides update dispatched.
-- ON HOLD (owner yes/no, feature freeze) · Form validation across other admin create/edit forms (duplicates flagged while typing, form reopens with the reason) · page messages are visible again everywhere (alert fix), so server-side rejections now show; next: apply the user-management pattern to the busiest forms.
+- DOING (owner approved 2026-10-21) · Form checks on remaining forms: deals, gym packages/classes, room packages, events, conference rooms, barcodes, menu categories (feb76e0 pattern: check-unique.php + admin-form-guard.js).
+- SHIPPED 78b49b9 / Liwonde a54c48b · Reports per-room-type RevPAR on sellable rooms (owner 2026-10-21).
+- NOTE (owner 2026-10-21) · Rosalyn's POS/KDS smoke needs a recipe-backed item; owner: Liwonde's passing run covers both (same code). Not a blocker.
 
 ## Shipped 2026-10-20
 - Receipt on every payment (all paths/types, pending->paid, till/split); quote before, invoice only when owed, paid-in-full statement; Block Rooms enforced; stock loss controls (alert shading, manual additions, count reminder, Needs review); ? help on every page; guides; OWASP claim removed. Accounting final sign-off: production-ready for money. Readiness gate written into BUILD_PLAN.md.

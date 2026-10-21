@@ -46,7 +46,7 @@ triaged with rule 2. Then Rosalyn's, by the owner/staff on a real stay.
 - [x] Liwonde dress rehearsal passes end to end (no P1/P2 open). Done 2026-10-21; findings fixed and shipped.
 - [ ] All owner items in 4 are done.
 - [ ] `php scripts/run_tests.php` and `php scripts/data-health.php` green in both hotels.
-      2026-10-21: Liwonde all green. Rosalyn's data-health green; POS/KDS smoke cannot run until one menu item has a recipe (setup, not a code fault).
+      2026-10-21: Liwonde all green. Rosalyn's data-health green; POS/KDS smoke cannot run until one menu item has a recipe (setup, not a code fault). Owner 2026-10-21: Liwonde's passing POS/KDS run counts for both hotels (same code).
 - [ ] Two weeks of real use with no new P1/P2.
 
 **How to test from here on:** tests run against the live DBs (no local MariaDB on the owner's
