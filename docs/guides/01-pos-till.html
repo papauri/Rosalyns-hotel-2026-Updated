@@ -69,7 +69,7 @@
     <li><strong>My orders</strong> &mdash; every order you rang up today, with kitchen and payment status.</li>
     <li><strong>Messages</strong> &mdash; the chat with the Kitchen, Bar and Coffee Bar. A number on the button shows how many station notes are waiting for you. It opens the <strong>Service</strong> window on the <strong>Messages</strong> tab (see <a href="#notes">the chat with the stations</a>).</li>
     <li><strong>More</strong> &mdash; a menu with: <strong>Close shift (Z-report)</strong>; <strong>Opening float</strong> (only if you have <strong>POS Opening Float</strong>); <strong>Stations</strong> (only with <strong>POS Station Overview</strong>); <strong>86 mode</strong> (only with <strong>POS Quick-86 Items</strong>); <strong>All orders</strong> (opens Orders &amp; Tabs, only if you can open that page); <strong>Help mode</strong>; <strong>Sound settings</strong>; <strong>POS guide</strong> (opens this guide); <strong>Admin dashboard</strong> (only if you have the Dashboard permission).</li>
-    <li><strong>Sign out</strong>.</li>
+    <li><strong>Sign out</strong>. If you have unsent sales, the till tries to send them first (see <a href="#sign-out">Signing out with unsent sales</a>).</li>
   </ul>
   <p><strong>Shift figures</strong> (second row): <strong>Orders</strong> is always shown. <strong>Revenue</strong>, <strong>Cash</strong>, <strong>Mobile</strong> and <strong>Card</strong> are shown only to people with the <strong>POS Accounting</strong> permission.</p>
   <p><strong>Menu side</strong></p>
@@ -440,6 +440,16 @@
     <li>Everything else (<strong>Fire</strong>, adding to a tab, settling a tab, refunds, close shift, notes) needs the connection. The till says <em>"Network error &mdash; could not reach the server. Please retry."</em> Do not assume it went through; check <strong>Tabs</strong> once you are back online.</li>
   </ul>
   <p>Managers can see what was queued and when it synced: Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Offline Log</strong> (page title <strong>Offline Activity Log</strong>), which needs the <strong>Offline Activity Log</strong> permission.</p>
+
+  <h3 id="sign-out">Signing out with unsent sales</h3>
+  <p>Anyone who takes a sale or payment while the internet is down must stay signed in on the same tablet until it sends. Only the person who took the sale can send it.</p>
+  <ul>
+    <li>If someone else signs in, the bar says <em>"N sale(s) waiting for &lt;name&gt; to sign in on this tablet"</em>. That person must sign in on this tablet to send them.</li>
+    <li>When you tap <strong>Sign out</strong> with unsent sales, the till first tries to send them. If it cannot, you see <em>"You have N unsent sale(s) on this tablet. Stay signed in until they send."</em> Stay signed in and wait for the connection.</li>
+    <li>Tapping <strong>Sign out</strong> again within 10 seconds leaves anyway. The sales stay saved on the tablet for that person.</li>
+    <li>If the server refuses a saved sale, it stays on the tablet with the message <em>"nothing was recorded for them. Ask a manager before taking the money again."</em> Do not take the money again until a manager has checked it.</li>
+    <li><strong>Before you leave the till, check that it shows no unsent sales.</strong></li>
+  </ul>
 
   <h3 id="offline-log">How to check the Offline Log</h3>
   <p>Managers can see exactly what the till saved while offline and when it reached the server. Open Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Offline Log</strong> (<code>/admin/offline-log.php</code>, page title <strong>Offline Activity Log</strong>). It needs the <strong>Offline Activity Log</strong> permission.</p>
