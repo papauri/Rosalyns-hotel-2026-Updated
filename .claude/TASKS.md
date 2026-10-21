@@ -5,6 +5,7 @@ and when work ships. One line per task: status · what · where it stands · nex
 Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 
 ## Open
+- SHIPPED cd72895 / Liwonde 319ee2a · Gym-only dress rehearsal on Liwonde DONE, fixes shipped (slot booking session, refund email, Credit Notes with gym, gym bill reminders, paid package needs a length; Liwonde packages set 1/7/30 days). Batch for owner: room links on a gym-only home page, stock banner with stock off, hotel wording on a gym till, start-date timezone default, owed-back list. Was: (gym_fitness preset, guest GYM REHEARSAL, johnpaulchirwa@gmail.com): signup, payment, check-in, class, till, renewal/expiry, refund, EOD/reports; teardown + modules restored. Findings -> fixes in Rosalyn's, ported.
 - SHIPPED 4cf7e69 / Liwonde 7ab6dd2 · Modules gate admin API endpoints; nav fixes; receptionist payment_add+receipts; room pictures need media_edit; Facebook Settings on shared layout.
 - DONE 2026-10-21 · Liwonde rehearsal + Test bookings removed completely (backup db-20261021-142200.sql.gz); 0 bookings/payments; data-health green. Owner: remove the same PDFs on the live server if copied there.
 - TODO (P3, owner approval, after go-live) · Code parity pass between hotels: config/database.php (cancellation log type 'financial' vs 'cancellation'), includes/room-management.php (room-status error handling inside a caller's transaction), admin/booking-settings.php, admin/section-headers-management.php. Front-end files (header/footer/seo) may differ by design.
