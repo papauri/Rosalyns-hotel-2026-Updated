@@ -181,12 +181,16 @@ $_SESSION['admin_user_id'] = (int)$admin['id'];
 $_SESSION['admin_username'] = $admin['username'];
 $_SESSION['admin_role'] = $admin['role'];
 $_SESSION['admin_full_name'] = $admin['full_name'];
+$_SESSION['admin_user'] = ['id' => (int)$admin['id'], 'username' => $admin['username'], 'full_name' => $admin['full_name'], 'role' => $admin['role']]; // what api/*.php endpoints read
 $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
 $_SESSION['admin_last_activity'] = time();
 session_write_close();
 
 // Optional seed rows (cfg.setup = [sql,...]): run inside the same never-committing transaction, before the page runs.
 foreach (($cfg['setup'] ?? []) as $setupSql) { $pdo->exec($setupSql); }
+// Optional cfg.vars = {name: sql}: after setup, each sql's first value replaces {name} inside the POST values (ids of the seed rows).
+$__h_vars = [];
+foreach (($cfg['vars'] ?? []) as $vName => $vSql) { $__h_vars['{' . $vName . '}'] = (string)$pdo->query($vSql)->fetchColumn(); }
 
 // Optional cfg.fake_smtp = <port>: point the (rolled-back) SMTP settings at scripts/tests/fake-smtp.php on
 // 127.0.0.1 so every email the page sends is captured instead of delivered. Refuses to run the page if the
@@ -209,6 +213,7 @@ $_SERVER['SERVER_NAME'] = 'localhost';
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 if (!empty($cfg['ajax'])) { $_SERVER['HTTP_X_REQUESTED_WITH'] = 'XMLHttpRequest'; }
 $_POST = ($cfg['post'] ?? []) + ['csrf_token' => $_SESSION['csrf_token']];
+if ($__h_vars) { foreach ($_POST as $pk => $pv) { if (is_string($pv)) { $_POST[$pk] = strtr($pv, $__h_vars); } } }
 $_GET = $cfg['get'] ?? [];
 $_REQUEST = $_POST + $_GET;
 chdir($root . '/' . dirname($page));

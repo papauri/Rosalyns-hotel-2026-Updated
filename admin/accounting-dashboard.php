@@ -414,11 +414,11 @@ try {
                 COALESCE(NULLIF(order_type, ''), 'walk_in') AS order_type,
                 COUNT(CASE WHEN status IN ('paid','completed') THEN 1 END) AS order_count,
                 COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
-                COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost ELSE 0 END), 0) AS cogs,
+                COALESCE(SUM(CASE WHEN status IN ('paid','completed','refunded') THEN total_cost ELSE 0 END), 0) AS cogs,
                 COALESCE(SUM(CASE WHEN status = 'voided' THEN total_amount ELSE 0 END), 0) AS voided_amount,
                 COALESCE(SUM(CASE WHEN status = 'voided' THEN 1 ELSE 0 END), 0) AS voided_count
             FROM stock_orders
-            WHERE (status IN ('paid','completed') AND COALESCE(paid_at, created_at) BETWEEN ? AND ?)
+            WHERE (status IN ('paid','completed','refunded') AND COALESCE(paid_at, created_at) BETWEEN ? AND ?)
                OR (status = 'voided' AND COALESCE(voided_at, created_at) BETWEEN ? AND ?)
             GROUP BY order_type
             ORDER BY gross_revenue DESC
@@ -429,9 +429,9 @@ try {
         $posTotalsStmt = $pdo->prepare("
             SELECT
                 COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
-                COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_cost ELSE 0 END), 0) AS cogs
+                COALESCE(SUM(CASE WHEN status IN ('paid','completed','refunded') THEN total_cost ELSE 0 END), 0) AS cogs
             FROM stock_orders
-            WHERE status IN ('paid','completed') AND COALESCE(paid_at, created_at) BETWEEN ? AND ?
+            WHERE status IN ('paid','completed','refunded') AND COALESCE(paid_at, created_at) BETWEEN ? AND ?
         ");
         $posTotalsStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
         $posTotals = $posTotalsStmt->fetch(PDO::FETCH_ASSOC) ?: ['gross_revenue' => 0, 'cogs' => 0];
@@ -741,8 +741,11 @@ if (!isset($folio_fnb)) {
         $source_total_gross = $cat_revenue_room + $cat_revenue_conf + $cat_revenue_fnb + $cat_revenue_gym + $cat_revenue_events;
         $pos_gross   = (float)($posTotals['gross_revenue'] ?? 0);
         $pos_cogs    = (float)($posTotals['cogs'] ?? 0);
-        $pos_margin  = $pos_gross - $pos_cogs;
-        $pos_margin_pct = $pos_gross > 0 ? ($pos_margin / $pos_gross) * 100 : 0;
+        // F&B prices are VAT-inclusive, so margin is measured on sales excluding VAT (VAT is not income).
+        $pos_vat_div = ($vatEnabled && (float)$vatRate > 0) ? (1 + ((float)$vatRate / 100)) : 1.0;
+        $pos_net     = round($pos_gross / $pos_vat_div, 2);
+        $pos_margin  = $pos_net - $pos_cogs;
+        $pos_margin_pct = $pos_net > 0 ? ($pos_margin / $pos_net) * 100 : 0;
 
         $order_type_labels = [
             'walk_in'      => 'Walk-in / Dine-in',
@@ -1653,7 +1656,7 @@ if (!isset($folio_fnb)) {
                 <span class="ck-kpi__label"><?php echo $ckH(rh_pos_short_label()); ?> margin</span>
                 <span class="ck-kpi__value"><?php echo number_format($pos_margin_pct, 1); ?><small>%</small></span>
                 <span class="ck-meter ck-meter--good"><span style="width:<?php echo max(0, min(100, round($pos_margin_pct))); ?>%"></span></span>
-                <span class="ck-kpi__sub"><?php echo $ckPlain($pos_margin); ?> on <?php echo $ckPlain($pos_gross); ?></span>
+                <span class="ck-kpi__sub"><?php echo $ckPlain($pos_margin); ?> on <?php echo $ckPlain($pos_net); ?><?php echo $pos_vat_div > 1 ? ' ex-VAT' : ''; ?></span>
             </div>
             <?php endif; ?>
         </section>
@@ -1826,7 +1829,10 @@ if (!isset($folio_fnb)) {
                 </div>
                 <span class="ck-meter ck-meter--good"><span style="width:<?php echo max(0, min(100, round($pos_margin_pct))); ?>%"></span></span>
                 <ul class="ck-kv">
-                    <li><span>Gross sales</span><strong><?php echo $ckPlain($pos_gross); ?></strong></li>
+                    <li><span>Sales<?php echo $pos_vat_div > 1 ? ' excl. VAT' : ''; ?> (after voids and refunds)</span><strong><?php echo $ckPlain($pos_net); ?></strong></li>
+                    <?php if ($pos_vat_div > 1): ?>
+                    <li><span>VAT in sales</span><strong><?php echo $ckPlain($pos_gross - $pos_net); ?></strong></li>
+                    <?php endif; ?>
                     <li><span>Cost of goods (COGS)</span><strong><?php echo $ckPlain($pos_cogs); ?></strong></li>
                     <?php if ($cat_voids_count > 0): ?>
                     <li><span>Voids (<?php echo (int)$cat_voids_count; ?>)</span><strong><?php echo $ckPlain($cat_voids_value); ?></strong></li>
@@ -2066,7 +2072,7 @@ if (!isset($folio_fnb)) {
                                 <tr>
                                     <th>Order type</th>
                                     <th class="num" title="Number of paid or completed orders">Orders</th>
-                                    <th class="num" title="Gross revenue - completed sales before any costs">Gross</th>
+                                    <th class="num" title="Completed sales excluding VAT, after voids and refunds, before costs">Sales<?php echo $pos_vat_div > 1 ? ' (ex-VAT)' : ''; ?></th>
                                     <th class="num" title="COGS - ingredient/stock cost of items sold, recorded at order time">COGS</th>
                                     <th class="num" title="Gross profit - revenue minus COGS">Margin</th>
                                     <th class="num" title="Margin as a percentage of revenue">Margin %</th>
@@ -2077,7 +2083,7 @@ if (!isset($folio_fnb)) {
                                 <?php if (empty($posByType)): ?>
                                     <tr><td colspan="7" class="ck-table__empty">No POS activity in this period.</td></tr>
                                 <?php else: foreach ($posByType as $ot):
-                                    $g = (float)$ot['gross_revenue'];
+                                    $g = round((float)$ot['gross_revenue'] / $pos_vat_div, 2);
                                     $c = (float)$ot['cogs'];
                                     $m = $g - $c;
                                     $mpct = $g > 0 ? ($m / $g) * 100 : 0;
@@ -2086,7 +2092,7 @@ if (!isset($folio_fnb)) {
                                     <tr>
                                         <td data-label="Order type"><?php echo $ckH($label); ?></td>
                                         <td class="num" data-label="Orders"><?php echo number_format((int)$ot['order_count']); ?></td>
-                                        <td class="num" data-label="Gross"><?php echo $ckPlain($g); ?></td>
+                                        <td class="num" data-label="Sales"><?php echo $ckPlain($g); ?></td>
                                         <td class="num" data-label="COGS"><?php echo $ckPlain($c); ?></td>
                                         <td class="num" data-label="Margin"><strong><?php echo $ckPlain($m); ?></strong></td>
                                         <td class="num" data-label="Margin %"><?php echo number_format($mpct, 1); ?>%</td>

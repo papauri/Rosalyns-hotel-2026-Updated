@@ -159,8 +159,9 @@ $posNotFolioSql = " AND NOT (order_type = 'room_service' AND EXISTS (SELECT 1 FR
 $ledgerCollectedSql = "payment_status IN ('paid','completed','refunded','partially_refunded')";
 /**
  * Takings per day between two dates (Y-m-d, inclusive) in hotel time: ledger payments collected
- * (non-restaurant) plus POS sales paid (paid / completed / since-refunded, room-service-on-folio left
- * out), less refunds paid out that day. Days with no money are 0. Throws on a failed query so the
+ * (non-restaurant) plus POS sales paid (paid / completed / since-refunded / since-voided - the same sale
+ * condition as End of Day, because the void of a paid order is paid back as a VOID refund row that is
+ * subtracted below; room-service-on-folio left out), less refunds paid out that day. Days with no money are 0. Throws on a failed query so the
  * caller can show "unavailable" instead of a false 0.
  */
 $takingsByDay = static function (string $from, string $to, bool $withLedger, bool $withPos) use ($pdo, $ledgerCollectedSql, $posNotFolioSql): array {
@@ -178,7 +179,8 @@ $takingsByDay = static function (string $from, string $to, bool $withLedger, boo
     }
     if ($withPos) {
         $st = $pdo->prepare("SELECT DATE(COALESCE(paid_at, created_at)) d, COALESCE(SUM(total_amount),0) v FROM stock_orders
-            WHERE status IN ('paid','completed','refunded') AND DATE(COALESCE(paid_at, created_at)) BETWEEN ? AND ?{$posNotFolioSql}
+            WHERE ((paid_at IS NOT NULL AND status IN ('paid','completed','refunded','voided')) OR (paid_at IS NULL AND status IN ('paid','completed')))
+              AND DATE(COALESCE(paid_at, created_at)) BETWEEN ? AND ?{$posNotFolioSql}
             GROUP BY DATE(COALESCE(paid_at, created_at))");
         $st->execute([$from, $to]);
         $add($st->fetchAll(PDO::FETCH_ASSOC), 1);

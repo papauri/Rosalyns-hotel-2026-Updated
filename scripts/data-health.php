@@ -31,6 +31,8 @@ $checks = [
         "SELECT o.id FROM stock_orders o JOIN bookings b ON b.id = o.booking_id WHERE o.order_type = 'room_service' AND o.status = 'placed' AND b.status IN ('checked-out','cancelled')"],
     ['FAIL', 'Live kitchen tickets on cancelled/voided orders',
         "SELECT o.id FROM stock_orders o WHERE o.status IN ('cancelled','voided') AND o.kitchen_status IN ('new','in_progress','ready')"],
+    ['FAIL', 'Unserved kitchen/bar lines still live on refunded orders',
+        "SELECT DISTINCT o.id FROM stock_orders o JOIN stock_order_items i ON i.order_id = o.id WHERE o.status = 'refunded' AND o.order_type <> 'room_service' AND i.kds_status NOT IN ('served','void')"],
     ['FAIL', 'Rooms still held (booking_rooms) by a cancelled/deleted booking',
         "SELECT br.id FROM booking_rooms br JOIN bookings b ON b.id = br.booking_id WHERE br.released_at IS NULL AND $gone"],
     ['FAIL', 'Cancelled/deleted bookings still pointing at a room or joined pair',

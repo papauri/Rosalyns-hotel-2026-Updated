@@ -107,6 +107,21 @@ $unionWindow = rh_station_union_business_window();
 
 function kds_log(PDO $pdo, int $orderId, ?int $itemId, string $event, ?string $from, ?string $to, array $user, ?string $ip): void
 {
+    /* stock_kds_events.event is an ENUM (fired, started, ready, collected, served, recalled,
+     * bumped, voided) and cannot change without DDL, so action names that are not in it are
+     * stored under the closest enum value and kept distinguishable in to_status:
+     * an 86 is event 'voided' / to_status 'void_86'; rush and note changes are 'fired' rows
+     * with to_status 'rush' / 'rush_off' / 'note_updated' (the order's "fired" row is the
+     * oldest one, which is the one the POS lifecycle reads). */
+    static $legacyEvents = [
+        'voided_86'    => ['voided', 'void_86'],
+        'rush_set'     => ['fired', 'rush'],
+        'rush_cleared' => ['fired', 'rush_off'],
+        'note_updated' => ['fired', 'note_updated'],
+    ];
+    if (isset($legacyEvents[$event])) {
+        [$event, $to] = $legacyEvents[$event];
+    }
     $pdo->prepare("INSERT INTO stock_kds_events (order_id, order_item_id, event, from_status, to_status, user_id, user_name, ip_address) VALUES (?,?,?,?,?,?,?,?)")
         ->execute([$orderId, $itemId, $event, $from, $to, (int)$user['id'], $user['full_name'] ?? $user['username'] ?? '', $ip]);
 }

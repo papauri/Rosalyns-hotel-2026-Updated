@@ -699,6 +699,14 @@ if (!function_exists('rh_sync_restaurant_order_refund_state')) {
             if ((string)$status !== 'refunded') {
                 $pdo->prepare("UPDATE stock_orders SET status = 'refunded', refunded_at = NOW(), refund_reason = ? WHERE id = ?")
                     ->execute([mb_substr($reason !== '' ? $reason : 'Refunded via payments', 0, 250), $orderId]);
+                // Linked data: a fully refunded order keeps no unserved lines on the stations.
+                if (function_exists('rh_close_refunded_order_lines')) {
+                    try {
+                        rh_close_refunded_order_lines($pdo, $orderId, (int)($_SESSION['admin_user_id'] ?? 0), 'Refunded via payments');
+                    } catch (Throwable $e) {
+                        error_log('rh_sync_restaurant_order_refund_state close lines: ' . $e->getMessage());
+                    }
+                }
             }
             return 'refunded';
         }

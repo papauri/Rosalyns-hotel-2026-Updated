@@ -1154,7 +1154,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Every original row is now reversed in full, so the order is fully refunded.
                 $pdo->prepare("UPDATE stock_orders SET status='refunded', refunded_at=NOW(), refund_reason=? WHERE id=?")
                     ->execute([$refundReason, $refundOrderId]);
-                $auditDetails = ['reason' => $refundReason, 'total' => $refundTotal, 'original_method' => $refRow['payment_method']];
+                // Linked data: unserved kitchen/bar lines of the refunded order come off the stations in the
+                // same transaction (never-started lines restore stock, started ones are wastage).
+                $closedLines = rh_close_refunded_order_lines($pdo, $refundOrderId, (int)$user['id'], 'Refund: ' . $refundReason);
+                $auditDetails = ['reason' => $refundReason, 'total' => $refundTotal, 'original_method' => $refRow['payment_method'], 'kitchen_lines_closed' => $closedLines['closed']];
                 if ($mgrActorId) {
                     $auditDetails['authorised_by_id']   = $mgrActorId;
                     $auditDetails['authorised_by_name'] = $mgrActorName;

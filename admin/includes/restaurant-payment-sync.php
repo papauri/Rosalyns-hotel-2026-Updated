@@ -632,6 +632,108 @@ function rh_restore_pos_order_stock(PDO $pdo, int $orderId, ?int $doneBy, string
 }
 
 /**
+ * A refunded order must not keep unserved lines alive on the KDS/BDS/CDS (linked-data rule).
+ * Runs inside the caller's transaction (the refund's). Lines already served or void are left
+ * alone (the food went out; its stock stays consumed). For every other line:
+ *   - pending (never started)               -> stock restored when it had been deducted, line void
+ *   - preparing / ready / collection        -> WASTAGE (the food exists), line void, station told to stop
+ * Then the order's kitchen_status is closed, ready pings are removed and station notes acknowledged.
+ * Room-service orders are skipped (their stock rides on the folio charge - void that instead).
+ * Throws RuntimeException when a stock restore fails so the caller's transaction rolls back.
+ *
+ * @return array{closed:int,restored:int,wasted:int}
+ */
+function rh_close_refunded_order_lines(PDO $pdo, int $orderId, int $userId, string $reason): array
+{
+    $out = ['closed' => 0, 'restored' => 0, 'wasted' => 0];
+    if ($orderId <= 0) {
+        return $out;
+    }
+    if (!$pdo->inTransaction()) {
+        throw new RuntimeException('rh_close_refunded_order_lines must run inside the caller\'s transaction.');
+    }
+    $oh = $pdo->prepare("SELECT reference, order_type, kitchen_status FROM stock_orders WHERE id = ? FOR UPDATE");
+    $oh->execute([$orderId]);
+    $order = $oh->fetch(PDO::FETCH_ASSOC);
+    if (!$order || (string)$order['order_type'] === 'room_service') {
+        return $out;
+    }
+    $ref = (string)$order['reference'];
+    $sel = $pdo->prepare("SELECT id, item_name, menu_item_id, menu_type, quantity, station, kds_status, stock_deducted,
+                                 EXISTS (SELECT 1 FROM stock_adjustments sa
+                                          WHERE sa.source_type = 'pos_order' AND sa.source_id = stock_order_items.id AND sa.quantity_change < 0) AS has_trail
+                            FROM stock_order_items
+                           WHERE order_id = ? AND kds_status NOT IN ('served', 'void')
+                        ORDER BY id ASC FOR UPDATE");
+    $sel->execute([$orderId]);
+    $lines = $sel->fetchAll(PDO::FETCH_ASSOC);
+    if (!$lines) {
+        return $out;
+    }
+    $actorName = '';
+    try {
+        $as = $pdo->prepare("SELECT COALESCE(NULLIF(full_name, ''), username) FROM admin_users WHERE id = ?");
+        $as->execute([$userId]);
+        $actorName = (string)$as->fetchColumn();
+    } catch (Throwable $e) {
+        // name is cosmetic
+    }
+    $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+    $void = $pdo->prepare("UPDATE stock_order_items SET kds_status = 'void', served_at = COALESCE(served_at, NOW()), bumped_by = ?, stock_deducted = 0 WHERE id = ?");
+    $stopStations = [];
+    foreach ($lines as $ln) {
+        $lineId = (int)$ln['id'];
+        $k = (string)$ln['kds_status'];
+        if ($k === 'pending') {
+            if ((int)$ln['has_trail'] === 1 && (int)$ln['stock_deducted'] === 1) {
+                if (!restoreStockForMenuItem((int)$ln['menu_item_id'], (string)$ln['menu_type'], (float)$ln['quantity'], 'Order refunded: line not started', $userId, $lineId, 'pos_order')) {
+                    throw new RuntimeException('Stock restore failed for ' . $ln['item_name'] . ' - nothing was changed. Please retry or contact a manager.');
+                }
+                $out['restored']++;
+            }
+        } else {
+            $alreadyOff = ((int)$ln['stock_deducted'] === 1);
+            $n = rh_record_item_wastage($pdo, (int)$ln['menu_item_id'], (string)$ln['menu_type'], (float)$ln['quantity'], !$alreadyOff, $userId, 'Order refunded - wastage (' . $ln['item_name'] . ', ' . $ref . ', ' . $k . ')', 'pos_order', $lineId);
+            if ($n > 0) {
+                $out['wasted']++;
+            }
+            if (in_array((string)$ln['station'], ['kitchen', 'bar', 'coffee_bar'], true)) {
+                $stopStations[(string)$ln['station']] = true;
+            }
+        }
+        $void->execute([$userId > 0 ? $userId : null, $lineId]);
+        $out['closed']++;
+        try {
+            $pdo->prepare("INSERT INTO stock_kds_events (order_id, order_item_id, event, from_status, to_status, user_id, user_name, ip_address) VALUES (?, ?, 'voided', ?, 'void', ?, ?, ?)")
+                ->execute([$orderId, $lineId, $k, $userId, $actorName, $ip]);
+        } catch (Throwable $e) {
+            // legacy event schema
+        }
+    }
+    // Only served lines (if any) remain, so the ticket is finished. The order's served_at is left alone:
+    // a refunded ticket that was never served must not count in kitchen-time averages.
+    $pdo->prepare("UPDATE stock_orders SET kitchen_status = 'served' WHERE id = ?")->execute([$orderId]);
+    try {
+        $pdo->prepare("DELETE FROM pos_ready_notifications WHERE order_id = ?")->execute([$orderId]);
+        $pdo->prepare("UPDATE station_messages SET pos_acknowledged = 1, pos_acknowledged_at = NOW(), pos_acknowledged_by = ? WHERE order_id = ? AND source = 'station' AND COALESCE(pos_acknowledged, 0) = 0")
+            ->execute([$userId, $orderId]);
+        foreach (array_keys($stopStations) as $stn) {
+            $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, is_acknowledged, acknowledged_at) VALUES (?, ?, ?, ?, 'pos', 'urgent', ?, ?, 0, NULL)")
+                ->execute([$stn, mb_substr('STOP - order ' . $ref . ' refunded. Do not serve it.', 0, 255), $userId > 0 ? $userId : null, mb_substr($actorName, 0, 120), $orderId, $ref]);
+        }
+    } catch (Throwable $e) {
+        error_log('rh_close_refunded_order_lines notices: ' . $e->getMessage());
+    }
+    try {
+        $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, 'refund_closed_lines', ?, ?)")
+            ->execute([$orderId, $userId > 0 ? $userId : null, $actorName, mb_substr($reason . ' | ' . $out['closed'] . ' unserved line(s) closed, stock restored ' . $out['restored'] . ', wastage ' . $out['wasted'], 0, 500), $ip]);
+    } catch (Throwable $e) {
+        error_log('rh_close_refunded_order_lines audit: ' . $e->getMessage());
+    }
+    return $out;
+}
+
+/**
  * Stock side of voiding / cancelling ONE room-service folio charge whose ingredients were booked
  * against the charge itself (booking_charges.stock_tracked = 1, source 'room_service'). Same prep
  * rule as an 86 and as rh_restore_pos_order_stock: the charge's kitchen line decides.

@@ -267,7 +267,7 @@ try {
         SELECT DATE_FORMAT(payment_date, '%Y-%m') as month,
                DATE_FORMAT(payment_date, '%b %Y') as month_label,
                SUM(CASE WHEN payment_type = 'refund' THEN 0 ELSE 1 END) as transaction_count,
-               COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN 0 ELSE total_amount END), 0) as monthly_revenue,
+               COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN -refund_amount ELSE total_amount END), 0) as monthly_revenue, -- net of refunds paid out, the End of Day cash rule
                COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END), 0) as monthly_vat
         FROM payments
         WHERE ((payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund')
@@ -1696,7 +1696,7 @@ try {
                                     <tr>
                                         <th>Month</th>
                                         <th>Txns</th>
-                                        <th>Revenue</th>
+                                        <th>Net Revenue</th>
                                         <th title="Month-on-Month growth: % change vs the previous month. Positive = growing, Negative = declining.">MoM %</th>
                                         <?php if ($vatEnabled): ?><th>VAT</th><?php endif; ?>
                                     </tr>
@@ -2095,7 +2095,7 @@ try {
                                     <tr>
                                         <th>Month</th>
                                         <th>Txns</th>
-                                        <th>Revenue</th>
+                                        <th>Net Revenue (after refunds)</th>
                                         <th>VAT Collected</th>
                                     </tr>
                                 </thead>
@@ -2113,7 +2113,7 @@ try {
                                     <tr style="font-weight:700">
                                         <td>Total</td>
                                         <td><?php echo number_format($totalTransactions); ?></td>
-                                        <td><?php echo $currency_symbol . ' ' . number_format($totalRevenue, 2); ?></td>
+                                        <td><?php echo $currency_symbol . ' ' . number_format($totalRevenue - $totalRefunds, 2); ?></td>
                                         <td><?php echo $currency_symbol . ' ' . number_format($totalVatCollected, 2); ?></td>
                                     </tr>
                                 </tfoot>

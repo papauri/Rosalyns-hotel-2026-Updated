@@ -36,7 +36,7 @@ $fnb = [
             FROM stock_orders o
             JOIN stock_order_items oi ON oi.order_id = o.id
             WHERE o.created_at BETWEEN ? AND ?
-              AND o.status NOT IN ('voided','cancelled')
+              AND o.status NOT IN ('voided','cancelled','refunded')
             GROUP BY oi.station
             ORDER BY revenue DESC");
         $st->execute([$rp_from, $rp_to]);
@@ -47,7 +47,7 @@ $fnb = [
                 SUM(oi.quantity) AS qty, SUM(oi.line_total) AS revenue, COUNT(DISTINCT o.id) AS orders
             FROM stock_orders o
             JOIN stock_order_items oi ON oi.order_id = o.id
-            WHERE o.created_at BETWEEN ? AND ? AND o.status NOT IN ('voided','cancelled')
+            WHERE o.created_at BETWEEN ? AND ? AND o.status NOT IN ('voided','cancelled','refunded')
             GROUP BY oi.item_name, oi.menu_type, oi.station
             ORDER BY revenue DESC LIMIT 25");
         $st->execute([$rp_from, $rp_to]);
@@ -56,7 +56,7 @@ $fnb = [
     'order_types' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
         $st = $pdo->prepare("SELECT order_type, COUNT(*) AS n, SUM(total_amount) AS revenue, AVG(total_amount) AS avg_check
             FROM stock_orders
-            WHERE created_at BETWEEN ? AND ? AND status NOT IN ('voided','cancelled')
+            WHERE created_at BETWEEN ? AND ? AND status NOT IN ('voided','cancelled','refunded')
             GROUP BY order_type ORDER BY revenue DESC");
         $st->execute([$rp_from, $rp_to]);
         return $st->fetchAll(PDO::FETCH_ASSOC);
@@ -91,9 +91,9 @@ $fnb = [
     'totals' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
         $st = $pdo->prepare("SELECT
                 COUNT(*) AS orders,
-                SUM(CASE WHEN status NOT IN ('voided','cancelled') THEN total_amount ELSE 0 END) AS net_revenue,
+                SUM(CASE WHEN status NOT IN ('voided','cancelled','refunded') THEN total_amount ELSE 0 END) AS net_revenue,
                 SUM(CASE WHEN status='voided' THEN total_amount ELSE 0 END) AS voided_value,
-                AVG(CASE WHEN status NOT IN ('voided','cancelled') THEN total_amount END) AS avg_check
+                AVG(CASE WHEN status NOT IN ('voided','cancelled','refunded') THEN total_amount END) AS avg_check
             FROM stock_orders WHERE created_at BETWEEN ? AND ?");
         $st->execute([$rp_from, $rp_to]);
         return $st->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -154,14 +154,14 @@ $staff = [
     'pos_actions' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
         $st = $pdo->prepare("SELECT u.id, u.username, u.full_name, u.role,
                 COUNT(o.id) AS orders_created,
-                SUM(o.total_amount) AS revenue_handled,
-                SUM(CASE WHEN o.status='voided' THEN 1 ELSE 0 END) AS voids_caused
+                COALESCE(SUM(CASE WHEN o.status NOT IN ('voided','cancelled','refunded') THEN o.total_amount ELSE 0 END),0) AS revenue_handled,
+                (SELECT COUNT(*) FROM stock_orders v WHERE v.voided_by = u.id AND v.voided_at BETWEEN ? AND ?) AS voids_caused
             FROM admin_users u
             LEFT JOIN stock_orders o ON o.created_by = u.id AND o.created_at BETWEEN ? AND ?
             WHERE u.is_active=1
-            GROUP BY u.id HAVING orders_created > 0
+            GROUP BY u.id HAVING orders_created > 0 OR voids_caused > 0
             ORDER BY revenue_handled DESC");
-        $st->execute([$rp_from, $rp_to]);
+        $st->execute([$rp_from, $rp_to, $rp_from, $rp_to]);
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }),
     'kds_actions' => rp_safe(function() use ($pdo, $rp_from, $rp_to) {
@@ -356,7 +356,7 @@ $voids = [
     <div class="rh-panel">
         <div class="rh-panel__head"><h2 class="rh-panel__title">POS Activity by User</h2></div>
         <?php if (!$staff['pos_actions']): ?><div class="rx-empty">No POS activity</div><?php else: ?>
-        <table class="rx-table"><thead><tr><th>User</th><th>Role</th><th class="num">Orders</th><th class="num">Revenue Handled</th><th class="num">Voids Caused</th></tr></thead><tbody>
+        <table class="rx-table"><thead><tr><th>User</th><th>Role</th><th class="num">Orders</th><th class="num">Revenue Handled (excl. voided / refunded)</th><th class="num">Voids Done</th></tr></thead><tbody>
         <?php foreach ($staff['pos_actions'] as $u): ?>
             <tr><td><strong><?php echo htmlspecialchars($u['full_name'] ?: $u['username']); ?></strong> <span style="color:#6c757d; font-size:11px;">(<?php echo htmlspecialchars($u['username']); ?>)</span></td><td><?php echo htmlspecialchars($u['role']); ?></td><td class="num"><?php echo number_format((int)$u['orders_created']); ?></td><td class="num"><?php echo $rp_currency.' '.number_format((float)$u['revenue_handled'], 2); ?></td><td class="num" style="color:<?php echo $u['voids_caused']>0?'#c82333':'#28a745'; ?>;"><?php echo number_format((int)$u['voids_caused']); ?></td></tr>
         <?php endforeach; ?>

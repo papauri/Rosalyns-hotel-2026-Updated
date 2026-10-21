@@ -1329,9 +1329,12 @@ $csrf_token = generateCsrfToken();
                 <div class="val"><?php echo (int)($shift['orders_today'] ?? 0); ?></div>
             </a>
             <a class="shift-card" href="accounting-dashboard.php" title="Open accounting dashboard">
-                <div class="lbl">Revenue Today</div>
+                <div class="lbl">Gross Sales Today</div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></div>
-                <div class="shift-card__sub">By payment time</div>
+                <div class="shift-card__sub">By payment time, before refunds and voids</div>
+                <?php if ((float)($shift['refund_amount'] ?? 0) > 0.004): ?>
+                    <div class="shift-card__sub">Refunds paid out: <?php echo $currency_symbol . ' ' . number_format((float)$shift['refund_amount'], 2); ?> &middot; Net: <?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0) - (float)$shift['refund_amount'], 2); ?></div>
+                <?php endif; ?>
                 <?php if ((int)($shift['earlier_tabs_n'] ?? 0) > 0): ?>
                     <div class="shift-card__sub">Settled from earlier tabs: <?php echo (int)$shift['earlier_tabs_n']; ?> &middot; <?php echo $currency_symbol . ' ' . number_format((float)$shift['earlier_tabs_amt'], 2); ?></div>
                 <?php endif; ?>
@@ -1485,7 +1488,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="revenue-today"
                     data-insight-title="Revenue Today Breakdown"
                     aria-label="Open revenue today breakdown">
-                    <div class="lbl">Revenue Today</div>
+                    <div class="lbl">Gross Sales Today</div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format($revToday, 2); ?></div>
                     <?php echo insightsDelta($revDelta); ?>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Yesterday: <?php echo $currency_symbol . ' ' . number_format($revYday, 2); ?></div>
@@ -1515,7 +1518,7 @@ $csrf_token = generateCsrfToken();
                     aria-label="Open average ticket quality">
                     <div class="lbl">Avg Ticket</div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($operationsSnapshot['avg_ticket_today'] ?? 0), 2); ?></div>
-                    <div style="font-size:11px;color:#6c757d;margin-top:3px;">Across <?php echo (int)($operationsSnapshot['settled_today'] ?? 0); ?> settled today</div>
+                    <div style="font-size:11px;color:#6c757d;margin-top:3px;">Gross, across <?php echo (int)($operationsSnapshot['settled_today'] ?? 0); ?> settled today</div>
                     <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
 

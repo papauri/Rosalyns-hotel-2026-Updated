@@ -496,10 +496,10 @@ if (!function_exists('rh_pos_eod_summary')) {
         $st->execute($saleParams);
         $out['by_type'] = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-        // Top items: sold lines only; voided / 86'd lines never count.
+        // Top items: sold lines only; voided / 86'd lines never count, and neither do orders since voided or refunded.
         $st = $pdo->prepare("SELECT soi.item_name, soi.menu_type, SUM(soi.quantity) AS qty, SUM(soi.line_total) AS revenue
             FROM stock_order_items soi INNER JOIN stock_orders o ON o.id = soi.order_id
-            WHERE $saleCond AND COALESCE(soi.kds_status,'') NOT IN ('void','voided','cancelled','86','86d','86ed')
+            WHERE $saleCond AND o.status IN ('paid','completed') AND COALESCE(soi.kds_status,'') NOT IN ('void','voided','cancelled','86','86d','86ed')
             GROUP BY soi.item_name, soi.menu_type ORDER BY revenue DESC LIMIT 8");
         $st->execute($saleParams);
         $out['top_items'] = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
