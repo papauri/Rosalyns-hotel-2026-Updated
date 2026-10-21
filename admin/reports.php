@@ -433,16 +433,17 @@ try {
     $avgRevenuePerBooking = $bookingSummary['avg_booking_value'];
 
     // 12. Cancellation Rate
+    // Cancellations are counted on the day they happened, from the booking history (owner 2026-10-21),
+    // against the bookings made in the period.
     $cancelStmt = $pdo->prepare("
-        SELECT
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
+        SELECT COUNT(*) as total
         FROM bookings
         WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
     ");
     $cancelStmt->execute([$start_date, $end_date]);
     $cancelData = $cancelStmt->fetch(PDO::FETCH_ASSOC);
-    $cancellationRate = $cancelData['total'] > 0 ? round(($cancelData['cancelled'] / $cancelData['total']) * 100, 1) : 0;
+    $cancelData['cancelled'] = rh_cancellations_between($pdo, $start_date, $end_date);
+    $cancellationRate = $cancelData['total'] > 0 ? min(100, round(($cancelData['cancelled'] / $cancelData['total']) * 100, 1)) : 0;
 
     // 13. Recent Bookings
     $recentBookingsStmt = $pdo->prepare("
@@ -473,9 +474,10 @@ try {
     $rhRoomsFactor = function (string $a): string {
         return rh_booking_rooms_factor_sql($a);
     };
-    // Revenue of a stay that falls inside the window (total_amount is net + levy, excludes VAT).
+    // Revenue of a stay that falls inside the window, INCLUDING VAT (owner 2026-10-21: ADR / RevPAR are shown
+    // incl. VAT everywhere; the tourism levy stays in, as before). Gross = total_with_vat, else total_amount + vat_amount.
     $rhOverlapRevenue = function (string $a, string $k) use ($rhOverlapNights): string {
-        return "({$a}.total_amount * " . $rhOverlapNights($a, $k) . " / NULLIF({$a}.number_of_nights, 0))";
+        return "(" . rh_booking_gross_sql($a) . " * " . $rhOverlapNights($a, $k) . " / NULLIF({$a}.number_of_nights, 0))";
     };
 
     // 14. Occupancy Data by Room Type
@@ -525,12 +527,10 @@ try {
     $overallOccupancy = $overallOccupancyStmt->fetch(PDO::FETCH_ASSOC);
 
     // Total room inventory
-    // A joined-only pair is ONE room: count it once.
-    $totalRoomInventory = rh_room_units_count(['out_of_order', 'maintenance'], true);
+    // THE occupancy base (owner 2026-10-21): all rooms minus out-of-order minus maintenance; a joined-only pair counts once.
+    $totalRoomInventory = rh_sellable_room_units();
     $totalRoomNightsAvailable = $totalRoomInventory * $daysInPeriod;
-    $overallOccupancyRate = $totalRoomNightsAvailable > 0
-        ? round(($overallOccupancy['total_nights_booked'] / $totalRoomNightsAvailable) * 100, 1)
-        : 0;
+    $overallOccupancyRate = rh_occupancy_pct((float)$overallOccupancy['total_nights_booked'], (float)$totalRoomNightsAvailable);
 
     // ============================================
     // GUESTS TAB QUERIES
@@ -690,7 +690,7 @@ try {
     // ADVANCED HOTEL KPI METRICS
     // ============================================
 
-    // 23. ADR (Average Daily Rate) = Room Revenue in period / Room Nights Sold in period
+    // 23. ADR (Average Daily Rate) = Room Revenue (incl. VAT) in period / Room Nights Sold in period
     // (stays clipped to the period; a joined booking is sold as two rooms, same basis as occupancy)
     $adrStmt = $pdo->prepare("
         SELECT COALESCE(SUM(" . $rhOverlapRevenue('b', 'a1') . "), 0) as total_room_revenue,
@@ -701,9 +701,7 @@ try {
     ");
     $adrStmt->execute([':ae' => $end_date, ':as' => $start_date] + $rhOverlapParams('a1', $start_date, $end_date) + $rhOverlapParams('a2', $start_date, $end_date));
     $adrData = $adrStmt->fetch(PDO::FETCH_ASSOC);
-    $adr = $adrData['total_nights_sold'] > 0
-        ? round($adrData['total_room_revenue'] / $adrData['total_nights_sold'], 0)
-        : 0;
+    $adr = round(rh_adr((float)$adrData['total_room_revenue'], (float)$adrData['total_nights_sold']), 0);
 
     // 24. RevPAR (Revenue Per Available Room) = Total Room Revenue / Total Available Room Nights
     $revpar = $totalRoomNightsAvailable > 0
@@ -1384,11 +1382,11 @@ try {
                                     <td style="text-align:right; font-weight:600"><?php echo $overallOccupancyRate; ?>%</td>
                                 </tr>
                                 <tr>
-                                    <td title="ADR (Average Daily Rate) — room revenue (tourism levy included, VAT excluded) divided by number of rooms sold.">ADR (Avg Daily Rate)</td>
+                                    <td title="ADR (Average Daily Rate) — room revenue including VAT (tourism levy included) divided by number of rooms sold.">ADR incl. VAT (Avg Daily Rate)</td>
                                     <td style="text-align:right; font-weight:600"><?php echo $currency_symbol . ' ' . number_format($adr); ?></td>
                                 </tr>
                                 <tr>
-                                    <td title="RevPAR (Revenue Per Available Room) — total room revenue divided by ALL available room nights. Lower than ADR means some rooms sat empty.">RevPAR</td>
+                                    <td title="RevPAR (Revenue Per Available Room) — room revenue including VAT divided by all sellable room nights (all rooms minus out of order minus maintenance). Lower than ADR means some rooms sat empty.">RevPAR</td>
                                     <td style="text-align:right; font-weight:600"><?php echo $currency_symbol . ' ' . number_format($revpar); ?></td>
                                 </tr>
                                 <tr>
@@ -1618,7 +1616,7 @@ try {
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Avg per Transaction</span>
                         <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . ($totalTransactions > 0 ? number_format($totalRevenue / $totalTransactions, 2) : '0.00'); ?></strong>
-                        <span class="rh-strip__sub">ADR: <?php echo $currency_symbol . ' ' . number_format($adr); ?> · RevPAR: <?php echo $currency_symbol . ' ' . number_format($revpar); ?></span>
+                        <span class="rh-strip__sub">ADR incl. VAT: <?php echo $currency_symbol . ' ' . number_format($adr); ?> · RevPAR: <?php echo $currency_symbol . ' ' . number_format($revpar); ?></span>
                     </div>
                 </div>
 
@@ -2423,7 +2421,7 @@ try {
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Cancellation Rate</span>
                         <strong class="rh-strip__value"><?php echo $cancellationRate; ?>%</strong>
-                        <span class="rh-strip__sub"><?php echo $cancelData['cancelled'] ?? 0; ?> of <?php echo $cancelData['total'] ?? 0; ?> bookings</span>
+                        <span class="rh-strip__sub"><?php echo $cancelData['cancelled'] ?? 0; ?> cancelled in the period (from booking history) · <?php echo $cancelData['total'] ?? 0; ?> bookings made</span>
                     </div>
                 </div>
 
@@ -2592,7 +2590,7 @@ try {
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Room-Nights Booked</span>
                         <strong class="rh-strip__value"><?php echo number_format($overallOccupancy['total_nights_booked']); ?></strong>
-                        <span class="rh-strip__sub">of <?php echo number_format($totalRoomNightsAvailable); ?> available</span>
+                        <span class="rh-strip__sub">of <?php echo number_format($totalRoomNightsAvailable); ?> sellable (all rooms minus out of order and maintenance)</span>
                     </div>
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Room Inventory</span>
@@ -2664,7 +2662,7 @@ try {
                 <!-- Per Room Type ADR / RevPAR -->
                 <div class="rh-panel">
                     <div class="rh-panel__head"><h2 class="rh-panel__title">ADR &amp; RevPAR by Room Type</h2></div>
-                    <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">ADR = Revenue ÷ Nights Sold. RevPAR = Revenue ÷ (Rooms × Days in Period). RevPAR below 40% of ADR means significant empty nights.</p>
+                    <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">ADR = Revenue incl. VAT ÷ Nights Sold. RevPAR = Revenue incl. VAT ÷ (Rooms of this type × Days in Period); this per-type table uses every room of the type, so it can differ from the headline RevPAR, which uses sellable rooms only. RevPAR below 40% of ADR means significant empty nights.</p>
                     <table class="acct-table">
                         <thead>
                             <tr>

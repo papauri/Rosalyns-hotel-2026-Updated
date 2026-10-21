@@ -3202,7 +3202,7 @@ try {
 
 // Statistics are computed by the DB stats query inside the main try block above.
 
-// ─── Missed check-ins: confirmed bookings whose check-in date has PASSED ───
+// ─── Missed check-ins: confirmed + pending bookings whose check-in date has PASSED (same as the room dashboard) ───
 $missed_checkins = [];
 try {
     $missed_stmt = $pdo->query("
@@ -3221,7 +3221,7 @@ try {
         FROM bookings b
         LEFT JOIN rooms r ON b.room_id = r.id
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-        WHERE b.status = 'confirmed'
+        WHERE b.status IN ('confirmed', 'pending')
           AND b.check_in_date < CURDATE()
           AND b.deleted_at IS NULL
         ORDER BY b.check_in_date ASC
@@ -3327,7 +3327,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 </div>
                 <div class="bookings-alert-banner__copy">
                     <h3 class="bookings-alert-banner__title">Missed Check-ins!</h3>
-                    <p class="bookings-alert-banner__text"><?php echo count($missed_checkins); ?> confirmed bookings have passed their check-in date without checking in.</p>
+                    <p class="bookings-alert-banner__text"><?php echo count($missed_checkins); ?> confirmed or pending bookings have passed their check-in date without checking in.</p>
                     <p class="bookings-alert-banner__helper"><i class="fas fa-circle-info" aria-hidden="true"></i><span>Helper: Open details to review each booking and update arrival status immediately.</span></p>
                 </div>
                 <button class="btn btn-secondary bookings-alert-banner__action" type="button" onclick="openMissedCheckinsModal()">

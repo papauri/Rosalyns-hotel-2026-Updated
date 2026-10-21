@@ -2012,6 +2012,8 @@ $currency_symbol = getSetting('currency_symbol');
         $statusCounts = $roomSummary['status_counts'] ?? [];
         $totalRooms = $mod_roomboard ? array_sum($statusCounts) : 0;
         $occupiedRooms = (int)($statusCounts['occupied'] ?? 0);
+        // Occupancy base (owner 2026-10-21): all rooms minus out-of-order minus maintenance.
+        $sellableRooms = max(0, $totalRooms - (int)($statusCounts['out_of_order'] ?? 0) - (int)($statusCounts['maintenance'] ?? 0));
         $occupancy = (float)($roomSummary['occupancy_rate'] ?? 0);
         $noShows = (int)($roomSummary['no_show_candidates'] ?? 0);
 
@@ -2150,7 +2152,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <span class="ck-kpi__label">Occupancy</span>
                     <span class="ck-kpi__value"><?php echo rtrim(rtrim(number_format($occupancy, 1), '0'), '.'); ?><small>%</small></span>
                     <span class="ck-meter"><span style="width:<?php echo min(100, $occupancy); ?>%"></span></span>
-                    <span class="ck-kpi__sub"><?php echo $occupiedRooms; ?> of <?php echo $totalRooms; ?> rooms occupied</span>
+                    <span class="ck-kpi__sub" title="Occupied rooms over rooms that can be sold (all rooms minus out of order minus maintenance)"><?php echo $occupiedRooms; ?> of <?php echo $sellableRooms; ?> sellable rooms occupied</span>
                 </a>
                 <?php endif; ?>
                 <a class="ck-kpi js-dashboard-insight" data-insight-card="checkins_today" data-insight-label="Today's check-ins" href="bookings.php?filter=checkin_today">

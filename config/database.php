@@ -3579,6 +3579,89 @@ function rh_room_units_count(array $statuses = [], bool $excludeStatuses = false
         return in_array($st, $statuses, true) !== $excludeStatuses;
     }));
 }
+
+/**
+ * THE occupancy base (owner 2026-10-21): every room unit the hotel could sell today = all active rooms
+ * (a joined-only pair counts once) minus out-of-order minus maintenance. Dashboard, Room dashboard,
+ * End of Day (page / PDF / e-mail) and Reports all take their occupancy and RevPAR denominator from here.
+ */
+function rh_sellable_room_units(): int
+{
+    return rh_room_units_count(['out_of_order', 'maintenance'], true);
+}
+
+/** Room units that cannot be sold right now (out of order + maintenance), on the same unit basis as above. */
+function rh_unsellable_room_units(): int
+{
+    return rh_room_units_count(['out_of_order', 'maintenance']);
+}
+
+/** Occupancy % = rooms (or room-nights) sold over the sellable base, one decimal. Never divides by zero. */
+function rh_occupancy_pct(float $sold, float $sellable): float
+{
+    return $sellable > 0 ? round(($sold / $sellable) * 100, 1) : 0.0;
+}
+
+/**
+ * THE average room rate (ADR): room revenue INCLUDING VAT (owner 2026-10-21; tourism levy treated as before,
+ * i.e. included) divided by room units sold. Every screen passes revenue gross of VAT, never net.
+ */
+function rh_adr(float $roomRevenueInclVat, float $roomsSold): float
+{
+    return $roomsSold > 0 ? $roomRevenueInclVat / $roomsSold : 0.0;
+}
+
+/**
+ * SQL expression: a booking's room revenue INCLUDING VAT (total_with_vat, falling back to total_amount + vat_amount
+ * - the same gross basis rh_booked_stay_split() uses). $alias is the bookings alias (constant, never user input).
+ */
+function rh_booking_gross_sql(string $alias = 'b'): string
+{
+    return "COALESCE(NULLIF({$alias}.total_with_vat, 0), {$alias}.total_amount + COALESCE({$alias}.vat_amount, 0))";
+}
+
+/**
+ * Room bookings CANCELLED between $from and $to (inclusive dates), counted on the day the cancellation
+ * happened, taken from the booking history (booking_timeline_logs: the "status -> cancelled" entry or the
+ * "Cancellation settled" entry every cancel path writes), NOT bookings.updated_at (owner 2026-10-21). One
+ * booking counts once per day however many entries it has; a booking that is deleted or no longer
+ * cancelled (restored) is not counted. Returns 0 when the history cannot be read.
+ */
+function rh_cancellations_between(PDO $pdo, string $from, string $to): int
+{
+    try {
+        $st = $pdo->prepare("SELECT COUNT(DISTINCT t.booking_id)
+            FROM booking_timeline_logs t
+            INNER JOIN bookings b ON b.id = t.booking_id AND b.deleted_at IS NULL AND b.status = 'cancelled'
+            WHERE t.new_value = 'cancelled' AND t.action_type IN ('status_change', 'financial', 'cancellation')
+              AND t.created_at >= ? AND t.created_at < DATE_ADD(?, INTERVAL 1 DAY)");
+        $st->execute([$from . ' 00:00:00', $to]);
+        return (int)$st->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('rh_cancellations_between: ' . $e->getMessage());
+        return 0;
+    }
+}
+
+/** Cancellations that happened on one date (see rh_cancellations_between). */
+function rh_cancellations_on_date(PDO $pdo, string $date): int
+{
+    return rh_cancellations_between($pdo, $date, $date);
+}
+
+/** Reviews received on a date that are PUBLISHED (status 'approved', shown as "Published" in admin/reviews.php and on the public site): count + average rating. */
+function rh_published_reviews_on_date(PDO $pdo, string $date): array
+{
+    try {
+        $st = $pdo->prepare("SELECT COUNT(*) AS cnt, COALESCE(AVG(rating), 0) AS avg_rating FROM reviews WHERE DATE(created_at) = ? AND status = 'approved'");
+        $st->execute([$date]);
+        $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        return ['count' => (int)($r['cnt'] ?? 0), 'avg' => (float)($r['avg_rating'] ?? 0)];
+    } catch (Throwable $e) {
+        error_log('rh_published_reviews_on_date: ' . $e->getMessage());
+        return ['count' => 0, 'avg' => 0.0];
+    }
+}
 /**
  * SQL expression: how many rooms ONE booking-night occupies, on the same basis as the inventory
  * denominator (rh_room_units_count): a normal booking = 1; a joined-room booking of a joined-ONLY

@@ -67,22 +67,24 @@ try {
             SUM(CASE WHEN check_out_date = ? AND status = 'checked-out' THEN 1 ELSE 0 END) AS departures_completed,
             SUM(CASE WHEN check_in_date < ? AND check_out_date > ? AND status = 'checked-in' THEN 1 ELSE 0 END) AS stayovers,
             SUM(CASE WHEN DATE(created_at) = ? THEN 1 ELSE 0 END) AS new_bookings,
-            SUM(CASE WHEN DATE(updated_at) = ? AND status = 'cancelled' THEN 1 ELSE 0 END) AS cancellations,
+            0 AS cancellations,
             SUM(CASE WHEN check_in_date = ? AND status = 'no-show' THEN 1 ELSE 0 END) AS no_shows
         FROM bookings
         WHERE deleted_at IS NULL
     ");
-    $opsStmt->execute(array_fill(0, 9, $date));
+    $opsStmt->execute(array_fill(0, 8, $date));
     $ops = $opsStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    // Cancellations count on the day they happened, from the booking history (owner 2026-10-21), not updated_at.
+    $ops['cancellations'] = rh_cancellations_on_date($pdo, $date);
 
     // 2) Occupancy
-    // A joined-only pair is ONE room (out of order when either of its rooms is).
-    $rooms_total    = rh_room_units_count(['out_of_order'], true);
-    $rooms_oo       = rh_room_units_count(['out_of_order']);
+    // ONE occupancy base everywhere (owner 2026-10-21): all rooms minus out-of-order minus maintenance (a joined pair counts once).
+    $rooms_total    = rh_sellable_room_units();
+    $rooms_oo       = rh_unsellable_room_units();
     $occStmt = $pdo->prepare("SELECT COALESCE(SUM(" . rh_booking_rooms_factor_sql('b') . "), 0) FROM bookings b WHERE b.deleted_at IS NULL AND b.status IN ('checked-in','checked-out') AND b.check_in_date <= ? AND b.check_out_date > ?");
     $occStmt->execute([$date, $date]);
     $rooms_occupied = (int)$occStmt->fetchColumn();
-    $occupancy_pct  = $rooms_total > 0 ? ($rooms_occupied / $rooms_total) * 100 : 0;
+    $occupancy_pct  = rh_occupancy_pct((float)$rooms_occupied, (float)$rooms_total);
 
     // 3) Revenue
     $payStmt = $pdo->prepare("
@@ -128,7 +130,7 @@ try {
     $earned        = rh_eod_earned_revenue($pdo, $date, $earnedModules);
     $earned_total  = (float)$earned['total'];
     // ADR / RevPAR on room revenue earned for the night (VAT and levy included).
-    $adr    = $rooms_occupied > 0 ? ((float)$earned['rooms_gross'] / $rooms_occupied) : 0;
+    $adr    = rh_adr((float)$earned['rooms_gross'], (float)$rooms_occupied);
     $revpar = $rooms_total    > 0 ? ((float)$earned['rooms_gross'] / $rooms_total)    : 0;
 
     // 4) Payment mix
@@ -175,7 +177,7 @@ try {
     $top_items = $posSummary['top_items'];
 
     // 8) Reviews
-    $rStmt = $pdo->prepare("SELECT COUNT(*) AS cnt, COALESCE(AVG(rating),0) AS avg_rating FROM reviews WHERE DATE(created_at) = :d");
+    $rStmt = $pdo->prepare("SELECT COUNT(*) AS cnt, COALESCE(AVG(rating),0) AS avg_rating FROM reviews WHERE DATE(created_at) = :d AND status = 'approved'");
     $rStmt->execute([':d' => $date]);
     $reviewRow = $rStmt->fetch(PDO::FETCH_ASSOC) ?: ['cnt' => 0, 'avg_rating' => 0];
 
@@ -206,7 +208,7 @@ try {
     $prevOcc = $pdo->prepare("SELECT COALESCE(SUM(" . rh_booking_rooms_factor_sql('b') . "), 0) FROM bookings b WHERE b.deleted_at IS NULL AND b.status IN ('checked-in','checked-out') AND b.check_in_date <= ? AND b.check_out_date > ?");
     $prevOcc->execute([$prevDay, $prevDay]);
     $prev_occ_count = (int)$prevOcc->fetchColumn();
-    $prev_occ_pct   = $rooms_total > 0 ? ($prev_occ_count / $rooms_total) * 100 : 0;
+    $prev_occ_pct   = rh_occupancy_pct((float)$prev_occ_count, (float)$rooms_total);
 
     $prev_pos_gross = (float)(rh_pos_eod_summary($pdo, $prevDay)['totals']['gross'] ?? 0);
 

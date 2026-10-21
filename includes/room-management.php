@@ -917,7 +917,7 @@ function failRoomInspection(int $roomId, int $inspectorId, string $reason, array
 /**
  * Get rooms requiring housekeeping
  *
- * @param string $status Filter by status (cleaning, all)
+ * @param string $status Filter: cleaning (status only), to_clean (status cleaning OR open task), pending, all
  * @return array List of rooms
  */
 function getRoomsRequiringHousekeeping(string $status = 'all'): array
@@ -956,6 +956,10 @@ function getRoomsRequiringHousekeeping(string $status = 'all'): array
 
         if ($status === 'cleaning') {
             $sql .= " AND ir.status = 'cleaning'";
+        } elseif ($status === 'to_clean') {
+            // "Rooms to clean" (one meaning, same as getRoomDashboardSummary): status cleaning OR an open
+            // housekeeping task (the join above only brings open tasks). Callers de-duplicate per room.
+            $sql .= " AND (ir.status = 'cleaning' OR ha.id IS NOT NULL)";
         } elseif ($status === 'pending') {
             $sql .= " AND ir.housekeeping_status = 'pending'";
         }
@@ -1117,15 +1121,13 @@ function getRoomDashboardSummary(): array
 }
 
 /**
- * Calculate occupancy rate
+ * Calculate occupancy rate: occupied rooms over the sellable base (all rooms minus out-of-order minus
+ * maintenance; owner 2026-10-21, same base as End of Day and Reports - see rh_sellable_room_units()).
  */
 function calculateOccupancyRate(array $statusCounts): float
 {
-    $total = array_sum($statusCounts);
-    if ($total === 0) return 0.0;
-
-    $occupied = ($statusCounts['occupied'] ?? 0);
-    return round(($occupied / $total) * 100, 1);
+    $sellable = array_sum($statusCounts) - (int)($statusCounts['out_of_order'] ?? 0) - (int)($statusCounts['maintenance'] ?? 0);
+    return rh_occupancy_pct((float)($statusCounts['occupied'] ?? 0), (float)$sellable);
 }
 
 /**

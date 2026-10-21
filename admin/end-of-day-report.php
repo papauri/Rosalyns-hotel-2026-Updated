@@ -102,13 +102,15 @@ if ($mod_bookings) {
                 SUM(CASE WHEN check_out_date = :d AND status = 'checked-out' THEN 1 ELSE 0 END) AS departures_completed,
                 SUM(CASE WHEN check_in_date < :d AND check_out_date > :d AND status = 'checked-in' THEN 1 ELSE 0 END) AS stayovers,
                 SUM(CASE WHEN DATE(created_at) = :d THEN 1 ELSE 0 END) AS new_bookings,
-                SUM(CASE WHEN DATE(updated_at) = :d AND status = 'cancelled' THEN 1 ELSE 0 END) AS cancellations,
+                0 AS cancellations,
                 SUM(CASE WHEN check_in_date = :d AND status = 'no-show' THEN 1 ELSE 0 END) AS no_shows
             FROM bookings
             WHERE deleted_at IS NULL
         ");
         $opsStmt->execute([':d' => $report_date]);
         $ops = array_merge($ops, $opsStmt->fetch(PDO::FETCH_ASSOC) ?: []);
+        // Cancellations count on the day they happened, from the booking history (owner 2026-10-21), not updated_at.
+        $ops['cancellations'] = rh_cancellations_on_date($pdo, $report_date);
     } catch (Throwable $e) {
         error_log('EOD ops: ' . $e->getMessage());
     }
@@ -120,9 +122,10 @@ $rooms_occupied = 0;
 $rooms_oo = 0;
 if ($mod_bookings) {
     try {
-        // A joined-only pair is ONE room (out of order when either of its rooms is).
-        $rooms_total = rh_room_units_count(['out_of_order'], true);
-        $rooms_oo    = rh_room_units_count(['out_of_order']);
+        // ONE occupancy base everywhere (owner 2026-10-21): all rooms minus out-of-order minus maintenance;
+        // a joined-only pair is ONE room (unsellable when either of its rooms is).
+        $rooms_total = rh_sellable_room_units();
+        $rooms_oo    = rh_unsellable_room_units();
         // Rooms occupied, on the inventory's own basis: a joined-room booking of a shared-mode pair
         // occupies BOTH its rooms; a joined-only pair is one room (see rh_booking_rooms_factor_sql).
         $occStmt = $pdo->prepare("
@@ -137,7 +140,7 @@ if ($mod_bookings) {
         error_log('EOD occupancy: ' . $e->getMessage());
     }
 }
-$occupancy_pct = $rooms_total > 0 ? ($rooms_occupied / $rooms_total) * 100 : 0;
+$occupancy_pct = rh_occupancy_pct((float)$rooms_occupied, (float)$rooms_total);
 
 // ---------------------------------------------------------------------------
 // 2) Revenue — split by source
@@ -218,7 +221,7 @@ $cash_collected = $net_revenue; // payments received today less refunds paid out
 
 // ADR / RevPAR — room revenue EARNED for the night (levy and VAT included) over rooms occupied
 // (joined-room factor already in $rooms_occupied) / over rooms available.
-$adr    = $rooms_occupied > 0 ? ((float)$earned['rooms_gross'] / $rooms_occupied) : 0;
+$adr    = rh_adr((float)$earned['rooms_gross'], (float)$rooms_occupied);
 $revpar = $rooms_total > 0 ? ((float)$earned['rooms_gross'] / $rooms_total) : 0;
 
 // ---------------------------------------------------------------------------
@@ -280,7 +283,7 @@ try {
     $rStmt = $pdo->prepare("
         SELECT COUNT(*) AS cnt, COALESCE(AVG(rating),0) AS avg_rating
         FROM reviews
-        WHERE DATE(created_at) = :d
+        WHERE DATE(created_at) = :d AND status = 'approved'
     ");
     $rStmt->execute([':d' => $report_date]);
     $row = $rStmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -476,7 +479,7 @@ try {
         ");
         $prevOcc->execute([':d' => $previous_day]);
         $previous['rooms_occupied'] = (int)$prevOcc->fetchColumn();
-        $previous['occupancy_pct'] = $rooms_total > 0 ? ($previous['rooms_occupied'] / $rooms_total) * 100 : 0;
+        $previous['occupancy_pct'] = rh_occupancy_pct((float)$previous['rooms_occupied'], (float)$rooms_total);
     }
 } catch (Throwable $e) {
     error_log('EOD previous comparison: ' . $e->getMessage());
@@ -602,7 +605,7 @@ if ($mod_bookings) {
         $addAlert('warn', 'fa-file-invoice-dollar', 'Outstanding guest folio', $money($outstanding_folio) . ' still owed on open bookings (in-house, upcoming and checked out).');
     }
     if ($rooms_oo > 0) {
-        $addAlert('watch', 'fa-screwdriver-wrench', 'Rooms out of order', $rooms_oo . ' room' . ($rooms_oo === 1 ? '' : 's') . ' unavailable for sale.');
+        $addAlert('watch', 'fa-screwdriver-wrench', 'Rooms out of order or in maintenance', $rooms_oo . ' room' . ($rooms_oo === 1 ? '' : 's') . ' unavailable for sale.');
     }
 }
 if ((float)$rev['pending'] > 0) {
@@ -1203,13 +1206,13 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 <span class="ck-kpi__value"><?php echo rtrim(rtrim(number_format($occupancy_pct, 1), '0'), '.'); ?><small>%</small></span>
                 <span class="ck-meter"><span style="width:<?php echo min(100, max(0, $occupancy_pct)); ?>%"></span></span>
                 <span class="ck-kpi__sub">
-                    <?php echo (int)$rooms_occupied; ?> of <?php echo (int)$rooms_total; ?> rooms sold<?php if ($rooms_oo > 0): ?> &middot; <?php echo (int)$rooms_oo; ?> out of order<?php endif; ?>
+                    <?php echo (int)$rooms_occupied; ?> of <?php echo (int)$rooms_total; ?> sellable rooms sold<?php if ($rooms_oo > 0): ?> &middot; <?php echo (int)$rooms_oo; ?> out of order or in maintenance (not counted)<?php endif; ?>
                     <span class="ck-pill ck-pill--<?php echo $pillTone[$trendTone($occupancy_change)]; ?>"><?php echo $trendLabel($occupancy_change, false, ' pts'); ?></span>
                 </span>
             </a>
             <div class="ck-kpi">
                 <span class="ck-kpi__icon"><i class="fas fa-chart-line"></i></span>
-                <span class="ck-kpi__label" title="Room revenue earned for the night (each booking's booked nightly rate, VAT and tourism levy included) divided by rooms occupied.">Average room rate (ADR)</span>
+                <span class="ck-kpi__label" title="Room revenue earned for the night (each booking's booked nightly rate, VAT and tourism levy included) divided by rooms occupied. Occupancy and RevPAR use sellable rooms: all rooms minus out of order minus maintenance.">Average room rate incl. VAT (ADR)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($adr); ?></span>
                 <span class="ck-kpi__sub">Per available room (RevPAR) <strong><?php echo $money($revpar); ?></strong> &middot; room revenue <?php echo $money($earned['rooms_gross']); ?></span>
             </div>
@@ -1846,7 +1849,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                         <div>
                             <h4 class="eod-sub-title">Reviews <?php if ($reviews['count'] > 0): ?><a class="eod-link" href="reviews.php">View all &rarr;</a><?php endif; ?></h4>
                             <?php if ($reviews['count'] === 0): ?>
-                                <div class="ck-empty"><i class="fas fa-star"></i><p>No reviews submitted <?php echo $isToday ? 'today' : 'on this day'; ?>.</p></div>
+                                <div class="ck-empty"><i class="fas fa-star"></i><p>No published reviews received <?php echo $isToday ? 'today' : 'on this day'; ?>.</p></div>
                             <?php else: ?>
                             <ul class="ck-kv eod-kv">
                                 <?php

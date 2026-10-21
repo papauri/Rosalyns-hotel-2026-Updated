@@ -97,7 +97,7 @@ $rdUniqueRooms = static function (array $rows): array {
     }
     return $out;
 };
-$cleaningQueue = $rdUniqueRooms(getRoomsRequiringHousekeeping('cleaning'));
+$cleaningQueue = $rdUniqueRooms(getRoomsRequiringHousekeeping('to_clean')); // same rooms as the "Rooms to Clean" figure
 $inspectionQueue = $rdUniqueRooms(getRoomsRequiringInspection());
 
 // Get room statuses for display
@@ -170,7 +170,7 @@ $roomStatuses = getRoomStatuses();
             <span class="ck-kpi__label">Check-ins Due Today</span>
             <span class="ck-kpi__value"><?php echo $summaryFailed ? '–' : (int)$summary['checkins_today']; ?></span>
         </div>
-        <div class="ck-kpi ck-kpi--warn">
+        <div class="ck-kpi ck-kpi--warn" title="Rooms with status Cleaning or an open housekeeping task">
             <span class="ck-kpi__icon"><i class="fas fa-broom"></i></span>
             <span class="ck-kpi__label">Rooms to Clean</span>
             <span class="ck-kpi__value"><?php echo $summaryFailed ? '–' : (int)$summary['cleaning_queue']; ?></span>
@@ -194,7 +194,15 @@ $roomStatuses = getRoomStatuses();
     ?>
     <div class="ck-kpis">
         <?php foreach ($roomStatuses as $status => $info): ?>
-        <?php $count = $summary['status_counts'][$status] ?? 0; ?>        <div data-filter-card data-status="<?php echo htmlspecialchars($status); ?>" class="ck-kpi<?php echo $statusKpiVariant[$status] ?? ''; ?>">
+        <?php
+        $count = $summary['status_counts'][$status] ?? 0;
+        // The Cleaning card is "rooms to clean": status cleaning OR an open housekeeping task (same as the figure above and the queue below).
+        $cardTitle = '';
+        if ($status === 'cleaning' && !$summaryFailed) {
+            $count = (int)($summary['cleaning_queue'] ?? 0);
+            $cardTitle = 'Rooms with status Cleaning or an open housekeeping task';
+        }
+        ?>        <div data-filter-card data-status="<?php echo htmlspecialchars($status); ?>" class="ck-kpi<?php echo $statusKpiVariant[$status] ?? ''; ?>"<?php echo $cardTitle !== '' ? ' title="' . htmlspecialchars($cardTitle) . '"' : ''; ?>>
             <span class="ck-kpi__icon"><i class="fas <?php echo htmlspecialchars($info['icon']); ?>"></i></span>
             <span class="ck-kpi__label"><?php echo htmlspecialchars($info['label']); ?></span>
             <span class="ck-kpi__value"><?php echo $summaryFailed ? '–' : (int)$count; ?></span>
@@ -204,7 +212,7 @@ $roomStatuses = getRoomStatuses();
 
     <!-- Occupancy Bar -->
     <div class="occupancy-section">
-        <h3 style="margin: 0 0 16px 0; font-family: 'Cormorant Garamond', serif; font-size: 20px;">
+        <h3 style="margin: 0 0 16px 0; font-family: 'Cormorant Garamond', serif; font-size: 20px;" title="Occupied rooms divided by all rooms that can be sold (all rooms minus out of order minus maintenance)">
             Room Occupancy: <?php echo $summaryFailed ? '–' : (float)$summary['occupancy_rate'] . '%'; ?>
         </h3>
         <div class="occupancy-bar">

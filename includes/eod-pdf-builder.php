@@ -312,11 +312,11 @@ function buildEodPdf(
         $kpi_slot2 = [
             'label' => 'OCCUPANCY',
             'value' => number_format($occupancy_pct, 1) . '%',
-            'sub'   => $rooms_occupied . '/' . $rooms_total . ' rooms  (' . ($occ_change >= 0 ? '+' : '') . number_format($occ_change, 1) . ' pts)',
+            'sub'   => $rooms_occupied . '/' . $rooms_total . ' sellable rooms  (' . ($occ_change >= 0 ? '+' : '') . number_format($occ_change, 1) . ' pts)',
             'sub_c' => $occ_sub_c,
         ];
         $kpi_slot3 = [
-            'label' => 'ADR',
+            'label' => 'ADR INCL. VAT',
             'value' => $m($adr),
             'sub'   => 'RevPAR ' . $m($revpar),
             'sub_c' => $TEXT2,
@@ -564,11 +564,11 @@ function buildEodPdf(
         $rowL('New Bookings Today',   (string)(int)($ops['new_bookings'] ?? 0),  false, $i++);
         $rowL('Cancellations',        (string)(int)($ops['cancellations'] ?? 0), false, $i++);
         $rowL('No-shows',             (string)(int)($ops['no_shows'] ?? 0),      false, $i++);
-        $rowL('Unsold Rooms',         $rooms_unsold . ' of ' . $rooms_total,     false, $i++);
+        $rowL('Unsold Rooms (of sellable)', $rooms_unsold . ' of ' . $rooms_total,     false, $i++);
         if ($empty_room_opportunity > 0) {
             $rowL('Empty-room Opportunity', $m($empty_room_opportunity), false, $i++);
         }
-        $rowL('ADR',    $m($adr),    false, $i++);
+        $rowL('ADR (incl. VAT)', $m($adr),    false, $i++);
         $rowL('RevPAR', $m($revpar), false, $i++);
     }
 
@@ -897,7 +897,7 @@ function buildEodPdf(
             $fwRow('HK Completed Today', (string)(int)($hk['completed']   ?? 0), false, $i++);
         }
         if ((int)($reviewRow['cnt'] ?? 0) > 0) {
-            $fwRow('Reviews Received',
+            $fwRow('Published Reviews',
                 (int)$reviewRow['cnt'] . ' — avg ' . number_format((float)($reviewRow['avg_rating'] ?? 0), 1) . '/5',
                 false, $i++);
         }

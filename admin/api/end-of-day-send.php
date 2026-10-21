@@ -87,22 +87,24 @@ try {
             SUM(CASE WHEN check_out_date = ? AND status = 'checked-out' THEN 1 ELSE 0 END) AS departures_completed,
             SUM(CASE WHEN check_in_date < ? AND check_out_date > ? AND status = 'checked-in' THEN 1 ELSE 0 END) AS stayovers,
             SUM(CASE WHEN DATE(created_at) = ? THEN 1 ELSE 0 END) AS new_bookings,
-            SUM(CASE WHEN DATE(updated_at) = ? AND status = 'cancelled' THEN 1 ELSE 0 END) AS cancellations,
+            0 AS cancellations,
             SUM(CASE WHEN check_in_date = ? AND status = 'no-show' THEN 1 ELSE 0 END) AS no_shows
         FROM bookings
         WHERE deleted_at IS NULL
     ");
-    $opsStmt->execute(array_fill(0, 9, $date));
+    $opsStmt->execute(array_fill(0, 8, $date));
     $ops = $opsStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    // Cancellations count on the day they happened, from the booking history (owner 2026-10-21), not updated_at.
+    $ops['cancellations'] = rh_cancellations_on_date($pdo, $date);
 
     // Occupancy
-    // A joined-only pair is ONE room (out of order when either of its rooms is).
-    $rooms_total = rh_room_units_count(['out_of_order'], true);
-    $rooms_oo = rh_room_units_count(['out_of_order']);
+    // ONE occupancy base everywhere (owner 2026-10-21): all rooms minus out-of-order minus maintenance (a joined pair counts once).
+    $rooms_total = rh_sellable_room_units();
+    $rooms_oo = rh_unsellable_room_units();
     $occStmt = $pdo->prepare("SELECT COALESCE(SUM(" . rh_booking_rooms_factor_sql('b') . "), 0) FROM bookings b WHERE b.deleted_at IS NULL AND b.status IN ('checked-in','checked-out') AND b.check_in_date <= ? AND b.check_out_date > ?");
     $occStmt->execute([$date, $date]);
     $rooms_occupied = (int)$occStmt->fetchColumn();
-    $occupancy_pct  = $rooms_total > 0 ? ($rooms_occupied / $rooms_total) * 100 : 0;
+    $occupancy_pct  = rh_occupancy_pct((float)$rooms_occupied, (float)$rooms_total);
 
     // Revenue
     $payStmt = $pdo->prepare("
@@ -142,7 +144,7 @@ try {
     $earned        = rh_eod_earned_revenue($pdo, $date, $earnedModules);
     $earned_total  = (float)$earned['total'];
     // ADR / RevPAR on room revenue earned for the night (VAT and levy included).
-    $adr   = $rooms_occupied > 0 ? ((float)$earned['rooms_gross'] / $rooms_occupied) : 0;
+    $adr   = rh_adr((float)$earned['rooms_gross'], (float)$rooms_occupied);
     $revpar = $rooms_total    > 0 ? ((float)$earned['rooms_gross'] / $rooms_total)    : 0;
 
     // Payment mix
@@ -205,7 +207,7 @@ try {
     // Reviews
     $reviews = ['c' => 0, 'a' => 0];
     try {
-        $rStmt = $pdo->prepare("SELECT COUNT(*) AS c, COALESCE(AVG(rating),0) AS a FROM reviews WHERE DATE(created_at) = :d");
+        $rStmt = $pdo->prepare("SELECT COUNT(*) AS c, COALESCE(AVG(rating),0) AS a FROM reviews WHERE DATE(created_at) = :d AND status = 'approved'");
         $rStmt->execute([':d' => $date]);
         $reviews = $rStmt->fetch(PDO::FETCH_ASSOC) ?: ['c' => 0, 'a' => 0];
     } catch (Throwable $e) {
@@ -263,7 +265,7 @@ try {
     $prevOcc = $pdo->prepare("SELECT COALESCE(SUM(" . rh_booking_rooms_factor_sql('b') . "), 0) FROM bookings b WHERE b.deleted_at IS NULL AND b.status IN ('checked-in','checked-out') AND b.check_in_date <= ? AND b.check_out_date > ?");
     $prevOcc->execute([$previous_day, $previous_day]);
     $previous['rooms_occupied'] = (int)$prevOcc->fetchColumn();
-    $previous['occupancy_pct'] = $rooms_total > 0 ? ($previous['rooms_occupied'] / $rooms_total) * 100 : 0;
+    $previous['occupancy_pct'] = rh_occupancy_pct((float)$previous['rooms_occupied'], (float)$rooms_total);
 
     $arrivals_remaining = max(0, (int)($ops['expected_arrivals'] ?? 0) - (int)($ops['arrivals_completed'] ?? 0));
     $departures_remaining = max(0, (int)($ops['expected_departures'] ?? 0) - (int)($ops['departures_completed'] ?? 0));
@@ -483,9 +485,9 @@ if ($channel === 'whatsapp') {
     $lines[] = '';
     if ($eodModBookings) {
     $lines[] = "━━━━━━━━━━ 🛏️ ROOMS ━━━━━━━━━━";
-    $lines[] = "Occupancy: *" . number_format($occupancy_pct, 1) . "%* (" . $rooms_occupied . "/" . $rooms_total . " rooms)";
+    $lines[] = "Occupancy: *" . number_format($occupancy_pct, 1) . "%* (" . $rooms_occupied . "/" . $rooms_total . " sellable rooms)";
     $lines[] = "  " . $occArrow . " " . ($occupancy_change >= 0 ? '+' : '') . number_format($occupancy_change, 1) . " pts vs yesterday";
-    $lines[] = "ADR:    " . _money($currency_symbol, (float)$adr) . "   RevPAR: " . _money($currency_symbol, (float)$revpar);
+    $lines[] = "ADR (incl. VAT): " . _money($currency_symbol, (float)$adr) . "   RevPAR: " . _money($currency_symbol, (float)$revpar);
     $lines[] = "Unsold: " . $rooms_unsold . " rooms  (opp. " . _money($currency_symbol, (float)$empty_room_opportunity) . ")";
     $lines[] = '';
     $lines[] = "Arrivals:   " . (int)($ops['arrivals_completed'] ?? 0) . " done / " . (int)($ops['expected_arrivals'] ?? 0) . " expected";
@@ -666,7 +668,7 @@ if ($eodModBookings) {
 
     // ADR / RevPAR
     $html .= '<td style="padding:16px;text-align:center;background:#F3ECE4;border-right:1px solid #e5d9c9;">';
-    $html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">ADR</div>';
+    $html .= '<div style="font-size:9px;letter-spacing:0.1em;color:#8A775F;text-transform:uppercase;margin-bottom:4px;">ADR incl. VAT</div>';
     $html .= '<div style="font-size:20px;font-weight:700;color:#231F1C;">' . _money($currency_symbol, $adr) . '</div>';
     $html .= '<div style="font-size:11px;color:#5e554d;margin-top:3px;">RevPAR&nbsp;' . _money($currency_symbol, $revpar) . '</div>';
     $html .= '</td>';
@@ -747,7 +749,7 @@ if ($eodModBookings) {
     $html .= $row('New Bookings Created', (string)(int)($ops['new_bookings'] ?? 0));
     $html .= $row('Cancellations', (string)(int)($ops['cancellations'] ?? 0));
     $html .= $row('No-Shows', (string)(int)($ops['no_shows'] ?? 0));
-    $html .= $row('Rooms Sold / Available', $rooms_occupied . ' / ' . $rooms_total);
+    $html .= $row('Rooms Sold / Sellable', $rooms_occupied . ' / ' . $rooms_total);
     $html .= $row('Unsold Room Opportunity', _money($currency_symbol, (float)$empty_room_opportunity));
 }
 
@@ -948,8 +950,8 @@ if (false) {
     $kpiW = 44.0;
     $kpiH = 18.0;
     if ($eodModBookings) {
-        $kpiSlot2 = ['OCCUPANCY', number_format($occupancy_pct, 1) . '%', $rooms_occupied . '/' . $rooms_total . ' rooms'];
-        $kpiSlot3 = ['ADR',       _money($currency_symbol, $adr),         'RevPAR ' . _money($currency_symbol, $revpar)];
+        $kpiSlot2 = ['OCCUPANCY', number_format($occupancy_pct, 1) . '%', $rooms_occupied . '/' . $rooms_total . ' sellable rooms'];
+        $kpiSlot3 = ['ADR INCL. VAT',       _money($currency_symbol, $adr),         'RevPAR ' . _money($currency_symbol, $revpar)];
     } else {
         $kpiSlot2 = ['ORDERS TODAY',    (string)$eodOrdersToday, (int)($pos['voided_count'] ?? 0) . ' void(s)'];
         $kpiSlot3 = ['AVG ORDER VALUE', _money($currency_symbol, $eodOrdersToday > 0 ? ((float)($pos['gross'] ?? 0)) / $eodOrdersToday : 0), 'per settled order'];
