@@ -18,7 +18,7 @@ require_once __DIR__ . '/includes/pos-shift-totals.php';
 /** @var PDO $pdo */
 
 $siteName       = getSetting('site_name') ?: 'Hotel';
-$currencySymbol = getSetting('currency_symbol') ?: 'K ';
+$currencySymbol = getSetting('currency_symbol') ?: 'MWK ';
 
 $fmt = function (float $n) use ($currencySymbol): string {
     return htmlspecialchars($currencySymbol, ENT_QUOTES, 'UTF-8') . ' ' . number_format($n, 2);

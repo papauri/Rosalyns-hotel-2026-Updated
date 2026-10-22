@@ -685,7 +685,7 @@ $priceTypeLabels = [
                                     <?php if ((float)$pkg['price_amount'] === 0.0): ?>
                                         <strong style="color:#1f7a42;">FREE</strong> &middot; Complimentary add-on
                                     <?php else: ?>
-                                        <strong>MWK <?php echo number_format((float)$pkg['price_amount'], 0); ?></strong> <?php echo htmlspecialchars($priceLabel); ?>
+                                        <strong><?php echo htmlspecialchars((string)getSetting('currency_symbol', 'MWK')); ?> <?php echo number_format((float)$pkg['price_amount'], 0); ?></strong> <?php echo htmlspecialchars($priceLabel); ?>
                                     <?php endif; ?>
                                     &nbsp;·&nbsp; <?php echo htmlspecialchars($scopeText); ?>
                                     <?php if ($pkg['short_description']): ?> &nbsp;·&nbsp; <?php echo htmlspecialchars($pkg['short_description']); ?><?php endif; ?>

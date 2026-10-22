@@ -65,7 +65,7 @@ foreach (preg_split('/[,;\s]+/', $cc_raw) as $em) {
 }
 
 $site_name       = getSetting('site_name') ?: 'Hotel';
-$currency_symbol = getSetting('currency_symbol') ?: 'K ';
+$currency_symbol = getSetting('currency_symbol') ?: 'MWK ';
 
 // -----------------------------------------------------------------------------
 // Re-run the same KPI queries that the dashboard page uses.

@@ -3619,7 +3619,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         <td data-label="Nights"><?php echo $booking['number_of_nights']; ?></td>
                                         <td data-label="Guests"><?php echo $booking['number_of_guests']; ?></td>
                                         <td data-label="Total">
-                                            <strong>K <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?>
+                                            <strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <?php if ($expires_soon): ?>
                                                     <br><span class="expires-soon"><i class="fas fa-exclamation-triangle"></i> Expires soon!</span>

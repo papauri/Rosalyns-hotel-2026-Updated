@@ -34,7 +34,7 @@ $user = [
 ];
 
 $site_name       = getSetting('site_name') ?: 'Hotel';
-$currency_symbol = getSetting('currency_symbol') ?: 'K ';
+$currency_symbol = getSetting('currency_symbol') ?: 'MWK ';
 $vatEnabled      = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
 
 // ---------------------------------------------------------------------------

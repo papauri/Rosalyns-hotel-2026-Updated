@@ -20,7 +20,7 @@ require_once __DIR__ . '/../includes/receivables.php';
 requireApiPermission('reports');
 
 $site_name       = getSetting('site_name') ?: 'Hotel';
-$currency_symbol = getSetting('currency_symbol') ?: 'K ';
+$currency_symbol = getSetting('currency_symbol') ?: 'MWK ';
 
 // ---- Auth & CSRF -----------------------------------------------------------
 if (empty($_SESSION['admin_user_id'])) {
