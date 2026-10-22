@@ -40,7 +40,7 @@ if (!isset($gallery_images) || empty($gallery_images)) {
                 SELECT image_url, title, description, category, video_path, video_type 
                 FROM hotel_gallery 
                 WHERE is_active = 1 
-                ORDER BY display_order ASC
+                ORDER BY display_order ASC, id ASC
             ");
             $gallery_images = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
@@ -99,7 +99,7 @@ if (!function_exists('resolveImageUrl')) {
                             'style' => 'width: 100%; height: 100%; object-fit: cover;'
                         ]); ?>
                     </div>
-                <?php else: ?>
+                <?php elseif (trim((string)resolveImageUrl($image['image_url'])) !== ''): ?>
                     <img src="<?php echo htmlspecialchars(resolveImageUrl($image['image_url'])); ?>"
                          class="editorial-gallery-item__img"
                          alt="<?php echo htmlspecialchars($image['title']); ?>"

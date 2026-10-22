@@ -1962,7 +1962,7 @@ function getCachedGalleryImages()
             SELECT id, title, description, image_url, video_path, video_type, category, display_order
             FROM hotel_gallery
             WHERE is_active = 1
-            ORDER BY display_order ASC
+            ORDER BY display_order ASC, id ASC
         ");
         $images = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -2489,11 +2489,16 @@ function invalidateDataCaches()
         'policies',
         'about_us',
         'settings_group_*',
+        'setting_*', // single settings (e.g. a logo image set from the Media Portal)
     ];
 
     foreach ($patterns as $pattern) {
         clearCacheByPattern($pattern);
     }
+
+    // The in-memory copy used by getSetting() for the rest of this request
+    global $_SITE_SETTINGS;
+    $_SITE_SETTINGS = [];
 }
 
 /**

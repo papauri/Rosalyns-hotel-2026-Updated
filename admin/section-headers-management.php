@@ -27,6 +27,93 @@ $message = '';
 $error = '';
 $success = false;
 
+/** Value of a quoted PHP string literal (single or double quoted). */
+function sh_unquote(string $single, string $double): string
+{
+    if ($double !== '') {
+        return stripcslashes($double);
+    }
+    return str_replace(["\\'", '\\\\'], ["'", '\\'], $single);
+}
+
+/**
+ * Every section header the guest site can show, as
+ * [section_key, page, label, subtitle, title, description, display_order].
+ * The built-in list comes first; any other renderSectionHeader('key', 'page', [...]) call found
+ * in the public pages is added with the text written in that call, so a header that only exists
+ * in code can be given a row here.
+ */
+function sh_code_defaults(): array
+{
+    static $all = null;
+    if ($all !== null) {
+        return $all;
+    }
+    $all = [
+            // Homepage sections
+            ['home_rooms', 'index', 'Accommodations', 'Where Comfort Meets Luxury', 'Luxurious Rooms & Suites', 'Experience unmatched comfort in our meticulously designed rooms and suites', 1],
+            ['home_facilities', 'index', 'Amenities', NULL, 'World-Class Facilities', 'Indulge in our premium facilities designed for your ultimate comfort', 2],
+            ['home_testimonials', 'index', 'Reviews', NULL, 'What Our Guests Say', 'Hear from those who have experienced our exceptional hospitality', 3],
+            ['booking_widget', 'index', 'Reserve', NULL, 'Begin Your Stay', 'Select your dates and preferences for a seamless luxury booking experience.', 4],
+            // Hotel Gallery
+            ['hotel_gallery', 'index', 'Visual Journey', 'Discover Our Story', 'Explore Our Hotel', 'Immerse yourself in the beauty and luxury of our hotel', 5],
+            // Reviews (global)
+            ['hotel_reviews', 'global', 'Guest Impressions', NULL, 'Stories from Our Guests', 'Hear from those who have experienced our exceptional hospitality', 1],
+            // Restaurant
+            ['restaurant_gallery', 'restaurant', 'Visual Journey', NULL, 'Our Dining Spaces', 'From elegant interiors to breathtaking views, every detail creates the perfect ambiance', 1],
+            ['restaurant_menu', 'restaurant', 'Culinary Delights', 'A Symphony of Flavors', 'Our Menu', 'Discover our carefully curated selection of dishes and beverages', 2],
+            // Gym
+            ['gym_wellness', 'gym', 'Your Wellness Journey', 'Transform Your Life', 'Start Your Fitness Journey', 'Transform your body and mind with our state-of-the-art facilities', 1],
+            ['gym_facilities', 'gym', 'What We Offer', NULL, 'Comprehensive Fitness Facilities', 'Everything you need for a complete wellness experience', 2],
+            ['gym_classes', 'gym', 'Stay Active', NULL, 'Group Fitness Classes', 'Join our expert-led classes designed for all fitness levels', 3],
+            ['gym_training', 'gym', 'One-on-One Coaching', NULL, 'Personal Training Programs', 'Achieve your fitness goals faster with personalized guidance from our certified trainers', 4],
+            ['gym_packages', 'gym', 'Exclusive Offers', NULL, 'Wellness Packages', 'Comprehensive packages designed for optimal health and relaxation', 5],
+            // Rooms showcase
+            ['rooms_collection', 'rooms-showcase', 'Stay Collection', NULL, 'Pick Your Perfect Space', 'Suites and rooms crafted for business, romance, and family stays with direct booking flows', 1],
+            // Conference
+            ['conference_overview', 'conference', 'Our Meeting Spaces', NULL, 'Professional Conference Facilities', 'State-of-the-art venues for your business meetings and events', 1],
+            // Events
+            ['events_overview', 'events', 'Upcoming Events', NULL, 'Special Events & Occasions', 'Join us for memorable celebrations and special gatherings', 1],
+            // Upcoming Events (homepage section)
+            ['upcoming_events', 'index', "What's Happening", NULL, 'Upcoming Events', "Don't miss out on our carefully curated experiences and celebrations", 6]
+    ];
+    $known = [];
+    foreach ($all as $d) {
+        $known[$d[0] . '|' . $d[1]] = true;
+    }
+
+    $root = dirname(__DIR__);
+    $files = array_merge(glob($root . '/*.php') ?: [], glob($root . '/includes/*.php') ?: []);
+    $q = '(?:\'((?:[^\'\\\\]|\\\\.)*)\'|"((?:[^"\\\\]|\\\\.)*)")';
+    foreach ($files as $file) {
+        $code = @file_get_contents($file);
+        if ($code === false || strpos($code, 'renderSectionHeader(') === false) {
+            continue;
+        }
+        if (!preg_match_all('/renderSectionHeader\(\s*\'([a-z0-9_]+)\'\s*,\s*\'([a-z0-9\-]+)\'\s*,\s*\[(.*?)\]/s', $code, $calls, PREG_SET_ORDER)) {
+            continue;
+        }
+        foreach ($calls as $call) {
+            $id = $call[1] . '|' . $call[2];
+            if (isset($known[$id])) {
+                continue;
+            }
+            $text = ['label' => '', 'subtitle' => '', 'title' => '', 'description' => ''];
+            foreach ($text as $field => $_) {
+                if (preg_match('/[\'"]' . $field . '[\'"]\s*=>\s*' . $q . '/s', $call[3], $m)) {
+                    $text[$field] = sh_unquote($m[1] ?? '', $m[2] ?? '');
+                }
+            }
+            if ($text['title'] === '') {
+                continue;
+            }
+            $known[$id] = true;
+            $all[] = [$call[1], $call[2], $text['label'] ?: null, $text['subtitle'] ?: null, $text['title'], $text['description'] ?: null, 99];
+        }
+    }
+    return $all;
+}
+
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -164,47 +251,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = 'Page hero text updated successfully!';
             $success = true;
         } elseif ($action === 'revert_defaults') {
-            // Delete all current section headers
-            $pdo->exec("DELETE FROM section_headers");
-
-            // Re-insert all default section headers
-            $defaults = [
-                // Homepage sections
-                ['home_rooms', 'index', 'Accommodations', 'Where Comfort Meets Luxury', 'Luxurious Rooms & Suites', 'Experience unmatched comfort in our meticulously designed rooms and suites', 1],
-                ['home_facilities', 'index', 'Amenities', NULL, 'World-Class Facilities', 'Indulge in our premium facilities designed for your ultimate comfort', 2],
-                ['home_testimonials', 'index', 'Reviews', NULL, 'What Our Guests Say', 'Hear from those who have experienced our exceptional hospitality', 3],
-                ['booking_widget', 'index', 'Reserve', NULL, 'Begin Your Stay', 'Select your dates and preferences for a seamless luxury booking experience.', 4],
-                // Hotel Gallery
-                ['hotel_gallery', 'index', 'Visual Journey', 'Discover Our Story', 'Explore Our Hotel', 'Immerse yourself in the beauty and luxury of our hotel', 5],
-                // Reviews (global)
-                ['hotel_reviews', 'global', 'Guest Impressions', NULL, 'Stories from Our Guests', 'Hear from those who have experienced our exceptional hospitality', 1],
-                // Restaurant
-                ['restaurant_gallery', 'restaurant', 'Visual Journey', NULL, 'Our Dining Spaces', 'From elegant interiors to breathtaking views, every detail creates the perfect ambiance', 1],
-                ['restaurant_menu', 'restaurant', 'Culinary Delights', 'A Symphony of Flavors', 'Our Menu', 'Discover our carefully curated selection of dishes and beverages', 2],
-                // Gym
-                ['gym_wellness', 'gym', 'Your Wellness Journey', 'Transform Your Life', 'Start Your Fitness Journey', 'Transform your body and mind with our state-of-the-art facilities', 1],
-                ['gym_facilities', 'gym', 'What We Offer', NULL, 'Comprehensive Fitness Facilities', 'Everything you need for a complete wellness experience', 2],
-                ['gym_classes', 'gym', 'Stay Active', NULL, 'Group Fitness Classes', 'Join our expert-led classes designed for all fitness levels', 3],
-                ['gym_training', 'gym', 'One-on-One Coaching', NULL, 'Personal Training Programs', 'Achieve your fitness goals faster with personalized guidance from our certified trainers', 4],
-                ['gym_packages', 'gym', 'Exclusive Offers', NULL, 'Wellness Packages', 'Comprehensive packages designed for optimal health and relaxation', 5],
-                // Rooms showcase
-                ['rooms_collection', 'rooms-showcase', 'Stay Collection', NULL, 'Pick Your Perfect Space', 'Suites and rooms crafted for business, romance, and family stays with direct booking flows', 1],
-                // Conference
-                ['conference_overview', 'conference', 'Our Meeting Spaces', NULL, 'Professional Conference Facilities', 'State-of-the-art venues for your business meetings and events', 1],
-                // Events
-                ['events_overview', 'events', 'Upcoming Events', NULL, 'Special Events & Occasions', 'Join us for memorable celebrations and special gatherings', 1],
-                // Upcoming Events (homepage section)
-                ['upcoming_events', 'index', "What's Happening", NULL, 'Upcoming Events', "Don't miss out on our carefully curated experiences and celebrations", 6]
-            ];
-
-            $stmt = $pdo->prepare("
-                INSERT INTO section_headers
-                (section_key, page, section_label, section_subtitle, section_title, section_description, display_order)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ");
-
-            foreach ($defaults as $default) {
-                $stmt->execute($default);
+            // Put every built-in header back to its factory text. Rows that are not in the list
+            // (for example the restaurant welcome text) are left alone.
+            $defaults = sh_code_defaults();
+            $pdo->beginTransaction();
+            try {
+                $del = $pdo->prepare("DELETE FROM section_headers WHERE section_key = ? AND page = ?");
+                $stmt = $pdo->prepare("
+                    INSERT INTO section_headers
+                    (section_key, page, section_label, section_subtitle, section_title, section_description, display_order)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ");
+                foreach ($defaults as $default) {
+                    $del->execute([$default[0], $default[1]]);
+                    $stmt->execute($default);
+                }
+                $pdo->commit();
+            } catch (Throwable $txe) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $txe;
             }
 
             // Clear cache
@@ -247,6 +314,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $message = "Hero entry created for '{$page_slug_new}'. You can now edit it below.";
             $success = true;
+        } elseif ($action === 'add_missing_header') {
+            // A header the public pages read but that has no row yet: create it with the text
+            // the page shows today, then it can be edited like any other.
+            $section_key = (string)($_POST['section_key'] ?? '');
+            $page = (string)($_POST['page'] ?? '');
+            $found = null;
+            foreach (sh_code_defaults() as $d) {
+                if ($d[0] === $section_key && $d[1] === $page) {
+                    $found = $d;
+                    break;
+                }
+            }
+            if (!$found) {
+                throw new Exception('That header is not used by any page.');
+            }
+            rh_with_create_lock($pdo, 'section_header', function () use ($pdo, $found) {
+                $has = $pdo->prepare("SELECT COUNT(*) FROM section_headers WHERE section_key = ? AND page = ?");
+                $has->execute([$found[0], $found[1]]);
+                if ((int)$has->fetchColumn() > 0) {
+                    throw new Exception('That header already exists. Edit it in the list.');
+                }
+                $ord = $pdo->prepare("SELECT COALESCE(MAX(display_order), 0) + 1 FROM section_headers WHERE page = ?");
+                $ord->execute([$found[1]]);
+                $found[6] = (int)$ord->fetchColumn();
+                $pdo->prepare("
+                    INSERT INTO section_headers
+                    (section_key, page, section_label, section_subtitle, section_title, section_description, display_order)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ")->execute($found);
+            });
+
+            require_once __DIR__ . '/../config/cache.php';
+            clearCache();
+
+            $message = 'Header "' . $found[0] . '" added. You can edit it below.';
+            $success = true;
         } elseif ($action === 'reset_single') {
             $section_key = $_POST['section_key'] ?? '';
             $page = $_POST['page'] ?? '';
@@ -255,27 +358,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Section key and page are required.');
             }
 
-            // Define all defaults
-            $all_defaults = [
-                ['home_rooms', 'index', 'Accommodations', 'Where Comfort Meets Luxury', 'Luxurious Rooms & Suites', 'Experience unmatched comfort in our meticulously designed rooms and suites', 1],
-                ['home_facilities', 'index', 'Amenities', NULL, 'World-Class Facilities', 'Indulge in our premium facilities designed for your ultimate comfort', 2],
-                ['home_testimonials', 'index', 'Reviews', NULL, 'What Our Guests Say', 'Hear from those who have experienced our exceptional hospitality', 3],
-                ['booking_widget', 'index', 'Reserve', NULL, 'Begin Your Stay', 'Select your dates and preferences for a seamless luxury booking experience.', 4],
-                ['hotel_gallery', 'index', 'Visual Journey', 'Discover Our Story', 'Explore Our Hotel', 'Immerse yourself in the beauty and luxury of our hotel', 5],
-                ['hotel_reviews', 'global', 'Guest Impressions', NULL, 'Stories from Our Guests', 'Hear from those who have experienced our exceptional hospitality', 1],
-                ['restaurant_gallery', 'restaurant', 'Visual Journey', NULL, 'Our Dining Spaces', 'From elegant interiors to breathtaking views, every detail creates the perfect ambiance', 1],
-                ['restaurant_menu', 'restaurant', 'Culinary Delights', 'A Symphony of Flavors', 'Our Menu', 'Discover our carefully curated selection of dishes and beverages', 2],
-                ['gym_wellness', 'gym', 'Your Wellness Journey', 'Transform Your Life', 'Start Your Fitness Journey', 'Transform your body and mind with our state-of-the-art facilities', 1],
-                ['gym_facilities', 'gym', 'What We Offer', NULL, 'Comprehensive Fitness Facilities', 'Everything you need for a complete wellness experience', 2],
-                ['gym_classes', 'gym', 'Stay Active', NULL, 'Group Fitness Classes', 'Join our expert-led classes designed for all fitness levels', 3],
-                ['gym_training', 'gym', 'One-on-One Coaching', NULL, 'Personal Training Programs', 'Achieve your fitness goals faster with personalized guidance from our certified trainers', 4],
-                ['gym_packages', 'gym', 'Exclusive Offers', NULL, 'Wellness Packages', 'Comprehensive packages designed for optimal health and relaxation', 5],
-                ['rooms_collection', 'rooms-showcase', 'Stay Collection', NULL, 'Pick Your Perfect Space', 'Suites and rooms crafted for business, romance, and family stays with direct booking flows', 1],
-                ['conference_overview', 'conference', 'Our Meeting Spaces', NULL, 'Professional Conference Facilities', 'State-of-the-art venues for your business meetings and events', 1],
-                ['events_overview', 'events', 'Upcoming Events', NULL, 'Special Events & Occasions', 'Join us for memorable celebrations and special gatherings', 1],
-                // Upcoming Events (homepage section)
-                ['upcoming_events', 'index', "What's Happening", NULL, 'Upcoming Events', "Don't miss out on our carefully curated experiences and celebrations", 6]
-            ];
+            $all_defaults = sh_code_defaults();
 
             // Find the matching default
             $default = null;
@@ -383,6 +466,22 @@ try {
     ")->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $page_heroes_rows = [];
+}
+
+// Headers the public pages read that have no row yet (they show built-in text and cannot be edited)
+$missing_headers = [];
+try {
+    $have = [];
+    foreach ($pdo->query("SELECT section_key, page FROM section_headers")->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $have[$row['section_key'] . '|' . $row['page']] = true;
+    }
+    foreach (sh_code_defaults() as $d) {
+        if (!isset($have[$d[0] . '|' . $d[1]])) {
+            $missing_headers[] = $d;
+        }
+    }
+} catch (PDOException $e) {
+    $missing_headers = [];
 }
 
 $current_page = 'section-headers-management.php';
@@ -619,6 +718,29 @@ $page_title = 'Section Headers Management';
                     </span>
                 </div>
             </div>
+
+            <?php if (!empty($missing_headers)): ?>
+                <section class="rh-panel">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Not editable yet</h2>
+                    </div>
+                    <p class="sh-toolbar__note" style="padding:0 20px 8px;">These headings are on the website but still use the text written into the page, so they are not in the list below. Add one to start editing it; it begins with exactly the wording guests see now.</p>
+                    <?php foreach ($missing_headers as $mh): ?>
+                        <form method="post" class="sh-form" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:6px 0;">
+                            <input type="hidden" name="action" value="add_missing_header">
+                            <input type="hidden" name="section_key" value="<?= htmlspecialchars($mh[0], ENT_QUOTES) ?>">
+                            <input type="hidden" name="page" value="<?= htmlspecialchars($mh[1], ENT_QUOTES) ?>">
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
+                            <strong><?= htmlspecialchars($mh[4]) ?></strong>
+                            <span class="rh-pill rh-pill--muted"><?= htmlspecialchars($mh[1]) ?></span>
+                            <span class="sh-meta"><?= htmlspecialchars($mh[0]) ?></span>
+                            <button type="submit" class="sh-btn sh-btn--primary" style="margin-left:auto;">
+                                <i class="fas fa-plus"></i> Add to list
+                            </button>
+                        </form>
+                    <?php endforeach; ?>
+                </section>
+            <?php endif; ?>
 
             <?php if (empty($section_headers)): ?>
                 <section class="rh-panel">
