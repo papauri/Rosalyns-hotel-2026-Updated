@@ -29,7 +29,9 @@ Owner lead = the department lead whose files it is; the patch lead plans, briefs
   only when the covering refund is completed (finance-account-sync.php). · accounting lead
 
 - TODO · Security follow-ups from the F1-F13 QA: facebook/WhatsApp/review-source helpers still use the literal default salt (includes/facebook-functions.php:47) → use APP_ENCRYPTION_SALT; document-download type=invoice accepts 'bookings' for any payments.id → narrow per account type; order-lifecycle (stock module) calls void/cancel APIs now gated on pos. · patch lead
-- TODO · WhatsApp "send invoice" (admin/booking-details.php ~360) sends a static invoice URL that now 403s. WhatsApp is OFF in both hotels today (whatsapp_enabled=0), so nothing breaks now; before anyone switches WhatsApp on, send a private expiring link instead. · patch lead
+- REVIEW · WhatsApp "send invoice" now sends a private 30-day signed link (includes/doc-links.php rh_doc_signed_url, public invoice-view.php, HMAC on type+booking id+expiry, APP_ENCRYPTION_SALT or a site_settings secret, per-IP limit, friendly expired page; used by admin/booking-details.php and sendBookingInvoiceWhatsApp, only when WhatsApp is on). Test scripts/tests/doc_link.php (26 checks, in run_tests). Awaiting QA + ship + port. · patch lead
+
+- SHIPPED b4fd83c / Liwonde 23c01d5 (owner: yes) · Private invoice links: a CANCELLED booking's link stops working (today it serves the invoice until the 30 days run out; deleted bookings already 410)? Also the per-IP limit (30/10 min) counts valid views too. · patch lead
 
 ## Public site follows the business setup (gym-only, bar, shop, supermarket rehearsals)
 - TODO · Home/footer/header hide room booking, room cards, gym and conference sections when their

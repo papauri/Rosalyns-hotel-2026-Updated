@@ -5,6 +5,7 @@ and when work ships. One line per task: status · what · where it stands · nex
 Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 
 ## Open
+- SHIPPED b4fd83c / Liwonde 23c01d5 · Owner-found room bugs (stale 'being cleaned' flag; released rooms shown as 'EXEC-01 + EXEC-03'), private expiring WhatsApp invoice links (cancelled/deleted stop at once), Stock Dashboard 'Net Sales Today' (d7eaede / 1f4eefa). Liwonde owner test booking removed (backup db-20261022-102710). CODE COMPLETE FOR GO-LIVE; remaining = owner go-live steps + two weeks of real use; optional PATCH_QUEUE after.
 - SHIPPED 37f073f+a6c9428 / Liwonde 3a72ba6+b8f0ea4 · Security sweep F1-F13 (guest documents off the web, API rooms.manage scope, error_log denied, CSRF, reset links, rate limits, API errors/keys, cookies, login message, docs/POS gates).
 - SHIPPED (owner 2026-10-22) · API key encryption removed: keys shown once, stored hashed only.
 - DONE 2026-10-22 · 77 leftover tentative_booking_log test rows deleted in Rosalyn's (owner yes); AI help assistant logged as a Future Idea (owner: not now).
