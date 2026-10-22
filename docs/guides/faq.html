@@ -427,6 +427,31 @@
     <p>For one booking, its <strong>Activity timeline</strong>. For one order, <strong>Order log</strong> on the kitchen, bar or coffee screen. For everything (sign-ins, setting changes, refunds, errors) an administrator opens <strong>Settings</strong> &rarr; <strong>System Logs</strong>. See <a href="99-admin-dashboard-full-guide.html#logs">System Logs</a>.</p>
   </details>
 
+  <details class="faq" id="faq-child-charge" data-module="bookings">
+    <summary>How do I make children free, or charge a fixed amount per child?</summary>
+    <p>Open <strong>Settings</strong> &rarr; <strong>Rooms</strong> and click <strong>Edit Room</strong>. In the <strong>Children</strong> part, choose <strong>% of the room rate</strong> or <strong>Fixed amount per child per night</strong>. Type 0 to make children free. To make only the first few children free in each room, fill in <strong>Free children (first N in each room)</strong>. One room can have its own rule in <strong>Front Desk</strong> &rarr; <strong>Individual Rooms</strong>; it starts as <strong>Same as room type</strong>. Rooms stay as they were until you edit them, and bookings already made keep the rule they were made with. See <a href="09-packages-rates.html#child-charges">Child charges</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-children-limit" data-module="bookings">
+    <summary>A booking is refused because of too many children. What do I do?</summary>
+    <p>The room has a limit in <strong>Most children in one room</strong>. You will see a message like <em>"[room name] takes at most 2 children per room."</em> Reduce the children, add adults, add another room or pick a room type that takes more. An administrator or manager can raise the limit in <strong>Settings</strong> &rarr; <strong>Rooms</strong> (or for one room in Individual Rooms); leave the box blank for no limit. See <a href="09-packages-rates.html#child-charges">Child charges</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-child-on-invoice" data-module="bookings">
+    <summary>What does "2 children, first 2 free" mean on a quotation or invoice?</summary>
+    <p>It tells the guest how the children were charged. <em>2 children, first 2 free</em> means both stay free. <em>1 child x MWK 10,000 x 7 nights</em> means one child paid MWK 10,000 for each of 7 nights. The quantity on the line is the number of children who pay. Emails can show the same words with the <code>{{child_charge_rule}}</code> tag. See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-who-online">
+    <summary>Who is online right now? How do I see who is logged in?</summary>
+    <p>An administrator or manager opens <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong> (or <strong>System Logs</strong>) and looks at <strong>Who's online</strong> at the top. It shows <strong>Active now</strong> or <strong>Idle N min</strong>, the screen each person has open and when they signed in. It updates every minute. A person drops off after 30 minutes with no activity, or as soon as they log out. Administrators also see the IP address. The panel does not keep anyone signed in. See <a href="18-staff-access.html#online">Who's online</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-error-logs">
+    <summary>How do I clear the server error log?</summary>
+    <p>An administrator opens <strong>Settings</strong> &rarr; <strong>Cache</strong> and finds <strong>Error logs</strong>. Click <strong>Clear</strong> beside a file, or <strong>Clear all error logs</strong>. The file is emptied, not deleted, and what was in it cannot be brought back. The page never shows what is inside. Every clear is recorded with who did it. See <a href="99-admin-dashboard-full-guide.html#cache">Cache</a>.</p>
+  </details>
+
   <details class="faq" id="faq-filter-cards">
     <summary>What do the number cards, tabs and chips at the top of a page do?</summary>
     <p>They filter the list below them. Click a card or tab to see only those rows, and the page takes you straight to the filtered list. Click the same card again, <strong>All</strong> or <strong>Clear</strong> to see everything. See <a href="99-admin-dashboard-full-guide.html#lists">Lists, number cards, tabs and times</a>.</p>
@@ -494,7 +519,7 @@
 
   <details class="faq" id="faq-old-content">
     <summary>The website shows old content, text or prices after I changed them.</summary>
-    <p>The browser or the website kept an old copy. First reload the page (hold <kbd>Shift</kbd> and click reload). If it is still old, an administrator opens <strong>Settings</strong> &rarr; <strong>Cache</strong>, ticks the cache types and clicks <strong>Clear Selected Caches</strong>. Clearing the cache never deletes hotel data. See <a href="99-admin-dashboard-full-guide.html#cache">Cache</a>.</p>
+    <p>The browser or the website kept an old copy. First reload the page (hold <kbd>Shift</kbd> and click reload). If it is still old, an administrator opens <strong>Settings</strong> &rarr; <strong>Cache</strong>, ticks <strong>All caches</strong> and clicks <strong>Clear Selected Caches</strong>. Under <strong>Total size</strong>, <strong>Last cleared</strong> shows when this was last done. Clearing the cache never deletes hotel data. See <a href="99-admin-dashboard-full-guide.html#cache">Cache</a>.</p>
   </details>
 
   <details class="faq" id="faq-station-sound" data-module="pos">

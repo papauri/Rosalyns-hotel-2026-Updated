@@ -399,17 +399,30 @@
   <h2 id="cache">Cache</h2>
   <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Cache</strong> (<code>/admin/cache-management.php</code>). Permission: <strong>Cache Management</strong>. The page title is <strong>Cache Management</strong>, with a pill <strong>Caching on</strong> or <strong>Caching off</strong>.</p>
   <ul>
-    <li><strong>Individual cache controls</strong>: a table of cache types, each with a status and an enable or disable button. Message: <em>"Cache 'x' enabled successfully!"</em> or <em>"... disabled successfully!"</em></li>
-    <li><strong>Bulk cache clearing</strong>: tick the cache types and click <strong>Clear Selected Caches</strong> (asks <em>"Are you sure you want to clear the selected caches?"</em>). With none ticked: <em>"Please select at least one cache type to clear."</em></li>
+    <li>A strip of figures at the top shows <strong>Total cache files</strong>, <strong>Active caches</strong>, <strong>Expired caches</strong> and <strong>Total size</strong>. Under <strong>Total size</strong>, <strong>Last cleared</strong> shows the date and time the caches were last cleared, by hand or on the schedule. It says <em>never recorded</em> if that has not happened yet.</li>
+    <li><strong>Individual cache controls</strong>: a table of cache types, each with <strong>ON</strong> or <strong>OFF</strong> and a <strong>Disable</strong> or <strong>Enable</strong> button. The switches work now: a type that is OFF is not stored again, so the website reads fresh details each time. Message: <em>"Cache 'x' enabled successfully!"</em> or <em>"... disabled successfully!"</em></li>
+    <li><strong>Bulk cache clearing</strong>: tick the cache types and click <strong>Clear Selected Caches</strong> (asks <em>"Are you sure you want to clear the selected caches?"</em>). With none ticked: <em>"Please select at least one cache type to clear."</em> To clear everything at once, tick <strong>All caches</strong> and click <strong>Clear Selected Caches</strong>. You will see <em>"Successfully cleared N cache files in N cache type(s)!"</em></li>
     <li><strong>Global cache control</strong>: <strong>Enable All Caching</strong> and <strong>Save Setting</strong>.</li>
     <li><strong>Quick actions</strong>: <strong>Purge SEO &amp; Favicon</strong> clears the page caches and makes browsers fetch the icon and page details again. Use it after changing the logo, name or search-engine details.</li>
     <li><strong>PWA service worker</strong>: <strong>Bump SW Version Now</strong> forces every browser and installed app to fetch fresh copies. Use it after a significant update.</li>
     <li><strong>Scheduled cache clearing</strong>: clear caches automatically on a schedule.</li>
+    <li><strong>Error logs</strong> (administrators only): see below.</li>
   </ul>
-  <p>Clearing the cache never deletes hotel data. The system rebuilds the copies as people use the website.</p>
+  <p>Clearing the cache never deletes hotel data. The system rebuilds the copies as people use the website. Passwords and other private details are never stored in the cache, and the cache folder cannot be opened from the web.</p>
+  <h3>When to use All caches</h3>
+  <p>Use it when the website shows old text, prices or pictures after you changed them, and a reload (<kbd>Shift</kbd> + reload) did not fix it. Tick <strong>All caches</strong>, click <strong>Clear Selected Caches</strong> and confirm. If only the logo, hotel name or search-engine details look old, <strong>Purge SEO &amp; Favicon</strong> is enough. The first visitor after a clear may wait a moment longer while the copies are rebuilt.</p>
+  <h3>Error logs</h3>
+  <p>Only an <strong>Administrator</strong> sees the <strong>Error logs</strong> panel on this page. It lists the server's own error log files. For each file it shows the <strong>Log file</strong> name, its <strong>Size</strong> and <strong>Last modified</strong>. The contents are never shown on screen. Use it when a log file has grown very large and you want to start fresh, usually after the technical person has finished reading it.</p>
+  <ol class="steps">
+    <li>Open <strong>Settings</strong> &rarr; <strong>Cache</strong> and find <strong>Error logs</strong>.</li>
+    <li>Click <strong>Clear</strong> beside one file, or <strong>Clear all error logs</strong> under the list. Confirm <em>"Empty [file]? This cannot be undone."</em> or <em>"Empty ALL error log files listed above? This cannot be undone."</em></li>
+    <li>You will see <em>"[file] emptied (was 2 MB). The server will start a fresh log as new errors happen."</em> or <em>"Emptied N error log file(s), freeing 2 MB."</em></li>
+  </ol>
+  <p>The file is emptied, not deleted, and new errors are written to it again. <strong>Clear</strong> is greyed out for a file that is already empty. Every clear is recorded in <a href="#logs">System Logs</a> and the activity log, with who did it and how big the file was. What was in the file cannot be brought back.</p>
+  <p><strong>If something goes wrong:</strong> <em>"Only an administrator can clear error logs."</em> means your role is not Administrator. <em>"Could not empty: [file] (file permissions)."</em> means the server will not let the system change that file; tell your technical person. <em>"Nothing to clear: every error log is already empty."</em> is not a problem.</p>
 
   <h2 id="logs">System Logs (who did what)</h2>
-  <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>System Logs</strong> (<code>/admin/system-logs.php</code>). Permission: <strong>System Logs</strong>. It is a read-only record for troubleshooting, and the place to see who did what and when: sign-ins, setting changes, booking changes, orders and errors, each with the person's name. (For one booking, its own <strong>Activity timeline</strong> is quicker; for one order, use <strong>Order log</strong>.)</p>
+  <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>System Logs</strong> (<code>/admin/system-logs.php</code>). Permission: <strong>System Logs</strong>. It is a read-only record for troubleshooting, and the place to see who did what and when: sign-ins, setting changes, booking changes, orders and errors, each with the person's name. (For one booking, its own <strong>Activity timeline</strong> is quicker; for one order, use <strong>Order log</strong>.) Administrators and managers also see a <strong>Who's online</strong> panel at the top: who is signed in now, what they have open and how long they have been quiet. See <a href="18-staff-access.html#online">Who's online</a>.</p>
   <ul>
     <li>Cards for the last 24 hours: system events, admin activity, booking changes, POS orders, KDS/DS events, API calls, offline replays and errors.</li>
     <li>Filters: <strong>Source</strong>, <strong>Level</strong>, <strong>Rows</strong> (20 to 500) and <strong>Auto-refresh 15s</strong>; click <strong>Apply</strong>, or <strong>Reset</strong> to clear.</li>

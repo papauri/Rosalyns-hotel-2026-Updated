@@ -50,7 +50,8 @@ $d = [
     'child_guests' => 'Number of children.',
     'tentative_expires_at_formatted' => 'When a tentative hold runs out.',
     'tentative_status' => 'Status of the booking in words.',
-    'child_price_multiplier' => 'Child price as a percentage of the adult rate.',
+    'child_price_multiplier' => 'Child price as a percentage of the room rate. Empty when the booking charges a fixed amount per child.',
+    'child_charge_rule' => 'How children were charged, in words, like "2 children, first 2 free" or "1 child x MWK 10,000 x 7 nights". Empty when there are no children.',
     'child_supplement_total_formatted' => 'Child supplement total, as a number.',
     'total_amount_formatted' => 'Amount owed as a plain number, without the currency symbol.',
     'special_requests' => 'The guest special requests.',
@@ -152,7 +153,7 @@ $d = [
 ];
 
 /* The set every email built from a booking can use. */
-$base = ['site_name','site_url','contact_email','contact_phone','phone_main','currency_symbol','payment_policy','check_in_time','check_out_time','booking_reference','guest_name','guest_email','guest_phone','room_name','room_assignment','room_numbers','occupancy_type','check_in_date_formatted','check_out_date_formatted','number_of_nights','number_of_guests','adult_guests','child_guests','tentative_expires_at_formatted','tentative_status','child_price_multiplier','child_supplement_total_formatted','total_amount_formatted','special_requests','cancellation_reason','rate_plan_label','rate_plan_discount_formatted','package_total_formatted','packages_html','vat_number','vat_rate','vat_amount','levy_rate','levy_amount','subtotal_amount','total_amount','vat_number_html','logo_html','address'];
+$base = ['site_name','site_url','contact_email','contact_phone','phone_main','currency_symbol','payment_policy','check_in_time','check_out_time','booking_reference','guest_name','guest_email','guest_phone','room_name','room_assignment','room_numbers','occupancy_type','check_in_date_formatted','check_out_date_formatted','number_of_nights','number_of_guests','adult_guests','child_guests','tentative_expires_at_formatted','tentative_status','child_price_multiplier','child_charge_rule','child_supplement_total_formatted','total_amount_formatted','special_requests','cancellation_reason','rate_plan_label','rate_plan_discount_formatted','package_total_formatted','packages_html','vat_number','vat_rate','vat_amount','levy_rate','levy_amount','subtotal_amount','total_amount','vat_number_html','logo_html','address'];
 
 $groups = [
     [

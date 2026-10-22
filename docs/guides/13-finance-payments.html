@@ -154,6 +154,9 @@
     <li>If you ask for an invoice on a paid account (for example from an old page left open) you will see <em>"This booking is fully paid. Send the receipt instead."</em></li>
   </ul>
 
+  <h3>How children show on these documents</h3>
+  <p>When a room booking has children, the quotation, invoice and stay statement have a <strong>Child supplement</strong> line. Under it, the line says how the children were charged, using the rule the booking was made with. For example: <em>2 children, first 2 free</em> (nobody pays), or <em>1 child x MWK 10,000 x 7 nights</em>. The quantity on the line is the number of children who pay, so quantity times the unit price equals the amount. Children who stay free are named in the words under the line. A group booking adds up the children across its rooms. The same wording is available in emails as the <code>{{child_charge_rule}}</code> tag (see <a href="12-email-templates.php">Email templates</a>). The rule is set in <a href="09-packages-rates.html#child-charges">Child charges</a>.</p>
+
   <h2 id="receipt">How to send or reprint a receipt</h2>
   <p>A receipt is emailed to the guest by itself when a payment is saved as Paid or Completed. Use this to send it again, to a different address, or by WhatsApp.</p>
   <ol class="steps">

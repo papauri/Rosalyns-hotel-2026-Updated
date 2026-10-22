@@ -35,6 +35,7 @@
       <li><a href="#screen">What is on the screens</a></li>
       <li><a href="#room-add">How to add a room type</a></li>
       <li><a href="#room-prices">How to change room prices</a></li>
+      <li><a href="#child-charges">Child charges</a></li>
       <li><a href="#room-hide">How to hide, feature, reorder or delete a room</a></li>
       <li><a href="#plan-add">How to create a rate plan</a></li>
       <li><a href="#plan-edit">How to edit, switch off or delete a rate plan</a></li>
@@ -51,11 +52,11 @@
     <li>The system picks the nightly room price from the number of guests sharing the room: the <strong>Single Occupancy Price</strong> for 1 guest, the <strong>Double Occupancy Price</strong> for 2, the <strong>Triple Occupancy Price</strong> for 3. If that price is left empty, the <strong>Price Per Night</strong> is used instead.</li>
     <li>Any matching, active <strong>rate plan</strong> then raises or lowers that nightly price.</li>
     <li>The nightly price is multiplied by the number of nights.</li>
-    <li>If children are staying, a child supplement is added: the nightly price after the rate plan, times the <strong>Child Supplement (%)</strong>, times the number of children, times the number of nights.</li>
+    <li>If children are staying, a child charge is added. The first children in each room can be free (<strong>Free children (first N in each room)</strong>). Each child after that pays either a percentage of the nightly price after the rate plan, or a fixed amount, for every night. The rule is set per room type, and a single room can have its own. See <a href="#child-charges">Child charges</a>.</li>
     <li>If VAT or the tourism levy is switched on in Hotel Settings, they are worked out on the stay amount and added. The tourism levy is not charged on packages.</li>
     <li>Any <strong>packages</strong> the guest ticked are added on top.</li>
   </ol>
-  <p>Example: a double room has a Double Occupancy Price of MWK 100,000. A 10% discount rate plan matches, so the night costs MWK 90,000. Two nights is MWK 180,000. One child with a Child Supplement of 50% adds 90,000 &times; 50% &times; 2 nights = MWK 90,000.</p>
+  <p>Example: a double room has a Double Occupancy Price of MWK 100,000. A 10% discount rate plan matches, so the night costs MWK 90,000. Two nights is MWK 180,000. One child with a Child Supplement of 50% adds 90,000 &times; 50% &times; 2 nights = MWK 90,000. With a fixed amount of MWK 10,000 per child per night, the same child adds 10,000 &times; 2 nights = MWK 20,000. With <strong>Free children</strong> set to 1, that child adds nothing.</p>
 
   <h2 id="screen">What is on the screens</h2>
 
@@ -63,7 +64,7 @@
   <ul>
     <li><strong>Add New Room</strong> button at the top.</li>
     <li><strong>Joined Rooms</strong> button (opens the <strong>Joined Room Combinations</strong> window on the Individual Rooms page, where two adjoining rooms are paired into one bookable room type; see <a href="07-reception-bookings.html#rooms">Individual rooms</a>).</li>
-    <li>One card per room type. Each card shows the price per night, then <em>Single</em>, <em>Double</em> and <em>Triple</em> prices (only those that are filled in) and <em>Child: +50%</em> style supplement. It also shows an <strong>Active</strong> or <strong>Inactive</strong> badge and a <strong>Featured</strong> badge.</li>
+    <li>One card per room type. Each card shows the price per night, then <em>Single</em>, <em>Double</em> and <em>Triple</em> prices (only those that are filled in) and a <em>Children:</em> line that sums up the child rule, for example <em>Children: 50% of room rate, first 2 free, max 3 per room</em>. It also shows an <strong>Active</strong> or <strong>Inactive</strong> badge and a <strong>Featured</strong> badge.</li>
     <li>Small icon buttons on each card: change featured image, manage gallery photos, room video, active on/off, featured on/off, post to Facebook (only if Facebook posting is on), and delete.</li>
     <li><strong>Edit Room</strong> button on each card.</li>
     <li>The text <em>Drag cards to reorder</em>.</li>
@@ -111,13 +112,32 @@
         <li><strong>Single Occupancy Price</strong> — one guest in the room. Optional.</li>
         <li><strong>Double Occupancy Price</strong> — two guests. Optional.</li>
         <li><strong>Triple Occupancy Price</strong> — three guests. Optional.</li>
-        <li><strong>Child Supplement (%)</strong> — each child pays this percentage of the nightly price. 50 means half. The highest you can set is 100; a larger number is saved as 100.</li>
-      </ul>
+              </ul>
     </li>
     <li>Tick or untick <strong>Enable Triple Occupancy (3 guests)</strong> and <strong>Allow Children for this Room Type</strong> as needed.</li>
     <li>Click <strong>Save Changes</strong>. You will see <em>"Room updated successfully!"</em> inside the window.</li>
   </ol>
   <div class="note"><p>Prices are in Malawi Kwacha (MWK). Rate plans change these prices automatically; do not edit room prices just to run a short promotion. Use a rate plan so the normal price comes back by itself.</p></div>
+
+  <h2 id="child-charges">Child charges</h2>
+  <p>Set how children are charged in the <strong>Children</strong> part of the <strong>Add New Room</strong> and <strong>Edit Room</strong> windows (Settings &rarr; Rooms). You need the <strong>Room Management</strong> permission. This only changes the price of new bookings. Money already booked does not move.</p>
+  <ol class="steps">
+    <li>Open <strong>Settings</strong> &rarr; <strong>Rooms</strong> and click <strong>Edit Room</strong> on the room type.</li>
+    <li>In <strong>Child charge</strong>, choose <strong>% of the room rate</strong> or <strong>Fixed amount per child per night</strong>.</li>
+    <li>For a percentage, fill in <strong>Percent of the room rate (%)</strong> (0 to 100; 50 means half). For a fixed amount, fill in <strong>Amount per child per night</strong>. The box says <em>0 = free</em>.</li>
+    <li>In <strong>Free children (first N in each room)</strong>, type how many children in each room stay free. The first N are free and each child after that is charged. Leave it at 0 for no free children.</li>
+    <li>In <strong>Most children in one room</strong>, type the most children one room can take. Leave it blank for no limit beyond the room's guest capacity.</li>
+    <li>Click <strong>Save Changes</strong>.</li>
+  </ol>
+  <p>A percentage of 0, or a fixed amount of 0, means children stay free. The Rooms page card shows the rule in one line, for example <em>Children: 50% of room rate, first 2 free, max 3 per room</em>.</p>
+  <h3>One room with its own rule</h3>
+  <ol class="steps">
+    <li>Open <strong>Front Desk</strong> &rarr; <strong>Individual Rooms</strong> and edit the room.</li>
+    <li>Under <strong>Children</strong>, <strong>Child charge</strong> starts as <strong>Same as room type</strong>. The room then follows its room type, including any change you make to the type later.</li>
+    <li>To give this room its own rule, choose a percentage or a fixed amount and fill in the boxes. A box left empty shows <em>Same as room type</em> and follows the type.</li>
+  </ol>
+  <div class="note"><p>Rooms you set up before this change keep working exactly as before until you edit them. Each booking keeps the child rule it was made with. Changing the rule later does not change bookings that already exist. A booking with more children than the limit allows is refused on the booking screens and the website.</p></div>
+  <p>Quotations, invoices, statements and emails say how children were charged, for example <em>2 children, first 2 free</em> or <em>1 child x MWK 10,000 x 7 nights</em>. The quantity on the invoice line is the number of children who pay.</p>
 
   <h2 id="room-hide">How to hide, feature, reorder or delete a room</h2>
   <ol class="steps">
@@ -212,6 +232,7 @@
     <li>A room type needs a name. <strong>Rooms Available</strong> cannot be more than <strong>Total Rooms</strong> when you edit a room (<em>"Availability cannot exceed total rooms."</em>). When you add a room, an Available number above Total is lowered to match Total.</li>
     <li>The triple tier can only be switched on when <strong>Max Guests</strong> is 3 or more. Single and double tiers are on when Max Guests allows them (1 and 2 or more).</li>
     <li>If <strong>Allow Children for this Room Type</strong> is not ticked, a booking with children for that room is refused. The message starts <em>"Children are not allowed"</em>.</li>
+    <li>If a room has a limit in <strong>Most children in one room</strong>, a booking with more children than that is refused. The message reads <em>"[room name] takes at most 2 children per room."</em> (or <em>"Children cannot stay in [room name]."</em> when the limit is 0). Add adults, reduce the children or pick another room type.</li>
     <li>If Single, Double or Triple Occupancy Price is left empty, the <strong>Price Per Night</strong> is used for that number of guests.</li>
     <li>Rate plans only change a nightly price above 0. A percentage cannot be -100 or lower, or above 1000. A fixed amount cannot be more than 9,999,999 either way. The adjustment cannot be 0.</li>
     <li>A seasonal plan is matched on the <strong>check-in date</strong> only. A plan that is switched off, or that does not match the stay, does nothing.</li>
@@ -227,6 +248,9 @@
     <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
     <tbody>
       <tr><td><em>Room name is required.</em> (when adding a room: <em>Error: Room name is required.</em>)</td><td>The name box is empty.</td><td>Type a room name and save again.</td></tr>
+      <tr><td><em>[room name] takes at most 2 children per room.</em></td><td>The booking has more children than <strong>Most children in one room</strong> allows.</td><td>Reduce the children, add adults, or choose a room type that takes more.</td></tr>
+      <tr><td><em>Free children must be a whole number from 0 to 20.</em> / <em>Most children in one room must be a whole number from 0 to 20.</em></td><td>The box has a decimal, a negative number or a number above 20.</td><td>Type a whole number from 0 to 20.</td></tr>
+      <tr><td><em>Enter the fixed amount per child per night (0 means children stay free).</em></td><td>You chose a fixed amount and left the amount empty.</td><td>Type the amount, or 0 for free.</td></tr>
       <tr><td><em>Availability cannot exceed total rooms.</em></td><td>Rooms Available is higher than Total Rooms.</td><td>Lower Rooms Available or raise Total Rooms.</td></tr>
       <tr><td><em>This room has booking history (3 bookings) and cannot be deleted. Deactivate it instead.</em></td><td>The room type has bookings.</td><td>Use the active icon on the card to hide it.</td></tr>
       <tr><td><em>Cannot delete room type with 2 individual rooms. Please delete or reassign rooms first.</em></td><td>Physical rooms still belong to this room type.</td><td>Delete or move those rooms in Individual Rooms, then try again.</td></tr>

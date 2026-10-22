@@ -43,6 +43,7 @@
       <li><a href="#resend">How to resend an invitation</a></li>
       <li><a href="#delete">How to delete a staff member</a></li>
       <li><a href="#passwords">Passwords and signing in</a></li>
+      <li><a href="#online">Who's online</a></li>
       <li><a href="#rules">Rules the system enforces</a></li>
       <li><a href="#problems">Problems and fixes</a></li>
     </ol>
@@ -391,6 +392,19 @@
   <h3>Automatic sign-out</h3>
   <p>You stay signed in for your whole shift. After <strong>8 hours</strong> with no activity you are signed out and must sign in again. Using any admin page counts as activity, so a busy shift never signs you out.</p>
   <p><strong>After a system update:</strong> everyone is signed out once and must sign in again. This is normal and happens one time only. If you are signed out earlier than 8 hours, tell the administrator.</p>
+
+  <h2 id="online">Who's online</h2>
+  <p>This panel shows who is signed in and using the system right now. It is at the top of <strong>Staff &amp; Access</strong> and on <strong>System Logs</strong> (Settings &rarr; System Logs). Only an <strong>Administrator</strong> or a <strong>Manager</strong> sees it. Other roles do not see the panel at all. It only shows information. It does not sign anyone out and it does not keep anyone signed in.</p>
+  <ul>
+    <li>The heading <strong>Who's online</strong> has a count beside it, for example <strong>3 online</strong>.</li>
+    <li>Each row shows the person's name and role, with <em>(you)</em> beside your own name.</li>
+    <li><strong>Active now</strong> means they used the system in the last 2 minutes. <strong>Idle 7 min</strong> means they have been quiet for about that long. Idle shows up to 30 minutes.</li>
+    <li>The row also shows the screen they have open, and <strong>Signed in</strong> with the time they signed in (the date too, if it was not today).</li>
+    <li>Administrators also see each person's IP address (the device's address on the network). Managers do not.</li>
+    <li>The panel updates by itself every minute. You do not need to reload the page.</li>
+  </ul>
+  <p>Someone drops off the list after 30 minutes with no activity, for example a tab left open and untouched. When someone clicks <strong>Logout</strong>, they leave the list straight away. If nobody is signed in you will see <em>Nobody is signed in right now.</em></p>
+  <div class="note"><p>Use it to see who is at the desk before you ask someone to check a booking, or to spot a sign-in you do not recognise. If you see someone you do not expect, change their password or untick <strong>Active Account</strong> (see <a href="#edit">How to edit, deactivate or change someone's role</a>).</p></div>
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>
