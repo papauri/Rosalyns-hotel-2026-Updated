@@ -15,10 +15,28 @@
 if (!function_exists('rh_recipe_qty_to_base')) {
 
     /**
+     * What a stock unit measures when it is a BIG weight or volume: 'g' for kg / kilogram (small unit = grams),
+     * 'ml' for litre / l / ltr (small unit = millilitres), null for everything else (g and ml themselves are
+     * already the small unit, so staff just type whole numbers in them). Same word lists as Menu Management's page script.
+     */
+    function rh_recipe_small_unit(string $unit): ?string
+    {
+        $u = trim($unit);
+        if (preg_match('/^(kgs?|kilograms?|kilos?)$/i', $u)) {
+            return 'g';
+        }
+        if (preg_match('/^(l|ltrs?|litres?|liters?)$/i', $u)) {
+            return 'ml';
+        }
+        return null;
+    }
+
+    /**
      * Convert what staff typed into the stock item's base unit.
      *
-     * @param string $entryUnit 'base' (the stock unit), 'pack' (one purchase pack = $packSize base units)
-     *                          or 'pieces' ($qty single pieces; one stock unit holds $piecesPerUnit pieces)
+     * @param string $entryUnit 'base' (the stock unit), 'pack' (one purchase pack = $packSize base units),
+     *                          'pieces' ($qty single pieces; one stock unit holds $piecesPerUnit pieces)
+     *                          or 'small' ($qty whole grams / millilitres of a kg / litre item; divided by 1000)
      * @throws RuntimeException on a quantity that is not a positive number, or a pack/pieces choice with no size
      */
     function rh_recipe_qty_to_base(float $qty, string $entryUnit, ?float $packSize, ?float $piecesPerUnit = null): float
@@ -26,7 +44,13 @@ if (!function_exists('rh_recipe_qty_to_base')) {
         if (!is_finite($qty) || $qty <= 0) {
             throw new RuntimeException('Enter a quantity greater than 0.');
         }
-        if ($entryUnit === 'pack') {
+        if ($entryUnit === 'small') {
+            // Whole grams / ml only (1 to 1,000,000), so a typed 250 is exactly 0.25 and never a rounding surprise.
+            if ($qty < 1 || $qty > 1000000 || abs($qty - round($qty)) > 1e-9) {
+                throw new RuntimeException('Type a whole number of grams or ml (1 to 1,000,000).');
+            }
+            $qty = round($qty) / 1000;
+        } elseif ($entryUnit === 'pack') {
             if ($packSize === null || $packSize <= 0) {
                 throw new RuntimeException('This stock item has no pack size, so the quantity cannot be entered in packs.');
             }
@@ -131,7 +155,7 @@ if (!function_exists('rh_recipe_qty_to_base')) {
      * @param ?int $portions / ?string $notes null = keep the recipe's current value (1 / empty for a new recipe)
      * @param bool $canSetPieces true when the user may overwrite a pieces_per_unit the stock item already has (stock_management);
      *                           anyone may set it while it is still empty
-     * @param array $lines each: ingredient_id, quantity (as typed), unit ('base'|'pack'|'pieces', default base),
+     * @param array $lines each: ingredient_id, quantity (as typed), unit ('base'|'pack'|'pieces'|'small', default base),
      *                     yield_percent (optional, 1-100; omitted = keep what the item had, else 100)
      * @return array{recipe_id:int,lines_written:int}
      * @throws RuntimeException|InvalidArgumentException on bad input (nothing is written)
@@ -206,6 +230,9 @@ if (!function_exists('rh_recipe_qty_to_base')) {
                         $savePieces[$ingId] = $piecesPer;
                     } // else the stock item's saved value stands (a menu-only user cannot change it)
                 }
+            }
+            if ($entryUnit === 'small' && rh_recipe_small_unit((string)$ing['unit']) === null) {
+                throw new RuntimeException($ing['name'] . ': grams / ml can only be used for stock counted in kg or litres (use the stock unit instead).');
             }
             try {
                 $base = rh_recipe_qty_to_base((float)($line['quantity'] ?? 0), $entryUnit, $packSize, $piecesPer);

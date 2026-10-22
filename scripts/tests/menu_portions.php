@@ -265,6 +265,49 @@ try {
     check((float)col($pdo, "SELECT pieces_per_unit FROM stock_ingredients WHERE id = ?", [$pk6]) === 6.0 && (string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]) === '0.166667', 'A menu-only user cannot overwrite an existing pieces-per-unit (stays 6, line still 1/6)');
     $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 1, 'unit' => 'pieces', 'pieces_per_unit' => '8']], $adminId, true);
     check((float)col($pdo, "SELECT pieces_per_unit FROM stock_ingredients WHERE id = ?", [$pk6]) === 8.0 && (string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]) === '0.125000', 'A stock_management user may change it (8 per packet, line 0.125)');
+    // Grams / ml entry (owner 2026-10-23): staff type WHOLE g or ml of a kg / litre item; the server divides by 1000.
+    check(rh_recipe_small_unit('kg') === 'g' && rh_recipe_small_unit('Kilogram') === 'g' && rh_recipe_small_unit('Litre') === 'ml' && rh_recipe_small_unit('L') === 'ml' && rh_recipe_small_unit('ltr') === 'ml'
+        && rh_recipe_small_unit('g') === null && rh_recipe_small_unit('ml') === null && rh_recipe_small_unit('packet') === null, 'Unit words: kg/kilogram -> g, litre/L/ltr -> ml; g, ml and packets have no small unit');
+    check($near6(rh_recipe_qty_to_base(250, 'small', null), 0.25) && $near6(rh_recipe_qty_to_base(25, 'small', null), 0.025) && $near6(rh_recipe_qty_to_base(1, 'small', null), 0.001) && $near6(rh_recipe_qty_to_base(1000000, 'small', null), 1000.0), 'Small to base: 250 -> 0.25, 25 -> 0.025, 1 -> 0.001, 1,000,000 -> 1,000');
+    foreach ([[0.5, '0.5 g'], [0, 'zero'], [1000001, '1,000,001'], [250.5, '250.5 g'], [-5, 'negative']] as [$sq, $why]) {
+        $threw = false; try { rh_recipe_qty_to_base((float)$sq, 'small', null); } catch (RuntimeException $e) { $threw = true; }
+        check($threw, "Grams/ml refused: $why");
+    }
+    $beef = $mkIng("ZZMP $run Beef", 'kg', 12.5, 7000, null, null);
+    $milk = $mkIng("ZZMP $run Milk", 'litre', 20, 4000, null, null);
+    $gram = $mkIng("ZZMP $run Salt g", 'g', 5000, 2, null, null);
+    $sm = rh_menu_pos_sync_item($pdo, 'food', $web("ZZMP $run Beef stew", $catA), null, null);
+    $res = rh_menu_recipe_save($pdo, $sm['id'], $sm['slug'], null, null, [['ingredient_id' => $beef, 'quantity' => 250, 'unit' => 'small']], $adminId);
+    check((string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]) === '0.250000', '250 g of a kg item is stored as 0.25 kg');
+    check(abs(rh_menu_recipe_cost($pdo, $sm['id'], $sm['slug']) - 1750.0) < 0.0001, 'Cost is exact: 0.25 kg x 7,000 = 1,750.00');
+    $b = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$beef]);
+    $okSale = deductStockForMenuItem($sm['id'], $sm['slug'], 1.0, 'pos_order', 987656001, $adminId);
+    $a = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$beef]);
+    check($okSale && $near6($b - $a, 0.25), 'A POS sale of one deducts 0.25 kg of the beef', sprintf('took %.6f', $b - $a));
+    $lines = rh_menu_recipe_lines($pdo, $sm['id'], $sm['slug']);
+    check(count($lines) === 1 && abs((float)$lines[0]['quantity_per_portion'] * 1000 - 250.0) < 1e-6 && abs(round((float)$lines[0]['quantity_per_portion'] * 1000) - (float)$lines[0]['quantity_per_portion'] * 1000) < 1e-6, 'Reopening: the saved 0.25 kg x 1000 is a whole 250, so the screen shows 250 g again');
+    $res = rh_menu_recipe_save($pdo, $sm['id'], $sm['slug'], null, null, [['ingredient_id' => $milk, 'quantity' => 25, 'unit' => 'small']], $adminId);
+    check((string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]) === '0.025000', '25 ml of a litre item is stored as 0.025 litre');
+    check(abs(rh_menu_recipe_cost($pdo, $sm['id'], $sm['slug']) - 100.0) < 0.0001, 'Cost is exact: 0.025 litre x 4,000 = 100.00');
+    $b = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$milk]);
+    deductStockForMenuItem($sm['id'], $sm['slug'], 4.0, 'pos_order', 987656002, $adminId);
+    $a = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$milk]);
+    check($near6($b - $a, 0.1), '4 sales of 25 ml take 0.1 litre off the shelf', sprintf('took %.6f', $b - $a));
+    $bs = (float)col($pdo, "SELECT COALESCE(SUM(quantity_remaining),0) FROM stock_batches WHERE ingredient_id = ?", [$milk]);
+    check(abs($bs - $a) <= 0.000003, 'Batch total still matches the stock total after the ml sales', sprintf('batches %.6f vs stock %.6f', $bs, $a));
+    foreach ([[0.5, '0.5 g'], [0, 'zero'], [1000001, '1,000,001 g'], [12.5, '12.5 g']] as [$sq, $why]) {
+        $threw = false; try { rh_menu_recipe_save($pdo, $sm['id'], $sm['slug'], null, null, [['ingredient_id' => $beef, 'quantity' => $sq, 'unit' => 'small']], $adminId); } catch (Throwable $e) { $threw = true; }
+        check($threw, "Save refused server-side: $why");
+    }
+    check((string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]) === '0.025000', 'A refused g/ml save leaves the previous link untouched');
+    $threw = false; try { rh_menu_recipe_save($pdo, $sm['id'], $sm['slug'], null, null, [['ingredient_id' => $gram, 'quantity' => 5, 'unit' => 'small']], $adminId); } catch (Throwable $e) { $threw = true; }
+    check($threw, 'The g/ml choice is refused for stock already counted in g (whole numbers in its own unit instead)');
+    $threw = false; try { rh_menu_recipe_save($pdo, $sm['id'], $sm['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 5, 'unit' => 'small']], $adminId); } catch (Throwable $e) { $threw = true; }
+    check($threw, 'The g/ml choice is refused for a packet item');
+    $res = rh_menu_recipe_save($pdo, $sm['id'], $sm['slug'], null, null, [['ingredient_id' => $gram, 'quantity' => 5, 'unit' => 'base']], $adminId);
+    check((string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]) === '5.000000', 'Stock counted in g: a whole 5 in its own unit stores 5 (base kept)');
+    $res = rh_menu_recipe_save($pdo, $sm['id'], $sm['slug'], null, null, [['ingredient_id' => $beef, 'quantity' => 0.15, 'unit' => 'base']], $adminId);
+    check((string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]) === '0.150000', 'The kg (base) choice still works for anyone who wants a decimal');
     // Negative-stock flag ignores 6-decimal crumbs.
     $crumb = $mkIng("ZZMP $run Crumb", 'packet', 1, 100, null, null);
     $pdo->prepare("UPDATE stock_ingredients SET current_quantity = -0.000002 WHERE id = ?")->execute([$crumb]);
@@ -334,6 +377,12 @@ check($clean($r) && ($r['json']['success'] ?? true) === false && (int)(($r['veri
 
 $r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{rice}', 'quantity' => 0.15, 'unit' => 'base']])], $ingSetup, $ingVars, $verifyAdd);
 check($clean($r) && ($r['json']['success'] ?? false) === true && $near($qty($r, 3), 0.15), 'Page: 0.15 kg is stored as 0.15', json_encode($r['json'] ?? $r['verify'] ?? $r));
+
+// Grams: the page sends the WHOLE number typed (250 g); the server stores 0.25 kg. Fractions of a gram are refused and nothing is saved.
+$r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{rice}', 'quantity' => 250, 'unit' => 'small']])], $ingSetup, $ingVars, $verifyPcs);
+check($clean($r) && ($r['json']['success'] ?? false) === true && $qty($r, 4) === 250000.0, 'Page: "250 g" of a kg item is stored as 0.25 kg', json_encode($r['json'] ?? $r['verify'] ?? $r));
+$r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{rice}', 'quantity' => 0.5, 'unit' => 'small']])], $ingSetup, $ingVars, $verifyAdd);
+check($clean($r) && ($r['json']['success'] ?? true) === false && (int)(($r['verify'][0][0] ?? [])['n'] ?? 1) === 0, 'Page: 0.5 g is refused and nothing is saved', json_encode($r['json'] ?? $r));
 
 $r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{rice}', 'quantity' => 1, 'unit' => 'pack']])], $ingSetup, $ingVars, $verifyAdd);
 check($clean($r) && ($r['json']['success'] ?? true) === false && (int)(($r['verify'][0][0] ?? [])['n'] ?? 1) === 0, 'Page: a pack choice on an item with no pack size is refused and nothing is saved', json_encode($r['json'] ?? $r));
@@ -413,7 +462,7 @@ $r = $page(['action' => 'save_recipe', 'menu_item_id' => '{mid}', 'menu_type' =>
 check($clean($r) && $near($qty($r, 0), 1) && $near($qty($r, 1), 0), 'Stock > Recipes: an item in an inactive category is saved under its real slug, not "food"', json_encode($r['verify'] ?? $r['raw'] ?? $r));
 
 // Rendered page: search markup, filters, the stock section, the unit chooser, mobile-safe table labels.
-$r = $page([], array_merge($ingSetup, ["INSERT INTO food_menu (item_name, price, category, station) VALUES ('ZZMP $hr Shown', 100, 'ZZMP Cat $hr', 'kitchen')"]), [], [], 'GET', ['id="mmSearch"', 'No items match', 'mmApplyFilters', 'data-search=', 'id="mmCatFilter"', 'What it uses from stock', 'id="mmIngUnit"', 'id="mmIngPer"', 'data-q="0.5"', 'data-q="3"', 'function mmShowAsPieces', 'id="mmIngCat"', 'All categories', 'id="mmIngSearch"', 'id="mmIngPick"', 'No stock items match', 'id="mmIngUnitLine"', 'function mmIngOptionText', 'pieces in one', 'in stock', 'function mmPiecesGuard', 'This item is free', 'data-label="Item"', 'aria-controls="mmResults"']);
+$r = $page([], array_merge($ingSetup, ["INSERT INTO food_menu (item_name, price, category, station) VALUES ('ZZMP $hr Shown', 100, 'ZZMP Cat $hr', 'kitchen')"]), [], [], 'GET', ['id="mmSearch"', 'No items match', 'mmApplyFilters', 'data-search=', 'id="mmCatFilter"', 'What it uses from stock', 'id="mmIngUnit"', 'id="mmIngPer"', 'data-q="0.5"', 'data-q="3"', 'function mmShowAsPieces', 'id="mmIngCat"', 'All categories', 'id="mmIngSearch"', 'id="mmIngPick"', 'No stock items match', 'id="mmIngUnitLine"', 'function mmIngOptionText', 'pieces in one', 'in stock', 'function mmPiecesGuard', 'function mmSmallOf', 'function mmQuickSet', 'function mmSmallText', 'This item is free', 'data-label="Item"', 'aria-controls="mmResults"']);
 check($clean($r) && !empty($r['found']) && !in_array(false, $r['found'], true), 'Page: search box, filters, "No items match" state, stock section and unit chooser are on the page', json_encode($r['found'] ?? $r['raw'] ?? $r));
 
 // The picker's data: every stock item carries category, unit, cost, stock on hand and pieces-per-unit (what the dropdown lines show).
