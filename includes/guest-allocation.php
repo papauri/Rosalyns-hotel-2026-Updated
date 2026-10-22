@@ -86,6 +86,109 @@ if (!function_exists('ga_resolve_policy')) {
         return (float)$room['price_per_night'];
     }
 
+    /** Cheapest-to-dearest order of the occupancy price tiers. */
+    function ga_tier_rank(string $tier): int
+    {
+        return ['single' => 1, 'double' => 2, 'triple' => 3][$tier] ?? 0;
+    }
+
+    /**
+     * The cheapest tier a room with this many guests may be priced at: the cheapest ENABLED tier whose rank is at
+     * least the guest count's (1 guest = single, 2 = double, 3 or more = triple), else the highest enabled tier
+     * (e.g. 3 guests with Triple off floor at Double). Null when no tier is enabled.
+     */
+    function ga_tier_floor(int $guests, array $policy): ?string
+    {
+        $need = max(1, min(3, $guests));
+        $enabled = [];
+        foreach (['single', 'double', 'triple'] as $t) {
+            if (!empty($policy[$t . '_enabled'])) $enabled[ga_tier_rank($t)] = $t;
+        }
+        if (!$enabled) return null;
+        ksort($enabled);
+        foreach ($enabled as $rank => $t) {
+            if ($rank >= $need) return $t;
+        }
+        return end($enabled);
+    }
+
+    /**
+     * How many guests one room can be priced for at a tier: Single 1, Double 2, Triple the room's capacity. The HIGHEST
+     * ENABLED tier always counts as the full capacity (so with Triple off, Double covers a 3-guest room).
+     */
+    function ga_tier_capacity(string $tier, int $capacity, array $policy): int
+    {
+        $rank = ga_tier_rank($tier);
+        if ($rank === 0) return 0;
+        $capacity = max(1, $capacity);
+        $highest = 0;
+        foreach (['single', 'double', 'triple'] as $t) {
+            if (!empty($policy[$t . '_enabled'])) $highest = ga_tier_rank($t);
+        }
+        if ($rank === 3 || $rank === $highest) return $capacity;
+        return min($capacity, $rank);
+    }
+
+    /**
+     * Owner rule (2026-10-23): the tiers chosen for the rooms of ONE room type in a booking must be able to seat that
+     * type's guests: sum of ga_tier_capacity() >= guests. So 4 guests in 2 rooms (cap 3) may be Double+Double or
+     * Triple+Single, never Double+Single or Single+Single. A dearer tier than needed is fine. Returns the refusal text
+     * or null. $tiers = chosen tier per room, $labels = how each room is named ("Room 2"), $capacity = one room's capacity,
+     * $policy = the policy the price uses. Whoever may override prices (ga_can_under_tier) saves anyway, with an audit note.
+     */
+    function ga_group_tier_message(string $typeName, array $labels, array $tiers, int $guests, int $capacity, array $policy): ?string
+    {
+        $tiers = array_values($tiers);
+        $labels = array_values($labels);
+        if (!$tiers || $guests < 1) return null;
+        $label = function_exists('rh_occupancy_tier_label') ? 'rh_occupancy_tier_label' : 'ucfirst';
+        $caps = [];
+        foreach ($tiers as $t) {
+            if (ga_tier_rank((string)$t) === 0) return null;
+            $caps[] = ga_tier_capacity((string)$t, $capacity, $policy);
+        }
+        $priced = array_sum($caps);
+        if ($priced >= $guests) return null;
+        $enabledRanks = [];
+        foreach (['single', 'double', 'triple'] as $t) {
+            if (!empty($policy[$t . '_enabled'])) $enabledRanks[ga_tier_rank($t)] = $t;
+        }
+        ksort($enabledRanks);
+        $guestWord = $guests . ' guest' . ($guests === 1 ? '' : 's');
+        if (count($tiers) === 1) {
+            foreach ($enabledRanks as $t) {
+                if (ga_tier_capacity($t, $capacity, $policy) >= $guests) {
+                    return $labels[0] . ' has ' . $guestWord . ' but is priced as ' . $label($tiers[0]) . '. Choose ' . $label($t) . ', or ask someone who can override prices.';
+                }
+            }
+            return null;
+        }
+        // Several rooms: raise the cheapest room that can still go up to its next enabled tier.
+        $order = array_keys($tiers);
+        usort($order, fn($x, $y) => [ga_tier_rank((string)$tiers[$x]), $x] <=> [ga_tier_rank((string)$tiers[$y]), $y]);
+        foreach ($order as $i) {
+            foreach ($enabledRanks as $rank => $t) {
+                if ($rank > ga_tier_rank((string)$tiers[$i])) {
+                    return 'These ' . count($tiers) . ' ' . $typeName . ' rooms hold ' . $guestWord . ' but are priced for ' . $priced
+                        . '. Raise ' . $labels[$i] . ' to ' . $label($t) . ', or ask someone who can override prices.';
+                }
+            }
+        }
+        return null;
+    }
+
+    /** One room: the same rule as ga_group_tier_message() for a group of one. $capacity 0 = unknown (assume the guests fit). */
+    function ga_under_tier_message(string $roomLabel, int $seatedGuests, string $chosenTier, array $policy, int $capacity = 0): ?string
+    {
+        return ga_group_tier_message('', [$roomLabel], [$chosenTier], $seatedGuests, $capacity > 0 ? $capacity : max(3, $seatedGuests), $policy);
+    }
+
+    /** Who may deliberately price a room below its guests' tier: the same people who may override a room price. */
+    function ga_can_under_tier(?array $user): bool
+    {
+        return in_array((string)($user['role'] ?? ''), ['admin', 'manager'], true);
+    }
+
     function ga_failure(string $reason, int $roomsNeeded, string $message): array
     {
         return [

@@ -20,6 +20,7 @@
 require_once __DIR__ . '/admin-init.php';
 require_once __DIR__ . '/../includes/validation.php';
 require_once __DIR__ . '/../includes/pricing.php';
+require_once __DIR__ . '/../includes/guest-allocation.php';
 require_once __DIR__ . '/../includes/alert.php';
 require_once __DIR__ . '/../includes/booking-room-change.php';
 
@@ -263,6 +264,27 @@ function edit_booking_reprice(array $booking, array $roomType, int $nights, stri
     ];
 }
 
+/** The occupancy policy the price uses: the room type's, with the picked individual room's own tier overrides on top. */
+function eb_tier_policy(PDO $pdo, array $roomTypeRow, int $individualRoomId): array
+{
+    $irPolicy = null;
+    if ($individualRoomId > 0) {
+        $st = $pdo->prepare('SELECT single_occupancy_enabled_override, double_occupancy_enabled_override, triple_occupancy_enabled_override, children_allowed_override FROM individual_rooms WHERE id = ?');
+        $st->execute([$individualRoomId]);
+        $irPolicy = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+    $policy = ga_resolve_policy($roomTypeRow);
+    if ($irPolicy) {
+        $withRoom = resolveOccupancyPolicy($roomTypeRow, $irPolicy);
+        foreach (['single', 'double', 'triple'] as $t) {
+            if (($irPolicy[$t . '_occupancy_enabled_override'] ?? null) !== null && ($irPolicy[$t . '_occupancy_enabled_override'] ?? '') !== '') {
+                $policy[$t . '_enabled'] = $withRoom[$t . '_enabled'];
+            }
+        }
+    }
+    return $policy;
+}
+
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -324,6 +346,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     $error = 'Selected occupancy type is disabled for this room type.';
                 } elseif (empty($policy['children_allowed']) && $child_guests > 0) {
                     $error = 'Children are not allowed for this room type.';
+                }
+            }
+            // Owner rule: no cheaper occupancy tier than the guests in the room, unless the user may override prices.
+            // Only when occupancy or the guest count is being changed (an old booking's other edits are never blocked); joined pairs are exempt.
+            $underTierNote = '';
+            if (empty($error) && $roomTypeRow && $can_edit_stay && !$is_joined_type
+                && ($occupancy_type !== (string)($booking['occupancy_type'] ?? 'single') || $number_of_guests !== (int)$booking['number_of_guests'])) {
+                $utMsg = ga_under_tier_message('This room', $number_of_guests, $occupancy_type, eb_tier_policy($pdo, $roomTypeRow, $individual_room_id && !$editPair ? (int)$individual_room_id : 0), (int)$roomTypeRow['max_guests']);
+                if ($utMsg !== null) {
+                    if (!ga_can_under_tier($user)) {
+                        $error = $utMsg;
+                    } else {
+                        $underTierNote = ' Deliberate under-tier: ' . $number_of_guests . ' guest' . ($number_of_guests === 1 ? '' : 's') . ' priced as ' . rh_occupancy_tier_label($occupancy_type) . '.';
+                    }
                 }
             }
             if (empty($error) && $child_guests > 0 && ($child_guests !== (int)($booking['child_guests'] ?? 0)
@@ -494,7 +530,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 }
                 if (!empty($auditNew)) {
                     logBookingAudit($booking_id, 'modified', $auditOld, $auditNew,
-                        'Edited on full booking page by ' . $actor . (isset($changes['total_amount']) ? ' (stay repriced at the booked rate)' : ''),
+                        'Edited on full booking page by ' . $actor . (isset($changes['total_amount']) ? ' (stay repriced at the booked rate)' : '') . ($underTierNote ?? ''),
                         $booking['booking_reference'] ?? null);
                     rh_log_event('edit-booking', 'info', 'Booking edited by admin', [
                         'booking_id' => $booking_id, 'ref' => $booking['booking_reference'] ?? null,
@@ -854,6 +890,7 @@ $back_url = 'booking-details.php?id=' . $booking_id;
         </div>
     </div>
 
+    <?php $ebTierPolicyJs = $roomTypeRow ? eb_tier_policy($pdo, $roomTypeRow, (int)($booking['individual_room_id'] ?? 0)) : []; ?>
     <script>
         (function() {
             const P = <?php echo json_encode($preview_data); ?>;
@@ -894,8 +931,42 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                 }
             });
 
+            // Owner rule: people who cannot override prices cannot pick a cheaper tier than the guests in the room
+            // (the server refuses it too). The booking's saved tier stays selectable while its guest count is unchanged.
+            const canUnderTier = <?php echo (ga_can_under_tier($user) || $is_joined_type) ? 'true' : 'false'; ?>; // joined pairs are exempt
+            const savedGuests = <?php echo (int)$booking['number_of_guests']; ?>;
+            const tierRank = { single: 1, double: 2, triple: 3 };
+            const tierOn = <?php echo json_encode(array_map('intval', $ebTierPolicyJs)); ?>; // the room's enabled tiers (type + its own overrides)
+            const roomCap = <?php echo max(1, (int)($roomTypeRow['max_guests'] ?? 1)); ?>;
+            // One room: the tier must be able to seat the guests (Single 1, Double 2, Triple = capacity; the highest enabled tier counts as the full capacity).
+            function tierCap(tier) {
+                const rank = tierRank[tier] || 0;
+                const on = [tierOn.single_enabled ? 1 : 0, tierOn.double_enabled ? 2 : 0, tierOn.triple_enabled ? 3 : 0].filter(x => x > 0);
+                const highest = on.length ? on[on.length - 1] : 0;
+                return (rank === 3 || rank === highest) ? roomCap : Math.min(roomCap, rank);
+            }
+            function applyTierFloor() {
+                const occSel = $('occupancy_type');
+                const g = $('number_of_guests');
+                if (canUnderTier || !occSel || occSel.disabled || !g) return;
+                const guestCount = Math.max(1, parseInt(g.value || '1', 10));
+                Array.from(occSel.options).forEach(opt => {
+                    if (opt.dataset.policyOff === undefined) opt.dataset.policyOff = opt.disabled ? '1' : '0';
+                    const keepSaved = opt.value === P.occupancy && guestCount === savedGuests;
+                    const tooCheap = tierCap(opt.value) < guestCount && !keepSaved;
+                    opt.disabled = opt.dataset.policyOff === '1' || tooCheap;
+                    opt.title = tooCheap ? 'Cheaper than the ' + guestCount + ' guest' + (guestCount === 1 ? '' : 's') + ' in this room. Ask someone who can override prices.' : '';
+                });
+                if (occSel.selectedOptions[0] && occSel.selectedOptions[0].disabled) {
+                    const next = Array.from(occSel.options).find(o => !o.disabled);
+                    if (next) { occSel.value = next.value; preview(); }
+                }
+            }
+
             const guests = $('number_of_guests');
             if (guests) {
+                guests.addEventListener('input', applyTierFloor);
+                applyTierFloor();
                 guests.addEventListener('input', function() {
                     const childInput = $('child_guests');
                     const maxChildren = Math.max(0, Math.max(1, parseInt(this.value || '1', 10)) - 1);

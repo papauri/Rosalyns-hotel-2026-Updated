@@ -503,6 +503,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     'children_allowed' => !empty($pl['policy']['children_allowed']),
                     'name' => (string)$pl['room_data']['name'],
                     'room_id' => (int)$pl['room_id'],
+                    'tier' => (string)$pl['occupancy_type'],
+                    'tier_policy' => $pl['policy'],
+                    // Joined pairs and manager-priced (override) lines keep today's behaviour.
+                    'tier_exempt' => !empty($pl['combination_queue']) || $pl['price_override'] !== null,
                 ];
             }
         }
@@ -510,6 +514,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         $party_split = ga_distribute_party($party_rows, $adult_guests, $child_guests);
         if (empty($party_split['valid'])) {
             throw new Exception($party_split['message']);
+        }
+        // Owner rule: the tiers chosen for the rooms of one room type must be able to seat that type's guests
+        // (Single 1, Double 2, Triple = room capacity; the highest enabled tier counts as full capacity), unless the user may
+        // override prices. Guests per type = adults + children seated in its rooms above. Joined pairs and manager-priced lines are exempt.
+        $under_tier_notes = [];   // first row index of the type => audit text for a deliberate under-tier by someone allowed to
+        $tier_groups = [];
+        foreach ($party_rows as $pi => $prow) {
+            $tier_groups[(int)$prow['room_id']][] = $pi;
+        }
+        foreach ($tier_groups as $grp_rid => $grp_rows) {
+            $exempt_grp = false; $grp_guests = 0; $grp_labels = []; $grp_tiers = [];
+            foreach ($grp_rows as $pi) {
+                $exempt_grp = $exempt_grp || !empty($party_rows[$pi]['tier_exempt']);
+                $grp_guests += (int)$party_split['rows'][$pi]['guests'];
+                $grp_labels[] = 'Room ' . ($pi + 1);
+                $grp_tiers[] = $party_rows[$pi]['tier'];
+            }
+            if ($exempt_grp) continue;
+            $first = $party_rows[$grp_rows[0]];
+            $utMsg = ga_group_tier_message((string)$first['name'], $grp_labels, $grp_tiers, $grp_guests, (int)$first['capacity'], $first['tier_policy']);
+            if ($utMsg === null) continue;
+            if (!ga_can_under_tier($user)) {
+                throw new Exception($utMsg);
+            }
+            $under_tier_notes[$grp_rows[0]] = 'Deliberate under-tier by ' . ($user['full_name'] ?? ($user['username'] ?? 'staff'))
+                . ': ' . $grp_guests . ' guest' . ($grp_guests === 1 ? '' : 's') . ' in ' . implode(', ', $grp_labels) . ' priced as '
+                . implode(' + ', array_map('rh_occupancy_tier_label', $grp_tiers)) . '.';
         }
         // Per room type: how many rooms will carry children and how many children sleep there
         $child_rooms_by_room  = [];
@@ -1113,7 +1144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         }
 
         // ── Audit logs ───────────────────────────────────────────────────────
-        foreach ($created_bookings as $cb) {
+        foreach ($created_bookings as $cbi => $cb) {
             rh_log_event('create-booking', 'info', 'Booking created by admin', [
                 'booking_id'  => $cb['id'],
                 'ref' => $cb['ref'],
@@ -1127,7 +1158,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 'created',
                 null,
                 ['status' => $booking_status, 'payment_status' => $payment_status_val, 'total_rooms' => $total_rooms_booked],
-                'Created manually by admin (' . ($user['full_name'] ?? ($user['username'] ?? '')) . ')',
+                'Created manually by admin (' . ($user['full_name'] ?? ($user['username'] ?? '')) . ')'
+                    . (isset($under_tier_notes[$cbi]) ? '. ' . $under_tier_notes[$cbi] : ''),
                 $cb['ref']
             );
         }
@@ -2642,6 +2674,8 @@ try {
 
     <script>
         const roomsData = <?php echo $rooms_json; ?>;
+        const canUnderTier = <?php echo ga_can_under_tier($user) ? 'true' : 'false'; ?>; // may price a room below its guests' tier (same people as price override)
+        const tierRankJs = { single: 1, double: 2, triple: 3 };
         const ratePlans = <?php echo $rate_plans_json; ?>;
         const currency = '<?php echo htmlspecialchars($currency_symbol, ENT_QUOTES); ?>';
         const vatRate = <?php echo (float)$vat_rate_cfg; ?>;
@@ -2929,6 +2963,7 @@ try {
             const cap = roomPhysicalCap(room);
             labelOccOptions(lineEl, room);
             Array.from(occSel.options).forEach(opt => {
+                delete opt.dataset.floor;
                 if (opt.value === 'single') opt.disabled = !room.single_enabled || cap < 1;
                 if (opt.value === 'double') opt.disabled = !room.double_enabled || cap < 2;
                 if (opt.value === 'triple') opt.disabled = !room.triple_enabled || cap < 3;
@@ -3327,6 +3362,7 @@ try {
                     has('triple') ? 'triple' :
                     (opts[0]?.value ?? occSel.value);
             });
+            applyTierFloors();
         }
 
         function childrenChanged() {
@@ -3668,6 +3704,7 @@ try {
                 if (cox !== '') ca = cox === '1';
             }
             Array.from(occSel.options).forEach(opt => {
+                delete opt.dataset.floor;
                 if (opt.value === 'single') opt.disabled = !se;
                 if (opt.value === 'double') opt.disabled = !de;
                 if (opt.value === 'triple') opt.disabled = !te;
@@ -3676,6 +3713,7 @@ try {
                 const f = Array.from(occSel.options).find(o => !o.disabled);
                 if (f) occSel.value = f.value;
             }
+            applyTierFloors();
             const cEl = el('childGuests');
             if (cEl) {
                 cEl.disabled = !ca;
@@ -3684,6 +3722,62 @@ try {
             calculateTotal();
         }
 
+        // Owner rule: users who cannot override prices cannot choose tiers that cannot seat a room type's guests together
+        // (4 guests in 2 rooms: Double+Double or Triple+Single, never Double+Single). The server refuses it too; this only greys
+        // options out: one is greyed when, with the type's other rooms at their chosen tiers, it cannot seat the group.
+        // Tier capacity mirrors ga_tier_capacity() in includes/guest-allocation.php: Single 1, Double 2, Triple = room capacity,
+        // and the highest enabled tier counts as the full capacity. Joined-room lines are exempt.
+        function tierCapJs(tier, room) {
+            const rank = tierRankJs[tier] || 0;
+            if (!rank) return 0;
+            const cap = roomPhysicalCap(room);
+            const on = [room.single_enabled ? 1 : 0, room.double_enabled ? 2 : 0, room.triple_enabled ? 3 : 0].filter(x => x > 0);
+            const highest = on.length ? on[on.length - 1] : 0;
+            return (rank === 3 || rank === highest) ? cap : Math.min(cap, rank);
+        }
+        function applyTierFloors() {
+            if (canUnderTier) return;
+            const seating = adminSeatParty();
+            const lines = getVisibleLines();
+            lines.forEach(ln => {
+                const occSel = ln.querySelector('.line-occ-select');
+                if (occSel) Array.from(occSel.options).forEach(opt => {
+                    if (opt.dataset.floor === '1') { opt.disabled = false; opt.title = ''; delete opt.dataset.floor; }
+                });
+            });
+            if (!seating.valid) return;
+            const grpGuests = {};
+            lines.forEach((ln, i) => {
+                const rid = lineRoomId(ln);
+                if (seating.rows[i]) grpGuests[rid] = (grpGuests[rid] || 0) + seating.rows[i].guests;
+            });
+            for (let pass = 0; pass < 2; pass++) {
+                lines.forEach((ln, i) => {
+                    const occSel = ln.querySelector('.line-occ-select');
+                    const rid = lineRoomId(ln);
+                    const rm = roomById(rid);
+                    const isJoined = !!(_availMap[rid] && (_availMap[rid].combo_rates || []).length);
+                    if (!occSel || !rm || isJoined) return;
+                    let others = 0;
+                    lines.forEach((o, j) => {
+                        if (j === i || lineRoomId(o) !== rid) return;
+                        others += tierCapJs(o.querySelector('.line-occ-select')?.value, rm);
+                    });
+                    const need = grpGuests[rid] || 0;
+                    Array.from(occSel.options).forEach(opt => {
+                        if (!opt.disabled && others + tierCapJs(opt.value, rm) < need) {
+                            opt.disabled = true;
+                            opt.dataset.floor = '1';
+                            opt.title = 'Too small for the ' + need + ' guest' + (need === 1 ? '' : 's') + ' in these rooms. Ask someone who can override prices.';
+                        }
+                    });
+                    if (occSel.selectedOptions[0]?.disabled) {
+                        const next = Array.from(occSel.options).find(o => !o.disabled);
+                        if (next) occSel.value = next.value;
+                    }
+                });
+            }
+        }
         // Plain note when the occupancy tier does not match the guests seated in the room.
         function occupancyNote(occ, seated) {
             if (occ === 'single' && seated > 1) return ' Occupancy is Single (1 guest) but ' + seated + ' guests are seated here.';
