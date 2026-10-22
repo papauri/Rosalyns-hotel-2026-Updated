@@ -25,49 +25,50 @@ function getSectionHeader($section_key, $page = 'global', $fallback = []) {
     
     $fallback = array_merge($default_fallback, $fallback);
     
+    // A header row switched off in Section Headers means "show no header here": it must not
+    // fall back to the built-in text, so the row is read whether or not it is active.
+    $shape = function (array $header, bool $hidden) use ($fallback): array {
+        return [
+            'label' => $header['section_label'] ?? $fallback['label'],
+            'subtitle' => $header['section_subtitle'] ?? $fallback['subtitle'],
+            'title' => $header['section_title'] ?? $fallback['title'],
+            'description' => $header['section_description'] ?? $fallback['description'],
+            'hidden' => $hidden,
+        ];
+    };
+
     try {
         $stmt = $pdo->prepare("
-            SELECT section_label, section_subtitle, section_title, section_description 
-            FROM section_headers 
-            WHERE section_key = ? AND page = ? AND is_active = 1
+            SELECT section_label, section_subtitle, section_title, section_description, is_active
+            FROM section_headers
+            WHERE section_key = ? AND page = ?
             LIMIT 1
         ");
         $stmt->execute([$section_key, $page]);
         $header = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if ($header) {
-            return [
-                'label' => $header['section_label'] ?? $fallback['label'],
-                'subtitle' => $header['section_subtitle'] ?? $fallback['subtitle'],
-                'title' => $header['section_title'] ?? $fallback['title'],
-                'description' => $header['section_description'] ?? $fallback['description']
-            ];
+            return $shape($header, !(int)$header['is_active']);
         }
-        
+
         // If not found with specific page, try global
         if ($page !== 'global') {
             $stmt->execute([$section_key, 'global']);
             $header = $stmt->fetch(PDO::FETCH_ASSOC);
-            
+
             if ($header) {
-                return [
-                    'label' => $header['section_label'] ?? $fallback['label'],
-                    'subtitle' => $header['section_subtitle'] ?? $fallback['subtitle'],
-                    'title' => $header['section_title'] ?? $fallback['title'],
-                    'description' => $header['section_description'] ?? $fallback['description']
-                ];
+                return $shape($header, !(int)$header['is_active']);
             }
         }
-        
+
         // Return fallback if no header found
-        return $fallback;
-        
+        return $fallback + ['hidden' => false];
+
     } catch (PDOException $e) {
         error_log("Error fetching section header: " . $e->getMessage());
-        return $fallback;
+        return $fallback + ['hidden' => false];
     }
 }
-
 /**
  * Generate semantic ID for section header based on section key and page
  *
@@ -132,7 +133,10 @@ function generateSectionHeaderId($section_key, $page) {
  */
 function renderSectionHeader($section_key, $page = 'global', $fallback = [], $additional_classes = '') {
     $header = getSectionHeader($section_key, $page, $fallback);
-    
+    if (!empty($header['hidden'])) {
+        return; // switched off in Section Headers
+    }
+
     $classes = 'section-header';
     if (!empty($additional_classes)) {
         $classes .= ' ' . $additional_classes;

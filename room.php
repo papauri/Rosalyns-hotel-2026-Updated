@@ -450,7 +450,9 @@ try {
                     <?php
                     $reviews_header = getSectionHeader('hotel_reviews', 'global', ['title' => 'Guest Reviews']);
                     ?>
+                    <?php if (empty($reviews_header['hidden'])): ?>
                     <h2 class="editorial-testimonials-title"><?php echo htmlspecialchars($reviews_header['title']); ?></h2>
+                    <?php endif; ?>
                     <a class="editorial-btn-write-review" href="submit-review.php?room_id=<?php echo $room['id']; ?>">
                         <i class="fas fa-pen-fancy"></i>
                         <span>Write a Review</span>

@@ -51,6 +51,7 @@ if (!function_exists('footer_parse_tags')) {
 ?>
 <?php if (!function_exists('isBookingEnabled')) { require_once __DIR__ . '/booking-functions.php'; } ?>
 <?php require_once __DIR__ . '/visitor-tracker.php'; ?>
+<?php require_once __DIR__ . '/footer-links.php'; ?>
 <?php require_once 'modal.php'; ?>
 <!-- Footer - Minimalist Professional 2026 with Lazy Load -->
 <footer class="footer" id="contact" data-footer-lazy="">
@@ -126,39 +127,7 @@ if (!function_exists('footer_parse_tags')) {
                     <h4 class="footer__section-title"><?php echo htmlspecialchars($column_name); ?></h4>
                     <ul class="footer__links">
                         <?php foreach ($links as $link): ?>
-                            <?php
-                            $rawHref = trim((string)($link['link_url'] ?? ''));
-
-                            // Normalize footer links
-                            $rawHref = preg_replace('#^api/#i', '', $rawHref);
-                            $normalizedHref = $rawHref;
-
-                            $isAbsolute = preg_match('/^https?:\/\//i', $rawHref);
-                            $isRooted = preg_match('/^\//', $rawHref);
-                            $startsHash = strpos($rawHref, '#') === 0;
-                            $hasHashAnywhere = strpos($rawHref, '#') !== false;
-                            $hasPhp = (bool)preg_match('/\.php(\b|#|\?|$)/i', $rawHref);
-
-                            // Normalize special cases
-                            if ($rawHref !== '') {
-                                $lc = strtolower($rawHref);
-                                if ($lc === 'contact' || $lc === '#contact') {
-                                    $normalizedHref = $is_index_page ? '#contact' : 'contact-us.php#contact-info';
-                                } elseif ($lc === 'contact-us' || $lc === 'contact-us.php') {
-                                    $normalizedHref = 'contact-us.php' . ($hasHashAnywhere ? '' : '#contact-info');
-                                } elseif (!$startsHash && !$isAbsolute && !$isRooted && !$hasPhp && preg_match('/^[A-Za-z][A-Za-z0-9_\-:.]*$/', $rawHref)) {
-                                    $normalizedHref = $is_index_page ? ('#' . $rawHref) : ('index.php#' . $rawHref);
-                                } elseif ($normalizedHref === $rawHref && !$hasPhp && !$startsHash) {
-                                    // If URL has a hash, insert .php before the #, not at the end
-                                    if ($hasHashAnywhere) {
-                                        $parts = explode('#', $rawHref, 2);
-                                        $normalizedHref = $parts[0] . '.php#' . $parts[1];
-                                    } else {
-                                        $normalizedHref = $rawHref . '.php';
-                                    }
-                                }
-                            }
-                            ?>
+                            <?php $normalizedHref = footer_normalize_href((string)($link['link_url'] ?? ''), $is_index_page); ?>
                             <li><a href="<?php echo htmlspecialchars($normalizedHref); ?>"><?php echo htmlspecialchars($link['link_text']); ?></a></li>
                         <?php endforeach; ?>
                     </ul>
@@ -310,7 +279,29 @@ if (!function_exists('footer_parse_tags')) {
             [
                 'slug' => 'faqs',
                 'title' => 'Frequently Asked Questions',
-                'content' => "<strong>Q: Is parking available?</strong><br>A: Yes, we offer complimentary secure parking for all guests.\n\n<strong>Q: Do you offer airport transfers?</strong><br>A: Yes, airport transfers can be arranged at an additional cost. Please contact us in advance.\n\n<strong>Q: Is WiFi available?</strong><br>A: Complimentary high-speed WiFi is available throughout the hotel.\n\n<strong>Q: Are pets allowed?</strong><br>A: Unfortunately, we do not allow pets except for registered service animals.\n\n<strong>Q: What payment methods do you accept?</strong><br>A: We accept cash, credit cards (Visa, MasterCard, American Express), and mobile money.\n\n<strong>Q: Do you have a gym or fitness center?</strong><br>A: Yes, our fully equipped fitness center is available 24/7 for all guests.\n\n<strong>Q: Can I host events at the hotel?</strong><br>A: Yes, we have conference and event facilities. Please contact our events team for more information.\n\n<strong>Q: Is the hotel wheelchair accessible?</strong><br>A: Yes, we have wheelchair-accessible rooms and facilities. Please specify your requirements when booking."
+                'content' => "Q: Is parking available?
+A: Yes, we offer complimentary secure parking for all guests.
+
+Q: Do you offer airport transfers?
+A: Yes, airport transfers can be arranged at an additional cost. Please contact us in advance.
+
+Q: Is WiFi available?
+A: Complimentary high-speed WiFi is available throughout the hotel.
+
+Q: Are pets allowed?
+A: Unfortunately, we do not allow pets except for registered service animals.
+
+Q: What payment methods do you accept?
+A: We accept cash, credit cards (Visa, MasterCard, American Express), and mobile money.
+
+Q: Do you have a gym or fitness center?
+A: Yes, our fully equipped fitness center is available 24/7 for all guests.
+
+Q: Can I host events at the hotel?
+A: Yes, we have conference and event facilities. Please contact our events team for more information.
+
+Q: Is the hotel wheelchair accessible?
+A: Yes, we have wheelchair-accessible rooms and facilities. Please specify your requirements when booking."
             ]
         ];
 

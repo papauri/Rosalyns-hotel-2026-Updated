@@ -12,6 +12,55 @@ require_once '../includes/alert.php';
 require_once 'video-upload-handler.php';
 require_once '../includes/form-validation.php';
 
+/** Guests read the gallery from a 1-hour cache: every change here must drop it. */
+function galleryBustCache(): void
+{
+    if (function_exists('invalidateDataCaches')) {
+        invalidateDataCaches();
+    }
+}
+
+/**
+ * Switch the media-catalog rows that mirror one gallery item on or off (optionally one column only).
+ * The catalog keeps its own is_active, so a hidden or removed gallery item must switch it off too.
+ */
+function galleryCatalogSetActive(int $id, bool $active, ?string $column = null): void
+{
+    global $pdo;
+    if ($id <= 0 || !function_exists('mediaTablesAvailable') || !mediaTablesAvailable()) {
+        return;
+    }
+    $sql = "UPDATE managed_media_catalog c JOIN managed_media_links l ON l.media_catalog_id = c.id
+            SET c.is_active = ? WHERE l.source_table = 'hotel_gallery' AND l.source_record_id = ?";
+    $args = [$active ? 1 : 0, (string)$id];
+    if ($column !== null) {
+        $sql .= ' AND l.source_column = ?';
+        $args[] = $column;
+    }
+    $pdo->prepare($sql)->execute($args);
+}
+
+/** The gallery item is gone: remove its media links and the catalog rows only it used. */
+function galleryCatalogRemove(int $id): void
+{
+    global $pdo;
+    if ($id <= 0 || !function_exists('mediaTablesAvailable') || !mediaTablesAvailable()) {
+        return;
+    }
+    $sel = $pdo->prepare("SELECT DISTINCT media_catalog_id FROM managed_media_links WHERE source_table = 'hotel_gallery' AND source_record_id = ?");
+    $sel->execute([(string)$id]);
+    $catalogIds = array_map('intval', $sel->fetchAll(PDO::FETCH_COLUMN));
+    $pdo->prepare("DELETE FROM managed_media_links WHERE source_table = 'hotel_gallery' AND source_record_id = ?")->execute([(string)$id]);
+    $left = $pdo->prepare('SELECT COUNT(*) FROM managed_media_links WHERE media_catalog_id = ?');
+    $del = $pdo->prepare('DELETE FROM managed_media_catalog WHERE id = ?');
+    foreach ($catalogIds as $cid) {
+        $left->execute([$cid]);
+        if ((int)$left->fetchColumn() === 0) {
+            $del->execute([$cid]);
+        }
+    }
+}
+
 function syncHotelGalleryManagedMedia(array $item): void
 {
     if (!function_exists('upsertManagedMediaForSource')) {
@@ -20,6 +69,10 @@ function syncHotelGalleryManagedMedia(array $item): void
 
     $id = $item['id'] ?? null;
     if (!$id) {
+        return;
+    }
+    if (array_key_exists('is_active', $item) && !(int)$item['is_active']) {
+        galleryCatalogSetActive((int)$id, false); // a hidden item stays out of the media catalog
         return;
     }
 
@@ -53,6 +106,10 @@ function syncHotelGalleryManagedMedia(array $item): void
         'media_type' => 'video',
         'mime_type' => $item['video_type'] ?? null,
     ]);
+    // upsert only switches the link off when media is removed; the catalog row must follow
+    if (trim((string)($item['video_path'] ?? '')) === '') {
+        galleryCatalogSetActive((int)$id, false, 'video_path');
+    }
 }
 
 // Note: $user and $current_page are already set in admin-init.php
@@ -117,14 +174,18 @@ function galleryFileSubmitted(string $key): bool
     return isset($_FILES[$key]) && (int)($_FILES[$key]['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
 }
 
-/** Remove a local gallery file only when it lives under images/ or videos/ (never traverse). */
+/**
+ * Remove a local file only when it is one this screen stored itself (images/hotel_gallery/ or
+ * videos/gallery/, plain file name). A site path typed into the URL box (a room photo, the logo)
+ * or a Media Portal upload is never deleted from here.
+ */
 function galleryUnlinkLocal(?string $rel): void
 {
     $rel = trim((string)$rel);
     if ($rel === '' || preg_match('#^https?://#i', $rel) || strpos($rel, '..') !== false) {
         return;
     }
-    if (!preg_match('#^(images|videos)/#', $rel)) {
+    if (!preg_match('#^(images/hotel_gallery|videos/gallery)/[A-Za-z0-9._-]+$#', $rel)) {
         return;
     }
     $path = __DIR__ . '/../' . $rel;
@@ -136,12 +197,20 @@ function galleryUnlinkLocal(?string $rel): void
 // Handle POST actions
 $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 $savedId = null;
+$gUploaded = []; // files this request stored; removed again if the save does not go through
+
+/** JSON reply for the AJAX calls on this screen. */
+function galleryJsonExit(array $payload): void
+{
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($payload);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['success' => false, 'message' => 'Security token invalid.']);
-            exit;
+            galleryJsonExit(['success' => false, 'message' => 'Security token invalid.']);
         }
         header('Location: ' . basename($_SERVER['PHP_SELF']));
         exit;
@@ -155,41 +224,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'add') {
-            $imagePath = uploadGalleryImage($_FILES['image'] ?? null);
-            $imageUrl = $imagePath ?: galleryCleanImageUrl($_POST['image_url_external'] ?? '');
-
-            // Only obvious duplicates: the same title in the same category.
+            // Check everything first so a rejected save never leaves an uploaded file behind.
             $galDup = ($_POST['title'] !== '' && mb_strlen($_POST['title']) <= 255)
                 ? rh_find_duplicate($pdo, 'hotel_gallery', 'title', $_POST['title'], ['category' => $_POST['category']])
                 : null;
+            $addError = '';
+            if ($_POST['title'] === '') {
+                $addError = 'Title is required.';
+            } elseif (mb_strlen($_POST['title']) > 255) {
+                $addError = 'Title is too long (max 255 characters).';
+            } elseif (mb_strlen($_POST['category']) > 100) {
+                $addError = 'Category is too long (max 100 characters).';
+            } elseif ($galDup) {
+                $addError = 'There is already a gallery item called "' . $galDup['value'] . '" in the "' . $_POST['category'] . '" category. Edit that one or use a different title.';
+            }
 
-            if ($_POST['title'] === '' || mb_strlen($_POST['title']) > 255 || mb_strlen($_POST['category']) > 100 || $galDup) {
-                $imageUrl = '';
-                if ($_POST['title'] === '') {
-                    $error = 'Title is required.';
-                } elseif (mb_strlen($_POST['title']) > 255) {
-                    $error = 'Title is too long (max 255 characters).';
-                } elseif (mb_strlen($_POST['category']) > 100) {
-                    $error = 'Category is too long (max 100 characters).';
-                } else {
-                    $error = 'There is already a gallery item called "' . $galDup['value'] . '" in the "' . $_POST['category'] . '" category. Edit that one or use a different title.';
-                }
+            $imageUrl = '';
+            if ($addError === '') {
+                $imagePath = uploadGalleryImage($_FILES['image'] ?? null);
                 if ($imagePath) {
-                    galleryUnlinkLocal($imagePath);
+                    $gUploaded[] = $imagePath;
                 }
-                if ($isAjax) {
-                    header('Content-Type: application/json; charset=utf-8');
-                    echo json_encode(['success' => false, 'message' => $error]);
-                    exit;
+                $imageUrl = $imagePath ?: galleryCleanImageUrl($_POST['image_url_external'] ?? '');
+                if (empty($imageUrl)) {
+                    $addError = galleryFileSubmitted('image')
+                        ? 'The image was rejected: use a JPG, PNG, WebP or GIF under 8 MB.'
+                        : 'Please provide an image (upload or URL).';
                 }
-            } elseif (empty($imageUrl)) {
-                $error = galleryFileSubmitted('image')
-                    ? 'The image was rejected: use a JPG, PNG, WebP or GIF under 8 MB.'
-                    : 'Please provide an image (upload or URL).';
+            }
+
+            if ($addError !== '') {
+                $error = $addError;
                 if ($isAjax) {
-                    header('Content-Type: application/json; charset=utf-8');
-                    echo json_encode(['success' => false, 'message' => $error]);
-                    exit;
+                    galleryJsonExit(['success' => false, 'message' => $error]);
                 }
             } else {
                 // Handle video
@@ -201,59 +268,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $videoUpload = uploadVideo($_FILES['video'] ?? null, 'gallery');
                     $videoPath = $videoUpload['path'] ?? null;
                     $videoType = $videoUpload['type'] ?? null;
+                    if ($videoPath) {
+                        $gUploaded[] = $videoPath;
+                    }
                 }
 
+                $newOrder = (int)($_POST['display_order'] ?? 0);
                 $stmt = $pdo->prepare("
                     INSERT INTO hotel_gallery (title, description, image_url, video_path, video_type, category, is_active, display_order)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $newId = 0;
-                try {
-                    rh_with_create_lock($pdo, 'hotel_gallery', function () use ($pdo, $stmt, $imageUrl, $videoPath, $videoType, &$newId) {
-                        if ($dupNow = rh_find_duplicate($pdo, 'hotel_gallery', 'title', (string)$_POST['title'], ['category' => $_POST['category']])) {
-                            throw new RuntimeException('There is already a gallery item called "' . $dupNow['value'] . '" in the "' . $_POST['category'] . '" category.');
-                        }
-                        $stmt->execute([
-                            (string)$_POST['title'],
-                            $_POST['description'] ?? '',
-                            $imageUrl,
-                            $videoPath,
-                            $videoType,
-                            $_POST['category'] ?? 'general',
-                            1,
-                            (int)($_POST['display_order'] ?? 0)
-                        ]);
-                        $newId = (int)$pdo->lastInsertId();
-                    });
-                } catch (RuntimeException $lockEx) {
-                    // do not leave an orphaned upload behind
-                    if ($imagePath) {
-                        galleryUnlinkLocal($imagePath);
+                rh_with_create_lock($pdo, 'hotel_gallery', function () use ($pdo, $stmt, $imageUrl, $videoPath, $videoType, $newOrder, &$newId) {
+                    if ($dupNow = rh_find_duplicate($pdo, 'hotel_gallery', 'title', (string)$_POST['title'], ['category' => $_POST['category']])) {
+                        throw new RuntimeException('There is already a gallery item called "' . $dupNow['value'] . '" in the "' . $_POST['category'] . '" category.');
                     }
-                    throw $lockEx;
-                }
+                    $stmt->execute([
+                        (string)$_POST['title'],
+                        $_POST['description'] ?? '',
+                        $imageUrl,
+                        $videoPath,
+                        $videoType,
+                        $_POST['category'] ?? 'general',
+                        1,
+                        $newOrder
+                    ]);
+                    $newId = (int)$pdo->lastInsertId();
+                });
                 if ($newId > 0) {
                     syncHotelGalleryManagedMedia([
                         'id' => $newId,
                         'title' => $_POST['title'] ?? null,
                         'description' => $_POST['description'] ?? null,
-                        'display_order' => $_POST['display_order'] ?? 0,
+                        'display_order' => $newOrder,
                         'image_url' => $imageUrl,
                         'video_path' => $videoPath,
                         'video_type' => $videoType,
                     ]);
                 }
+                galleryBustCache();
+                $gUploaded = [];
 
                 $message = 'Gallery item added successfully!';
                 $savedId = $newId;
                 if ($isAjax) {
-                    header('Content-Type: application/json; charset=utf-8');
-                    echo json_encode(['success' => true, 'message' => $message, 'saved_id' => $savedId]);
-                    exit;
+                    galleryJsonExit(['success' => true, 'message' => $message, 'saved_id' => $savedId]);
                 }
             }
         } elseif ($action === 'update') {
+            // Validate before anything is uploaded.
+            $itemId = (int)($_POST['id'] ?? 0);
+            if ($_POST['title'] === '' || $itemId <= 0) {
+                throw new RuntimeException('Title and a valid item are required.');
+            }
+            if (mb_strlen($_POST['title']) > 255 || mb_strlen($_POST['category']) > 100) {
+                throw new RuntimeException('Title (max 255) or category (max 100) is too long.');
+            }
+            if ($galDup = rh_find_duplicate($pdo, 'hotel_gallery', 'title', $_POST['title'], ['category' => $_POST['category']], $itemId)) {
+                throw new RuntimeException('There is already a gallery item called "' . $galDup['value'] . '" in the "' . $_POST['category'] . '" category.');
+            }
+            $curSt = $pdo->prepare('SELECT image_url FROM hotel_gallery WHERE id = ?');
+            $curSt->execute([$itemId]);
+            $curRow = $curSt->fetch(PDO::FETCH_ASSOC);
+            if (!$curRow) {
+                throw new RuntimeException('That gallery item no longer exists.');
+            }
+
             $imagePath = uploadGalleryImage($_FILES['image'] ?? null);
+            if ($imagePath) {
+                $gUploaded[] = $imagePath;
+            }
+            if (!$imagePath && galleryFileSubmitted('image')) {
+                throw new RuntimeException('The image was rejected: use a JPG, PNG, WebP or GIF under 8 MB.');
+            }
 
             // Handle video
             $videoUrl = processVideoUrl($_POST['video_url'] ?? '');
@@ -264,20 +351,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $videoUpload = uploadVideo($_FILES['video'] ?? null, 'gallery');
                 $videoPath = $videoUpload['path'] ?? null;
                 $videoType = $videoUpload['type'] ?? null;
+                if ($videoPath) {
+                    $gUploaded[] = $videoPath;
+                }
             }
 
-            if ($_POST['title'] === '' || (int)($_POST['id'] ?? 0) <= 0) {
-                throw new RuntimeException('Title and a valid item are required.');
-            }
-            if (mb_strlen($_POST['title']) > 255 || mb_strlen($_POST['category']) > 100) {
-                throw new RuntimeException('Title (max 255) or category (max 100) is too long.');
-            }
-            if ($galDup = rh_find_duplicate($pdo, 'hotel_gallery', 'title', $_POST['title'], ['category' => $_POST['category']], (int)$_POST['id'])) {
-                throw new RuntimeException('There is already a gallery item called "' . $galDup['value'] . '" in the "' . $_POST['category'] . '" category.');
-            }
-            if (!$imagePath && galleryFileSubmitted('image')) {
-                throw new RuntimeException('The image was rejected: use a JPG, PNG, WebP or GIF under 8 MB.');
-            }
             $updateFields = ['title = ?', 'description = ?', 'category = ?', 'display_order = ?'];
             $updateValues = [
                 trim((string)$_POST['title']),
@@ -289,9 +367,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $oldImageToRemove = null;
             $externalImage = galleryCleanImageUrl($_POST['image_url_external'] ?? '');
             if ($imagePath || $externalImage !== '') {
-                $oldImg = $pdo->prepare('SELECT image_url FROM hotel_gallery WHERE id = ?');
-                $oldImg->execute([(int)$_POST['id']]);
-                $oldImageToRemove = (string)$oldImg->fetchColumn();
+                $oldImageToRemove = (string)$curRow['image_url'];
                 $updateFields[] = 'image_url = ?';
                 $updateValues[] = $imagePath ?: $externalImage;
                 if ($oldImageToRemove === ($imagePath ?: $externalImage)) {
@@ -314,71 +390,135 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $updateValues[] = null;
             }
 
-            $updateValues[] = (int)$_POST['id'];
+            $updateValues[] = $itemId;
 
             $sql = "UPDATE hotel_gallery SET " . implode(', ', $updateFields) . " WHERE id = ?";
             $stmt = $pdo->prepare($sql);
             $stmt->execute($updateValues);
+            $gUploaded = [];
             if ($oldImageToRemove) {
                 galleryUnlinkLocal($oldImageToRemove); // replaced image no longer referenced
             }
 
-            $itemId = (int)($_POST['id'] ?? 0);
-            if ($itemId > 0) {
-                $mediaStmt = $pdo->prepare("SELECT id, title, description, display_order, image_url, video_path, video_type FROM hotel_gallery WHERE id = ? LIMIT 1");
-                $mediaStmt->execute([$itemId]);
-                $mediaItem = $mediaStmt->fetch(PDO::FETCH_ASSOC);
-                if ($mediaItem) {
-                    syncHotelGalleryManagedMedia($mediaItem);
-                }
+            $mediaStmt = $pdo->prepare("SELECT id, title, description, display_order, image_url, video_path, video_type, is_active FROM hotel_gallery WHERE id = ? LIMIT 1");
+            $mediaStmt->execute([$itemId]);
+            $mediaItem = $mediaStmt->fetch(PDO::FETCH_ASSOC);
+            if ($mediaItem) {
+                syncHotelGalleryManagedMedia($mediaItem);
             }
+            galleryBustCache();
 
             $message = 'Gallery item updated successfully!';
-            $savedId = (int)($_POST['id'] ?? 0);
+            $savedId = $itemId;
             if ($isAjax) {
-                header('Content-Type: application/json; charset=utf-8');
-                echo json_encode(['success' => true, 'message' => $message, 'saved_id' => $savedId]);
-                exit;
+                galleryJsonExit(['success' => true, 'message' => $message, 'saved_id' => $savedId]);
             }
         } elseif ($action === 'delete') {
             $itemId = (int)($_POST['id'] ?? 0);
-            if ($itemId > 0 && function_exists('upsertManagedMediaForSource')) {
-                upsertManagedMediaForSource('hotel_gallery', $itemId, 'image_url', null, ['source_context' => '']);
-                upsertManagedMediaForSource('hotel_gallery', $itemId, 'video_path', null, ['source_context' => '']);
-            }
 
-            // Get image path before deleting
+            // Get the files before deleting
             $stmt = $pdo->prepare("SELECT image_url, video_path FROM hotel_gallery WHERE id = ?");
             $stmt->execute([$itemId]);
             $item = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            $stmt = $pdo->prepare("DELETE FROM hotel_gallery WHERE id = ?");
-            $stmt->execute([$itemId]);
+            // Row, media links and catalog rows go together or not at all.
+            $pdo->beginTransaction();
+            try {
+                galleryCatalogRemove($itemId);
+                $pdo->prepare("DELETE FROM hotel_gallery WHERE id = ?")->execute([$itemId]);
+                $pdo->commit();
+            } catch (Throwable $txe) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $txe;
+            }
 
-            // Delete local files (only inside images/ or videos/)
+            // Only files this screen stored are deleted (see galleryUnlinkLocal)
             if ($item) {
                 galleryUnlinkLocal($item['image_url']);
                 galleryUnlinkLocal($item['video_path']);
             }
+            galleryBustCache();
             $message = 'Gallery item deleted successfully!';
         } elseif ($action === 'toggle_active') {
-            $stmt = $pdo->prepare("UPDATE hotel_gallery SET is_active = NOT is_active WHERE id = ?");
-            $stmt->execute([(int)($_POST['id'] ?? 0)]);
+            $itemId = (int)($_POST['id'] ?? 0);
+            $curSt = $pdo->prepare('SELECT is_active FROM hotel_gallery WHERE id = ?');
+            $curSt->execute([$itemId]);
+            $curActive = $curSt->fetchColumn();
+            if ($curActive === false) {
+                throw new RuntimeException('That gallery item no longer exists.');
+            }
+            $pdo->prepare("UPDATE hotel_gallery SET is_active = ? WHERE id = ?")->execute([(int)$curActive ? 0 : 1, $itemId]);
+            $rowSt = $pdo->prepare("SELECT id, title, description, display_order, image_url, video_path, video_type, is_active FROM hotel_gallery WHERE id = ? LIMIT 1");
+            $rowSt->execute([$itemId]);
+            if ($row = $rowSt->fetch(PDO::FETCH_ASSOC)) {
+                syncHotelGalleryManagedMedia($row); // hidden: catalog rows off; shown again: back on
+            }
+            galleryBustCache();
             $message = 'Gallery item status updated!';
+        } elseif ($action === 'reorder') {
+            // Drag-and-drop / move up-down: the full list of ids in the new order.
+            $posted = json_decode((string)($_POST['order'] ?? '[]'), true);
+            if (!is_array($posted) || !$posted) {
+                throw new RuntimeException('No order received.');
+            }
+            $existing = array_map('intval', $pdo->query('SELECT id FROM hotel_gallery ORDER BY display_order ASC, id ASC')->fetchAll(PDO::FETCH_COLUMN));
+            $order = [];
+            foreach ($posted as $pid) {
+                $pid = (int)$pid;
+                if ($pid > 0 && in_array($pid, $existing, true) && !in_array($pid, $order, true)) {
+                    $order[] = $pid;
+                }
+            }
+            if (!$order) {
+                throw new RuntimeException('Those gallery items no longer exist. Reload the page.');
+            }
+            foreach ($existing as $eid) { // items added meanwhile keep their place at the end
+                if (!in_array($eid, $order, true)) {
+                    $order[] = $eid;
+                }
+            }
+            $pdo->beginTransaction();
+            try {
+                $upd = $pdo->prepare('UPDATE hotel_gallery SET display_order = ? WHERE id = ?');
+                $updMedia = (function_exists('mediaTablesAvailable') && mediaTablesAvailable())
+                    ? $pdo->prepare("UPDATE managed_media_catalog c JOIN managed_media_links l ON l.media_catalog_id = c.id SET c.display_order = ?, l.display_order = ? WHERE l.source_table = 'hotel_gallery' AND l.source_record_id = ?")
+                    : null;
+                foreach ($order as $i => $oid) {
+                    $pos = ($i + 1) * 10;
+                    $upd->execute([$pos, $oid]);
+                    if ($updMedia) {
+                        $updMedia->execute([$pos, $pos, (string)$oid]);
+                    }
+                }
+                $pdo->commit();
+            } catch (Throwable $txe) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $txe;
+            }
+            galleryBustCache();
+            $message = 'Gallery order saved.';
+            if ($isAjax) {
+                galleryJsonExit(['success' => true, 'message' => $message, 'order' => $order]);
+            }
         }
     } catch (Throwable $e) {
+        foreach ($gUploaded as $upl) { // a save that failed must not leave its upload behind
+            galleryUnlinkLocal($upl);
+        }
         $error = 'Error: ' . $e->getMessage();
         if ($isAjax) {
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['success' => false, 'message' => $error]);
-            exit;
+            galleryJsonExit(['success' => false, 'message' => $error]);
         }
     }
 }
 
 // Fetch all gallery items
 try {
-    $stmt = $pdo->query("SELECT * FROM hotel_gallery ORDER BY display_order ASC, created_at DESC");
+    $stmt = $pdo->query("SELECT * FROM hotel_gallery ORDER BY display_order ASC, id ASC");
     $gallery_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (!empty($gallery_items) && function_exists('applyManagedMediaOverrides')) {
@@ -449,7 +589,10 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
             <?php showAlert($error, 'error'); ?>
         <?php endif; ?>
 
-        <div id="galleryPageFeedback" class="admin-modal-feedback" hidden></div>
+        <div id="galleryPageFeedback" class="admin-modal-feedback" role="status" aria-live="polite" hidden></div>
+        <?php if (count($gallery_items) > 1): ?>
+            <p class="gallery-reorder-hint"><i class="fas fa-grip-vertical"></i> Drag a photo by its handle, or use the up and down buttons, to change the order guests see. The order saves as soon as you let go.</p>
+        <?php endif; ?>
 
         <!-- Category Filter -->
         <div class="filter-bar">
@@ -465,7 +608,7 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
         <?php if (!empty($gallery_items)): ?>
             <div class="gallery-grid" id="galleryGrid">
                 <?php foreach ($gallery_items as $item): ?>
-                    <div class="gallery-card" data-category="<?php echo htmlspecialchars($item['category']); ?>">
+                    <div class="gallery-card" data-id="<?php echo (int)$item['id']; ?>" data-category="<?php echo htmlspecialchars($item['category']); ?>">
                         <?php
                         $imgSrc = $item['image_url'];
                         if (!preg_match('#^https?://#i', $imgSrc)) {
@@ -496,6 +639,11 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
                             </div>
 
                             <div class="gallery-card-actions">
+                                <div class="gallery-move" role="group" aria-label="Change position">
+                                    <span class="gallery-drag-handle" title="Drag to change the order"><i class="fas fa-grip-vertical" aria-hidden="true"></i></span>
+                                    <button class="gallery-move-btn" type="button" data-move="-1" title="Move up" aria-label="Move up: <?php echo htmlspecialchars($item['title']); ?>"><i class="fas fa-arrow-up" aria-hidden="true"></i></button>
+                                    <button class="gallery-move-btn" type="button" data-move="1" title="Move down" aria-label="Move down: <?php echo htmlspecialchars($item['title']); ?>"><i class="fas fa-arrow-down" aria-hidden="true"></i></button>
+                                </div>
                                 <button class="btn btn-primary btn-action btn-edit" type="button" onclick='openEditModal(<?php echo htmlspecialchars(json_encode($item), ENT_QUOTES, "UTF-8"); ?>)'>
                                     <i class="fas fa-edit"></i> Edit
                                 </button>
@@ -846,6 +994,227 @@ if ($gallery_css_version === '' || $gallery_css_version === '0') {
                 }
             });
         }
+
+        // ── Reorder: drag (mouse), pointer drag (touch / pen) and Move up / Move down buttons ──
+        (function() {
+            const grid = document.getElementById('galleryGrid');
+            if (!grid || grid.dataset.reorderReady) {
+                return;
+            }
+            grid.dataset.reorderReady = '1';
+            let dragCard = null;
+            let startOrder = '';
+            let touchDrag = false;
+
+            function allCards() {
+                return Array.prototype.slice.call(grid.querySelectorAll('.gallery-card'));
+            }
+
+            function currentOrder() {
+                return allCards().map(function(c) {
+                    return c.dataset.id;
+                }).join(',');
+            }
+
+            function note(isError, text) {
+                const fb = document.getElementById('galleryPageFeedback');
+                if (!fb) {
+                    return;
+                }
+                fb.hidden = false;
+                fb.className = 'admin-modal-feedback ' + (isError ? 'admin-modal-feedback--error' : 'admin-modal-feedback--success') + ' visible';
+                fb.textContent = text;
+                clearTimeout(note.timer);
+                if (!isError) {
+                    note.timer = setTimeout(function() {
+                        fb.hidden = true;
+                    }, 2500);
+                }
+            }
+
+            function saveOrder() {
+                const order = allCards().map(function(c) {
+                    return c.dataset.id;
+                });
+                const fd = new FormData();
+                fd.append('action', 'reorder');
+                fd.append('order', JSON.stringify(order));
+                fd.append('csrf_token', GALLERY_CSRF_TOKEN || '');
+                fetch(window.location.pathname, {
+                        method: 'POST',
+                        body: fd,
+                        credentials: 'same-origin',
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    })
+                    .then(function(r) {
+                        if (!r.ok) {
+                            throw new Error('HTTP ' + r.status);
+                        }
+                        return r.json();
+                    })
+                    .then(function(res) {
+                        if (!res.success) {
+                            throw new Error(res.message || 'Could not save the order.');
+                        }
+                        allCards().forEach(function(c, i) {
+                            const label = c.querySelector('.gallery-order');
+                            if (label) {
+                                label.textContent = 'Order: ' + ((i + 1) * 10);
+                            }
+                        });
+                        note(false, 'Gallery order saved.');
+                    })
+                    .catch(function(err) {
+                        note(true, (err && err.message ? err.message : 'Could not save the order.') + ' The page will reload.');
+                        setTimeout(function() {
+                            window.location.reload();
+                        }, 1500);
+                    });
+            }
+
+            function placeNear(target, clientX, clientY) {
+                if (!dragCard || !target || target === dragCard) {
+                    return;
+                }
+                const r = target.getBoundingClientRect();
+                const before = clientY < r.top + r.height * 0.25 ||
+                    (clientY <= r.bottom - r.height * 0.25 && clientX < r.left + r.width / 2);
+                const ref = before ? target : target.nextElementSibling;
+                if (ref !== dragCard.nextElementSibling || before) {
+                    grid.insertBefore(dragCard, ref);
+                }
+            }
+
+            function finishDrag() {
+                if (!dragCard) {
+                    return;
+                }
+                dragCard.classList.remove('is-dragging');
+                dragCard.removeAttribute('draggable');
+                dragCard = null;
+                touchDrag = false;
+                if (currentOrder() !== startOrder) {
+                    saveOrder();
+                }
+            }
+
+            // Mouse: native HTML5 drag, started only from the handle
+            grid.addEventListener('mousedown', function(e) {
+                const handle = e.target.closest('.gallery-drag-handle');
+                const card = handle ? handle.closest('.gallery-card') : null;
+                if (card) {
+                    card.setAttribute('draggable', 'true');
+                }
+            });
+            document.addEventListener('mouseup', function() {
+                if (!dragCard) {
+                    allCards().forEach(function(c) {
+                        c.removeAttribute('draggable');
+                    });
+                }
+            });
+            grid.addEventListener('dragstart', function(e) {
+                const card = e.target.closest ? e.target.closest('.gallery-card') : null;
+                if (!card || card.getAttribute('draggable') !== 'true') {
+                    return;
+                }
+                dragCard = card;
+                startOrder = currentOrder();
+                e.dataTransfer.effectAllowed = 'move';
+                try {
+                    e.dataTransfer.setData('text/plain', card.dataset.id);
+                } catch (err) {}
+                setTimeout(function() {
+                    if (dragCard) {
+                        dragCard.classList.add('is-dragging');
+                    }
+                }, 0);
+            });
+            grid.addEventListener('dragover', function(e) {
+                if (!dragCard) {
+                    return;
+                }
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                placeNear(e.target.closest('.gallery-card'), e.clientX, e.clientY);
+            });
+            grid.addEventListener('drop', function(e) {
+                if (dragCard) {
+                    e.preventDefault();
+                }
+            });
+            grid.addEventListener('dragend', finishDrag);
+
+            // Touch and pen: pointer events on the handle
+            grid.addEventListener('pointerdown', function(e) {
+                if (e.pointerType === 'mouse') {
+                    return;
+                }
+                const handle = e.target.closest('.gallery-drag-handle');
+                const card = handle ? handle.closest('.gallery-card') : null;
+                if (!card) {
+                    return;
+                }
+                e.preventDefault();
+                dragCard = card;
+                touchDrag = true;
+                startOrder = currentOrder();
+                card.classList.add('is-dragging');
+                try {
+                    handle.setPointerCapture(e.pointerId);
+                } catch (err) {}
+            });
+            grid.addEventListener('pointermove', function(e) {
+                if (!touchDrag || !dragCard) {
+                    return;
+                }
+                e.preventDefault();
+                const under = document.elementFromPoint(e.clientX, e.clientY);
+                placeNear(under ? under.closest('.gallery-card') : null, e.clientX, e.clientY);
+                if (e.clientY < 70) {
+                    window.scrollBy(0, -14);
+                } else if (e.clientY > window.innerHeight - 70) {
+                    window.scrollBy(0, 14);
+                }
+            });
+            grid.addEventListener('pointerup', function() {
+                if (touchDrag) {
+                    finishDrag();
+                }
+            });
+            grid.addEventListener('pointercancel', function() {
+                if (touchDrag) {
+                    finishDrag();
+                }
+            });
+
+            // Keyboard / button fallback
+            grid.addEventListener('click', function(e) {
+                const btn = e.target.closest('.gallery-move-btn');
+                if (!btn) {
+                    return;
+                }
+                const card = btn.closest('.gallery-card');
+                const dir = parseInt(btn.dataset.move, 10);
+                const shown = allCards().filter(function(c) {
+                    return c.style.display !== 'none';
+                });
+                const idx = shown.indexOf(card);
+                const other = shown[idx + dir];
+                if (!other) {
+                    return;
+                }
+                if (dir < 0) {
+                    grid.insertBefore(card, other);
+                } else {
+                    grid.insertBefore(card, other.nextElementSibling);
+                }
+                btn.focus();
+                saveOrder();
+            });
+        })();
 
         function filterGallery(category, btn) {
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));

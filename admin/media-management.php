@@ -522,14 +522,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $currentStmt->execute([$itemId]);
                 $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
 
-                mm_propagate_media_to_sources($pdo, $itemId, null, true);
+                // Clearing the linked pages and removing the item happen together or not at all.
+                $pdo->beginTransaction();
+                try {
+                    mm_propagate_media_to_sources($pdo, $itemId, null, true);
+                    $stmt = $pdo->prepare("DELETE FROM managed_media_catalog WHERE id = ?");
+                    $stmt->execute([$itemId]);
+                    $pdo->commit();
+                } catch (Throwable $txe) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $txe;
+                }
 
                 if (function_exists('invalidateDataCaches')) {
                     invalidateDataCaches();
                 }
-
-                $stmt = $pdo->prepare("DELETE FROM managed_media_catalog WHERE id = ?");
-                $stmt->execute([$itemId]);
 
                 if ($current && ($current['source_type'] ?? '') === 'upload' && !empty($current['media_url'])
                     && preg_match('#^(images|videos)/managed/[A-Za-z0-9._-]+$#', (string)$current['media_url'])) {
@@ -551,7 +560,7 @@ $mediaItems = [];
 try {
     mm_sync_page_hero_media($pdo);
     mm_sync_about_us_media($pdo);
-    $stmt = $pdo->query("SELECT c.*, GROUP_CONCAT(CONCAT(l.source_table, ':', l.source_column, ':', l.source_record_id, IF(l.source_context IS NULL OR l.source_context = '', '', CONCAT(':', l.source_context))) ORDER BY l.source_table, l.source_column, l.source_record_id SEPARATOR ' | ') AS source_links FROM managed_media_catalog c LEFT JOIN managed_media_links l ON l.media_catalog_id = c.id WHERE c.is_active = 1 AND c.media_url IS NOT NULL AND TRIM(c.media_url) <> '' GROUP BY c.id ORDER BY COALESCE(c.page_slug, ''), COALESCE(c.section_key, ''), c.display_order ASC, c.id ASC");
+    $stmt = $pdo->query("SELECT c.*, GROUP_CONCAT(CONCAT(l.source_table, ':', l.source_column, ':', l.source_record_id, IF(l.source_context IS NULL OR l.source_context = '', '', CONCAT(':', l.source_context))) ORDER BY l.source_table, l.source_column, l.source_record_id SEPARATOR ' | ') AS source_links FROM managed_media_catalog c LEFT JOIN managed_media_links l ON l.media_catalog_id = c.id WHERE c.media_url IS NOT NULL AND TRIM(c.media_url) <> '' GROUP BY c.id ORDER BY COALESCE(c.page_slug, ''), COALESCE(c.section_key, ''), c.display_order ASC, c.id ASC");
     $mediaItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = 'Unable to load unified media catalog. Run Database/migrations/011_unified_media_catalog.sql first. ' . $e->getMessage();
@@ -735,11 +744,10 @@ if ($media_css_version === '' || $media_css_version === '0') {
         $displayItems = array_values(array_filter($mediaItems, static function ($item) {
             $itemId = (int)($item['id'] ?? 0);
             $mediaUrl = trim((string)($item['media_url'] ?? ''));
-            $isActive = (int)($item['is_active'] ?? 0) === 1;
 
             // Only show media whose owning page/module is active for this preset —
             // a gym install shouldn't see restaurant or conference imagery.
-            return $itemId > 0 && $mediaUrl !== '' && $isActive && mm_item_visible_for_preset($item);
+            return $itemId > 0 && $mediaUrl !== '' && mm_item_visible_for_preset($item);
         }));
 
         $allSlugs = array_filter(array_unique(array_map(static function ($item) {
@@ -748,9 +756,17 @@ if ($media_css_version === '' || $media_css_version === '0') {
         sort($allSlugs);
         $filterSlug = $_GET['filter_slug'] ?? '';
         $filterType = $_GET['filter_type'] ?? '';
-        $filteredItems = array_values(array_filter($displayItems, static function ($item) use ($filterSlug, $filterType) {
+        // Switched-off items are kept, not lost: they show under Inactive (or All) so they can be turned back on.
+        $filterStatus = in_array($_GET['filter_status'] ?? '', ['inactive', 'all'], true) ? $_GET['filter_status'] : 'active';
+        $inactiveCount = count(array_filter($displayItems, static function ($item) {
+            return (int)($item['is_active'] ?? 0) !== 1;
+        }));
+        $filteredItems = array_values(array_filter($displayItems, static function ($item) use ($filterSlug, $filterType, $filterStatus) {
             if ($filterSlug !== '' && ($item['page_slug'] ?? '') !== $filterSlug) return false;
             if ($filterType !== '' && ($item['media_type'] ?? '') !== $filterType) return false;
+            $on = (int)($item['is_active'] ?? 0) === 1;
+            if ($filterStatus === 'active' && !$on) return false;
+            if ($filterStatus === 'inactive' && $on) return false;
             return true;
         }));
 
@@ -811,7 +827,12 @@ if ($media_css_version === '' || $media_css_version === '0') {
                     <option value="image" <?= $filterType === 'image' ? 'selected' : '' ?>>Images</option>
                     <option value="video" <?= $filterType === 'video' ? 'selected' : '' ?>>Videos</option>
                 </select>
-                <?php if ($filterSlug !== '' || $filterType !== ''): ?>
+                <select name="filter_status" onchange="this.form.submit()" class="mm-input" aria-label="Show active or inactive items" style="width:auto;min-width:120px;padding:7px 10px;">
+                    <option value="">Active</option>
+                    <option value="inactive" <?= $filterStatus === 'inactive' ? 'selected' : '' ?>>Inactive (<?= (int)$inactiveCount ?>)</option>
+                    <option value="all" <?= $filterStatus === 'all' ? 'selected' : '' ?>>Active and inactive</option>
+                </select>
+                <?php if ($filterSlug !== '' || $filterType !== '' || $filterStatus !== 'active'): ?>
                     <a href="media-management.php" class="btn-secondary" style="padding:7px 14px;font-size:13px;text-decoration:none;">
                         <i class="fas fa-times"></i> Clear
                     </a>
@@ -829,7 +850,7 @@ if ($media_css_version === '' || $media_css_version === '0') {
                 <?php if (!empty($error)): ?>
                     <p>Media catalog table not found. Run the migration first.</p>
                 <?php else: ?>
-                    <p>No media items found<?= ($filterSlug || $filterType) ? ' for this filter' : '' ?>.</p>
+                    <p>No media items found<?= ($filterSlug || $filterType || $filterStatus !== 'active') ? ' for this filter' : '' ?>.</p>
                 <?php endif; ?>
             </div>
         <?php else: ?>
@@ -875,6 +896,9 @@ if ($media_css_version === '' || $media_css_version === '0') {
                         <div class="mm-card__body">
                             <div class="mm-card__title"><?= htmlspecialchars($itemTitle) ?></div>
                             <div class="mm-card__meta">
+                                <?php if ((int)($item['is_active'] ?? 0) !== 1): ?>
+                                    <span class="mm-tag mm-tag--inactive">Inactive</span>
+                                <?php endif; ?>
                                 <?php foreach ($tags as $tag): ?>
                                     <span class="mm-tag"><?= htmlspecialchars($tag) ?></span>
                                 <?php endforeach; ?>
@@ -996,6 +1020,7 @@ if ($media_css_version === '' || $media_css_version === '0') {
                                     <label class="mm-edit-active-toggle">
                                         <input type="checkbox" id="mm-edit-is-active" name="is_active" value="1"> Active
                                     </label>
+                                    <small style="display:block;color:#888;margin-top:4px;">Untick to take this item out of its placement group. A page that is linked to a record keeps showing the file until you replace or delete it. Inactive items stay listed under the Inactive filter.</small>
                                 </div>
                             </div>
                         </div>
