@@ -53,7 +53,7 @@
   <ul>
     <li><strong>Add New User</strong> button — opens the form for a new staff member.</li>
     <li>Role filter buttons (<strong>All</strong>, then one per role) — show only the people with that role.</li>
-    <li>The staff table — name, username, email, role, status and last activity. Each row has buttons:
+    <li>The staff table — name, email (with <strong>Username: ...</strong> written under it), role, status and last activity. Each row has buttons:
       <ul>
         <li><strong>Edit</strong> — name, email, role, active/inactive, new password.</li>
         <li><strong>Permissions</strong> — tick exactly which pages and actions this person may use. Not shown for Administrators (they always have everything).</li>
@@ -90,8 +90,8 @@
   <ol class="steps">
     <li>Click <strong>Add New User</strong>.</li>
     <li><strong>Full Name</strong> — e.g. <em>Jane Banda</em>. This appears in the invitation and on records they create.</li>
-    <li><strong>Username</strong> — what they type to sign in, e.g. <em>jane.b</em>. At least 3 characters: letters, numbers, dots, dashes and underscores only, no spaces. It must not already be used (capitals don't matter: <em>Jane.B</em> and <em>jane.b</em> are the same) and it cannot be changed later.</li>
-    <li><strong>Email</strong> — their own working email address. The invitation is sent here and password resets go here.</li>
+    <li><strong>Username</strong> — one of the two things they can type to sign in (the other is their email), e.g. <em>jane.b</em>. At least 3 characters: letters, numbers, dots, dashes and underscores only, no spaces. It must not already be used (capitals don't matter: <em>Jane.B</em> and <em>jane.b</em> are the same) and it cannot be changed later.</li>
+    <li><strong>Email</strong> — their own working email address. The invitation is sent here and password resets go here. They can also sign in with it, so no two people may share one email. If another person already has it you see <em>"Another staff member already uses this email. Each person needs their own email to sign in."</em></li>
     <li><strong>Role</strong> — choose the closest role (see the table above). Nothing is chosen for you: the form will not save until you pick one.</li>
     <li><strong>Password</strong> — leave this <strong>blank</strong>. The person will choose their own from the invitation. (Only type one if you must give it to them in person; it must be at least 8 characters.)</li>
     <li>Leave <strong>Send invitation email</strong> ticked.</li>
@@ -116,7 +116,7 @@
     <li>Open the email titled <em>"You're invited to <span class="g-site-name">Rosalyns Beach Hotel</span> — accept your staff account"</em>.</li>
     <li>Click <strong>Accept invitation &amp; set your password</strong>. The page <strong>Accept your invitation</strong> opens on the hotel's own website.</li>
     <li>Type a password of at least 8 characters twice and save.</li>
-    <li>Go to the sign-in page and sign in with the <strong>username</strong> from the email and the new password.</li>
+    <li>Go to the sign-in page and sign in with the <strong>username</strong> from the invitation (or their email address) in the <strong>Username or email</strong> box, and the new password.</li>
   </ol>
   <ul>
     <li>The link works <strong>once</strong> and expires after <strong>72 hours</strong> (the exact time is printed in the email).</li>
@@ -354,7 +354,7 @@
   <h2 id="edit">How to edit, deactivate or change someone's role</h2>
   <ol class="steps">
     <li>Click <strong>Edit</strong> on their row.</li>
-    <li>Change <strong>Full Name</strong>, <strong>Email</strong> or <strong>Role</strong> as needed. <strong>Username</strong> is read-only.</li>
+    <li>Change <strong>Full Name</strong>, <strong>Email</strong> or <strong>Role</strong> as needed. <strong>Username</strong> is read-only. If you change the email to one another person already uses, you see <em>"Another staff member already uses this email. Each person needs their own email to sign in."</em> and the change is not saved.</li>
     <li>To stop someone signing in without deleting their history, untick <strong>Active Account</strong>.</li>
     <li>To set a password for them directly, type it in <strong>New Password (leave blank to keep current)</strong> (at least 8 characters). Normally use the invitation or "Forgot password" instead.</li>
     <li>Click <strong>Save Changes</strong>.</li>
@@ -377,6 +377,8 @@
   <p>Prefer <strong>deactivating</strong> (untick <strong>Active Account</strong>) for people who have left: their name stays on the bookings and payments they handled.</p>
 
   <h2 id="passwords">Passwords and signing in</h2>
+  <h3>What staff type to sign in</h3>
+  <p>The first box on the sign-in page is <strong>Username or email</strong>. Staff can type either one, then their password. The email works only when one account has it. A staff member who forgot their username can use their email, or you can read it under their email in this page (<strong>Username: ...</strong>). A wrong username, email or password, or a locked or switched-off account, all show <em>"Invalid username or password. If this keeps happening, wait 15 minutes and try again."</em> and never says which part was wrong. The POS Till, kitchen and bar screens sign in as before.</p>
   <h3>Forgot password (staff do this themselves)</h3>
   <ol class="steps">
     <li>On the sign-in page click <strong>Forgot Password?</strong></li>
@@ -413,7 +415,7 @@
     <li>Administrator permissions cannot be changed — an Administrator always has everything.</li>
     <li>The <strong>last active Administrator</strong> cannot be deactivated, demoted or deleted.</li>
     <li>You cannot delete your own account.</li>
-    <li>Usernames and email addresses must be unique. A duplicate is flagged under the box while you type, and again when you save.</li>
+    <li>Usernames and email addresses must be unique, because both can be used to sign in. A duplicate is flagged under the box while you type (<em>"This email already belongs to another user."</em> or <em>"This username is already taken. Choose a different one."</em>), and again when you save.</li>
     <li>After <strong>5 wrong passwords</strong> an account is locked for <strong>15 minutes</strong>. Too many failures from one location also blocks sign-in from there for 15 minutes.</li>
     <li>Deactivated accounts cannot sign in or reset their password.</li>
   </ul>
@@ -423,13 +425,12 @@
     <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
     <tbody>
       <tr><td><em>Set a password, or tick "Send invitation" so they choose their own.</em></td><td>Password blank and invitation unticked.</td><td>Tick <strong>Send invitation email</strong>.</td></tr>
-      <tr><td><em>The username "…" is already taken. Choose a different username.</em> or <em>The email "…" already belongs to another user.</em></td><td>Someone already has that username or email (capitals do not matter).</td><td>Use another username; if the email belongs to an old account, edit or delete that account first.</td></tr>
+      <tr><td><em>The username "…" is already taken. Choose a different username.</em> or <em>Another staff member already uses this email. Each person needs their own email to sign in.</em></td><td>Someone already has that username or email (capitals do not matter).</td><td>Use another username; if the email belongs to an old account, edit or delete that account first.</td></tr>
       <tr><td><em>User '…' created successfully. The email could not be sent: &lt;reason&gt;. Use "Resend invitation" once that is fixed.</em></td><td>The account was created, but the invitation email failed. The reason is shown in the message.</td><td>Read the reason. Fix it (see <a href="#invite-checklist">If invitations don't arrive</a>), then click the <strong>Resend invitation</strong> button on their row. The account and its permissions are kept.</td></tr>
       <tr><td><em>Permissions saved. The invitation email could not be sent: &lt;reason&gt;. Use "Resend invitation" once that is fixed.</em></td><td>Same as above, after "Save &amp; send invitation".</td><td>Permissions are kept. Fix the reason, then click the <strong>Resend invitation</strong> button on their row.</td></tr>
       <tr><td>New person says the link shows <em>"This reset link is invalid or has expired."</em></td><td>Link already used, older than 72 hours, or replaced by a newer invitation.</td><td>Send a new invitation with the <strong>Resend invitation</strong> button.</td></tr>
       <tr><td><em>Invalid security token. Please try again.</em></td><td>The page was open too long, or your session ended.</td><td>Sign out, sign in again, then try the invitation again.</td></tr>
-      <tr><td><em>Account temporarily locked due to too many failed attempts.</em></td><td>5 wrong passwords.</td><td>Wait the minutes shown, or use <strong>Forgot Password?</strong></td></tr>
-      <tr><td><em>This account has been deactivated. Contact your administrator.</em></td><td><strong>Active Account</strong> is unticked.</td><td>An administrator ticks it again in <strong>Edit</strong>.</td></tr>
+      <tr><td><em>Invalid username or password. If this keeps happening, wait 15 minutes and try again.</em> (even though the person is sure the password is right)</td><td>The page shows this same message for a wrong username, a wrong email, a wrong password, 5 wrong passwords in a row (locked for 15 minutes) and a switched-off account.</td><td>Check <strong>Active Account</strong> is ticked in <strong>Edit</strong>. If it is, wait 15 minutes or use <strong>Forgot Password?</strong>, and check the username or email is typed correctly.</td></tr>
       <tr><td><em>Cannot change role or deactivate: this is the last active admin.</em></td><td>The system must always keep one active Administrator.</td><td>Make another person an Administrator first.</td></tr>
       <tr><td><em>You do not have permission to do that (Edit Bookings).</em> (or Check-in Guests, Check-out Guests, Cancel Bookings, Add Payments)</td><td>The person does not have the permission named in brackets.</td><td>An administrator or manager ticks it in <strong>Permissions</strong> (see "What each booking action needs").</td></tr>
       <tr><td>A button is greyed out with <em>Needs the Edit Booking permission.</em></td><td>Adding or voiding a guest-bill charge needs Edit Bookings.</td><td>Tick <strong>Edit Bookings</strong> for that person.</td></tr>
