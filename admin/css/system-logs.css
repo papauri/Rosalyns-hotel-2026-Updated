@@ -1,23 +1,149 @@
-/* System Logs — admin/system-logs.php */
+/* System Logs — admin/system-logs.php. Colours come from the admin tokens in admin-styles.css. */
 
+/* ---- Needs attention ---- */
+.log-attention {
+    background: #fff;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 18px;
+}
+
+.log-attention__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.log-attention__head h3 {
+    margin: 0;
+    font-size: 18px;
+    color: var(--navy, #231F1C);
+}
+
+.log-attention__range {
+    font-size: 13px;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.log-attention__clear {
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--admin-success-border, #3f8f5a);
+    border-radius: 10px;
+    background: var(--admin-success-bg);
+    color: var(--admin-success-text, #134e2f);
+    font-size: 14px;
+}
+
+.log-attention__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 12px;
+}
+
+.log-attention__note {
+    margin: 12px 0 0;
+    font-size: 12.5px;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.log-attn {
+    border: 1px solid var(--border-color, #eaecef);
+    border-left-width: 4px;
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.log-attn--danger {
+    border-left-color: var(--admin-danger-border, #956a5b);
+}
+
+.log-attn--warning {
+    border-left-color: var(--admin-warning-border, #9a7c53);
+}
+
+.log-attn--hot {
+    background: var(--admin-danger-bg);
+    border-color: var(--admin-danger-border, #956a5b);
+}
+
+.log-attn__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.log-attn__top h4 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--navy, #231F1C);
+    overflow-wrap: anywhere;
+}
+
+.log-attn__meaning {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.45;
+    color: var(--admin-text, #1f2a37);
+}
+
+.log-attn__examples {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 12.5px;
+    color: var(--admin-muted, #5f6b7c);
+    overflow-wrap: anywhere;
+}
+
+.log-attn__foot {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.log-attn__link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    font-weight: 600;
+    color: var(--gold, #8F6A35);
+    text-decoration: none;
+    border-bottom: 1px solid currentColor;
+}
+
+/* ---- Summary cards ---- */
 .log-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
     margin-bottom: 18px;
 }
 
 .log-card {
     background: #fff;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
     border-radius: 10px;
-    padding: 16px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, .05);
+    padding: 12px 14px;
+    box-shadow: var(--shadow, 0 1px 3px rgba(0, 0, 0, .06));
 }
 
 .log-card small {
     display: block;
-    color: #6b7280;
+    color: var(--admin-muted, #5f6b7c);
     text-transform: uppercase;
     font-size: 11px;
     font-weight: 700;
@@ -26,18 +152,28 @@
 
 .log-card strong {
     display: block;
-    color: #111827;
-    font-size: 28px;
-    margin-top: 4px;
+    color: var(--navy, #231F1C);
+    font-size: 26px;
+    margin-top: 2px;
 }
 
+.log-card--danger {
+    border-color: var(--admin-danger-border, #956a5b);
+    background: var(--admin-danger-bg);
+}
+
+.log-card--danger strong {
+    color: var(--admin-danger-text, #4b352d);
+}
+
+/* ---- Filter bar ---- */
 .log-toolbar {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
     align-items: end;
     background: #fff;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
     border-radius: 10px;
     padding: 14px;
     margin-bottom: 16px;
@@ -49,20 +185,32 @@
     gap: 5px;
     font-size: 12px;
     font-weight: 700;
-    color: #374151;
+    color: var(--admin-text, #1f2a37);
+}
+
+.log-toolbar label.log-toolbar__check {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    font-weight: 600;
 }
 
 .log-toolbar select,
-.log-toolbar input {
-    min-height: 38px;
-    border: 1px solid #d1d5db;
+.log-toolbar input[type="number"] {
+    min-height: 44px;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
     border-radius: 8px;
     padding: 8px 10px;
 }
 
+.log-toolbar input[type="number"] {
+    width: 90px;
+}
+
 .log-toolbar button,
 .log-toolbar a {
-    min-height: 38px;
+    min-height: 44px;
     display: inline-flex;
     align-items: center;
     gap: 7px;
@@ -76,9 +224,10 @@
     cursor: pointer;
 }
 
+/* ---- Sections and tables ---- */
 .log-section {
     background: #fff;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
     border-radius: 10px;
     margin-bottom: 18px;
     overflow: hidden;
@@ -87,12 +236,23 @@
 .log-section h3 {
     margin: 0;
     padding: 14px 16px;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid var(--border-color, #eaecef);
     font-size: 16px;
-    color: #111827;
+    color: var(--navy, #231F1C);
     display: flex;
     gap: 8px;
     align-items: center;
+}
+
+.log-scroll {
+    overflow-x: auto;
+}
+
+.log-empty {
+    text-align: center;
+    color: var(--admin-muted, #5f6b7c);
+    padding: 24px 16px;
+    margin: 0;
 }
 
 .log-table {
@@ -103,51 +263,156 @@
 .log-table th,
 .log-table td {
     padding: 10px 12px;
-    border-bottom: 1px solid #f3f4f6;
+    border-bottom: 1px solid var(--border-color, #eaecef);
     text-align: left;
     vertical-align: top;
     font-size: 13px;
 }
 
 .log-table th {
-    color: #6b7280;
-    background: #f9fafb;
+    color: var(--admin-muted, #5f6b7c);
+    background: var(--admin-table-head, #f2f5fa);
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: .04em;
 }
 
+/* ---- Level pills ---- */
 .log-pill {
     display: inline-flex;
     align-items: center;
     border-radius: 999px;
     padding: 3px 9px;
     font-size: 11px;
-    font-weight: 800;
-    background: #e5e7eb;
+    font-weight: 700;
+    border: 1px solid transparent;
+    background: #f3f4f6;
     color: #374151;
+    white-space: nowrap;
 }
 
 .log-pill.success {
-    background: #dcfce7;
-    color: #166534;
+    background: var(--admin-success-bg);
+    border-color: var(--admin-success-border, #3f8f5a);
+    color: var(--admin-success-text, #134e2f);
 }
 
 .log-pill.warning {
-    background: #fef3c7;
-    color: #92400e;
+    background: var(--admin-warning-bg);
+    border-color: var(--admin-warning-border, #9a7c53);
+    color: var(--admin-warning-text, #4f3f2a);
 }
 
 .log-pill.danger {
-    background: #fee2e2;
-    color: #991b1b;
+    background: var(--admin-danger-bg);
+    border-color: var(--admin-danger-border, #956a5b);
+    color: var(--admin-danger-text, #4b352d);
 }
 
 .log-pill.muted {
     background: #f3f4f6;
+    border-color: #d1d5db;
     color: #4b5563;
 }
 
+/* ---- Event stream (a list, so it reads the same on a phone) ---- */
+.log-events {
+    display: flex;
+    flex-direction: column;
+}
+
+.log-event {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color, #eaecef);
+    border-left: 4px solid transparent;
+    min-width: 0;
+}
+
+.log-event:last-child {
+    border-bottom: 0;
+}
+
+.log-event--danger {
+    border-left-color: var(--admin-danger-border, #956a5b);
+}
+
+.log-event--warning {
+    border-left-color: var(--admin-warning-border, #9a7c53);
+}
+
+.log-event__top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    font-size: 12.5px;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.log-event__top code {
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.log-event__top time,
+.log-repeat {
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.log-repeat {
+    font-weight: 700;
+    color: var(--admin-warning-text, #4f3f2a);
+}
+
+.log-event__msg {
+    margin: 4px 0 0;
+    font-size: 14px;
+    color: var(--admin-text, #1f2a37);
+    overflow-wrap: anywhere;
+}
+
+.log-event__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 14px;
+    margin-top: 4px;
+    font-size: 12.5px;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.log-event__meta details {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.log-event__meta summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.log-event__meta pre {
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    max-width: 100%;
+    overflow: auto;
+    background: var(--admin-table-head, #f2f5fa);
+    border-radius: 8px;
+    font-size: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.log-events__foot {
+    margin: 0;
+    padding: 10px 16px;
+    font-size: 12.5px;
+    color: var(--admin-muted, #5f6b7c);
+    border-top: 1px solid var(--border-color, #eaecef);
+}
+
+/* ---- File tails ---- */
 .log-files {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -156,16 +421,17 @@
 }
 
 .log-file {
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
     border-radius: 8px;
     overflow: hidden;
+    min-width: 0;
 }
 
 .log-file h4 {
     margin: 0;
     padding: 10px 12px;
-    background: #f9fafb;
-    border-bottom: 1px solid #e5e7eb;
+    background: var(--admin-table-head, #f2f5fa);
+    border-bottom: 1px solid var(--border-color, #eaecef);
     font-size: 13px;
 }
 
@@ -174,28 +440,81 @@
     padding: 12px;
     max-height: 320px;
     overflow: auto;
-    background: #111827;
+    background: var(--deep-navy, #111827);
     color: #e5e7eb;
     font-size: 11px;
     line-height: 1.5;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .context-json {
     max-width: 360px;
     white-space: pre-wrap;
-    color: #4b5563;
+    color: var(--admin-muted, #5f6b7c);
     font-size: 12px;
 }
 
 /* Pagination for this page intentionally uses shared global styles from admin-components.css */
 
 @media (max-width: 768px) {
-    .log-table {
+    .log-table:not(.mobile-enhanced) {
         min-width: 760px;
     }
 
     .log-files {
         grid-template-columns: 1fr;
+    }
+
+    .log-attention__grid {
+        grid-template-columns: 1fr;
+    }
+
+    .log-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    .log-card {
+        padding: 10px 12px;
+    }
+
+    .log-card strong {
+        font-size: 22px;
+    }
+
+    .log-toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .log-toolbar label.log-toolbar__check {
+        grid-column: 1 / -1;
+        min-height: 44px;
+    }
+
+    .log-toolbar button,
+    .log-toolbar a {
+        justify-content: center;
+    }
+
+    .log-toolbar select,
+    .log-toolbar input[type="number"] {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .log-event {
+        padding: 10px 12px;
+    }
+}
+
+.log-nowrap {
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .log-nowrap {
+        white-space: normal;
     }
 }

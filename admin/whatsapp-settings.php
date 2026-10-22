@@ -164,7 +164,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
             $pdo->rollBack();
         }
         $error = 'Error saving settings: ' . $e->getMessage();
-        rh_log_event('whatsapp_settings', 'error', 'Failed saving WhatsApp settings', ['error' => $e->getMessage()]);
+        // A refused entry (bad number, missing token) is the person's typing, not a fault: warning.
+        // Only a database failure is a real error.
+        if ($e instanceof PDOException || !($e instanceof RuntimeException || $e instanceof InvalidArgumentException)) {
+            rh_log_event('whatsapp_settings', 'error', 'Failed saving WhatsApp settings (' . ($e instanceof PDOException ? 'database error' : 'unexpected error') . ')', ['error' => $e->getMessage()]);
+        } else {
+            rh_log_event('whatsapp_settings', 'warning', 'WhatsApp settings not saved: ' . mb_substr($e->getMessage(), 0, 300));
+        }
     }
 }
 

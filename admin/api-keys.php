@@ -198,7 +198,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     } catch (Throwable $e) {
         $message = 'Error: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
         $messageType = 'error';
-        rh_log_event('api_keys', 'error', 'API key action failed', ['action' => $_POST['action'] ?? '', 'error' => $e->getMessage()]);
+        // A refused entry (missing name, bad email, duplicate, stale form) is a warning; only a real failure is an error.
+        if ($e instanceof RuntimeException && !($e instanceof PDOException)) {
+            rh_log_event('api_keys', 'warning', 'API key action refused: ' . mb_substr($e->getMessage(), 0, 300), ['action' => $_POST['action'] ?? '']);
+        } else {
+            rh_log_event('api_keys', 'error', 'API key action failed', ['action' => $_POST['action'] ?? '', 'error' => $e->getMessage()]);
+        }
     }
 }
 

@@ -350,7 +350,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (Throwable $e) {
         $error = 'Cache action failed: ' . $e->getMessage();
-        rh_log_event('cache_management', 'error', 'Cache action failed', ['action' => $action, 'error' => $e->getMessage()]);
+        // A refused request (stale form, unknown cache type) is a warning; only a real failure is an error.
+        if ($e instanceof RuntimeException && !($e instanceof PDOException)) {
+            rh_log_event('cache_management', 'warning', 'Cache action refused: ' . mb_substr($e->getMessage(), 0, 300), ['action' => $action]);
+        } else {
+            rh_log_event('cache_management', 'error', 'Cache action failed', ['action' => $action, 'error' => $e->getMessage()]);
+        }
     }
 }
 

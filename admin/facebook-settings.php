@@ -289,7 +289,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->rollBack();
         }
         $error = 'Error saving settings: ' . $e->getMessage();
-        rh_log_event('facebook_settings', 'error', 'Failed saving Facebook settings', ['error' => $e->getMessage()]);
+        // A refused entry (non-numeric ID, bad token) is the person's typing, not a fault: warning.
+        // Only a database failure is a real error.
+        if ($e instanceof PDOException || !($e instanceof RuntimeException || $e instanceof InvalidArgumentException)) {
+            rh_log_event('facebook_settings', 'error', 'Failed saving Facebook settings (' . ($e instanceof PDOException ? 'database error' : 'unexpected error') . ')', ['error' => $e->getMessage()]);
+        } else {
+            rh_log_event('facebook_settings', 'warning', 'Facebook settings not saved: ' . mb_substr($e->getMessage(), 0, 300));
+        }
     }
 }
 

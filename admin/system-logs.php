@@ -15,16 +15,29 @@ if (!hasPermission((int)$user['id'], 'system_logs')) {
 }
 
 $site_name = getSetting('site_name');
+require_once __DIR__ . '/includes/system-log-attention.php';
+
+// Level 'problems' (warnings, errors and critical) is the default so real faults show first.
+$levelLabels = [
+    'problems' => 'Warnings and errors',
+    'all' => 'Everything',
+    'error' => 'Errors only',
+    'critical' => 'Critical only',
+    'warning' => 'Warnings only',
+    'info' => 'Info only',
+    'debug' => 'Debug only',
+];
+$validLevels = array_keys($levelLabels);
 $sourceFilter = trim((string)($_GET['source'] ?? 'all'));
-$levelFilter = trim((string)($_GET['level'] ?? 'all'));
+$levelFilter = trim((string)($_GET['level'] ?? 'problems'));
+if (!in_array($levelFilter, $validLevels, true)) {
+    $levelFilter = 'problems';
+}
 $limit = min(500, max(20, (int)($_GET['limit'] ?? 50)));
 $loginScanLimit = max(120, min(2000, $limit * 6));
 $autoRefresh = isset($_GET['auto']) && $_GET['auto'] === '1';
-
-$validLevels = ['all', 'debug', 'info', 'warning', 'error', 'critical'];
-if (!in_array($levelFilter, $validLevels, true)) {
-    $levelFilter = 'all';
-}
+$isAutoReload = $autoRefresh && ($_GET['r'] ?? '') === '1'; // r=1 is added only by this page's own 15-second reload
+$groupRepeats = (string)($_GET['group'] ?? '1') !== '0';
 
 function rh_logs_table_exists(PDO $pdo, string $table): bool
 {
@@ -116,8 +129,11 @@ $stats = [
 try {
     rh_ensure_system_event_log_table($pdo);
 
-    // Log the page view before querying so it appears in the current result set.
-    rh_log_event('system_logs', 'debug', 'System logs viewed', ['source' => $sourceFilter, 'level' => $levelFilter, 'limit' => $limit]);
+    // Log the page view before querying so it appears in the current result set. Not on the page's own
+    // 15-second reload (marker r=1), which would add thousands of identical rows a day.
+    if (!$isAutoReload) {
+        rh_log_event('system_logs', 'debug', 'System logs viewed', ['source' => $sourceFilter, 'level' => $levelFilter, 'limit' => $limit]);
+    }
 
     if (rh_logs_table_exists($pdo, 'system_event_log')) {
         $where = [];
@@ -126,17 +142,46 @@ try {
             $where[] = 'source = ?';
             $args[] = $sourceFilter;
         }
-        if ($levelFilter !== 'all') {
+        if ($levelFilter === 'problems') {
+            $where[] = "level IN ('warning','error','critical')";
+        } elseif ($levelFilter !== 'all') {
             $where[] = 'level = ?';
             $args[] = $levelFilter;
         }
         $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
-        $stmt = $pdo->prepare("SELECT * FROM system_event_log {$whereSql} ORDER BY created_at DESC, id DESC LIMIT {$limit}");
-        $stmt->execute($args);
-        $dbEvents = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if ($groupRepeats) {
+            // Read a wider slice without the (large) context, group repeats, then fetch the
+            // context of just the rows that are shown.
+            $scan = min(3000, $limit * 20);
+            $stmt = $pdo->prepare("SELECT id, source, level, message, user_id, username, created_at FROM system_event_log {$whereSql} ORDER BY created_at DESC, id DESC LIMIT {$scan}");
+            $stmt->execute($args);
+            $dbEvents = array_slice(rh_log_group_events($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []), 0, $limit);
+            $ids = array_map(function ($r) { return (int)$r['id']; }, $dbEvents);
+            if ($ids) {
+                $ctx = $pdo->prepare('SELECT id, context_json FROM system_event_log WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+                $ctx->execute($ids);
+                $ctxById = [];
+                foreach ($ctx->fetchAll(PDO::FETCH_ASSOC) as $c) {
+                    $ctxById[(int)$c['id']] = $c['context_json'];
+                }
+                foreach ($dbEvents as &$ev) {
+                    $ev['context_json'] = $ctxById[(int)$ev['id']] ?? null;
+                }
+                unset($ev);
+            }
+        } else {
+            $stmt = $pdo->prepare("SELECT * FROM system_event_log {$whereSql} ORDER BY created_at DESC, id DESC LIMIT {$limit}");
+            $stmt->execute($args);
+            $dbEvents = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        }
 
         $stats['system_events'] = (int)$pdo->query("SELECT COUNT(*) FROM system_event_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)")->fetchColumn();
-        $stats['errors'] = (int)$pdo->query("SELECT COUNT(*) FROM system_event_log WHERE level IN ('error','critical') AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)")->fetchColumn();
+        // Real errors only: a form refusing a typing mistake is not counted.
+        foreach ($pdo->query("SELECT source, level, message FROM system_event_log WHERE level IN ('error','critical') AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) ORDER BY created_at DESC LIMIT 500")->fetchAll(PDO::FETCH_ASSOC) as $errRow) {
+            if (!rh_log_is_validation_refusal((string)$errRow['source'], (string)$errRow['level'], (string)$errRow['message'])) {
+                $stats['errors']++;
+            }
+        }
     }
 
     if (rh_logs_table_exists($pdo, 'admin_activity_log')) {
@@ -447,14 +492,36 @@ $fileLogs = [
     'whatsapp-log.txt' => rh_tail_file($logDir . '/whatsapp-log.txt', 80),
 ];
 
-$sources = ['all'];
-foreach ($dbEvents as $event) {
-    $src = (string)($event['source'] ?? '');
-    if ($src !== '' && !in_array($src, $sources, true)) {
-        $sources[] = $src;
+// Source filter: every source seen in the last 30 days (not just the rows on screen).
+$sources = [];
+try {
+    foreach ($pdo->query("SELECT DISTINCT source FROM system_event_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) ORDER BY source LIMIT 150")->fetchAll(PDO::FETCH_COLUMN) as $src) {
+        if ((string)$src !== '') {
+            $sources[] = (string)$src;
+        }
     }
+} catch (Throwable $e) {
+}
+if ($sourceFilter !== 'all' && $sourceFilter !== '' && !in_array($sourceFilter, $sources, true)) {
+    $sources[] = $sourceFilter;
 }
 sort($sources);
+array_unshift($sources, 'all');
+
+// Needs attention (last 7 days).
+$attention = rh_log_attention_load($pdo, 7);
+$attentionLinkOk = function (?array $link) use ($user) {
+    if (!$link) {
+        return false;
+    }
+    if (!empty($link['permission']) && !hasPermission((int)$user['id'], $link['permission'])) {
+        return false;
+    }
+    if (!empty($link['module']) && function_exists('rh_module_key_enabled') && !rh_module_key_enabled($link['module'])) {
+        return false;
+    }
+    return true;
+};
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -476,10 +543,42 @@ sort($sources);
     <div class="content">
         <div class="page-header">
             <h1 class="page-title"><i class="fas fa-clipboard-list" style="color:var(--gold)"></i> System Logs</h1>
-            <p class="text-muted">Live operational view across admin actions, API calls, offline replay, backups, visitors, WhatsApp and PHP errors.</p>
+            <p class="text-muted">Start with &ldquo;Needs attention&rdquo;. Everything below it is the full record of what the system, staff, devices and API clients did.</p>
         </div>
 
-        <?php rh_presence_render_panel($pdo, (string)($user['role'] ?? ''), (int)$user['id']); /* Who's online: admin + manager only */ ?>
+        <section class="log-attention" id="log-attention" aria-labelledby="log-attention-title">
+            <div class="log-attention__head">
+                <h3 id="log-attention-title">Needs attention</h3>
+                <span class="log-attention__range">Last 7 days</span>
+            </div>
+            <?php if (!$attention): ?>
+                <p class="log-attention__clear"><strong>All clear.</strong> No system errors, repeated failed sign-ins, failed emails, stock below zero, offline sync failures or refused API keys in the last 7 days.</p>
+            <?php else: ?>
+                <div class="log-attention__grid">
+                    <?php foreach ($attention as $item): ?>
+                        <article class="log-attn log-attn--<?php echo htmlspecialchars($item['level']); ?><?php echo !empty($item['highlight']) ? ' log-attn--hot' : ''; ?>">
+                            <div class="log-attn__top">
+                                <h4><?php echo htmlspecialchars($item['title']); ?></h4>
+                                <span class="log-pill <?php echo htmlspecialchars($item['level']); ?>"><?php echo number_format((int)$item['count']); ?></span>
+                            </div>
+                            <p class="log-attn__meaning"><?php echo htmlspecialchars($item['meaning']); ?></p>
+                            <?php if (!empty($item['examples'])): ?>
+                                <ul class="log-attn__examples">
+                                    <?php foreach ($item['examples'] as $exLine): ?><li><?php echo htmlspecialchars($exLine); ?></li><?php endforeach; ?>
+                                </ul>
+                            <?php endif; ?>
+                            <div class="log-attn__foot">
+                                <span>Last seen <?php echo htmlspecialchars(rh_log_short_time((string)$item['last_seen'])); ?></span>
+                                <?php if ($attentionLinkOk($item['link'] ?? null)): ?>
+                                    <a class="log-attn__link" href="<?php echo htmlspecialchars($item['link']['page']); ?>"><?php echo htmlspecialchars($item['link']['label']); ?></a>
+                                <?php endif; ?>
+                            </div>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+            <p class="log-attention__note">Entries a form refused because of a typing mistake (for example a number in the wrong format) are warnings in the record below and are not counted here.</p>
+        </section>
 
         <div class="log-grid">
             <div class="log-card"><small>System events, 24h</small><strong><?php echo number_format($stats['system_events']); ?></strong></div>
@@ -489,10 +588,12 @@ sort($sources);
             <div class="log-card"><small>KDS/DS events, 24h</small><strong><?php echo number_format($stats['kds_events']); ?></strong></div>
             <div class="log-card"><small>API calls, 24h</small><strong><?php echo number_format($stats['api_calls']); ?></strong></div>
             <div class="log-card"><small>Offline replays, 24h</small><strong><?php echo number_format($stats['offline_replays']); ?></strong></div>
-            <div class="log-card"><small>Errors, 24h</small><strong><?php echo number_format($stats['errors']); ?></strong></div>
+            <div class="log-card<?php echo $stats['errors'] > 0 ? ' log-card--danger' : ''; ?>"><small>Errors, 24h</small><strong><?php echo number_format($stats['errors']); ?></strong></div>
         </div>
 
-        <form method="get" class="log-toolbar">
+        <?php rh_presence_render_panel($pdo, (string)($user['role'] ?? ''), (int)$user['id']); /* Who's online: admin + manager only */ ?>
+
+        <form method="get" class="log-toolbar" action="system-logs.php#log-events">
             <label>Source
                 <select name="source">
                     <?php foreach ($sources as $source): ?>
@@ -500,62 +601,63 @@ sort($sources);
                     <?php endforeach; ?>
                 </select>
             </label>
-            <label>Level
+            <label>Show
                 <select name="level">
-                    <?php foreach ($validLevels as $level): ?>
-                        <option value="<?php echo htmlspecialchars($level); ?>" <?php echo $levelFilter === $level ? 'selected' : ''; ?>><?php echo htmlspecialchars($level); ?></option>
+                    <?php foreach ($levelLabels as $levelKey => $levelText): ?>
+                        <option value="<?php echo htmlspecialchars($levelKey); ?>" <?php echo $levelFilter === $levelKey ? 'selected' : ''; ?>><?php echo htmlspecialchars($levelText); ?></option>
                     <?php endforeach; ?>
                 </select>
             </label>
             <label>Rows
                 <input type="number" name="limit" min="20" max="500" value="<?php echo (int)$limit; ?>">
             </label>
-            <label style="flex-direction:row;align-items:center;gap:8px;margin-bottom:4px;">
-                <input type="checkbox" name="auto" value="1" <?php echo $autoRefresh ? 'checked' : ''; ?>> Auto-refresh 15s
-            </label>
+            <input type="hidden" name="group" value="0">
+            <label class="log-toolbar__check"><input type="checkbox" name="group" value="1" <?php echo $groupRepeats ? 'checked' : ''; ?>> Group repeats</label>
+            <label class="log-toolbar__check"><input type="checkbox" name="auto" value="1" <?php echo $autoRefresh ? 'checked' : ''; ?>> Auto-refresh 15s</label>
             <button type="submit"><i class="fas fa-filter"></i> Apply</button>
-            <a href="system-logs.php"><i class="fas fa-rotate-left"></i> Reset</a>
+            <a href="system-logs.php#log-events"><i class="fas fa-rotate-left"></i> Reset</a>
         </form>
 
-        <div class="log-section">
+        <div class="log-section" id="log-events">
             <h3><i class="fas fa-stream"></i> System Event Stream</h3>
-            <div style="overflow-x:auto;">
-                <table class="log-table">
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Source</th>
-                            <th>Level</th>
-                            <th>Message</th>
-                            <th>User</th>
-                            <th>Context</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (!$dbEvents): ?>
-                            <tr>
-                                <td colspan="6" style="text-align:center;color:#6b7280;padding:30px;">No system events yet. New admin actions will appear here automatically.</td>
-                            </tr>
-                        <?php else: ?>
-                            <?php foreach ($dbEvents as $event): ?>
-                                <tr>
-                                    <td style="white-space:nowrap;"><?php echo htmlspecialchars((string)$event['created_at']); ?></td>
-                                    <td><code><?php echo htmlspecialchars((string)$event['source']); ?></code></td>
-                                    <td><span class="log-pill <?php echo rh_log_level_class((string)$event['level']); ?>"><?php echo htmlspecialchars((string)$event['level']); ?></span></td>
-                                    <td><?php echo htmlspecialchars((string)$event['message']); ?></td>
-                                    <td><?php echo htmlspecialchars((string)($event['username'] ?: ($event['user_id'] ? '#' . $event['user_id'] : '-'))); ?></td>
-                                    <td class="context-json"><?php echo htmlspecialchars((string)($event['context_json'] ?? '')); ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
+            <?php if (!$dbEvents): ?>
+                <p class="log-empty"><?php echo $levelFilter === 'problems' ? 'No warnings or errors match. Choose &ldquo;Everything&rdquo; to see all events.' : 'No system events match. New admin actions will appear here automatically.'; ?></p>
+            <?php else: ?>
+                <div class="log-events">
+                    <?php foreach ($dbEvents as $event):
+                        $evRepeat = (int)($event['repeat_count'] ?? 1);
+                        $evUser = (string)($event['username'] ?: (!empty($event['user_id']) ? '#' . $event['user_id'] : ''));
+                        $evCtx = (string)($event['context_json'] ?? '');
+                    ?>
+                        <article class="log-event log-event--<?php echo htmlspecialchars(rh_log_level_class((string)$event['level'])); ?>">
+                            <div class="log-event__top">
+                                <span class="log-pill <?php echo rh_log_level_class((string)$event['level']); ?>"><?php echo htmlspecialchars((string)$event['level']); ?></span>
+                                <code><?php echo htmlspecialchars((string)$event['source']); ?></code>
+                                <?php if ($evRepeat > 1): ?>
+                                    <span class="log-repeat" title="First seen <?php echo htmlspecialchars((string)$event['first_seen']); ?>">x<?php echo number_format($evRepeat); ?> &middot; last <?php echo htmlspecialchars(rh_log_short_time((string)$event['last_seen'])); ?></span>
+                                <?php else: ?>
+                                    <time><?php echo htmlspecialchars((string)$event['created_at']); ?></time>
+                                <?php endif; ?>
+                            </div>
+                            <p class="log-event__msg"><?php echo htmlspecialchars((string)$event['message']); ?></p>
+                            <?php if ($evUser !== '' || $evCtx !== ''): ?>
+                                <div class="log-event__meta">
+                                    <?php if ($evUser !== ''): ?><span>By <?php echo htmlspecialchars($evUser); ?></span><?php endif; ?>
+                                    <?php if ($evCtx !== ''): ?>
+                                        <details><summary>Details<?php echo $evRepeat > 1 ? ' (latest)' : ''; ?></summary><pre><?php echo htmlspecialchars($evCtx); ?></pre></details>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+                <p class="log-events__foot"><?php echo $groupRepeats ? 'Identical events are grouped (numbers and addresses ignored), newest first.' : 'Newest first.'; ?> Showing up to <?php echo (int)$limit; ?>.</p>
+            <?php endif; ?>
         </div>
 
-        <div class="log-section">
+        <div class="log-section" id="log-booking-audit">
             <h3><i class="fas fa-clock-rotate-left"></i> Booking Changes Audit</h3>
-            <div style="overflow-x:auto;">
+            <div class="log-scroll">
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -587,7 +689,7 @@ sort($sources);
                                 $actionClass = in_array($ev['action'], ['cancelled', 'no-show'], true) ? 'danger' : (in_array($ev['action'], ['checked-in', 'confirmed'], true) ? 'success' : (in_array($ev['action'], ['checked-out'], true) ? 'muted' : 'warning'));
                                 ?>
                                 <tr>
-                                    <td style="white-space:nowrap;"><?php echo htmlspecialchars((string)$ev['performed_at']); ?></td>
+                                    <td class="log-nowrap"><?php echo htmlspecialchars((string)$ev['performed_at']); ?></td>
                                     <td><a href="booking-details.php?id=<?php echo (int)$ev['booking_id']; ?>" style="text-decoration:none;color:#7E684B;font-weight:600;"><?php echo htmlspecialchars($ev['booking_reference'] ?? ('Booking #' . $ev['booking_id'])); ?></a></td>
                                     <td><span class="log-pill <?php echo $actionClass; ?>"><?php echo htmlspecialchars((string)$ev['action']); ?></span></td>
                                     <td><?php echo htmlspecialchars((string)($ev['performed_by_name'] ?? $ev['performed_by_username'] ?? ('#' . $ev['performed_by']))); ?></td>
@@ -601,9 +703,9 @@ sort($sources);
             </div>
         </div>
 
-        <div class="log-section">
+        <div class="log-section" id="log-logins">
             <h3><i class="fas fa-right-to-bracket"></i> Recent Logins</h3>
-            <div style="overflow-x:auto;">
+            <div class="log-scroll">
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -630,7 +732,7 @@ sort($sources);
                                 }
                             ?>
                                 <tr>
-                                    <td style="white-space:nowrap;">
+                                    <td class="log-nowrap">
                                         <strong><?php echo htmlspecialchars((string)$bundle['latest_at']); ?></strong>
                                         <?php if ($bundle['oldest_at'] !== $bundle['latest_at']): ?>
                                             <div style="font-size:11px;color:#6b7280;">Range: <?php echo htmlspecialchars((string)$rangeLabel); ?></div>
@@ -681,7 +783,7 @@ sort($sources);
 
         <div class="log-section">
             <h3><i class="fas fa-user-shield"></i> Recent Admin Activity</h3>
-            <div style="overflow-x:auto;">
+            <div class="log-scroll">
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -736,7 +838,7 @@ sort($sources);
 
         <div class="log-section">
             <h3><i class="fas fa-cash-register"></i> POS Orders</h3>
-            <div style="overflow-x:auto;">
+            <div class="log-scroll">
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -769,11 +871,11 @@ sort($sources);
                                 if (!empty($order['opened_as_tab'])) $flags[] = '<span style="color:#7E684B;font-size:11px;">TAB</span>';
                             ?>
                                 <tr>
-                                    <td style="white-space:nowrap;"><?php echo htmlspecialchars((string)$order['created_at']); ?></td>
+                                    <td class="log-nowrap"><?php echo htmlspecialchars((string)$order['created_at']); ?></td>
                                     <td><strong><?php echo htmlspecialchars((string)($order['reference'] ?? '#' . $order['id'])); ?></strong><?php echo $flags ? '<div style="margin-top:3px;">' . implode(' ', $flags) . '</div>' : ''; ?></td>
                                     <td style="text-transform:capitalize;"><?php echo htmlspecialchars($orderType); ?></td>
                                     <td><?php echo $location; ?></td>
-                                    <td style="white-space:nowrap;"><?php echo htmlspecialchars($amountFormatted); ?></td>
+                                    <td class="log-nowrap"><?php echo htmlspecialchars($amountFormatted); ?></td>
                                     <td><span class="log-pill <?php echo rh_pos_status_class($orderStatus); ?>"><?php echo htmlspecialchars($orderStatus); ?></span></td>
                                     <td style="text-transform:capitalize;"><?php echo htmlspecialchars($payMethod); ?></td>
                                     <td class="pos-user-cell" data-user="<?php echo htmlspecialchars(strtolower((string)($order['created_by_name'] ?? '')), ENT_QUOTES); ?>" style="cursor:pointer;" title="Click to filter by this user"><?php echo htmlspecialchars((string)($order['created_by_name'] ?: '—')); ?></td>
@@ -812,7 +914,7 @@ sort($sources);
             <h3><i class="fas fa-display"></i> Display Screens — KDS / BDS / CDS</h3>
 
             <h4 style="margin:0 0 12px;font-size:14px;color:var(--text-secondary,#5E554D);">Station Events</h4>
-            <div style="overflow-x:auto;">
+            <div class="log-scroll">
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -837,7 +939,7 @@ sort($sources);
                                 $tableLabel = $ev['table_number'] ? 'Table ' . htmlspecialchars((string)$ev['table_number']) : '';
                             ?>
                                 <tr>
-                                    <td style="white-space:nowrap;"><?php echo htmlspecialchars((string)$ev['created_at']); ?></td>
+                                    <td class="log-nowrap"><?php echo htmlspecialchars((string)$ev['created_at']); ?></td>
                                     <td><?php echo htmlspecialchars((string)($ev['reference'] ?? '—')); ?><?php if ($tableLabel): ?><div style="font-size:11px;color:#6b7280;"><?php echo $tableLabel; ?></div><?php endif; ?></td>
                                     <td><?php echo htmlspecialchars((string)($ev['item_name'] ?? '—')); ?></td>
                                     <td><code><?php echo htmlspecialchars((string)($ev['station'] ?? '—')); ?></code></td>
@@ -853,7 +955,7 @@ sort($sources);
             </div>
 
             <h4 style="margin:24px 0 12px;font-size:14px;color:var(--text-secondary,#5E554D);">Station Messages</h4>
-            <div style="overflow-x:auto;">
+            <div class="log-scroll">
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -876,7 +978,7 @@ sort($sources);
                                 $priorityClass = (string)($msg['priority'] ?? '') === 'urgent' ? 'danger' : 'muted';
                             ?>
                                 <tr>
-                                    <td style="white-space:nowrap;"><?php echo htmlspecialchars((string)$msg['created_at']); ?></td>
+                                    <td class="log-nowrap"><?php echo htmlspecialchars((string)$msg['created_at']); ?></td>
                                     <td><code><?php echo htmlspecialchars((string)$msg['station']); ?></code></td>
                                     <td><span class="log-pill <?php echo $priorityClass; ?>"><?php echo htmlspecialchars((string)($msg['priority'] ?? 'normal')); ?></span></td>
                                     <td style="font-size:12px;"><?php echo htmlspecialchars((string)($msg['source'] ?? '—')); ?></td>
@@ -892,7 +994,7 @@ sort($sources);
 
             <?php if ($shiftCloses): ?>
                 <h4 style="margin:24px 0 12px;font-size:14px;color:var(--text-secondary,#5E554D);">Shift Closes</h4>
-                <div style="overflow-x:auto;">
+                <div class="log-scroll">
                     <table class="log-table">
                         <thead>
                             <tr>
@@ -915,11 +1017,11 @@ sort($sources);
                             ?>
                                 <tr>
                                     <td><?php echo htmlspecialchars((string)$sc['shift_date']); ?></td>
-                                    <td style="white-space:nowrap;"><?php echo htmlspecialchars((string)$sc['closed_at']); ?></td>
+                                    <td class="log-nowrap"><?php echo htmlspecialchars((string)$sc['closed_at']); ?></td>
                                     <td><?php echo htmlspecialchars((string)$sc['user_name']); ?></td>
                                     <td><?php echo (int)($sc['orders_count'] ?? 0); ?></td>
-                                    <td style="white-space:nowrap;"><?php echo htmlspecialchars($revenueFormatted); ?></td>
-                                    <td style="white-space:nowrap;"><?php echo (int)($sc['voids_count'] ?? 0); ?> (<?php echo htmlspecialchars($voidsFormatted); ?>)</td>
+                                    <td class="log-nowrap"><?php echo htmlspecialchars($revenueFormatted); ?></td>
+                                    <td class="log-nowrap"><?php echo (int)($sc['voids_count'] ?? 0); ?> (<?php echo htmlspecialchars($voidsFormatted); ?>)</td>
                                     <td><span class="log-pill <?php echo $varianceClass; ?>" style="font-size:11px;"><?php echo htmlspecialchars($varianceFormatted); ?></span></td>
                                     <td style="font-size:12px;color:#6b7280;"><?php echo htmlspecialchars((string)($sc['notes'] ?: '—')); ?></td>
                                 </tr>
@@ -930,9 +1032,9 @@ sort($sources);
             <?php endif; ?>
         </div>
 
-        <div class="log-section">
+        <div class="log-section" id="log-api-calls">
             <h3><i class="fas fa-key"></i> Recent API Calls</h3>
-            <div style="overflow-x:auto;">
+            <div class="log-scroll">
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -965,9 +1067,9 @@ sort($sources);
             </div>
         </div>
 
-        <div class="log-section">
+        <div class="log-section" id="log-offline-sync">
             <h3><i class="fas fa-cloud-arrow-up"></i> Recent Offline Sync</h3>
-            <div style="overflow-x:auto;">
+            <div class="log-scroll">
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -1223,7 +1325,9 @@ sort($sources);
     <?php if ($autoRefresh): ?>
         <script>
             setTimeout(function() {
-                window.location.reload();
+                var u = new URL(window.location.href);
+                u.searchParams.set('r', '1');
+                window.location.replace(u.toString());
             }, 15000);
         </script>
     <?php endif; ?>
