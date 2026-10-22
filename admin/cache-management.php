@@ -5,6 +5,9 @@
  * Easy cache control with toggles, scheduling, and bulk operations
  */
 
+// PHP's own error_log setting, captured before this page points it somewhere else (Error logs panel).
+$rh_ini_error_log = (string)ini_get('error_log');
+
 // Enable error reporting for debugging
 error_reporting(E_ALL);
 ini_set('display_errors', 0); // Don't display to user, log instead
@@ -12,6 +15,9 @@ ini_set('log_errors', 1);
 ini_set('error_log', __DIR__ . '/../logs/php-errors.log');
 
 require_once 'admin-init.php';
+require_once __DIR__ . '/includes/error-log-manager.php';
+require_once __DIR__ . '/../config/cache.php';
+require_once __DIR__ . '/../config/page-cache.php';
 
 $csrf_token = $csrf_token ?? generateCsrfToken();
 
@@ -47,9 +53,10 @@ $allowedScheduleIntervals = ['30sec', '1min', '5min', '15min', '30min', 'hourly'
 // Include alert.php for showAlert function
 require_once __DIR__ . '/../includes/alert.php';
 
-// Handle success message from redirect
-if (isset($_GET['msg'])) {
-    $message = htmlspecialchars($_GET['msg']);
+// Success message carried over a redirect (kept in the session: a ?msg= link must not be able to print text here)
+if (!empty($_SESSION['cache_flash'])) {
+    $message = (string)$_SESSION['cache_flash'];
+    unset($_SESSION['cache_flash']);
 }
 
 // Handle form submissions
@@ -76,13 +83,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ON DUPLICATE KEY UPDATE setting_value = ?, updated_at = NOW()
                 ");
                 $stmt->execute(["cache_{$cache_type}_enabled", $enabled, $enabled]);
+                rhCacheFlagsReset();
 
                 $message = "Cache '{$cache_type}' " . ($enabled ? 'enabled' : 'disabled') . " successfully!";
                 $success = true;
                 rh_log_event('cache_management', 'info', 'Cache type toggled', ['cache_type' => $cache_type, 'enabled' => $enabled]);
 
                 // Redirect to force fresh read of database
-                header('Location: cache-management.php?msg=' . urlencode($message));
+                $_SESSION['cache_flash'] = $message;
+                header('Location: cache-management.php');
                 exit;
                 break;
 
@@ -98,77 +107,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (empty($cache_types)) {
                     $error = 'Please select at least one cache type to clear.';
                 } else {
-                    require_once __DIR__ . '/../config/cache.php';
-                    require_once __DIR__ . '/../config/page-cache.php';
-                    $cleared = 0;
-                    $files_cleared = 0;
+                    $cleared = 0;       // cache types cleared
+                    $files_cleared = 0; // files actually removed (each helper returns its own count)
 
                     foreach ($cache_types as $type) {
                         switch ($type) {
                             case 'all':
-                                $before = count(glob(CACHE_DIR . '/*.cache'));
-                                $image_before = countDirectoryFiles(IMAGE_CACHE_DIR);
-                                $page_before = countDirectoryFiles(PAGE_CACHE_DIR);
-                                clearCache();
-                                clearPageCache();
-                                $files_cleared += $before + $image_before + $page_before;
+                                // Everything under cache/ (incl. cache/pages) and the image cache.
+                                $files_cleared += (int)clearCache() + (int)clearPageCache();
                                 $cleared++;
                                 break;
                             case 'email':
-                                $before = count(glob(CACHE_DIR . '/email_*.cache'))
-                                    + count(glob(CACHE_DIR . '/email_setting_*.cache'))
-                                    + count(glob(CACHE_DIR . '/booking_email_template_*.cache'));
-                                clearEmailCache();
-                                $files_cleared += $before;
+                                $files_cleared += (int)clearEmailCache();
                                 $cleared++;
                                 break;
                             case 'settings':
-                                $before = count(glob(CACHE_DIR . '/setting_*.cache'))
-                                    + count(glob(CACHE_DIR . '/settings_group_*.cache'));
-                                clearSettingsCache();
-                                $files_cleared += $before;
+                                $files_cleared += (int)clearSettingsCache();
                                 $cleared++;
                                 break;
                             case 'rooms':
-                                $before = count(glob(CACHE_DIR . '/rooms_*.cache'))
-                                    + count(glob(CACHE_DIR . '/room_*.cache'))
-                                    + count(glob(CACHE_DIR . '/facilities_*.cache'))
-                                    + count(glob(CACHE_DIR . '/gallery_*.cache'))
-                                    + count(glob(CACHE_DIR . '/hero_*.cache'));
-                                $image_before = countDirectoryFiles(IMAGE_CACHE_DIR);
-                                clearRoomCache();
-                                $files_cleared += $before + $image_before;
+                                // Rooms, prices, facilities, gallery, page heroes AND the proxied-image cache.
+                                $files_cleared += (int)clearRoomCache();
                                 $cleared++;
                                 break;
                             case 'tables':
-                                $before = count(glob(CACHE_DIR . '/table_*.cache'));
-                                clearCacheByPattern('table_*');
-                                $files_cleared += $before;
+                                $files_cleared += (int)clearCacheByPattern('table_*');
                                 $cleared++;
                                 break;
                             case 'images':
-                                $before = countDirectoryFiles(IMAGE_CACHE_DIR);
-                                clearImageCache();
-                                $files_cleared += $before;
+                                $files_cleared += (int)clearImageCache();
                                 $cleared++;
                                 break;
                             case 'pages':
-                                $before = countDirectoryFiles(PAGE_CACHE_DIR);
-                                clearPageCache();
-                                $files_cleared += $before;
+                                $files_cleared += (int)clearPageCache();
                                 $cleared++;
                                 break;
                             case 'content':
-                                $before = count(glob(CACHE_DIR . '/testimonials_*.cache'))
-                                    + count(glob(CACHE_DIR . '/policies_*.cache'))
-                                    + count(glob(CACHE_DIR . '/about_us_*.cache'));
-                                clearContentCache();
-                                $files_cleared += $before;
+                                $files_cleared += (int)clearContentCache();
                                 $cleared++;
                                 break;
                         }
                     }
 
+                    $stampStmt = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, updated_at) VALUES ('cache_last_cleared', ?, NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()");
+                    $stampStmt->execute([(string)time()]);
                     $message = "Successfully cleared {$files_cleared} cache files in {$cleared} cache type(s)!";
                     $success = true;
                     rh_log_event('cache_management', 'info', 'Cache cleared', ['cache_types' => $cache_types, 'files_cleared' => $files_cleared]);
@@ -217,6 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ON DUPLICATE KEY UPDATE setting_value = ?, updated_at = NOW()
                 ");
                 $stmt->execute([$enabled, $enabled]);
+                rhCacheFlagsReset();
 
                 $message = "Global caching " . ($enabled ? 'enabled' : 'disabled') . "!";
                 $success = true;
@@ -311,6 +294,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rh_log_event('cache_management', 'info', 'SW versions bumped', ['stamp' => $bumpStamp, 'bumped' => $swBumped, 'failed' => $swMissing]);
                 break;
 
+            case 'clear_error_log':
+            case 'clear_all_error_logs':
+                // Admin role only (the Cache permission can be given to other roles). The request carries
+                // a whitelist key, never a path; rh_errorlog_clear() re-resolves and validates it.
+                if (!rh_errorlog_user_is_admin()) {
+                    $error = 'Only an administrator can clear error logs.';
+                    rh_log_event('cache_management', 'warning', 'Error log clear refused: not an administrator', ['action' => $action]);
+                    break;
+                }
+                if ($action === 'clear_error_log') {
+                    $logKey = (string)($_POST['log_key'] ?? '');
+                    $res = rh_errorlog_clear($logKey, null, $rh_ini_error_log);
+                    rh_errorlog_record($logKey, $res);
+                    if ($res['ok']) {
+                        $message = $res['rel'] . ' emptied (was ' . formatBytes($res['size_before']) . '). The server will start a fresh log as new errors happen.';
+                        $success = true;
+                    } else {
+                        $error = $res['error'];
+                    }
+                    break;
+                }
+                $clearedLogs = 0;
+                $failedLogs = [];
+                $freed = 0;
+                foreach (rh_errorlog_list(null, $rh_ini_error_log) as $row) {
+                    if ($row['size'] === 0) {
+                        continue;
+                    }
+                    $res = rh_errorlog_clear($row['key'], null, $rh_ini_error_log);
+                    rh_errorlog_record($row['key'], $res);
+                    if ($res['ok']) {
+                        $clearedLogs++;
+                        $freed += $res['size_before'];
+                    } else {
+                        $failedLogs[] = $row['rel'];
+                    }
+                }
+                if ($failedLogs) {
+                    $error = 'Could not empty: ' . implode(', ', $failedLogs) . ' (file permissions).';
+                }
+                if ($clearedLogs > 0) {
+                    $message = 'Emptied ' . $clearedLogs . ' error log file(s), freeing ' . formatBytes($freed) . '.';
+                    $success = true;
+                } elseif (!$failedLogs) {
+                    $message = 'Nothing to clear: every error log is already empty.';
+                    $success = true;
+                }
+                break;
+
             default:
                 $error = 'Unsupported cache action requested.';
                 rh_log_event('cache_management', 'warning', 'Unsupported cache action requested', ['action' => $action]);
@@ -338,6 +370,9 @@ try {
 } catch (PDOException $e) {
     $error = 'Error fetching cache settings: ' . $e->getMessage();
 }
+
+// Last time caches were cleared: the later of a manual clear (this page) and the scheduled run
+$last_cleared_ts = max((int)($cache_settings['cache_last_cleared'] ?? 0), (int)($cache_settings['cache_last_run'] ?? 0));
 
 // Get cache statistics (with error handling)
 require_once __DIR__ . '/../config/cache.php';
@@ -370,6 +405,9 @@ try {
     // Empty cache list if error occurs
     $caches = [];
 }
+
+// Error logs panel data (admin only; sizes and dates only, never contents)
+$error_logs = rh_errorlog_user_is_admin() ? rh_errorlog_list(null, $rh_ini_error_log) : [];
 
 // Read current SW version strings for display
 $pwa_public_version = 'unknown';
@@ -539,6 +577,7 @@ $cache_types = [
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Total size</span>
                 <strong class="rh-strip__value"><?php echo $stats['total_size_formatted']; ?></strong>
+                <span class="rh-strip__sub">Last cleared: <?php echo $last_cleared_ts > 0 ? htmlspecialchars(date('j M Y H:i', $last_cleared_ts), ENT_QUOTES, 'UTF-8') : 'never recorded'; ?></span>
             </div>
         </div>
 
@@ -621,7 +660,7 @@ $cache_types = [
 
                             <label class="cache-checkbox-item">
                                 <input type="checkbox" name="cache_types[]" value="rooms">
-                                <span><i class="fas fa-bed"></i> Rooms &amp; Prices (<?php
+                                <span><i class="fas fa-bed"></i> Rooms, Prices &amp; Images (<?php
                                                                                     $room_count = count(array_filter($caches, function ($c) {
                                                                                         return strpos($c['key'], 'rooms_') === 0 || strpos($c['key'], 'room_') === 0 ||
                                                                                             strpos($c['key'], 'facilities_') === 0 || strpos($c['key'], 'gallery_') === 0 ||
@@ -663,9 +702,64 @@ $cache_types = [
                         </div>
                     </form>
                 </section>
+
+                <?php if (rh_errorlog_user_is_admin()): ?>
+                <!-- Error logs (admin only): fixed whitelist, contents never shown -->
+                <section class="rh-panel rh-panel--flush" id="error-logs-panel">
+                    <div class="rh-panel__head">
+                        <h2 class="rh-panel__title">Error logs</h2>
+                    </div>
+                    <div class="rh-panel__body">
+                        <p class="cache-toggle-desc cache-list-intro">
+                            The server's own PHP error logs. Clearing empties a file to 0 bytes; the file stays and the server keeps writing new errors to it. Contents are not shown here.
+                        </p>
+                        <?php if (empty($error_logs)): ?>
+                            <p class="cache-toggle-desc">No error log files were found on this server.</p>
+                        <?php else: ?>
+                            <table class="cache-table" id="error-logs-table">
+                                <thead>
+                                    <tr>
+                                        <th>Log file</th>
+                                        <th>Size</th>
+                                        <th>Last modified</th>
+                                        <th><span class="cache-sr-only">Action</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($error_logs as $log): ?>
+                                        <tr>
+                                            <td><code><?php echo htmlspecialchars($log['rel'], ENT_QUOTES, 'UTF-8'); ?></code><br><small><?php echo htmlspecialchars($log['label'], ENT_QUOTES, 'UTF-8'); ?></small></td>
+                                            <td><?php echo htmlspecialchars(formatBytes($log['size']), ENT_QUOTES, 'UTF-8'); ?></td>
+                                            <td><?php echo $log['modified'] > 0 ? htmlspecialchars(date('j M Y H:i', $log['modified']), ENT_QUOTES, 'UTF-8') : '-'; ?></td>
+                                            <td>
+                                                <form method="POST" onsubmit="return confirm('Empty <?php echo htmlspecialchars($log['rel'], ENT_QUOTES, 'UTF-8'); ?>? This cannot be undone.');">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                                    <input type="hidden" name="action" value="clear_error_log">
+                                                    <input type="hidden" name="log_key" value="<?php echo htmlspecialchars($log['key'], ENT_QUOTES, 'UTF-8'); ?>">
+                                                    <button type="submit" class="btn-action btn-delete"<?php echo $log['size'] === 0 ? ' disabled' : ''; ?>>
+                                                        <i class="fas fa-eraser"></i> Clear
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                            <form method="POST" class="cache-form-foot" onsubmit="return confirm('Empty ALL error log files listed above? This cannot be undone.');">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="action" value="clear_all_error_logs">
+                                <button type="submit" class="btn-action btn-delete">
+                                    <i class="fas fa-eraser"></i> Clear all error logs
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </section>
+                <?php endif; ?>
             </div>
 
             <aside class="rh-layout__side">
+
                 <!-- Global Cache Control -->
                 <section class="rh-panel">
                     <div class="rh-panel__head">
@@ -817,7 +911,7 @@ $cache_types = [
                     <div class="form-group custom-interval-group" id="custom_interval_group">
                         <label>Custom Interval (seconds)</label>
                         <input type="number" name="custom_seconds" id="custom_seconds"
-                            value="<?php echo $cache_settings['cache_custom_seconds'] ?? '60'; ?>"
+                            value="<?php echo htmlspecialchars((string)($cache_settings['cache_custom_seconds'] ?? '60'), ENT_QUOTES, 'UTF-8'); ?>"
                             min="10" max="86400" step="1">
                         <small class="form-help-text">
                             Min: 10 seconds (0.17 mins) | Max: 86400 seconds (24 hours)
@@ -827,7 +921,7 @@ $cache_types = [
                     <div class="form-group">
                         <label>Clear At Time</label>
                         <input type="time" name="schedule_time"
-                            value="<?php echo $cache_settings['cache_schedule_time'] ?? '00:00'; ?>"
+                            value="<?php echo htmlspecialchars((string)($cache_settings['cache_schedule_time'] ?? '00:00'), ENT_QUOTES, 'UTF-8'); ?>"
                             min="00:00" max="23:59">
                     </div>
 
@@ -875,14 +969,14 @@ $cache_types = [
                 });
             }
 
-            // Run on page load
-            document.addEventListener('DOMContentLoaded', function() {
+            // Run now: after in-place (SPA) navigation DOMContentLoaded never fires again
+            (function() {
                 const intervalSelect = document.getElementById('schedule_interval');
                 if (intervalSelect) {
                     intervalSelect.addEventListener('change', toggleCustomInterval);
                 }
                 toggleCustomInterval();
-            });
+            })();
         </script>
 
         <!-- Cache Files List -->

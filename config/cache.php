@@ -19,36 +19,89 @@ define('CACHE_ENABLED', true); // This can be overridden by database setting
 function isCacheEnabled($type = null)
 {
     try {
-        // Check global setting from database
         global $pdo;
         if (!$pdo) {
             return CACHE_ENABLED;
         }
 
-        $stmt = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = 'cache_global_enabled' LIMIT 1");
-        $stmt->execute();
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        // The on/off switches are read once per request (one query, not two per cache read, which
+        // cost more than the cache saved) and re-read if the connection object changes.
+        $memo = $GLOBALS['_RH_CACHE_FLAGS'] ?? null;
+        if (!is_array($memo) || ($memo['pdo'] ?? null) !== spl_object_id($pdo)) {
+            $flags = [];
+            $stmt = $pdo->query("SELECT setting_key, setting_value FROM site_settings WHERE setting_key LIKE 'cache%enabled'");
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $flags[$row['setting_key']] = (string)$row['setting_value'];
+            }
+            $memo = ['pdo' => spl_object_id($pdo), 'flags' => $flags];
+            $GLOBALS['_RH_CACHE_FLAGS'] = $memo;
+        }
 
-        if ($result && $result['setting_value'] == '0') {
+        if (($memo['flags']['cache_global_enabled'] ?? '1') === '0') {
             return false;
         }
 
         // Check specific cache type
-        if ($type) {
-            $stmt = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = ? LIMIT 1");
-            $stmt->execute(["cache_{$type}_enabled"]);
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if ($result && $result['setting_value'] == '0') {
-                return false;
-            }
+        if ($type && ($memo['flags']["cache_{$type}_enabled"] ?? '1') === '0') {
+            return false;
         }
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         // If database query fails, default to enabled
         error_log("Cache enable check failed: " . $e->getMessage());
     }
 
     return CACHE_ENABLED;
+}
+
+/**
+ * Forget the per-request copy of the cache on/off switches (call after changing them).
+ */
+function rhCacheFlagsReset(): void
+{
+    unset($GLOBALS['_RH_CACHE_FLAGS']);
+}
+
+/**
+ * Which per-type switch (Cache Management) governs a cache key. Callers rarely pass a type, so the
+ * key decides: an Email/Rooms/Tables/Content switch now really stops that group from being cached.
+ * Unrecognised keys stay under 'settings' as before.
+ */
+function cacheTypeForKey(string $key, string $type = 'settings'): string
+{
+    if ($type !== 'settings') {
+        return $type;
+    }
+    static $prefixes = [
+        'email_' => 'email', 'booking_email_template_' => 'email',
+        'rooms_' => 'rooms', 'room_' => 'rooms', 'facilities_' => 'rooms', 'gallery_images' => 'rooms',
+        'page_hero' => 'rooms', 'hero_' => 'rooms',
+        'table_' => 'tables',
+        'testimonials_' => 'content', 'policies' => 'content', 'about_us' => 'content',
+    ];
+    foreach ($prefixes as $prefix => $t) {
+        if (strpos($key, $prefix) === 0) {
+            return $t;
+        }
+    }
+    return 'settings';
+}
+
+/**
+ * Cache files are JSON and can hold decrypted settings (e.g. SMTP credentials), so the folder must
+ * never be web-served. The root .htaccess denies /cache/; this also drops a deny-all .htaccess in
+ * the folder itself if it is missing (cache/ is not in git, so it cannot ship with the code).
+ */
+function ensureCacheDirProtected(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    $ht = CACHE_DIR . '/.htaccess';
+    if (is_dir(CACHE_DIR) && !file_exists($ht)) {
+        @file_put_contents($ht, "# Cache files may contain credentials: never serve them.\n<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Order allow,deny\n    Deny from all\n</IfModule>\n");
+    }
 }
 
 /**
@@ -59,7 +112,8 @@ function getCache(string $key, mixed $default = null, string $type = 'settings')
 {
     try {
         // Check if caching is enabled for this type
-        if (!isCacheEnabled($type)) {
+        // (the key decides which per-type switch applies)
+        if (!isCacheEnabled(cacheTypeForKey($key, $type))) {
             return $default;
         }
 
@@ -103,7 +157,7 @@ function getCache(string $key, mixed $default = null, string $type = 'settings')
 function getReadableCacheFilename(string $key): string
 {
     // Sanitize key to be filesystem-safe
-    $sanitized = preg_replace('/[^a-zA-Z0-9_-]/', '_', $key);
+    $sanitized = substr(preg_replace('/[^a-zA-Z0-9_-]/', '_', $key), 0, 150); // keep the file name under OS limits
     // Generate short hash for uniqueness
     $shortHash = substr(md5($key), 0, 8);
     return "{$sanitized}_{$shortHash}.cache";
@@ -116,7 +170,7 @@ function getReadableCacheFilename(string $key): string
 function setCache(string $key, mixed $value, int $ttl = 3600, string $type = 'settings'): bool
 {
     // Don't cache if disabled
-    if (!isCacheEnabled($type)) {
+    if (!isCacheEnabled(cacheTypeForKey($key, $type))) {
         return false;
     }
 
@@ -124,6 +178,7 @@ function setCache(string $key, mixed $value, int $ttl = 3600, string $type = 'se
     if (!file_exists(CACHE_DIR)) {
         @mkdir(CACHE_DIR, 0755, true);
     }
+    ensureCacheDirProtected();
 
     $cacheFile = CACHE_DIR . '/' . getReadableCacheFilename($key);
 
@@ -136,6 +191,9 @@ function setCache(string $key, mixed $value, int $ttl = 3600, string $type = 'se
     ];
 
     $data = json_encode($cacheData);
+    if ($data === false) {
+        return false; // value cannot be stored as JSON: never write an empty file
+    }
     return @file_put_contents($cacheFile, $data, LOCK_EX) !== false;
 }
 
@@ -160,20 +218,53 @@ function recursiveDelete(string $dir): bool
         return true;
     }
 
+    // A link is removed, never followed into whatever it points at.
+    if (is_link($dir)) {
+        return @unlink($dir) || @rmdir($dir);
+    }
+
     if (!is_dir($dir)) {
         return @unlink($dir);
     }
 
     $files = array_diff(scandir($dir), array('.', '..'));
     foreach ($files as $file) {
-        (is_dir("$dir/$file")) ? recursiveDelete("$dir/$file") : @unlink("$dir/$file");
+        recursiveDelete("$dir/$file");
     }
 
     return @rmdir($dir);
 }
 
 /**
- * Clear directory contents (keep the directory itself)
+ * Count regular files under a directory (any depth), ignoring dotfiles such as .htaccess.
+ */
+function countCacheFiles(string $dir): int
+{
+    if (!is_dir($dir) || is_link($dir)) {
+        return 0;
+    }
+    $items = @scandir($dir);
+    if ($items === false) {
+        return 0;
+    }
+    $count = 0;
+    foreach ($items as $item) {
+        if ($item[0] === '.') {
+            continue;
+        }
+        $path = $dir . '/' . $item;
+        if (is_dir($path) && !is_link($path)) {
+            $count += countCacheFiles($path);
+        } elseif (is_file($path)) {
+            $count++;
+        }
+    }
+    return $count;
+}
+
+/**
+ * Clear directory contents (keep the directory itself and any dotfile such as the
+ * deny-all .htaccess). Returns how many files were removed.
  */
 function emptyDirectory(string $dir): int
 {
@@ -184,10 +275,14 @@ function emptyDirectory(string $dir): int
     $count = 0;
     $files = array_diff(scandir($dir), array('.', '..'));
     foreach ($files as $file) {
+        if ($file[0] === '.') {
+            continue;
+        }
         $path = "$dir/$file";
-        if (is_dir($path)) {
+        if (is_dir($path) && !is_link($path)) {
+            $inside = countCacheFiles($path);
             if (recursiveDelete($path)) {
-                $count++;
+                $count += $inside;
             }
         } else {
             if (@unlink($path)) {
@@ -540,10 +635,10 @@ function listAllCache()
                         'size_formatted' => formatBytes(filesize($path)),
                         'created' => $created,
                         'created_formatted' => date('Y-m-d H:i:s', $created),
-                        'expires' => null,
-                        'expires_formatted' => 'N/A',
-                        'expired' => false,
-                        'ttl' => null,
+                        'expires' => $created + 7 * 86400,
+                        'expires_formatted' => date('Y-m-d H:i:s', $created + 7 * 86400),
+                        'expired' => (time() - $created) > 7 * 86400,
+                        'ttl' => ($created + 7 * 86400) - time(),
                         'source' => 'image',
                         'source_label' => 'Image Cache'
                     ];
@@ -642,6 +737,7 @@ function getCacheStats()
     if (!file_exists(PAGE_CACHE_DIR)) {
         @mkdir(PAGE_CACHE_DIR, 0755, true);
     }
+    ensureCacheDirProtected();
 
     $stats = [
         'total_files' => 0,
@@ -728,6 +824,12 @@ function getCacheStats()
                 $stats['image_cache']['size'] += $fileSize;
 
                 $created = filemtime($path);
+                // Proxied images are served for 7 days (includes/image-proxy.php), then re-fetched.
+                if (($now - $created) > 7 * 86400) {
+                    $stats['expired_files']++;
+                } else {
+                    $stats['active_files']++;
+                }
                 if ($created < $oldest) {
                     $oldest = $created;
                     $stats['oldest_file'] = 'image/' . $file;
@@ -849,6 +951,10 @@ function clearSettingsCache()
     $cleared = clearCacheByPattern('setting_*');
     // Also clear settings-group grouped caches (different key prefix: settings_group_*)
     $cleared += clearCacheByPattern('settings_group_*');
+    // And the in-memory copy getSetting() keeps for the rest of this request, or the old value
+    // would still be returned right after a save.
+    global $_SITE_SETTINGS;
+    $_SITE_SETTINGS = [];
     return $cleared;
 }
 

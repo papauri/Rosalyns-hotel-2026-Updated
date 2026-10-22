@@ -434,8 +434,9 @@ function ensureChildPricingColumns(PDO $pdo): void
         $pdo->exec("UPDATE bookings SET adult_guests = CASE WHEN number_of_guests < 1 THEN 1 ELSE number_of_guests END WHERE adult_guests IS NULL OR adult_guests < 1");
         $pdo->exec("UPDATE bookings SET child_guests = 0 WHERE child_guests IS NULL OR child_guests < 0");
 
-        // Backfill booking multiplier from rooms where possible
-        $pdo->exec("UPDATE bookings b LEFT JOIN rooms r ON b.room_id = r.id SET b.child_price_multiplier = COALESCE(r.child_price_multiplier, b.child_price_multiplier, 50.00) WHERE b.child_price_multiplier IS NULL OR b.child_price_multiplier <= 0");
+        // Backfill booking multiplier from rooms where possible. Only a MISSING value is filled: 0 is a real rule
+        // (children stay free) and must keep the rule the booking was saved with.
+        $pdo->exec("UPDATE bookings b LEFT JOIN rooms r ON b.room_id = r.id SET b.child_price_multiplier = COALESCE(r.child_price_multiplier, b.child_price_multiplier, 50.00) WHERE b.child_price_multiplier IS NULL");
     } catch (Throwable $e) {
         error_log('ensureChildPricingColumns warning: ' . $e->getMessage());
     }
@@ -1485,9 +1486,11 @@ function getEmailSetting(string $key, mixed $default = '')
             }
         }
 
-        // Cache the result (1 hour TTL for encrypted, 6 hours for unencrypted)
-        $ttl = $is_encrypted ? 3600 : 21600;
-        setCache("email_setting_{$key}", $value, $ttl);
+        // Cache only plain values (6 hours). Encrypted ones (SMTP password etc.) are never written to a
+        // cache file in decrypted form; they are read from the database each time.
+        if (!$is_encrypted) {
+            setCache("email_setting_{$key}", $value, 21600);
+        }
 
         return $value;
     } catch (PDOException $e) {
