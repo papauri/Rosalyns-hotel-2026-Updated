@@ -462,31 +462,62 @@
   </ul>
 
   <h2 id="menu">How to add or change a menu item</h2>
-  <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong> (<code>/admin/menu-management.php</code>). Permission: <strong>Menu</strong>. Only shown when the <strong>POS &amp; Stations</strong> module is on.</p>
-  <p>The page has three buttons: <strong>Food Menu</strong>, <strong>Drinks Menu</strong> and <strong>Room Service</strong> (which jumps to the Room Service category). Food categories are Breakfast, Lunch, Dinner, Snacks and Room Service. Drink categories are Coffee, Tea, Juice, Cocktails, Mocktails, Beer, Wine, Spirits, Soft Drinks and Room Service.</p>
+  <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong> (<code>/admin/menu-management.php</code>, page title <strong>Menu Management</strong>). Permission: <strong>Menu</strong>. Only shown when the <strong>POS &amp; Stations</strong> module is on.</p>
+  <p>One list feeds the website menu, the till, room service and the Kitchen, Bar and Coffee Bar screens. An item you save here appears on each of them, depending on the boxes you tick. Stock comes off for every item that has a stock link.</p>
+  <p>The page has two tabs, <strong>Food</strong> and <strong>Drinks</strong>, each showing how many items it holds. Items are grouped by category. Each row shows the item, its price (or <strong>Free</strong>), where it shows (the station, <strong>Till</strong>, <strong>Room service</strong> or <strong>Website only</strong>), <strong>Uses from stock</strong> (or <strong>Not linked to stock</strong>) and its status.</p>
+  <h3>Find an item</h3>
+  <ol class="steps">
+    <li>Type in <strong>Search by item name, category or barcode</strong>. The list narrows as you type. Click the <strong>&times;</strong> to clear it.</li>
+    <li>Narrow it further with the category list (<strong>All categories</strong>, each category with its item count) and the status list: <strong>All items</strong>, <strong>Available only</strong>, <strong>Unavailable only</strong>, <strong>Room service items</strong> or <strong>Not linked to stock</strong>.</li>
+    <li>A count beside the filters says how many items match, for example "3 of 52 items". The <strong>Food</strong> and <strong>Drinks</strong> tabs show their own match counts.</li>
+    <li>If the tab you are on has no match, the page says <em>"No food items match &quot;sausage&quot;."</em> (or <em>"No drink items match ..."</em>). If the other tab has matches, click the button <strong>Show N matching drink items</strong> (or food items). <strong>Clear search and filters</strong> brings everything back.</li>
+  </ol>
   <h3>Add an item</h3>
   <ol class="steps">
-    <li>Open <strong>Food Menu</strong> or <strong>Drinks Menu</strong> and click <strong>Add Food Item</strong> / <strong>Add Drink Item</strong> (or <strong>Add Item</strong> beside a category).</li>
-    <li>In <strong>Add New Menu Item</strong> choose a <strong>Category</strong> and fill in <strong>Item name</strong>, <strong>Description</strong> and <strong>Price</strong>. The price can be 0 or more.</li>
-    <li>Optionally set <strong>Display order</strong> (left blank, the item goes to the end of its category) and, for drinks, <strong>Tags</strong>.</li>
-    <li>Choose the <strong>Station (where this item is prepared)</strong>: <strong>Kitchen (KDS)</strong>, <strong>Bar (BDS)</strong> or <strong>Coffee Bar (CDS)</strong>. This decides which screen receives the ticket.</li>
-    <li>Tick <strong>Available (visible on menu)</strong>, <strong>Show in POS / Till</strong> and <strong>Show in Room Service Dashboard</strong> as needed.</li>
-    <li>Click <strong>Add item</strong>. You will see <em>"Menu item added successfully!"</em></li>
+    <li>Open the <strong>Food</strong> or <strong>Drinks</strong> tab and click <strong>Add item</strong> at the top (or <strong>Add item here</strong> in a category, which picks that category for you).</li>
+    <li>In <strong>Add food item</strong> (or <strong>Add drink item</strong> on the Drinks tab) fill in <strong>Item name</strong> and choose the <strong>Category</strong> (or choose <strong>New category&hellip;</strong> and type the name).</li>
+    <li>Type the <strong>Price</strong>. For an item that costs nothing, tick <strong>This item is free</strong> instead.</li>
+    <li>Choose <strong>Prepared at</strong>: <strong>Kitchen</strong>, <strong>Bar</strong> or <strong>Coffee bar</strong>. This decides which screen gets the ticket.</li>
+    <li>Tick where it shows: <strong>Available (untick to hide it everywhere)</strong>, <strong>On the till (POS)</strong> and <strong>In room service</strong>.</li>
+    <li>Optional: <strong>Description</strong>, <strong>Tags</strong> (comma separated, for example Hot, Cold, Premium) and <strong>Barcode</strong> (scan or type).</li>
+    <li>Fill in <strong>What it uses from stock</strong> if the item takes stock off (next section).</li>
+    <li>Click <strong>Add item</strong>. You will see <em>"Menu item added."</em></li>
   </ol>
-  <p>Names are checked as you type. A second item with the same name in the same category is flagged: <em>"A food item with this name already exists in this category."</em> (or <em>"A drink item ..."</em>). The same name in another category is allowed. If the save is still refused, the form stays open with what you typed and the reason shown. On a shop (retail) menu, a barcode already used by another product is flagged the same way, and the message names that product.</p>
+  <p>If the save is refused, the form stays open with what you typed and the reason is shown. Common reasons:</p>
+  <ul>
+    <li><em>"Enter the price (more than 0). For a free item, tick &quot;This item is free&quot;."</em></li>
+    <li><em>"A food item called &quot;...&quot; already exists in &quot;...&quot;. Use a different name or edit the existing one."</em> The same name in another category is allowed.</li>
+    <li><em>"That barcode is already used by &quot;...&quot;."</em> A barcode belongs to one item only.</li>
+  </ul>
+  <h3 id="menu-stock">What it uses from stock (sell one sausage from a pack)</h3>
+  <p>This part tells the system how much stock goes down each time one item is sold. Stock comes off when the kitchen or bar marks the item ready, or straight away when it is charged to a room. If you leave it empty, selling the item does not change stock and the row shows <strong>Not linked to stock</strong>.</p>
+  <ol class="steps">
+    <li>In <strong>Search stock items…</strong> pick the stock item (for example Sausages).</li>
+    <li>In <strong>Qty</strong> type how much one sale uses. Decimals are fine, for example 0.15.</li>
+    <li>Choose the unit next to it. The first choice is the item's own unit (for example <strong>each</strong>). If the item is bought in packs and has a pack size, a second choice shows the pack, for example <strong>Pack (10 each)</strong>.</li>
+    <li>Click <strong>Add</strong>. A line under the form says it in plain words, for example <em>"Uses 1 each of Sausages (pack of 10) per item sold &rarr; 1 pack serves 10"</em>. Check that it says what you mean.</li>
+    <li>Add more lines for more stock items. Click <strong>Remove</strong> on a line to take it out.</li>
+    <li>Look at <strong>Stock cost per item sold</strong>. Beside it you see the food cost as a percentage of the price, and the margin. If the margin is poor, change the price or the amounts.</li>
+    <li>Click <strong>Add item</strong> (or <strong>Save changes</strong> when editing). The message adds <em>"Stock link saved (1 stock item)."</em></li>
+  </ol>
+  <p><strong>One sausage from a pack of 10:</strong> pick the sausages, type 1 and choose <strong>each</strong>. One sale then takes 1 sausage off stock, not the whole pack. To use a whole pack for each sale, choose the pack unit and type 1.</p>
+  <p>If the stock item you need is not in the list, click <strong>Stock item not listed? Create it</strong>, fill in the name, <strong>Counted in</strong> and <strong>Cost per unit</strong>, and click <strong>Create</strong>. Pack sizes (for example a pack of 10) are set in Stock &rarr; Ingredients, under <strong>Bought in packs?</strong> (see the <a href="08-stock-orders.html#ingredients">Stock guide</a>).</p>
   <h3>Change an item</h3>
   <ol class="steps">
-    <li>Edit the row directly: name, description, price, <strong>Routing</strong> (station and the <strong>POS</strong> and <strong>Room Service</strong> tick boxes) and <strong>Status</strong> (<strong>Available</strong> or <strong>Unavailable</strong>).</li>
-    <li>Click <strong>Save</strong> on that row. You will see <em>"Menu item updated successfully!"</em> You can drag rows to change their order.</li>
-    <li><strong>Toggle</strong> flips Available/Unavailable straight away: <em>"Menu item availability updated!"</em></li>
-    <li><strong>Recipe</strong> opens the stock recipe for the item (see the <a href="08-stock-orders.html">Stock guide</a>). <strong>Feature</strong> posts the item to Facebook, if posting is switched on.</li>
-    <li><strong>Delete</strong> asks <em>"Delete this menu item? Any attached stock recipe will also be removed."</em> Click <strong>Delete</strong> to confirm: <em>"Menu item deleted successfully!"</em></li>
+    <li>Find the item and click <strong>Edit</strong> on its row. The same form opens with its details filled in.</li>
+    <li>Change what you need and click <strong>Save changes</strong>. You will see <em>"Menu item updated."</em></li>
+    <li>The <strong>Available</strong> / <strong>Unavailable</strong> button on the row flips the status at once: <em>"Item marked unavailable: hidden from the till, room service and the guest menu."</em> or <em>"Item is available again."</em></li>
+    <li>You can drag rows to change their order. <strong>Feature</strong> posts the item to Facebook, if posting is switched on.</li>
+    <li><strong>Delete</strong> asks <em>"Delete this menu item?"</em> Click <strong>Delete</strong> to confirm: <em>"Menu item deleted."</em> The stock link goes with it.</li>
   </ol>
   <ul>
-    <li>An item that is on an open order cannot be deleted: <em>"This item is on N open order line(s). Close or settle those orders first, then delete it (or mark it unavailable now)."</em> Close or settle those orders, or use <strong>Unavailable</strong> for now.</li>
-    <li>An item that has ever been sold is not deleted, so the sales history stays readable. It is hidden instead: <em>"This item has sales history so it cannot be deleted - it has been marked unavailable instead."</em> Its stock recipe is kept with it.</li>
+    <li>An item that is on an open order cannot be deleted: <em>"This item is on N open order line(s). Close or settle those orders first, then delete it (or mark it unavailable now)."</em></li>
+    <li>An item that has ever been sold is not deleted, so past sales stay readable. It is hidden instead: <em>"This item has sales history, so it cannot be deleted. It has been marked unavailable and hidden from the till and room service instead."</em></li>
+    <li>You cannot move an item to another category while it is on an open order: <em>"This item is on an open order, so it cannot move to another category yet. Close or settle those orders first ..."</em> Settle the orders, then change the category.</li>
+    <li>Changing the price does not switch back on an item that was switched off at the till (86).</li>
   </ul>
-  <div class="note"><p>An item shows on the till only if it is <strong>Available</strong> and <strong>Show in POS / Till</strong> is ticked. It shows in room-service mode only if <strong>Show in Room Service Dashboard</strong> is ticked. The price on the menu is the price the guest pays, tax included. The till always uses the price saved here, not a price sent from the screen.</p></div>
+  <div class="note"><p>An item shows on the till only if it is <strong>Available</strong> and <strong>On the till (POS)</strong> is ticked. It shows in room service only if <strong>In room service</strong> is ticked. The price on the menu is the price the guest pays, tax included. The till always uses the price saved here, not a price sent from the screen.</p></div>
+  <p><strong>If something goes wrong:</strong> an item you saved is not on the till? Click <strong>Edit</strong> on it, check <strong>Available</strong> and <strong>On the till (POS)</strong> are ticked, save, then reload the till. A stock item has no pack choice in the unit list? It has no pack size yet. Set it in Stock &rarr; Ingredients (<strong>Bought in packs?</strong> and <strong>Units in one pack</strong>), or type a fraction of its own unit instead. If a pack is chosen anyway the page says <em>"This stock item has no pack size, so the quantity cannot be entered in packs."</em></p>
 
   <h2 id="tables">How to set up the dine-in tables</h2>
   <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Tables</strong> (<code>/admin/restaurant-tables.php</code>). Permission: <strong>Ingredients &amp; Recipes</strong>. The till only offers tables from this list and stops two open orders on the same table.</p>

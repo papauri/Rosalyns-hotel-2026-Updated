@@ -220,6 +220,12 @@
     <p>Single, Double and Triple are price tiers, not a head count. <strong>Triple</strong> means 3 or more guests, so a room that holds 4 uses the Triple price. On New Booking the choices read <em>Single (1 guest)</em>, <em>Double (2 guests)</em> and <em>Triple (3+ guests)</em>. For a room that holds more than 3 the last one reads <em>Triple / family (3&ndash;4 guests)</em>, with the note <em>"Occupancy sets the price tier. Rooms that hold 4 use the 3+ price."</em> Nothing is wrong and no price changed. A booking for several rooms also shows <em>Group booking: N guests in M rooms</em> at the top. See <a href="09-packages-rates.html#price-tiers">Price tiers and what they are called</a>.</p>
   </details>
 
+  <details class="faq" id="faq-total-higher" data-module="bookings">
+    <summary>Why is the booking total higher than the room price? Does the total include VAT?</summary>
+    <p>Yes, the total includes VAT and levy. The <strong>Total</strong> on a booking is now the full amount: the room price with VAT and the tourism levy counted in (the ones that are switched on). You see the same full amount on the Bookings list, the booking summary window, the Dashboard <strong>Pending Bookings</strong> list (<strong>Total (incl. VAT &amp; levy)</strong>), Booking Details (for rooms booked together, <strong>Group total (incl. VAT &amp; levy)</strong>), and in the <strong>Export CSV</strong> file. On <strong>Payment Details</strong> the room bill reads <strong>Total (incl. VAT &amp; levy)</strong>, so <strong>Paid</strong> plus <strong>Due</strong> adds up to it. Conference totals also show the amount with VAT (<strong>incl. VAT</strong>). When you edit a conference amount and VAT is added on top, the field says <strong>before VAT</strong>: type the price without VAT. Nothing was added to what guests pay. The old figure was only the room price before VAT and levy. In Reports, a column named <strong>Revenue (excl. VAT, incl. levy)</strong> is the income before VAT. See <a href="07-reception-bookings.html#details">The Booking Details page</a>.</p>
+  </details>
+
+
   <h2 id="restaurant-money">Restaurant, bar and money</h2>
 
   <details class="faq" id="faq-deals" data-module="pos">
@@ -277,6 +283,22 @@
     <p>Yes. Selling is never blocked at zero stock. Tap the item as normal. The ingredient's stock goes below zero, and a manager fixes it at the next delivery or stock count. See <a href="08-stock-orders.html#how">How a sale takes stock off the shelf</a>.</p>
   </details>
 
+  <details class="faq" id="faq-search-menu" data-module="pos">
+    <summary>How do I search for a menu item?</summary>
+    <p>Open <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong> and type in <strong>Search by item name, category or barcode</strong>. The list narrows as you type and a count shows how many items match. Use <strong>All categories</strong> and the status list (<strong>Available only</strong>, <strong>Unavailable only</strong>, <strong>Room service items</strong>, <strong>Not linked to stock</strong>) to narrow it more. If nothing matches on the tab you are on, the page says <em>"No food items match ..."</em> and offers a button to show matches on the other tab. <strong>Clear search and filters</strong> shows everything again. See <a href="01-pos-till.html#menu">How to add or change a menu item</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-one-sausage" data-module="pos">
+    <summary>How do I sell one sausage from a pack?</summary>
+    <p>Open <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong>, click <strong>Edit</strong> on the item (or <strong>Add item</strong>) and go to <strong>What it uses from stock</strong>. Pick the sausages in <strong>Search stock items…</strong>, type <strong>1</strong> in <strong>Qty</strong> and choose <strong>each</strong> as the unit. Click <strong>Add</strong>. The line below says <em>"Uses 1 each of Sausages (pack of 10) per item sold &rarr; 1 pack serves 10"</em>. Click <strong>Save changes</strong> (or <strong>Add item</strong> for a new item). Each sale now takes 1 sausage off stock, not the whole pack. If the unit list has no pack choice, the stock item has no pack size: set <strong>Bought in packs?</strong> and <strong>Units in one pack</strong> in Stock &rarr; Ingredients, or use a fraction of its own unit. See <a href="01-pos-till.html#menu-stock">What it uses from stock</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-menu-item-not-on-till" data-module="pos">
+    <summary>I added a menu item but it isn't on the till</summary>
+    <p>Open <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong>, find the item (use <strong>Search by item name, category or barcode</strong>) and click <strong>Edit</strong>. Check that <strong>Available (untick to hide it everywhere)</strong> and <strong>On the till (POS)</strong> are ticked. For room service tick <strong>In room service</strong>. A row marked <strong>Website only</strong> is not on the till at all. Click <strong>Save changes</strong>, then reload the till page. If the item was switched off at the till (86), mark it unavailable and then available again on the Menu page to put it back. Items saved on the Menu page reach the till, room service and the Kitchen, Bar and Coffee Bar screens. See <a href="01-pos-till.html#menu">How to add or change a menu item</a>.</p>
+  </details>
+
+
   <details class="faq" id="faq-opening-stock" data-module="stock">
     <summary>What does "Opening stock not recorded (N items)" mean, and how do I fix it?</summary>
     <p>N ingredients have never had a quantity recorded, so they are not counted as out of stock or low. To fix it: open <strong>Stock</strong> &rarr; <strong>Stock Count</strong>, tick <strong>This is the opening stock count</strong>, click <strong>Start count</strong>, type the quantity and the unit cost for every item, click <strong>Save readings</strong> and <strong>Submit for approval</strong>. A different manager then clicks <strong>Approve &amp; post variances</strong>. See <a href="08-stock-orders.html#opening">How to do the Opening stock count</a>.</p>
@@ -302,6 +324,17 @@
     <summary>Why will it not let me receive or approve an item with no cost, or receive more than I ordered?</summary>
     <p>An item with no cost cannot be received by barcode, and a count that adds stock for an item with no cost cannot be approved. Type the cost first. If more arrived than a purchase order says, you can receive it, but you must type an <strong>Over-delivery note</strong> of at least 5 characters. See <a href="08-stock-orders.html#po">How to raise and receive a purchase order</a>.</p>
   </details>
+
+  <details class="faq" id="faq-count-cannot-approve" data-module="stock">
+    <summary>I can't approve a stock count - it says another count was approved</summary>
+    <p>The page says <em>"This count is out of date: another count was approved after these items were counted ..."</em>. Another count that covers some of the same items was approved after you counted them. Approving this one too would add the same stock twice, so it is refused and nothing is posted. Click <strong>Reject &amp; send back</strong> (type a reason of at least 8 characters), then <strong>Reopen for re-count</strong>. This takes a fresh snapshot of stock. Count the lines again and submit. See <a href="08-stock-orders.html#count">How to do a stock count</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-count-406" data-module="stock">
+    <summary>The stock count says "406 Not Acceptable" when I save</summary>
+    <p>That happened with very big counts (hundreds of lines). Big counts now save normally. Reload the page, enter or check your readings and click <strong>Save readings</strong> again. If you still see it, tell your administrator. See <a href="08-stock-orders.html#count">How to do a stock count</a>.</p>
+  </details>
+
 
   <details class="faq" id="faq-order-by-crate" data-module="stock">
     <summary>How do I order by the crate?</summary>
