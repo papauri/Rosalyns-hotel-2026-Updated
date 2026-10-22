@@ -2867,7 +2867,9 @@ function validateRoomAssignment(array $booking): array
         return ['allowed' => false, 'reason' => "Missing required field: status"];
     }
 
-    if ($booking['status'] !== 'confirmed') {
+    // A checked-in (in-house) guest may be moved to another room of the same type, e.g. a faulty
+    // room. assignIndividualRoomToBooking() then needs a clean room and sends the old one to housekeeping.
+    if (!in_array($booking['status'], ['confirmed', 'checked-in'], true)) {
         return ['allowed' => false, 'reason' => "Rooms can only be assigned to CONFIRMED bookings (current: {$booking['status']})"];
     }
 
@@ -4025,12 +4027,36 @@ function assignRoomCombinationToBooking(int $bookingId, int $combinationId, ?int
         $lockStmt->execute($roomIds);
 
         $comboMoveIn = (string)$booking['status'] === 'checked-in';
+        // An in-house guest only needs the rooms for the nights still to come.
+        $comboFrom = substr((string)$booking['check_in_date'], 0, 10);
+        if ($comboMoveIn && $comboFrom < date('Y-m-d')) {
+            $comboFrom = date('Y-m-d');
+        }
+        if ($comboMoveIn && $comboFrom >= substr((string)$booking['check_out_date'], 0, 10)) {
+            throw new RuntimeException('No nights are left to move: the guest departs today');
+        }
+        // Rooms the booking holds right now (live rows only), so an in-house move can send the old ones to housekeeping.
+        $heldBefore = [];
+        if ($comboMoveIn) {
+            $heldQ = $pdo->prepare("SELECT individual_room_id FROM bookings WHERE id = ? AND individual_room_id IS NOT NULL");
+            $heldQ->execute([$bookingId]);
+            foreach ($heldQ->fetchAll(PDO::FETCH_COLUMN) as $hid) {
+                $heldBefore[(int)$hid] = true;
+            }
+            if (bookingAvailabilityTableExists('booking_rooms')) {
+                $heldQ = $pdo->prepare("SELECT individual_room_id FROM booking_rooms WHERE booking_id = ? AND released_at IS NULL");
+                $heldQ->execute([$bookingId]);
+                foreach ($heldQ->fetchAll(PDO::FETCH_COLUMN) as $hid) {
+                    $heldBefore[(int)$hid] = true;
+                }
+            }
+        }
         foreach ($roomIds as $roomId) {
-            $availability = checkIndividualRoomAvailability($roomId, (string)$booking['check_in_date'], (string)$booking['check_out_date'], $bookingId, $comboMoveIn && !in_array($roomId, getBookingRoomIds($bookingId), true));
+            $availability = checkIndividualRoomAvailability($roomId, $comboFrom, (string)$booking['check_out_date'], $bookingId, $comboMoveIn && !isset($heldBefore[$roomId]));
             if (empty($availability['available'])) {
                 throw new RuntimeException($availability['error'] ?? 'One of the joined rooms is no longer available');
             }
-            $lockedConflict = rh_individual_room_locked_conflict($roomId, (string)$booking['check_in_date'], (string)$booking['check_out_date'], $bookingId);
+            $lockedConflict = rh_individual_room_locked_conflict($roomId, $comboFrom, (string)$booking['check_out_date'], $bookingId);
             if ($lockedConflict !== null) {
                 throw new RuntimeException('One of the joined rooms was just taken by booking ' . $lockedConflict);
             }
@@ -4057,6 +4083,19 @@ function assignRoomCombinationToBooking(int $bookingId, int $combinationId, ?int
                 $oldStatus = (string)($statusStmt->fetchColumn() ?: 'available');
                 $updateStmt->execute([$roomId]);
                 $logStmt->execute([$roomId, $oldStatus, 'Joined-room booking assigned: ' . ($booking['booking_reference'] ?? $bookingId), $performedBy]);
+            }
+            // An in-house guest moved to another pair leaves the old rooms dirty, not free.
+            foreach (array_keys($heldBefore) as $oldRoomId) {
+                if (!in_array($oldRoomId, $roomIds, true)) {
+                    // A room that is out of service (maintenance / out of order) keeps its status and gets no cleaning task.
+                    $oldSt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+                    $oldSt->execute([$oldRoomId]);
+                    if (in_array((string)$oldSt->fetchColumn(), rh_room_out_of_service_statuses(), true)) {
+                        continue;
+                    }
+                    $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning' WHERE id = ? AND status = 'occupied'")->execute([$oldRoomId]);
+                    rh_ensure_checkout_cleaning_task($oldRoomId, $bookingId, $performedBy);
+                }
             }
         }
 
@@ -7824,7 +7863,19 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
             return false;
         }
 
-        $neededBy = rh_room_needed_for_joined($individualRoomId, (string)$booking['check_in_date'], (string)$booking['check_out_date'], $bookingId);
+        // An in-house guest only needs the room for the nights still to come; nights already slept
+        // are history and must not clash with whoever used that room earlier in the stay.
+        $availFrom = substr((string)$booking['check_in_date'], 0, 10);
+        if ((string)$booking['status'] === 'checked-in' && $availFrom < date('Y-m-d')) {
+            $availFrom = date('Y-m-d');
+        }
+        if ((string)$booking['status'] === 'checked-in' && $availFrom >= substr((string)$booking['check_out_date'], 0, 10)) {
+            $rollback();
+            rh_room_assign_last_error('No nights are left to move: the guest departs today. Check them out instead');
+            return false;
+        }
+
+        $neededBy = rh_room_needed_for_joined($individualRoomId, $availFrom, (string)$booking['check_out_date'], $bookingId);
         if ($neededBy !== null && (int)($booking['previous_individual_room_id'] ?? 0) !== $individualRoomId) {
             $rollback();
             rh_room_assign_last_error('This room is needed for joined-room booking ' . $neededBy . ' (no other free pair is left). Assign that booking its pair first, or pick another room');
@@ -7844,7 +7895,7 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
         // Check if room is available for booking dates
         // An in-house guest moving to another room moves in now: that room must be clean.
         $movingInNow = (string)$booking['status'] === 'checked-in' && (int)($booking['previous_individual_room_id'] ?? 0) !== $individualRoomId;
-        $assignAvailability = checkIndividualRoomAvailability($individualRoomId, (string)$booking['check_in_date'], (string)$booking['check_out_date'], $bookingId, $movingInNow);
+        $assignAvailability = checkIndividualRoomAvailability($individualRoomId, $availFrom, (string)$booking['check_out_date'], $bookingId, $movingInNow);
         if (empty($assignAvailability['available'])) {
             $rollback();
             rh_room_assign_last_error((string)($assignAvailability['error'] ?? 'Selected room is not available for the booking dates')
@@ -7857,7 +7908,7 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
         // read snapshot when the caller already holds a transaction; a locking read always
         // sees the latest committed bookings, so a competing assignment that committed
         // after that snapshot is still caught before we write.
-        $lockedConflict = rh_individual_room_locked_conflict($individualRoomId, (string)$booking['check_in_date'], (string)$booking['check_out_date'], $bookingId);
+        $lockedConflict = rh_individual_room_locked_conflict($individualRoomId, $availFrom, (string)$booking['check_out_date'], $bookingId);
         if ($lockedConflict !== null) {
             $rollback();
             rh_room_assign_last_error('Selected room was just taken by booking ' . $lockedConflict . '. Pick another room.');
@@ -7877,8 +7928,13 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
         // An in-house guest moved to another room leaves the old one dirty, not free.
         $prevRoomId = (int)($booking['previous_individual_room_id'] ?? 0);
         if ($prevRoomId > 0 && $prevRoomId !== $individualRoomId && (string)$booking['status'] === 'checked-in') {
-            $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning' WHERE id = ? AND status = 'occupied'")->execute([$prevRoomId]);
-            rh_ensure_checkout_cleaning_task($prevRoomId, $bookingId, $performedBy);
+            // A room that is out of service (maintenance / out of order) keeps its status and gets no cleaning task.
+            $prevSt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+            $prevSt->execute([$prevRoomId]);
+            if (!in_array((string)$prevSt->fetchColumn(), rh_room_out_of_service_statuses(), true)) {
+                $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning' WHERE id = ? AND status = 'occupied'")->execute([$prevRoomId]);
+                rh_ensure_checkout_cleaning_task($prevRoomId, $bookingId, $performedBy);
+            }
         }
 
         // A room becomes 'occupied' when the guest actually checks in (updateBookingRoomsStatus

@@ -428,3 +428,49 @@ if (!function_exists('applyDynamicPricing')) {
         ];
     }
 }
+
+if (!function_exists('rh_doc_stay_lines')) {
+    /**
+     * The room figures a guest DOCUMENT (quotation, invoice, statement) prints for one booking row, built from the
+     * stored columns so the printed lines foot to the booking total exactly (no recomputing from net).
+     *
+     * Gross basis = total_with_vat, falling back to total_amount + vat_amount (the same basis rh_booked_stay_split()
+     * and rh_booking_gross_sql() use). total_amount is net + levy, so the display amounts are:
+     *   inclusive / off : gross - levy   (VAT sits inside the lines; levy is its own line)
+     *   exclusive       : gross - VAT - levy   (net lines; VAT is its own line)
+     * Packages and the child supplement are stored on the price basis (the same basis the lines print on) and are
+     * split out of the display amount; the room line is what remains.
+     *
+     * @param array $b           bookings row (total_amount, vat_amount, total_with_vat, tourism_levy_amount, child_supplement_total)
+     * @param float $pkgPriceTotal package add-ons inside this row, on the price basis (primary booking only)
+     * @return array{mode:string,gross:float,vat:float,levy:float,lines_total:float,room:float,child:float,pkg:float,subtotal:float,total:float}
+     */
+    function rh_doc_stay_lines(array $b, float $pkgPriceTotal = 0.0): array
+    {
+        $mode  = function_exists('vat_mode') ? vat_mode() : 'off';
+        $gross = (float)($b['total_with_vat'] ?? 0);
+        if ($gross <= 0) {
+            $gross = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
+        }
+        $vat   = max(0.0, (float)($b['vat_amount'] ?? 0));
+        $levy  = max(0.0, (float)($b['tourism_levy_amount'] ?? 0));
+        $lines = round($gross - $levy - ($mode === 'exclusive' ? $vat : 0.0), 2);
+        $child = max(0.0, (float)($b['child_supplement_total'] ?? 0));
+        $pkg   = max(0.0, $pkgPriceTotal);
+        $room  = round($lines - $child - $pkg, 2);
+        if ($room < 0) {
+            // Stored child/package figures larger than the booking (legacy rows): fold into the room line.
+            $room = round($lines - $pkg, 2);
+            $child = 0.0;
+            if ($room < 0) {
+                $room = $lines;
+                $pkg = 0.0;
+            }
+        }
+        return [
+            'mode' => $mode, 'gross' => round($gross, 2), 'vat' => $vat, 'levy' => $levy,
+            'lines_total' => $lines, 'room' => $room, 'child' => $child, 'pkg' => $pkg,
+            'subtotal' => $lines, 'total' => round($gross, 2),
+        ];
+    }
+}

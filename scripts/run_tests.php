@@ -15,6 +15,7 @@ $suites = [
     'Hotel details section' => 'scripts/tests/hotel_details.php',
     'User timezone display' => 'scripts/tests/user_timezone.php',
     'Rooms linked data'     => 'scripts/tests/linked_rooms.php',
+    'In-house moves + splits' => 'scripts/tests/inhouse_move.php',
     'Money linked data'     => 'scripts/tests/linked_money.php',
     'Gym linked data'       => 'scripts/tests/linked_gym.php',
     'Block Rooms permission' => 'scripts/tests/block_rooms.php',

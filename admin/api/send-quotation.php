@@ -107,6 +107,11 @@ try {
     } elseif (!empty($booking['room_name'])) {
         $roomNameForLog = $booking['room_name'];
     }
+    // The register shows the same VAT-inclusive total the guest was quoted (not the net total_amount).
+    if (!function_exists('rh_doc_stay_lines')) {
+        require_once dirname(__DIR__, 2) . '/includes/pricing.php';
+    }
+    $quotedTotal = rh_doc_stay_lines($booking)['total'];
     $insStmt = $pdo->prepare("
         INSERT INTO quotations
             (booking_id, booking_type, quote_reference, booking_reference, guest_name,
@@ -123,7 +128,7 @@ try {
         $booking['guest_name']        ?? '',
         $booking['guest_email']       ?? '',
         $roomNameForLog,
-        (float)($booking['total_amount'] ?? 0),
+        $quotedTotal,
         $valid_days,
         $valid_days,
         $notes !== '' ? $notes : null,

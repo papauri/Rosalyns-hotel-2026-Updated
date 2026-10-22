@@ -1125,6 +1125,9 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             'tourism_levy_percent' => 2.5, 'rate_plan_discount' => 0, 'rate_plan_label' => '', 'primary_booking_id' => null,
         ];
         $grand = vat_components(480000.0)['total'] + 12000;
+        // Stored VAT / gross like a real booking, so the sample's printed lines foot to its total.
+        $booking['vat_amount'] = vat_components(480000.0)['vat'];
+        $booking['total_with_vat'] = $grand;
         $pay = [['payment_date' => date('Y-m-d', strtotime('-8 days')), 'payment_method' => 'mobile_money', 'payment_type' => 'deposit', 'total_amount' => 200000, 'payment_reference' => 'PAY-SAMPLE-1']];
         $preload = ['packages' => [], 'folio_charges' => [], 'payments' => $pay,
             'summary' => ['grand_total' => $grand, 'amount_paid' => 200000.0, 'balance_due' => $grand - 200000]];

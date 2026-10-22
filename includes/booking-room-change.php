@@ -330,11 +330,26 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
         }
     }
     if ($status === 'checked-in') {
+        // The room the guest left goes to housekeeping (status 'cleaning' + an open cleaning task, the same
+        // as after a checkout). Only the NEW room(s) are marked occupied: getBookingRoomIds() also lists the
+        // released old room, so updateBookingRoomsStatus() here would put it straight back to occupied.
+        $outOfService = function_exists('rh_room_out_of_service_statuses') ? rh_room_out_of_service_statuses() : ['maintenance', 'out_of_order'];
+        $roomStatusQ = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
         foreach ($oldRoomIds as $rid) {
+            $roomStatusQ->execute([(int)$rid]);
+            if (in_array((string)$roomStatusQ->fetchColumn(), $outOfService, true)) {
+                continue;
+            }
             updateIndividualRoomStatus((int)$rid, 'cleaning', 'Guest moved to ' . $newRoom['name'] . ' (' . $b['booking_reference'] . ')', $actorId ?: null);
+            rh_ensure_checkout_cleaning_task((int)$rid, $bookingId, $actorId ?: null);
         }
         if ($assigned !== '') {
-            updateBookingRoomsStatus($bookingId, 'occupied', 'Guest moved in: ' . $b['booking_reference'], $actorId ?: null);
+            foreach (array_diff(getBookingRoomIds($bookingId), array_map('intval', $oldRoomIds)) as $rid) {
+                $roomStatusQ->execute([(int)$rid]);
+                if ((string)$roomStatusQ->fetchColumn() !== 'occupied') {
+                    updateIndividualRoomStatus((int)$rid, 'occupied', 'Guest moved in: ' . $b['booking_reference'], $actorId ?: null);
+                }
+            }
         }
     }
 

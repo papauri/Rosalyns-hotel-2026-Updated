@@ -606,6 +606,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bookingGroupTourismLevyTotal += $tourismLevyThisBooking;
             }
 
+            // A split party (e.g. 4 guests in 2 rooms) is one group: link every later room to the first, the same
+            // way the admin group booking does (primary_booking_id NULL on the lead), so the cancel dialog offers
+            // the whole group and one room cannot be left holding stock.
+            if (count($createdBookingIds) > 1) {
+                $linkGroupStmt = $pdo->prepare("UPDATE bookings SET primary_booking_id = ? WHERE id = ?");
+                foreach (array_slice($createdBookingIds, 1) as $secondaryBookingId) {
+                    $linkGroupStmt->execute([$createdBookingIds[0], $secondaryBookingId]);
+                }
+            }
+
             // Insert booking_packages rows inside the transaction (atomic with the booking insert)
             if (!empty($packageRowsToInsert) && !empty($createdBookingIds)) {
                 $pkgStmt = $pdo->prepare("INSERT INTO booking_packages

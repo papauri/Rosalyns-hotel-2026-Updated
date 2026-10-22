@@ -440,7 +440,8 @@ function reconcileIndividualRoomHousekeeping(PDO $pdo, int $roomId, ?int $perfor
         return;
     }
 
-    $pdo->prepare("UPDATE individual_rooms SET housekeeping_status = 'completed', housekeeping_notes = NULL, last_cleaned_at = COALESCE(last_cleaned_at, NOW()) WHERE id = ?")
+    // Stamp the clean time each time the room moves to 'completed' (the assignment above ended); a repeat reconcile of an already-clean room keeps it. last_cleaned_at is set first: MySQL reads later columns after earlier SET items.
+    $pdo->prepare("UPDATE individual_rooms SET last_cleaned_at = IF(last_cleaned_at IS NULL OR COALESCE(housekeeping_status, '') <> 'completed', NOW(), last_cleaned_at), housekeeping_status = 'completed', housekeeping_notes = NULL WHERE id = ?")
         ->execute([$roomId]);
 
     $roomStatusStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");

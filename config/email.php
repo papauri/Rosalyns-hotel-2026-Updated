@@ -6152,16 +6152,23 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
         $nights      = (int)$booking['number_of_nights'];
         $adults      = (int)($booking['adult_guests'] ?? $booking['number_of_guests'] ?? 1);
         $children    = (int)($booking['child_guests'] ?? 0);
-        $total       = (float)$booking['total_amount'];
-        $vat_amount  = (float)($booking['vat_amount'] ?? 0);
+        if (!function_exists('rh_doc_stay_lines')) {
+            require_once __DIR__ . '/../includes/pricing.php';
+        }
+        // Money comes from the stored gross basis (total_with_vat, else total_amount + vat_amount), never the net
+        // total_amount: inclusive mode shows the VAT-inclusive total the guest pays; exclusive shows net lines
+        // plus a VAT line that add up to the same total.
+        $docLines    = rh_doc_stay_lines($booking, (float)($booking['package_total'] ?? 0));
+        $total       = $docLines['total'];
+        $vat_amount  = $docLines['vat'];
+        $levy_amount = $docLines['levy'];
+        $pkg_amount  = $docLines['pkg'];
         $vat_rate    = (float)($booking['vat_rate'] ?? 0);
-        $child_supp  = (float)($booking['child_supplement_total'] ?? 0);
+        $child_supp  = $docLines['child'];
         $deposit_req = !empty($booking['deposit_required']);
         $deposit_amt = (float)($booking['deposit_amount'] ?? 0);
 
-        // Exclusive: VAT was added on top, so strip it to recover the room line.
-        // Inclusive/off: the priced total IS the room line (VAT, if any, is inside it).
-        $room_subtotal  = $total - (vat_mode() === 'exclusive' ? $vat_amount : 0.0) - $child_supp;
+        $room_subtotal  = $docLines['room'];
         $rate_per_night = $nights > 0 ? $room_subtotal / $nights : (float)$room['price_per_night'];
 
         $fmt = static function (float $v) use ($currency): string {
@@ -6252,8 +6259,14 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
             <h2 style="color:#8B7355;font-family:Georgia,serif;font-weight:400;margin-top:0;font-size:18px;">Pricing Breakdown</h2>
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0">'
             . $trow($room_line, $fmt($room_subtotal));
-        if ($children > 0 && $child_supp > 0) {
-            $htmlBody .= $trow('Child supplement (' . $children . ' child' . ($children !== 1 ? 'ren' : '') . ')', $fmt($child_supp));
+        if ($child_supp > 0) {
+            $htmlBody .= $trow('Child supplement' . ($children > 0 ? ' (' . $children . ' child' . ($children !== 1 ? 'ren' : '') . ')' : ''), $fmt($child_supp));
+        }
+        if ($pkg_amount > 0) {
+            $htmlBody .= $trow('Package add-ons', $fmt($pkg_amount));
+        }
+        if ($levy_amount > 0) {
+            $htmlBody .= $trow('Tourism levy', $fmt($levy_amount));
         }
         if ($vat_enabled && $vat_amount > 0) {
             $htmlBody .= $trow('VAT (' . number_format($vat_rate, 0) . '%)', vat_document_value($fmt($vat_amount)));

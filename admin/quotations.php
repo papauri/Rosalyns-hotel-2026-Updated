@@ -60,7 +60,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
 
                 if ($result['success']) {
-                    $pdo->prepare("UPDATE quotations SET status = 'sent', sent_at = NOW(), updated_at = NOW() WHERE id = ?")->execute([$quotation_id]);
+                    // A resend also refreshes the register total to the VAT-inclusive figure the guest was just quoted.
+                    if (!function_exists('rh_doc_stay_lines')) {
+                        require_once __DIR__ . '/../includes/pricing.php';
+                    }
+                    $pdo->prepare("UPDATE quotations SET status = 'sent', sent_at = NOW(), total_amount = ?, updated_at = NOW() WHERE id = ?")->execute([rh_doc_stay_lines($booking)['total'], $quotation_id]);
                     $pdo->prepare("UPDATE bookings SET last_quotation_sent_at = NOW() WHERE id = ?")->execute([$qRow['booking_id']]);
                     $_SESSION['qt_flash'] = ['type' => 'success', 'msg' => 'Quotation resent to ' . ($qRow['guest_email'] ?? '')];
                 } else {

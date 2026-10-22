@@ -410,7 +410,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $editReceiptNotice = '';
                 if (in_array($paymentStatus, ['completed', 'paid'], true)) {
                     require_once __DIR__ . '/../config/receipts.php';
-                    $editReceiptNotice = receipt_after_payment($pdo, (int)$editId, $user)['notice'];
+                    // Only a pending -> collected move is new money; a plain edit of an already-collected payment must
+                    // never re-issue the paid-in-full statement.
+                    $editIsNewMoney = isset($lockedRow['payment_status']) && !in_array((string)$lockedRow['payment_status'], ['completed', 'paid'], true);
+                    $editReceiptNotice = receipt_after_payment($pdo, (int)$editId, $user, $editIsNewMoney)['notice'];
                 }
 
                 $_SESSION['alert'] = ['type' => 'success', 'message' => 'Payment updated successfully'

@@ -677,19 +677,35 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
 
     // When group_bookings is provided, use combined figures from all rooms.
     // Otherwise fall back to single-booking columns.
-    if (!empty($group_bookings)) {
-        $childSuppTotal  = array_sum(array_column($group_bookings, 'child_supplement_total'));
-        $tourismLevyAmt  = array_sum(array_column($group_bookings, 'tourism_levy_amount'));
-        $tourismLevyPct  = (float)($group_bookings[0]['tourism_levy_percent'] ?? ($booking['tourism_levy_percent'] ?? 0));
-        // roomSubtotal = sum of all (total_amount - package_total per booking)
-        // packages live on the primary booking so we subtract once
-        $roomSubtotal    = array_sum(array_column($group_bookings, 'total_amount')) - $pkgTotal;
-    } else {
-        $childSuppTotal  = (float)($booking['child_supplement_total'] ?? 0);
-        $tourismLevyAmt  = (float)($booking['tourism_levy_amount']    ?? 0);
-        $tourismLevyPct  = (float)($booking['tourism_levy_percent']   ?? 0);
-        $roomSubtotal    = (float)$booking['total_amount'] - $pkgTotal;
+    // Room lines come from the stored GROSS basis (total_with_vat, else total_amount + vat_amount) via
+    // rh_doc_stay_lines(), never from the net total_amount, so the printed lines foot to the booking total:
+    // inclusive = VAT-inclusive lines, exclusive = net lines with VAT as its own row. Packages live on the
+    // primary booking, so they are split out of that one row only.
+    if (!function_exists('rh_doc_stay_lines')) {
+        require_once __DIR__ . '/../includes/pricing.php';
     }
+    $docRows   = !empty($group_bookings) ? array_values($group_bookings) : [$booking];
+    $pkgRowIdx = 0;
+    foreach ($docRows as $di => $dr) {
+        if ((int)($dr['id'] ?? 0) === (int)($booking['id'] ?? -1)) {
+            $pkgRowIdx = $di;
+            break;
+        }
+    }
+    $docLines = [];
+    foreach ($docRows as $di => $dr) {
+        $docLines[$di] = rh_doc_stay_lines($dr, $di === $pkgRowIdx ? $pkgTotal : 0.0);
+    }
+    if ($ratePlanDiscount > 0 && $ratePlanLabel !== '') {
+        // The discount prints as its own negative row, so the room line shows the rate BEFORE the discount.
+        $docLines[$pkgRowIdx]['room'] = round($docLines[$pkgRowIdx]['room'] + $ratePlanDiscount, 2);
+    }
+    $childSuppTotal  = array_sum(array_column($docLines, 'child'));
+    $tourismLevyAmt  = array_sum(array_column($docLines, 'levy'));
+    $tourismLevyPct  = (float)(!empty($group_bookings)
+        ? ($group_bookings[0]['tourism_levy_percent'] ?? ($booking['tourism_levy_percent'] ?? 0))
+        : ($booking['tourism_levy_percent'] ?? 0));
+    $roomSubtotal    = array_sum(array_column($docLines, 'room'));
     $pkgRows = [];
     try {
         $ps2 = $pdo->prepare("SELECT * FROM booking_packages WHERE booking_id = ? ORDER BY id ASC");
@@ -751,11 +767,23 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     // Totals — VAT per installation mode: exclusive adds on top of the room
     // base, inclusive extracts from it (total never inflates), off is zero.
     // Folio lines carry their own stored VAT split either way.
-    $taxBase       = $roomSubtotal + $pkgTotal;
-    $baseVatParts  = vat_components($taxBase);
+    $vMode         = vat_mode();
+    $baseGross     = round(array_sum(array_column($docLines, 'gross')), 2);
+    $baseVatSum    = round(array_sum(array_column($docLines, 'vat')), 2);
+    $baseVatParts  = [
+        'mode'  => $vMode,
+        'rate'  => $vMode === 'off' ? 0.0 : (float)getSetting('vat_rate', 0),
+        'net'   => round($baseGross - $baseVatSum - $tourismLevyAmt, 2),
+        'vat'   => $baseVatSum,
+        'total' => $baseGross,
+    ];
     $vatRate       = $baseVatParts['rate'];
     $vatAmount     = $baseVatParts['vat'] + $folioVat;
     $totalWithVat  = $baseVatParts['total'] + $folioTotal;
+    // Printed subtotal: inclusive/off = VAT-inclusive lines; exclusive = net lines (VAT and levy are their own
+    // rows), so subtotal + VAT + levy = total in every mode.
+    $linesTotal    = round(array_sum(array_column($docLines, 'lines_total')), 2);
+    $subtotalShown = $vMode === 'exclusive' ? $linesTotal + $folioTotal - $folioVat : $linesTotal + $folioTotal;
     $amountPaid    = array_sum(array_column($payments, 'total_amount'));
     $balanceDue    = max(0.0, $totalWithVat - $amountPaid);
 
@@ -816,8 +844,8 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     // Item rows: [description, qty, unit, amount]
     $itemRows = [];
     if (!empty($group_bookings)) {
-        foreach ($group_bookings as $grm) {
-            $grmSubtotal = (float)$grm['total_amount'];
+        foreach (array_values($group_bookings) as $gi => $grm) {
+            $grmSubtotal = (float)$docLines[$gi]['room'];
             $nightRate   = $grmSubtotal / max(1, (int)$grm['number_of_nights']);
             $itemRows[] = [
                 rh_pdf_e($grm['room_name']) . rh_inv_sub('Accommodation'),
@@ -835,11 +863,12 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             rh_pdf_e($money($roomSubtotal)),
         ];
     }
-    if ($childGuests > 0 && $childSuppTotal > 0) {
+    if ($childSuppTotal > 0) {
+        $childQty = max(1, $childGuests);
         $itemRows[] = [
-            rh_pdf_e('Child supplement x ' . $childGuests),
-            rh_pdf_e((string)$childGuests),
-            rh_pdf_e($money($childSuppTotal / $childGuests)),
+            rh_pdf_e('Child supplement x ' . $childQty),
+            rh_pdf_e((string)$childQty),
+            rh_pdf_e($money($childSuppTotal / $childQty)),
             rh_pdf_e($money($childSuppTotal)),
         ];
     }
@@ -866,11 +895,14 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             'spa'   => 'Spa',
             default => ucfirst((string)(($fc['charge_type'] ?? '') !== '' ? $fc['charge_type'] : 'Extra')),
         };
+        // Exclusive: the line shows its net amount (VAT is its own total row); inclusive/off: the all-in line total.
+        $fcShown = $vMode === 'exclusive' ? (float)$fc['line_subtotal'] : (float)$fc['line_total'];
+        $fcQty   = max(1, (int)$fc['quantity']);
         $itemRows[] = [
             rh_pdf_e($fc['description']) . rh_inv_sub($typeLabel),
             rh_pdf_e((string)(int)$fc['quantity']),
-            rh_pdf_e($money((float)$fc['unit_price'])),
-            rh_pdf_e($money((float)$fc['line_total'])),
+            rh_pdf_e($money($vMode === 'exclusive' ? $fcShown / $fcQty : (float)$fc['unit_price'])),
+            rh_pdf_e($money($fcShown)),
         ];
     }
     $itemsHtml = rh_pdf_items_table([
@@ -881,12 +913,11 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     ], $itemRows);
 
     // Totals - same figures as before; only the presentation follows vat_mode().
-    $vMode = vat_mode();
     $totals = [];
     if ($vMode === 'inclusive') {
-        $totals[] = ['label' => 'Subtotal (incl. VAT)', 'value' => $money($baseVatParts['total'] + $folioTotal)];
+        $totals[] = ['label' => 'Subtotal (incl. VAT)', 'value' => $money($subtotalShown)];
     } elseif ($vMode === 'exclusive') {
-        $totals[] = ['label' => 'Subtotal (excl. VAT)', 'value' => $money($baseVatParts['net'] + $folioTotal - $folioVat)];
+        $totals[] = ['label' => 'Subtotal (excl. VAT)', 'value' => $money($subtotalShown)];
     } else {
         // VAT off: no VAT row prints, so the subtotal must carry any VAT recorded
         // earlier for the rows to foot to the invoice total.
@@ -1035,7 +1066,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
     $guestCountStr = $adultGuests . ' Adult' . ($adultGuests > 1 ? 's' : '') . ($childGuests > 0 ? ', ' . $childGuests . ' Child' . ($childGuests > 1 ? 'ren' : '') : '');
 
     // ── TOTALS ROWS (appended directly into charges tbody) ───
-    $cSub = number_format($baseVatParts['net'] + $folioTotal - $folioVat, 2);
+    $cSub = number_format($subtotalShown, 2);
     $totalsRows  = '<tr><td colspan="3" style="padding:6px 8px 3px; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-top:2px solid #D8CDBE; border-left:1px solid #C8BEB0;">Subtotal</td><td width="25%" style="padding:6px 8px 3px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-top:2px solid #D8CDBE; border-right:1px solid #C8BEB0; white-space:nowrap;">' . $currency_symbol . ' ' . $cSub . '</td></tr>';
     if ($vatEnabled && $vatAmount > 0) {
         $totalsRows .= '<tr><td colspan="3" style="padding:3px 8px; text-align:right; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-left:1px solid #C8BEB0;">VAT (' . number_format($vatRate, 1) . '%)</td><td width="25%" style="padding:3px 8px; text-align:right; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border-bottom:1px solid #C8BEB0; border-right:1px solid #C8BEB0; white-space:nowrap;">' . htmlspecialchars(vat_document_value($currency_symbol . ' ' . number_format($vatAmount, 2)), ENT_QUOTES, 'UTF-8') . '</td></tr>';
@@ -1868,6 +1899,62 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null)
     }
 }
 
+if (!function_exists('rh_issue_paid_statement')) {
+    /**
+     * Produce the paid-in-full STAY STATEMENT for a booking whose account is settled (owner document rules:
+     * quote before, invoice only while money is owed, statement once paid). It reuses the number already on the
+     * booking (the final invoice's) and overwrites that file, so a stay never burns a second invoice number and
+     * the stored copy stops saying "Balance due". A booking with no number yet gets a STMT-<reference> label, not
+     * a number from the invoice sequence.
+     *
+     * @param bool $email also email the statement to the guest (CC the invoice recipients)
+     * @return array{success:bool,message:string,invoice_number?:string,relative_path?:string,filepath?:string,email_sent?:bool}
+     */
+    function rh_issue_paid_statement(PDO $pdo, int $bookingId, bool $email = false): array
+    {
+        try {
+            $st = $pdo->prepare("SELECT id, room_id, booking_reference, guest_name, guest_email, check_out_date, final_invoice_number, primary_booking_id FROM bookings WHERE id = ?");
+            $st->execute([$bookingId]);
+            $b = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$b) {
+                return ['success' => false, 'message' => 'Booking not found'];
+            }
+            $number = trim((string)($b['final_invoice_number'] ?? ''));
+            // No number yet: the statement carries a STMT-<reference> label (file name / document number only). It is
+            // never stored in bookings.final_invoice_number, so invoice numbering stays untouched.
+            $label = $number !== '' ? $number : 'STMT-' . preg_replace('/[^A-Za-z0-9_-]+/', '-', (string)$b['booking_reference']);
+            $gen = generateInvoicePDF($bookingId, $label, true);
+            if (!$gen) {
+                return ['success' => false, 'message' => 'Failed to generate the statement'];
+            }
+            $pdo->prepare("UPDATE bookings SET final_invoice_path = ?, updated_at = NOW() WHERE id = ?")
+                ->execute([$gen['relative_path'], $bookingId]);
+
+            $out = ['success' => true, 'message' => 'Statement generated', 'invoice_number' => $gen['invoice_number'],
+                'relative_path' => $gen['relative_path'], 'filepath' => $gen['filepath'], 'email_sent' => false];
+            $to = trim((string)($b['guest_email'] ?? ''));
+            if ($email && $to !== '' && filter_var($to, FILTER_VALIDATE_EMAIL)) {
+                $cc = array_filter(array_map('trim', explode(',', (string)getEmailSetting('invoice_recipients', ''))));
+                $smtpUser = (string)getEmailSetting('smtp_username', '');
+                if ($smtpUser !== '' && !in_array($smtpUser, $cc, true)) {
+                    $cc[] = $smtpUser;
+                }
+                $sent = sendFinalInvoiceEmail($b, $gen['filepath'], array_values($cc), 0.0);
+                $out['email_sent'] = !empty($sent['success']);
+                if ($out['email_sent']) {
+                    $pdo->prepare("UPDATE bookings SET final_invoice_sent_at = NOW() WHERE id = ?")->execute([$bookingId]);
+                } else {
+                    $out['message'] = 'Statement generated (email failed: ' . (string)($sent['message'] ?? 'unknown') . ')';
+                }
+            }
+            return $out;
+        } catch (Throwable $e) {
+            error_log('rh_issue_paid_statement: ' . $e->getMessage());
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+}
+
 /**
  * Send final invoice email at checkout
  *
@@ -1924,7 +2011,7 @@ function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_r
 
                     <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee;">
                         <span style="font-weight: bold; color: #333;">Check-out Date:</span>
-                        <span style="color: #666;">' . date('F j, Y') . '</span>
+                        <span style="color: #666;">' . (!empty($booking['check_out_date']) ? date('F j, Y', strtotime((string)$booking['check_out_date'])) : date('F j, Y')) . '</span>
                     </div>
                 </div>
 

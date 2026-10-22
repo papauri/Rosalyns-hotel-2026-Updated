@@ -500,6 +500,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Every room of the type (or every joined pair) with its state and the reason it
             // cannot be used, so nothing silently disappears from the picker.
+            // An in-house guest only needs the room for the nights still to come.
+            if ($bookingInHouse && substr($check_in, 0, 10) < date('Y-m-d')) {
+                $check_in = date('Y-m-d');
+            }
             $candidates = rh_room_assignment_candidates($room_type_id, $check_in, $check_out, $exclude_booking_id, $bookingInHouse);
             $normalized = array_map(function ($item) use ($bookingChildGuests) {
                 $item['requires_child_override'] = $item['available'] && $bookingChildGuests > 0 && (int)$item['children_allowed'] === 0;
@@ -2613,8 +2617,8 @@ if ($deep_link_booking_id > 0 && $search_query === '') {
     $dlSt->execute([$deep_link_booking_id]);
     $dlRow = $dlSt->fetch(PDO::FETCH_ASSOC) ?: [];
     $search_query = (string)($dlRow['booking_reference'] ?? '');
-    if ($deep_link_action === 'assign-room' && $search_query !== '' && (string)$dlRow['status'] !== 'confirmed') {
-        $_SESSION['error_message'] = 'A room can only be assigned to a confirmed booking (this one is ' . str_replace('-', ' ', (string)$dlRow['status']) . ').';
+    if ($deep_link_action === 'assign-room' && $search_query !== '' && !in_array((string)$dlRow['status'], ['confirmed', 'checked-in'], true)) {
+        $_SESSION['error_message'] = 'A room can only be assigned to a confirmed or in-house booking (this one is ' . str_replace('-', ' ', (string)$dlRow['status']) . ').';
         header('Location: booking-details.php?id=' . $deep_link_booking_id);
         exit;
     }
@@ -3689,7 +3693,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             $can_modify = $bk_holding || $bk_inhouse;
                                             $can_change_room_type = ($bk_holding && !$is_missed_checkin) || $bk_inhouse;
                                             // A late arrival (confirmed, arrival date passed) still needs a room to check in.
-                                            $can_assign_room = $bk_status === 'confirmed';
+                                            $can_assign_room = $bk_status === 'confirmed' || $bk_inhouse; // in-house: move to another room of the same type
                                             // The right document for the state (owner rule): nothing paid yet = quotation first;
                                             // balance owed = invoice first; fully paid = receipt (never an invoice).
                                             $bk_doc = rh_doc_state($bk_paid, $bk_due, $bk_status);

@@ -398,12 +398,23 @@ if (!function_exists('receipt_build_pos_style_html_raw')) {
 
         // Totals
         $grandTotal  = $totalAmount + $tipAmount;
-        $totalsHtml  = '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Sub-total (net)</td>';
-        $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($netAmount, 2) . '</td></tr>';
-        if ($vatAmount > 0) {
+        // Same VAT presentation as the receipt PDF (receipt_render_payment_pdf_html): exclusive itemises net +
+        // VAT; inclusive prints only the "prices include VAT at x%" note (never a net/VAT split); off prints none.
+        $vatDocMode  = function_exists('vat_mode') ? vat_mode() : 'off';
+        $totalsHtml  = '';
+        if ($vatDocMode === 'exclusive') {
+            $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Sub-total (net)</td>';
+            $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($netAmount, 2) . '</td></tr>';
+        }
+        if ($vatDocMode === 'exclusive' && $vatAmount > 0) {
             $vatLabel = 'VAT' . ($vatRate > 0 ? ' (' . number_format($vatRate, 1) . '%)' : '');
             $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">' . htmlspecialchars($vatLabel, ENT_QUOTES, 'UTF-8') . '</td>';
             $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($vatAmount, 2) . '</td></tr>';
+        } elseif ($vatDocMode === 'inclusive') {
+            $noteRate = $vatRate > 0 ? $vatRate : (float)getSetting('vat_rate', 0);
+            if ($noteRate > 0) {
+                $totalsHtml .= '<tr><td colspan="2" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;font-size:11px;color:#7C6E5B;text-align:right;">All prices include VAT at ' . htmlspecialchars(rtrim(rtrim(number_format($noteRate, 2), '0'), '.'), ENT_QUOTES, 'UTF-8') . '%</td></tr>';
+            }
         }
         if ($tipAmount > 0) {
             $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;color:#059669;font-weight:600;">Tip</td>';
@@ -1399,14 +1410,92 @@ if (!function_exists('receipt_after_payment')) {
      * The one call every "payment received" path makes right after the money is committed:
      * emails the receipt (once) and returns ['sent'=>bool, 'notice'=>string, 'result'=>array].
      * Append 'notice' to the staff success message. Never throws.
+     *
+     * $newMoney: true when this call is for money that has just been received (every create path, or an edit that
+     * moves a payment from pending to collected); false for a plain edit of an already-collected payment. Only new
+     * money can trigger the paid-in-full statement.
      */
-    function receipt_after_payment(PDO $pdo, int $paymentId, ?array $user = null): array
+    function receipt_after_payment(PDO $pdo, int $paymentId, ?array $user = null, bool $newMoney = true): array
     {
         if ($paymentId <= 0) {
             return ['sent' => false, 'notice' => '', 'result' => ['success' => false, 'reason' => 'not_found']];
         }
         $result = receipt_auto_send($pdo, $paymentId, $user);
-        return ['sent' => !empty($result['success']) && ($result['reason'] ?? '') === 'sent', 'notice' => receipt_staff_notice($result), 'result' => $result];
+        $notice = receipt_staff_notice($result);
+        try {
+            if ($newMoney) {
+                $notice .= receipt_statement_after_payment($pdo, $paymentId);
+            }
+        } catch (Throwable $e) {
+            error_log('receipt_statement_after_payment failed for payment ' . $paymentId . ': ' . $e->getMessage());
+        }
+        return ['sent' => !empty($result['success']) && ($result['reason'] ?? '') === 'sent', 'notice' => $notice, 'result' => $result];
+    }
+}
+
+if (!function_exists('receipt_statement_after_payment')) {
+    /**
+     * A guest checked out with a balance and got a FINAL INVOICE ("Balance due"). When THIS payment is the one that
+     * clears that balance, replace it with the paid-in-full stay statement (same number, no new invoice number) and
+     * email it, so the guest is not left holding an invoice that still asks for money. Any other payment (not a room
+     * payment, a refund, no invoice issued yet, balance still owed, or the booking was already paid before this
+     * payment) does nothing. Returns a staff notice sentence, or ''.
+     */
+    function receipt_statement_after_payment(PDO $pdo, int $paymentId): string
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $ps = $pdo->prepare("SELECT booking_type, booking_id, total_amount, payment_type, payment_status, created_at, updated_at FROM payments WHERE id = ? AND deleted_at IS NULL");
+        $ps->execute([$paymentId]);
+        $p = $ps->fetch(PDO::FETCH_ASSOC);
+        if (!$p || (string)$p['booking_type'] !== 'room' || (int)$p['booking_id'] <= 0
+            || (string)($p['payment_type'] ?? '') === 'refund'
+            || !in_array((string)($p['payment_status'] ?? ''), ['completed', 'paid'], true)) {
+            return '';
+        }
+        $bookingId = (int)$p['booking_id'];
+        $bs = $pdo->prepare("SELECT final_invoice_generated, status, final_invoice_sent_at FROM bookings WHERE id = ?");
+        $bs->execute([$bookingId]);
+        $b = $bs->fetch(PDO::FETCH_ASSOC);
+        if (!$b || (int)($b['final_invoice_generated'] ?? 0) !== 1 || in_array((string)$b['status'], ['cancelled', 'no-show', 'expired'], true)) {
+            return '';
+        }
+        // Once only: the statement already went out after this money was collected (final_invoice_sent_at is stamped
+        // when it is emailed). The money counts as collected at the later of created_at and updated_at: a payment
+        // created pending before checkout and marked collected afterwards (its update stamps updated_at) is newer
+        // than the checkout invoice and must still get its statement.
+        $collectedTs = max((int)strtotime((string)($p['created_at'] ?? '')), (int)strtotime((string)($p['updated_at'] ?? '')));
+        if (!empty($b['final_invoice_sent_at']) && $collectedTs > 0 && strtotime((string)$b['final_invoice_sent_at']) >= $collectedTs) {
+            return '';
+        }
+        // Only the payment that cleared the balance: no later collected payment may exist on this booking.
+        $later = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'room' AND booking_id = ? AND id > ? AND deleted_at IS NULL
+            AND COALESCE(payment_type, '') <> 'refund' AND payment_status IN ('completed', 'paid')");
+        $later->execute([$bookingId, $paymentId]);
+        if ((int)$later->fetchColumn() > 0) {
+            return '';
+        }
+        if (!function_exists('getBookingFolioSummary')) {
+            return '';
+        }
+        $fs = getBookingFolioSummary($bookingId);
+        if (isset($fs['error'])) {
+            return '';
+        }
+        $dueNow = (float)$fs['balance_due'];
+        $dueBefore = (float)$fs['grand_total'] - ((float)$fs['amount_paid'] - (float)$p['total_amount']);
+        if ($dueNow > $tol || $dueBefore <= $tol) {
+            return '';
+        }
+        if (!function_exists('rh_issue_paid_statement')) {
+            require_once __DIR__ . '/invoice.php';
+        }
+        $res = rh_issue_paid_statement($pdo, $bookingId, true);
+        if (empty($res['success'])) {
+            return ' Paid-in-full statement could not be produced: ' . (string)($res['message'] ?? '');
+        }
+        return !empty($res['email_sent'])
+            ? ' Balance cleared: paid-in-full stay statement emailed to the guest.'
+            : ' Balance cleared: paid-in-full stay statement generated (not emailed: ' . (string)($res['message'] ?? 'no valid guest email') . ').';
     }
 }
 

@@ -249,6 +249,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
             case 'generate_invoice':
                 // Generate invoice without sending
                 require_once '../config/invoice.php';
+                // A settled booking gets its paid-in-full statement under the number it already holds, never a new invoice.
+                if (rh_account_fully_paid($pdo, 'room', (int)$booking_id)) {
+                    $stmtRes = rh_issue_paid_statement($pdo, (int)$booking_id, false);
+                    if (!empty($stmtRes['success'])) {
+                        $_SESSION['success_message'] = 'This booking is paid in full, so the paid-in-full statement was generated: ' . $stmtRes['invoice_number'];
+                    } else {
+                        $_SESSION['error_message'] = 'Failed to generate the statement: ' . $stmtRes['message'];
+                    }
+                    break;
+                }
                 $invoice_result = generateInvoicePDF($booking_id);
                 if ($invoice_result) {
                     // Update booking with invoice details if not exists
@@ -297,7 +307,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
             case 'regenerate_invoice':
                 // Force regenerate invoice
                 require_once '../config/invoice.php';
-                $invoice_result = generateInvoicePDF($booking_id);
+                // Regenerating keeps the number already issued (it never burns a new one from the sequence). A
+                // settled booking gets the paid-in-full statement instead of an invoice.
+                if (rh_account_fully_paid($pdo, 'room', (int)$booking_id)) {
+                    $stmtRes = rh_issue_paid_statement($pdo, (int)$booking_id, false);
+                    if (!empty($stmtRes['success'])) {
+                        $_SESSION['success_message'] = 'This booking is paid in full, so the paid-in-full statement was regenerated: ' . $stmtRes['invoice_number'];
+                    } else {
+                        $_SESSION['error_message'] = 'Failed to regenerate the statement: ' . $stmtRes['message'];
+                    }
+                    break;
+                }
+                $regenNumStmt = $pdo->prepare("SELECT final_invoice_number FROM bookings WHERE id = ?");
+                $regenNumStmt->execute([$booking_id]);
+                $regenNumber = trim((string)$regenNumStmt->fetchColumn());
+                $invoice_result = generateInvoicePDF($booking_id, $regenNumber !== '' ? $regenNumber : null);
                 if ($invoice_result) {
                     // Update booking with new invoice
                     $updateStmt = $pdo->prepare("

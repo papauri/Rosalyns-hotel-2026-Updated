@@ -62,6 +62,36 @@ function dx_user(PDO $pdo): array {
 }
 $user = dx_user($pdo);
 
+function dx_pdf_text(string $pdf): string {
+    // Plain text of a TCPDF file (core-font strings in the compressed content streams), for asserting printed amounts.
+    $txt = '';
+    if (preg_match_all('/stream\r?\n(.*?)\r?\nendstream/s', $pdf, $m)) {
+        foreach ($m[1] as $st) {
+            $d = @gzuncompress($st);
+            if ($d !== false) { $txt .= $d . "\n"; }
+        }
+    }
+    preg_match_all('/\(([^)]*)\)\s*Tj|\[(.*?)\]\s*TJ/s', $txt, $mm, PREG_SET_ORDER);
+    $out = [];
+    foreach ($mm as $g) {
+        if (($g[1] ?? '') !== '') { $out[] = $g[1]; continue; }
+        if (preg_match_all('/\(([^)]*)\)/', (string)($g[2] ?? ''), $parts)) { $out[] = implode('', $parts[1]); }
+    }
+    return implode(' | ', $out);
+}
+/** Booking priced like the dress rehearsal: 2 nights, 270,000 gross (net 229,787.23 + VAT 40,212.77 at 17.5%), optional 2.5% levy. */
+function dx_priced_booking(PDO $pdo, string $run, string $mode, bool $levy, string $status): array {
+    $GLOBALS['_SITE_SETTINGS']['vat_enabled'] = '1';
+    $GLOBALS['_SITE_SETTINGS']['vat_rate'] = '17.5';
+    $GLOBALS['_SITE_SETTINGS']['vat_pricing_mode'] = $mode;
+    [$bid, $bref] = dx_booking($pdo, $run, 'docs-test@example.invalid', $status);
+    $net = 229787.23; $vat = 40212.77; $levyAmt = $levy ? 5744.68 : 0.0;
+    $pdo->prepare("UPDATE bookings SET number_of_nights = 2, check_out_date = DATE_ADD(check_in_date, INTERVAL 2 DAY), total_amount = ?, vat_rate = 17.5, vat_amount = ?,
+            tourism_levy_amount = ?, tourism_levy_percent = ?, total_with_vat = ? WHERE id = ?")
+        ->execute([round($net + $levyAmt, 2), $vat, $levyAmt, $levy ? 2.5 : 0, round($net + $vat + $levyAmt, 2), $bid]);
+    return [$bid, $bref];
+}
+
 switch ($sc) {
     case 'account': // gym | event | conference: Record payment helper (the shared modal's server side)
         $type = (string)$prm['type'];
@@ -224,6 +254,118 @@ switch ($sc) {
             $out['pdf_title_statement'] = strpos($raw, 'Stay Statement') !== false || strpos($raw, $needle16) !== false || strpos($raw, bin2hex($needle16)) !== false || stripos($raw, strtoupper(bin2hex($needle16))) !== false;
             @unlink($res['filepath']);
         }
+        break;
+
+    case 'quote_money': // F1: the room quotation (PDF, email, register total) shows the VAT-inclusive total the guest pays
+        require_once $root . '/includes/quotation-pdf.php';
+        require_once $root . '/includes/pricing.php';
+        [$bid, $bref] = dx_priced_booking($pdo, $run, (string)$prm['mode'], !empty($prm['levy']), 'confirmed');
+        $q = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b JOIN rooms r ON r.id = b.room_id WHERE b.id = ?");
+        $q->execute([$bid]);
+        $bk = $q->fetch(PDO::FETCH_ASSOC);
+        $room = $pdo->query("SELECT * FROM rooms ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        $L = rh_doc_stay_lines($bk);
+        $out['lines'] = $L;
+        $out['lines_foot'] = abs(($L['room'] + $L['child'] + $L['pkg']) + ($L['mode'] === 'exclusive' ? $L['vat'] : 0.0) + $L['levy'] - $L['total']) < 0.005;
+        $txt = dx_pdf_text(generateQuotationPDF($bk, $room, []));
+        $out['pdf_text'] = substr($txt, strpos($txt, 'DESCRIPTION') !== false ? strpos($txt, 'DESCRIPTION') : 0, 400);
+        foreach (['MWK135,000', 'MWK270,000', 'MWK229,787', 'MWK114,894', 'MWK40,213', 'MWK5,745', 'MWK275,745'] as $needle) {
+            $out['pdf_has_' . $needle] = strpos($txt, $needle) !== false;
+        }
+        $res = sendTentativeQuotationEmail($bk, ['valid_days' => 7, 'attach_pdf' => true, 'send_whatsapp' => false]);
+        $out['email_ok'] = !empty($res['success']);
+        break;
+
+    case 'invoice_money': // F2: invoice / paid-in-full statement lines foot to the total in every VAT mode
+        require_once $root . '/config/invoice.php';
+        [$bid, $bref] = dx_priced_booking($pdo, $run, (string)$prm['mode'], !empty($prm['levy']), 'checked-out');
+        $gross = (float)$pdo->query("SELECT total_with_vat FROM bookings WHERE id = $bid")->fetchColumn();
+        $extras = !empty($prm['extras']) ? 27000.0 : 0.0;
+        if ($extras > 0) {
+            $pdo->prepare("INSERT INTO booking_charges (booking_id, charge_type, description, quantity, unit_price, line_subtotal, vat_rate, vat_amount, line_total, posted_at, added_by)
+                VALUES (?, 'food', 'Dinner', 1, 22978.72, 22978.72, 17.5, 4021.28, 27000, NOW(), ?)")->execute([$bid, $user['id']]);
+        }
+        dx_payment($pdo, $run, 'room', $bid, $bref, 'completed', round($gross + $extras, 2), 'RDXI' . $run);
+        recalculateBookingFinancials($bid);
+        $st = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b JOIN rooms r ON r.id = b.room_id WHERE b.id = ?");
+        $st->execute([$bid]);
+        $bk = $st->fetch(PDO::FETCH_ASSOC);
+        $html = buildInvoiceHTML($bk, 'INV-DXMONEY-1', 'Test', 'a@b.c', '1', 'x', 'MWK', [], null, true);
+        $txt = html_entity_decode(strip_tags(str_replace(['</td>', '</tr>'], [' | ', "\n"], $html)), ENT_QUOTES, 'UTF-8');
+        $out['txt'] = preg_replace('/\s+/', ' ', substr($txt, (int)strpos($txt, 'Accommodation'), 900));
+        $out['has_stmt'] = stripos($html, 'Stay Statement') !== false;
+        foreach (['135,000.00', '270,000.00', '297,000.00', '229,787.23', '114,893.62', '256,787.23', '40,212.77', '44,234.05', '22,978.72', '252,765.95', '27,000.00', '5,744.68', '275,744.68', '302,744.68', '114,894.62'] as $needle) {
+            $out['n_' . $needle] = substr_count($txt, 'MWK ' . $needle);
+        }
+        $out['has_subtotal_incl'] = strpos($txt, 'Subtotal (incl. VAT)') !== false;
+        $out['has_subtotal_excl'] = strpos($txt, 'Subtotal (excl. VAT)') !== false;
+        // Foot check straight from the printed totals block: Subtotal (+ VAT row in exclusive) (+ levy) = Total charges.
+        $num = static function (string $label) use ($txt): ?float {
+            return preg_match('/' . preg_quote($label, '/') . '[^|]*\|\s*MWK ([\d,]+\.\d\d)/', $txt, $m) ? (float)str_replace(',', '', $m[1]) : null;
+        };
+        $sub = $num('Subtotal'); $vatRow = $num('VAT ('); $levyRow = $num('Tourism levy'); $totalRow = $num('Total charges');
+        $out['foots'] = $sub !== null && $totalRow !== null && abs($sub + ($prm['mode'] === 'exclusive' ? (float)$vatRow : 0.0) + (float)$levyRow - $totalRow) < 0.005;
+        $out['printed'] = ['sub' => $sub, 'vat' => $vatRow, 'levy' => $levyRow, 'total' => $totalRow];
+        break;
+
+    case 'late_statement': // F3: the payment that clears the balance AFTER checkout replaces the balance-due invoice with the statement
+        require_once $root . '/config/invoice.php';
+        [$bid, $bref] = dx_booking($pdo, $run, 'docs-test@example.invalid', 'checked-out');
+        $firstPay = dx_payment($pdo, $run, 'room', $bid, $bref, 'completed', 40.0, 'RDXL' . $run);
+        $pdo->prepare("UPDATE bookings SET final_invoice_generated = 1, final_invoice_number = ?, final_invoice_path = ? WHERE id = ?")
+            ->execute(['INV-DXLATE-' . $run, 'invoices/INV-DXLATE-' . $run . '.pdf', $bid]);
+        recalculateBookingFinancials($bid);
+        $seq = static function (PDO $pdo): float { return (float)$pdo->query("SELECT COALESCE(SUM(next_number), 0) FROM finance_sequences")->fetchColumn(); };
+        $seqBefore = $seq($pdo);
+        $r0 = receipt_statement_after_payment($pdo, $firstPay); // still owes 60: nothing happens
+        $out['partial_notice'] = $r0;
+        $second = dx_payment($pdo, $run, 'room', $bid, $bref, 'completed', 60.0, 'RDXM' . $run);
+        if ($second <= $firstPay) { // ids are auto-increment in production: the later payment has the larger id
+            $pdo->prepare('UPDATE payments SET id = ? WHERE id = ?')->execute([$firstPay + 1, $second]);
+            $second = $firstPay + 1;
+        }
+        recalculateBookingFinancials($bid);
+        $r1 = receipt_after_payment($pdo, $second, $user);
+        $out['clearing_notice'] = $r1['notice'];
+        $row = $pdo->prepare("SELECT final_invoice_number, final_invoice_path, final_invoice_sent_at IS NOT NULL AS sent FROM bookings WHERE id = ?");
+        $row->execute([$bid]);
+        $b = $row->fetch(PDO::FETCH_ASSOC);
+        $out['number_kept'] = ($b['final_invoice_number'] ?? '') === 'INV-DXLATE-' . $run;
+        $out['path'] = (string)($b['final_invoice_path'] ?? '');
+        $out['statement_file'] = $out['path'] !== '' && is_file($root . '/' . $out['path']);
+        $out['stmt_sent_stamp'] = (int)($b['sent'] ?? 0);
+        $out['seq_unchanged'] = abs($seq($pdo) - $seqBefore) < 0.0001;
+        // Asking again for the clearing payment (statement already sent): nothing more goes out.
+        $r2 = receipt_after_payment($pdo, $second, $user);
+        $out['recall_notice'] = $r2['notice'];
+        // A further payment on an already-settled booking, or asking again, must not send a second statement.
+        $third = dx_payment($pdo, $run, 'room', $bid, $bref, 'completed', 5.0, 'RDXN' . $run);
+        if ($third <= $second) { $pdo->prepare('UPDATE payments SET id = ? WHERE id = ?')->execute([$second + 1, $third]); $third = $second + 1; }
+        $out['again_notice'] = receipt_statement_after_payment($pdo, $third);
+        // Once only, clearing payment only: re-asking for the clearing payment, a plain edit of it (newMoney=false) and the
+        // earlier payment (even with the "already sent" stamp removed) all stay silent.
+        $r3 = receipt_after_payment($pdo, $second, $user, false);
+        $out['edit_notice'] = $r3['notice'];
+        $pdo->prepare("UPDATE bookings SET final_invoice_sent_at = NULL WHERE id = ?")->execute([$bid]);
+        $out['earlier_notice'] = receipt_statement_after_payment($pdo, $firstPay);
+        $r4 = receipt_after_payment($pdo, $second, $user, false);
+        $out['edit_unsent_notice'] = $r4['notice'];
+        // Regenerate on the settled booking (what the booking page button calls) keeps the number and writes the statement.
+        $reg = rh_issue_paid_statement($pdo, $bid, false);
+        $out['regen_number'] = (string)($reg['invoice_number'] ?? '');
+        if (!empty($reg['filepath'])) { @unlink($reg['filepath']); }
+        // A settled booking that never had an invoice number: the statement is labelled STMT-<ref> but no such value is stored.
+        [$nb, $nref] = dx_booking($pdo, $run, 'docs-test@example.invalid', 'checked-out');
+        dx_payment($pdo, $run, 'room', $nb, $nref, 'completed', 100.0, 'RDXO' . $run);
+        recalculateBookingFinancials($nb);
+        $nr = rh_issue_paid_statement($pdo, $nb, false);
+        $nrow = $pdo->prepare("SELECT final_invoice_number, final_invoice_path FROM bookings WHERE id = ?");
+        $nrow->execute([$nb]);
+        $nrow = $nrow->fetch(PDO::FETCH_ASSOC);
+        $out['nonumber_label'] = (string)($nr['invoice_number'] ?? '');
+        $out['nonumber_stored'] = (string)($nrow['final_invoice_number'] ?? '');
+        $out['nonumber_path'] = (string)($nrow['final_invoice_path'] ?? '');
+        if (!empty($nr['filepath'])) { @unlink($nr['filepath']); }
         break;
 
     case 'api_create':

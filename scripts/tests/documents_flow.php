@@ -278,6 +278,95 @@ $gone = !is_file($root . '/' . $qfile);
 ok('deleting a conference enquiry removes its register row and its saved quotation PDF', $gone && (int)($r['verify'][0][0]['enq'] ?? 1) === 0 && (int)($r['verify'][0][0]['q'] ?? 1) === 0, json_encode([$r['output_flash'] ?? '', $r['verify'] ?? $r, $gone]));
 ok('  conference delete rolled back', dx_clean($r), json_encode($r));
 
+echo "== DOCUMENT MONEY: quotation, invoice, statement, late statement ==\n";
+foreach (['inclusive', 'exclusive'] as $vm) {
+    $r = dx_child('quote_money', ['mode' => $vm]);
+    $j = $r['json'] ?? [];
+    $L = $j['lines'] ?? [];
+    if ($vm === 'inclusive') {
+        ok('F1 quotation (inclusive): the lines are VAT-inclusive 135,000/night and 270,000 total (booking total_with_vat), not the net 229,787', abs(($L['room'] ?? 0) - 270000) < 0.01 && abs(($L['total'] ?? 0) - 270000) < 0.01 && !empty($j['lines_foot']), json_encode($j ?: $r));
+        ok('F1 quotation PDF (inclusive): prints MWK135,000 and MWK270,000 and never the net 229,787 / 114,894', !empty($j['pdf_has_MWK135,000']) && !empty($j['pdf_has_MWK270,000']) && empty($j['pdf_has_MWK229,787']) && empty($j['pdf_has_MWK114,894']), $j['pdf_text'] ?? json_encode($r));
+    } else {
+        ok('F1 quotation (exclusive): net room 229,787.23 + VAT 40,212.77 = 270,000 total', abs(($L['room'] ?? 0) - 229787.23) < 0.01 && abs(($L['vat'] ?? 0) - 40212.77) < 0.01 && abs(($L['total'] ?? 0) - 270000) < 0.01 && !empty($j['lines_foot']), json_encode($j ?: $r));
+        ok('F1 quotation PDF (exclusive): net room line, a VAT line and the 270,000 total', !empty($j['pdf_has_MWK229,787']) && !empty($j['pdf_has_MWK40,213']) && !empty($j['pdf_has_MWK270,000']), $j['pdf_text'] ?? json_encode($r));
+    }
+    ok('F1 quotation email (' . $vm . ') builds and sends with its PDF', !empty($j['email_ok']) && dx_count($r['emails'], 'quotation') === 1 && dx_has_pdf($r['emails'], 'quotation'), json_encode([dx_kinds($r['emails']), $j['email_ok'] ?? null]));
+    ok('  quotation (' . $vm . ') rolled back', dx_clean($r), json_encode($r));
+}
+$r = dx_child('quote_money', ['mode' => 'inclusive', 'levy' => 1]);
+$j = $r['json'] ?? [];
+ok('F1 quotation (inclusive + levy): 270,000 lines + 5,744.68 levy = 275,744.68 total, lines foot', abs(($j['lines']['total'] ?? 0) - 275744.68) < 0.01 && abs(($j['lines']['room'] ?? 0) - 270000) < 0.01 && !empty($j['lines_foot']) && !empty($j['pdf_has_MWK5,745']) && !empty($j['pdf_has_MWK275,745']), json_encode($j ?: $r));
+ok('  quotation levy rolled back', dx_clean($r), json_encode($r));
+
+foreach ([['inclusive', 0, 0], ['inclusive', 1, 0], ['exclusive', 0, 0], ['exclusive', 1, 0], ['inclusive', 0, 1]] as [$vm, $ex, $lv]) {
+    $r = dx_child('invoice_money', ['mode' => $vm, 'extras' => $ex, 'levy' => $lv]);
+    $j = $r['json'] ?? [];
+    $tag = 'F2 statement (' . $vm . ($ex ? ' + extras' : '') . ($lv ? ' + levy' : '') . ')';
+    $d = json_encode($j['printed'] ?? $j ?: $r) . ' ' . ($j['txt'] ?? '');
+    $n = static function (string $k) use ($j): int { return (int)($j['n_' . $k] ?? 0); };
+    if ($vm === 'inclusive' && !$ex && !$lv) {
+        ok($tag . ': room 135,000 x 2 = 270,000, total 270,000; the net 229,787.23 / 114,893.62 is never printed as a price', $n('135,000.00') >= 1 && $n('270,000.00') >= 3 && $n('229,787.23') === 0 && $n('114,893.62') === 0 && !empty($j['has_subtotal_incl']), $d);
+    } elseif ($vm === 'inclusive' && $ex && !$lv) {
+        ok($tag . ': subtotal and total both 297,000 (270,000 room + 27,000 extras), never 256,787.23', $n('297,000.00') >= 2 && $n('27,000.00') >= 1 && $n('256,787.23') === 0, $d);
+    } elseif ($vm === 'exclusive' && !$ex) {
+        ok($tag . ': net room 229,787.23, VAT 40,212.77, total 270,000', $n('229,787.23') >= 2 && $n('40,212.77') >= 1 && $n('270,000.00') >= 1 && !empty($j['has_subtotal_excl']), $d);
+    } elseif ($vm === 'exclusive' && $ex) {
+        ok($tag . ': net lines 229,787.23 + 22,978.72, subtotal 252,765.95, VAT 44,234.05, total 297,000', $n('22,978.72') >= 1 && $n('252,765.95') >= 1 && $n('44,234.05') >= 1 && $n('297,000.00') >= 1, $d);
+    } else {
+        ok($tag . ': 270,000 lines + 5,744.68 levy = 275,744.68', $n('270,000.00') >= 2 && $n('5,744.68') >= 1 && $n('275,744.68') >= 1, $d);
+    }
+    ok($tag . ': the printed Subtotal (+ VAT row in exclusive) (+ levy) adds up to the Total charges exactly', !empty($j['foots']) && !empty($j['has_stmt']), $d);
+    ok('  ' . $tag . ' rolled back', dx_clean($r), json_encode($r));
+}
+
+$r = dx_child('late_statement');
+$j = $r['json'] ?? [];
+ok('F3 a partial payment after checkout (balance still owed) does nothing to the invoice', ($j['partial_notice'] ?? 'x') === '', json_encode($j ?: $r));
+ok('F3 the payment that clears the balance after checkout: statement generated under the SAME invoice number (no new number burned)', !empty($j['number_kept']) && !empty($j['statement_file']) && !empty($j['seq_unchanged']) && stripos((string)($j['clearing_notice'] ?? ''), 'statement') !== false, json_encode($j ?: $r));
+ok('F3 that payment emails the receipt AND the paid-in-full statement (one each, both with a PDF)', dx_count($r['emails'], 'receipt') === 1 && dx_count($r['emails'], 'statement') === 1 && dx_has_pdf($r['emails'], 'statement') && !empty($j['stmt_sent_stamp']), json_encode([dx_kinds($r['emails']), $j ?: $r]));
+ok('F3 a later extra payment on the settled booking sends no second statement; regenerate keeps the number', ($j['again_notice'] ?? 'x') === '' && (string)($j['regen_number'] ?? '') !== '' && strpos((string)$j['regen_number'], 'INV-DXLATE-') === 0, json_encode($j ?: $r));
+ok('F3 once only: re-asking for the clearing payment, a plain edit of it, and the earlier payment send no second statement', ($j['recall_notice'] ?? 'x') === '' && ($j['edit_notice'] ?? 'x') === '' && ($j['earlier_notice'] ?? 'x') === '' && ($j['edit_unsent_notice'] ?? 'x') === '' && dx_count($r['emails'], 'statement') === 1 && dx_count($r['emails'], 'receipt') === 1, json_encode([dx_kinds($r['emails']), $j ?: $r]));
+ok('F3 a settled booking with no invoice number gets a STMT- labelled statement but no STMT- value is stored as its invoice number', strpos((string)($j['nonumber_label'] ?? ''), 'STMT-') === 0 && ($j['nonumber_stored'] ?? 'x') === '' && ($j['nonumber_path'] ?? '') !== '', json_encode($j ?: $r));
+ok('  late statement rolled back', dx_clean($r), json_encode($r));
+
+// A payment created PENDING before checkout, marked collected (admin edit) AFTER the checkout invoice was emailed:
+// it still earns exactly one paid-in-full statement; saving it again sends nothing more.
+$bid = dx_next_id(); $ref = 'DXPE' . $bid % 100000; $pid = dx_next_id(); $finPe = 'INV-DXPE-' . $bid % 100000;
+$peSetup = [dx_booking_sql($bid, $ref, $mail, 'checked-out'), dx_payment_sql($pid, $bid, $ref, 'pending', 100.0),
+    "UPDATE payments SET created_at = DATE_SUB(NOW(), INTERVAL 2 HOUR), updated_at = DATE_SUB(NOW(), INTERVAL 2 HOUR) WHERE id = $pid",
+    "UPDATE bookings SET final_invoice_generated = 1, final_invoice_number = " . dx_q($finPe) . ", final_invoice_path = " . dx_q('invoices/' . $finPe . '.pdf') . ", final_invoice_sent_at = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE id = $bid"];
+$pePost = array_merge($post, ['booking_id' => $bid, 'payment_amount' => '100', 'payment_status' => 'completed']);
+$r = dx_run('admin/payment-add.php', $pePost, ['get' => ['edit' => $pid], 'setup' => $peSetup, 'verify' => ["SELECT payment_status, (SELECT final_invoice_number FROM bookings WHERE id = $bid) AS fin FROM payments WHERE id = $pid"]]);
+ok('F3 pending-before-checkout payment marked collected after the checkout invoice: ONE receipt and ONE statement, same invoice number', dx_count($r['emails'], 'receipt') === 1 && dx_count($r['emails'], 'statement') === 1 && ($r['verify'][0][0]['fin'] ?? '') === $finPe, json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r, $r['output_flash'] ?? '']));
+@unlink($root . '/invoices/' . $finPe . '.pdf');
+ok('  pending->collected statement rolled back', dx_clean($r), json_encode($r));
+$bid = dx_next_id(); $ref = 'DXPF' . $bid % 100000; $pid = dx_next_id(); $finPe = 'INV-DXPF-' . $bid % 100000;
+$resave = [dx_booking_sql($bid, $ref, $mail, 'checked-out'), dx_payment_sql($pid, $bid, $ref, 'completed', 100.0, 'RDXPF' . $pid),
+    "UPDATE payments SET receipt_emailed_at = NOW(), receipt_email_count = 1, created_at = DATE_SUB(NOW(), INTERVAL 2 HOUR) WHERE id = $pid",
+    "UPDATE bookings SET final_invoice_generated = 1, final_invoice_number = " . dx_q($finPe) . ", final_invoice_path = " . dx_q('invoices/' . $finPe . '.pdf') . ", final_invoice_sent_at = NOW() WHERE id = $bid"];
+$r = dx_run('admin/payment-add.php', array_merge($pePost, ['booking_id' => $bid]), ['get' => ['edit' => $pid], 'setup' => $resave]);
+ok('F3 re-saving that collected payment again sends nothing more (no second statement or receipt)', count($r['emails']) === 0, json_encode(dx_kinds($r['emails'])));
+@unlink($root . '/invoices/' . $finPe . '.pdf');
+ok('  re-save rolled back', dx_clean($r), json_encode($r));
+
+$bid = dx_next_id(); $ref = 'DXRG' . $bid % 100000; $pid = dx_next_id(); $fin = 'INV-DXREG-' . $bid % 100000;
+$r = dx_run('admin/booking-details.php', ['invoice_action' => 'regenerate_invoice'], ['get' => ['id' => $bid],
+    'setup' => [dx_booking_sql($bid, $ref, $mail, 'checked-out'), dx_payment_sql($pid, $bid, $ref, 'completed', 100.0, 'RDXG' . $bid % 100000),
+        "UPDATE bookings SET amount_paid = 100, amount_due = 0, payment_status = 'paid', final_invoice_generated = 1, final_invoice_number = " . dx_q($fin) . ", final_invoice_path = " . dx_q('invoices/' . $fin . '.pdf') . " WHERE id = $bid"],
+    'verify' => ["SELECT final_invoice_number, final_invoice_path FROM bookings WHERE id = $bid"]]);
+ok('F3 Regenerate on a fully paid booking keeps its invoice number and writes the statement (no new INV number)', ($r['verify'][0][0]['final_invoice_number'] ?? '') === $fin && is_file($root . "/invoices/" . $fin . ".pdf"), json_encode([$r['output_flash'] ?? '', $r['verify'] ?? $r]));
+@unlink($root . '/invoices/' . $fin . '.pdf');
+ok('  regenerate rolled back', dx_clean($r), json_encode($r));
+
+$bid = dx_next_id(); $ref = 'DXQR' . $bid % 100000; $qid2 = dx_next_id();
+$r = dx_run('admin/quotations.php', ['action' => 'resend', 'quotation_id' => $qid2], [
+    'setup' => [dx_booking_sql($bid, $ref, $mail),
+        "UPDATE bookings SET number_of_nights = 2, check_out_date = DATE_ADD(check_in_date, INTERVAL 2 DAY), total_amount = 229787.23, vat_amount = 40212.77, vat_rate = 17.5, total_with_vat = 270000 WHERE id = $bid",
+        "INSERT INTO quotations (id, booking_id, booking_type, quote_reference, booking_reference, guest_name, guest_email, room_name, total_amount, valid_days, valid_until, status, sent_at) VALUES ($qid2, $bid, 'room', " . dx_q('QT-' . $ref) . ", " . dx_q($ref) . ", 'DOCS TEST', " . dx_q($mail) . ", 'Room', 229787.23, 7, DATE_ADD(CURDATE(), INTERVAL 7 DAY), 'sent', NOW())"],
+    'verify' => ["SELECT total_amount FROM quotations WHERE id = $qid2"]]);
+ok('F1 resending a room quotation refreshes its register total to the VAT-inclusive 270,000', abs((float)($r['verify'][0][0]['total_amount'] ?? 0) - 270000) < 0.01 && dx_count($r['emails'], 'quotation') === 1, json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r, $r['output_flash'] ?? '']));
+ok('  quotation resend rolled back', dx_clean($r), json_encode($r));
+
 echo "== API: api/payments.php ==\n";
 $apiV = ["SELECT p.payment_status, p.receipt_number IS NOT NULL AS has_receipt_no, p.receipt_emailed_at IS NOT NULL AS emailed, p.receipt_email_count AS cnt FROM payments p JOIN bookings b ON b.id = p.booking_id WHERE b.guest_name = 'DOCS TEST'"];
 $r = dx_child('api_create', ['status' => 'completed'], ['verify' => $apiV]);
