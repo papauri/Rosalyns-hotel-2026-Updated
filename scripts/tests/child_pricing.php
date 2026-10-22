@@ -287,6 +287,13 @@ foreach (['inclusive', 'exclusive'] as $vm) {
     $bid = 990000020 + ($vm === 'inclusive' ? 0 : 1);
     $setup = array_merge(cp_setup($rid, 'percent', null, 50, 0, null), $rate100, [
         "INSERT INTO site_settings (setting_key, setting_value) VALUES ('vat_pricing_mode', '$vm') ON DUPLICATE KEY UPDATE setting_value = '$vm'",
+    ], $vm === 'exclusive' ? [
+        // The exclusive figures above assume VAT 17.5% + levy 1% on, whatever this hotel uses.
+        "INSERT INTO site_settings (setting_key, setting_value) VALUES ('vat_enabled', '1') ON DUPLICATE KEY UPDATE setting_value = '1'",
+        "INSERT INTO site_settings (setting_key, setting_value) VALUES ('vat_rate', '17.5') ON DUPLICATE KEY UPDATE setting_value = '17.5'",
+        "INSERT INTO site_settings (setting_key, setting_value) VALUES ('tourism_levy_enabled', '1') ON DUPLICATE KEY UPDATE setting_value = '1'",
+        "INSERT INTO site_settings (setting_key, setting_value) VALUES ('tourism_levy_percent', '1') ON DUPLICATE KEY UPDATE setting_value = '1'",
+    ] : [], [
         "INSERT INTO bookings (id, booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights,
             number_of_guests, adult_guests, child_guests, occupancy_type, status, payment_status, child_price_multiplier, child_charge_mode, child_charge_amount, free_children,
             total_amount, vat_amount, tourism_levy_amount, tourism_levy_percent, vat_rate, total_with_vat, amount_due, child_supplement_total)
@@ -308,7 +315,8 @@ foreach (['inclusive', 'exclusive'] as $vm) {
 }
 
 echo "== room type change keeps the child rule unless the whole stay is re-priced ==\n";
-$typeB = 1;
+// Another active room type than the test's own (ids differ per hotel).
+$typeB = (int)$pdo->query('SELECT id FROM rooms WHERE is_active = 1 AND id <> ' . (int)$rid . ' ORDER BY id LIMIT 1')->fetchColumn();
 $bSetup = array_merge(cp_setup($rid, 'percent', null, 50, 0, null), $rate100, [
     "UPDATE rooms SET children_allowed = 1, max_guests = 4, price_per_night = 200000, price_single_occupancy = 200000, price_double_occupancy = 200000, triple_occupancy_enabled = 1, price_triple_occupancy = 200000,
         child_charge_mode = 'fixed', child_charge_amount = 20000, free_children = 0, max_children = NULL, child_price_multiplier = 50 WHERE id = $typeB",

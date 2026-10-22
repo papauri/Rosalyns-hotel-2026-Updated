@@ -351,15 +351,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $applied_rate_plan_row   = $dynamicResult['rate_plan_row'];
 
         $base_amount = $room_price * $number_of_nights;
-        $child_price_multiplier = isset($room['child_price_multiplier'])
-            ? (float)$room['child_price_multiplier']
-            : (float)getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50));
-        if ($child_price_multiplier < 0) {
-            $child_price_multiplier = 0;
+        // One child-charge rule per room type (includes/pricing.php): % of rate or fixed per night, free children, max per room.
+        $childRule = rh_child_rule($room);
+        $child_price_multiplier = $childRule['percent'];
+        $childSnapshot = rh_child_rule_snapshot($childRule);
+        foreach ($bookingAllocation as $allocPart) {
+            $childLimitError = rh_child_limit_error($childRule, (int)$allocPart['children'], !empty($occupancyPolicy['children_allowed']), (string)$room['name']);
+            if ($childLimitError !== '') {
+                throw new Exception($childLimitError);
+            }
         }
 
-        $child_rate_per_night = $room_price * ($child_price_multiplier / 100);
-        $child_supplement_total = $child_guests > 0 ? ($child_rate_per_night * $child_guests * $number_of_nights) : 0;
+        $child_supplement_total = rh_child_supplement($childRule, $child_guests, $number_of_nights, (float)$room_price);
         $total_amount = $base_amount + $child_supplement_total;
 
         $tourism_levy_enabled = in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true);
@@ -473,12 +476,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT INTO bookings (
                     booking_reference, room_id, guest_name, guest_email, guest_phone,
                     guest_country, guest_address, number_of_guests, adult_guests, child_guests,
-                    child_price_multiplier, check_in_date, check_out_date, number_of_nights,
+                    child_price_multiplier, child_charge_mode, child_charge_amount, free_children,
+                    check_in_date, check_out_date, number_of_nights,
                     total_amount, amount_due, vat_rate, vat_amount, total_with_vat, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
                     special_requests, status,
                     is_tentative, tentative_expires_at, occupancy_type, client_uuid,
                     rate_plan_id, rate_plan_label, rate_plan_discount, package_total
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             // Build per-row idempotency tag. The first row uses the client uuid verbatim;
             // split-bookings get a deterministic suffix so each row stays unique while
@@ -523,7 +527,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pkgTotalThisBooking = ($i === 0) ? $packageTotal : 0.0;
 
                 $baseThisBooking = $rateThisBooking * $number_of_nights;
-                $childSupplementThisBooking = $childrenThisBooking > 0 ? (($rateThisBooking * ($child_price_multiplier / 100)) * $childrenThisBooking * $number_of_nights) : 0;
+                $childSupplementThisBooking = rh_child_supplement($childRule, $childrenThisBooking, (int)$number_of_nights, $rateThisBooking);
                 // Stay totals via the shared helper: the tourism levy is OUTSIDE the VAT
                 // base (levy = net * levy%, VAT = net * VAT%). Levy applies to room +
                 // child supplement only; packages carry VAT but no levy.
@@ -569,7 +573,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $guestsThisBooking,
                     $adultsThisBooking,
                     $childrenThisBooking,
-                    $child_price_multiplier,
+                    $childSnapshot['child_price_multiplier'],
+                    $childSnapshot['child_charge_mode'],
+                    $childSnapshot['child_charge_amount'],
+                    $childSnapshot['free_children'],
                     $check_in_date,
                     $check_out_date,
                     $number_of_nights,
@@ -681,6 +688,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'adult_guests' => $adult_guests,
                 'child_guests' => $child_guests,
                 'child_price_multiplier' => $child_price_multiplier,
+                'child_charge_mode' => $childSnapshot['child_charge_mode'],
+                'child_charge_amount' => $childSnapshot['child_charge_amount'],
+                'free_children' => $childSnapshot['free_children'],
+                'rooms_in_group' => max(1, count(array_filter($bookingAllocation, static fn($p) => (int)$p['children'] > 0))), // rooms carrying children
                 'child_supplement_total' => $bookingGroupChildSupplementTotal,
                 'tourism_levy_amount' => $bookingGroupTourismLevyTotal,
                 'tourism_levy_percent' => $tourism_levy_percent,
@@ -865,6 +876,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($error_message)) {
 $rooms_stmt = $pdo->query("
     SELECT r.id, r.name, r.price_per_night, r.price_single_occupancy, r.price_double_occupancy,
            r.price_triple_occupancy, r.child_price_multiplier,
+           r.child_charge_mode, r.child_charge_amount, r.free_children, r.max_children,
            GREATEST(
                r.max_guests,
                COALESCE((SELECT MAX(ir.max_guests_override) FROM individual_rooms ir WHERE ir.room_type_id = r.id AND ir.is_active = 1), 0),
@@ -908,7 +920,8 @@ foreach ($available_rooms as $room) {
         'price_single_occupancy' => (float)($room['price_single_occupancy'] ?? $room['price_per_night']),
         'price_double_occupancy' => (float)($room['price_double_occupancy'] ?? $room['price_per_night']),
         'price_triple_occupancy' => (float)($room['price_triple_occupancy'] ?? $room['price_per_night']),
-        'child_price_multiplier' => isset($room['child_price_multiplier']) ? (float)$room['child_price_multiplier'] : (float)getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50)),
+        'child_price_multiplier' => rh_child_rule($room)['percent'],
+        'child_rule' => rh_child_rule_js(rh_child_rule($room)),
         'rooms_available' => (int)$room['rooms_available'],
         'total_rooms' => (int)$room['total_rooms'],
         'single_enabled' => (int)$policy['single_enabled'],
