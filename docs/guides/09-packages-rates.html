@@ -49,7 +49,7 @@
   <h2 id="how-price">How a booking price is worked out</h2>
   <p>The same steps are used on the website booking form and in the admin when staff create a booking.</p>
   <ol class="steps">
-    <li>The system picks the nightly room price from the number of guests sharing the room: the <strong>Single Occupancy Price</strong> for 1 guest, the <strong>Double Occupancy Price</strong> for 2, the <strong>Triple Occupancy Price</strong> for 3. If that price is left empty, the <strong>Price Per Night</strong> is used instead.</li>
+    <li>The system picks the nightly room price from the number of guests sharing the room: the <strong>Single Occupancy Price</strong> for 1 guest, the <strong>Double Occupancy Price</strong> for 2, the <strong>Triple Occupancy Price</strong> for 3 or more. If that price is left empty, the <strong>Price Per Night</strong> is used instead. On a booking these tiers read <em>Single (1 guest)</em>, <em>Double (2 guests)</em> and <em>Triple (3+ guests)</em>. For a room that holds more than 3 the third one reads <em>Triple / family (3&ndash;4 guests)</em>, and a room for 4 uses the Triple price. See <a href="#price-tiers">Price tiers and what they are called</a>.</li>
     <li>Any matching, active <strong>rate plan</strong> then raises or lowers that nightly price.</li>
     <li>The nightly price is multiplied by the number of nights.</li>
     <li>If children are staying, a child charge is added. The first children in each room can be free (<strong>Free children (first N in each room)</strong>). Each child after that pays either a percentage of the nightly price after the rate plan, or a fixed amount, for every night. The rule is set per room type, and a single room can have its own. See <a href="#child-charges">Child charges</a>.</li>
@@ -57,6 +57,19 @@
     <li>Any <strong>packages</strong> the guest ticked are added on top.</li>
   </ol>
   <p>Example: a double room has a Double Occupancy Price of MWK 100,000. A 10% discount rate plan matches, so the night costs MWK 90,000. Two nights is MWK 180,000. One child with a Child Supplement of 50% adds 90,000 &times; 50% &times; 2 nights = MWK 90,000. With a fixed amount of MWK 10,000 per child per night, the same child adds 10,000 &times; 2 nights = MWK 20,000. With <strong>Free children</strong> set to 1, that child adds nothing.</p>
+
+  <h2 id="price-tiers">Price tiers and what they are called</h2>
+  <p>Single, Double and Triple are price tiers, not a head count. The name only tells you which price is used. Nothing about the price changed; only the words on the booking screens, emails and WhatsApp messages did.</p>
+  <table>
+    <thead><tr><th>You see</th><th>Price used</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Single (1 guest)</strong></td><td>Single Occupancy Price</td></tr>
+      <tr><td><strong>Double (2 guests)</strong></td><td>Double Occupancy Price</td></tr>
+      <tr><td><strong>Triple (3+ guests)</strong></td><td>Triple Occupancy Price (3 or more guests). If the room holds exactly 3 it reads <strong>Triple (3 guests)</strong>.</td></tr>
+      <tr><td><strong>Triple / family (3&ndash;4 guests)</strong></td><td>The same Triple Occupancy Price, for a room that holds more than 3. The second number is the most the room holds.</td></tr>
+    </tbody>
+  </table>
+  <p>On New Booking, a room that holds more than 3 shows the note <em>"Occupancy sets the price tier. Rooms that hold 4 use the 3+ price."</em> So a room for 4 that says Triple is correct: there is no separate price for 4 guests.</p>
 
   <h2 id="screen">What is on the screens</h2>
 
@@ -111,7 +124,7 @@
         <li><strong>Price Per Night</strong> — required. Used whenever a more specific price below is empty.</li>
         <li><strong>Single Occupancy Price</strong> — one guest in the room. Optional.</li>
         <li><strong>Double Occupancy Price</strong> — two guests. Optional.</li>
-        <li><strong>Triple Occupancy Price</strong> — three guests. Optional.</li>
+        <li><strong>Triple Occupancy Price</strong> — three or more guests. Optional.</li>
               </ul>
     </li>
     <li>Tick or untick <strong>Enable Triple Occupancy (3 guests)</strong> and <strong>Allow Children for this Room Type</strong> as needed.</li>

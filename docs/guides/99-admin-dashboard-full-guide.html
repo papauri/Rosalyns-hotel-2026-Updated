@@ -59,7 +59,7 @@
   <p>Open <code>/admin/login.php</code> on the hotel's website address.</p>
   <h3>How to sign in</h3>
   <ol class="steps">
-    <li>Type your <strong>Username</strong> and <strong>Password</strong>. The eye button next to the password shows or hides what you type.</li>
+    <li>Type your <strong>Username</strong> and <strong>Password</strong>. The eye button next to the password shows or hides what you type. The box takes your <strong>username</strong>, not your email address. If you type your email you will see <em>"Invalid username or password. If this keeps happening, wait 15 minutes and try again."</em> Ask the administrator for your username. (The email address is only used for <strong>Forgot Password?</strong>.)</li>
     <li>Click <strong>Sign In</strong>. You go to the page you asked for, or to your home page.</li>
   </ol>
   <h3>How to reset a forgotten password</h3>
@@ -423,9 +423,23 @@
 
   <h2 id="logs">System Logs (who did what)</h2>
   <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>System Logs</strong> (<code>/admin/system-logs.php</code>). Permission: <strong>System Logs</strong>. It is a read-only record for troubleshooting, and the place to see who did what and when: sign-ins, setting changes, booking changes, orders and errors, each with the person's name. (For one booking, its own <strong>Activity timeline</strong> is quicker; for one order, use <strong>Order log</strong>.) Administrators and managers also see a <strong>Who's online</strong> panel at the top: who is signed in now, what they have open and how long they have been quiet. See <a href="18-staff-access.html#online">Who's online</a>.</p>
+  <h3 id="logs-attention">Needs attention in System Logs</h3>
+  <p>Start here. The panel at the top covers the last 7 days and says <strong>All clear.</strong> when there is nothing to do. Otherwise it shows one box for each kind of problem, with a count, what it means, examples, <em>Last seen</em> and a link to the right page. The boxes are:</p>
+  <table>
+    <thead><tr><th>Box</th><th>What it means</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Errors the system logged</strong></td><td>Something failed while the system was working. It is not a typing mistake.</td><td>Click <strong>Show the errors</strong>. If the same message keeps coming back, send it to support.</td></tr>
+      <tr><td><strong>Failed sign-ins</strong>, or <strong>Repeated failed sign-ins from one address</strong> (red)</td><td>Someone typed a wrong username or password. Red means 3 or more failed tries from one address inside an hour, which can be someone guessing passwords. The sign-in page takes a <strong>username</strong>, not an email address, so staff who type their email will fail.</td><td>Click <strong>See the sign-ins</strong>. If the address is not one of your staff, change that user's password. If it is a member of staff, give them their username.</td></tr>
+      <tr><td><strong>Emails that did not send</strong></td><td>The mail server refused the message, usually a wrong or made-up guest address.</td><td>Check the address on the booking, or the email settings if it happens for everyone. Link: <strong>Automated Emails</strong>.</td></tr>
+      <tr><td><strong>Stock went below zero</strong></td><td>Items were sold or used before their delivery or count was recorded.</td><td>Receive the stock or do a <strong>Stock Count</strong>. Link: <strong>Stock Count</strong>.</td></tr>
+      <tr><td><strong>Offline work that did not sync</strong></td><td>A sale or action done while a device was offline was refused when it reconnected, so it was not saved.</td><td>Open the <strong>Offline Log</strong> and enter it again by hand.</td></tr>
+      <tr><td><strong>API key refused</strong></td><td>Someone called the hotel's API with a wrong or missing key.</td><td>If a partner site should connect, give them a correct key in <strong>API Keys</strong>. Random probes can be ignored.</td></tr>
+    </tbody>
+  </table>
+  <p>A link only shows if you have the permission for that page. A form refused because of a typing mistake (for example a number in the wrong format) is a <strong>warning</strong>, not an error, and is not counted in this panel. The event list under the panel starts on <strong>Warnings and errors</strong>; choose <strong>Everything</strong> in <strong>Show</strong> to see all events. Tick <strong>Group repeats</strong> to show the same message once with a count. See also <a href="faq.html#faq-log-attention">What needs my attention in System Logs?</a></p>
   <ul>
     <li>Cards for the last 24 hours: system events, admin activity, booking changes, POS orders, KDS/DS events, API calls, offline replays and errors.</li>
-    <li>Filters: <strong>Source</strong>, <strong>Level</strong>, <strong>Rows</strong> (20 to 500) and <strong>Auto-refresh 15s</strong>; click <strong>Apply</strong>, or <strong>Reset</strong> to clear.</li>
+    <li>Filters: <strong>Source</strong>, <strong>Show</strong> (<strong>Warnings and errors</strong> by default, <strong>Everything</strong>, <strong>Errors only</strong>, <strong>Critical only</strong>, <strong>Warnings only</strong>, <strong>Info only</strong>, <strong>Debug only</strong>), <strong>Rows</strong> (20 to 500), <strong>Group repeats</strong> and <strong>Auto-refresh 15s</strong>; click <strong>Apply</strong>, or <strong>Reset</strong> to clear.</li>
     <li>Sections: <strong>System Event Stream</strong>, <strong>Booking Changes Audit</strong>, <strong>Recent Logins</strong>, <strong>Recent Admin Activity</strong>, <strong>POS Orders</strong>, <strong>Display Screens</strong>, <strong>Recent API Calls</strong>, <strong>Recent Offline Sync</strong> and <strong>File Log Tails</strong>.</li>
     <li>Changes to settings, refunds, modules and sign-in attempts are recorded here with the person's name.</li>
   </ul>

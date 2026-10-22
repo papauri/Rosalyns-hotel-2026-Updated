@@ -89,6 +89,26 @@
     <p>Your hotel data has not been backed up for a long time, the last backup attempt failed, disk space is low, a background job has stopped or the database is down. Open <strong>Backups</strong> or <strong>System Logs</strong> from the box and tell the administrator. For a backup warning, an administrator should open <strong>Backups</strong> and press <strong>Run Backup Now</strong>.</p>
   </details>
 
+  <details class="faq" id="faq-log-attention">
+    <summary>What needs my attention in System Logs?</summary>
+    <p>Open <strong>Settings</strong> &rarr; <strong>System Logs</strong> (permission: <strong>System Logs</strong>). The <strong>Needs attention</strong> panel at the top covers the last 7 days. If it says <strong>All clear.</strong>, there is nothing to do. Each box has a number, a short meaning, examples, <em>Last seen</em> and a link to the right page.</p>
+    <ul>
+      <li><strong>Errors the system logged</strong>: something failed while the system was working. If the same message keeps coming back, send it to support. Click <strong>Show the errors</strong>.</li>
+      <li><strong>Repeated failed sign-ins from one address</strong> (red): see <a href="#faq-failed-signins">Why do I see failed sign-ins?</a></li>
+      <li><strong>Emails that did not send</strong>: usually a wrong or made-up guest address. Check the address on the booking, or the email settings if it happens for everyone.</li>
+      <li><strong>Stock went below zero</strong>: items were sold or used before their delivery or count was recorded. Receive the stock or do a <strong>Stock Count</strong>.</li>
+      <li><strong>Offline work that did not sync</strong>: a sale made while a device was offline was refused when it reconnected, so it was not saved. Open the <strong>Offline Log</strong> and enter it again by hand.</li>
+      <li><strong>API key refused</strong>: someone called the hotel's API with a wrong or missing key. If a partner site should connect, give them a correct key in <strong>API Keys</strong>. Random probes can be ignored.</li>
+    </ul>
+    <p>The event list below the panel starts on <strong>Warnings and errors</strong>; choose <strong>Everything</strong> in <strong>Show</strong> to see all of it. Tick <strong>Group repeats</strong> to fold the same message into one line with a count. A form refused because of a typing mistake (for example a number in the wrong format) is a warning, not an error, and is not counted in the panel. See <a href="99-admin-dashboard-full-guide.html#logs">System Logs</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-failed-signins">
+    <summary>Why do I see failed sign-ins?</summary>
+    <p>Someone typed a wrong username or password. A few are normal, for example a forgotten password. In <strong>Needs attention</strong> the box <strong>Failed sign-ins</strong> shows how many were wrong password, unknown username or blocked. When 3 or more tries come from one address inside an hour, the box turns red and reads <strong>Repeated failed sign-ins from one address</strong>. That can mean someone is guessing passwords. If the address is not one of your staff, change that user's password.</p>
+    <p>Staff often fail because they type their email address. The sign-in takes a <strong>username</strong>, not an email address. If someone cannot sign in with their email, the administrator can give them their username. The page says <em>"Invalid username or password. If this keeps happening, wait 15 minutes and try again."</em> for both mistakes. See <a href="#faq-locked">My account is locked</a>.</p>
+  </details>
+
   <h2 id="signing-in">Signing in and passwords</h2>
 
   <details class="faq" id="faq-forgot-password">
@@ -176,6 +196,11 @@
   <details class="faq" id="faq-cancel-booking" data-module="bookings">
     <summary>Why can't I cancel this booking?</summary>
     <p>Checked-in, checked-out, cancelled and no-show bookings cannot be cancelled. Check the status first. A cancel also closes the booking's room tab or room-service orders. It is refused only if one of them is <strong>part-paid</strong> (or a delivered room-service order has been paid). You will see <em>"Order ORD-... is part-paid. Settle or refund it in Orders &amp; Tabs first, then try again."</em> Settle or refund that order in <strong>Orders &amp; Tabs</strong>, then cancel again. Food the kitchen has already started does not block the cancel: it stays on the guest's bill and the refund is reduced by it. Food not yet started is cancelled and its stock goes back. Nothing is changed by a refused cancel. See <a href="07-reception-bookings.html#cancel">How to cancel a booking or mark a no-show</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-triple-for-four" data-module="bookings">
+    <summary>Why does a room for 4 say Triple?</summary>
+    <p>Single, Double and Triple are price tiers, not a head count. <strong>Triple</strong> means 3 or more guests, so a room that holds 4 uses the Triple price. On New Booking the choices read <em>Single (1 guest)</em>, <em>Double (2 guests)</em> and <em>Triple (3+ guests)</em>. For a room that holds more than 3 the last one reads <em>Triple / family (3&ndash;4 guests)</em>, with the note <em>"Occupancy sets the price tier. Rooms that hold 4 use the 3+ price."</em> Nothing is wrong and no price changed. A booking for several rooms also shows <em>Group booking: N guests in M rooms</em> at the top. See <a href="09-packages-rates.html#price-tiers">Price tiers and what they are called</a>.</p>
   </details>
 
   <h2 id="restaurant-money">Restaurant, bar and money</h2>
