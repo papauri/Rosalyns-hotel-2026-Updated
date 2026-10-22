@@ -70,6 +70,14 @@
     </tbody>
   </table>
   <p>On New Booking, a room that holds more than 3 shows the note <em>"Occupancy sets the price tier. Rooms that hold 4 use the 3+ price."</em> So a room for 4 that says Triple is correct: there is no separate price for 4 guests.</p>
+  <h3>The tier must seat the guests</h3>
+  <p>A booking cannot be priced at a cheaper tier than its guests need. Single seats 1 guest, Double seats 2, and Triple seats as many as the room holds. If the hotel has switched a tier off in the room type, the highest tier that is still on counts as the full room. For rooms of the same type in one booking, the tiers together must seat all the guests in those rooms (4 guests in 2 rooms that hold 3: Double + Double or Triple + Single, never Double + Single). A dearer tier than needed is always allowed.</p>
+  <ul>
+    <li><strong>Receptionists and other staff</strong> cannot save a tier that is too small. On New Booking and Edit Booking the cheaper choices are greyed out, and a save is refused with a message such as <em>"Room 1 has 2 guests but is priced as Single (1 guest). Choose Double (2 guests), or ask someone who can override prices."</em></li>
+    <li><strong>Administrators and managers</strong> can save a cheaper tier on purpose. The booking's history records <em>"Deliberate under-tier"</em> with their name, the number of guests and the tier, so the lower price is never hidden.</li>
+    <li>Edit Booking checks only when you change <strong>Occupancy</strong> or the number of guests. Joined rooms, and booking lines with a <strong>Price override</strong>, are not checked.</li>
+  </ul>
+  <p>Nothing about the price itself changes: the tier you pick still decides which price is used. See <a href="07-reception-bookings.html#create">How to create a booking</a>.</p>
 
   <h2 id="screen">What is on the screens</h2>
 

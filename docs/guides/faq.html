@@ -106,10 +106,21 @@
   <details class="faq" id="faq-failed-signins">
     <summary>Why do I see failed sign-ins?</summary>
     <p>Someone typed a wrong username or password. A few are normal, for example a forgotten password. In <strong>Needs attention</strong> the box <strong>Failed sign-ins</strong> shows how many were wrong password, unknown username or blocked. When 3 or more tries come from one address inside an hour, the box turns red and reads <strong>Repeated failed sign-ins from one address</strong>. That can mean someone is guessing passwords. If the address is not one of your staff, change that user's password.</p>
-    <p>Staff often fail because they type their email address. The sign-in takes a <strong>username</strong>, not an email address. If someone cannot sign in with their email, the administrator can give them their username. The page says <em>"Invalid username or password. If this keeps happening, wait 15 minutes and try again."</em> for both mistakes. See <a href="#faq-locked">My account is locked</a>.</p>
+    <p>Staff often fail because of a typing slip in the email or username, or because they typed the wrong password. The sign-in box takes a <strong>username or email</strong>. An email only works when no one else has the same email on their account. If someone cannot sign in, they can try their username, or the administrator can look it up in Staff &amp; access (it shows under the email). The page says <em>"Invalid username or password. If this keeps happening, wait 15 minutes and try again."</em> for every kind of mistake, so it never tells anyone which part was wrong. See <a href="#faq-locked">My account is locked</a> and <a href="#faq-signin-email">Can I sign in with my email?</a></p>
   </details>
 
   <h2 id="signing-in">Signing in and passwords</h2>
+
+  <details class="faq" id="faq-signin-email">
+    <summary>Can I sign in with my email?</summary>
+    <p>Yes. On the sign-in page the first box is called <strong>Username or email</strong>. Type either your username or the email address on your account, then your password. The email works only when one account has that email. If two accounts ever shared one email, sign in with your username instead. Staff &amp; access no longer lets two people use the same email.</p>
+    <p>If it fails, the page says <em>"Invalid username or password. If this keeps happening, wait 15 minutes and try again."</em> The same words appear for a wrong username, a wrong email and a wrong password. Five wrong passwords still lock the account for 15 minutes. The POS Till, kitchen and bar screens sign in as before. See <a href="99-admin-dashboard-full-guide.html#signin">Signing in</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-forgot-username">
+    <summary>I forgot my username.</summary>
+    <p>You do not need it. Type the email address on your account in the <strong>Username or email</strong> box and sign in with your password. If that does not work, ask the administrator: your username shows as <strong>Username: ...</strong> under your email in Staff &amp; access. If you forgot your password, click <strong>Forgot Password?</strong>. See <a href="#faq-forgot-password">I forgot my password.</a></p>
+  </details>
 
   <details class="faq" id="faq-forgot-password">
     <summary>I forgot my password.</summary>
@@ -118,7 +129,7 @@
 
   <details class="faq" id="faq-locked">
     <summary>My account is locked.</summary>
-    <p>After 5 wrong passwords an account is locked for 15 minutes. Wait for the minutes shown, or use <strong>Forgot Password?</strong>. If it says the account has been <em>deactivated</em>, an administrator must tick <strong>Active Account</strong> again in Staff &amp; access.</p>
+    <p>After 5 wrong passwords an account is locked for 15 minutes. The page does not say it is locked: it shows the usual <em>"Invalid username or password. If this keeps happening, wait 15 minutes and try again."</em> even with the right password. Wait 15 minutes, or use <strong>Forgot Password?</strong>. If it still fails after that, an administrator checks that <strong>Active Account</strong> is ticked in Staff &amp; access, because a switched-off account shows the same message.</p>
   </details>
 
   <details class="faq" id="faq-signed-out">
@@ -196,6 +207,12 @@
   <details class="faq" id="faq-cancel-booking" data-module="bookings">
     <summary>Why can't I cancel this booking?</summary>
     <p>Checked-in, checked-out, cancelled and no-show bookings cannot be cancelled. Check the status first. A cancel also closes the booking's room tab or room-service orders. It is refused only if one of them is <strong>part-paid</strong> (or a delivered room-service order has been paid). You will see <em>"Order ORD-... is part-paid. Settle or refund it in Orders &amp; Tabs first, then try again."</em> Settle or refund that order in <strong>Orders &amp; Tabs</strong>, then cancel again. Food the kitchen has already started does not block the cancel: it stays on the guest's bill and the refund is reduced by it. Food not yet started is cancelled and its stock goes back. Nothing is changed by a refused cancel. See <a href="07-reception-bookings.html#cancel">How to cancel a booking or mark a no-show</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-single-for-two" data-module="bookings">
+    <summary>Why can't I choose Single for two guests?</summary>
+    <p>The price tier must be able to seat the guests, so the booking is never priced cheaper than it should be. Single seats 1 guest, Double seats 2, and Triple seats as many as the room holds. With two guests in a room, <em>Single (1 guest)</em> is greyed out. Pick <strong>Double (2 guests)</strong> or Triple. For several rooms of the same type the tiers are added up: 4 guests in 2 rooms that hold 3 can be Double + Double or Triple + Single, not Double + Single. A dearer tier is always allowed.</p>
+    <p>If you save a tier that is too small, you see <em>"Room 1 has 2 guests but is priced as Single (1 guest). Choose Double (2 guests), or ask someone who can override prices."</em> and nothing is saved. An administrator or manager can save the cheaper tier on purpose; the booking history then records <em>"Deliberate under-tier"</em>. On Edit Booking the check runs only when you change occupancy or the number of guests. See <a href="09-packages-rates.html#price-tiers">Price tiers and what they are called</a> and <a href="07-reception-bookings.html#create">How to create a booking</a>.</p>
   </details>
 
   <details class="faq" id="faq-triple-for-four" data-module="bookings">
