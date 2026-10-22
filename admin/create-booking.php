@@ -531,7 +531,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         $grand_child_supplement  = 0.0;
         $grand_levy_amount       = 0.0;
         $grand_vat_amount        = 0.0;
-        $global_row_idx = 0;   // child supplement is group-level: charged once, on the very first row
+        $global_row_idx = 0;   // index of the room row across all lines = index into $party_split['rows']
         foreach ($room_lines as &$line) {
             $r   = $line['room_data'];
             $occ = $line['occupancy_type'];
@@ -602,8 +602,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $applied_rate_discount   = $dyn['discount_amount'];
 
                     $base_row  = $r_price * $number_of_nights;
-                    $child_sup = ($global_row_idx === 0 && $child_guests > 0)
-                        ? $r_price * ($cpm / 100) * $child_guests * $number_of_nights
+                    // Each room is charged for the children seated in THAT room (same as the public
+                    // booking page and Edit Booking), so identical rooms with identical guests cost the same.
+                    $row_seated_children = (int)($party_split['rows'][$global_row_idx]['children'] ?? 0);
+                    $child_sup = $row_seated_children > 0
+                        ? $r_price * ($cpm / 100) * $row_seated_children * $number_of_nights
                         : 0.0;
                     // Levy sits outside the VAT base (shared helper)
                     $tt = rh_stay_totals($base_row + $child_sup, 'price');
@@ -668,10 +671,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         }
 
         // ── Transaction: create bookings for all lines ───────────────────────
+        // Every requested type AND the types that share rooms with it through joined rooms are locked
+        // (ascending id, deadlock-free) so two receptionists can never both sell the last room. The set is
+        // read BEFORE the transaction: a plain read inside it would open the snapshot ahead of the locks.
+        $lock_type_ids = rh_related_room_type_ids($pdo, array_column($room_lines, 'room_id'));
         $pdo->beginTransaction();
-        foreach (array_unique(array_column($room_lines, 'room_id')) as $lock_rid) {
-            $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$lock_rid]);
-        }
+        rh_lock_room_types($pdo, $lock_type_ids);
 
         // ── Server-side availability guard (prevents double-booking race) ─────
         // Re-verify capacity for every room type inside the locked transaction.
@@ -690,6 +695,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             if ($remaining < $needed) {
                 $room_label = $avail['room']['name'] ?? ('room type ' . $rid);
                 throw new Exception('Only ' . max(0, $remaining) . ' room(s) of "' . $room_label . '" remain available for those dates, but ' . $needed . ' were requested.');
+            }
+        }
+        // Joined rooms: a booking of a member room type committed a moment ago has no room yet, so the pair
+        // check cannot see it; the member type's own remaining count must still cover the pairs being sold.
+        $joined_pairs = [];
+        foreach ($room_lines as $line) {
+            foreach ((array)($line['combination_queue'] ?? []) as $pair) {
+                $joined_pairs[] = $pair;
+            }
+        }
+        if ($joined_pairs) {
+            $joined_err = rh_joined_members_stock_error($joined_pairs, $check_in_date, $check_out_date);
+            if ($joined_err !== '') {
+                throw new Exception($joined_err);
             }
         }
 
@@ -713,7 +732,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 $is_first_row = ($booking_number === 0);   // first row of the whole booking
                 $row_fin      = $line['rows'][$room_idx];
 
-                // Per-row financials exactly as priced above (child supplement on the first row only)
+                // Per-row financials exactly as priced above (child supplement for this room's own children)
                 $row_tot       = $row_fin['total_amount'];
                 $row_levy      = $row_fin['levy_amount'];
                 $row_vat       = $row_fin['vat_amount'];
@@ -1283,7 +1302,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         exit;
     } catch (\Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
-        $error = $e->getMessage();
+        $error = rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage();
         rh_log_event('create-booking', 'error', 'Booking creation failed: ' . $e->getMessage(), [
             'by'        => $user['username'] ?? null,
             'exception' => get_class($e),
@@ -1760,6 +1779,15 @@ try {
             line-height: 36px;
         }
 
+        .line-detail { font-size: 12px; color: #555; margin-top: 2px; line-height: 1.5; }
+        .line-warn { font-size: 12px; color: #c0392b; font-weight: 600; margin-top: 4px; line-height: 1.4; }
+        .line-warn:empty, .line-detail:empty { display: none; }
+        .room-line.has-issue { border-color: #f5b7b1; background: #fdf3f2; }
+        .alloc-summary { border-left: 3px solid #8f6a35; background: #faf6f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; color: #2a2723; line-height: 1.55; }
+        .alloc-summary:empty { display: none; }
+        .alloc-summary .as-err { color: #c0392b; font-weight: 600; }
+        .alloc-summary .as-ok { color: #2a7d4f; font-weight: 600; }
+
         .group-summary {
             display: flex;
             align-items: center;
@@ -2104,7 +2132,7 @@ try {
                     <div class="cb-section-error" id="cbErr1"></div>
                     <div class="cb-section-nav">
                         <span></span>
-                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(1)">Rooms &amp; Availability <i class="fas fa-arrow-right"></i></button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(1)">Rooms &amp; Availability <i class="fas fa-arrow-down"></i></button>
                     </div>
                 </div>
 
@@ -2129,6 +2157,9 @@ try {
                         </div>
                         <small id="roomsCounterHint" style="color:#888;font-size:12px;"></small>
                     </div>
+
+                    <!-- Rooms needed vs guests vs availability, and who sleeps where (filled by JS) -->
+                    <div id="allocationSummary" class="alloc-summary" aria-live="polite"></div>
 
                     <div id="groupSummaryPill" class="group-summary" style="display:none;">
                         <i class="fas fa-users"></i> <span id="groupSummaryText"></span>
@@ -2157,8 +2188,8 @@ try {
                     </div>
                     <div class="cb-section-error" id="cbErr2"></div>
                     <div class="cb-section-nav">
-                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(2)"><i class="fas fa-arrow-left"></i> Stay Details</button>
-                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(2)">Guest Information <i class="fas fa-arrow-right"></i></button>
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(2)"><i class="fas fa-arrow-up"></i> Stay Details</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(2)">Guest Information <i class="fas fa-arrow-down"></i></button>
                     </div>
                 </div>
 
@@ -2219,8 +2250,8 @@ try {
                     </div>
                     <div class="cb-section-error" id="cbErr3"></div>
                     <div class="cb-section-nav">
-                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(3)"><i class="fas fa-arrow-left"></i> Rooms</button>
-                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(3)">Booking Status <i class="fas fa-arrow-right"></i></button>
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(3)"><i class="fas fa-arrow-up"></i> Rooms</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(3)">Booking Status <i class="fas fa-arrow-down"></i></button>
                     </div>
                 </div>
 
@@ -2241,8 +2272,8 @@ try {
                         </div>
                     </div>
                     <div class="cb-section-nav" style="margin-top:16px;">
-                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(4)"><i class="fas fa-arrow-left"></i> Guest Info</button>
-                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(4)">Payment <i class="fas fa-arrow-right"></i></button>
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(4)"><i class="fas fa-arrow-up"></i> Guest Info</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(4)">Payment <i class="fas fa-arrow-down"></i></button>
                     </div>
                 </div>
 
@@ -2367,8 +2398,8 @@ try {
 
                     <div class="cb-section-error" id="cbErr5"></div>
                     <div class="cb-section-nav">
-                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(5)"><i class="fas fa-arrow-left"></i> Status</button>
-                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(5)">Review &amp; Submit <i class="fas fa-arrow-right"></i></button>
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(5)"><i class="fas fa-arrow-up"></i> Status</button>
+                        <button type="button" class="cb-nav-btn cb-nav-next" onclick="cbNext(5)">Review &amp; Submit <i class="fas fa-arrow-down"></i></button>
                     </div>
                     <script>
                         function onCreditOverrideToggle() {
@@ -2483,7 +2514,7 @@ try {
                         </div>
                     </div>
                     <div class="cb-section-nav" style="border-top:none; padding-top:8px; margin-top:8px;">
-                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(6)"><i class="fas fa-arrow-left"></i> Payment</button>
+                        <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(6)"><i class="fas fa-arrow-up"></i> Payment</button>
                         <span></span>
                     </div>
                 </div>
@@ -2568,19 +2599,17 @@ try {
         let _autoSplitting = false;
 
         // ── Room line management ──────────────────────────────────────────────────
-        function addRoomLine() {
+        function addRoomLine(presetRid) {
             const idx = _lineCount++;
             const container = el('roomLinesContainer');
             const isFirst = getVisibleLines().length === 0;
             const datesReady = !!(el('checkInDate')?.value && el('checkOutDate')?.value);
 
+            // Option text/disabled state (remaining count per type) is filled in by refreshAvailabilityUI().
             let optHtml = `<option value="">— ${datesReady ? 'Select Room Type' : 'Select dates first'} —</option>`;
             roomsData.forEach(r => {
-                const info = _availMap[r.id];
-                const dis = info && !info.available ? ' disabled style="color:#999"' : '';
-                const avl = info ? (info.available ? (info.rooms_left > 1 ? ' — ' + info.rooms_left + ' avail.' : ' — Available') : ' — Not available') : '';
                 const price = currency + r.price_per_night.toLocaleString() + '/night';
-                optHtml += `<option value="${r.id}"${dis} data-base-name="${r.name.replace(/"/g,'&quot;')}">${r.name} (${price})${avl}</option>`;
+                optHtml += `<option value="${r.id}" data-base-name="${r.name.replace(/"/g,'&quot;')}">${r.name} (${price})</option>`;
             });
 
             const div = document.createElement('div');
@@ -2588,7 +2617,7 @@ try {
             div.id = 'room-line-' + idx;
             div.innerHTML = `
             <div class="room-line-header">
-                <span class="room-line-title"><i class="fas fa-door-open" style="color:var(--gold,#8f6a35);margin-right:5px;"></i> Room ${getVisibleLines().length + 1}</span>
+                <span class="room-line-title"><i class="fas fa-door-open" style="color:var(--gold,#8f6a35);margin-right:5px;"></i> <span class="room-line-num">Room ${getVisibleLines().length + 1}</span></span>
                 ${!isFirst ? `<button type="button" class="room-line-remove" onclick="removeRoomLine(${idx})"><i class="fas fa-times"></i> Remove</button>` : ''}
             </div>
             <div class="form-row three-col">
@@ -2598,7 +2627,7 @@ try {
                 </div>
                 <div class="form-group">
                     <label>Occupancy</label>
-                    <select name="room_line_occupancy[]" class="line-occ-select" onchange="calculateTotal()">
+                    <select name="room_line_occupancy[]" class="line-occ-select" onchange="occupancyChosen(${idx})">
                         <option value="single">Single</option>
                         <option value="double" selected>Double</option>
                         <option value="triple">Triple</option>
@@ -2615,10 +2644,15 @@ try {
                     <span class="line-subtotal" id="line-subtotal-${idx}">—</span>
                 </div>
             </div>
+            <div class="line-detail" id="line-detail-${idx}"></div>
+            <div class="line-warn" id="line-warn-${idx}"></div>
             <input type="hidden" name="room_line_qty[]" value="1">`;
             container.appendChild(div);
+            if (presetRid) {
+                const sel = div.querySelector('.line-room-select');
+                if (sel && !sel.disabled) sel.value = String(presetRid);
+            }
             updateLineRoom(idx);
-            updateGroupSummary();
         }
 
         function removeRoomLine(idx) {
@@ -2627,8 +2661,110 @@ try {
             lineEl.setAttribute('data-removed', '1');
             lineEl.style.display = 'none';
             lineEl.querySelectorAll('input,select').forEach(i => i.disabled = true);
+            refreshAllocation();
+        }
+
+        // Staff picked an occupancy by hand: keep it while this room seats the same number of
+        // guests; it goes back to following the seating as soon as that number changes.
+        function occupancyChosen(idx) {
+            const occSel = el('room-line-' + idx)?.querySelector('.line-occ-select');
+            if (!occSel) return;
+            const lines = getVisibleLines();
+            const pos = lines.findIndex(l => l.id === 'room-line-' + idx);
+            const seating = adminSeatParty();
+            occSel.dataset.manualGuests = String(seating.valid && pos >= 0 ? seating.rows[pos].guests : -1);
+            calculateTotal();
+            updateGroupSummary();
+        }
+
+        function lineRoomId(ln) {
+            return parseInt(ln.querySelector('.line-room-select')?.value || '0', 10);
+        }
+
+        function roomById(rid) {
+            return roomsData.find(r => r.id === rid);
+        }
+
+        // How many rooms of each type the rows currently hold: { roomTypeId: count }.
+        function typeUsage() {
+            const m = {};
+            getVisibleLines().forEach(ln => {
+                const rid = lineRoomId(ln);
+                if (rid) m[rid] = (m[rid] || 0) + 1;
+            });
+            return m;
+        }
+
+        // Rooms of a type free for the chosen dates (null until an availability check has run).
+        function typeTotal(rid) {
+            const info = _availMap[rid];
+            if (!info) return null;
+            return info.available ? Math.max(1, parseInt(info.rooms_left || 0, 10)) : 0;
+        }
+
+        // Rooms of a type still unassigned in this booking (available minus rows already holding it).
+        function typeLeft(rid, usage) {
+            const total = typeTotal(rid);
+            if (total === null) return null;
+            return total - ((usage || typeUsage())[rid] || 0);
+        }
+
+        // Update every availability card and every row's dropdown so they show what is LEFT after
+        // the rows already assigned. A row's own choice always stays selectable for itself.
+        function refreshAvailabilityUI() {
+            const usage = typeUsage();
+            document.querySelectorAll('.avail-card').forEach(card => {
+                const rid = parseInt(card.dataset.roomId, 10);
+                const total = typeTotal(rid);
+                if (total === null) return;
+                const used = usage[rid] || 0;
+                const left = Math.max(0, total - used);
+                card.classList.toggle('ac-available', total > 0 && left > 0);
+                card.classList.toggle('ac-unavailable', total === 0 || left === 0);
+                card.classList.toggle('ac-selected', used > 0);
+                const cnt = card.querySelector('.avail-card-count');
+                const tag = card.querySelector('.avail-card-tag');
+                if (cnt) cnt.textContent = String(left);
+                if (tag) {
+                    tag.textContent = total === 0 ? 'Sold Out'
+                        : (left === 0 ? 'All ' + total + ' assigned'
+                        : (used > 0 ? left + ' left of ' + total : (total === 1 ? 'Available' : total + ' Available')));
+                }
+            });
+            document.querySelectorAll('.room-line:not([data-removed]) .line-room-select').forEach(sel => {
+                const cur = parseInt(sel.value || '0', 10);
+                Array.from(sel.options).forEach(opt => {
+                    if (!opt.value) return;
+                    const rid = parseInt(opt.value, 10);
+                    const rm = roomById(rid);
+                    const base = opt.getAttribute('data-base-name') || opt.text.split(' (')[0];
+                    opt.setAttribute('data-base-name', base);
+                    const priced = base + ' (' + currency + (rm ? rm.price_per_night : 0).toLocaleString() + '/night)';
+                    const total = typeTotal(rid);
+                    if (total === null) { opt.disabled = false; opt.style.color = ''; opt.text = priced; return; }
+                    const left = total - (usage[rid] || 0);
+                    if (total === 0) {
+                        opt.disabled = (rid !== cur); opt.style.color = '#999'; opt.text = base + ' — Not available';
+                    } else if (left <= 0 && rid !== cur) {
+                        opt.disabled = true; opt.style.color = '#999'; opt.text = priced + ' — none left';
+                    } else {
+                        opt.disabled = false; opt.style.color = '';
+                        opt.text = priced + ' — ' + Math.max(0, left) + ' left';
+                    }
+                });
+            });
+        }
+
+        // Re-run everything that depends on which rooms the rows hold or how many there are.
+        function refreshAllocation() {
             const disp = el('roomsCounterDisplay');
             if (disp) disp.textContent = getVisibleLines().length;
+            getVisibleLines().forEach((ln, i) => {
+                const n = ln.querySelector('.room-line-num');
+                if (n) n.textContent = 'Room ' + (i + 1);
+            });
+            refreshAvailabilityUI();
+            autoOccupancy();
             calculateTotal();
             updateGroupSummary();
             refreshIndividualRoomSection();
@@ -2643,14 +2779,8 @@ try {
             const roomId = parseInt(roomSel?.value || '0', 10);
             const room = roomsData.find(r => r.id === roomId);
 
-            // Sync selected state on availability cards
-            if (roomId) {
-                document.querySelectorAll('.avail-card').forEach(c => {
-                    c.classList.toggle('ac-selected', parseInt(c.dataset.roomId) === roomId);
-                });
-            }
             if (!room) {
-                calculateTotal();
+                refreshAllocation();
                 return;
             }
 
@@ -2667,22 +2797,44 @@ try {
                 const valid = Array.from(occSel.options).filter(o => !o.disabled);
                 if (valid.length) occSel.value = valid[valid.length - 1].value;
             }
-            // If one room of this type can't seat the whole party, split into more.
-            autoSplitForCapacity(idx);
-            refreshIndividualRoomSection();
-            calculateTotal();
-            updateGroupSummary();
+            // If the rooms picked cannot seat the whole party, add more rows (never removes any).
+            autoGrowRooms();
+            refreshAllocation();
         }
 
         // ── Rooms counter (top of allocation card) ────────────────────────────────
+        // A new row starts as the type of the last row that has one, while any of that type are left.
+        function defaultNewRowType() {
+            const usage = typeUsage();
+            const picked = getVisibleLines().map(lineRoomId).filter(r => r > 0);
+            if (!picked.length) return 0;
+            const last = picked[picked.length - 1];
+            const left = typeLeft(last, usage);
+            return (left === null || left > 0) ? last : 0;
+        }
+
+        function partyCounts() {
+            const guests = Math.max(1, parseInt(el('numGuests')?.value || '1', 10) || 1);
+            const children = Math.max(0, parseInt(el('childGuests')?.value || '0', 10) || 0);
+            return { guests, children, adults: Math.max(1, guests - children) };
+        }
+
         function adjustTotalRooms(delta) {
-            const guests = parseInt(el('numGuests')?.value || '1', 10);
+            const party = partyCounts();
             const current = getVisibleLines().length;
             const maxAvail = getMaxRoomsFromAvailability();
-            const max = Math.min(guests, maxAvail, 20);
+            const max = Math.max(1, Math.min(party.adults, maxAvail, 20));
             const newCount = Math.min(max, Math.max(1, current + delta));
+            let blocked = '';
+            if (delta > 0 && newCount === current) {
+                blocked = current >= party.adults
+                    ? `Every room needs at least one adult, so ${party.adults} room${party.adults === 1 ? ' is' : 's are'} the most this party can use.`
+                    : (current >= maxAvail
+                        ? `Only ${maxAvail} room${maxAvail === 1 ? ' is' : 's are'} free for these dates, and all are in use.`
+                        : 'A booking can have at most 20 rooms.');
+            }
             if (newCount > current) {
-                for (let i = current; i < newCount; i++) addRoomLine();
+                for (let i = current; i < newCount; i++) addRoomLine(defaultNewRowType());
             } else if (newCount < current) {
                 const lines = getVisibleLines();
                 for (let i = newCount; i < lines.length; i++) {
@@ -2690,17 +2842,83 @@ try {
                     removeRoomLine(linIdx);
                 }
             }
-            const disp = el('roomsCounterDisplay');
-            if (disp) disp.textContent = getVisibleLines().length;
-            updateGroupSummary();
-            calculateTotal();
+            refreshAllocation();
+            if (blocked) {
+                const hint = el('roomsCounterHint');
+                if (hint) { hint.textContent = blocked; hint.style.color = '#c0392b'; }
+            }
         }
 
+        // Total rooms free for the dates across all types (before anything is assigned).
         function getMaxRoomsFromAvailability() {
             const keys = Object.keys(_availMap);
             if (!keys.length) return 20;
             const total = keys.reduce((s, k) => s + ((_availMap[k].available && _availMap[k].rooms_left > 0) ? _availMap[k].rooms_left : 0), 0);
             return total > 0 ? total : 1;
+        }
+
+        // Smallest number of rooms that can hold the party, using the biggest rooms free for the
+        // dates: every room gets at least one adult, nobody beyond a room's capacity, children only
+        // in rooms that allow them. null = even every free room together cannot take the party.
+        function partyNeeds() {
+            const party = partyCounts();
+            const units = [];
+            roomsData.forEach(rm => {
+                const total = typeTotal(rm.id);
+                const n = total === null ? Math.max(0, parseInt(rm.rooms_available || 0, 10)) : total;
+                for (let i = 0; i < n && units.length < 400; i++) {
+                    units.push({ cap: roomPhysicalCap(rm), kids: !!rm.children_allowed });
+                }
+            });
+            units.sort((a, b) => (b.cap - a.cap) || ((b.kids ? 1 : 0) - (a.kids ? 1 : 0)));
+            const allSeats = units.reduce((s, u) => s + u.cap, 0);
+            let seats = 0, kidSeats = 0, min = null;
+            for (let k = 1; k <= units.length && k <= party.adults; k++) {
+                seats += units[k - 1].cap;
+                if (units[k - 1].kids) kidSeats += units[k - 1].cap - 1;
+                if (seats >= party.guests && kidSeats >= party.children) { min = k; break; }
+            }
+            return { min, inventory: units.length, seats: allSeats, party };
+        }
+
+        // Grow the rows (never shrink) until the rooms chosen can seat the party. New rows copy the
+        // last chosen type while any of it is left; otherwise they stay blank for staff to choose.
+        function autoGrowRooms() {
+            if (_autoSplitting) return;
+            const party = partyCounts();
+            const lines = getVisibleLines();
+            if (!lines.length) return;
+            let lastRid = 0;
+            lines.forEach(ln => { const r = lineRoomId(ln); if (r) lastRid = r; });
+            if (!lastRid) return; // nothing chosen yet
+            const used = typeUsage();
+            let seats = 0;
+            lines.forEach(ln => { seats += roomPhysicalCap(roomById(lineRoomId(ln) || lastRid)); });
+            let rows = lines.length;
+            const maxRows = Math.max(1, Math.min(party.adults, getMaxRoomsFromAvailability(), 20));
+            if (seats >= party.guests || rows >= maxRows) return;
+            const toAdd = [];
+            while (seats < party.guests && rows < maxRows) {
+                const left = typeLeft(lastRid, used);
+                if (left === null || left > 0) {
+                    toAdd.push(lastRid);
+                    used[lastRid] = (used[lastRid] || 0) + 1;
+                    seats += roomPhysicalCap(roomById(lastRid));
+                } else {
+                    // Out of that type: estimate with the biggest type still free; staff picks it.
+                    let best = 1;
+                    roomsData.forEach(rm => { const l = typeLeft(rm.id, used); if (l === null || l > 0) best = Math.max(best, roomPhysicalCap(rm)); });
+                    toAdd.push(0);
+                    seats += best;
+                }
+                rows++;
+            }
+            _autoSplitting = true;
+            try {
+                toAdd.forEach(rid => addRoomLine(rid));
+            } finally {
+                _autoSplitting = false;
+            }
         }
 
         function parseDateOnly(value) {
@@ -2838,13 +3056,19 @@ try {
             const guests = Math.max(1, parseInt(el('numGuests')?.value || '1', 10));
             const children = Math.max(0, parseInt(el('childGuests')?.value || '0', 10) || 0);
             const adults = guests - children;
-            const rows = getVisibleLines().map(ln => {
-                const rid = parseInt(ln.querySelector('.line-room-select')?.value || '0', 10);
-                const rm = roomsData.find(r => r.id === rid);
+            // A row with no type yet is seated provisionally as the last type chosen before it
+            // (the booking cannot be saved until every row has a type).
+            let carry = null;
+            const lineList = getVisibleLines();
+            const firstPicked = lineList.map(ln => roomById(lineRoomId(ln))).find(Boolean) || null;
+            const rows = lineList.map(ln => {
+                const rm = roomById(lineRoomId(ln));
+                if (rm) carry = rm;
+                const use = rm || carry || firstPicked;
                 return {
-                    name: rm ? rm.name : 'room',
-                    capacity: rm ? roomPhysicalCap(rm) : 1,
-                    childrenAllowed: rm ? !!rm.children_allowed : true,
+                    name: use ? use.name : 'room',
+                    capacity: use ? roomPhysicalCap(use) : 1,
+                    childrenAllowed: use ? !!use.children_allowed : true,
                     picked: !!rm
                 };
             });
@@ -2884,8 +3108,14 @@ try {
             return {
                 valid: true,
                 message: '',
+                provisional: rows.some(r => !r.picked),
+                capacities: rows.map(r => r.capacity),
                 rows: seated.map(x => ({ adults: x.adults, children: x.children, guests: x.adults + x.children }))
             };
+        }
+
+        function seatLabel(r) {
+            return `${r.adults} adult${r.adults === 1 ? '' : 's'}` + (r.children > 0 ? ` + ${r.children} ${r.children === 1 ? 'child' : 'children'}` : '');
         }
 
         // ── Occupancy auto-derive per line ────────────────────────────────────────
@@ -2898,6 +3128,9 @@ try {
             getVisibleLines().forEach((ln, i) => {
                 const per = seating.valid ? seating.rows[i].guests : Math.ceil(guests / totalRooms);
                 const occSel = ln.querySelector('.line-occ-select');
+                // Staff set this room's occupancy by hand for the same number of seated guests: keep it.
+                if (occSel.dataset.manualGuests !== undefined && parseInt(occSel.dataset.manualGuests, 10) === per) return;
+                delete occSel.dataset.manualGuests;
                 const opts = Array.from(occSel.options).filter(o => !o.disabled);
                 const has = v => opts.some(o => o.value === v);
                 occSel.value = per <= 1 && has('single') ? 'single' :
@@ -2908,108 +3141,113 @@ try {
         }
 
         function childrenChanged() {
-            autoOccupancy();
-            calculateTotal();
-            updateGroupSummary();
+            guestsChanged();
         }
 
-        // ── Auto-split a large party across rooms ─────────────────────────────────
-        // When the guest count exceeds what one room of the chosen type physically
-        // holds, add more rooms of the SAME type until everyone is seated — bounded by
-        // how many of that type are actually available for the dates. This is what a
-        // front-desk manager does with a big group.
-        function autoSplitForCapacity(triggerIdx) {
-            if (_autoSplitting) return;
-            const guests = parseInt(el('numGuests')?.value || '1', 10);
-            const lines = getVisibleLines();
-            if (!lines.length) return;
-
-            const trigEl = (typeof triggerIdx === 'number') ? el('room-line-' + triggerIdx) : null;
-            const baseLine = (trigEl && !trigEl.hasAttribute('data-removed')) ? trigEl : lines[0];
-            const roomId = parseInt(baseLine.querySelector('.line-room-select')?.value || '0', 10);
-            const room = roomsData.find(r => r.id === roomId);
-            if (!room) return;
-
-            const cap = roomPhysicalCap(room);
-            if (guests <= cap) return; // one room seats everyone — nothing to split
-
-            // Rooms of this type bookable for the chosen dates (fall back to the static
-            // inventory count before an availability check has run).
-            const info = _availMap[roomId];
-            const availOfType = info
-                ? (info.available ? Math.max(1, parseInt(info.rooms_left || 1, 10)) : 0)
-                : Math.max(1, parseInt(room.rooms_available || 1, 10));
-            if (availOfType < 1) return; // sold out — server capacity guard will flag it
-
-            const needed = Math.min(Math.ceil(guests / cap), availOfType, 20);
-            const current = lines.length;
-            if (needed <= current) return;
-
-            _autoSplitting = true;
-            try {
-                for (let i = current; i < needed; i++) addRoomLine();
-                // Homogenise: every line becomes the same room type as the trigger.
-                getVisibleLines().forEach(ln => {
-                    const sel = ln.querySelector('.line-room-select');
-                    if (sel && !sel.disabled && sel.value !== String(roomId)) {
-                        sel.value = String(roomId);
-                        updateLineRoom(parseInt(ln.id.replace('room-line-', ''), 10));
-                    }
-                });
-                const disp = el('roomsCounterDisplay');
-                if (disp) disp.textContent = getVisibleLines().length;
-            } finally {
-                _autoSplitting = false;
-            }
-            autoOccupancy();
-            updateGroupSummary();
-            refreshIndividualRoomSection();
-        }
-
+        // ── Party changes (total guests / children) ───────────────────────────────
+        // Rows are trimmed if there are more rooms than adults (every room needs an adult) and grown
+        // if the rooms chosen cannot seat the party; the seating, occupancy and prices follow.
         function guestsChanged() {
-            const guests = parseInt(el('numGuests')?.value || '1', 10);
+            const party = partyCounts();
             const current = getVisibleLines().length;
-            if (current > guests) adjustTotalRooms(guests - current);
-            // Expand the allocation if a single room can no longer hold the party.
-            autoSplitForCapacity();
-            autoOccupancy();
-            calculateTotal();
-            updateGroupSummary();
-            const disp = el('roomsCounterDisplay');
-            if (disp) disp.textContent = getVisibleLines().length;
+            if (current > party.adults) adjustTotalRooms(party.adults - current);
+            autoGrowRooms();
+            refreshAllocation();
         }
 
-        // ── Group summary pill ────────────────────────────────────────────────────
+        // Everything that is wrong with the allocation right now, per row and overall.
+        function allocationState() {
+            const party = partyCounts();
+            const lines = getVisibleLines();
+            const seating = adminSeatParty();
+            const need = partyNeeds();
+            const availKnown = Object.keys(_availMap).length > 0;
+            const rowIssues = lines.map(() => []);
+            const errors = [];
+            const seenOfType = {};
+            lines.forEach((ln, i) => {
+                const rid = lineRoomId(ln);
+                if (!rid) { rowIssues[i].push('Choose a room type for this room.'); return; }
+                const rm = roomById(rid);
+                const total = typeTotal(rid);
+                seenOfType[rid] = (seenOfType[rid] || 0) + 1;
+                if (total !== null && seenOfType[rid] > total) {
+                    rowIssues[i].push(total === 0
+                        ? `${rm.name} is not available for these dates - choose another type.`
+                        : `Only ${total} ${rm.name} room${total === 1 ? ' is' : 's are'} free for these dates and ${total === 1 ? 'it is' : 'they are'} already assigned - choose another type.`);
+                }
+            });
+            const maxAvail = getMaxRoomsFromAvailability();
+            if (availKnown && lines.length > maxAvail) {
+                errors.push(`${lines.length} rooms are selected but only ${maxAvail} are free for these dates. Remove rooms.`);
+            }
+            if (!seating.valid) errors.push(seating.message);
+            return { party, lines, seating, need, rowIssues, errors, availKnown, maxAvail };
+        }
+
+        // Messages that must stop the booking from being saved (also enforced by the server).
+        function allocationErrors() {
+            const st = allocationState();
+            const out = [];
+            st.rowIssues.forEach((msgs, i) => msgs.forEach(m => out.push(`Room ${i + 1}: ${m}`)));
+            st.errors.forEach(m => out.push(m));
+            return out;
+        }
+
+        // ── Group summary: rooms needed vs guests vs availability, who sleeps where ──
         function updateGroupSummary() {
             const pill = el('groupSummaryPill');
             const txt = el('groupSummaryText');
-            const guests = parseInt(el('numGuests')?.value || '1', 10);
-            const total = getTotalRooms();
-
-            // Seating hint next to the rooms counter: who sleeps where, or exactly why the
-            // current rooms cannot take the party (same rules the server enforces).
+            const box = el('allocationSummary');
             const hint = el('roomsCounterHint');
+            const st = allocationState();
+            const { party, lines, seating, need } = st;
+            const total = lines.length;
+            const anyPicked = lines.some(ln => lineRoomId(ln) > 0);
+            const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+            lines.forEach((ln, i) => {
+                const idx = ln.id.replace('room-line-', '');
+                const warn = el('line-warn-' + idx);
+                const msgs = anyPicked ? st.rowIssues[i] : [];
+                if (warn) warn.textContent = msgs.join(' ');
+                ln.classList.toggle('has-issue', msgs.length > 0);
+            });
+
             if (hint) {
-                const anyPicked = getVisibleLines().some(ln => parseInt(ln.querySelector('.line-room-select')?.value || '0', 10) > 0);
-                if (!anyPicked) {
-                    hint.textContent = '';
-                } else {
-                    const seating = adminSeatParty();
-                    if (!seating.valid) {
-                        hint.textContent = seating.message;
-                        hint.style.color = '#c0392b';
+                hint.style.color = '#888';
+                hint.textContent = (anyPicked && need.min !== null) ? `Minimum for ${plural(party.guests, 'guest')}: ${plural(need.min, 'room')}` : '';
+            }
+
+            if (box) {
+                box.textContent = '';
+                const add = (text, cls) => {
+                    const d = document.createElement('div');
+                    if (cls) d.className = cls;
+                    d.textContent = text;
+                    box.appendChild(d);
+                };
+                if (anyPicked) {
+                    add(`Party: ${plural(party.guests, 'guest')} (${plural(party.adults, 'adult')}${party.children > 0 ? ', ' + plural(party.children, 'child').replace('childs', 'children') : ''}) in ${plural(total, 'room')}.`);
+                    if (need.min === null) {
+                        add(`The ${plural(need.inventory, 'room')} free for these dates hold at most ${plural(need.seats, 'guest')}, fewer than this party. Reduce the party or change the dates.`, 'as-err');
                     } else {
-                        hint.textContent = 'Seating: ' + seating.rows.map((r, i) =>
-                            `Room ${i + 1} - ${r.adults} adult${r.adults === 1 ? '' : 's'}${r.children > 0 ? ' + ' + r.children + (r.children === 1 ? ' child' : ' children') : ''}`
-                        ).join('; ') + ' - the party fits.';
-                        hint.style.color = '#2a7d4f';
+                        const short = total < need.min;
+                        add(`Minimum rooms needed for this party: ${need.min}. Free for these dates: ${plural(need.inventory, 'room')}, holding up to ${plural(need.seats, 'guest')}.` + (short ? ` You have ${total} - add ${need.min - total} more.` : ''), short ? 'as-err' : '');
                     }
+                    if (seating.valid) {
+                        add('Seating: ' + seating.rows.map((r, i) => `Room ${i + 1} - ${seatLabel(r)}`).join('; ') + (seating.provisional ? ' (provisional until every room has a type).' : '.'));
+                    } else {
+                        add(seating.message, 'as-err');
+                    }
+                    st.errors.filter(m => m !== seating.message).forEach(m => add(m, 'as-err'));
+                    if (!allocationErrors().length && !seating.provisional) add('The party fits in the rooms selected.', 'as-ok');
                 }
             }
 
             if (!pill || !txt) return;
             if (total > 1) {
-                txt.textContent = `Group booking: ${total} rooms · ${guests} guest${guests !== 1 ? 's' : ''} · ~${(guests / total).toFixed(1)} guests/room`;
+                txt.textContent = `Group booking: ${total} rooms · ${party.guests} guest${party.guests !== 1 ? 's' : ''} · ~${(party.guests / total).toFixed(1)} guests/room`;
                 pill.style.display = 'flex';
             } else {
                 pill.style.display = 'none';
@@ -3079,67 +3317,45 @@ try {
                     });
                     document.querySelectorAll('.line-room-select').forEach(sel => {
                         const curVal = sel.value;
-                        let curStillOk = false;
-                        Array.from(sel.options).forEach(opt => {
-                            if (!opt.value) return;
-                            const rid = parseInt(opt.value);
-                            const info = _availMap[rid];
-                            const rm = roomsData.find(r => r.id === rid);
-                            let base = opt.getAttribute('data-base-name') || opt.text.split(' (')[0];
-                            opt.setAttribute('data-base-name', base);
-                            if (info && info.available) {
-                                opt.disabled = false;
-                                opt.style.color = '';
-                                opt.text = base + ' (' + currency + (rm?.price_per_night || 0).toLocaleString() + '/night)' + (info.rooms_left > 1 ? ' — ' + info.rooms_left + ' avail.' : ' — Available');
-                                if (String(rid) === String(curVal)) curStillOk = true;
-                            } else {
-                                opt.disabled = true;
-                                opt.style.color = '#999';
-                                opt.text = base + ' — Not available';
-                            }
-                        });
-                        if (curVal && !curStillOk) sel.value = '';
+                        const curInfo = curVal ? _availMap[parseInt(curVal, 10)] : null;
+                        // A row whose type is no longer bookable for the new dates is cleared.
+                        if (curVal && !(curInfo && curInfo.available)) sel.value = '';
                         sel.disabled = false;
                         sel.options[0].text = '— Select Room Type —';
                     });
                     if (notice) notice.style.display = 'none';
 
-                    // Build availability summary panel
+                    // Availability cards: counts are kept in step with the rows by refreshAvailabilityUI()
                     const panel = el('availSummaryPanel');
                     if (panel && roomsData.length > 0) {
                         panel.innerHTML = '';
                         roomsData.forEach(function (rm) {
                             const info = _availMap[rm.id];
                             if (!info) return;
-                            const avail = !!info.available;
-                            const left  = avail ? (info.rooms_left > 0 ? info.rooms_left : 1) : 0;
                             const card  = document.createElement('div');
-                            card.className = 'avail-card ' + (avail ? 'ac-available' : 'ac-unavailable');
+                            card.className = 'avail-card ac-available';
                             card.setAttribute('role', 'listitem');
                             card.dataset.roomId = rm.id;
                             card.innerHTML =
-                                '<div class="avail-card-count">' + (avail ? left : '0') + '</div>' +
+                                '<div class="avail-card-count"></div>' +
                                 '<div class="avail-card-name">' + rm.name + '</div>' +
                                 '<div class="avail-card-price">' + currency + rm.price_per_night.toLocaleString() + ' / night</div>' +
-                                '<span class="avail-card-tag">' + (avail ? (left === 1 ? 'Available' : left + ' Available') : 'Sold Out') + '</span>';
-                            if (avail) {
-                                card.addEventListener('click', function () {
-                                    // Auto-select this room type in the first empty line dropdown
-                                    const selects = Array.from(document.querySelectorAll('.line-room-select'));
-                                    const target  = selects.find(s => !s.value) || selects[0];
-                                    if (target) {
-                                        target.value = rm.id;
-                                        target.dispatchEvent(new Event('change'));
-                                    }
-                                    // Mark selected card
-                                    document.querySelectorAll('.avail-card').forEach(c => c.classList.remove('ac-selected'));
-                                    card.classList.add('ac-selected');
-                                });
-                            }
+                                '<span class="avail-card-tag"></span>';
+                            card.addEventListener('click', function () {
+                                if (!(typeLeft(rm.id) > 0)) return;
+                                // Put this type on the first row that has none (or the only row)
+                                const selects = Array.from(document.querySelectorAll('.room-line:not([data-removed]) .line-room-select'));
+                                const target  = selects.find(s => !s.value) || (selects.length === 1 ? selects[0] : null);
+                                if (target) {
+                                    target.value = rm.id;
+                                    target.dispatchEvent(new Event('change'));
+                                }
+                            });
                             panel.appendChild(card);
                         });
                         panel.classList.add('visible');
                     }
+                    refreshAvailabilityUI();
 
                     getVisibleLines().forEach(ln => {
                         const i = parseInt(ln.id.replace('room-line-', ''), 10);
@@ -3278,6 +3494,15 @@ try {
             calculateTotal();
         }
 
+        // Plain note when the occupancy tier does not match the guests seated in the room.
+        function occupancyNote(occ, seated) {
+            if (occ === 'single' && seated > 1) return ' Occupancy is Single but ' + seated + ' guests are seated here.';
+            if (occ === 'double' && seated > 2) return ' Occupancy is Double but ' + seated + ' guests are seated here.';
+            if (occ === 'double' && seated < 2) return ' Priced as Double for ' + seated + ' guest.';
+            if (occ === 'triple' && seated < 3) return ' Priced as Triple for ' + seated + ' guest' + (seated === 1 ? '' : 's') + '.';
+            return '';
+        }
+
         // ── Core accounting calculator ─────────────────────────────────────────────
         function calculateTotal() {
             const ci = el('checkInDate')?.value;
@@ -3327,6 +3552,10 @@ try {
             // (and only its) applies to that line, exactly as the server does.
             const indRadio = lines.length === 1 ? document.querySelector('input[name=individual_room_id]:checked') : null;
 
+            // Each row is priced for the guests seated in THAT room (same rule as the server).
+            let childPctSeen = null;
+            const seatingAll = adminSeatParty();
+            const nightsLbl = nights + ' night' + (nights !== 1 ? 's' : '');
             lines.forEach((ln, lnOrder) => {
                 const lineIdx = parseInt(ln.id.replace('room-line-', ''), 10);
                 const roomId = parseInt(ln.querySelector('.line-room-select')?.value || '0', 10);
@@ -3336,11 +3565,15 @@ try {
                 const override = ovRaw !== '' ? parseFloat(ovRaw) : null;
                 const room = roomsData.find(r => r.id === roomId);
                 const subEl = el('line-subtotal-' + lineIdx);
+                const detEl = el('line-detail-' + lineIdx);
                 totalRooms += qty;
                 if (!room) {
                     if (subEl) subEl.textContent = '—';
+                    if (detEl) detEl.textContent = '';
                     return;
                 }
+                const seatRow = seatingAll.valid ? seatingAll.rows[lnOrder] : null;
+                const rowChildren = seatRow ? seatRow.children : 0;
 
                 let rate = room.price_per_night;
                 if (occ === 'single' && room.price_single) rate = room.price_single;
@@ -3372,11 +3605,28 @@ try {
                     tt = stayTotals(override * qty, 'final');
                 } else {
                     lineBase = rate * nights * qty;
-                    // Child supplement is group-level: charged once, on the first room line only (matches the server)
-                    lineChild = (children > 0 && lnOrder === 0) ? (rate * (cMult / 100) * children * nights) : 0;
+                    // Child supplement: only for the children seated in THIS room (matches the server)
+                    lineChild = rowChildren > 0 ? (rate * (cMult / 100) * rowChildren * nights) : 0;
                     tt = stayTotals(lineBase + lineChild, 'price');
                 }
                 if (subEl) subEl.textContent = fmt(tt.total);
+                if (override === null && rowChildren > 0) {
+                    if (childPctSeen === null) childPctSeen = cMult;
+                    else if (childPctSeen !== cMult) childPctSeen = 'varies';
+                }
+                if (detEl) {
+                    const seatTxt = seatRow ? 'Seated: ' + seatLabel(seatRow) + ' (room holds ' + roomPhysicalCap(room) + '). ' : '';
+                    const occTxt = seatRow ? occupancyNote(occ, seatRow.guests) : '';
+                    if (override !== null) {
+                        detEl.textContent = seatTxt + 'Price override ' + fmt(override) + ' is the final amount for this room.' + occTxt;
+                    } else {
+                        let d = seatTxt + fmt(rate) + '/night × ' + nightsLbl + ' = ' + fmt(lineBase);
+                        if (lineChild > 0) d += ' + ' + rowChildren + (rowChildren === 1 ? ' child' : ' children') + ' at ' + cMult + '% = ' + fmt(lineChild);
+                        const tax = tt.total - (lineBase + lineChild);
+                        if (tax > 0.005) d += (vatMode === 'exclusive' && tt.vat > 0 ? (tt.levy > 0 ? ' + VAT and levy ' : ' + VAT ') : ' + levy ') + fmt(tax);
+                        detEl.textContent = d + occTxt;
+                    }
+                }
                 grandBase += lineBase;
                 grandChild += lineChild;
                 grandLevy += tt.levy;
@@ -3403,7 +3653,7 @@ try {
             if (el('accQtyTotal')) el('accQtyTotal').textContent = fmt(grandBase);
             if (el('accRowChild')) el('accRowChild').style.display = children > 0 ? '' : 'none';
             if (el('accChildCount')) el('accChildCount').textContent = children;
-            if (el('accChildPct')) el('accChildPct').textContent = '50';
+            if (el('accChildPct')) el('accChildPct').textContent = childPctSeen === null ? '50' : String(childPctSeen);
             if (el('accChildTotal')) el('accChildTotal').textContent = fmt(grandChild);
             if (el('accRowLevy')) el('accRowLevy').style.display = levyEnabled && grandLevy > 0 ? '' : 'none';
             if (el('accLevyTotal')) el('accLevyTotal').textContent = fmt(grandLevy);
@@ -3778,6 +4028,9 @@ try {
                     const hasRoom = Array.from(roomSelects).some(function (s) { return s.value; });
                     if (!hasRoom) {
                         errs.push('Please select at least one room type before continuing.');
+                    } else {
+                        // Every room needs a type, none may exceed what is free, and the party must fit.
+                        allocationErrors().forEach(function (m) { errs.push(m); });
                     }
                 }
 

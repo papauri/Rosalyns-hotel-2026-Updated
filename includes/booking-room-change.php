@@ -227,12 +227,22 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
     $oldRoomIds = [];
 
     try {
+        // Room types to lock (old + new, plus joined-room types sharing their rooms) are read BEFORE the
+        // transaction: a plain read inside it would open the snapshot ahead of the room locks.
+        $preSt = $pdo->prepare("SELECT room_id FROM bookings WHERE id = ?");
+        $preSt->execute([$bookingId]);
+        $lockTypeIds = rh_related_room_type_ids($pdo, [(int)$preSt->fetchColumn(), $newRoomId]);
         $pdo->beginTransaction();
         $lock = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
         $lock->execute([$bookingId]);
         $b = $lock->fetch(PDO::FETCH_ASSOC);
         if (!$b) {
             throw new RuntimeException('Booking not found.');
+        }
+        // Room-type locks come before any plain read (ascending id, shared with the booking flows).
+        rh_lock_room_types($pdo, $lockTypeIds);
+        if (!in_array((int)$b['room_id'], $lockTypeIds, true)) {
+            throw new RuntimeException('This booking was changed by someone else a moment ago. Refresh the page and try again.');
         }
         if (!empty($b['deleted_at'])) {
             throw new RuntimeException('This booking has been deleted. Restore it first.');
@@ -318,7 +328,7 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        return ['success' => false, 'message' => $e->getMessage()];
+        return ['success' => false, 'message' => rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage()];
     }
 
     // Physical room: pick one of the new type. In-house: old room to housekeeping, new one occupied.

@@ -851,8 +851,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                 // Update booking status; if leaving tentative, clear tentative fields so badge counts stay accurate
                 $clear_tentative_flag = ($new_status !== 'tentative') ? ', is_tentative = 0, tentative_expires_at = NULL' : '';
-                $stmt = $pdo->prepare("UPDATE bookings SET status = ?{$clear_tentative_flag} WHERE id = ?");
-                $stmt->execute([$new_status, $booking_id]);
+                $confirmRoomUpdated = null;
+                if (in_array($current_status, ['pending', 'tentative'], true) && $new_status === 'confirmed') {
+                    // Confirming a hold takes a room out of stock: one transaction that locks the booking row and
+                    // every room type sharing its rooms (read BEFORE the transaction, locked in ascending id),
+                    // re-checks availability, and only then changes the status and the room counter. Two people
+                    // confirming at once, or confirming while someone books, can never both claim the last room.
+                    $confirmLockIds = rh_related_room_type_ids($pdo, [(int)$room_id]);
+                    $pdo->beginTransaction();
+                    try {
+                        $lockBk = $pdo->prepare("SELECT status FROM bookings WHERE id = ? FOR UPDATE");
+                        $lockBk->execute([$booking_id]);
+                        $lockedStatus = $lockBk->fetchColumn();
+                        if (!in_array($lockedStatus, ['pending', 'tentative'], true)) {
+                            throw new Exception('This booking was changed by someone else a moment ago. Refresh the page and check its status.');
+                        }
+                        rh_lock_room_types($pdo, $confirmLockIds);
+                        $availabilityCheck = checkRoomAvailability($room_id, $current_booking['check_in_date'], $current_booking['check_out_date'], $booking_id);
+                        if (!$availabilityCheck['available']) {
+                            throw new Exception(getBookingActionErrorMessage('confirm', $availabilityCheck['error'] ?? 'No rooms available'));
+                        }
+                        $pdo->prepare("UPDATE bookings SET status = ?{$clear_tentative_flag} WHERE id = ?")->execute([$new_status, $booking_id]);
+                        $update_room = $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ? AND rooms_available > 0");
+                        $update_room->execute([$room_id]);
+                        $confirmRoomUpdated = $update_room->rowCount() > 0;
+                        $pdo->commit();
+                    } catch (Throwable $confirmEx) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        throw rh_is_lock_conflict($confirmEx) ? new Exception(rh_lock_conflict_message()) : $confirmEx;
+                    }
+                } else {
+                    $stmt = $pdo->prepare("UPDATE bookings SET status = ?{$clear_tentative_flag} WHERE id = ?");
+                    $stmt->execute([$new_status, $booking_id]);
+                }
                 $message = 'Booking status updated!';
                 rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'by' => $user['username'] ?? null]);
                 logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $current_booking['booking_reference'] ?? null);
@@ -860,25 +893,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Handle room availability changes
                 if (in_array($current_status, ['pending', 'tentative'], true) && $new_status === 'confirmed') {
-                    // Serialise on the room-type row (same lock the creation flows take)
-                    // BEFORE the availability re-check + rooms_available decrement, so two
-                    // simultaneous confirmations can't both claim the last room.
-                    $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$room_id]);
-                    // Check availability before confirming
-                    $availabilityCheck = checkRoomAvailability($room_id, $current_booking['check_in_date'], $current_booking['check_out_date'], $booking_id);
-                    if (!$availabilityCheck['available']) {
-                        // Rollback status change
-                        $stmt = $pdo->prepare("UPDATE bookings SET status = ? WHERE id = ?");
-                        $stmt->execute([$current_status, $booking_id]);
-                        $errorMsg = getBookingActionErrorMessage('confirm', $availabilityCheck['error'] ?? 'No rooms available');
-                        throw new Exception($errorMsg);
-                    }
-
-                    // Booking confirmed: decrement rooms_available
-                    $update_room = $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ? AND rooms_available > 0");
-                    $update_room->execute([$room_id]);
-
-                    if ($update_room->rowCount() === 0) {
+                    // (Availability re-check, status change and room counter were done in the locked transaction above.)
+                    if (!$confirmRoomUpdated) {
                         // This shouldn't happen if availability checks are working, but handle it
                         $message .= ' (Warning: Could not update room availability - room may be fully booked)';
                     } else {

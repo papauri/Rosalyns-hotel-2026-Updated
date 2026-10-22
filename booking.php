@@ -441,13 +441,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Conflict check is now INSIDE the transaction with a per-room row lock to
         // prevent the classic check-then-insert race that allows overbooking when two
         // guests submit for the last room simultaneously.
+        // The set of room types to lock (this one plus joined-room types sharing its rooms) is read BEFORE the
+        // transaction: a plain read inside it would open the snapshot ahead of the locks.
+        $lockTypeIds = rh_related_room_type_ids($pdo, [(int)$room_id]);
         $pdo->beginTransaction();
 
         try {
             // Per-room serialisation lock — concurrent transactions wait here until
             // the current insert+commit finishes, eliminating the race window.
-            $lockStmt = $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE");
-            $lockStmt->execute([$room_id]);
+            // Also locks the joined-room types that share physical rooms with this one (ascending id).
+            rh_lock_room_types($pdo, $lockTypeIds);
 
             $childRoomsNeeded = ga_child_rooms($bookingAllocation);
 
@@ -457,6 +460,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $inventoryError = ga_inventory_error($lockedAvailability, $roomsNeeded, (string)$room['name'], $check_in_date, $check_out_date);
             if ($inventoryError !== '') {
                 throw new Exception($inventoryError . ' Please adjust your dates, guest count or room type.');
+            }
+            // Joined rooms: a member-type booking committed a moment ago has no room yet (see the helper).
+            if ($usesCombinations) {
+                $joinedErr = rh_joined_members_stock_error($combinationQueue, $check_in_date, $check_out_date);
+                if ($joinedErr !== '') {
+                    throw new Exception($joinedErr . ' Please adjust your dates or room type.');
+                }
             }
 
             $insert_stmt = $pdo->prepare("
@@ -755,7 +765,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } catch (Exception $e) {
             // Rollback on insert error
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             throw $e;
         }
     } catch (Exception $e) {
@@ -763,7 +775,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        $error_message = $e->getMessage();
+        $error_message = rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage();
     }
 }
 

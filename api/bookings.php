@@ -288,23 +288,24 @@ try {
         $tentativeExpiresAt = date('Y-m-d H:i:s', strtotime("+{$tentativeDurationHours} hours"));
     }
     
-    // Start transaction
+    // Start transaction. The room types to lock (this one plus joined-room types sharing its rooms) are read
+    // BEFORE it: a plain read inside would open the snapshot ahead of the locks.
+    $lockTypeIds = rh_related_room_type_ids($pdo, [(int)$bookingData['room_id']]);
     $pdo->beginTransaction();
     
     try {
         // Authoritative availability re-check INSIDE the transaction with a per-room
         // row lock. Concurrent transactions wait here, eliminating the check-then-insert
         // race that would otherwise allow overbooking.
-        $lockStmt = $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE");
-        $lockStmt->execute([$bookingData['room_id']]);
+        rh_lock_room_types($pdo, $lockTypeIds);
         $lockedAvailability = checkRoomAvailability($bookingData['room_id'], $bookingData['check_in_date'], $bookingData['check_out_date'], null, $bookingData['child_guests']);
         if (empty($lockedAvailability['available'])) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
             ApiResponse::error($lockedAvailability['error'] ?? 'This room is no longer available for the selected dates. Please choose different dates.', 409);
         }
         $lockedInventoryError = ga_inventory_error($lockedAvailability, 1, (string)$room['name'], $bookingData['check_in_date'], $bookingData['check_out_date']);
         if ($lockedInventoryError !== '') {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
             ApiResponse::error($lockedInventoryError, 409);
         }
 
@@ -357,12 +358,12 @@ try {
         if (roomTypeHasActiveCombinations((int)$bookingData['room_id'])) {
             $availableCombinations = getAvailableRoomCombinations((int)$bookingData['room_id'], $bookingData['check_in_date'], $bookingData['check_out_date'], $bookingId);
             if (empty($availableCombinations)) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 ApiResponse::error('Joined rooms are no longer available for the selected dates. Please choose different dates.', 409);
             }
             $assignment = assignRoomCombinationToBooking($bookingId, (int)$availableCombinations[0]['id']);
             if (empty($assignment['success'])) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 ApiResponse::error($assignment['message'] ?? 'Failed to reserve joined rooms for this booking.', 409);
             }
         }
@@ -545,12 +546,17 @@ try {
         
     } catch (Exception $e) {
         // Rollback on error
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         throw $e;
     }
     
 } catch (PDOException $e) {
     error_log("Booking API Database Error: " . $e->getMessage());
+    if (rh_is_lock_conflict($e)) {
+        ApiResponse::error(rh_lock_conflict_message(), 409);
+    }
     ApiResponse::error('Database error occurred while creating booking', 500);
 } catch (Exception $e) {
     error_log("Booking API Error: " . $e->getMessage());

@@ -3497,6 +3497,135 @@ function roomTypeHasActiveCombinations(int $roomTypeId): bool
 }
 
 /**
+ * Room types whose stock overlaps the given ones through joined rooms: the component types of a
+ * joined ("Book As") type, and the joined types that use a requested type's rooms. The result
+ * includes the requested ids themselves, sorted ascending.
+ *
+ * Call this BEFORE beginTransaction(): it is a plain read, so it must not run inside the booking
+ * transaction (it would open the transaction's snapshot before the room locks are taken, and it must
+ * never hold row locks on individual_rooms / room_combinations, which the room assignment locks later
+ * in a different order). Hand the result to rh_lock_room_types() inside the transaction.
+ *
+ * @param int[] $typeIds
+ * @return int[]
+ */
+function rh_related_room_type_ids(PDO $pdo, array $typeIds): array
+{
+    $set = [];
+    foreach ($typeIds as $t) {
+        if ((int)$t > 0) {
+            $set[(int)$t] = (int)$t;
+        }
+    }
+    if (!$set) {
+        return [];
+    }
+    try {
+        foreach (array_values($set) as $t) {
+            $st = $pdo->prepare("SELECT rc.combined_room_type_id AS comb_t, a.room_type_id AS a_t, b.room_type_id AS b_t
+                FROM room_combinations rc
+                JOIN individual_rooms a ON a.id = rc.room_a_id
+                JOIN individual_rooms b ON b.id = rc.room_b_id
+                WHERE rc.is_active = 1 AND (rc.combined_room_type_id = ? OR a.room_type_id = ? OR b.room_type_id = ?)");
+            $st->execute([$t, $t, $t]);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                foreach (['comb_t', 'a_t', 'b_t'] as $k) {
+                    if ((int)$row[$k] > 0) {
+                        $set[(int)$row[$k]] = (int)$row[$k];
+                    }
+                }
+            }
+        }
+    } catch (PDOException $e) {
+        // Only "table does not exist" (no joined rooms were ever set up) is harmless; a timeout, deadlock or
+        // lost connection must stop the sale, not let it carry on unlocked.
+        if ((string)$e->getCode() !== '42S02') {
+            throw $e;
+        }
+    }
+    $ids = array_values($set);
+    sort($ids, SORT_NUMERIC);
+    return $ids;
+}
+
+/**
+ * Serialise concurrent sales of the same physical rooms: take the room-type row lock (FOR UPDATE) of
+ * every given type, always in ascending id order so two sellers can never deadlock on each other.
+ * $typeIds is the expanded set from rh_related_room_type_ids() (computed before the transaction began).
+ * Must run inside the booking transaction, as the first thing that touches data after the booking's own
+ * row lock (no plain read before it). Throws when no transaction is open: a lock would be released at once.
+ *
+ * @param int[] $typeIds
+ * @return int[] ids locked
+ */
+function rh_lock_room_types(PDO $pdo, array $typeIds): array
+{
+    if (!$pdo->inTransaction()) {
+        throw new RuntimeException('rh_lock_room_types() needs an open transaction.');
+    }
+    $ids = array_values(array_unique(array_filter(array_map('intval', $typeIds), static fn($i) => $i > 0)));
+    sort($ids, SORT_NUMERIC);
+    $lock = $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE");
+    foreach ($ids as $id) {
+        $lock->execute([$id]);
+        $lock->fetchAll();
+    }
+    return $ids;
+}
+
+/** True when the database gave up on a statement because of a lock wait timeout or a deadlock (1205 / 1213). */
+function rh_is_lock_conflict(Throwable $e): bool
+{
+    if ($e instanceof PDOException) {
+        $code = (int)($e->errorInfo[1] ?? 0);
+        if ($code === 1205 || $code === 1213) {
+            return true;
+        }
+        if ((string)$e->getCode() === '40001') {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** What staff / guests see instead of a raw database error when two people book the same rooms at once. */
+function rh_lock_conflict_message(): string
+{
+    return 'Someone else was booking the same rooms at that moment. Nothing was saved - please try again.';
+}
+
+/**
+ * Stock re-check for joined pairs that are about to be sold, run INSIDE the booking transaction after the
+ * room-type locks. A pair is only physically free while nobody holds its rooms; a booking of a member room
+ * type that was committed a moment ago has no room yet (it is assigned just after the commit), so the pair
+ * check alone cannot see it. Here the member type's own remaining count (which includes such bookings) must
+ * still cover the rooms the pairs take from it. Pairs whose rooms already belong to the joined type itself
+ * are skipped. Returns '' when fine, otherwise a plain message.
+ *
+ * @param array $combinations rows from getAvailableRoomCombinations() (combined_room_type_id, room_a_type_id, room_b_type_id)
+ */
+function rh_joined_members_stock_error(array $combinations, string $checkIn, string $checkOut, ?int $excludeBookingId = null): string
+{
+    $need = [];
+    foreach ($combinations as $c) {
+        $own = (int)($c['combined_room_type_id'] ?? 0);
+        foreach (['room_a_type_id', 'room_b_type_id'] as $k) {
+            $t = (int)($c[$k] ?? 0);
+            if ($t > 0 && $t !== $own) {
+                $need[$t] = ($need[$t] ?? 0) + 1;
+            }
+        }
+    }
+    foreach ($need as $t => $n) {
+        $av = checkRoomAvailability((int)$t, $checkIn, $checkOut, $excludeBookingId);
+        if (empty($av['available']) || (int)($av['remaining_rooms'] ?? 0) < $n) {
+            return 'The rooms this joined room is made of are no longer available for those dates.';
+        }
+    }
+    return '';
+}
+
+/**
  * Joined-only pairs: combinations whose two rooms BOTH belong to the "Book As" room type, i.e.
  * the rooms are sold only as the pair and behave as ONE room everywhere staff look at rooms
  * (rooms list, blocked dates, calendar, pickers). A 'shared' pair (rooms keep their own type and
@@ -4181,7 +4310,15 @@ function assignRoomCombinationToBooking(int $bookingId, int $combinationId, ?int
             $pdo->rollBack();
         }
         error_log('assignRoomCombinationToBooking warning: ' . $e->getMessage());
-        $result['message'] = $e->getMessage();
+        if (rh_is_lock_conflict($e)) {
+            if (!$ownTransaction) {
+                throw $e; // the caller's transaction is already rolled back by the server: let it show the plain retry message
+            }
+            $result['message'] = rh_lock_conflict_message();
+            return $result;
+        }
+        // Never show raw database text to a user.
+        $result['message'] = $e instanceof PDOException ? 'The joined rooms could not be reserved. Please try again.' : $e->getMessage();
         return $result;
     }
 }

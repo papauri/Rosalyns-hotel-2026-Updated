@@ -242,7 +242,15 @@ function rh_restore_booking(PDO $pdo, int $bookingId, int $userId, string $userN
     $ownTx = !$pdo->inTransaction();
     $assignMsg = '';
     try {
+        // Plain reads (audit-log status, related room types) happen BEFORE the transaction when we own it, so no
+        // snapshot is open ahead of the locks; inside the transaction: booking row, then room types ascending.
+        $restoreStatus = null;
+        $lockTypeIds = [];
         if ($ownTx) {
+            $restoreStatus = rh_booking_status_before_delete($pdo, $bookingId);
+            $preSt = $pdo->prepare("SELECT room_id FROM bookings WHERE id = ?");
+            $preSt->execute([$bookingId]);
+            $lockTypeIds = rh_related_room_type_ids($pdo, [(int)$preSt->fetchColumn()]);
             $pdo->beginTransaction();
         }
         $lock = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
@@ -255,14 +263,20 @@ function rh_restore_booking(PDO $pdo, int $bookingId, int $userId, string $userN
             throw new RuntimeException('This booking is not deleted.');
         }
         $ref = (string)$b['booking_reference'];
-        $restoreStatus = rh_booking_status_before_delete($pdo, $bookingId);
+        if (!$ownTx) {
+            $restoreStatus = rh_booking_status_before_delete($pdo, $bookingId);
+            $lockTypeIds = rh_related_room_type_ids($pdo, [(int)$b['room_id']]);
+        }
         if ($restoreStatus === null) {
             throw new RuntimeException('The status this booking had before it was deleted is not in the audit log, so it cannot be restored automatically. Ask an administrator to check the booking.');
         }
         $reholds = in_array($restoreStatus, rh_soft_delete_releasing_statuses(), true) && (string)$b['status'] === 'cancelled';
 
         if ($reholds) {
-            $pdo->prepare("SELECT id FROM rooms WHERE id = ? FOR UPDATE")->execute([$b['room_id']]);
+            if (!in_array((int)$b['room_id'], $lockTypeIds, true)) {
+                throw new RuntimeException('This booking was changed by someone else a moment ago. Refresh the page and try again.');
+            }
+            rh_lock_room_types($pdo, $lockTypeIds);
             $av = checkRoomAvailability((int)$b['room_id'], (string)$b['check_in_date'], (string)$b['check_out_date'], $bookingId, (int)($b['child_guests'] ?? 0));
             if (empty($av['available'])) {
                 throw new RuntimeException('Cannot restore as ' . $restoreStatus . ': the room type is no longer free for '
@@ -292,7 +306,7 @@ function rh_restore_booking(PDO $pdo, int $bookingId, int $userId, string $userN
         if ($ownTx && $pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        return ['success' => false, 'message' => $e->getMessage()];
+        return ['success' => false, 'message' => rh_is_lock_conflict($e) ? rh_lock_conflict_message() : $e->getMessage()];
     }
 
     if ($reholds && $restoreStatus === 'confirmed' && function_exists('autoAssignIndividualRoom')) {
