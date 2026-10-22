@@ -2873,7 +2873,7 @@ function sendAdminNotificationEmail(array $booking)
         if ($isTentative && $tentativeExpiresFormatted !== '') {
             $summaryRows[] = ['Hold Expires', $tentativeExpiresFormatted, true];
         }
-        $summaryRows[] = ['Total', $currency . ' ' . number_format((float)($booking['total_amount'] ?? 0), 0), true];
+        $summaryRows[] = ['Total', $currency . ' ' . number_format((function_exists('rh_booking_full_total') ? rh_booking_full_total($booking) : (float)($booking['total_amount'] ?? 0)), 0), true];
 
         $adminBodyText = $isTentative
             ? '<p style="margin:0 0 16px;">A <strong>tentative hold</strong> has been placed via the website. The guest must confirm before the hold expires. Please review and follow up as needed.</p>'
@@ -4325,7 +4325,7 @@ function generateWhatsAppLink(array $booking, array $room)
     $message .= "🏨 Room: " . $room['name'] . "\n";
     $message .= "📆 Check-in: " . date('F j, Y', strtotime($booking['check_in_date'])) . "\n";
     $message .= "📆 Check-out: " . date('F j, Y', strtotime($booking['check_out_date'])) . "\n";
-    $message .= "💰 Total Amount: " . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . "\n\n";
+    $message .= "💰 Total Amount: " . getSetting('currency_symbol') . ' ' . number_format((function_exists('rh_booking_full_total') ? rh_booking_full_total($booking) : (float)($booking['total_amount'] ?? 0)), 0) . "\n\n";
     $message .= "Please confirm my booking. Thank you!";
 
     return 'https://wa.me/' . $whatsapp_number . '?text=' . urlencode($message);
@@ -4901,7 +4901,7 @@ function sendPendingBookingExpiredEmail(array $booking, ?array $room = null)
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Check-out Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . date('F j, Y', strtotime($booking['check_out_date'])) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format((function_exists('rh_booking_full_total') ? rh_booking_full_total($booking) : (float)($booking['total_amount'] ?? 0)), 0) . '</td></tr></table>
         </div>
 
         <p>If you are still interested in booking with us, please visit our website to check availability and make a new booking.</p>
@@ -5080,7 +5080,7 @@ function sendAdminBookingExpiredNotification(array $booking, string $booking_typ
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Check-out Date:</td><td style="padding:10px 0 10px 6px;color: #333;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . date('F j, Y', strtotime($booking['check_out_date'])) . '</td></tr></table>
 
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format($booking['total_amount'], 0) . '</td></tr></table>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Total Amount:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . getSetting('currency_symbol') . ' ' . number_format((function_exists('rh_booking_full_total') ? rh_booking_full_total($booking) : (float)($booking['total_amount'] ?? 0)), 0) . '</td></tr></table>
         </div>
 
         <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">

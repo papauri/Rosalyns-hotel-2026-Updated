@@ -280,7 +280,7 @@ try {
                                 // What the guest owes (VAT-inclusive); older rows without it fall back to total_amount.
                                 $lookup_owed = (float)($booking['total_with_vat'] ?? 0);
                                 if ($lookup_owed <= 0) {
-                                    $lookup_owed = (float)($booking['total_amount'] ?? 0);
+                                    $lookup_owed = rh_booking_full_total($booking);
                                 }
                                 echo number_format($lookup_owed, 0);
                             ?></div>

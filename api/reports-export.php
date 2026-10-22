@@ -32,6 +32,7 @@ if (!in_array($_exportRole, ['admin', 'manager', 'accountant'], true)) {
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../admin/includes/finance-schema.php';
+require_once __DIR__ . '/../includes/conference-pricing.php';
 require_once __DIR__ . '/../admin/includes/permissions.php';
 rhApiModuleGate('reports.php'); // blocked when the finance module is switched off, as the page is
 
@@ -527,10 +528,10 @@ function exportBookingsReport($output, string $start_date, string $end_date, str
     fputcsv($output, []);
 
     fputcsv($output, ['BOOKING STATUS SUMMARY']);
-    fputcsv($output, ['Status', 'Count', 'Total Value']);
+    fputcsv($output, ['Status', 'Count', 'Total Value (incl. VAT & levy)']);
 
     $statusStmt = $pdo->prepare("
-        SELECT status, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total_value
+        SELECT status, COUNT(*) as count, COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0))), 0) as total_value
         FROM bookings WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status ORDER BY count DESC
     ");
@@ -541,7 +542,7 @@ function exportBookingsReport($output, string $start_date, string $end_date, str
     fputcsv($output, []);
 
     fputcsv($output, ['BOOKINGS BY ROOM TYPE']);
-    fputcsv($output, ['Room', 'Bookings', 'Total Nights', 'Revenue']);
+    fputcsv($output, ['Room', 'Bookings', 'Total Nights', 'Revenue (excl. VAT, incl. levy)']);
 
     $roomStmt = $pdo->prepare("
         SELECT r.name, COUNT(b.id) as count, COALESCE(SUM(b.number_of_nights), 0) as nights, COALESCE(SUM(b.total_amount), 0) as revenue
@@ -555,7 +556,7 @@ function exportBookingsReport($output, string $start_date, string $end_date, str
     fputcsv($output, []);
 
     fputcsv($output, ['ALL BOOKINGS']);
-    fputcsv($output, ['Reference', 'Guest', 'Email', 'Room', 'Check-in', 'Check-out', 'Nights', 'Amount', 'Status']);
+    fputcsv($output, ['Reference', 'Guest', 'Email', 'Room', 'Check-in', 'Check-out', 'Nights', 'Total (incl. VAT & levy)', 'Status']);
 
     $allStmt = $pdo->prepare("
         SELECT b.*, r.name as room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id
@@ -571,7 +572,7 @@ function exportBookingsReport($output, string $start_date, string $end_date, str
             $row['check_in_date'],
             $row['check_out_date'],
             $row['number_of_nights'],
-            $currency_symbol . ' ' . number_format($row['total_amount'], 2),
+            $currency_symbol . ' ' . number_format(rh_booking_full_total($row), 2),
             ucfirst($row['status'])
         ]);
     }
@@ -624,7 +625,7 @@ function exportGuestsReport($output, string $start_date, string $end_date, strin
     fputcsv($output, []);
 
     fputcsv($output, ['GUEST ORIGIN COUNTRIES']);
-    fputcsv($output, ['Country', 'Bookings', 'Guests', 'Revenue']);
+    fputcsv($output, ['Country', 'Bookings', 'Guests', 'Revenue (excl. VAT, incl. levy)']);
 
     $countryStmt = $pdo->prepare("
         SELECT COALESCE(guest_country, 'Not Specified') as country, COUNT(*) as bookings,
@@ -639,10 +640,10 @@ function exportGuestsReport($output, string $start_date, string $end_date, strin
     fputcsv($output, []);
 
     fputcsv($output, ['REPEAT GUESTS']);
-    fputcsv($output, ['Guest', 'Email', 'Country', 'Bookings', 'Total Spent', 'First Visit', 'Last Visit']);
+    fputcsv($output, ['Guest', 'Email', 'Country', 'Bookings', 'Total Spent (incl. VAT & levy)', 'First Visit', 'Last Visit']);
 
     $repeatStmt = $pdo->prepare("
-        SELECT guest_name, guest_email, guest_country, COUNT(*) as bookings, COALESCE(SUM(total_amount), 0) as spent,
+        SELECT guest_name, guest_email, guest_country, COUNT(*) as bookings, COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0))), 0) as spent,
                MIN(check_in_date) as first_visit, MAX(check_in_date) as last_visit
         FROM bookings WHERE status != 'cancelled' AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY guest_name, guest_email, guest_country HAVING bookings > 1 ORDER BY bookings DESC
@@ -675,10 +676,10 @@ function exportConferenceReport($output, string $start_date, string $end_date, s
     fputcsv($output, []);
 
     fputcsv($output, ['CONFERENCE INQUIRY STATUS']);
-    fputcsv($output, ['Status', 'Count', 'Total Value', 'Amount Paid']);
+    fputcsv($output, ['Status', 'Count', 'Total Value (incl. VAT)', 'Amount Paid']);
 
     $confStmt = $pdo->prepare("
-        SELECT status, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as value, COALESCE(SUM(amount_paid), 0) as paid
+        SELECT status, COUNT(*) as count, COALESCE(SUM(" . rh_conf_gross_sql() . "), 0) as value, COALESCE(SUM(amount_paid), 0) as paid
         FROM conference_inquiries WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status
     ");
@@ -689,11 +690,11 @@ function exportConferenceReport($output, string $start_date, string $end_date, s
     fputcsv($output, []);
 
     fputcsv($output, ['CONFERENCE ROOM UTILIZATION']);
-    fputcsv($output, ['Room', 'Capacity', 'Events', 'Avg Attendees', 'Revenue']);
+    fputcsv($output, ['Room', 'Capacity', 'Events', 'Avg Attendees', 'Revenue (incl. VAT)']);
 
     $roomStmt = $pdo->prepare("
         SELECT cr.name, cr.capacity, COUNT(ci.id) as events, COALESCE(AVG(ci.number_of_attendees), 0) as avg_att,
-               COALESCE(SUM(ci.total_amount), 0) as revenue
+               COALESCE(SUM(" . rh_conf_gross_sql('ci') . "), 0) as revenue
         FROM conference_rooms cr LEFT JOIN conference_inquiries ci ON cr.id = ci.conference_room_id
             AND ci.created_at >= ? AND ci.created_at <= DATE_ADD(?, INTERVAL 1 DAY) AND ci.status != 'cancelled'
         WHERE cr.is_active = 1 GROUP BY cr.id, cr.name, cr.capacity ORDER BY events DESC

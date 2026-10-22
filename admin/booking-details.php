@@ -353,7 +353,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
                 $waBookingStmt = $pdo->prepare("
                     SELECT guest_name, guest_phone, booking_reference,
                            final_invoice_path, final_invoice_number,
-                           check_in_date, check_out_date, total_amount
+                           check_in_date, check_out_date, total_amount, total_with_vat, vat_amount
                     FROM bookings WHERE id = ?
                 ");
                 $waBookingStmt->execute([$booking_id]);
@@ -392,11 +392,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
                 $hotelName  = getSetting('hotel_name', 'Hotel');
                 $guestName  = $waBooking['guest_name'] ?? 'Guest';
 
+                // Full amount on the invoice: room + VAT + levy + folio extras (owner 2026-10-23), not the ex-VAT base.
+                $waFolio = getBookingFolioSummary((int)$booking_id);
+                $waInvoiceTotal = isset($waFolio['grand_total']) ? (float)$waFolio['grand_total'] : rh_booking_full_total($waBooking);
+
                 $waMsg = "Dear {$guestName},\n\n"
                     . "Please find your invoice ({$invoiceRef}) for your stay at {$hotelName}.\n\n"
                     . "Check-in: " . date('d M Y', strtotime($waBooking['check_in_date'])) . "\n"
                     . "Check-out: " . date('d M Y', strtotime($waBooking['check_out_date'])) . "\n"
-                    . "Total: " . getSetting('currency_symbol', 'MWK') . ' ' . number_format((float) $waBooking['total_amount'], 2) . "\n\n"
+                    . "Total: " . getSetting('currency_symbol', 'MWK') . ' ' . number_format($waInvoiceTotal, 2) . "\n\n"
                     . "View your invoice (link valid for 30 days): {$invoiceUrl}\n\n"
                     . "Thank you for staying with us!";
 
@@ -828,7 +832,7 @@ try {
                 SELECT
                     COUNT(*) AS total_bookings,
                     SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired') THEN 1 ELSE 0 END) AS completed_stays,
-                    COALESCE(SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired') THEN total_amount ELSE 0 END), 0) AS lifetime_spend
+                    COALESCE(SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired') THEN " . rh_booking_gross_sql('bookings') . " ELSE 0 END), 0) AS lifetime_spend
                 FROM bookings
                 WHERE guest_email = :email
                   AND id != :current_id
@@ -870,7 +874,7 @@ try {
         : (int)$booking['id'];
     $sib_stmt = $pdo->prepare("
         SELECT b.id, b.booking_reference, b.status, b.number_of_guests,
-               b.total_with_vat, b.primary_booking_id,
+               b.total_with_vat, b.total_amount, b.vat_amount, b.primary_booking_id,
                COALESCE(r.name, 'Unknown') AS room_name
         FROM bookings b
         LEFT JOIN rooms r ON b.room_id = r.id
@@ -1603,6 +1607,19 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <?php echo htmlspecialchars($gb['room_name']); ?> &mdash; <strong><?php echo htmlspecialchars($gb['booking_reference']); ?></strong>
             </a>
             <?php endforeach; ?>
+            <?php
+            // Group total = every live room in the group at its full amount (room + VAT + levy), owner 2026-10-23.
+            $bd_group_total = rh_booking_full_total($booking);
+            foreach ($group_bookings as $gb) {
+                if (!in_array((string)($gb['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true)) {
+                    $bd_group_total += rh_booking_full_total($gb);
+                }
+            }
+            if (in_array((string)($booking['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true)) {
+                $bd_group_total -= rh_booking_full_total($booking);
+            }
+            ?>
+            <span class="bd-group-notice__label">Group total (incl. VAT &amp; levy): <strong><?php echo $currency_symbol; ?><?php echo number_format($bd_group_total, 2); ?></strong></span>
         </div>
         <?php endif; ?>
 

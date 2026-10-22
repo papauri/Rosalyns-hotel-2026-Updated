@@ -2579,7 +2579,7 @@ function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file
 
                     <div style="display: flex; justify-content: space-between; padding: 15px 0;">
                         <span style="font-weight: bold; color: #8B7355; font-size: 18px;">Invoice total:</span>
-                        <span style="color: #8B7355; font-weight: bold; font-size: 18px;">' . $currency_symbol . ' ' . number_format($enquiry['total_amount'], 0) . '</span>
+                        <span style="color: #8B7355; font-weight: bold; font-size: 18px;">' . $currency_symbol . ' ' . number_format(rh_conf_gross($enquiry), 0) . '</span>
                     </div>
                 </div>
 

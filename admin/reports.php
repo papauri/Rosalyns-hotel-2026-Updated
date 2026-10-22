@@ -10,6 +10,7 @@
 require_once __DIR__ . '/admin-init.php';
 require_once __DIR__ . '/includes/finance-schema.php';
 require_once __DIR__ . '/includes/receivables.php';
+require_once __DIR__ . '/../includes/conference-pricing.php';
 
 // Get date range from query parameters or default to current month
 $start_date = $_GET['start_date'] ?? date('Y-m-01');
@@ -371,7 +372,7 @@ try {
     // 9. Booking Status Breakdown
     $bookingStatusStmt = $pdo->prepare("
         SELECT status, COUNT(*) as count,
-               COALESCE(SUM(total_amount), 0) as total_value
+               COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0))), 0) as total_value
         FROM bookings
         WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status ORDER BY count DESC
@@ -401,8 +402,8 @@ try {
     $bookingSummaryStmt = $pdo->prepare("
         SELECT COUNT(*) as total_bookings,
                COALESCE(AVG(number_of_nights), 0) as avg_stay_length,
-               COALESCE(SUM(total_amount), 0) as total_booking_value,
-               COALESCE(AVG(total_amount), 0) as avg_booking_value,
+               COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0))), 0) as total_booking_value,
+               COALESCE(AVG(COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0))), 0) as avg_booking_value,
                COALESCE(SUM(number_of_guests), 0) as total_guests,
                COALESCE(SUM(COALESCE(adult_guests, GREATEST(number_of_guests - COALESCE(child_guests, 0), 1))), 0) as total_adults,
                COALESCE(SUM(COALESCE(child_guests, 0)), 0) as total_children,
@@ -525,7 +526,7 @@ try {
     $guestCountryStmt = $pdo->prepare("
         SELECT COALESCE(guest_country, 'Not Specified') as country,
                COUNT(*) as booking_count,
-               COALESCE(SUM(total_amount), 0) as total_spent,
+               COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0))), 0) as total_spent,
                COALESCE(SUM(number_of_guests), 0) as total_guests,
                COALESCE(SUM(COALESCE(adult_guests, GREATEST(number_of_guests - COALESCE(child_guests, 0), 1))), 0) as total_adults,
                COALESCE(SUM(COALESCE(child_guests, 0)), 0) as total_children
@@ -541,7 +542,7 @@ try {
     $repeatGuestsStmt = $pdo->prepare("
         SELECT b.guest_name, b.guest_email, b.guest_country,
                COUNT(b.id) as booking_count,
-               COALESCE(SUM(b.total_amount), 0) as total_spent,
+               COALESCE(SUM(COALESCE(NULLIF(b.total_with_vat, 0), b.total_amount + COALESCE(b.vat_amount, 0))), 0) as total_spent,
                MIN(b.check_in_date) as first_visit,
                MAX(b.check_in_date) as last_visit
         FROM bookings b
@@ -563,7 +564,7 @@ try {
     $guestMetricsStmt = $pdo->prepare("
         SELECT COUNT(DISTINCT guest_email) as unique_guests,
                COUNT(*) as total_bookings,
-               COALESCE(AVG(total_amount), 0) as avg_spend
+               COALESCE(AVG(COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0))), 0) as avg_spend
         FROM bookings
         WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         AND status NOT IN ('cancelled')
@@ -591,7 +592,7 @@ try {
     // 20. Conference Inquiry Stats
     $conferenceStatsStmt = $pdo->prepare("
         SELECT status, COUNT(*) as count,
-               COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), COALESCE(total_amount, 0) + COALESCE(vat_amount, 0))), 0) as total_value,
+               COALESCE(SUM(" . rh_conf_gross_sql() . "), 0) as total_value,
                COALESCE(SUM(amount_paid), 0) as total_paid,
                COALESCE(SUM(amount_due), 0) as total_due,
                COALESCE(AVG({$conferenceFields['expected_attendees']}), 0) as avg_attendees
@@ -606,7 +607,7 @@ try {
     $conferenceRoomStmt = $pdo->prepare("
         SELECT cr.name as room_name, cr.capacity,
                COUNT(ci.id) as total_events,
-               COALESCE(SUM(ci.total_amount), 0) as total_revenue,
+               COALESCE(SUM(" . rh_conf_gross_sql('ci') . "), 0) as total_revenue,
                COALESCE(AVG(ci.{$conferenceFields['expected_attendees']}), 0) as avg_attendees
         FROM conference_rooms cr
         LEFT JOIN conference_inquiries ci ON cr.id = ci.conference_room_id
@@ -1357,7 +1358,7 @@ try {
                                     <td style="text-align:right"><?php echo $avgStayLength; ?> nights</td>
                                 </tr>
                                 <tr>
-                                    <td>Avg Booking Value</td>
+                                    <td>Avg Booking Value (incl. VAT &amp; levy)</td>
                                     <td style="text-align:right"><?php echo $currency_symbol . ' ' . number_format($avgRevenuePerBooking, 2); ?></td>
                                 </tr>
                                 <tr>
@@ -2393,7 +2394,7 @@ try {
                                 <tr>
                                     <th>Status</th>
                                     <th>Count</th>
-                                    <th>Total Value</th>
+                                    <th>Total Value (incl. VAT &amp; levy)</th>
                                     <th>Share</th>
                                 </tr>
                             </thead>
@@ -2436,7 +2437,7 @@ try {
                                     <th>Bookings</th>
                                     <th>Total Nights</th>
                                     <th>Avg Stay</th>
-                                    <th>Revenue</th>
+                                    <th>Revenue (excl. VAT, incl. levy)</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -2696,7 +2697,7 @@ try {
                 <strong class="rh-strip__value"><?php echo number_format($guestMetrics['unique_guests'] ?? 0); ?></strong>
             </div>
             <div class="rh-strip__cell">
-                <span class="rh-strip__label">Avg Spend per Guest</span>
+                <span class="rh-strip__label">Avg Spend per Guest (incl. VAT & levy)</span>
                 <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($guestMetrics['avg_spend'] ?? 0, 2); ?></strong>
             </div>
             <div class="rh-strip__cell">
@@ -2723,7 +2724,7 @@ try {
                                 <th>Country</th>
                                 <th>Bookings</th>
                                 <th>Guests</th>
-                                <th>Revenue</th>
+                                <th>Revenue (incl. VAT &amp; levy)</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -2787,7 +2788,7 @@ try {
                             <th>Email</th>
                             <th>Country</th>
                             <th>Stays</th>
-                            <th>Total Spent</th>
+                            <th>Total Spent (incl. VAT &amp; levy)</th>
                             <th>First Visit</th>
                             <th>Last Visit</th>
                         </tr>
@@ -2888,7 +2889,7 @@ try {
         <div class="rh-strip" role="group" aria-label="Summary">
             <?php if ($mod_conference): ?>
             <div class="rh-strip__cell">
-                <span class="rh-strip__label">Conference Revenue</span>
+                <span class="rh-strip__label">Conference Revenue (incl. VAT)</span>
                 <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalConfRevenue, 2); ?></strong>
                 <span class="rh-strip__sub"><?php echo number_format($totalConfEvents); ?> inquiries · cancelled not counted</span>
             </div>
@@ -2942,7 +2943,7 @@ try {
                             <tr>
                                 <th>Status</th>
                                 <th>Count</th>
-                                <th>Value</th>
+                                <th>Value (incl. VAT)</th>
                                 <th>Paid</th>
                             </tr>
                         </thead>
@@ -3038,7 +3039,7 @@ try {
                             <th>Capacity</th>
                             <th>Events</th>
                             <th>Avg Attendees</th>
-                            <th>Revenue</th>
+                            <th>Revenue (incl. VAT)</th>
                             <th>Utilization</th>
                         </tr>
                     </thead>

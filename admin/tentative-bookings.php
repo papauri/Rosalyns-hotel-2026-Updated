@@ -430,7 +430,7 @@ foreach ($active as $bk) {
                                     </td>
 
                                     <td class="num">
-                                        <strong><?php echo htmlspecialchars($currency_symbol); ?><?php echo number_format((float)$bk['total_amount'], 0); ?></strong>
+                                        <strong><?php echo htmlspecialchars($currency_symbol); ?><?php echo number_format(rh_booking_full_total($bk), 0); ?></strong>
                                     </td>
 
                                     <td>
@@ -599,7 +599,7 @@ foreach ($active as $bk) {
                                     </td>
                                     <td><?php echo htmlspecialchars($bk['room_name']); ?></td>
                                     <td><?php echo date('M j, Y', strtotime($bk['check_in_date'])); ?></td>
-                                    <td class="num"><?php echo htmlspecialchars($currency_symbol); ?><?php echo number_format((float)$bk['total_amount'], 0); ?></td>
+                                    <td class="num"><?php echo htmlspecialchars($currency_symbol); ?><?php echo number_format(rh_booking_full_total($bk), 0); ?></td>
                                     <td>
                                         <span class="tb-countdown tb-countdown--expired">
                                             <i class="fas fa-clock-rotate-left"></i>

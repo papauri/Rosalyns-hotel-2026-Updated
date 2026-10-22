@@ -748,7 +748,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $uStmt = $pdo->prepare("
                 SELECT b.id, b.booking_reference, b.guest_name, b.guest_email, b.guest_phone,
                        b.check_in_date, b.check_out_date, b.status, b.payment_status,
-                       b.total_amount, r.name AS room_type_name
+                       b.total_amount, b.total_with_vat, b.vat_amount, r.name AS room_type_name
                 FROM bookings b
                 JOIN rooms r ON r.id = b.room_id
                 WHERE {$detailBookingPred}
@@ -809,7 +809,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'check_out'       => $active['check_out_date'],
                     'status'          => $active['status'],
                     'payment_status'  => $active['payment_status'] ?? 'pending',
-                    'total_amount'    => $sym . ' ' . number_format((float)($active['total_amount'] ?? 0), 0),
+                    'total_amount'    => $sym . ' ' . number_format(rh_booking_full_total($active), 0),
                     'nights_remaining' => max(0, (int)($active['nights_remaining'] ?? 0)),
                     'adults'          => (int)($active['adult_guests'] ?? 1),
                     'children'        => (int)($active['child_guests'] ?? 0),
@@ -827,7 +827,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'check_out'      => $b['check_out_date'],
                 'status'         => $b['status'],
                 'payment_status' => $b['payment_status'] ?? 'pending',
-                'total_amount'   => $sym . ' ' . number_format((float)($b['total_amount'] ?? 0), 0),
+                'total_amount'   => $sym . ' ' . number_format(rh_booking_full_total($b), 0),
             ], $upcoming);
 
             $logNorm = array_map(fn($l) => [

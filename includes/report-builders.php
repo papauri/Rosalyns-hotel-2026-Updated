@@ -77,7 +77,7 @@ function buildBookingsReport(string $startDate, string $endDate): array
     $sql = "SELECT b.id, b.booking_reference, b.guest_name, b.guest_email, b.guest_phone,
                    r.name AS room_name, b.check_in_date, b.check_out_date, b.number_of_nights,
                    b.number_of_guests, b.adult_guests, b.child_guests, b.occupancy_type,
-                   b.total_amount, b.amount_paid, b.amount_due, b.payment_status, b.status,
+                   b.total_amount, b.total_with_vat, b.vat_amount, b.amount_paid, b.amount_due, b.payment_status, b.status,
                    b.created_at
             FROM bookings b
             LEFT JOIN rooms r ON r.id = b.room_id
@@ -91,7 +91,7 @@ function buildBookingsReport(string $startDate, string $endDate): array
         'ID', 'Reference', 'Guest', 'Email', 'Phone',
         'Room', 'Check-in', 'Check-out', 'Nights',
         'Guests', 'Adults', 'Children', 'Occupancy',
-        'Total', 'Paid', 'Due', 'Payment Status', 'Booking Status',
+        'Total (incl. VAT & levy)', 'Paid', 'Due', 'Payment Status', 'Booking Status',
         'Created',
     ];
 
@@ -101,7 +101,7 @@ function buildBookingsReport(string $startDate, string $endDate): array
             $b['id'], $b['booking_reference'], $b['guest_name'], $b['guest_email'], $b['guest_phone'],
             $b['room_name'], $b['check_in_date'], $b['check_out_date'], $b['number_of_nights'],
             $b['number_of_guests'], $b['adult_guests'], $b['child_guests'], $b['occupancy_type'],
-            rh_money((float)$b['total_amount']), rh_money((float)$b['amount_paid']), rh_money((float)$b['amount_due']),
+            rh_money(rh_booking_full_total($b)), rh_money((float)$b['amount_paid']), rh_money((float)$b['amount_due']),
             $b['payment_status'], $b['status'],
             $b['created_at'],
         ];
@@ -315,7 +315,7 @@ function buildAccountingSummary(string $startDate, string $endDate): array
     $outStmt = $pdo->query(
         "SELECT b.booking_reference, b.guest_name, r.name AS room_name,
                 b.check_in_date, b.check_out_date,
-                b.total_amount, b.amount_paid, b.amount_due, b.payment_status
+                b.total_amount, b.total_with_vat, b.vat_amount, b.amount_paid, b.amount_due, b.payment_status
          FROM bookings b
          LEFT JOIN rooms r ON r.id = b.room_id
          WHERE b.amount_due > 0
@@ -324,13 +324,13 @@ function buildAccountingSummary(string $startDate, string $endDate): array
     );
 
     fputcsv($fp, ['OUTSTANDING RECEIVABLES (current snapshot)']);
-    fputcsv($fp, ['Reference', 'Guest', 'Room', 'Check-in', 'Check-out', 'Total', 'Paid', 'Due', 'Status']);
+    fputcsv($fp, ['Reference', 'Guest', 'Room', 'Check-in', 'Check-out', 'Total (incl. VAT & levy)', 'Paid', 'Due', 'Status']);
     $outstandingTotal = 0.0;
     foreach ($outStmt as $r) {
         fputcsv($fp, [
             $r['booking_reference'], $r['guest_name'], $r['room_name'],
             $r['check_in_date'], $r['check_out_date'],
-            rh_money((float)$r['total_amount']),
+            rh_money(rh_booking_full_total($r)),
             rh_money((float)$r['amount_paid']),
             rh_money((float)$r['amount_due']),
             $r['payment_status'],

@@ -1222,7 +1222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                            b.check_in_date,
                            b.check_out_date,
                            b.number_of_nights,
-                           b.total_amount,
+                           b.total_amount, b.total_with_vat, b.vat_amount,
                            b.amount_paid,
                            b.amount_due,
                            b.created_at,
@@ -1235,6 +1235,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     WHERE b.id = ?");
                 $booking_stmt->execute([$bid]);
                 $payload['booking'] = $booking_stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                if ($payload['booking']) { $payload['booking']['total_full'] = rh_booking_full_total($payload['booking']); }
 
                 $payments_stmt = $pdo->prepare("\n                    SELECT p.id,
                            p.payment_reference,
@@ -2300,7 +2301,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $booking['check_in_date_formatted'] = date('M j, Y', strtotime($booking['check_in_date']));
             $booking['check_out_date_formatted'] = date('M j, Y', strtotime($booking['check_out_date']));
             $booking['created_at_formatted'] = date('M j, Y H:i', strtotime($booking['created_at']));
-            $booking['total_formatted'] = number_format($booking['total_amount'], 2);
+            $booking['total_full'] = rh_booking_full_total($booking); // room + VAT + levy (owner 2026-10-23)
+            $booking['total_formatted'] = number_format($booking['total_full'], 2);
             $booking['status_label'] = ucfirst($booking['status']);
             $booking['payment_status_label'] = ucfirst($booking['actual_payment_status'] ?? $booking['payment_status']);
 
@@ -2742,7 +2744,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                         SELECT b.booking_reference, b.guest_name, b.guest_email, b.guest_phone, b.guest_country,
                                      r.name as room_name, ir.room_number as individual_room_number, ir.room_name as individual_room_name,
                                      b.check_in_date, b.check_out_date, b.number_of_nights,
-                                     b.number_of_guests, b.total_amount, b.status, b.payment_status, b.occupancy_type,
+                                     b.number_of_guests, b.total_amount, b.total_with_vat, b.vat_amount, b.status, b.payment_status, b.occupancy_type,
                                      b.special_requests, b.created_at,
                                      (
                                          SELECT px.payment_reference
@@ -2777,7 +2779,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             'Check-out',
             'Nights',
             'Guests',
-            'Total',
+            'Total (incl. VAT & levy)',
             'Status',
             'Payment',
             'Payment Ref',
@@ -2800,7 +2802,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 $row['check_out_date'],
                 $row['number_of_nights'],
                 $row['number_of_guests'],
-                $row['total_amount'],
+                number_format(rh_booking_full_total($row), 2, '.', ''),
                 $row['status'],
                 $row['payment_status'],
                 $row['payment_reference'],
@@ -2998,7 +3000,7 @@ try {
             'room' => $room_label,
             'check_in' => (string)($row['check_in_date'] ?? ''),
             'check_out' => (string)($row['check_out_date'] ?? ''),
-            'amount' => (float)($row['total_amount'] ?? 0),
+            'amount' => rh_booking_full_total($row),
             'payment_status' => (string)($row['payment_status'] ?? ''),
             'details_href' => 'booking-details.php?id=' . (int)($row['id'] ?? 0),
         ];
@@ -3016,7 +3018,7 @@ try {
                    b.status,
                    b.check_in_date,
                    b.check_out_date,
-                   b.total_amount,
+                   b.total_amount, b.total_with_vat, b.vat_amount,
                    b.payment_status,
                    r.name AS room_name,
                    ir.room_name AS individual_room_name,
@@ -3616,7 +3618,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         <td data-label="Nights"><?php echo $booking['number_of_nights']; ?></td>
                                         <td data-label="Guests"><?php echo $booking['number_of_guests']; ?></td>
                                         <td data-label="Total">
-                                            <strong>K <?php echo number_format($booking['total_amount'], 2); ?></strong>
+                                            <strong>K <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <?php if ($expires_soon): ?>
                                                     <br><span class="expires-soon"><i class="fas fa-exclamation-triangle"></i> Expires soon!</span>
@@ -3734,7 +3736,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             $can_delete = $_perm_delete && !$bk_inhouse && $bk_paid <= BALANCE_TOLERANCE && $bk_folio <= BALANCE_TOLERANCE;
                                             ?>
                                             <div class="actions-row">
-                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format((float)($booking['total_amount'] ?? 0), 2), ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars($bk_deleted ? 'Deleted' : ucwords(str_replace('-', ' ', $bk_status)), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)$bk_payment_st)), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this, typeof event !== 'undefined' ? event : null)">
+                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format(rh_booking_full_total($booking), 2), ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars($bk_deleted ? 'Deleted' : ucwords(str_replace('-', ' ', $bk_status)), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)$bk_payment_st)), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this, typeof event !== 'undefined' ? event : null)">
                                                     <i class="fas fa-circle-info"></i>
                                                     <span class="label">View details</span>
                                                 </button>
@@ -8564,7 +8566,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 '<span class="bal-chip">Payment: ' + escapeHtml(snapshot.payment_status || '\u2014') + '</span>',
                 '<span class="bal-chip">Stay: ' + formatAuditDate(snapshot.check_in_date) + ' -> ' + formatAuditDate(snapshot.check_out_date) + '</span>',
                 '<span class="bal-chip">Nights: ' + escapeHtml(String(snapshot.number_of_nights ?? '\u2014')) + '</span>',
-                '<span class="bal-chip bal-chip--amount">Total: ' + formatAuditValue('total_amount', snapshot.total_amount) + '</span>',
+                '<span class="bal-chip bal-chip--amount">Total: ' + formatAuditValue('total_amount', snapshot.total_full ?? snapshot.total_amount) + '</span>',
                 '<span class="bal-chip bal-chip--ok">Paid: ' + formatAuditValue('amount_paid', snapshot.amount_paid) + '</span>',
                 '<span class="bal-chip bal-chip--warn">Due: ' + formatAuditValue('amount_due', snapshot.amount_due) + '</span>',
                 '<span class="bal-chip">Events: ' + counts.total + '</span>'

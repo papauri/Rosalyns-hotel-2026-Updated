@@ -100,6 +100,21 @@ if (!function_exists('rh_conf_gross')) {
     }
 }
 
+if (!function_exists('rh_conf_gross_sql')) {
+    /**
+     * SQL twin of rh_conf_gross() for SUM()/list queries: locked total_with_vat when present, else
+     * total_amount (inclusive/off mode) or total_amount + vat_amount (VAT-on-top). Same rule, one place.
+     */
+    function rh_conf_gross_sql(string $alias = ''): string
+    {
+        $p = $alias !== '' ? $alias . '.' : '';
+        $fallback = (function_exists('vat_mode') && vat_mode() === 'inclusive')
+            ? "COALESCE({$p}total_amount, 0)"
+            : "COALESCE({$p}total_amount, 0) + COALESCE({$p}vat_amount, 0)";
+        return "COALESCE(NULLIF({$p}total_with_vat, 0), {$fallback})";
+    }
+}
+
 if (!function_exists('rh_conf_price')) {
     /**
      * One pricing rule for guest form and admin.

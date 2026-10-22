@@ -3882,6 +3882,21 @@ function rh_booking_gross_sql(string $alias = 'b'): string
 }
 
 /**
+ * THE booking "Total" (owner 2026-10-23): the full amount the guest pays for the stay - room + VAT + tourism
+ * levy (bookings.total_with_vat). Falls back to total_amount (net + levy, ex-VAT) + vat_amount for old rows whose
+ * total_with_vat is NULL/0 (same basis as rh_booking_gross_sql()). Folio charges are NOT included.
+ * @param array $row a bookings row (needs total_with_vat and/or total_amount, vat_amount)
+ */
+function rh_booking_full_total(array $row): float
+{
+    $full = (float)($row['total_with_vat'] ?? 0);
+    if ($full > BALANCE_TOLERANCE) {
+        return round($full, 2);
+    }
+    return round((float)($row['total_amount'] ?? 0) + (float)($row['vat_amount'] ?? 0), 2);
+}
+
+/**
  * Room bookings CANCELLED between $from and $to (inclusive dates), counted on the day the cancellation
  * happened, taken from the booking history (booking_timeline_logs: the "status -> cancelled" entry or the
  * "Cancellation settled" entry every cancel path writes), NOT bookings.updated_at (owner 2026-10-21). One

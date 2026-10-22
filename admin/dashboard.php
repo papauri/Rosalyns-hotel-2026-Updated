@@ -732,11 +732,11 @@ if ($is_card_insight_ajax) {
                     ['key' => 'guest', 'label' => 'Guest'],
                     ['key' => 'checkin', 'label' => 'Check-in'],
                     ['key' => 'nights', 'label' => 'Nights'],
-                    ['key' => 'total', 'label' => 'Total'],
+                    ['key' => 'total', 'label' => 'Total (incl. VAT & levy)'],
                     ['key' => 'amount_due', 'label' => 'Outstanding'],
                 ];
                 $payload['link'] = ['href' => 'bookings.php?status=pending&flash=status:pending', 'label' => 'Open pending bookings'];
-                $stmt = $pdo->query("SELECT id AS booking_id, booking_reference, guest_name, check_in_date, number_of_nights, total_amount, amount_due
+                $stmt = $pdo->query("SELECT id AS booking_id, booking_reference, guest_name, check_in_date, number_of_nights, total_amount, total_with_vat, vat_amount, amount_due
                                      FROM bookings
                                      WHERE deleted_at IS NULL AND status = 'pending'
                                      ORDER BY created_at ASC
@@ -749,7 +749,7 @@ if ($is_card_insight_ajax) {
                         'guest' => (string)$row['guest_name'],
                         'checkin' => date('M j, Y', strtotime((string)$row['check_in_date'])),
                         'nights' => (string)(int)($row['number_of_nights'] ?? 0),
-                        'total' => $formatMoney((float)($row['total_amount'] ?? 0)),
+                        'total' => $formatMoney(rh_booking_full_total($row)),
                         'amount_due' => $formatMoney((float)($row['amount_due'] ?? 0)),
                     ];
                 }

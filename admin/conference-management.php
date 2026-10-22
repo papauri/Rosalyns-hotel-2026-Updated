@@ -851,6 +851,7 @@ try {
         $confRoomsById[(int)$confRoomRow['id']] = $confRoomRow;
     }
     foreach ($conference_enquiries as &$confEnqRow) {
+        $confEnqRow['gross_total'] = rh_conf_gross($confEnqRow);
         $confEnqRow['rp_total'] = rh_account_gross_total($confEnqRow);
         $confEnqRow['rp_paid'] = (float)($confEnqRow['amount_paid'] ?? 0);
         $confEnqRow['rp_balance'] = ((string)$confEnqRow['status'] === 'cancelled') ? 0.0 : max(0.0, round($confEnqRow['rp_total'] - $confEnqRow['rp_paid'], 2));
@@ -1085,8 +1086,9 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                         </span>
                                     </td>
                                     <td>
-                                        <?php if ($enquiry['total_amount']): ?>
-                                            <?php echo $currency; ?> <?php echo number_format($enquiry['total_amount'], 2); ?>
+                                        <?php if (!empty($enquiry['total_amount'])): ?>
+                                            <?php /* Owner rule: "Total" is the full amount incl. VAT, never the quote base. */ ?>
+                                            <?php echo $currency; ?> <?php echo number_format($enquiry['gross_total'], 2); ?>
                                         <?php else: ?>
                                             <em>Pending</em>
                                         <?php endif; ?>
@@ -1748,7 +1750,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                 </div>
                 <div class="detail-row">
                     <strong>Total Amount:</strong>
-                    <span>${enquiry.total_amount ? '<?php echo $currency; ?> ' + Number(enquiry.total_amount).toLocaleString() : 'Pending'}</span>
+                    <span>${Number(enquiry.total_amount) > 0 ? '<?php echo $currency; ?> ' + Number(enquiry.gross_total || enquiry.total_amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' <small><?php echo vat_mode() === 'off' ? '' : 'incl. VAT'; ?></small>' : 'Pending'}</span>
                 </div>
                 <div class="detail-row">
                     <strong>Notes:</strong>
@@ -1791,7 +1793,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         <input type="hidden" name="enquiry_action" value="update_amount">
                         <input type="hidden" name="enquiry_id" value="${enquiry.id}">
                         <div class="form-group" style="margin-bottom: 10px;">
-                            <label>Update Total Amount:</label>
+                            <label>Update Total Amount<?php echo vat_mode() === 'exclusive' ? ' (before VAT; VAT is added on top)' : ''; ?>:</label>
                             <input type="number" name="total_amount" step="0.01" value="${enquiry.total_amount || ''}" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
                         </div>
                         <button type="submit" class="btn">Update Amount</button>

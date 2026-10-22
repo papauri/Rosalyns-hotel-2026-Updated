@@ -683,7 +683,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                                         <tr><th scope="row">Table</th><td><?php echo htmlspecialchars((string)$bookingDetails['customer']['table_number']); ?></td></tr>
                                     <?php endif; ?>
                                 <?php endif; ?>
-                                <tr><th scope="row">Total</th><td><?php echo $pd_fmt($pd_amt['total_amount']); ?></td></tr>
+                                <tr><th scope="row"><?php echo $bookingDetails['type'] === 'room' ? 'Total (incl. VAT &amp; levy)' : 'Total'; ?></th><td><?php echo $pd_fmt($bookingDetails['type'] === 'room' ? $bookingTotalAmount : $pd_amt['total_amount']); ?></td></tr>
                                 <?php if ($bookingDetails['type'] === 'restaurant'): ?>
                                     <tr><th scope="row">Est. stock cost</th><td><?php echo $pd_fmt($pd_amt['total_cost']); ?></td></tr>
                                 <?php else: ?>

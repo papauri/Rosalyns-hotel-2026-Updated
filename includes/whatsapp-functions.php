@@ -396,7 +396,7 @@ function buildWhatsAppBookingVars(array $booking, array $room = []): array
         'guests'               => (string)($booking['number_of_guests'] ?? 1),
         'adults'               => (string)($booking['adult_guests'] ?? $booking['number_of_guests'] ?? 1),
         'children'             => (string)($booking['child_guests'] ?? 0),
-        'total_amount'         => $currency . ' ' . number_format((float)($booking['total_amount'] ?? 0), 0),
+        'total_amount'         => $currency . ' ' . number_format(function_exists('rh_booking_full_total') ? rh_booking_full_total($booking) : (float)($booking['total_amount'] ?? 0), 0),
         'check_in_time'        => $checkInTime,
         'check_out_time'       => $checkOutTime,
         'special_requests'     => !empty($booking['special_requests']) ? $booking['special_requests'] : 'None',
@@ -418,12 +418,7 @@ function buildConferenceWhatsAppVars(array $enquiry, array $room = [], array $ex
     $currency = getSetting('currency_symbol');
     $siteName = getSetting('site_name');
 
-    $total = (float)($enquiry['total_with_vat'] ?? 0);
-    if ($total <= 0) {
-        $base = (float)($enquiry['total_amount'] ?? 0);
-        $vat = (float)($enquiry['vat_amount'] ?? 0);
-        $total = $base + $vat;
-    }
+    $total = rh_conf_gross($enquiry);
 
     $startTime = !empty($enquiry['start_time']) ? date('H:i', strtotime((string)$enquiry['start_time'])) : '';
     $endTime = !empty($enquiry['end_time']) ? date('H:i', strtotime((string)$enquiry['end_time'])) : '';

@@ -80,12 +80,27 @@ function logBookingEvent(
  * Log booking creation
  */
 function logBookingCreated(array $booking, string $performed_by_type = 'guest', ?int $performed_by_id = null, ?string $performed_by_name = null): bool {
+    // The total shown in the history is the full amount (room + VAT + levy), owner 2026-10-23; read the saved row
+    // so callers that only pass total_amount (ex-VAT) still log the right figure.
+    $fullTotal = (float)($booking['total_amount'] ?? 0);
+    try {
+        global $pdo;
+        if ($pdo instanceof PDO && function_exists('rh_booking_full_total') && !empty($booking['id'])) {
+            $tq = $pdo->prepare('SELECT total_amount, total_with_vat, vat_amount FROM bookings WHERE id = ?');
+            $tq->execute([(int)$booking['id']]);
+            if ($trow = $tq->fetch(PDO::FETCH_ASSOC)) {
+                $fullTotal = rh_booking_full_total($trow);
+            }
+        }
+    } catch (Throwable $e) {
+        // keep the passed total
+    }
     return logBookingEvent(
         $booking['id'],
         $booking['booking_reference'],
         'Booking created',
         'create',
-        "New booking created for {$booking['number_of_nights']} night(s) - Total: {$booking['total_amount']}",
+        "New booking created for {$booking['number_of_nights']} night(s) - Total: " . number_format($fullTotal, 2, '.', ''),
         null,
         $booking['status'],
         $performed_by_type,
@@ -96,7 +111,7 @@ function logBookingCreated(array $booking, string $performed_by_type = 'guest', 
             'check_in' => $booking['check_in_date'] ?? null,
             'check_out' => $booking['check_out_date'] ?? null,
             'guests' => $booking['number_of_guests'] ?? null,
-            'total' => $booking['total_amount'] ?? null,
+            'total' => $fullTotal,
             'is_tentative' => $booking['is_tentative'] ?? false
         ]
     );
@@ -165,7 +180,7 @@ function logBookingCancellation(
             $cancelled_by_id,
             $cancelled_by_name,
             $reason,
-            $booking['total_amount'] ?? 0,
+            function_exists('rh_booking_full_total') ? rh_booking_full_total($booking) : (float)($booking['total_amount'] ?? 0),
             $amount_paid,
             $refund_amount,
             $refund_status,

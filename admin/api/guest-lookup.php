@@ -80,7 +80,7 @@ try {
                 MAX(check_out_date)               AS last_check_out,
                 MAX(booking_reference)            AS last_booking_ref,
                 COALESCE(SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired')
-                                  THEN total_amount ELSE 0 END), 0) AS lifetime_spend
+                                  THEN COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0)) ELSE 0 END), 0) AS lifetime_spend
             FROM bookings
             WHERE guest_email != ''
               AND (guest_name  LIKE :q1

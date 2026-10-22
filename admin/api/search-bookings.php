@@ -12,6 +12,7 @@ ini_set('log_errors', 1);
 
 require_once __DIR__ . '/api-init.php';
 require_once __DIR__ . '/../includes/finance-schema.php';
+require_once __DIR__ . '/../../includes/conference-pricing.php';
 
 /** @var PDO $pdo */
 
@@ -63,7 +64,7 @@ try {
                     b.child_supplement_total,
                     b.check_in_date,
                     b.check_out_date,
-                    b.total_amount,
+                    b.total_amount, b.total_with_vat, b.vat_amount,
                     b.amount_paid,
                     b.amount_due,
                     b.guest_phone,
@@ -90,7 +91,7 @@ try {
                     b.child_supplement_total,
                     b.check_in_date,
                     b.check_out_date,
-                    b.total_amount,
+                    b.total_amount, b.total_with_vat, b.vat_amount,
                     b.amount_paid,
                     b.amount_due,
                     b.guest_phone,
@@ -125,6 +126,8 @@ try {
                     ci.{$conferenceFields['start_date']} as start_date,
                     ci.{$conferenceFields['end_date']} as end_date,
                     ci.total_amount,
+                    ci.total_with_vat,
+                    ci.vat_amount,
                     ci.amount_paid,
                     ci.amount_due,
                     ci.{$conferenceFields['phone']} as contact_phone
@@ -147,6 +150,8 @@ try {
                     ci.{$conferenceFields['start_date']} as start_date,
                     ci.{$conferenceFields['end_date']} as end_date,
                     ci.total_amount,
+                    ci.total_with_vat,
+                    ci.vat_amount,
                     ci.amount_paid,
                     ci.amount_due,
                     ci.{$conferenceFields['phone']} as contact_phone
@@ -217,7 +222,13 @@ try {
             $booking['end_date'] = date('M j, Y', strtotime($booking['end_date']));
         }
         // Ensure numeric values
-        $booking['total_amount'] = (float)($booking['total_amount'] ?? 0);
+        // Room bookings: "Total" is the full amount (room + VAT + levy), owner 2026-10-23.
+        // Conference: gross via rh_conf_gross (the stored total_amount is the quote base).
+        if ($type === 'conference') {
+            $booking['total_amount'] = rh_conf_gross($booking);
+        } else {
+            $booking['total_amount'] = ($type === 'room') ? rh_booking_full_total($booking) : (float)($booking['total_amount'] ?? 0);
+        }
         $booking['amount_paid'] = (float)($booking['amount_paid'] ?? 0);
         $booking['amount_due'] = (float)($booking['amount_due'] ?? 0);
         if (isset($booking['number_of_guests'])) {

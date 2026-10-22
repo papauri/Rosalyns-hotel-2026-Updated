@@ -683,9 +683,7 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                                 $paymentStatus = !empty($booking['payment_status'])
                                                     ? ucfirst(htmlspecialchars($booking['payment_status'], ENT_QUOTES, 'UTF-8'))
                                                     : 'Pending';
-                                                $totalAmount = !empty($booking['total_amount'])
-                                                    ? number_format(floatval($booking['total_amount']), 2)
-                                                    : '0.00';
+                                                $totalAmount = number_format(rh_booking_full_total($booking), 2); // full amount incl. VAT & levy
                                                 $currencySymbol = getSetting('currency_symbol');
 
                                                 // Build tooltip data attributes (all properly escaped)

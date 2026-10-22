@@ -133,6 +133,9 @@ try {
                 'free_children' => (int)($booking['free_children'] ?? 0),
                 'child_supplement_total' => (float)($booking['child_supplement_total'] ?? 0),
                 'total_amount' => (float)$booking['total_amount'],
+                'vat_amount' => (float)($booking['vat_amount'] ?? 0),
+                'total_with_vat' => rh_booking_full_total($booking),
+                'total' => rh_booking_full_total($booking), // full amount: room + VAT + levy (total_amount stays ex-VAT)
                 'currency' => getSetting('currency_symbol'),
                 'currency_code' => getSetting('currency_code')
             ],
