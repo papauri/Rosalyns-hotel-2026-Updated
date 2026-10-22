@@ -205,9 +205,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         INSERT INTO individual_rooms (
                             room_type_id, room_number, room_name, floor, status, max_guests_override, child_price_multiplier,
                             single_occupancy_enabled_override, double_occupancy_enabled_override, triple_occupancy_enabled_override, children_allowed_override,
-                            notes, display_order
+                            notes, display_order, housekeeping_status
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')
                     ");
                     $stmt->execute([
                         $room_type_id,

@@ -26,6 +26,7 @@ $suites = [
     'Stock count approval'  => 'scripts/tests/stock_count_approval.php',
     'Stock sheet import'    => 'scripts/tests/stock_sheet_import.php',
     'Documents flow'        => 'scripts/tests/documents_flow.php',
+    'Private document link' => 'scripts/tests/doc_link.php',
     'Payment limits'        => 'scripts/tests/payment_limits.php',
     'Rehearsal fixes'       => 'scripts/tests/rehearsal_fixes.php',
     'Shop returns + wording' => 'scripts/tests/shop_returns.php',

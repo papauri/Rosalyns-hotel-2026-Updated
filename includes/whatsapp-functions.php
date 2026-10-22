@@ -826,6 +826,13 @@ function sendBookingInvoiceWhatsApp(array $booking, array $payment = [], array $
     $currency = getSetting('currency_symbol');
     $vars['invoice_number'] = (string)($payment['invoice_number'] ?? ($booking['invoice_number'] ?? ''));
     $vars['invoice_url']    = (string)($payment['invoice_url']    ?? ($booking['invoice_url']    ?? ''));
+    // The invoices/ folder is closed to the web, so a static file URL would 403: use the private
+    // 30-day link whenever this booking has a stored final invoice.
+    if (!empty($booking['id']) && !empty($booking['final_invoice_path'])) {
+        require_once __DIR__ . '/doc-links.php';
+        $signed = rh_doc_signed_url('booking_invoice', (int)$booking['id'], 30);
+        $vars['invoice_url'] = $signed; // '' (no link) is better than a dead static URL
+    }
     $vars['amount_paid']    = $currency . ' ' . number_format((float)($payment['amount_paid'] ?? $booking['total_amount'] ?? 0), 0);
     $vars['amount_due']     = $currency . ' ' . number_format((float)($payment['amount_due']  ?? 0), 0);
     $vars['payment_method'] = ucfirst(str_replace('_', ' ', (string)($payment['payment_method'] ?? '')));

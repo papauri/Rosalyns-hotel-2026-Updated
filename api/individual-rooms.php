@@ -316,8 +316,8 @@ function createIndividualRoom() {
     $stmt = $pdo->prepare("
         INSERT INTO individual_rooms (
             room_type_id, room_number, room_name, floor, status,
-            notes, specific_amenities, is_active, display_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            notes, specific_amenities, is_active, display_order, housekeeping_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')
     ");
     
     $stmt->execute([

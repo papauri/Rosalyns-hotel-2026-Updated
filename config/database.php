@@ -2737,8 +2737,45 @@ function validateCheckIn(array $booking): array
 }
 
 /**
+ * SQL condition (no bound parameters): the room row aliased $alias has an open housekeeping task.
+ * Default: any open task (pending / in progress / blocked) - what the housekeeping_status flag
+ * mirrors, used to spot a stale flag. $gate = true is the clean-room rule used by check-in, assigning
+ * and room change (same as "Rooms to Clean" plus the old due-date rule): a pending / in-progress task
+ * due today or earlier (or undated); a deep clean scheduled for next week does not block today.
+ * individual_rooms.housekeeping_status alone is only a display flag and can go stale (task deleted by
+ * hand), so it never blocks by itself.
+ */
+function rh_room_open_task_sql(string $alias = 'ir', bool $gate = false): string
+{
+    $a = preg_replace('/[^a-z0-9_]/i', '', $alias);
+    if ($gate) {
+        return "EXISTS (SELECT 1 FROM housekeeping_assignments hkx WHERE hkx.individual_room_id = {$a}.id AND hkx.status IN ('pending', 'in_progress') AND (hkx.due_date IS NULL OR hkx.due_date <= CURDATE()))";
+    }
+    return "EXISTS (SELECT 1 FROM housekeeping_assignments hkx WHERE hkx.individual_room_id = {$a}.id AND hkx.status IN ('pending', 'in_progress', 'blocked'))";
+}
+
+/**
+ * Reset a stale housekeeping_status flag: when the room has no open housekeeping task and its status
+ * is not 'cleaning', a leftover 'pending' / 'in_progress' flag is set back to 'completed'. Call after
+ * housekeeping tasks are deleted or cancelled. Returns true if a flag was reset. Never throws.
+ */
+function rh_room_clear_stale_hk_flag(PDO $pdo, int $roomId): bool
+{
+    try {
+        $st = $pdo->prepare("UPDATE individual_rooms ir SET ir.housekeeping_status = 'completed', ir.housekeeping_notes = NULL
+            WHERE ir.id = ? AND ir.housekeeping_status IN ('pending', 'in_progress') AND ir.status <> 'cleaning'
+              AND NOT " . rh_room_open_task_sql('ir'));
+        $st->execute([$roomId]);
+        return $st->rowCount() > 0;
+    } catch (Throwable $e) {
+        error_log('rh_room_clear_stale_hk_flag warning: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
  * Rooms on a booking that housekeeping has not released: room status other than
- * 'available', or cleaning still pending / in progress.
+ * 'available', or an open housekeeping task.
  *
  * @return array<int,array{id:int,room_number:string,status:string,housekeeping_status:?string}>
  */
@@ -2750,8 +2787,10 @@ function getBookingRoomsNotReady(int $bookingId): array
         return [];
     }
     $ph = implode(',', array_fill(0, count($ids), '?'));
-    $st = $pdo->prepare("SELECT id, room_number, status, housekeeping_status FROM individual_rooms
-        WHERE id IN ($ph) AND (status <> 'available' OR housekeeping_status IN ('pending', 'in_progress'))");
+    // Not clean = an open housekeeping task (the same rule as "Rooms to Clean"); the leftover
+    // housekeeping_status flag alone no longer blocks.
+    $st = $pdo->prepare("SELECT id, room_number, status, housekeeping_status FROM individual_rooms ir
+        WHERE id IN ($ph) AND (status <> 'available' OR " . rh_room_open_task_sql('ir', true) . ")");
     $st->execute(array_values($ids));
     return $st->fetchAll(PDO::FETCH_ASSOC);
 }
@@ -2774,7 +2813,7 @@ function evaluateCheckInRoomReady(int $bookingId, ?int $userId, bool $override =
     foreach ($rooms as $r) {
         $why = (string)$r['status'] !== 'available'
             ? str_replace('_', ' ', (string)$r['status'])
-            : 'cleaning ' . str_replace('_', ' ', (string)$r['housekeeping_status']);
+            : 'cleaning not finished';
         $labels[] = 'Room ' . $r['room_number'] . ' (' . $why . ')';
     }
     $list = implode(', ', $labels);
@@ -3126,7 +3165,14 @@ function bookingAvailabilityTableExists(string $table): bool
     return $cache[$table];
 }
 
-function getBookingRooms(int $bookingId): array
+/**
+ * Rooms a booking holds. Default: the active booking_rooms rows (released_at IS NULL), so a room the
+ * booking was moved away from is not listed. When the booking holds nothing any more (checked out,
+ * cancelled: every row released) the set released last is returned, so labels, checkout and cancel
+ * (which release the rows first, then change room status) still find the rooms the stay used.
+ * $includeReleased = true returns every row ever held (history, including rooms moved away from).
+ */
+function getBookingRooms(int $bookingId, bool $includeReleased = false): array
 {
     global $pdo;
 
@@ -3136,7 +3182,7 @@ function getBookingRooms(int $bookingId): array
 
     try {
         if (bookingAvailabilityTableExists('booking_rooms')) {
-            $stmt = $pdo->prepare("
+            $select = "
                 SELECT
                     br.individual_room_id,
                     br.room_combination_id,
@@ -3150,13 +3196,27 @@ function getBookingRooms(int $bookingId): array
                 FROM booking_rooms br
                 JOIN individual_rooms ir ON ir.id = br.individual_room_id
                 LEFT JOIN rooms r ON r.id = ir.room_type_id
-                WHERE br.booking_id = ?
-                ORDER BY br.is_primary DESC, ir.room_number ASC, br.id ASC
-            ");
-            $stmt->execute([$bookingId]);
+                WHERE br.booking_id = ?";
+            $order = " ORDER BY br.is_primary DESC, ir.room_number ASC, br.id ASC";
+            if ($includeReleased) {
+                $stmt = $pdo->prepare($select . $order);
+                $stmt->execute([$bookingId]);
+            } else {
+                $stmt = $pdo->prepare($select . " AND br.released_at IS NULL" . $order);
+                $stmt->execute([$bookingId]);
+            }
             $rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
             if (!empty($rooms)) {
                 return $rooms;
+            }
+            if (!$includeReleased) {
+                // Nothing active: the last released set (all rows released together by one release).
+                $stmt = $pdo->prepare($select . " AND br.released_at = (SELECT MAX(x.released_at) FROM booking_rooms x WHERE x.booking_id = br.booking_id)" . $order);
+                $stmt->execute([$bookingId]);
+                $rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                if (!empty($rooms)) {
+                    return $rooms;
+                }
             }
         }
 
@@ -3184,10 +3244,10 @@ function getBookingRooms(int $bookingId): array
     }
 }
 
-function getBookingRoomIds(int $bookingId): array
+function getBookingRoomIds(int $bookingId, bool $includeReleased = false): array
 {
     $ids = [];
-    foreach (getBookingRooms($bookingId) as $room) {
+    foreach (getBookingRooms($bookingId, $includeReleased) as $room) {
         $roomId = (int)($room['individual_room_id'] ?? 0);
         if ($roomId > 0) {
             $ids[] = $roomId;
@@ -5868,6 +5928,7 @@ function rh_delete_individual_room(PDO $pdo, int $roomId, int $userId = 0): arra
                 $snapshots[] = ['housekeeping_task' => $row];
             }
             $pdo->prepare("DELETE FROM housekeeping_assignments WHERE individual_room_id = ? AND status IN ('pending', 'in_progress', 'blocked')")->execute([$roomId]);
+            rh_room_clear_stale_hk_flag($pdo, $roomId);
         } catch (PDOException $e) {
             // table may not exist on an older install
         }
@@ -7002,6 +7063,7 @@ function getAvailableIndividualRooms(int $roomTypeId, string $checkIn, string $c
                 ir.floor,
                 ir.status,
                 ir.housekeeping_status,
+                " . rh_room_open_task_sql('ir', true) . " AS has_open_hk_task,
                 ir.display_order,
                 ir.specific_amenities,
                 ir.single_occupancy_enabled_override,
@@ -7044,8 +7106,7 @@ function getAvailableIndividualRooms(int $roomTypeId, string $checkIn, string $c
                 continue;
             }
 
-            $ready = ((string)$room['status'] === 'available')
-                && !in_array((string)$room['housekeeping_status'], ['pending', 'in_progress'], true);
+            $ready = ((string)$room['status'] === 'available') && empty($room['has_open_hk_task']);
 
             $availableRooms[] = [
                 'id' => $room['id'],
@@ -7354,30 +7415,24 @@ function rh_room_out_of_service_statuses(): array
 }
 
 /**
- * Is this individual room "dirty right now": status 'cleaning', housekeeping not
- * finished, or an open housekeeping task due today or earlier? Used for stays that
- * start today (or earlier); a stay starting later is cleaned long before it begins.
- * Same definition the check-in clean-room gate (evaluateCheckInRoomReady) applies.
+ * Is this individual room "dirty right now": status 'cleaning' or an open housekeeping
+ * task? Used for stays that start today (or earlier); a stay starting later is cleaned long
+ * before it begins. Same definition the check-in clean-room gate (evaluateCheckInRoomReady)
+ * and Rooms to Clean apply; a stale housekeeping_status flag with no task does not count.
  */
 function rh_room_is_dirty_now(int $individualRoomId): bool
 {
     global $pdo;
     try {
-        $st = $pdo->prepare("SELECT status, housekeeping_status FROM individual_rooms WHERE id = ?");
+        $st = $pdo->prepare("SELECT status, " . rh_room_open_task_sql('ir', true) . " AS has_open_hk_task FROM individual_rooms ir WHERE ir.id = ?");
         $st->execute([$individualRoomId]);
         $row = $st->fetch(PDO::FETCH_ASSOC);
         if (!$row) {
             return false;
         }
-        if ((string)$row['status'] === 'cleaning' || in_array((string)$row['housekeeping_status'], ['pending', 'in_progress'], true)) {
-            return true;
-        }
-        $hk = $pdo->prepare("
-            SELECT COUNT(*) FROM housekeeping_assignments
-            WHERE individual_room_id = ? AND status IN ('pending', 'in_progress') AND due_date <= CURDATE()
-        ");
-        $hk->execute([$individualRoomId]);
-        return (int)$hk->fetchColumn() > 0;
+        // One rule everywhere (as "Rooms to Clean"): status cleaning OR an open housekeeping task.
+        // The leftover housekeeping_status flag with no task does not count.
+        return (string)$row['status'] === 'cleaning' || !empty($row['has_open_hk_task']);
     } catch (Throwable $e) {
         error_log('rh_room_is_dirty_now warning: ' . $e->getMessage());
         return false;

@@ -331,8 +331,8 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
     }
     if ($status === 'checked-in') {
         // The room the guest left goes to housekeeping (status 'cleaning' + an open cleaning task, the same
-        // as after a checkout). Only the NEW room(s) are marked occupied: getBookingRoomIds() also lists the
-        // released old room, so updateBookingRoomsStatus() here would put it straight back to occupied.
+        // as after a checkout). Only the NEW room(s) are marked occupied (the array_diff keeps the old room out
+        // even if the new assignment is missing and getBookingRoomIds() falls back to the last released set).
         $outOfService = function_exists('rh_room_out_of_service_statuses') ? rh_room_out_of_service_statuses() : ['maintenance', 'out_of_order'];
         $roomStatusQ = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
         foreach ($oldRoomIds as $rid) {

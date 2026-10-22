@@ -1800,7 +1800,7 @@ if ($is_card_insight_ajax) {
                                                         ir.room_number,
                                                         ir.room_name,
                                                         ir.floor,
-                                                        COALESCE(ir.housekeeping_status, '') AS housekeeping_status,
+                                                        CASE WHEN ir.housekeeping_status IN ('pending', 'in_progress') AND ir.status <> 'cleaning' AND NOT " . rh_room_open_task_sql('ir') . " THEN 'completed' ELSE COALESCE(ir.housekeeping_status, '') END AS housekeeping_status,
                                                         COALESCE(r.name, '—') AS room_type,
                                                         b.id AS booking_id,
                                                         b.booking_reference,

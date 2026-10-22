@@ -381,7 +381,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
                     break;
                 }
 
-                $invoiceUrl = rtrim(BASE_URL, '/') . '/' . ltrim($waBooking['final_invoice_path'] ?? '', '/');
+                // Private link that expires in 30 days (invoices/ itself is closed to the web).
+                require_once '../includes/doc-links.php';
+                $invoiceUrl = empty($waBooking['final_invoice_path']) ? '' : rh_doc_signed_url('booking_invoice', (int)$booking_id, 30);
+                if ($invoiceUrl === '') {
+                    $_SESSION['error_message'] = 'The invoice link could not be created, so nothing was sent.';
+                    break;
+                }
                 $invoiceRef = $waBooking['final_invoice_number'] ?? $waBooking['booking_reference'];
                 $hotelName  = getSetting('hotel_name', 'Hotel');
                 $guestName  = $waBooking['guest_name'] ?? 'Guest';
@@ -391,7 +397,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
                     . "Check-in: " . date('d M Y', strtotime($waBooking['check_in_date'])) . "\n"
                     . "Check-out: " . date('d M Y', strtotime($waBooking['check_out_date'])) . "\n"
                     . "Total: " . getSetting('currency_symbol', 'MWK') . ' ' . number_format((float) $waBooking['total_amount'], 2) . "\n\n"
-                    . "Download invoice: {$invoiceUrl}\n\n"
+                    . "View your invoice (link valid for 30 days): {$invoiceUrl}\n\n"
                     . "Thank you for staying with us!";
 
                 $waResult = sendWhatsAppMessage($guestPhone, $waMsg);

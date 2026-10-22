@@ -1315,7 +1315,10 @@ try {
 }
 
 // Get data for the page
-$roomsStmt = $pdo->query("SELECT id, room_number, room_name, status, housekeeping_status FROM individual_rooms WHERE is_active = 1 ORDER BY room_number ASC");
+// A leftover 'pending' / 'in progress' flag with no open task and a room not in 'cleaning' is stale: show it as completed.
+$roomsStmt = $pdo->query("SELECT ir.id, ir.room_number, ir.room_name, ir.status,
+    CASE WHEN ir.housekeeping_status IN ('pending', 'in_progress') AND ir.status <> 'cleaning' AND NOT " . rh_room_open_task_sql('ir') . " THEN 'completed' ELSE ir.housekeeping_status END AS housekeeping_status
+    FROM individual_rooms ir WHERE ir.is_active = 1 ORDER BY ir.room_number ASC");
 $rooms = $roomsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 $usersStmt = $pdo->query("SELECT id, username FROM admin_users WHERE is_active = 1 ORDER BY username ASC");

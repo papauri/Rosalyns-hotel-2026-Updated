@@ -88,6 +88,11 @@ foreach (['gallery', 'blocked_dates', 'room_blocked_dates', 'individual_rooms'] 
     $checks[] = ['WARN', "$t rows whose room type is missing",
         "SELECT x.id FROM $t x LEFT JOIN rooms r ON r.id = x.$col WHERE x.$col IS NOT NULL AND x.$col <> 0 AND r.id IS NULL"];
 }
+// A room flagged 'pending' / 'in progress' for cleaning with no open housekeeping task (task deleted by hand):
+// staff have nothing to mark done. The clean-room checks ignore the flag (status cleaning or an open task decides).
+$checks[] = ['WARN', 'Rooms flagged for cleaning with no open task',
+    "SELECT ir.id FROM individual_rooms ir WHERE ir.is_active = 1 AND ir.status <> 'cleaning'
+       AND ir.housekeeping_status IN ('pending','in_progress') AND NOT " . rh_room_open_task_sql('ir')];
 $checks[] = ['WARN', 'event_inquiries whose event is missing',
     "SELECT x.id FROM event_inquiries x LEFT JOIN events e ON e.id = x.event_id WHERE x.event_id IS NOT NULL AND e.id IS NULL"];
 $checks[] = ['WARN', 'Review responses whose review is missing',

@@ -97,6 +97,16 @@ $r = $runScenario('deliver');
 $st = $r['verify'][0][0] ?? [];
 check(($st['status'] ?? '') === 'completed' && stripos(implode(' ', $r['output_flash'] ?? []), 'marked as delivered') !== false, 'Delivered accepts a served-but-open folio order and completes it', json_encode([$st, $r['output_flash'] ?? null]));
 
+// A room added in Individual Rooms starts clean (housekeeping_status 'completed'), not 'pending'.
+$newRoomNo = 'ZH' . $run;
+$cfgAdd = base64_encode(json_encode(['post' => ['action' => 'add_individual_room', 'room_type_id' => (string)$type['id'], 'room_number' => $newRoomNo, 'room_name' => '', 'floor' => '1', 'status' => 'available'], 'ajax' => false,
+    'verify' => ["SELECT housekeeping_status FROM individual_rooms WHERE room_number = '$newRoomNo'"]]));
+$outAdd = (string)shell_exec('php ' . escapeshellarg($harness) . ' admin/individual-rooms.php ' . escapeshellarg($cfgAdd) . ' 2>&1');
+$rAdd = ['error' => 'no result', 'raw' => substr($outAdd, -500)];
+if (preg_match('/@@RESULT@@(.*)$/m', $outAdd, $m)) { $x = json_decode($m[1], true); if (is_array($x)) { $rAdd = $x; } }
+check(empty($rAdd['leak']) && !empty($rAdd['rolled_back']), 'Add room: harness rolled back, nothing left behind', json_encode($rAdd['raw'] ?? $rAdd['leak'] ?? ''));
+check(($rAdd['verify'][0][0]['housekeeping_status'] ?? '') === 'completed', 'A newly added room starts clean (completed)', json_encode([$rAdd['verify'] ?? null, $rAdd['output_flash'] ?? null, $rAdd['raw'] ?? null]));
+
 try {
     $pdo->beginTransaction();
     $future = date('Y-m-d', strtotime('+400 day')); $future2 = date('Y-m-d', strtotime('+401 day'));
@@ -366,6 +376,58 @@ try {
     $x = rh_delete_room_type($pdo, $tid);
     check($x['success'], 'Empty room type is deleted', json_encode($x));
     check((int)col($pdo, "SELECT COUNT(*) FROM gallery WHERE room_id = ?", [$tid]) === 0 && (int)col($pdo, "SELECT COUNT(*) FROM blocked_dates WHERE room_id = ?", [$tid]) === 0, 'Its gallery and blocked dates went with it');
+
+    echo "\n--- F8: one clean-room rule (status cleaning OR an open housekeeping task); stale flag never blocks ---\n";
+    $mkRoom8 = function (string $suffix, string $hk) use ($pdo, $type): int {
+        $pdo->prepare("INSERT INTO individual_rooms (room_type_id, room_number, room_name, floor, status, housekeeping_status) VALUES (?, ?, 'Linked test', 1, 'available', ?)")
+            ->execute([$type['id'], 'LT' . $suffix, $hk]);
+        return (int)$pdo->lastInsertId();
+    };
+    $r8 = $mkRoom8('H' . $run, 'pending'); // stale flag: 'pending' but no task at all
+    [$b8] = mk_booking($pdo, $run, (int)$type['id'], $r8, 'confirmed', $future, $future2, 'ready');
+    check(getBookingRoomsNotReady($b8) === [], 'Stale flag (pending, no task) does not block check-in');
+    check(evaluateCheckInRoomReady($b8, $adminId, false)['allowed'] === true, 'Check-in gate allows a stale-flag room');
+    check(rh_room_is_dirty_now($r8) === false, 'Stale flag room is not dirty (room change allowed)');
+    $pdo->prepare("INSERT INTO housekeeping_assignments (individual_room_id, status, due_date, notes) VALUES (?, 'pending', DATE_ADD(CURDATE(), INTERVAL 7 DAY), 'linked test future')")->execute([$r8]);
+    check(getBookingRoomsNotReady($b8) === [] && rh_room_is_dirty_now($r8) === false, 'A task scheduled for next week does not block check-in or a room change');
+    check(rh_room_clear_stale_hk_flag($pdo, $r8) === false, 'Flag is kept while any open task exists (even a future one)');
+    $pdo->prepare("DELETE FROM housekeeping_assignments WHERE individual_room_id = ?")->execute([$r8]);
+    $pdo->prepare("INSERT INTO housekeeping_assignments (individual_room_id, status, due_date, notes) VALUES (?, 'pending', CURDATE(), 'linked test')")->execute([$r8]);
+    $nr = getBookingRoomsNotReady($b8);
+    check(count($nr) === 1 && (int)$nr[0]['id'] === $r8, 'An open task due today still blocks check-in');
+    check(rh_room_is_dirty_now($r8) === true, 'An open task still makes the room dirty for a room change');
+    check(rh_room_clear_stale_hk_flag($pdo, $r8) === false, 'Flag is not reset while a task is open');
+    $pdo->prepare("UPDATE housekeeping_assignments SET status = 'completed' WHERE individual_room_id = ?")->execute([$r8]);
+    check(getBookingRoomsNotReady($b8) === [], 'A completed task no longer blocks');
+    $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning' WHERE id = ?")->execute([$r8]);
+    check(count(getBookingRoomsNotReady($b8)) === 1 && rh_room_is_dirty_now($r8) === true, "Room status 'cleaning' still blocks");
+    check(rh_room_clear_stale_hk_flag($pdo, $r8) === false, "Flag is not reset while the room status is 'cleaning'");
+    $pdo->prepare("UPDATE individual_rooms SET status = 'available' WHERE id = ?")->execute([$r8]);
+    check(rh_room_clear_stale_hk_flag($pdo, $r8) === true && col($pdo, "SELECT housekeeping_status FROM individual_rooms WHERE id = ?", [$r8]) === 'completed', 'Stale flag is reset once no task remains');
+    $row8 = null;
+    foreach (getAvailableIndividualRooms((int)$type['id'], date('Y-m-d', strtotime('+900 day')), date('Y-m-d', strtotime('+901 day')), null) as $cand) {
+        if ((int)$cand['id'] === $r8) { $row8 = $cand; }
+    }
+    check($row8 !== null && (int)$row8['ready'] === 1, 'Assign list shows the room as ready');
+
+    echo "\n--- F9: a reassigned booking holds, labels and occupies only its new room ---\n";
+    $ra = $mkRoom8('RA' . $run, 'completed');
+    $rb = $mkRoom8('RB' . $run, 'completed');
+    [$b9a] = mk_booking($pdo, $run, (int)$type['id'], $ra, 'confirmed', $future, $future2, 'reassign');
+    check(getBookingRoomLabel($b9a) === 'LTRA' . $run, 'Label shows the first room before the move');
+    $as = assignIndividualRoomToBooking($b9a, $rb);
+    check($as === true || !empty($as['success']), 'Reassign to the second room succeeds', json_encode($as));
+    $pdo->prepare("UPDATE booking_rooms SET released_at = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE booking_id = ? AND individual_room_id = ?")->execute([$b9a, $ra]); // the move happened earlier than the checkout
+    check(getBookingRoomLabel($b9a) === 'LTRB' . $run, 'Label shows only the new room after the move', getBookingRoomLabel($b9a));
+    check(getBookingRoomIds($b9a) === [$rb], 'getBookingRoomIds lists only the new room');
+    check(in_array($ra, getBookingRoomIds($b9a, true), true) && in_array($rb, getBookingRoomIds($b9a, true), true), 'Opt-in lists released rooms too');
+    updateBookingRoomsStatus($b9a, 'occupied', 'linked test check-in', $adminId);
+    check(col($pdo, "SELECT status FROM individual_rooms WHERE id = ?", [$rb]) === 'occupied' && col($pdo, "SELECT status FROM individual_rooms WHERE id = ?", [$ra]) === 'available', 'Check-in occupies only the new room; the old room stays available');
+    // Checkout / cancel order: release the rows first, then change room status - must still find the room.
+    rh_release_booking_room_holds($pdo, $b9a);
+    check(getBookingRoomIds($b9a) === [$rb], 'After release (checkout) the last held room is still found');
+    updateBookingRoomsStatus($b9a, 'cleaning', 'linked test checkout', $adminId);
+    check(col($pdo, "SELECT status FROM individual_rooms WHERE id = ?", [$rb]) === 'cleaning' && col($pdo, "SELECT status FROM individual_rooms WHERE id = ?", [$ra]) === 'available', 'Checkout cleans the room the stay used, not the one it left');
 } catch (Throwable $e) {
     bad('Test run crashed', $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine());
 }
