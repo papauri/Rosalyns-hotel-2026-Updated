@@ -71,6 +71,14 @@ Owner lead = the department lead whose files it is; the patch lead plans, briefs
 - TODO · F7 medium: conference quotation email shows literal {{logo_html}}/{{address}}; credit-note email shows {{address}} {{contact_phone}} {{guest_email}}. · events-gym lead + accounting
 - TODO · F8 (latent, VAT-on-top mode) first quotation/public estimate show net; F9 conference sync lacks 'refunded' state; F10 conference_venue preset keeps bookings on (public site sells rooms) — decide with the public-site item; F11 off-module links/wording; F12 refund rows listed "Needs PDF"; F13 EOD payment mix gross of refunds, VAT column doesn't add up; F14 conference details modal lacks VAT/paid/balance and attendee/room edit; F15 smoke_test_booking leaves a tentative_booking_log row; F16 email wording. IDEAs: conference deposits setter, events reserving conference rooms, pre-event reminder for unpaid confirmed conferences.
 
+## Hotel (No Restaurant) rehearsal 2026-10-22
+- SHIPPED 74c93dc / Liwonde de25c55 · F1 P1 room quotations priced net in inclusive mode; F2 P1 invoice/statement room line net labelled "incl. VAT" (doesn't foot); F3 final payment after checkout leaves "BALANCE DUE" invoice, regenerate burns a number; F13 receipt email vs PDF VAT lines. · accounting lead
+- SHIPPED 74c93dc / Liwonde de25c55 · F4 in-house type move leaves the old room occupied; F5 no same-type in-house move; F6 public split bookings not linked as a group; F7 last_cleaned_at never updates. · rooms lead
+- TODO · scripts/tests/help_map.php fails on the gym pages in Rosalyn's because the gym module is off there (help is hidden for off modules) — the test should skip pages of switched-off modules (passes 1410/1410 on Liwonde). · patch lead
+- TODO · admin/invoices.php per-payment regenerate still prints invoice wording on a fully paid booking (amounts and numbers correct). · accounting lead
+- TODO · Notes from the F1-F7 QA: quotations.total_amount now gross for new/resent rows, older rows net (Reports pipeline mixes bases until resent); legacy admin-customised invoice template (config/invoice.php ~984) prints group room rows from net incl. levy (only if a custom template is used); public split groups now get one overdue reminder per group lead. · accounting lead
+- TODO (batch) · F8 EOD arrivals/departures skip same-day checked-out; F9 folio F&B labelled "POS / Till Sales" with POS off; F10 Reports per-type occupancy denominator vs RevPAR, shared pair counted twice; F11 restaurant links with restaurant off; F12 POS/KDS/stock pages open by URL with modules off, "Run POS & KDS" install banner.
+
 ## Installed app (PWA)
 - TODO · 8-hour idle sign-out sends the person's unsent sales first (or warns on next sign-in). · pwa lead
 - TODO · Clear the till cart after a sale is queued offline; timeout on network-first page loads;
