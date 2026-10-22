@@ -64,7 +64,10 @@ $u = $pdo->query("SELECT id, role FROM admin_users WHERE is_active = 1 ORDER BY 
 $adminId = (int)($pdo->query("SELECT id FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetchColumn());
 $mgrId = (int)($pdo->query("SELECT id FROM admin_users WHERE is_active = 1 AND role = 'manager' ORDER BY id LIMIT 1")->fetchColumn());
 $staffId = (int)($pdo->query("SELECT id FROM admin_users WHERE is_active = 1 AND role NOT IN ('admin','manager') ORDER BY id LIMIT 1")->fetchColumn());
-if (!$adminId || !$mgrId || !$staffId) { bad('needs an active admin, manager and other staff user'); echo "$pass passed, $fail failed\n"; exit(1); }
+if (!$adminId || !$staffId) { bad('needs an active admin and other staff user'); echo "$pass passed, $fail failed\n"; exit(1); }
+// An install with no manager (e.g. a small test hotel) uses a temporary one inside the rolled-back
+// transaction for the library checks; the page-level manager checks are then skipped.
+$tempMgr = !$mgrId;
 
 $_SERVER['REMOTE_ADDR'] = '10.9.8.7';
 $_SERVER['HTTP_USER_AGENT'] = 'PresenceTest/1.0';
@@ -77,6 +80,11 @@ $row = function (int $id) use ($pdo) {
 
 $pdo->beginTransaction();
 try {
+    if ($tempMgr) {
+        $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, is_active) VALUES (?, ?, ?, ?, 'manager', 1)")
+            ->execute(['zz_presence_mgr', 'zz_presence_mgr@example.invalid', 'x', 'Presence Test Manager']);
+        $mgrId = (int)$pdo->lastInsertId();
+    }
     $pdo->prepare("DELETE FROM admin_presence WHERE user_id IN (?, ?, ?)")->execute([$adminId, $mgrId, $staffId]);
 
     // First heartbeat of a sign-in
@@ -201,12 +209,16 @@ check(is_array($list) && count($list) === 2 && ($r['json']['success'] ?? false),
 check(is_array($list) && ($list[0]['ip'] ?? '') === '10.1.2.3', 'admin: IP addresses are included');
 check($clean($r), 'admin endpoint run rolled back', json_encode($r));
 
-// Endpoint: manager sees the list without IPs
-$r = run_page('admin/api/presence.php', ['method' => 'GET', 'as_username' => $mgrName, 'setup' => $seed]);
-$list = $r['json']['data']['online'] ?? null;
-check(is_array($list) && count($list) === 2, 'manager: endpoint lists who is online', json_encode($r['json'] ?? $r));
-check(is_array($list) && !array_key_exists('ip', $list[0] ?? []) && strpos(json_encode($r['json'] ?? []), '10.1.2.3') === false, 'manager: no IP addresses in the answer');
-check($clean($r), 'manager endpoint run rolled back');
+// Endpoint: manager sees the list without IPs (page runs need a real signed-in manager)
+if ($tempMgr) {
+    echo "SKIP manager page checks: no active manager user on this install\n";
+} else {
+    $r = run_page('admin/api/presence.php', ['method' => 'GET', 'as_username' => $mgrName, 'setup' => $seed]);
+    $list = $r['json']['data']['online'] ?? null;
+    check(is_array($list) && count($list) === 2, 'manager: endpoint lists who is online', json_encode($r['json'] ?? $r));
+    check(is_array($list) && !array_key_exists('ip', $list[0] ?? []) && strpos(json_encode($r['json'] ?? []), '10.1.2.3') === false, 'manager: no IP addresses in the answer');
+    check($clean($r), 'manager endpoint run rolled back');
+}
 
 // Endpoint: everyone else is refused
 $r = run_page('admin/api/presence.php', ['method' => 'GET', 'as_username' => $staffName, 'setup' => $seed]);
@@ -221,7 +233,7 @@ check(($r['json']['success'] ?? false) === true && count($v) === 1 && (int)$v[0]
 $r = run_page('admin/api/presence.php', ['method' => 'GET', 'as_username' => $staffName, 'get' => ['ping' => '1', 'page' => 'payments.php'],
     'setup' => ["DELETE FROM admin_presence"], 'verify' => ["SELECT COUNT(*) AS n FROM admin_presence"]]);
 check(($r['json']['success'] ?? null) === false && (int)($r['verify'][0][0]['n'] ?? -1) === 0, 'ping without the X-Requested-With header is refused and writes nothing', json_encode($r['json'] ?? $r));
-$r = run_page('admin/api/presence.php', ['method' => 'POST', 'as_username' => $mgrName, 'setup' => $seed]);
+$r = run_page('admin/api/presence.php', ['method' => 'POST', 'as_username' => $tempMgr ? $staffName : $mgrName, 'setup' => $seed]);
 check(($r['json']['success'] ?? null) === false, 'POST to the endpoint is refused');
 
 // admin-init heartbeat on a real page load, and the panel on User Management
@@ -232,11 +244,15 @@ $v = $r['verify'][0] ?? [];
 check(count($v) === 1 && ($v[0]['current_page'] ?? '') === 'user-management.php', 'a page load by a signed-in user records the page via admin-init', json_encode($r['verify'] ?? $r));
 check(!empty($r['found']["Who's online"]) && !empty($r['found']['rh-presence-panel']) && !empty($r['found']['<span class="presence-ip"']), 'User Management shows the panel (with IPs) to an admin', json_encode($r['found'] ?? $r));
 check($clean($r), 'page run rolled back');
-$r = run_page('admin/user-management.php', ['post' => [], 'as_username' => $mgrName, 'setup' => ["DELETE FROM admin_presence"], 'grep' => ["Who's online", '<span class="presence-ip"', 'rh-presence-panel']]);
-if (!empty($r['found']['rh-presence-panel']) || !empty($r['found']["Who's online"])) {
-    check(!empty($r['found']["Who's online"]) && empty($r['found']['<span class="presence-ip"']), 'User Management shows the panel without IPs to a manager');
+if ($tempMgr) {
+    echo "SKIP manager User Management check: no active manager user on this install\n";
 } else {
-    ok('manager has no access to User Management on this install (panel not reachable)');
+    $r = run_page('admin/user-management.php', ['post' => [], 'as_username' => $mgrName, 'setup' => ["DELETE FROM admin_presence"], 'grep' => ["Who's online", '<span class="presence-ip"', 'rh-presence-panel']]);
+    if (!empty($r['found']['rh-presence-panel']) || !empty($r['found']["Who's online"])) {
+        check(!empty($r['found']["Who's online"]) && empty($r['found']['<span class="presence-ip"']), 'User Management shows the panel without IPs to a manager');
+    } else {
+        ok('manager has no access to User Management on this install (panel not reachable)');
+    }
 }
 $r = run_page('admin/system-logs.php', ['post' => [], 'setup' => ["DELETE FROM admin_presence"], 'grep' => ["Who's online", 'rh-presence-panel']]);
 check(!empty($r['found']['rh-presence-panel']), 'System Logs (audit area) also shows the panel to an admin', json_encode($r['found'] ?? $r));
