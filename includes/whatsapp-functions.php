@@ -402,7 +402,9 @@ function buildWhatsAppBookingVars(array $booking, array $room = []): array
         'special_requests'     => !empty($booking['special_requests']) ? $booking['special_requests'] : 'None',
         'hotel_phone'          => $phoneMain,
         'hotel_whatsapp'       => $hotelWa,
-        'occupancy_type'       => ucfirst($booking['occupancy_type'] ?? 'double'),
+        'occupancy_type'       => function_exists('rh_occupancy_tier_label')
+            ? rh_occupancy_tier_label($booking['occupancy_type'] ?? 'double', isset($room['max_guests']) ? (int)$room['max_guests'] : null)
+            : ucfirst($booking['occupancy_type'] ?? 'double'),
         'status'               => ucfirst($booking['status'] ?? 'pending'),
     ];
 }

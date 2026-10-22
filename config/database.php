@@ -3252,6 +3252,26 @@ function getBookingRooms(int $bookingId, bool $includeReleased = false): array
     }
 }
 
+/**
+ * Plain-words label for an occupancy PRICE TIER (single/double/triple). Triple is the
+ * "3 or more guests" tier, so it is spelled out. $maxGuests (the room's capacity) gives a
+ * family range such as "Triple / family (3-4 guests)". Display only, the stored value never changes.
+ */
+if (!function_exists('rh_occupancy_tier_label')) {
+    function rh_occupancy_tier_label($tier, ?int $maxGuests = null): string
+    {
+        $tier = strtolower(trim((string)$tier));
+        if ($tier === 'single') return 'Single (1 guest)';
+        if ($tier === 'double') return 'Double (2 guests)';
+        if ($tier === 'triple') {
+            if ($maxGuests !== null && $maxGuests > 3) return 'Triple / family (3–' . $maxGuests . ' guests)';
+            if ($maxGuests === 3) return 'Triple (3 guests)';
+            return 'Triple (3+ guests)';
+        }
+        return $tier === '' ? '' : ucfirst(str_replace('_', ' ', $tier));
+    }
+}
+
 function getBookingRoomIds(int $bookingId, bool $includeReleased = false): array
 {
     $ids = [];

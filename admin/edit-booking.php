@@ -401,7 +401,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     $changes['child_guests'] = ['old' => (int)($locked['child_guests'] ?? 0), 'new' => $child_guests];
                 }
                 if ($occupancy_type !== ($locked['occupancy_type'] ?? 'single')) {
-                    $changes['occupancy_type'] = ['old' => ucfirst($locked['occupancy_type'] ?? 'single'), 'new' => ucfirst($occupancy_type)];
+                    $changes['occupancy_type'] = ['old' => rh_occupancy_tier_label($locked['occupancy_type'] ?? 'single'), 'new' => rh_occupancy_tier_label($occupancy_type)];
                 }
                 if ($guest_name !== $locked['guest_name']) {
                     $changes['guest_name'] = ['old' => $locked['guest_name'], 'new' => $guest_name];
@@ -712,12 +712,17 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                         <select id="occupancy_type" name="occupancy_type" <?php echo $can_edit_stay ? '' : 'disabled'; ?>>
                             <?php
                             $occPolicy = $roomTypeRow ? resolveOccupancyPolicy($roomTypeRow, null) : ['single_enabled' => 1, 'double_enabled' => 1, 'triple_enabled' => 1];
-                            foreach (['single' => 'Single', 'double' => 'Double', 'triple' => 'Triple'] as $occVal => $occLabel):
+                            $occMaxGuests = (int)($booking['max_guests'] ?? 0);
+                            foreach (['single', 'double', 'triple'] as $occVal):
+                                $occLabel = rh_occupancy_tier_label($occVal, $occMaxGuests > 0 ? $occMaxGuests : null);
                                 $occOn = !empty($occPolicy[$occVal . '_enabled']) || ($booking['occupancy_type'] ?? '') === $occVal;
                             ?>
-                                <option value="<?php echo $occVal; ?>" <?php echo ($booking['occupancy_type'] ?? 'single') === $occVal ? 'selected' : ''; ?> <?php echo $occOn ? '' : 'disabled'; ?>><?php echo $occLabel; ?></option>
+                                <option value="<?php echo $occVal; ?>" <?php echo ($booking['occupancy_type'] ?? 'single') === $occVal ? 'selected' : ''; ?> <?php echo $occOn ? '' : 'disabled'; ?>><?php echo htmlspecialchars($occLabel); ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <?php if ($occMaxGuests > 3): ?>
+                            <small>Occupancy sets the price tier. Rooms that hold <?php echo $occMaxGuests; ?> use the 3+ price.</small>
+                        <?php endif; ?>
                     </div>
                     <div class="form-group">
                         <label for="check_in_date">Check-in Date *</label>

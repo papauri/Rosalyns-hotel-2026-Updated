@@ -247,7 +247,7 @@ try {
                             ?>
                             <div class="conf-stay-tags">
                                 <?php if ($occupancy_type !== ''): ?>
-                                    <span class="conf-stay-tag"><i class="fas fa-bed"></i> <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', $occupancy_type))); ?></span>
+                                    <span class="conf-stay-tag"><i class="fas fa-bed"></i> <?php echo htmlspecialchars(rh_occupancy_tier_label($occupancy_type)); ?></span>
                                 <?php endif; ?>
                                 <?php if ($rate_plan_label !== ''): ?>
                                     <span class="conf-stay-tag"><i class="fas fa-tag"></i> <?php echo htmlspecialchars($rate_plan_label); ?></span>

@@ -2207,7 +2207,7 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
     $displayRoomName = $roomAssignment !== '' ? trim($roomTypeName . ' - ' . $roomAssignment) : $roomTypeName;
 
     $occupancyType = (string)($booking['occupancy_type'] ?? '');
-    $occupancyLabel = $occupancyType !== '' ? ucfirst(str_replace('_', ' ', $occupancyType)) : '';
+    $occupancyLabel = $occupancyType !== '' ? rh_occupancy_tier_label($occupancyType, isset($room['max_guests']) ? (int)$room['max_guests'] : null) : '';
 
     $vars = [
         'site_name' => $email_site_name,
@@ -2830,7 +2830,7 @@ function sendAdminNotificationEmail(array $booking)
         $currency = getSetting('currency_symbol');
         $nights   = (int)($booking['number_of_nights'] ?? 0);
         $occupancyRaw = (string)($booking['occupancy_type'] ?? '');
-        $occupancyLabel = $occupancyRaw !== '' ? ucfirst(str_replace('_', ' ', $occupancyRaw)) : '—';
+        $occupancyLabel = $occupancyRaw !== '' ? rh_occupancy_tier_label($occupancyRaw, isset($booking['max_guests']) ? (int)$booking['max_guests'] : null) : '—';
         $ratePlan = (string)($booking['rate_plan_label'] ?? '');
 
         // Detect tentative booking

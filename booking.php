@@ -1317,7 +1317,7 @@ try {
                             </div>
                             <div class="occupancy-type-label" id="tripleOccupancyLabel">
                                 <strong>Triple</strong>
-                                <span>3 Guests</span>
+                                <span id="tripleGuestsText">3+ Guests</span>
                                 <span id="triplePriceDisplay" class="price-display">-</span>
                             </div>
                         </div>

@@ -62,7 +62,28 @@
             return null;
         }
 
-        function getOccupancyLabel(occupancyType) {
+        // Occupancy is a PRICE TIER (single / double / triple = "3 or more guests"),
+        // not a head count, so the label spells out which guest counts it covers.
+        function getOccupancyGuestRange(occupancyType, room) {
+            if (occupancyType === 'single') return '1 guest';
+            if (occupancyType === 'double') return '2 guests';
+            if (occupancyType === 'triple') {
+                const max = room ? Number(room.max_guests || 0) : 0;
+                return max > 3 ? `3–${max} guests` : (max === 3 ? '3 guests' : '3+ guests');
+            }
+            return '';
+        }
+
+        function getOccupancyLabel(occupancyType, room) {
+            const range = getOccupancyGuestRange(occupancyType, room);
+            if (!range) return 'Standard';
+            const name = occupancyType === 'triple' && room && Number(room.max_guests || 0) > 3 ?
+                'Triple / family' : occupancyType.charAt(0).toUpperCase() + occupancyType.slice(1);
+            return `${name} (${range})`;
+        }
+
+        // Short tier name for places that already print the guest count next to it.
+        function getOccupancyTierName(occupancyType) {
             if (occupancyType === 'single') return 'Single';
             if (occupancyType === 'double') return 'Double';
             if (occupancyType === 'triple') return 'Triple';
@@ -711,6 +732,12 @@
                 }
             ];
 
+            const tripleGuestsText = document.getElementById('tripleGuestsText');
+            if (tripleGuestsText) {
+                const range = getOccupancyGuestRange('triple', room);
+                tripleGuestsText.textContent = range.charAt(0).toUpperCase() + range.slice(1);
+            }
+
             let enabledCount = 0;
             mapping.forEach(item => {
                 const enabled = Number(room[item.key] || 0) === 1;
@@ -1027,7 +1054,7 @@
                 const occ = part.occupancy_type || part.occupancyType;
                 const rate = part.rate_per_night !== undefined ? Number(part.rate_per_night) : getPriceForOccupancy(room, occ);
                 const lineTotal = part.total_with_vat !== undefined ? Number(part.total_with_vat) : null;
-                return `<li><strong>Room ${index + 1}:</strong> ${escapeHtml(describeRoomGuests(part))} &middot; ${getOccupancyLabel(occ)} rate ${currencySymbol}${rate.toLocaleString()}/night` +
+                return `<li><strong>Room ${index + 1}:</strong> ${escapeHtml(describeRoomGuests(part))} &middot; ${getOccupancyLabel(occ, room)} rate ${currencySymbol}${rate.toLocaleString()}/night` +
                     (lineTotal !== null && nights > 0 ? ` &middot; ${currencySymbol}${lineTotal.toLocaleString()} for ${plural(nights, 'night')}` : '') + '</li>';
             }).join('');
             let totalLine = '';
@@ -1352,8 +1379,8 @@
                     // Update room details section
                     document.getElementById('summaryRoom').textContent = selectedRoomName;
                     const occupancySummary = roomsNeeded > 1 ?
-                        `${totalGuests} Guests (${roomsNeeded} rooms: ${allocation.map((part, index) => `R${index + 1} ${getOccupancyLabel(part.occupancyType)}`).join(', ')})` :
-                        `${getOccupancyLabel(allocation[0].occupancyType)} (${totalGuests} Guest${totalGuests === 1 ? '' : 's'})`;
+                        `${totalGuests} Guests (${roomsNeeded} rooms: ${allocation.map((part, index) => `R${index + 1} ${getOccupancyTierName(part.occupancyType)}`).join(', ')})` :
+                        `${getOccupancyTierName(allocation[0].occupancyType)} rate (${totalGuests} Guest${totalGuests === 1 ? '' : 's'})`;
                     document.getElementById('summaryOccupancyType').textContent = occupancySummary;
                     document.getElementById('summaryRatePerNight').textContent = roomsNeeded > 1 ?
                         `${currencySymbol}${roomRateTotalPerNight.toLocaleString()} across ${roomsNeeded} rooms` :

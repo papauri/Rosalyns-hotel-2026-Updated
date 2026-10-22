@@ -2708,6 +2708,31 @@ try {
             return Math.max(1, parseInt(room?.max_guests || 1, 10));
         }
 
+        // Occupancy is a PRICE TIER, not a head count: triple means "3 or more guests".
+        // Labels say so; the option values (single / double / triple) never change.
+        function occTierLabel(tier, room) {
+            if (tier === 'single') return 'Single (1 guest)';
+            if (tier === 'double') return 'Double (2 guests)';
+            const cap = room ? roomPhysicalCap(room) : 0;
+            if (cap > 3) return 'Triple / family (3–' + cap + ' guests)';
+            return cap === 3 ? 'Triple (3 guests)' : 'Triple (3+ guests)';
+        }
+
+        // Relabel a line's occupancy options for the chosen room type and show the price-tier hint
+        // when the room holds more than 3.
+        function labelOccOptions(lineEl, room) {
+            const occSel = lineEl.querySelector('.line-occ-select');
+            if (occSel) {
+                Array.from(occSel.options).forEach(opt => { opt.textContent = occTierLabel(opt.value, room); });
+            }
+            const hint = lineEl.querySelector('.line-occ-hint');
+            if (hint) {
+                const cap = room ? roomPhysicalCap(room) : 0;
+                hint.textContent = 'Occupancy sets the price tier. Rooms that hold ' + cap + ' use the 3+ price.';
+                hint.style.display = cap > 3 ? '' : 'none';
+            }
+        }
+
         // Re-entrancy guard so the auto-split routine can add/retype lines without the
         // change handlers it triggers recursing back into it.
         let _autoSplitting = false;
@@ -2742,10 +2767,11 @@ try {
                 <div class="form-group">
                     <label>Occupancy</label>
                     <select name="room_line_occupancy[]" class="line-occ-select" onchange="occupancyChosen(${idx})">
-                        <option value="single">Single</option>
-                        <option value="double" selected>Double</option>
-                        <option value="triple">Triple</option>
+                        <option value="single">Single (1 guest)</option>
+                        <option value="double" selected>Double (2 guests)</option>
+                        <option value="triple">Triple (3+ guests)</option>
                     </select>
+                    <small class="line-occ-hint" style="display:none;color:#666;"></small>
                 </div>
             </div>
             <div class="form-row" style="align-items:flex-end;">
@@ -2901,6 +2927,7 @@ try {
             // Occupancy options are gated by BOTH the room's occupancy policy AND its
             // physical capacity — a 2-guest room never offers "Triple".
             const cap = roomPhysicalCap(room);
+            labelOccOptions(lineEl, room);
             Array.from(occSel.options).forEach(opt => {
                 if (opt.value === 'single') opt.disabled = !room.single_enabled || cap < 1;
                 if (opt.value === 'double') opt.disabled = !room.double_enabled || cap < 2;
@@ -3409,7 +3436,7 @@ try {
 
             if (!pill || !txt) return;
             if (total > 1) {
-                txt.textContent = `Group booking: ${total} rooms · ${party.guests} guest${party.guests !== 1 ? 's' : ''} · ~${(party.guests / total).toFixed(1)} guests/room`;
+                txt.textContent = `Group booking: ${party.guests} guest${party.guests !== 1 ? 's' : ''} in ${total} rooms`;
                 pill.style.display = 'flex';
             } else {
                 pill.style.display = 'none';
@@ -3659,10 +3686,10 @@ try {
 
         // Plain note when the occupancy tier does not match the guests seated in the room.
         function occupancyNote(occ, seated) {
-            if (occ === 'single' && seated > 1) return ' Occupancy is Single but ' + seated + ' guests are seated here.';
-            if (occ === 'double' && seated > 2) return ' Occupancy is Double but ' + seated + ' guests are seated here.';
-            if (occ === 'double' && seated < 2) return ' Priced as Double for ' + seated + ' guest.';
-            if (occ === 'triple' && seated < 3) return ' Priced as Triple for ' + seated + ' guest' + (seated === 1 ? '' : 's') + '.';
+            if (occ === 'single' && seated > 1) return ' Occupancy is Single (1 guest) but ' + seated + ' guests are seated here.';
+            if (occ === 'double' && seated > 2) return ' Occupancy is Double (2 guests) but ' + seated + ' guests are seated here.';
+            if (occ === 'double' && seated < 2) return ' Priced as Double (2 guests) for ' + seated + ' guest.';
+            if (occ === 'triple' && seated < 3) return ' Priced as Triple (3+ guests) for ' + seated + ' guest' + (seated === 1 ? '' : 's') + '.';
             return '';
         }
 
