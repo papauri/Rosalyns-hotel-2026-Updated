@@ -875,6 +875,9 @@ try {
     $sib_stmt = $pdo->prepare("
         SELECT b.id, b.booking_reference, b.status, b.number_of_guests,
                b.total_with_vat, b.total_amount, b.vat_amount, b.primary_booking_id,
+               b.number_of_nights, b.tourism_levy_amount, b.tourism_levy_percent, b.vat_rate, b.child_supplement_total, b.child_guests,
+               b.child_price_multiplier, b.child_charge_mode, b.child_charge_amount, b.free_children, b.package_total,
+               b.rate_plan_label, b.rate_plan_discount,
                COALESCE(r.name, 'Unknown') AS room_name
         FROM bookings b
         LEFT JOIN rooms r ON b.room_id = r.id
@@ -1593,6 +1596,18 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             </div>
         <?php endif; ?>
 
+        <?php
+        // A clean bookings row for the "how this total is worked out" popup: the page query above joins payments, whose
+        // vat_rate / vat_amount columns would otherwise replace the booking's own.
+        $bd_row_fresh = $booking;
+        try {
+            $bdFresh = $pdo->prepare('SELECT * FROM bookings WHERE id = ?');
+            $bdFresh->execute([(int)$booking['id']]);
+            $bd_row_fresh = $bdFresh->fetch(PDO::FETCH_ASSOC) ?: $booking;
+        } catch (Throwable $e) {
+            $bd_row_fresh = $booking;
+        }
+        ?>
         <!-- Group booking notice -->
         <?php if (!empty($group_bookings)): ?>
         <div class="bd-group-notice">
@@ -1609,17 +1624,20 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <?php endforeach; ?>
             <?php
             // Group total = every live room in the group at its full amount (room + VAT + levy), owner 2026-10-23.
-            $bd_group_total = rh_booking_full_total($booking);
+            $bd_group_total = rh_booking_full_total($bd_row_fresh);
+            $bd_group_rows = [$bd_row_fresh];
             foreach ($group_bookings as $gb) {
                 if (!in_array((string)($gb['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true)) {
                     $bd_group_total += rh_booking_full_total($gb);
+                    $bd_group_rows[] = $gb;
                 }
             }
             if (in_array((string)($booking['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true)) {
-                $bd_group_total -= rh_booking_full_total($booking);
+                $bd_group_total -= rh_booking_full_total($bd_row_fresh);
+                array_shift($bd_group_rows);
             }
             ?>
-            <span class="bd-group-notice__label">Group total (incl. VAT &amp; levy): <strong><?php echo $currency_symbol; ?><?php echo number_format($bd_group_total, 2); ?></strong></span>
+            <span class="bd-group-notice__label">Group total (incl. VAT &amp; levy): <strong><?php echo $currency_symbol; ?><?php echo number_format($bd_group_total, 2); ?></strong><?php echo $bd_group_rows ? rh_booking_total_info_btn($bd_group_rows, ['currency' => $currency_symbol]) : ''; ?></span>
         </div>
         <?php endif; ?>
 
@@ -1630,13 +1648,19 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         $bd_pay_label = $bd_pay_labels[$bd_pay_raw] ?? ucfirst($bd_pay_raw);
         $bd_has_credit = $folio_credit_balance > BALANCE_TOLERANCE;
         $bd_has_due = !$bd_has_credit && $folio_balance_due > BALANCE_TOLERANCE;
+        $bd_info_btn = rh_booking_total_info_btn($bd_row_fresh, [
+            'currency' => $currency_symbol,
+            'folio' => is_array($folio_summary) && !isset($folio_summary['error'])
+                ? array_merge($folio_summary, ['credit' => $folio_credit_balance])
+                : null,
+        ]);
         ?>
 
         <!-- Summary strip -->
         <div class="rh-strip" role="group" aria-label="Booking financial summary">
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Folio total</span>
-                <strong class="rh-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong>
+                <strong class="rh-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong><?php echo $bd_info_btn; ?>
             </div>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Paid</span>
@@ -1888,7 +1912,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             </div>
                             <div class="payment-tax-row payment-tax-row--total">
                                 <span>Total</span>
-                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong>
+                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?><?php echo $bd_info_btn; ?></strong>
                             </div>
                             <div class="payment-tax-row">
                                 <span>Paid</span>

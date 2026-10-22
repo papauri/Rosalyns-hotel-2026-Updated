@@ -19,6 +19,7 @@ $suites = [
     'Occupancy tier floor'  => 'scripts/tests/occupancy_tier.php',
     'Child charge rules'    => 'scripts/tests/child_pricing.php',
     'Booking full total'    => 'scripts/tests/booking_full_total.php',
+    'Booking total breakdown' => 'scripts/tests/booking_total_breakdown.php',
     'Conference full total' => 'scripts/tests/conference_full_total.php',
     'Concurrent bookings'   => 'scripts/tests/concurrent_booking.php',
     'In-house moves + splits' => 'scripts/tests/inhouse_move.php',

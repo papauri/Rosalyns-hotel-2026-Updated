@@ -325,6 +325,19 @@ if ($dueAmount <= BALANCE_TOLERANCE) {
     $dueAmount = 0.0;
 }
 
+// "How this total is worked out" popup (room accounts only; same stored figures as the booking total).
+$pd_total_info = '';
+if ($payment['booking_type'] === 'room' && !empty($booking) && is_array($booking) && !empty($folioForTotal) && !isset($folioForTotal['error'])) {
+    $pd_total_info = rh_booking_total_info_btn($booking, [
+        'currency' => (string)($currency_symbol ?? ''),
+        'folio' => array_merge($folioForTotal, [
+            'amount_paid' => (float)$paymentSummary['total_paid'],
+            'balance_due' => $dueAmount,
+            'credit' => max(0.0, (float)$paymentSummary['total_paid'] - $bookingTotalAmount),
+        ]),
+    ]);
+}
+
 // Refunds issued AGAINST this specific payment (when this is the original)
 $refundsAgainstStmt = $pdo->prepare("
     SELECT id, payment_reference, payment_date, refund_amount, refund_reason, refund_status, refund_notes, total_amount, created_at
@@ -439,7 +452,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
             </div>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Booking total</span>
-                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format((float)$bookingTotalAmount, 0); ?></strong>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format((float)$bookingTotalAmount, 0); ?></strong><?php echo $pd_total_info; ?>
                 <span class="rh-strip__sub">Paid <?php echo $currency_symbol . number_format((float)$paymentSummary['total_paid'], 0); ?> of total</span>
             </div>
             <div class="rh-strip__cell">
@@ -683,7 +696,7 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                                         <tr><th scope="row">Table</th><td><?php echo htmlspecialchars((string)$bookingDetails['customer']['table_number']); ?></td></tr>
                                     <?php endif; ?>
                                 <?php endif; ?>
-                                <tr><th scope="row"><?php echo $bookingDetails['type'] === 'room' ? 'Total (incl. VAT &amp; levy)' : 'Total'; ?></th><td><?php echo $pd_fmt($bookingDetails['type'] === 'room' ? $bookingTotalAmount : $pd_amt['total_amount']); ?></td></tr>
+                                <tr><th scope="row"><?php echo $bookingDetails['type'] === 'room' ? 'Total (incl. VAT &amp; levy)' : 'Total'; ?></th><td><?php echo $pd_fmt($bookingDetails['type'] === 'room' ? $bookingTotalAmount : $pd_amt['total_amount']); ?><?php echo $bookingDetails['type'] === 'room' ? $pd_total_info : ''; ?></td></tr>
                                 <?php if ($bookingDetails['type'] === 'restaurant'): ?>
                                     <tr><th scope="row">Est. stock cost</th><td><?php echo $pd_fmt($pd_amt['total_cost']); ?></td></tr>
                                 <?php else: ?>

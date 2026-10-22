@@ -3897,6 +3897,159 @@ function rh_booking_full_total(array $row): float
 }
 
 /**
+ * The "How this total is worked out" figures for one booking row or a list of rows (a group booking), built from the
+ * SAME stored numbers that make the total (rh_doc_stay_lines(): total_with_vat, vat_amount, tourism_levy_amount,
+ * child_supplement_total, package_total) so the lines always add up to the shown total; any leftover is a "Rounding"
+ * line. Pure calculation, no queries. Old rows with missing fields show the parts that exist.
+ *
+ * $opts: currency (symbol), folio (optional, from getBookingFolioSummary(): booking_base_amount, extras_total,
+ *        grand_total, amount_paid, balance_due, credit) adds Folio extras / Paid / Balance due lines.
+ * Line kinds: add (part of the total), note (shown, not added: discount, VAT already inside), total, minus.
+ *
+ * @return array{ok:bool,title:string,note:string,lines:array<int,array{label:string,hint:string,value:string,kind:string}>}
+ */
+function rh_booking_total_breakdown(array $rows, array $opts = []): array
+{
+    if (!function_exists('rh_doc_stay_lines')) {
+        require_once __DIR__ . '/../includes/pricing.php';
+    }
+    $list = (isset($rows[0]) && is_array($rows[0])) ? $rows : [$rows];
+    $cur = (string)($opts['currency'] ?? (function_exists('getSetting') ? getSetting('currency_symbol') : '') ?: 'K');
+    if (preg_match('/[A-Za-z]$/', $cur)) {
+        $cur .= ' ';
+    }
+    $fmt = function (float $v) use ($cur): string {
+        return ($v < 0 ? '-' : '') . $cur . number_format(abs($v), 2);
+    };
+    $out = ['ok' => false, 'title' => 'How this total is worked out', 'note' => 'Breakdown not available for this older booking.', 'lines' => []];
+
+    $room = $child = $pkg = $levy = $vat = $gross = $disc = 0.0;
+    $mode = 'off';
+    $rebuilt = false;
+    $nightsSet = [];
+    $levyPct = 0.0;
+    $vatPct = 0.0;
+    $planLabels = [];
+    foreach ($list as $r) {
+        if (!is_array($r)) {
+            continue;
+        }
+        $dl = rh_doc_stay_lines($r, max(0.0, (float)($r['package_total'] ?? 0)));
+        $mode = $dl['mode'];
+        $room += $dl['room'];
+        $child += $dl['child'];
+        $pkg += $dl['pkg'];
+        $levy += $dl['levy'];
+        $vat += $dl['vat'];
+        $gross += $dl['gross'];
+        if ((float)($r['total_with_vat'] ?? 0) <= BALANCE_TOLERANCE) {
+            $rebuilt = true;
+        }
+        $n = (int)($r['number_of_nights'] ?? 0);
+        if ($n > 0) {
+            $nightsSet[$n] = true;
+        }
+        $levyPct = max($levyPct, (float)($r['tourism_levy_percent'] ?? 0));
+        $vatPct = max($vatPct, (float)($r['vat_rate'] ?? 0));
+        $pd = (float)($r['rate_plan_discount'] ?? 0);
+        if ($pd > 0 && trim((string)($r['rate_plan_label'] ?? '')) !== '') {
+            $disc += $pd * max(1, $n);
+            $planLabels[trim((string)$r['rate_plan_label'])] = true;
+        }
+    }
+    $gross = round($gross, 2);
+    if ($gross <= BALANCE_TOLERANCE) {
+        return $out;
+    }
+    $rooms = count($list);
+    $nights = count($nightsSet) === 1 ? (int)array_key_first($nightsSet) : 0;
+    $exclusive = ($mode === 'exclusive');
+    $trim = function (float $p): string {
+        return rtrim(rtrim(number_format($p, 2), '0'), '.');
+    };
+
+    $lines = [];
+    $hint = '';
+    if ($nights > 0 && $room > 0) {
+        $per = $room / ($nights * $rooms);
+        $hint = $nights . ' night' . ($nights === 1 ? '' : 's') . ($rooms > 1 ? ' x ' . $rooms . ' rooms' : '') . ' at ' . $fmt($per) . ($rooms > 1 ? ' average' : '') . ($mode === 'inclusive' && $vat > 0 ? ', VAT included' : '');
+    }
+    $lines[] = ['label' => $rooms > 1 ? 'Room rate x nights (' . $rooms . ' rooms)' : 'Room rate x nights', 'hint' => $hint, 'value' => $fmt($room), 'kind' => 'add'];
+    if ($disc > BALANCE_TOLERANCE) {
+        $lines[] = ['label' => 'Discount already taken off', 'hint' => implode(', ', array_keys($planLabels)), 'value' => $fmt(-$disc), 'kind' => 'note'];
+    }
+    if ($child > BALANCE_TOLERANCE) {
+        $cl = $rooms > 1 ? rh_child_doc_label($list, trim($cur)) : rh_child_charge_label($list[0], trim($cur));
+        $lines[] = ['label' => 'Child charge', 'hint' => $cl, 'value' => $fmt($child), 'kind' => 'add'];
+    }
+    if ($pkg > BALANCE_TOLERANCE) {
+        $lines[] = ['label' => 'Packages / add-ons', 'hint' => '', 'value' => $fmt($pkg), 'kind' => 'add'];
+    }
+    if ($levy > BALANCE_TOLERANCE) {
+        $lines[] = ['label' => 'Tourism levy' . ($levyPct > 0 ? ' (' . $trim($levyPct) . '%)' : ''), 'hint' => '', 'value' => $fmt($levy), 'kind' => 'add'];
+    }
+    if ($vat > BALANCE_TOLERANCE && $mode !== 'off') {
+        $lines[] = ['label' => 'VAT' . ($vatPct > 0 ? ' (' . $trim($vatPct) . '%)' : ''), 'hint' => $exclusive ? 'added' : 'included in the room rate above', 'value' => $fmt($vat), 'kind' => $exclusive ? 'add' : 'note'];
+    }
+    $sum = round($room + $child + $pkg + $levy + ($exclusive ? $vat : 0.0), 2);
+    $diff = round($gross - $sum, 2);
+    if (abs($diff) > 0.004) {
+        $lines[] = ['label' => 'Rounding', 'hint' => '', 'value' => $fmt($diff), 'kind' => 'add'];
+    }
+    $lines[] = ['label' => 'Total (incl. VAT & levy)', 'hint' => '', 'value' => $fmt($gross), 'kind' => 'total'];
+
+    $folio = $opts['folio'] ?? null;
+    if (is_array($folio)) {
+        $base = (float)($folio['booking_base_amount'] ?? $gross);
+        if (abs($base - $gross) > BALANCE_TOLERANCE) {
+            // Cancelled stays bill only what was kept: show the step so the lines still add up.
+            array_pop($lines);
+            $lines[] = ['label' => 'Original total', 'hint' => '', 'value' => $fmt($gross), 'kind' => 'add'];
+            $lines[] = ['label' => 'Cancellation adjustment', 'hint' => 'only the amount kept is billed', 'value' => $fmt(round($base - $gross, 2)), 'kind' => 'add'];
+            $lines[] = ['label' => 'Booking total', 'hint' => '', 'value' => $fmt($base), 'kind' => 'total'];
+        }
+        $extras = (float)($folio['extras_total'] ?? 0);
+        $grand = (float)($folio['grand_total'] ?? ($base + $extras));
+        if ($extras > BALANCE_TOLERANCE) {
+            $lines[] = ['label' => 'Folio extras', 'hint' => 'meals, services and other charges, incl. VAT', 'value' => $fmt($extras), 'kind' => 'add'];
+            $lines[] = ['label' => 'Folio total', 'hint' => '', 'value' => $fmt($grand), 'kind' => 'total'];
+        }
+        $paid = (float)($folio['amount_paid'] ?? 0);
+        $lines[] = ['label' => 'Paid', 'hint' => '', 'value' => $fmt(-$paid), 'kind' => 'minus'];
+        $credit = (float)($folio['credit'] ?? 0);
+        if ($credit > BALANCE_TOLERANCE) {
+            $lines[] = ['label' => 'Credit owed to guest', 'hint' => '', 'value' => $fmt($credit), 'kind' => 'total'];
+        } else {
+            $lines[] = ['label' => 'Balance due', 'hint' => '', 'value' => $fmt(max(0.0, (float)($folio['balance_due'] ?? 0))), 'kind' => 'total'];
+        }
+    }
+
+    $out['ok'] = true;
+    $out['note'] = $rebuilt ? 'Older booking: figures are rebuilt from the amounts stored at the time.' : '';
+    $out['lines'] = $lines;
+    return $out;
+}
+
+/**
+ * The small "i" button that opens the booking-total popup (admin/js/rh-total-info.js, css/rh-total-info.css).
+ * Returns '' when there is nothing to show. The data rides in an escaped data attribute (no inline script/handlers).
+ * @param array $rows a bookings row, or a list of rows for a group
+ */
+function rh_booking_total_info_btn(array $rows, array $opts = []): string
+{
+    try {
+        $bd = rh_booking_total_breakdown($rows, $opts);
+    } catch (Throwable $e) {
+        return '';
+    }
+    $json = json_encode($bd, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($json === false) {
+        return '';
+    }
+    return '<button type="button" class="rh-info-btn" aria-label="How this total is worked out" aria-haspopup="dialog" aria-expanded="false" data-rh-breakdown="' . htmlspecialchars($json, ENT_QUOTES, 'UTF-8') . '"><span aria-hidden="true">i</span></button>';
+}
+
+/**
  * Room bookings CANCELLED between $from and $to (inclusive dates), counted on the day the cancellation
  * happened, taken from the booking history (booking_timeline_logs: the "status -> cancelled" entry or the
  * "Cancellation settled" entry every cancel path writes), NOT bookings.updated_at (owner 2026-10-21). One

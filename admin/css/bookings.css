@@ -2118,3 +2118,7 @@ hr.menu-divider {
         text-align: center;
     }
 }
+
+/* Bookings list: "Total (incl. VAT & levy)" header keeps the bracket under the word so the column stays narrow */
+.booking-table th.bk-th-total { white-space: normal; }
+.booking-table th.bk-th-total .bk-th-total__sub { display: block; font-weight: 400; font-size: .85em; text-transform: none; letter-spacing: 0; }

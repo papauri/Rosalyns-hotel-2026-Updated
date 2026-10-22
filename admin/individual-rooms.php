@@ -748,7 +748,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $uStmt = $pdo->prepare("
                 SELECT b.id, b.booking_reference, b.guest_name, b.guest_email, b.guest_phone,
                        b.check_in_date, b.check_out_date, b.status, b.payment_status,
-                       b.total_amount, b.total_with_vat, b.vat_amount, r.name AS room_type_name
+                       b.total_amount, b.total_with_vat, b.vat_amount, b.number_of_nights, b.tourism_levy_amount, b.tourism_levy_percent, b.vat_rate,
+                       b.child_supplement_total, b.child_guests, b.child_price_multiplier, b.child_charge_mode, b.child_charge_amount, b.free_children,
+                       b.package_total, b.rate_plan_label, b.rate_plan_discount, r.name AS room_type_name
                 FROM bookings b
                 JOIN rooms r ON r.id = b.room_id
                 WHERE {$detailBookingPred}
@@ -810,6 +812,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'status'          => $active['status'],
                     'payment_status'  => $active['payment_status'] ?? 'pending',
                     'total_amount'    => $sym . ' ' . number_format(rh_booking_full_total($active), 0),
+                    'total_breakdown' => rh_booking_total_breakdown($active, ['currency' => $sym]),
                     'nights_remaining' => max(0, (int)($active['nights_remaining'] ?? 0)),
                     'adults'          => (int)($active['adult_guests'] ?? 1),
                     'children'        => (int)($active['child_guests'] ?? 0),
@@ -828,6 +831,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'status'         => $b['status'],
                 'payment_status' => $b['payment_status'] ?? 'pending',
                 'total_amount'   => $sym . ' ' . number_format(rh_booking_full_total($b), 0),
+                'total_breakdown' => rh_booking_total_breakdown($b, ['currency' => $sym]),
             ], $upcoming);
 
             $logNorm = array_map(fn($l) => [
@@ -3070,7 +3074,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                 <div class="rd-occ-label">Payment</div>
                                 <div class="rd-occ-value">
                                     ${_badge(_payLabels[active.payment_status] || active.payment_status, _payColors[active.payment_status] || '#6b7280')}
-                                    <span style="font-size:12px;color:#5E554D;margin-left:4px;">${active.total_amount}</span>
+                                    <span style="font-size:12px;color:#5E554D;margin-left:4px;">${active.total_amount}</span>${window.rhTotalInfoHtml ? window.rhTotalInfoHtml(active.total_breakdown) : ''}
                                 </div>
                             </div>
                         </div>
@@ -3132,7 +3136,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             <div class="rd-up-badges">
                                 ${_badge(_statusLabels[b.status] || b.status, _statusColors[b.status] || '#6b7280')}
                                 ${_badge(_payLabels[b.payment_status] || b.payment_status, _payColors[b.payment_status] || '#6b7280')}
-                                <span style="font-size:11px;color:#5E554D;">${b.total_amount}</span>
+                                <span style="font-size:11px;color:#5E554D;">${b.total_amount}</span>${window.rhTotalInfoHtml ? window.rhTotalInfoHtml(b.total_breakdown) : ''}
                             </div>
                         </div>`;
                 }).join('');

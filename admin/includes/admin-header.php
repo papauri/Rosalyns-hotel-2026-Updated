@@ -323,6 +323,7 @@ if ($_admin_back_target !== null) {
 <link rel="stylesheet" href="css/admin-kpi.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-kpi.css'); ?>">
 <link rel="stylesheet" href="css/admin-uniform.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-uniform.css'); ?>">
 <link rel="stylesheet" href="css/admin-global-search.css?v=<?php echo @filemtime(__DIR__ . '/../css/admin-global-search.css'); ?>">
+<link rel="stylesheet" href="css/rh-total-info.css?v=<?php echo @filemtime(__DIR__ . '/../css/rh-total-info.css'); ?>">
 <script src="js/admin-global-search.js?v=<?php echo @filemtime(__DIR__ . '/../js/admin-global-search.js'); ?>" defer></script>
 <div id="adminPageLoader" class="admin-page-loader is-visible" data-boot-loader="1" role="status" aria-live="polite" aria-hidden="false">
     <div class="admin-page-loader-card">

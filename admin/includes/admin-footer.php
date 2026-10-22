@@ -20,6 +20,8 @@
 <script src="js/admin-bulk.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-bulk.js'); ?>"></script>
 <!-- Global table-section pagination (10 rows max + inline loader) -->
 <script src="js/admin-section-pagination.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-section-pagination.js'); ?>"></script>
+<!-- "i" popup that shows how a booking total is worked out (delegated, survives SPA navigation) -->
+<script src="js/rh-total-info.js?v=<?php echo filemtime(__DIR__ . '/../js/rh-total-info.js'); ?>"></script>
 <!-- Admin Mobile Enhancements -->
 <script src="js/admin-mobile.js?v=<?php echo filemtime(__DIR__ . '/../js/admin-mobile.js'); ?>"></script>
 <!-- Deep-linking: scroll to + flash the targeted row/card/section from ?focus= or #hash -->

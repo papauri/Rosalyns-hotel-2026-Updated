@@ -736,7 +736,9 @@ if ($is_card_insight_ajax) {
                     ['key' => 'amount_due', 'label' => 'Outstanding'],
                 ];
                 $payload['link'] = ['href' => 'bookings.php?status=pending&flash=status:pending', 'label' => 'Open pending bookings'];
-                $stmt = $pdo->query("SELECT id AS booking_id, booking_reference, guest_name, check_in_date, number_of_nights, total_amount, total_with_vat, vat_amount, amount_due
+                $stmt = $pdo->query("SELECT id AS booking_id, booking_reference, guest_name, check_in_date, number_of_nights, total_amount, total_with_vat, vat_amount, amount_due,
+                                            tourism_levy_amount, tourism_levy_percent, vat_rate, child_supplement_total, child_guests, child_price_multiplier,
+                                            child_charge_mode, child_charge_amount, free_children, package_total, rate_plan_label, rate_plan_discount
                                      FROM bookings
                                      WHERE deleted_at IS NULL AND status = 'pending'
                                      ORDER BY created_at ASC
@@ -749,7 +751,7 @@ if ($is_card_insight_ajax) {
                         'guest' => (string)$row['guest_name'],
                         'checkin' => date('M j, Y', strtotime((string)$row['check_in_date'])),
                         'nights' => (string)(int)($row['number_of_nights'] ?? 0),
-                        'total' => $formatMoney(rh_booking_full_total($row)),
+                        'total' => ['type' => 'breakdown', 'text' => $formatMoney(rh_booking_full_total($row)), 'breakdown' => rh_booking_total_breakdown($row)],
                         'amount_due' => $formatMoney((float)($row['amount_due'] ?? 0)),
                     ];
                 }
@@ -2784,6 +2786,10 @@ $currency_symbol = getSetting('currency_symbol');
                                 const label = dashboardInsightEscape(cellValue.label || 'Open');
                                 const target = cellValue.target === '_blank' ? ' target="_blank" rel="noopener"' : '';
                                 return '<td' + dataLabelAttr + '><a class="dashboard-insight-modal__row-link" href="' + href + '"' + target + '>' + label + '</a></td>';
+                            }
+                            if (cellValue && typeof cellValue === 'object' && !Array.isArray(cellValue) && cellValue.type === 'breakdown') {
+                                const infoHtml = typeof window.rhTotalInfoHtml === 'function' ? window.rhTotalInfoHtml(cellValue.breakdown) : '';
+                                return '<td' + dataLabelAttr + '>' + dashboardInsightEscape(cellValue.text ?? '—') + infoHtml + '</td>';
                             }
                             if (cellValue && typeof cellValue === 'object' && !Array.isArray(cellValue) && cellValue.type === 'details') {
                                 const summary = dashboardInsightEscape(cellValue.summary || 'View details');

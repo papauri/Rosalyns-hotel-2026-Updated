@@ -92,12 +92,12 @@ foreach (['exclusive', 'inclusive'] as $mode) {
 
     // Bookings list (search by reference): the Total column
     $r = bft_run('admin/bookings.php', ['method' => 'GET', 'get' => ['search' => $tg], 'setup' => $setup, 'verify' => $verify,
-        'grep' => ['K 116,500.00', 'K 100,000.00', 'K 58,250.00', 'K 87,000.00', 'K 50,000.00']]);
+        'grep' => ['K 116,500.00', 'K 100,000.00', 'K 58,250.00', 'K 87,000.00</strong>', 'K 50,000.00</strong>']]);
     $f = $r['found'] ?? [];
     ok("[$mode] bookings list shows the full total (VAT-exclusive style row)", !empty($f['K 116,500.00']), $r['raw'] ?? '');
     ok("[$mode] bookings list shows the full total (VAT-inclusive style row)", !empty($f['K 100,000.00']));
     ok("[$mode] bookings list shows the fallback total for the NULL total_with_vat row", !empty($f['K 58,250.00']));
-    ok("[$mode] bookings list no longer shows the ex-VAT figures", empty($f['K 87,000.00']) && empty($f['K 50,000.00']));
+    ok("[$mode] bookings list no longer shows the ex-VAT figures", empty($f['K 87,000.00</strong>']) && empty($f['K 50,000.00</strong>']));
     $v = $r['verify'][0] ?? [];
     ok("[$mode] balances unchanged after the list renders", is_array($v) && count($v) === 3 && abs((float)$v[0]['amount_paid'] - 20000) <= BALANCE_TOLERANCE && abs((float)$v[0]['amount_due'] - 96500) <= BALANCE_TOLERANCE);
 
@@ -109,7 +109,7 @@ foreach (['exclusive', 'inclusive'] as $mode) {
     // Dashboard "pending bookings" card
     $r = bft_run('admin/dashboard.php', ['method' => 'GET', 'get' => ['ajax' => 'card_insight', 'card' => 'pending_bookings'], 'setup' => $setup]);
     $totals = [];
-    foreach (($r['json']['rows'] ?? []) as $row) { $totals[$row['reference']['label'] ?? ''] = (string)($row['total'] ?? ''); }
+    foreach (($r['json']['rows'] ?? []) as $row) { $tv = $row['total'] ?? ''; $totals[$row['reference']['label'] ?? ''] = (string)(is_array($tv) ? ($tv['text'] ?? '') : $tv); }
     ok("[$mode] dashboard pending card shows the full total", isset($totals[$a]) && strpos($totals[$a], '116,500') !== false, json_encode($totals) . ' ' . ($r['raw'] ?? ''));
     ok("[$mode] dashboard pending card uses the fallback for the old row", isset($totals[$c]) && strpos($totals[$c], '58,250') !== false, json_encode($totals));
 

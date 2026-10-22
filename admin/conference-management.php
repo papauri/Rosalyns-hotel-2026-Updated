@@ -1051,7 +1051,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                             <th>Room</th>
                             <th>Attendees</th>
                             <th>Status</th>
-                            <th>Amount</th>
+                            <th>Amount<?php echo vat_mode() === 'off' ? '' : ' (incl. VAT)'; ?></th>
                             <th>Actions</th>
                         </tr>
                     </thead>

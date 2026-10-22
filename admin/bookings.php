@@ -2303,6 +2303,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $booking['created_at_formatted'] = date('M j, Y H:i', strtotime($booking['created_at']));
             $booking['total_full'] = rh_booking_full_total($booking); // room + VAT + levy (owner 2026-10-23)
             $booking['total_formatted'] = number_format($booking['total_full'], 2);
+            $booking['total_breakdown'] = rh_booking_total_breakdown($booking);
             $booking['status_label'] = ucfirst($booking['status']);
             $booking['payment_status_label'] = ucfirst($booking['actual_payment_status'] ?? $booking['payment_status']);
 
@@ -3534,7 +3535,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                     <th>Check Out</th>
                                     <th>Nights</th>
                                     <th>Guests</th>
-                                    <th>Total</th>
+                                    <th class="bk-th-total">Total <span class="bk-th-total__sub">(incl. VAT &amp; levy)</span></th>
                                     <th>Status</th>
                                     <th>Payment</th>
                                     <th>Created</th>
@@ -3618,7 +3619,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         <td data-label="Nights"><?php echo $booking['number_of_nights']; ?></td>
                                         <td data-label="Guests"><?php echo $booking['number_of_guests']; ?></td>
                                         <td data-label="Total">
-                                            <strong>K <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong>
+                                            <strong>K <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <?php if ($expires_soon): ?>
                                                     <br><span class="expires-soon"><i class="fas fa-exclamation-triangle"></i> Expires soon!</span>
@@ -6140,7 +6141,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <div id="view_guests" class="detail-value"></div>
                     </div>
                     <div class="detail-item">
-                        <label>Total Amount:</label>
+                        <label>Total Amount (incl. VAT &amp; levy):<span id="view_total_info"></span></label>
                         <div id="view_total" class="detail-value"></div>
                     </div>
                     <div class="detail-item">
@@ -6364,6 +6365,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             setText('view_nights', booking.number_of_nights, '—');
             setText('view_guests', booking.number_of_guests, '—');
             setText('view_total', booking.total_formatted || booking.total_amount, '—');
+            (function () {
+                var infoEl = document.getElementById('view_total_info');
+                if (infoEl) infoEl.innerHTML = (window.rhTotalInfoHtml && booking.total_breakdown) ? window.rhTotalInfoHtml(booking.total_breakdown) : '';
+            })();
             setText('view_status', booking.status_label || booking.status, '—');
             setText('view_payment', booking.payment_status_label || booking.payment_status, '—');
             setText('view_created', booking.created_at_formatted || booking.created_at, '—');
