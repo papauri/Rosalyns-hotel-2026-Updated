@@ -102,9 +102,14 @@ if (!$error && $metrics) {
         $liveSales = $pdo->query("
             SELECT SUM(CASE WHEN settled = 1 THEN 1 ELSE 0 END) AS paid_n,
                    COALESCE(SUM(CASE WHEN settled = 1 THEN total_amount ELSE 0 END), 0) AS paid_amt,
-                   SUM(CASE WHEN status = 'placed' THEN 1 ELSE 0 END) AS open_n
+                   SUM(CASE WHEN status = 'placed' THEN 1 ELSE 0 END) AS open_n,
+                   SUM(CASE WHEN reversed = 1 THEN 1 ELSE 0 END) AS rev_n,
+                   COALESCE(SUM(CASE WHEN reversed = 1 THEN total_amount ELSE 0 END), 0) AS rev_amt
             FROM (
                 SELECT o.status, o.total_amount,
+                       -- Paid orders refunded or voided today: shown under the card so the net figure is explained.
+                       ((o.status = 'refunded' AND DATE(o.refunded_at) = CURDATE())
+                        OR (o.status = 'voided' AND o.paid_at IS NOT NULL AND DATE(o.voided_at) = CURDATE())) AS reversed,
                        (o.status IN ('paid','completed') AND DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()
                         AND NOT (o.order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = o.id))) AS settled
                 FROM stock_orders o
@@ -114,6 +119,8 @@ if (!$error && $metrics) {
             $metrics['orders_paid_today'] = (int)$liveSales['paid_n'];
             $metrics['revenue_today']     = (float)$liveSales['paid_amt'];
             $metrics['orders_pending']    = (int)$liveSales['open_n'];
+            $metrics['reversed_today_n']   = (int)$liveSales['rev_n'];
+            $metrics['reversed_today_amt'] = (float)$liveSales['rev_amt'];
         }
     } catch (Throwable $e) {
         error_log('stock-dashboard sales cards: ' . $e->getMessage());
@@ -360,7 +367,7 @@ $csrf_token = generateCsrfToken();
         <div class="ck-kpis ck-kpis--4">
             <a class="ck-kpi ck-kpi--info" href="stock-orders.php?date=today&status=settled">
                 <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
-                <span class="ck-kpi__label">Settled Today</span>
+                <span class="ck-kpi__label">Net Sales Today</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['revenue_today'], 0); ?></span>
                 <span class="ck-kpi__sub">
                     <?php if (($metrics['orders_paid_today'] ?? null) === null): ?>
@@ -370,7 +377,11 @@ $csrf_token = generateCsrfToken();
                     <?php if ((int)$metrics['orders_paid_today'] > 0 && $metrics['revenue_today'] > 0): ?>
                         &middot; avg <?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($metrics['revenue_today'] / $metrics['orders_paid_today'], 0); ?>
                     <?php endif; ?>
-                    &middot; refunded and voided orders left out
+                    <?php if ((int)($metrics['reversed_today_n'] ?? 0) > 0): ?>
+                        <br>Refunded / voided today: <?php echo number_format((int)$metrics['reversed_today_n']); ?> (<?php echo htmlspecialchars($currency_symbol) . ' ' . number_format((float)$metrics['reversed_today_amt'], 0); ?>)
+                    <?php else: ?>
+                        &middot; after refunds and voids
+                    <?php endif; ?>
                     <?php endif; ?>
                 </span>
             </a>
