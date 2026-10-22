@@ -21,6 +21,15 @@ if (isset($_SESSION['admin_user_id'])) {
     } catch (Exception $e) {
         // Don't block logout if logging fails
     }
+    // No longer online ("Who's online"); silent if the table is missing.
+    try {
+        require_once __DIR__ . '/includes/presence-lib.php';
+        if (isset($pdo)) {
+            rh_presence_clear($pdo, (int)$_SESSION['admin_user_id']);
+        }
+    } catch (Throwable $e) {
+        // Don't block logout
+    }
 }
 
 // Clear all admin session variables

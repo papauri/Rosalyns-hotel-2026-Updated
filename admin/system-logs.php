@@ -479,6 +479,8 @@ sort($sources);
             <p class="text-muted">Live operational view across admin actions, API calls, offline replay, backups, visitors, WhatsApp and PHP errors.</p>
         </div>
 
+        <?php rh_presence_render_panel($pdo, (string)($user['role'] ?? ''), (int)$user['id']); /* Who's online: admin + manager only */ ?>
+
         <div class="log-grid">
             <div class="log-card"><small>System events, 24h</small><strong><?php echo number_format($stats['system_events']); ?></strong></div>
             <div class="log-card"><small>Admin activity, 24h</small><strong><?php echo number_format($stats['admin_activity']); ?></strong></div>

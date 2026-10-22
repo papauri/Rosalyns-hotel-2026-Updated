@@ -361,6 +361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } else {
                         // Delete user permissions first
                         $pdo->prepare("DELETE FROM user_permissions WHERE user_id = ?")->execute([$uid]);
+                        rh_presence_clear($pdo, (int)$uid); // no longer "online" (silent if the table is missing)
 
                         // Delete user
                         $stmt = $pdo->prepare("DELETE FROM admin_users WHERE id = ?");
@@ -537,6 +538,8 @@ $nav_categories = getNavCategories();
         </button>
         <?php endif; ?>
     </div>
+
+    <?php rh_presence_render_panel($pdo, (string)($user['role'] ?? ''), (int)$user['id']); /* Who's online: admin + manager only */ ?>
 
     <!-- Role Overview — roles relevant to this business preset, plus any
          off-preset role that still has users (existing staff are never hidden) -->

@@ -2095,3 +2095,29 @@
         init();
     }
 })();
+
+// Staff presence ("Who's online"): while this tab is visible and the person is using it (mouse,
+// keys, touch, scroll), tell the server at most once a minute which screen they are on. A GET, so
+// it does not extend the 8-hour idle sign-out. A tab left alone stops pinging and ages to idle.
+(function () {
+    'use strict';
+    if (window.__rhPresencePing) { return; }
+    window.__rhPresencePing = true;
+    var lastPing = 0;
+    var EVENTS = ['pointerdown', 'keydown', 'touchstart', 'scroll', 'visibilitychange'];
+
+    function ping() {
+        if (document.hidden || !window.fetch) { return; }
+        var now = Date.now();
+        if (now - lastPing < 60000) { return; }
+        lastPing = now;
+        var page = (location.pathname.split('/').pop() || '').replace(/[^A-Za-z0-9_.-]/g, '');
+        fetch('api/presence.php?ping=1&page=' + encodeURIComponent(page), {
+            credentials: 'same-origin',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        }).catch(function () { /* presence is best effort */ });
+    }
+    EVENTS.forEach(function (evt) {
+        (evt === 'visibilitychange' ? document : window).addEventListener(evt, ping, { passive: true });
+    });
+})();

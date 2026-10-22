@@ -144,6 +144,13 @@ if (!function_exists('rh_format_age')) {
 }
 
 
+// Staff presence ("Who's online"): one throttled, silent upsert per real page load. Background
+// polling GETs are not people using the page, so they do not count (the page script pings instead).
+require_once __DIR__ . '/includes/presence-lib.php';
+if (function_exists('rh_admin_request_is_activity') && rh_admin_request_is_activity()) {
+    rh_presence_heartbeat($pdo, (int)$user['id'], $current_page);
+}
+
 // Web-triggered scheduler: replaces cron (runs after the response is sent; see includes/auto-scheduler.php).
 require_once __DIR__ . '/../includes/auto-scheduler.php';
 rh_scheduler_maybe_run();
