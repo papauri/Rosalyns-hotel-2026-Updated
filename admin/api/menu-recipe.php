@@ -16,6 +16,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/api-init.php';
+require_once __DIR__ . '/../includes/menu-recipe-lib.php';
 
 header('Content-Type: application/json');
 
@@ -44,7 +45,7 @@ try {
 
         case 'list_ingredients': {
                 $rows = $pdo->query(
-                    "SELECT id, name, category, unit, cost_per_unit, current_quantity, min_quantity, yield_percent
+                    "SELECT id, name, category, unit, cost_per_unit, current_quantity, min_quantity, yield_percent, pack_name, pack_size
                  FROM stock_ingredients
                  WHERE is_archived = 0
                  ORDER BY category, name"
@@ -55,13 +56,10 @@ try {
 
         case 'get_recipe': {
                 $mid  = (int)($_GET['menu_item_id'] ?? 0);
-                $typeRaw = trim($_GET['menu_type'] ?? '');
-                $catSlug = $pdo->prepare("SELECT slug FROM menu_categories WHERE slug = ? AND is_active = 1 LIMIT 1");
-                $catSlug->execute([$typeRaw]);
-                $type = (string)($catSlug->fetchColumn() ?: 'food');
-                if ($mid <= 0) {
+                                if ($mid <= 0) {
                     throw new InvalidArgumentException('menu_item_id required');
                 }
+                $type = rh_menu_item_slug($pdo, $mid);
 
                 $itemStmt = $pdo->prepare("SELECT mi.id, mi.item_name, mi.price FROM menu_items mi WHERE mi.id = ?");
                 $itemStmt->execute([$mid]);
@@ -74,19 +72,7 @@ try {
                 $rec->execute([$mid, $type]);
                 $recipe = $rec->fetch(PDO::FETCH_ASSOC);
 
-                $lines = [];
-                if ($recipe) {
-                    $ls = $pdo->prepare(
-                        "SELECT ri.id, ri.ingredient_id, ri.quantity_per_portion, ri.yield_percent,
-                            i.name, i.unit, i.cost_per_unit
-                     FROM stock_recipe_ingredients ri
-                     JOIN stock_ingredients i ON i.id = ri.ingredient_id
-                     WHERE ri.recipe_id = ?
-                     ORDER BY i.name"
-                    );
-                    $ls->execute([$recipe['id']]);
-                    $lines = $ls->fetchAll(PDO::FETCH_ASSOC);
-                }
+                $lines = $recipe ? rh_menu_recipe_lines($pdo, $mid, $type) : [];
 
                 echo json_encode([
                     'ok'      => true,
@@ -99,12 +85,8 @@ try {
 
         case 'save_recipe': {
                 $mid  = (int)($_POST['menu_item_id'] ?? 0);
-                $typeRaw2 = trim($_POST['menu_type'] ?? '');
-                $catSlug2 = $pdo->prepare("SELECT slug FROM menu_categories WHERE slug = ? AND is_active = 1 LIMIT 1");
-                $catSlug2->execute([$typeRaw2]);
-                $type = (string)($catSlug2->fetchColumn() ?: 'food');
-                $portions = max(1, (int)($_POST['portions'] ?? 1));
-                $notes    = trim((string)($_POST['notes'] ?? ''));
+                                $portions = isset($_POST['portions']) ? max(1, (int)$_POST['portions']) : null;
+                $notes    = isset($_POST['notes']) ? trim((string)$_POST['notes']) : null;
                 $linesJson = $_POST['lines'] ?? '[]';
                 $lines = json_decode($linesJson, true);
                 if (!is_array($lines)) {
@@ -114,74 +96,26 @@ try {
                 if ($mid <= 0) {
                     throw new InvalidArgumentException('menu_item_id required');
                 }
+                // The recipe is keyed by the item's own category slug (what the till sells it under).
+                $type = rh_menu_item_slug($pdo, $mid);
 
-                // Validate menu item exists in unified table
-                $check = $pdo->prepare("SELECT id FROM menu_items WHERE id = ?");
-                $check->execute([$mid]);
-                if (!$check->fetchColumn()) {
-                    throw new RuntimeException('Menu item not found');
-                }
-
-                $pdo->beginTransaction();
-
-                // Upsert recipe row
-                $up = $pdo->prepare(
-                    "INSERT INTO stock_recipes (menu_item_id, menu_type, portions_per_recipe, notes, created_by)
-                 VALUES (?, ?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE
-                    portions_per_recipe = VALUES(portions_per_recipe),
-                    notes = VALUES(notes),
-                    updated_at = CURRENT_TIMESTAMP,
-                    id = LAST_INSERT_ID(id)"
-                );
-                $up->execute([$mid, $type, $portions, $notes, (int)$_SESSION['admin_user_id']]);
-                $recipeId = (int)$pdo->lastInsertId();
-
-                // Replace ingredient lines
-                $del = $pdo->prepare("DELETE FROM stock_recipe_ingredients WHERE recipe_id = ?");
-                $del->execute([$recipeId]);
-
-                $ins = $pdo->prepare(
-                    "INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent)
-                 VALUES (?, ?, ?, ?)"
-                );
-                $written = 0;
-                $seenIngredients = [];
-                foreach ($lines as $line) {
-                    $ingId = (int)($line['ingredient_id'] ?? 0);
-                    $qty   = (float)($line['quantity'] ?? 0);
-                    $yld   = isset($line['yield_percent']) && $line['yield_percent'] !== ''
-                        ? max(1, min(100, (float)$line['yield_percent'])) : 100;
-                    if ($ingId > 0 && $qty > 0) {
-                        // Same rule as stock-recipes.php: an ingredient appears once per recipe.
-                        if (isset($seenIngredients[$ingId])) {
-                            throw new InvalidArgumentException('An ingredient can only appear once in a recipe - combine the quantities into one line.');
-                        }
-                        $seenIngredients[$ingId] = true;
-                        $ins->execute([$recipeId, $ingId, $qty, $yld]);
-                        $written++;
-                    }
-                }
-
-                $pdo->commit();
+                $res = rh_menu_recipe_save($pdo, $mid, $type, $portions, $notes, $lines, (int)$_SESSION['admin_user_id']);
+                $written = $res['lines_written'];
                 echo json_encode([
                     'ok' => true,
-                    'recipe_id' => $recipeId,
+                    'recipe_id' => $res['recipe_id'],
                     'lines_written' => $written,
-                    'message' => "Recipe saved ($written ingredient line" . ($written === 1 ? '' : 's') . ')'
+                    'message' => "Stock link saved ($written stock item" . ($written === 1 ? '' : 's') . ')'
                 ]);
                 break;
             }
 
         case 'delete_recipe': {
                 $mid  = (int)($_POST['menu_item_id'] ?? 0);
-                $typeRaw3 = trim($_POST['menu_type'] ?? '');
-                $catSlug3 = $pdo->prepare("SELECT slug FROM menu_categories WHERE slug = ? AND is_active = 1 LIMIT 1");
-                $catSlug3->execute([$typeRaw3]);
-                $type = (string)($catSlug3->fetchColumn() ?: 'food');
-                if ($mid <= 0) {
+                                if ($mid <= 0) {
                     throw new InvalidArgumentException('menu_item_id required');
                 }
+                $type = rh_menu_item_slug($pdo, $mid);
                 $del = $pdo->prepare("DELETE FROM stock_recipes WHERE menu_item_id = ? AND menu_type = ?");
                 $del->execute([$mid, $type]);
                 echo json_encode(['ok' => true, 'deleted' => $del->rowCount()]);

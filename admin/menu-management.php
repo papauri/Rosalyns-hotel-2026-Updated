@@ -4,6 +4,8 @@ require_once 'admin-init.php';
 /** @var string $csrf_token */
 require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/includes/menu-recipe-lib.php';
+require_once __DIR__ . '/includes/menu-pos-sync.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -14,7 +16,7 @@ $user = [
 $message = '';
 $error = '';
 $current_page = basename($_SERVER['PHP_SELF']);
-$current_tab = $_GET['tab'] ?? 'food';
+$current_tab = (($_GET['tab'] ?? 'food') === 'drinks') ? 'drinks' : 'food';
 $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
 // Non-restaurant presets (gym, retail, supermarket…) manage the POS product
@@ -29,21 +31,29 @@ require_once '../includes/facebook-functions.php';
 $fb_menu_posting_on = facebookShareVisible('menu');
 $fb_share_attrs     = facebookShareButtonAttrs('Feature on Facebook'); // title, or disabled + hint when not connected
 
+/* Every save in this page writes the website menu (food_menu / drink_menu) AND the till's catalogue
+ * (menu_items) in one transaction - see includes/menu-pos-sync.php. Stock links (recipes) hang off
+ * the till item. */
+
 // Handle menu item actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
             header('Content-Type: application/json');
-            echo json_encode(['success' => false, 'message' => 'Security token invalid.']);
+            echo json_encode(['success' => false, 'message' => 'Security token invalid. Refresh the page and try again.']);
             exit;
         }
         header('Location: ' . basename($_SERVER['PHP_SELF']));
         exit;
     }
     $menuLockName = '';
+    $jsonExtra = [];
     try {
-        $action = $_POST['action'] ?? '';
-        $menu_type = $_POST['menu_type'] ?? 'food';
+        $action = (string)($_POST['action'] ?? '');
+        // The drinks tab sends 'drinks'; only that or 'drink' selects drink_menu.
+        $menu_type = in_array((string)($_POST['menu_type'] ?? 'food'), ['drink', 'drinks'], true) ? 'drink' : 'food';
+        $table = $menu_type === 'food' ? 'food_menu' : 'drink_menu';
+        $stockOn = function_exists('ensureStockTablesExist') && ensureStockTablesExist();
 
         if ($action === 'save_category_order') {
             $menu_type = $_POST['order_type'] ?? 'food';
@@ -58,359 +68,417 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $message = 'Category order updated successfully!';
         } elseif ($action === 'reorder_items') {
-            $table = $menu_type === 'food' ? 'food_menu' : 'drink_menu';
             $ids = $_POST['ids'] ?? [];
-            $stmt = $pdo->prepare("UPDATE `{$table}` SET display_order = ? WHERE id = ?");
+            if (!is_array($ids)) {
+                $ids = [];
+            }
+            $pdo->beginTransaction();
+            $upd = $pdo->prepare("UPDATE `{$table}` SET display_order = ? WHERE id = ?");
+            $sel = $pdo->prepare("SELECT item_name, category FROM `{$table}` WHERE id = ?");
+            $updPos = $pdo->prepare("UPDATE menu_items SET display_order = ? WHERE id = ?");
             foreach ($ids as $order => $id) {
                 $id = (int)$id;
-                if ($id > 0) {
-                    $stmt->execute([$order + 1, $id]);
+                if ($id <= 0) {
+                    continue;
+                }
+                $upd->execute([$order + 1, $id]);
+                $sel->execute([$id]);
+                $r = $sel->fetch(PDO::FETCH_ASSOC);
+                $p = $r ? rh_menu_pos_find($pdo, (string)$r['item_name'], (string)$r['category']) : null;
+                if ($p) {
+                    $updPos->execute([$order + 1, $p['id']]);
                 }
             }
+            $pdo->commit();
             header('Content-Type: application/json; charset=utf-8');
             echo json_encode(['success' => true]);
             exit;
         } elseif ($action === 'add' || $action === 'update') {
-            // Validate/normalise once so strict SQL never sees '' for a DECIMAL or an over-long value.
-            $_POST['name'] = rh_clean_text($_POST['name'] ?? '');
-            $_POST['category'] = rh_clean_text($_POST['category'] ?? '');
-            $_POST['description'] = (string)($_POST['description'] ?? '');
+            $name = rh_clean_text($_POST['name'] ?? '');
+            $category = rh_clean_text($_POST['category'] ?? '');
+            if ($category === '__new__') {
+                $category = rh_clean_text($_POST['new_category'] ?? '');
+            }
+            $description = mb_substr(trim((string)($_POST['description'] ?? '')), 0, 2000);
             $rawPrice = str_replace(',', '', trim((string)($_POST['price'] ?? '')));
-            if ($_POST['name'] === '' || mb_strlen($_POST['name']) > 200) {
+            $isFree = !empty($_POST['free_item']);
+            $tags = $menu_type === 'drink' ? mb_substr(rh_clean_text($_POST['tags'] ?? ''), 0, 255) : '';
+            $itemId = (int)($_POST['id'] ?? 0);
+
+            if ($name === '' || mb_strlen($name) > 200) {
                 throw new RuntimeException('Item name is required (200 characters maximum).');
             }
-            if ($_POST['category'] === '' || mb_strlen($_POST['category']) > 100) {
-                throw new RuntimeException('Category is required (100 characters maximum).');
+            if ($category === '' || mb_strlen($category) > 100) {
+                throw new RuntimeException('Pick a category (or type a new one, 100 characters maximum).');
             }
-            if ($rawPrice === '' || !is_numeric($rawPrice) || (float)$rawPrice < 0 || (float)$rawPrice > 99999999) {
-                throw new RuntimeException('Enter a valid price (0 or more).');
+            if ($isFree) {
+                $price = '0.00';
+            } else {
+                if ($rawPrice === '' || !is_numeric($rawPrice) || (float)$rawPrice <= 0 || (float)$rawPrice > 99999999) {
+                    throw new RuntimeException('Enter the price (more than 0). For a free item, tick "This item is free".');
+                }
+                $price = number_format((float)$rawPrice, 2, '.', '');
             }
-            $_POST['price'] = number_format((float)$rawPrice, 2, '.', '');
-            if (isset($_POST['tags'])) {
-                $_POST['tags'] = mb_substr((string)$_POST['tags'], 0, 255);
-            }
-            if ($action === 'update' && (int)($_POST['id'] ?? 0) <= 0) {
+            if ($action === 'update' && $itemId <= 0) {
                 throw new RuntimeException('Invalid menu item.');
             }
-            $_POST['is_available'] = !empty($_POST['is_available']) ? 1 : 0;
-            $_POST['display_order'] = (int)($_POST['display_order'] ?? 0);
-            // The drinks tab sends 'drinks'; only that or 'drink' selects drink_menu.
-            $menu_type = in_array($menu_type, ['drink', 'drinks'], true) ? 'drink' : 'food';
-            if ($_POST['display_order'] < 0 || $_POST['display_order'] > 100000) {
-                throw new RuntimeException('Display order must be between 0 and 100000.');
-            }
+            $station = in_array($_POST['station'] ?? '', ['kitchen', 'bar', 'coffee_bar'], true)
+                ? $_POST['station'] : ($menu_type === 'food' ? 'kitchen' : 'bar');
+            $isAvail = !empty($_POST['is_available']) ? 1 : 0;
+            $showPos = !empty($_POST['show_pos']) ? 1 : 0;
+            $showRs = !empty($_POST['show_room_service']) ? 1 : 0;
+            $barcode = array_key_exists('barcode', $_POST) ? rhNormalizeBarcode((string)$_POST['barcode']) : null;
+
             // Same name within the same menu type + category is a duplicate (lock covers check + write).
-            $menuLockName = 'rh_form_menu_item_' . $menu_type . '_' . (defined('DB_NAME') ? DB_NAME : 'db');
-            $menuLockName = substr($menuLockName, 0, 64);
+            $menuLockName = substr('rh_form_menu_item_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64); // one lock for food and drinks: a barcode is unique across both
             if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($menuLockName) . ', 10)')->fetchColumn() !== 1) {
                 $menuLockName = '';
                 throw new RuntimeException('Someone else is saving a menu item right now. Please try again in a moment.');
             }
-            $dupTable = $menu_type === 'food' ? 'food_menu' : 'drink_menu';
+
+            $cur = null;
+            if ($action === 'update') {
+                $curStmt = $pdo->prepare("SELECT * FROM `{$table}` WHERE id = ?");
+                $curStmt->execute([$itemId]);
+                $cur = $curStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$cur) {
+                    throw new RuntimeException('This item no longer exists. Reload the page.');
+                }
+            }
             // On edit, only check when the name or category actually changes, so an item that already
             // has a twin (from before this check existed) can still be edited in place.
             $keyChanged = true;
-            if ($action === 'update') {
-                $curStmt = $pdo->prepare("SELECT item_name, category FROM {$dupTable} WHERE id = ?");
-                $curStmt->execute([(int)$_POST['id']]);
-                $cur = $curStmt->fetch(PDO::FETCH_ASSOC);
-                if ($cur && mb_strtolower(rh_clean_text($cur['item_name'])) === mb_strtolower(rh_clean_text($_POST['name']))
-                    && (string)$cur['category'] === (string)$_POST['category']) {
-                    $keyChanged = false;
-                }
+            if ($cur && mb_strtolower(rh_clean_text($cur['item_name'])) === mb_strtolower($name) && (string)$cur['category'] === $category) {
+                $keyChanged = false;
             }
             $dup = $keyChanged
-                ? rh_find_duplicate($pdo, $dupTable, 'item_name', $_POST['name'], ['category' => $_POST['category']],
-                    $action === 'update' ? (int)$_POST['id'] : null)
+                ? rh_find_duplicate($pdo, $table, 'item_name', $name, ['category' => $category], $action === 'update' ? $itemId : null)
                 : null;
             if ($dup) {
-                throw new RuntimeException('A ' . ($menu_type === 'food' ? 'food' : 'drink') . ' item called "' . htmlspecialchars($dup['value'], ENT_QUOTES, 'UTF-8') . '" already exists in the "' . htmlspecialchars($_POST['category'], ENT_QUOTES, 'UTF-8') . '" category. Use a different name or edit the existing one.');
+                throw new RuntimeException('A ' . ($menu_type === 'food' ? 'food' : 'drink') . ' item called "' . $dup['value'] . '" already exists in "' . $category . '". Use a different name or edit the existing one.');
             }
-        }
-        if ($action === 'add') {
 
-            if ($menu_type === 'food') {
-                // Add new food item - auto-increment display_order if not specified
-                $category = $_POST['category'];
-                $display_order = isset($_POST['display_order']) && $_POST['display_order'] !== '' ? (int)$_POST['display_order'] : null;
-
-                if ($display_order === null) {
-                    // Get next available display_order for this category
-                    $stmt = $pdo->prepare("SELECT COALESCE(MAX(display_order), 0) + 1 as next_order FROM food_menu WHERE category = ?");
-                    $stmt->execute([$category]);
-                    $result = $stmt->fetch(PDO::FETCH_ASSOC);
-                    $display_order = $result['next_order'];
-                }
-
-                $stmt = $pdo->prepare("
-                    INSERT INTO food_menu (item_name, description, price, category, is_available, display_order, station, show_pos, show_room_service)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ");
-                $stmt->execute([
-                    $_POST['name'],
-                    $_POST['description'],
-                    $_POST['price'],
-                    $category,
-                    isset($_POST['is_available']) ? 1 : 0,
-                    $display_order,
-                    in_array($_POST['station'] ?? 'kitchen', ['kitchen', 'bar', 'coffee_bar'], true) ? $_POST['station'] : 'kitchen',
-                    isset($_POST['show_pos']) ? 1 : 0,
-                    isset($_POST['show_room_service']) ? 1 : 0
-                ]);
+            // New items go to the end of their category; an edit keeps its place unless it changes category.
+            if ($cur && (string)$cur['category'] === $category) {
+                $displayOrder = (int)$cur['display_order'];
             } else {
-                // Add new drink item - auto-increment item_order if not specified
-                $category = $_POST['category'];
-                $item_order = isset($_POST['item_order']) && $_POST['item_order'] !== '' ? (int)$_POST['item_order'] : null;
+                $ord = $pdo->prepare("SELECT COALESCE(MAX(display_order), 0) + 1 FROM `{$table}` WHERE category = ?");
+                $ord->execute([$category]);
+                $displayOrder = (int)$ord->fetchColumn();
+            }
 
-                if ($item_order === null) {
-                    // Get next available item_order for this category
-                    $stmt = $pdo->prepare("SELECT COALESCE(MAX(display_order), 0) + 1 as next_order FROM drink_menu WHERE category = ?");
-                    $stmt->execute([$category]);
-                    $result = $stmt->fetch(PDO::FETCH_ASSOC);
-                    $item_order = $result['next_order'];
+            $pdo->beginTransaction();
+            if ($action === 'add') {
+                if ($menu_type === 'food') {
+                    $pdo->prepare("INSERT INTO food_menu (item_name, description, price, category, is_available, display_order, station, show_pos, show_room_service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                        ->execute([$name, $description, $price, $category, $isAvail, $displayOrder, $station, $showPos, $showRs]);
+                } else {
+                    $pdo->prepare("INSERT INTO drink_menu (item_name, description, price, category, is_available, display_order, tags, station, show_pos, show_room_service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                        ->execute([$name, $description, $price, $category, $isAvail, $displayOrder, $tags, $station, $showPos, $showRs]);
                 }
-
-                $stmt = $pdo->prepare("
-                    INSERT INTO drink_menu (item_name, description, price, category, is_available, display_order, tags, station, show_pos, show_room_service)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ");
-                $stmt->execute([
-                    $_POST['name'],
-                    $_POST['description'],
-                    $_POST['price'],
-                    $category,
-                    isset($_POST['is_available']) ? 1 : 0,
-                    $item_order,
-                    $_POST['tags'] ?? '',
-                    in_array($_POST['station'] ?? 'bar', ['kitchen', 'bar', 'coffee_bar'], true) ? $_POST['station'] : 'bar',
-                    isset($_POST['show_pos']) ? 1 : 0,
-                    isset($_POST['show_room_service']) ? 1 : 0
-                ]);
-            }
-            $message = 'Menu item added successfully!';
-            if ($isAjax) {
-                header('Content-Type: application/json; charset=utf-8');
-                echo json_encode(['success' => true, 'message' => $message]);
-                exit;
-            }
-        } elseif ($action === 'update') {
-            if ($menu_type === 'food') {
-                // Update existing food item
-                $stmt = $pdo->prepare("
-                    UPDATE food_menu
-                    SET item_name = ?, description = ?, price = ?, category = ?, is_available = ?, display_order = ?, station = ?, show_pos = ?, show_room_service = ?
-                    WHERE id = ?
-                ");
-                $stmt->execute([
-                    $_POST['name'],
-                    $_POST['description'],
-                    $_POST['price'],
-                    $_POST['category'],
-                    $_POST['is_available'],
-                    $_POST['display_order'],
-                    in_array($_POST['station'] ?? 'kitchen', ['kitchen', 'bar', 'coffee_bar'], true) ? $_POST['station'] : 'kitchen',
-                    isset($_POST['show_pos']) ? 1 : 0,
-                    isset($_POST['show_room_service']) ? 1 : 0,
-                    (int)$_POST['id']
-                ]);
+                $itemId = (int)$pdo->lastInsertId();
+                $old = null;
             } else {
-                // Update existing drink item
-                $stmt = $pdo->prepare("
-                    UPDATE drink_menu
-                    SET item_name = ?, description = ?, price = ?, category = ?, is_available = ?, display_order = ?, tags = ?, station = ?, show_pos = ?, show_room_service = ?
-                    WHERE id = ?
-                ");
-                $stmt->execute([
-                    $_POST['name'],
-                    $_POST['description'],
-                    $_POST['price'],
-                    $_POST['category'],
-                    $_POST['is_available'],
-                    $_POST['display_order'],
-                    $_POST['tags'] ?? '',
-                    in_array($_POST['station'] ?? 'bar', ['kitchen', 'bar', 'coffee_bar'], true) ? $_POST['station'] : 'bar',
-                    isset($_POST['show_pos']) ? 1 : 0,
-                    isset($_POST['show_room_service']) ? 1 : 0,
-                    (int)$_POST['id']
-                ]);
+                if ($menu_type === 'food') {
+                    $pdo->prepare("UPDATE food_menu SET item_name = ?, description = ?, price = ?, category = ?, is_available = ?, display_order = ?, station = ?, show_pos = ?, show_room_service = ? WHERE id = ?")
+                        ->execute([$name, $description, $price, $category, $isAvail, $displayOrder, $station, $showPos, $showRs, $itemId]);
+                } else {
+                    $pdo->prepare("UPDATE drink_menu SET item_name = ?, description = ?, price = ?, category = ?, is_available = ?, display_order = ?, tags = ?, station = ?, show_pos = ?, show_room_service = ? WHERE id = ?")
+                        ->execute([$name, $description, $price, $category, $isAvail, $displayOrder, $tags, $station, $showPos, $showRs, $itemId]);
+                }
+                $old = ['item_name' => $cur['item_name'], 'category' => $cur['category']];
             }
-            $message = 'Menu item updated successfully!';
+
+            // The till's copy of this item (price, station, where it shows, barcode) and its stock link.
+            $pos = rh_menu_pos_sync_item($pdo, $menu_type, [
+                'item_name' => $name, 'description' => $description, 'price' => $price, 'category' => $category,
+                'station' => $station,
+                // Edited without touching availability: leave the till's own setting (it may have been switched off there).
+                'is_available' => ($cur && (int)$cur['is_available'] === $isAvail) ? null : $isAvail,
+                'display_order' => $displayOrder,
+                'show_pos' => $showPos, 'show_room_service' => $showRs, 'tags' => $tags,
+            ], $old, $barcode);
+
+            $stockMsg = '';
+            if ($stockOn && !empty($_POST['recipe_changed'])) {
+                $recipeLines = json_decode((string)($_POST['recipe_lines'] ?? '[]'), true);
+                if (!is_array($recipeLines)) {
+                    $recipeLines = [];
+                }
+                if ($recipeLines) {
+                    $saved = rh_menu_recipe_save($pdo, $pos['id'], $pos['slug'], null, null, $recipeLines, (int)$user['id']);
+                    $stockMsg = ' Stock link saved (' . $saved['lines_written'] . ' stock item' . ($saved['lines_written'] === 1 ? '' : 's') . ').';
+                } else {
+                    $removed = rh_menu_recipe_clear($pdo, $pos['id'], $pos['slug']);
+                    $stockMsg = $removed ? ' Stock link removed.' : '';
+                }
+            }
+            $pdo->commit();
+            $message = ($action === 'add' ? 'Menu item added.' : 'Menu item updated.') . $stockMsg;
+            $jsonExtra = ['pos_id' => $pos['id']];
         } elseif ($action === 'delete') {
-            $table = $_POST['menu_type'] === 'food' ? 'food_menu' : 'drink_menu';
-            $recipeMenuType = $_POST['menu_type'] === 'food' ? 'food' : 'drink';
-            $itemId = (int)$_POST['id'];
-
-            // BLOCK: a live line of this item on an open ('placed') order - the tab or kitchen ticket would lose its item.
-            $openLines = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items soi
-                                          JOIN stock_orders so ON so.id = soi.order_id
-                                         WHERE soi.menu_item_id = ? AND soi.menu_type = ? AND soi.kds_status <> 'void' AND so.status = 'placed'");
-            $openLines->execute([$itemId, $recipeMenuType]);
-            $openLineCount = (int)$openLines->fetchColumn();
-
-            // History: sold on any order, or posted as a room folio charge. Sold items are never hard-deleted.
-            $hasHistory = false;
-            if ($openLineCount === 0) {
-                $hist = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE menu_item_id = ? AND menu_type = ?");
-                $hist->execute([$itemId, $recipeMenuType]);
-                $hasHistory = ((int)$hist->fetchColumn() > 0);
-                if (!$hasHistory) {
-                    try {
-                        $chg = $pdo->prepare("SELECT COUNT(*) FROM booking_charges WHERE source_item_id = ? AND charge_type = ?");
-                        $chg->execute([$itemId, $recipeMenuType]);
-                        $hasHistory = ((int)$chg->fetchColumn() > 0);
-                    } catch (Throwable $e) {
-                        // legacy schema without booking_charges.source_item_id: nothing to check
-                    }
-                }
+            $itemId = (int)($_POST['id'] ?? 0);
+            $rowStmt = $pdo->prepare("SELECT item_name, category FROM `{$table}` WHERE id = ?");
+            $rowStmt->execute([$itemId]);
+            $webRow = $rowStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$webRow) {
+                throw new RuntimeException('This item is already gone. Reload the page.');
+            }
+            $pos = rh_menu_pos_find($pdo, (string)$webRow['item_name'], (string)$webRow['category']);
+            // Another website row with the same name + category shares the till row: leave the till row alone.
+            $twins = 0;
+            foreach (['food_menu', 'drink_menu'] as $t) {
+                $tw = $pdo->prepare("SELECT COUNT(*) FROM `{$t}` WHERE LOWER(item_name) = LOWER(?) AND LOWER(category) = LOWER(?)" . ($t === $table ? ' AND id <> ?' : ''));
+                $tw->execute($t === $table ? [$webRow['item_name'], $webRow['category'], $itemId] : [$webRow['item_name'], $webRow['category']]);
+                $twins += (int)$tw->fetchColumn();
             }
 
-            // Recipe-aware delete: warn if a stock recipe is attached
-            $hasRecipe = false;
-            if (function_exists('ensureStockTablesExist') && ensureStockTablesExist()) {
-                $rcheck = $pdo->prepare("SELECT COUNT(*) FROM stock_recipes WHERE menu_item_id = ? AND menu_type = ?");
-                $rcheck->execute([$itemId, $recipeMenuType]);
-                $hasRecipe = ((int)$rcheck->fetchColumn() > 0);
+            $pdo->beginTransaction();
+            $mode = 'deleted';
+            $res = ['mode' => 'deleted', 'open_lines' => 0, 'deals' => 0];
+            if ($pos && $twins === 0) {
+                $res = rh_menu_pos_remove($pdo, $pos['id'], $pos['slug']);
+                $mode = $res['mode'];
             }
-
-            if ($openLineCount > 0) {
-                $error = 'This item is on ' . $openLineCount . ' open order line(s). Close or settle those orders first, then delete it (or mark it unavailable now).';
-            } elseif ($hasHistory) {
-                // Sales history stays readable (order history, reports, recipe-cost joins): hide it instead of deleting.
-                $pdo->prepare("UPDATE $table SET is_available = 0 WHERE id = ?")->execute([$itemId]);
-                $message = 'This item has sales history so it cannot be deleted - it has been marked unavailable instead.';
-            } elseif ($hasRecipe && empty($_POST['force_delete'])) {
-                $error = 'This menu item has a stock recipe. Re-submit with confirmation to delete the item AND its recipe.';
-            } else {
-                $pdo->beginTransaction();
-                if ($hasRecipe) {
-                    // Cascading FK on stock_recipes will remove ingredients automatically
-                    $delR = $pdo->prepare("DELETE FROM stock_recipes WHERE menu_item_id = ? AND menu_type = ?");
-                    $delR->execute([$itemId, $recipeMenuType]);
-                }
-                $stmt = $pdo->prepare("DELETE FROM $table WHERE id = ?");
-                $stmt->execute([$itemId]);
-
-                // Deals that name this item by id: drop the id (deal item_ids carry no type, so an id the
-                // OTHER menu table still uses is left alone). A deal left with no items is switched off.
-                $otherTable = ($table === 'food_menu') ? 'drink_menu' : 'food_menu';
-                $otherHas = $pdo->prepare("SELECT COUNT(*) FROM $otherTable WHERE id = ?");
-                $otherHas->execute([$itemId]);
-                $dealsTouched = 0;
-                if ((int)$otherHas->fetchColumn() === 0) {
-                    try {
-                        $dl = $pdo->query("SELECT id, item_ids FROM pos_deals WHERE item_ids IS NOT NULL AND item_ids <> '' FOR UPDATE");
-                        foreach ($dl->fetchAll(PDO::FETCH_ASSOC) as $deal) {
-                            $ids = json_decode((string)$deal['item_ids'], true);
-                            if (!is_array($ids)) {
-                                continue;
-                            }
-                            $kept = array_values(array_filter($ids, static function ($v) use ($itemId) { return (int)$v !== $itemId; }));
-                            if (count($kept) === count($ids)) {
-                                continue;
-                            }
-                            if ($kept) {
-                                $pdo->prepare("UPDATE pos_deals SET item_ids = ? WHERE id = ?")->execute([json_encode($kept), (int)$deal['id']]);
-                            } else {
-                                $pdo->prepare("UPDATE pos_deals SET item_ids = NULL, is_active = 0 WHERE id = ?")->execute([(int)$deal['id']]);
-                            }
-                            $dealsTouched++;
-                        }
-                    } catch (Throwable $e) {
-                        error_log('menu delete: deal item_ids cleanup: ' . $e->getMessage());
-                    }
-                }
+            if ($mode === 'blocked') {
+                $pdo->rollBack();
+                throw new RuntimeException('This item is on ' . $res['open_lines'] . ' open order line(s). Close or settle those orders first, then delete it (or mark it unavailable now).');
+            }
+            if ($mode === 'archived') {
+                $pdo->prepare("UPDATE `{$table}` SET is_available = 0 WHERE id = ?")->execute([$itemId]);
                 $pdo->commit();
-                $message = 'Menu item deleted successfully!' . ($hasRecipe ? ' (Recipe also removed.)' : '') . ($dealsTouched > 0 ? ' (' . $dealsTouched . ' deal(s) updated.)' : '');
+                $message = 'This item has sales history, so it cannot be deleted. It has been marked unavailable and hidden from the till and room service instead.';
+            } else {
+                $pdo->prepare("DELETE FROM `{$table}` WHERE id = ?")->execute([$itemId]);
+                $pdo->commit();
+                $message = 'Menu item deleted.' . ($pos && $twins === 0 ? ' Its stock link was removed too.' : '') . ($res['deals'] > 0 ? ' (' . $res['deals'] . ' deal(s) updated.)' : '');
             }
         } elseif ($action === 'toggle_availability') {
-            $table = $_POST['menu_type'] === 'food' ? 'food_menu' : 'drink_menu';
-            $field = 'is_available';
-            $stmt = $pdo->prepare("UPDATE $table SET $field = NOT $field WHERE id = ?");
-            $stmt->execute([$_POST['id']]);
-            $message = 'Menu item availability updated!';
+            $itemId = (int)($_POST['id'] ?? 0);
+            $rowStmt = $pdo->prepare("SELECT item_name, category, is_available FROM `{$table}` WHERE id = ?");
+            $rowStmt->execute([$itemId]);
+            $webRow = $rowStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$webRow) {
+                throw new RuntimeException('This item no longer exists. Reload the page.');
+            }
+            $newAvail = ((int)$webRow['is_available'] === 1) ? 0 : 1;
+            $pdo->beginTransaction();
+            $pdo->prepare("UPDATE `{$table}` SET is_available = ? WHERE id = ?")->execute([$newAvail, $itemId]);
+            $pos = rh_menu_pos_find($pdo, (string)$webRow['item_name'], (string)$webRow['category']);
+            if ($pos) {
+                $pdo->prepare("UPDATE menu_items SET is_available = ? WHERE id = ?")->execute([$newAvail, $pos['id']]);
+            }
+            $pdo->commit();
+            $message = $newAvail ? 'Item is available again.' : 'Item marked unavailable: hidden from the till, room service and the guest menu.';
+            $jsonExtra = ['is_available' => $newAvail];
+        } else {
+            throw new RuntimeException('Unknown action.');
         }
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        if ($menuLockName !== '') {
-            try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($menuLockName) . ')'); } catch (Throwable $e2) {}
-            $menuLockName = '';
+        if ($e instanceof RuntimeException || $e instanceof InvalidArgumentException) {
+            $error = $e->getMessage();
+        } else {
+            error_log('menu-management: ' . $e->getMessage());
+            $error = 'Something went wrong and nothing was changed. Please try again.';
         }
-        $error = 'Error: ' . $e->getMessage();
-        if ($isAjax) {
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['success' => false, 'message' => $error]);
-            exit;
-        }
+    }
+    if ($menuLockName !== '') {
+        try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($menuLockName) . ')'); } catch (Throwable $e2) {}
+    }
+    if ($isAjax) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(array_merge(['success' => $error === '', 'message' => $error !== '' ? $error : $message], $error === '' ? $jsonExtra : []));
+        exit;
     }
 }
 
 // Fetch all menu items grouped by category
+$food_items = [];
+$drink_items = [];
 try {
-    // Simple approach: just use food_menu table
-    $stmt = $pdo->query("
-        SELECT * FROM food_menu
-        ORDER BY category ASC, display_order ASC, item_name ASC
-    ");
-    $food_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    // Fetch drink items from drink_menu
-    $stmt = $pdo->query("
-        SELECT * FROM drink_menu
-        ORDER BY category, display_order ASC, item_name ASC
-    ");
-    $drink_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    // Group food items by category
-    $grouped_food = [];
-    $food_categories = [];
-    foreach ($food_items as $item) {
-        $grouped_food[$item['category']][] = $item;
-        if (!in_array($item['category'], $food_categories)) {
-            $food_categories[] = $item['category'];
-        }
-    }
-    // Always include these standard food categories even if empty
-    $default_food_categories = ['Breakfast', 'Lunch', 'Dinner', 'Snacks', 'Room Service'];
-    $food_categories = array_unique(array_merge($default_food_categories, $food_categories));
-    sort($food_categories);
-
-    // Group drink items by category
-    $grouped_drinks = [];
-    $drink_categories = [];
-    foreach ($drink_items as $item) {
-        $grouped_drinks[$item['category']][] = $item;
-        if (!in_array($item['category'], $drink_categories)) {
-            $drink_categories[] = $item['category'];
-        }
-    }
-    // Always include these standard drink categories even if empty
-    $default_drink_categories = ['Coffee', 'Tea', 'Juice', 'Cocktails', 'Mocktails', 'Beer', 'Wine', 'Spirits', 'Soft Drinks', 'Room Service'];
-    $drink_categories = array_unique(array_merge($default_drink_categories, $drink_categories));
-    sort($drink_categories);
+    $food_items = $pdo->query("SELECT * FROM food_menu ORDER BY category ASC, display_order ASC, item_name ASC")->fetchAll(PDO::FETCH_ASSOC);
+    $drink_items = $pdo->query("SELECT * FROM drink_menu ORDER BY category ASC, display_order ASC, item_name ASC")->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    $error = 'Error fetching menu items: ' . $e->getMessage();
-    $food_categories = [];
-    $grouped_food = [];
-    $grouped_drinks = [];
-    $drink_categories = [];
+    error_log('menu-management fetch: ' . $e->getMessage());
+    $error = 'Could not load the menu items. Please reload the page.';
 }
 
-// Precompute which menu items have a stock recipe (drives the Recipe button state)
-$recipeMap = ['food' => [], 'drink' => []];
+// Every item here needs a till copy (the stock link and the till work from it). Insert-only, idempotent.
+try {
+    rh_menu_pos_backfill($pdo, ['food' => $food_items, 'drink' => $drink_items]);
+} catch (Throwable $e) {
+    error_log('menu-management: till sync: ' . $e->getMessage());
+}
+$posMap = [];
+try {
+    $posMap = rh_menu_pos_map($pdo);
+} catch (Throwable $e) {
+    error_log('menu-management: till map: ' . $e->getMessage());
+}
+
+// Stock links (recipes) of every item: one query, keyed by till item id + category slug.
 $stockReady = function_exists('ensureStockTablesExist') && ensureStockTablesExist();
+$recipeBy = [];
 if ($stockReady) {
     try {
-        $rows = $pdo->query("SELECT menu_item_id, menu_type FROM stock_recipes")->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $pdo->query(
+            "SELECT sr.menu_item_id, sr.menu_type, i.name, i.unit, i.pack_name, i.pack_size, i.cost_per_unit,
+                    ri.quantity_per_portion, ri.yield_percent
+               FROM stock_recipes sr
+               JOIN stock_recipe_ingredients ri ON ri.recipe_id = sr.id
+               JOIN stock_ingredients i ON i.id = ri.ingredient_id
+              ORDER BY i.name"
+        )->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as $r) {
-            $t = $r['menu_type'] === 'drink' ? 'drink' : 'food';
-            $recipeMap[$t][(int)$r['menu_item_id']] = true;
+            $recipeBy[$r['menu_item_id'] . '|' . $r['menu_type']][] = $r;
         }
     } catch (Throwable $e) {
-        // Non-fatal — recipe markers simply won't show
+        error_log('menu-management: recipes: ' . $e->getMessage());
     }
 }
+
+$currencySymbol = (string)getSetting('currency_symbol');
+$stationLabels = ['kitchen' => 'Kitchen', 'bar' => 'Bar', 'coffee_bar' => 'Coffee bar'];
+
+// Category lists for the item form: the usual ones plus anything already in use.
+$groupItems = static function (array $items): array {
+    $g = [];
+    foreach ($items as $item) {
+        $g[$item['category']][] = $item;
+    }
+    ksort($g, SORT_NATURAL | SORT_FLAG_CASE);
+    return $g;
+};
+$grouped_food = $groupItems($food_items);
+$grouped_drinks = $groupItems($drink_items);
+$food_categories = array_values(array_unique(array_merge(['Breakfast', 'Lunch', 'Dinner', 'Snacks', 'Room Service'], array_keys($grouped_food))));
+sort($food_categories, SORT_NATURAL | SORT_FLAG_CASE);
+$drink_categories = array_values(array_unique(array_merge(['Coffee', 'Tea', 'Juice', 'Cocktails', 'Mocktails', 'Beer', 'Wine', 'Spirits', 'Soft Drinks', 'Room Service'], array_keys($grouped_drinks))));
+sort($drink_categories, SORT_NATURAL | SORT_FLAG_CASE);
+
+// Filter dropdown: every category that has items, with its count.
+$filterCats = [];
+foreach (array_merge($food_items, $drink_items) as $it) {
+    $filterCats[$it['category']] = ($filterCats[$it['category']] ?? 0) + 1;
+}
+ksort($filterCats, SORT_NATURAL | SORT_FLAG_CASE);
+
+/** One menu tab: a card per category with a readable table of its items. */
+$mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $recipeBy, $currencySymbol, $stationLabels, $fb_menu_posting_on, $fb_share_attrs): void {
+    $menuType = $tab === 'food' ? 'food' : 'drink';
+    if (!$grouped) {
+        echo '<div class="empty-state mm-empty-all"><p>No ' . ($tab === 'food' ? 'food' : 'drink') . ' items yet. Use "Add item" to create the first one.</p></div>';
+        return;
+    }
+    foreach ($grouped as $category => $items) {
+        $catId = $tab . '-cat-' . preg_replace('/[^a-z0-9]+/', '-', strtolower((string)$category));
+        ?>
+        <div class="category-section" id="<?= htmlspecialchars($catId) ?>" data-cat="<?= htmlspecialchars((string)$category, ENT_QUOTES) ?>">
+            <h3 class="category-header">
+                <span><?= htmlspecialchars((string)$category) ?> <span class="cat-count" data-total="<?= count($items) ?>">(<?= count($items) ?>)</span></span>
+                <button type="button" class="mm-btn mm-btn-sm" onclick="mmOpenAdd('<?= $tab ?>', this.closest('.category-section').dataset.cat)">Add item here</button>
+            </h3>
+            <div class="table-responsive">
+                <table class="menu-table">
+                    <thead>
+                        <tr>
+                            <th class="drag-col" title="Drag to reorder"></th>
+                            <th>Item</th>
+                            <th>Price (<?= htmlspecialchars($currencySymbol) ?>)</th>
+                            <th>Shown in</th>
+                            <th>Uses from stock</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($items as $item):
+                            $pos = $posMap[rh_menu_pos_key((string)$item['item_name'], (string)$item['category'])] ?? null;
+                            $lines = $pos ? ($recipeBy[$pos['id'] . '|' . $pos['slug']] ?? []) : [];
+                            $cost = 0.0;
+                            foreach ($lines as $l) {
+                                $cost += ((float)$l['quantity_per_portion'] / rh_stock_yield_factor((float)$l['yield_percent'])) * (float)$l['cost_per_unit'];
+                            }
+                            $price = (float)$item['price'];
+                            $showPos = !isset($item['show_pos']) || (int)$item['show_pos'] === 1;
+                            $showRs = !isset($item['show_room_service']) || (int)$item['show_room_service'] === 1;
+                            $avail = (int)$item['is_available'] === 1;
+                            $station = $item['station'] ?? ($menuType === 'food' ? 'kitchen' : 'bar');
+                            $barcode = $pos && $pos['barcode'] !== null ? (string)$pos['barcode'] : '';
+                            $data = [
+                                'id' => (int)$item['id'], 'type' => $tab, 'name' => $item['item_name'], 'category' => $item['category'],
+                                'description' => (string)($item['description'] ?? ''), 'price' => $price, 'tags' => (string)($item['tags'] ?? ''),
+                                'station' => $station, 'show_pos' => $showPos ? 1 : 0, 'show_rs' => $showRs ? 1 : 0, 'avail' => $avail ? 1 : 0,
+                                'barcode' => $barcode, 'pos_id' => $pos ? $pos['id'] : 0, 'slug' => $pos ? $pos['slug'] : '',
+                            ];
+                            $search = mb_strtolower($item['item_name'] . ' ' . $item['category'] . ' ' . $barcode);
+                            ?>
+                            <tr id="<?= $menuType ?>-row-<?= (int)$item['id'] ?>" class="mm-row" data-tab="<?= $tab ?>" data-cat="<?= htmlspecialchars((string)$item['category'], ENT_QUOTES) ?>"
+                                data-search="<?= htmlspecialchars($search, ENT_QUOTES) ?>" data-rs="<?= $showRs ? 1 : 0 ?>" data-avail="<?= $avail ? 1 : 0 ?>" data-stock="<?= $lines ? 1 : 0 ?>"
+                                data-item="<?= htmlspecialchars(json_encode($data, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8') ?>">
+                                <td class="drag-col">
+                                    <span class="drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
+                                </td>
+                                <td class="mm-c-name" data-label="Item">
+                                    <strong class="mm-item-name"><?= htmlspecialchars($item['item_name']) ?></strong>
+                                    <?php if (trim((string)($item['description'] ?? '')) !== ''): ?>
+                                        <span class="mm-sub"><?= htmlspecialchars(mb_strimwidth((string)$item['description'], 0, 90, '…')) ?></span>
+                                    <?php endif; ?>
+                                    <?php if ($barcode !== ''): ?>
+                                        <span class="mm-sub">Barcode <?= htmlspecialchars($barcode) ?></span>
+                                    <?php endif; ?>
+                                    <?php if (!empty($item['tags'])): ?>
+                                        <span class="mm-sub"><?= htmlspecialchars((string)$item['tags']) ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="mm-c-price" data-label="Price"><?= $price > 0 ? number_format($price, 2) : '<span class="mm-tag">Free</span>' ?></td>
+                                <td data-label="Shown in">
+                                    <span class="mm-tag"><?= htmlspecialchars($stationLabels[$station] ?? 'Kitchen') ?></span>
+                                    <?php if ($showPos): ?><span class="mm-tag">Till</span><?php endif; ?>
+                                    <?php if ($showRs): ?><span class="mm-tag">Room service</span><?php endif; ?>
+                                    <?php if (!$showPos && !$showRs): ?><span class="mm-tag mm-tag-off">Website only</span><?php endif; ?>
+                                    <?php if ($avail && $pos && (int)$pos['is_available'] === 0): ?><span class="mm-tag mm-tag-off" title="Switched off from the till (86). Marking it unavailable and available again here puts it back.">Off at the till</span><?php endif; ?>
+                                </td>
+                                <td data-label="Uses from stock" class="mm-c-stock">
+                                    <?php if ($lines): ?>
+                                        <?php foreach (array_slice($lines, 0, 2) as $l): ?>
+                                            <span class="mm-uses"><?= htmlspecialchars($l['name']) ?>: <?= htmlspecialchars(rh_recipe_fmt_qty((float)$l['quantity_per_portion'])) ?> <?= htmlspecialchars($l['unit']) ?></span>
+                                        <?php endforeach; ?>
+                                        <?php if (count($lines) > 2): ?><span class="mm-sub">+<?= count($lines) - 2 ?> more</span><?php endif; ?>
+                                        <span class="mm-sub">Cost <?= number_format($cost, 2) ?><?= $price > 0 ? ' (' . round($cost / $price * 100) . '% of price)' : '' ?></span>
+                                    <?php else: ?>
+                                        <span class="mm-sub">Not linked to stock</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td data-label="Status">
+                                    <button type="button" class="mm-pill <?= $avail ? 'is-on' : 'is-off' ?>" onclick="mmToggle(<?= (int)$item['id'] ?>, '<?= $tab ?>')"
+                                        title="<?= $avail ? 'Click to mark unavailable' : 'Click to mark available' ?>"><?= $avail ? 'Available' : 'Unavailable' ?></button>
+                                </td>
+                                <td class="actions-cell">
+                                    <div class="action-buttons">
+                                        <button type="button" class="btn-action btn-edit" onclick="mmOpenEdit(this)">Edit</button>
+                                        <button type="button" class="btn-action btn-delete" onclick="mmConfirmDelete(<?= (int)$item['id'] ?>, '<?= $tab ?>')">Delete</button>
+                                        <?php if ($fb_menu_posting_on): ?>
+                                            <button type="button" class="btn-action btn-facebook"
+                                                onclick='openFbMenuModal(<?= (int)$item["id"] ?>, <?= htmlspecialchars(json_encode($item["item_name"]), ENT_QUOTES, "UTF-8") ?>, <?= htmlspecialchars(json_encode((float)$item["price"]), ENT_QUOTES, "UTF-8") ?>, <?= htmlspecialchars(json_encode($item["category"] ?? ""), ENT_QUOTES, "UTF-8") ?>, "<?= $menuType ?>")'
+                                                <?= $fb_share_attrs ?>>
+                                                <i class="fab fa-facebook-f"></i> Feature
+                                            </button>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <?php
+    }
+};
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -443,9 +511,11 @@ if ($stockReady) {
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
 
+    <div class="mm-restaurant">
     <div class="content">
         <div class="page-header">
             <h2 class="page-title">Menu Management</h2>
+            <button type="button" class="btn-add" onclick="mmOpenAdd(mmActiveTab())">Add item</button>
         </div>
 
         <?php if ($message): ?>
@@ -474,409 +544,144 @@ if ($stockReady) {
             </div>
         <?php endif; ?>
 
+        <!-- Find an item: filters both tabs as you type -->
+        <div class="mm-toolbar" id="mmToolbar">
+            <div class="mm-search">
+                <label for="mmSearch" class="mm-sr">Search menu items</label>
+                <input type="search" id="mmSearch" placeholder="Search by item name, category or barcode" autocomplete="off" aria-controls="mmResults">
+                <button type="button" class="mm-search-clear" id="mmSearchClear" onclick="mmClearFilters()" aria-label="Clear search" hidden>&times;</button>
+            </div>
+            <select id="mmCatFilter" aria-label="Filter by category">
+                <option value="">All categories</option>
+                <?php foreach ($filterCats as $c => $n): ?>
+                    <option value="<?= htmlspecialchars((string)$c, ENT_QUOTES) ?>"><?= htmlspecialchars((string)$c) ?> (<?= (int)$n ?>)</option>
+                <?php endforeach; ?>
+            </select>
+            <select id="mmShowFilter" aria-label="Filter by status">
+                <option value="">All items</option>
+                <option value="avail">Available only</option>
+                <option value="unavail">Unavailable only</option>
+                <option value="rs">Room service items</option>
+                <option value="nostock">Not linked to stock</option>
+            </select>
+            <span class="mm-count" id="mmCount" aria-live="polite"></span>
+        </div>
+
         <!-- Menu Type Tabs -->
-        <div class="menu-type-tabs">
-            <button class="menu-type-tab <?php echo $current_tab === 'food' ? 'active' : ''; ?>" onclick="switchTab('food')">
-                <i class="fas fa-utensils"></i> Food Menu
+        <div class="menu-type-tabs" role="tablist">
+            <button type="button" role="tab" id="mmTabFood" class="menu-type-tab <?php echo $current_tab === 'food' ? 'active' : ''; ?>" onclick="switchTab('food')">
+                Food <span class="mm-tab-n" data-tab-count="food"><?= count($food_items) ?></span>
             </button>
-            <button class="menu-type-tab <?php echo $current_tab === 'drinks' ? 'active' : ''; ?>" onclick="switchTab('drinks')">
-                <i class="fas fa-glass-martini-alt"></i> Drinks Menu
-            </button>
-            <button class="menu-type-tab menu-type-tab--rs" onclick="jumpToRoomService()" title="Jump to Room Service items in Food &amp; Drinks">
-                <i class="fas fa-concierge-bell"></i> Room Service
+            <button type="button" role="tab" id="mmTabDrinks" class="menu-type-tab <?php echo $current_tab === 'drinks' ? 'active' : ''; ?>" onclick="switchTab('drinks')">
+                Drinks <span class="mm-tab-n" data-tab-count="drinks"><?= count($drink_items) ?></span>
             </button>
         </div>
 
-        <!-- Food Menu Tab Content -->
-        <div class="tab-content <?php echo $current_tab === 'food' ? 'active' : ''; ?>" id="food-tab">
-            <div class="page-header">
-                <h3 class="page-title">Food Items</h3>
-                <button class="btn-add" onclick="openAddModal('food')">
-                    <i class="fas fa-plus"></i> Add Food Item
-                </button>
+        <div id="mmCats" hidden data-food="<?= htmlspecialchars(json_encode($food_categories), ENT_QUOTES, 'UTF-8') ?>" data-drinks="<?= htmlspecialchars(json_encode($drink_categories), ENT_QUOTES, 'UTF-8') ?>"></div>
+
+        <div id="mmResults">
+            <div class="mm-nomatch" id="mmNoMatch" hidden>
+                <p id="mmNoMatchText">No items match.</p>
+                <p><button type="button" class="mm-btn mm-btn-sm" id="mmNoMatchSwitch" hidden></button>
+                    <button type="button" class="mm-btn mm-btn-sm" onclick="mmClearFilters()">Clear search and filters</button></p>
             </div>
 
-            <?php foreach ($food_categories as $category): ?>
-                <div class="category-section" id="food-cat-<?php echo preg_replace('/[^a-z0-9]+/', '-', strtolower($category)); ?>">
-                    <h3 class="category-header">
-                        <span>
-                            <i class="fas fa-<?php
-                                                echo $category === 'Breakfast' ? 'coffee' : ($category === 'Lunch' ? 'hamburger' : ($category === 'Dinner' ? 'drumstick-bite' : ($category === 'Room Service' ? 'concierge-bell' : ($category === 'Snacks' ? 'cookie-bite' : 'utensils'))));
-                                                ?>"></i>
-                            <?php echo $category; ?>
-                            <?php if (isset($grouped_food[$category])): ?>
-                                <span class="cat-count">(<?php echo count($grouped_food[$category]); ?> items)</span>
-                            <?php endif; ?>
-                        </span>
-                        <button class="mm-btn mm-btn-sm" onclick="openAddModal('food', '<?php echo htmlspecialchars($category); ?>')">
-                            <i class="fas fa-plus"></i> Add Item
-                        </button>
-                    </h3>
-
-                    <?php if (isset($grouped_food[$category]) && !empty($grouped_food[$category])): ?>
-                        <div class="table-responsive">
-                            <table class="menu-table">
-                                <thead>
-                                    <tr>
-                                        <th class="drag-col" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></th>
-                                        <th style="width: 250px;">Item Name</th>
-                                        <th style="width: 350px;">Description</th>
-                                        <th style="width: 150px;">Price (<?php echo htmlspecialchars(getSetting('currency_symbol')); ?>)</th>
-                                        <th style="width: 200px;">Routing</th>
-                                        <th style="width: 150px;">Status</th>
-                                        <th style="width: 300px;">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($grouped_food[$category] as $item): ?>
-                                        <tr id="food-row-<?php echo $item['id']; ?>" data-category="<?php echo htmlspecialchars($item['category']); ?>">
-                                            <td class="drag-col">
-                                                <span class="drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
-                                                <input type="hidden" value="<?php echo (int)$item['display_order']; ?>" data-field="display_order">
-                                            </td>
-                                            <td>
-                                                <input type="text" value="<?php echo htmlspecialchars($item['item_name']); ?>" data-field="name">
-                                            </td>
-                                            <td>
-                                                <textarea data-field="description"><?php echo htmlspecialchars($item['description'] ?? ''); ?></textarea>
-                                            </td>
-                                            <td>
-                                                <input type="number" value="<?php echo $item['price']; ?>" step="0.01" data-field="price">
-                                            </td>
-                                            <td>
-                                                <select data-field="station" class="menu-routing-select">
-                                                    <option value="kitchen" <?php echo (($item['station'] ?? 'kitchen') === 'kitchen')    ? 'selected' : ''; ?>>Kitchen</option>
-                                                    <option value="bar" <?php echo (($item['station'] ?? '') === 'bar')                  ? 'selected' : ''; ?>>Bar</option>
-                                                    <option value="coffee_bar" <?php echo (($item['station'] ?? '') === 'coffee_bar')           ? 'selected' : ''; ?>>Coffee Bar</option>
-                                                </select>
-                                                <div class="menu-routing-checks">
-                                                    <label><input type="checkbox" data-field="show_pos" <?php echo !isset($item['show_pos']) || $item['show_pos'] ? 'checked' : ''; ?>> POS</label>
-                                                    <label><input type="checkbox" data-field="show_room_service" <?php echo !isset($item['show_room_service']) || $item['show_room_service'] ? 'checked' : ''; ?>> Room Service</label>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <select data-field="is_available">
-                                                    <option value="1" <?php echo $item['is_available'] ? 'selected' : ''; ?>>Available</option>
-                                                    <option value="0" <?php echo !$item['is_available'] ? 'selected' : ''; ?>>Unavailable</option>
-                                                </select>
-                                            </td>
-                                            <td class="actions-cell">
-                                                <div class="action-buttons">
-                                                    <button class="btn-action btn-save"
-                                                        onclick="saveRow(<?php echo $item['id']; ?>, '<?php echo htmlspecialchars($item['category']); ?>', 'food')"
-                                                        title="Save Changes">
-                                                        <i class="fas fa-save"></i> Save
-                                                    </button>
-                                                    <button class="btn-action btn-toggle <?php echo $item['is_available'] ? 'active' : ''; ?>"
-                                                        onclick="quickToggle(<?php echo $item['id']; ?>, 'food')"
-                                                        title="<?php echo $item['is_available'] ? 'Mark as Unavailable' : 'Mark as Available'; ?>">
-                                                        <i class="fas fa-toggle-<?php echo $item['is_available'] ? 'on' : 'off'; ?>"></i> Toggle
-                                                    </button>
-                                                    <button class="btn-action btn-recipe<?php echo isset($recipeMap['food'][(int)$item['id']]) ? ' has-recipe' : ''; ?>"
-                                                        onclick="openRecipeModal(<?php echo (int)$item['id']; ?>, 'food', '<?php echo htmlspecialchars($item['item_name'], ENT_QUOTES); ?>')"
-                                                        title="Manage stock recipe">
-                                                        <i class="fas fa-flask"></i> Recipe
-                                                    </button>
-                                                    <button class="btn-action btn-delete"
-                                                        onclick="mmConfirmDelete(<?php echo $item['id']; ?>, 'food')"
-                                                        title="Delete Item">
-                                                        <i class="fas fa-trash-alt"></i> Delete
-                                                    </button>
-                                                    <?php if ($fb_menu_posting_on): ?>
-                                                        <button class="btn-action btn-facebook"
-                                                            onclick='openFbMenuModal(<?php echo (int)$item["id"]; ?>, <?php echo htmlspecialchars(json_encode($item["item_name"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode((float)$item["price"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($item["category"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, "food")'
-                                                            <?php echo $fb_share_attrs; ?>>
-                                                            <i class="fab fa-facebook-f"></i> Feature
-                                                        </button>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    <?php else: ?>
-                        <div class="empty-state">
-                            <i class="fas fa-inbox"></i>
-                            <p>No items in this category yet. Click "Add Food Item" to get started.</p>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            <?php endforeach; ?>
-        </div>
-
-        <!-- Drinks Menu Tab Content -->
-        <div class="tab-content <?php echo $current_tab === 'drinks' ? 'active' : ''; ?>" id="drinks-tab">
-            <div class="page-header">
-                <h3 class="page-title">Drinks Items</h3>
-                <button class="btn-add" onclick="openAddModal('drinks')">
-                    <i class="fas fa-plus"></i> Add Drink Item
-                </button>
+            <!-- Food Menu Tab Content -->
+            <div class="tab-content <?php echo $current_tab === 'food' ? 'active' : ''; ?>" id="food-tab">
+                <?php $mmRenderTab('food', $grouped_food); ?>
             </div>
 
-            <?php foreach ($drink_categories as $category): ?>
-                <div class="category-section" id="drinks-cat-<?php echo preg_replace('/[^a-z0-9]+/', '-', strtolower($category)); ?>">
-                    <h3 class="category-header">
-                        <span>
-                            <i class="fas fa-<?php
-                                                echo $category === 'Coffee' ? 'coffee' : ($category === 'Wine' ? 'wine-bottle' : ($category === 'Cocktails' ? 'glass-martini-alt' : ($category === 'Beer' ? 'beer' : 'glass-martini-alt')));
-                                                ?>"></i>
-                            <?php echo $category; ?>
-                            <?php if (isset($grouped_drinks[$category])): ?>
-                                <span class="cat-count">(<?php echo count($grouped_drinks[$category]); ?> items)</span>
-                            <?php endif; ?>
-                        </span>
-                        <button class="mm-btn mm-btn-sm" onclick="openAddModal('drinks', '<?php echo htmlspecialchars($category); ?>')">
-                            <i class="fas fa-plus"></i> Add Item
-                        </button>
-                    </h3>
-
-                    <?php if (isset($grouped_drinks[$category]) && !empty($grouped_drinks[$category])): ?>
-                        <div class="table-responsive">
-                            <table class="menu-table">
-                                <thead>
-                                    <tr>
-                                        <th class="drag-col" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></th>
-                                        <th style="width: 250px;">Item Name</th>
-                                        <th style="width: 300px;">Description</th>
-                                        <th style="width: 150px;">Price (<?php echo htmlspecialchars(getSetting('currency_symbol')); ?>)</th>
-                                        <th style="width: 150px;">Tags</th>
-                                        <th style="width: 200px;">Routing</th>
-                                        <th style="width: 150px;">Status</th>
-                                        <th style="width: 300px;">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($grouped_drinks[$category] as $item): ?>
-                                        <tr id="drink-row-<?php echo $item['id']; ?>" data-category="<?php echo htmlspecialchars($item['category']); ?>">
-                                            <td class="drag-col">
-                                                <span class="drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
-                                                <input type="hidden" value="<?php echo (int)$item['display_order']; ?>" data-field="display_order">
-                                            </td>
-                                            <td>
-                                                <input type="text" value="<?php echo htmlspecialchars($item['item_name']); ?>" data-field="name">
-                                            </td>
-                                            <td>
-                                                <textarea data-field="description"><?php echo htmlspecialchars($item['description'] ?? ''); ?></textarea>
-                                            </td>
-                                            <td>
-                                                <input type="number" value="<?php echo $item['price']; ?>" step="0.01" data-field="price">
-                                            </td>
-                                            <td>
-                                                <input type="text" value="<?php echo htmlspecialchars($item['tags'] ?? ''); ?>" data-field="tags" placeholder="e.g., Hot, Cold, Premium">
-                                            </td>
-                                            <td>
-                                                <select data-field="station" class="menu-routing-select">
-                                                    <option value="bar" <?php echo (($item['station'] ?? 'bar') === 'bar')                ? 'selected' : ''; ?>>Bar</option>
-                                                    <option value="coffee_bar" <?php echo (($item['station'] ?? '') === 'coffee_bar')           ? 'selected' : ''; ?>>Coffee Bar</option>
-                                                    <option value="kitchen" <?php echo (($item['station'] ?? '') === 'kitchen')              ? 'selected' : ''; ?>>Kitchen</option>
-                                                </select>
-                                                <div class="menu-routing-checks">
-                                                    <label><input type="checkbox" data-field="show_pos" <?php echo !isset($item['show_pos']) || $item['show_pos'] ? 'checked' : ''; ?>> POS</label>
-                                                    <label><input type="checkbox" data-field="show_room_service" <?php echo !isset($item['show_room_service']) || $item['show_room_service'] ? 'checked' : ''; ?>> Room Service</label>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <select data-field="is_available">
-                                                    <option value="1" <?php echo $item['is_available'] ? 'selected' : ''; ?>>Available</option>
-                                                    <option value="0" <?php echo !$item['is_available'] ? 'selected' : ''; ?>>Unavailable</option>
-                                                </select>
-                                            </td>
-                                            <td class="actions-cell">
-                                                <div class="action-buttons">
-                                                    <button class="btn-action btn-save"
-                                                        onclick="saveRow(<?php echo $item['id']; ?>, '<?php echo htmlspecialchars($item['category']); ?>', 'drinks')"
-                                                        title="Save Changes">
-                                                        <i class="fas fa-save"></i> Save
-                                                    </button>
-                                                    <button class="btn-action btn-toggle <?php echo $item['is_available'] ? 'active' : ''; ?>"
-                                                        onclick="quickToggle(<?php echo $item['id']; ?>, 'drinks')"
-                                                        title="<?php echo $item['is_available'] ? 'Mark as Unavailable' : 'Mark as Available'; ?>">
-                                                        <i class="fas fa-toggle-<?php echo $item['is_available'] ? 'on' : 'off'; ?>"></i> Toggle
-                                                    </button>
-                                                    <button class="btn-action btn-recipe<?php echo isset($recipeMap['drink'][(int)$item['id']]) ? ' has-recipe' : ''; ?>"
-                                                        onclick="openRecipeModal(<?php echo (int)$item['id']; ?>, 'drink', '<?php echo htmlspecialchars($item['item_name'], ENT_QUOTES); ?>')"
-                                                        title="Manage stock recipe">
-                                                        <i class="fas fa-flask"></i> Recipe
-                                                    </button>
-                                                    <button class="btn-action btn-delete"
-                                                        onclick="mmConfirmDelete(<?php echo $item['id']; ?>, 'drinks')"
-                                                        title="Delete Item">
-                                                        <i class="fas fa-trash-alt"></i> Delete
-                                                    </button>
-                                                    <?php if ($fb_menu_posting_on): ?>
-                                                        <button class="btn-action btn-facebook"
-                                                            onclick='openFbMenuModal(<?php echo (int)$item["id"]; ?>, <?php echo htmlspecialchars(json_encode($item["item_name"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode((float)$item["price"]), ENT_QUOTES, "UTF-8"); ?>, <?php echo htmlspecialchars(json_encode($item["category"] ?? ""), ENT_QUOTES, "UTF-8"); ?>, "drink")'
-                                                            <?php echo $fb_share_attrs; ?>>
-                                                            <i class="fab fa-facebook-f"></i> Feature
-                                                        </button>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    <?php else: ?>
-                        <div class="empty-state">
-                            <i class="fas fa-inbox"></i>
-                            <p>No items in this category yet. Click "Add Drink Item" to get started.</p>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            <?php endforeach; ?>
+            <!-- Drinks Menu Tab Content -->
+            <div class="tab-content <?php echo $current_tab === 'drinks' ? 'active' : ''; ?>" id="drinks-tab">
+                <?php $mmRenderTab('drinks', $grouped_drinks); ?>
+            </div>
         </div>
     </div>
 
-    <!-- Add Menu Item Modal -->
-    <div class="mm-modal" id="addMenuModal">
-        <div class="mm-modal-card sm">
+    <!-- Add / edit one menu item (details, where it shows, what it uses from stock) -->
+    <div class="mm-modal" id="mmItemModal" role="dialog" aria-modal="true" aria-labelledby="mmItemTitle">
+        <div class="mm-modal-card">
             <div class="mm-modal-head">
-                <h3 id="modal-title">Add New Menu Item</h3>
-                <button type="button" class="mm-modal-close" onclick="closeAddModal()" aria-label="Close">&times;</button>
+                <h3 id="mmItemTitle">Add menu item</h3>
+                <button type="button" class="mm-modal-close" onclick="mmCloseItem()" aria-label="Close">&times;</button>
             </div>
-            <form method="POST" id="addMenuForm">
+            <form method="POST" id="mmItemForm" novalidate>
                 <div class="mm-modal-body">
-                    <input type="hidden" name="action" value="add">
-                    <input type="hidden" name="menu_type" id="menu_type" value="food">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
+                    <input type="hidden" name="action" id="mmAction" value="add">
+                    <input type="hidden" name="id" id="mmId" value="">
+                    <input type="hidden" name="menu_type" id="mmType" value="food">
 
                     <div class="mm-field">
-                        <label for="add_category">Category *</label>
-                        <select name="category" id="add_category" required>
-                            <option value="">Select category</option>
-                        </select>
-                    </div>
-                    <div class="mm-field">
-                        <label for="add_name">Item name *</label>
-                        <input type="text" name="name" id="add_name" required>
-                    </div>
-                    <div class="mm-field">
-                        <label for="add_description">Description *</label>
-                        <textarea name="description" id="add_description" rows="3" required></textarea>
+                        <label for="mmName">Item name <span class="mm-req">*</span></label>
+                        <input type="text" name="name" id="mmName" maxlength="200" required autocomplete="off">
                     </div>
                     <div class="mm-field-row">
                         <div class="mm-field">
-                            <label for="add_price">Price *</label>
-                            <input type="number" name="price" id="add_price" step="0.01" required data-currency="<?php echo htmlspecialchars(getSetting('currency_symbol'), ENT_QUOTES); ?>">
+                            <label for="mmCategory">Category <span class="mm-req">*</span></label>
+                            <select name="category" id="mmCategory" required></select>
+                            <input type="text" name="new_category" id="mmNewCategory" maxlength="100" placeholder="New category name" hidden>
                         </div>
                         <div class="mm-field">
-                            <label for="add_order">Display order</label>
-                            <input type="number" name="display_order" id="add_order" placeholder="Auto">
+                            <label for="mmPrice">Price (<?= htmlspecialchars($currencySymbol) ?>) <span class="mm-req">*</span></label>
+                            <input type="number" name="price" id="mmPrice" step="0.01" min="0" inputmode="decimal" required>
+                            <label class="mm-checkbox-line mm-free"><input type="checkbox" name="free_item" id="mmFree" value="1"> <span>This item is free</span></label>
                         </div>
                     </div>
-                    <div class="mm-field" id="tags-field-container" style="display:none;">
-                        <label for="add_tags">Tags (comma-separated)</label>
-                        <input type="text" name="tags" id="add_tags" placeholder="e.g., Hot, Cold, Premium">
-                    </div>
                     <div class="mm-field">
-                        <label for="add_station">Station (where this item is prepared)</label>
-                        <select name="station" id="add_station">
-                            <option value="kitchen">Kitchen (KDS)</option>
-                            <option value="bar">Bar (BDS)</option>
-                            <option value="coffee_bar">Coffee Bar (CDS)</option>
+                        <label for="mmStation">Prepared at</label>
+                        <select name="station" id="mmStation">
+                            <option value="kitchen">Kitchen</option>
+                            <option value="bar">Bar</option>
+                            <option value="coffee_bar">Coffee bar</option>
                         </select>
                     </div>
+                    <fieldset class="mm-field mm-where">
+                        <legend>Where it shows</legend>
+                        <label class="mm-checkbox-line"><input type="checkbox" name="is_available" id="mmAvail" value="1" checked> <span>Available (untick to hide it everywhere)</span></label>
+                        <label class="mm-checkbox-line"><input type="checkbox" name="show_pos" id="mmShowPos" value="1" checked> <span>On the till (POS)</span></label>
+                        <label class="mm-checkbox-line"><input type="checkbox" name="show_room_service" id="mmShowRs" value="1" checked> <span>In room service</span></label>
+                    </fieldset>
                     <div class="mm-field">
-                        <label class="mm-checkbox-line">
-                            <input type="checkbox" name="is_available" id="add_active" checked>
-                            <span id="availability-label">Available (visible on menu)</span>
-                        </label>
+                        <label for="mmDesc">Description <span class="mm-opt">(optional)</span></label>
+                        <textarea name="description" id="mmDesc" rows="2" maxlength="2000"></textarea>
                     </div>
-                    <div class="mm-field">
-                        <label class="mm-checkbox-line">
-                            <input type="checkbox" name="show_pos" id="add_show_pos" checked>
-                            <span>Show in POS / Till</span>
-                        </label>
+                    <div class="mm-field-row">
+                        <div class="mm-field" id="mmTagsWrap" hidden>
+                            <label for="mmTags">Tags <span class="mm-opt">(optional, comma separated)</span></label>
+                            <input type="text" name="tags" id="mmTags" maxlength="255" placeholder="e.g. Hot, Cold, Premium">
+                        </div>
+                        <div class="mm-field">
+                            <label for="mmBarcode">Barcode <span class="mm-opt">(optional)</span></label>
+                            <input type="text" name="barcode" id="mmBarcode" maxlength="100" autocomplete="off" placeholder="Scan or type">
+                        </div>
                     </div>
-                    <div class="mm-field">
-                        <label class="mm-checkbox-line">
-                            <input type="checkbox" name="show_room_service" id="add_show_rs" checked>
-                            <span>Show in Room Service Dashboard</span>
-                        </label>
-                    </div>
+
+                    <!-- What one sale uses from stock -->
+                    <section class="mm-stock" id="mmStock" aria-labelledby="mmStockTitle">
+                        <h4 id="mmStockTitle">What it uses from stock</h4>
+                        <p class="mm-hint">Each time one is sold, stock goes down by this amount. Selling one sausage from a pack of 10? Pick the sausages, enter 1 and choose "each". Leave this empty if the item does not use tracked stock.</p>
+                        <div id="mmStockLines"></div>
+                        <div class="mm-stock-add">
+                            <input type="text" id="mmIngPick" list="mmIngList" placeholder="Search stock items…" autocomplete="off" aria-label="Stock item">
+                            <datalist id="mmIngList"></datalist>
+                            <input type="number" id="mmIngQty" step="any" min="0" inputmode="decimal" placeholder="Qty" aria-label="Quantity used per item sold">
+                            <select id="mmIngUnit" aria-label="Unit"></select>
+                            <button type="button" class="mm-btn" id="mmIngAdd" onclick="mmStockAdd()">Add</button>
+                        </div>
+                        <p class="mm-preview" id="mmIngPreview" aria-live="polite"></p>
+                        <p class="mm-hint"><button type="button" class="mm-linkbtn" onclick="openIngredientModal()">Stock item not listed? Create it</button></p>
+                        <div class="mm-stock-totals" id="mmStockTotals" hidden>
+                            <span>Stock cost per item sold: <strong id="mmCostTotal">-</strong></span>
+                            <span id="mmCostPct"></span>
+                        </div>
+                    </section>
                 </div>
                 <div class="mm-modal-foot">
-                    <div id="addMenuFeedback" class="admin-modal-feedback" style="width:100%;margin-bottom:8px;"></div>
-                    <button type="button" class="mm-btn" onclick="closeAddModal()">
-                        <i class="fas fa-times"></i> Close
-                    </button>
-                    <button type="submit" id="addMenuSaveBtn" class="mm-btn mm-btn-primary">
-                        <i class="fas fa-save"></i> Add item
-                    </button>
+                    <button type="button" class="mm-btn" onclick="mmCloseItem()">Cancel</button>
+                    <button type="submit" id="mmSaveBtn" class="mm-btn mm-btn-primary">Save item</button>
                 </div>
             </form>
-        </div>
-    </div>
-
-    <!-- Recipe Modal -->
-    <div class="mm-modal" id="recipeModal">
-        <div class="mm-modal-card">
-            <div class="mm-modal-head">
-                <h3 id="recipe-modal-title">Recipe</h3>
-                <button type="button" class="mm-modal-close" onclick="closeRecipeModal()" aria-label="Close">&times;</button>
-            </div>
-            <div class="mm-modal-body">
-                <div class="recipe-meta" id="recipe-meta">
-                    <span><strong>Item:</strong> <span id="rm-item-name">—</span></span>
-                    <span><strong>Sell price:</strong> <span id="rm-item-price">—</span></span>
-                    <span><strong>Plate cost:</strong> <span id="rm-plate-cost">—</span></span>
-                    <span><strong>Food cost %:</strong> <span id="rm-food-pct">—</span></span>
-                </div>
-
-                <div class="mm-field" style="max-width:160px;">
-                    <label for="rm-portions">Portions per recipe</label>
-                    <input type="number" id="rm-portions" min="1" value="1">
-                </div>
-
-                <table class="recipe-table" id="rm-table">
-                    <thead>
-                        <tr>
-                            <th>Ingredient</th>
-                            <th class="col-qty">Qty / portion</th>
-                            <th class="col-unit">Unit</th>
-                            <th class="col-cost">Cost</th>
-                            <th class="col-rm"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="rm-lines"></tbody>
-                </table>
-
-                <div class="recipe-add-row">
-                    <select id="rm-add-select">
-                        <option value="">— Add ingredient —</option>
-                    </select>
-                    <input type="number" id="rm-add-qty" placeholder="Qty" step="0.0001" style="width:110px;">
-                    <button type="button" class="mm-btn mm-btn-sm" onclick="rmAddLine()">
-                        <i class="fas fa-plus"></i> Add
-                    </button>
-                    <button type="button" class="mm-btn mm-btn-sm mm-btn-ghost" onclick="openIngredientModal()">
-                        <i class="fas fa-seedling"></i> New ingredient
-                    </button>
-                </div>
-
-                <div class="recipe-totals">
-                    <span>Total ingredients: <strong id="rm-line-count">0</strong></span>
-                    <span>Total cost / portion: <strong id="rm-total-cost">—</strong></span>
-                </div>
-
-                <div class="recipe-link">
-                    <i class="fas fa-info-circle"></i>
-                    Saved recipes appear in
-                    <a href="stock-recipes.php" target="_blank">Stock &raquo; Recipes</a>
-                    and drive automatic stock deduction when this item is charged to a booking.
-                </div>
-            </div>
-            <div class="mm-modal-foot">
-                <button type="button" class="mm-btn" onclick="rmDeleteRecipe()" id="rm-delete-btn" style="margin-right:auto;color:var(--mm-danger);">
-                    <i class="fas fa-trash"></i> Delete recipe
-                </button>
-                <button type="button" class="mm-btn" onclick="closeRecipeModal()">Cancel</button>
-                <button type="button" class="mm-btn mm-btn-primary" onclick="rmSave()">
-                    <i class="fas fa-save"></i> Save recipe
-                </button>
-            </div>
         </div>
     </div>
 
@@ -884,12 +689,12 @@ if ($stockReady) {
     <div class="mm-modal" id="ingredientModal">
         <div class="mm-modal-card sm">
             <div class="mm-modal-head">
-                <h3>New ingredient</h3>
+                <h3>New stock item</h3>
                 <button type="button" class="mm-modal-close" onclick="closeIngredientModal()" aria-label="Close">&times;</button>
             </div>
             <div class="mm-modal-body">
                 <div class="mm-field">
-                    <label for="ig-name">Name *</label>
+                    <label for="ig-name">Name <span class="mm-req">*</span></label>
                     <input type="text" id="ig-name" required>
                 </div>
                 <div class="mm-field-row">
@@ -898,631 +703,816 @@ if ($stockReady) {
                         <input type="text" id="ig-category" placeholder="e.g., Proteins, Dairy" value="General">
                     </div>
                     <div class="mm-field">
-                        <label for="ig-unit">Unit *</label>
+                        <label for="ig-unit">Counted in <span class="mm-req">*</span></label>
                         <select id="ig-unit">
+                            <option value="each">each (piece)</option>
                             <option value="g">g (gram)</option>
                             <option value="kg">kg (kilogram)</option>
                             <option value="ml">ml (millilitre)</option>
                             <option value="L">L (litre)</option>
-                            <option value="each">each (piece)</option>
                         </select>
                     </div>
                 </div>
                 <div class="mm-field-row">
                     <div class="mm-field">
                         <label for="ig-cost">Cost per unit</label>
-                        <input type="number" id="ig-cost" step="0.01" value="0" data-currency="<?php echo htmlspecialchars(getSetting('currency_symbol'), ENT_QUOTES); ?>">
+                        <input type="number" id="ig-cost" step="0.01" value="0">
                     </div>
                     <div class="mm-field">
                         <label for="ig-yield">Yield %</label>
                         <input type="number" id="ig-yield" min="1" max="100" value="100">
                     </div>
                 </div>
+                <p class="mm-hint">Pack sizes (for example a pack of 10) are set in Stock &raquo; Ingredients.</p>
             </div>
             <div class="mm-modal-foot">
                 <button type="button" class="mm-btn" onclick="closeIngredientModal()">Cancel</button>
-                <button type="button" class="mm-btn mm-btn-primary" onclick="saveNewIngredient()">
-                    <i class="fas fa-save"></i> Create
-                </button>
+                <button type="button" class="mm-btn mm-btn-primary" onclick="saveNewIngredient()">Create</button>
             </div>
         </div>
     </div>
 
+    </div><!-- /.mm-restaurant -->
 
     <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
-        function switchTab(tab) {
-            // Update URL without reloading
-            const url = new URL(window.location);
-            url.searchParams.set('tab', tab);
-            window.history.pushState({}, '', url);
-
-            // Update tab buttons
-            document.querySelectorAll('.menu-type-tab').forEach(t => t.classList.remove('active'));
-            document.querySelector(`.menu-type-tab[onclick="switchTab('${tab}')"]`)?.classList.add('active');
-
-            // Update tab content
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.getElementById(`${tab}-tab`).classList.add('active');
-        }
-
-        function jumpToRoomService() {
-            // Activate food tab first (Room Service exists in both food & drinks)
-            switchTab('food');
-            // Small delay to let CSS display change take effect before scrolling
-            setTimeout(() => {
-                const anchor = document.getElementById('food-cat-room-service');
-                if (anchor) {
-                    anchor.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'start'
-                    });
-                    anchor.classList.add('rs-highlight');
-                    setTimeout(() => anchor.classList.remove('rs-highlight'), 2000);
-                }
-            }, 80);
-        }
-
-        // If URL has ?jump=room-service, auto-scroll after load
-        document.addEventListener('DOMContentLoaded', () => {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get('jump') === 'room-service') {
-                jumpToRoomService();
-            }
-            initDragToReorder();
-        });
-
-        function openAddModal(menuType, category = null) {
-            const modal = document.getElementById('addMenuModal');
-            const menuTypeInput = document.getElementById('menu_type');
-            const categorySelect = document.getElementById('add_category');
-            const tagsContainer = document.getElementById('tags-field-container');
-            const modalTitle = document.getElementById('modal-title');
-            const availabilityLabel = document.getElementById('availability-label');
-
-            menuTypeInput.value = menuType;
-            modalTitle.textContent = menuType === 'food' ? 'Add new food item' : 'Add new drink item';
-            availabilityLabel.textContent = menuType === 'food' ? 'Available (visible on menu)' : 'Active (visible on menu)';
-            tagsContainer.style.display = menuType === 'drinks' ? 'block' : 'none';
-
-            // Default station: food→kitchen, drinks→bar
-            const stationSel = document.getElementById('add_station');
-            if (stationSel) stationSel.value = menuType === 'food' ? 'kitchen' : 'bar';
-            // Default visibility: both checked
-            const sp = document.getElementById('add_show_pos');
-            if (sp) sp.checked = true;
-            const sr = document.getElementById('add_show_rs');
-            if (sr) sr.checked = true;
-
-            categorySelect.innerHTML = '<option value="">Select category</option>';
-            const categories = menuType === 'food' ? <?php echo json_encode($food_categories); ?> : <?php echo json_encode($drink_categories); ?>;
-            categories.forEach(cat => {
-                const opt = document.createElement('option');
-                opt.value = cat;
-                opt.textContent = cat;
-                categorySelect.appendChild(opt);
-            });
-            if (category) {
-                categorySelect.value = category;
-            }
-
-            if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('addMenuForm'));
-            modal.classList.add('open');
-        }
-
-        function closeAddModal() {
-            document.getElementById('addMenuModal').classList.remove('open');
-            document.getElementById('addMenuFeedback').className = 'admin-modal-feedback';
-            document.getElementById('addMenuFeedback').innerHTML = '';
-        }
-
-        // Close any modal when clicking the backdrop
-        document.querySelectorAll('.mm-modal').forEach(m => {
-            m.addEventListener('click', function(e) {
-                if (e.target === this) {
-                    this.classList.remove('open');
-                }
-            });
-        });
-
-        function saveRow(id, category, menuType) {
-            // Drink rows are id="drink-row-N" while the tab passes 'drinks'.
-            const row = document.getElementById((menuType === 'food' ? 'food' : 'drink') + '-row-' + id);
-            const formData = new FormData();
-
-            formData.append('action', 'update');
-            formData.append('id', id);
-            formData.append('category', category);
-            formData.append('menu_type', menuType);
-
-            if (menuType === 'food') {
-                formData.append('display_order', row.querySelector('[data-field="display_order"]').value);
-                formData.append('name', row.querySelector('[data-field="name"]').value);
-                formData.append('description', row.querySelector('[data-field="description"]').value);
-                formData.append('price', row.querySelector('[data-field="price"]').value);
-                formData.append('is_available', row.querySelector('[data-field="is_available"]').value);
-            } else {
-                formData.append('display_order', row.querySelector('[data-field="display_order"]').value);
-                formData.append('name', row.querySelector('[data-field="name"]').value);
-                formData.append('description', row.querySelector('[data-field="description"]').value);
-                formData.append('price', row.querySelector('[data-field="price"]').value);
-                formData.append('tags', row.querySelector('[data-field="tags"]').value);
-                formData.append('is_available', row.querySelector('[data-field="is_available"]').value);
-            }
-
-            // Routing fields (station + show_pos + show_room_service) — apply to both food & drink
-            const stationField = row.querySelector('[data-field="station"]');
-            if (stationField) formData.append('station', stationField.value);
-            const showPos = row.querySelector('[data-field="show_pos"]');
-            if (showPos && showPos.checked) formData.append('show_pos', '1');
-            const showRs = row.querySelector('[data-field="show_room_service"]');
-            if (showRs && showRs.checked) formData.append('show_room_service', '1');
-
-            if (window._saveRowBusy) return;
-            const flagged = row.querySelector('.rh-input-invalid');
-            if (flagged) {
-                // A duplicate name was already flagged under the field: say so instead of saving.
-                flagged.focus();
-                Alert.show((flagged.validationMessage || 'Fix the highlighted field first.'), 'error');
-                return;
-            }
-            window._saveRowBusy = true;
-            fetch(window.location.href, {
-                    method: 'POST',
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: formData
-                })
-                .then(response => {
-                    if (!response.ok) throw new Error('HTTP ' + response.status);
-                    return response.text();
-                })
-                .then(text => {
-                    var res = null;
-                    if (text.charAt(0) === '{') {
-                        try { res = JSON.parse(text); } catch (e) { res = null; }
-                    }
-                    if (res && res.success === false) {
-                        window._saveRowBusy = false;
-                        var tmp = document.createElement('div');
-                        tmp.innerHTML = res.message || 'Error saving item';
-                        Alert.show(tmp.textContent, 'error');
-                        return;
-                    }
-                    window.location.reload();
-                })
-                .catch(error => {
-                    window._saveRowBusy = false;
-                    console.error('Error:', error);
-                    Alert.show('Error saving item', 'error');
-                });
-        }
-
-        // Quick toggle availability
-        function quickToggle(id, menuType) {
-            const formData = new FormData();
-            formData.append('action', 'toggle_availability');
-            formData.append('id', id);
-            formData.append('menu_type', menuType);
-
-            fetch(window.location.href, {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => {
-                    if (response.ok) {
-                        window.location.reload();
-                    } else {
-                        Alert.show('Error toggling availability', 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    Alert.show('Error toggling availability', 'error');
-                });
-        }
-
-        function deleteRow(id, menuType) {
-            const formData = new FormData();
-            formData.append('action', 'delete');
-            formData.append('id', id);
-            formData.append('menu_type', menuType);
-            formData.append('force_delete', '1');
-
-            fetch(window.location.href, {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => {
-                    if (response.ok) {
-                        window.location.reload();
-                    } else {
-                        Alert.show('Error deleting item', 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    Alert.show('Error deleting item', 'error');
-                });
-        }
-
         /* ============================================================
-           RECIPE MANAGEMENT
+           Menu Management page script. Top-level functions are used by the inline
+           onclick handlers above (the admin SPA re-exports them after in-place navigation).
            ============================================================ */
-        const RECIPE_API = 'api/menu-recipe.php';
-        const CURRENCY = <?php echo json_encode(getSetting('currency_symbol')); ?>;
-        let _ingredientsCache = [];
-        let _rmContext = {
-            menu_item_id: 0,
-            menu_type: 'food',
-            item_name: '',
-            item_price: 0
+        const MM_CURRENCY = <?= json_encode($currencySymbol) ?>;
+        const MM_CSRF = <?= json_encode($csrf_token) ?>;
+        const MM_RECIPE_API = 'api/menu-recipe.php';
+        const MM_CATS = {
+            food: [],
+            drinks: []
         };
-        let _rmLines = []; // {ingredient_id, quantity, name, unit, cost_per_unit}
 
-        function fmtMoney(n) {
+        function mmReadCats(root) {
+            const el = (root || document).getElementById('mmCats');
+            if (!el) return;
+            try {
+                MM_CATS.food = JSON.parse(el.getAttribute('data-food') || '[]');
+                MM_CATS.drinks = JSON.parse(el.getAttribute('data-drinks') || '[]');
+            } catch (e) {}
+        }
+        const MM_FILTER = {
+            q: '',
+            cat: '',
+            show: ''
+        };
+        const MM_STATE = {
+            tab: <?= json_encode($current_tab) ?>,
+            ing: null, // stock items (loaded once, when a form is first opened)
+            lines: [], // stock link lines being edited
+            changed: false, // stock section touched (only then is it sent on save)
+            ready: false, // existing stock link loaded, so saving it is safe
+            editing: null, // the row being edited, or null when adding
+            busy: false
+        };
+
+        function mmEl(id) {
+            return document.getElementById(id);
+        }
+
+        function mmFmtMoney(n) {
             const v = Number(n) || 0;
-            return CURRENCY + v.toLocaleString('en-US', {
+            return MM_CURRENCY + ' ' + v.toLocaleString('en-US', {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
             });
         }
 
-        async function loadIngredients(force = false) {
-            if (!force && _ingredientsCache.length) return _ingredientsCache;
-            const res = await fetch(RECIPE_API + '?action=list_ingredients');
-            const data = await res.json();
-            if (!data.ok) throw new Error(data.error || 'Failed to load ingredients');
-            _ingredientsCache = data.ingredients;
-            return _ingredientsCache;
+        function mmFmtQty(n, max) {
+            max = max === undefined ? 4 : max;
+            let s = Number(n).toFixed(max);
+            if (s.indexOf('.') !== -1) s = s.replace(/0+$/, '').replace(/\.$/, '');
+            return s === '' || s === '-0' ? '0' : s;
         }
 
-        function rmFillIngredientSelect() {
-            const sel = document.getElementById('rm-add-select');
-            sel.innerHTML = '<option value="">— Add ingredient —</option>';
-            const grouped = {};
-            _ingredientsCache.forEach(i => {
-                (grouped[i.category || 'Other'] ||= []).push(i);
-            });
-            Object.keys(grouped).sort().forEach(cat => {
-                const og = document.createElement('optgroup');
-                og.label = cat;
-                grouped[cat].forEach(i => {
-                    const opt = document.createElement('option');
-                    opt.value = i.id;
-                    opt.textContent = `${i.name} (${i.unit})`;
-                    og.appendChild(opt);
-                });
-                sel.appendChild(og);
-            });
+        function mmActiveTab() {
+            return MM_STATE.tab;
         }
 
-        async function openRecipeModal(menuItemId, menuType, itemName) {
-            _rmContext = {
-                menu_item_id: menuItemId,
-                menu_type: menuType,
-                item_name: itemName,
-                item_price: 0
+        /* ---------- Tabs ---------- */
+        function switchTab(tab) {
+            MM_STATE.tab = tab === 'drinks' ? 'drinks' : 'food';
+            const url = new URL(window.location);
+            url.searchParams.set('tab', MM_STATE.tab);
+            window.history.replaceState({}, '', url);
+            mmEl('mmTabFood').classList.toggle('active', MM_STATE.tab === 'food');
+            mmEl('mmTabDrinks').classList.toggle('active', MM_STATE.tab === 'drinks');
+            mmEl('food-tab').classList.toggle('active', MM_STATE.tab === 'food');
+            mmEl('drinks-tab').classList.toggle('active', MM_STATE.tab === 'drinks');
+            mmApplyFilters(false);
+        }
+
+        /* ---------- Search and filters ---------- */
+        function mmRowMatches(tr, tokens) {
+            const hay = tr.dataset.search || '';
+            for (let i = 0; i < tokens.length; i++) {
+                if (hay.indexOf(tokens[i]) === -1) return false;
+            }
+            if (MM_FILTER.cat && tr.dataset.cat !== MM_FILTER.cat) return false;
+            switch (MM_FILTER.show) {
+                case 'avail':
+                    return tr.dataset.avail === '1';
+                case 'unavail':
+                    return tr.dataset.avail === '0';
+                case 'rs':
+                    return tr.dataset.rs === '1';
+                case 'nostock':
+                    return tr.dataset.stock === '0';
+            }
+            return true;
+        }
+
+        function mmApplyFilters(scroll) {
+            const tokens = MM_FILTER.q.toLowerCase().split(/\s+/).filter(Boolean);
+            const filtering = tokens.length > 0 || MM_FILTER.cat !== '' || MM_FILTER.show !== '';
+            const shown = {
+                food: 0,
+                drinks: 0
             };
-            document.getElementById('recipe-modal-title').textContent = `Recipe — ${itemName}`;
-            document.getElementById('rm-item-name').textContent = itemName;
-            document.getElementById('rm-item-price').textContent = '—';
-            document.getElementById('rm-plate-cost').textContent = '—';
-            document.getElementById('rm-food-pct').textContent = '—';
-            document.getElementById('rm-portions').value = 1;
-            document.getElementById('rm-lines').innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--mm-muted);padding:16px;">Loading…</td></tr>';
-            document.getElementById('recipeModal').classList.add('open');
+            const total = {
+                food: 0,
+                drinks: 0
+            };
+            document.querySelectorAll('#mmResults .mm-row').forEach(function(tr) {
+                const tab = tr.dataset.tab;
+                total[tab]++;
+                const ok = mmRowMatches(tr, tokens);
+                tr.classList.toggle('mm-hide', !ok);
+                if (ok) shown[tab]++;
+            });
+            document.querySelectorAll('#mmResults .category-section').forEach(function(sec) {
+                const rows = sec.querySelectorAll('.mm-row');
+                let n = 0;
+                rows.forEach(function(r) {
+                    if (!r.classList.contains('mm-hide')) n++;
+                });
+                sec.classList.toggle('mm-hide', n === 0);
+                const c = sec.querySelector('.cat-count');
+                if (c) c.textContent = filtering ? '(' + n + ' of ' + rows.length + ')' : '(' + rows.length + ')';
+            });
+            document.querySelectorAll('[data-tab-count]').forEach(function(b) {
+                const t = b.getAttribute('data-tab-count');
+                b.textContent = filtering ? shown[t] + ' of ' + total[t] : String(total[t]);
+            });
+            mmEl('mmResults').classList.toggle('mm-filtering', filtering);
+            mmEl('mmSearchClear').hidden = !(MM_FILTER.q !== '');
 
-            try {
-                await loadIngredients();
-                rmFillIngredientSelect();
-
-                const url = `${RECIPE_API}?action=get_recipe&menu_item_id=${menuItemId}&menu_type=${menuType}`;
-                const res = await fetch(url);
-                const data = await res.json();
-                if (!data.ok) throw new Error(data.error);
-
-                _rmContext.item_price = parseFloat(data.item.price) || 0;
-                document.getElementById('rm-item-price').textContent = fmtMoney(_rmContext.item_price);
-
-                if (data.recipe) {
-                    document.getElementById('rm-portions').value = data.recipe.portions_per_recipe || 1;
+            const cur = MM_STATE.tab;
+            const other = cur === 'food' ? 'drinks' : 'food';
+            const box = mmEl('mmNoMatch');
+            const sw = mmEl('mmNoMatchSwitch');
+            const noMatch = filtering && total[cur] > 0 && shown[cur] === 0;
+            box.hidden = !noMatch;
+            if (noMatch) {
+                const label = MM_FILTER.q ? ' "' + MM_FILTER.q + '"' : '';
+                mmEl('mmNoMatchText').textContent = 'No ' + (cur === 'food' ? 'food' : 'drink') + ' items match' + label + '.';
+                if (shown[other] > 0) {
+                    sw.hidden = false;
+                    sw.textContent = 'Show ' + shown[other] + ' matching ' + (other === 'food' ? 'food' : 'drink') + ' item' + (shown[other] === 1 ? '' : 's');
+                    sw.onclick = function() {
+                        switchTab(other);
+                    };
+                } else {
+                    sw.hidden = true;
                 }
+            }
+            const all = total.food + total.drinks;
+            const hits = shown.food + shown.drinks;
+            mmEl('mmCount').textContent = filtering ? hits + ' of ' + all + (all === 1 ? ' item' : ' items') : all + (all === 1 ? ' item' : ' items');
 
-                _rmLines = (data.lines || []).map(l => ({
-                    ingredient_id: parseInt(l.ingredient_id, 10),
-                    quantity: parseFloat(l.quantity_per_portion) || 0,
-                    name: l.name,
-                    unit: l.unit,
-                    cost_per_unit: parseFloat(l.cost_per_unit) || 0
-                }));
-                rmRender();
+            if (scroll) {
+                // Results must land in view: bring the first match (or the no-match note) up under the toolbar.
+                const target = noMatch ? box : document.querySelector('#mmResults .tab-content.active .mm-row:not(.mm-hide)');
+                if (target) {
+                    const r = target.getBoundingClientRect();
+                    if (r.top < 60 || r.top > window.innerHeight * 0.75) {
+                        const tb = mmEl('mmToolbar').getBoundingClientRect();
+                        window.scrollTo({
+                            top: Math.max(0, window.pageYOffset + r.top - Math.max(tb.height + 80, 120)),
+                            behavior: 'smooth'
+                        });
+                    }
+                }
+            }
+        }
+
+        function mmClearFilters() {
+            MM_FILTER.q = '';
+            MM_FILTER.cat = '';
+            MM_FILTER.show = '';
+            mmEl('mmSearch').value = '';
+            mmEl('mmCatFilter').value = '';
+            mmEl('mmShowFilter').value = '';
+            mmApplyFilters(true);
+            mmEl('mmSearch').focus();
+        }
+
+        function mmInitFilters() {
+            let timer = null;
+            const s = mmEl('mmSearch');
+            s.addEventListener('input', function() {
+                MM_FILTER.q = s.value.trim();
+                mmApplyFilters(false); // instant
+                clearTimeout(timer);
+                timer = setTimeout(function() {
+                    mmApplyFilters(true);
+                }, 250);
+            });
+            s.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    mmClearFilters();
+                }
+            });
+            mmEl('mmCatFilter').addEventListener('change', function() {
+                MM_FILTER.cat = this.value;
+                mmApplyFilters(true);
+            });
+            mmEl('mmShowFilter').addEventListener('change', function() {
+                MM_FILTER.show = this.value;
+                mmApplyFilters(true);
+            });
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('jump') === 'room-service') {
+                MM_FILTER.show = 'rs';
+                mmEl('mmShowFilter').value = 'rs';
+            }
+            if (params.get('q')) {
+                MM_FILTER.q = params.get('q');
+                s.value = MM_FILTER.q;
+            }
+            mmApplyFilters(false);
+        }
+
+        /* ---------- Add / edit form ---------- */
+        function mmFillCategories(tab, selected) {
+            const sel = mmEl('mmCategory');
+            sel.innerHTML = '';
+            const first = document.createElement('option');
+            first.value = '';
+            first.textContent = 'Select category';
+            sel.appendChild(first);
+            const list = (MM_CATS[tab] || []).slice();
+            if (selected && list.indexOf(selected) === -1) list.push(selected);
+            list.forEach(function(c) {
+                const o = document.createElement('option');
+                o.value = c;
+                o.textContent = c;
+                sel.appendChild(o);
+            });
+            const n = document.createElement('option');
+            n.value = '__new__';
+            n.textContent = 'New category…';
+            sel.appendChild(n);
+            sel.value = selected || '';
+            mmEl('mmNewCategory').hidden = true;
+            mmEl('mmNewCategory').value = '';
+        }
+
+        function mmSyncFree() {
+            const free = mmEl('mmFree').checked;
+            const p = mmEl('mmPrice');
+            if (free) p.value = '0';
+            p.disabled = free;
+            mmStockTotals();
+        }
+
+        function mmOpenAdd(tab, category) {
+            mmOpenItem('add', tab === 'drinks' ? 'drinks' : 'food', {
+                category: category || ''
+            });
+        }
+
+        function mmOpenEdit(btn) {
+            const tr = btn.closest('tr');
+            let it = null;
+            try {
+                it = JSON.parse(tr.dataset.item);
             } catch (e) {
-                document.getElementById('rm-lines').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--mm-danger);padding:16px;">${e.message}</td></tr>`;
+                it = null;
             }
+            if (!it) return;
+            mmOpenItem('update', it.type, it);
         }
 
-        function closeRecipeModal() {
-            document.getElementById('recipeModal').classList.remove('open');
-        }
-
-        function rmRender() {
-            const tbody = document.getElementById('rm-lines');
-            if (!_rmLines.length) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--mm-muted);padding:16px;">No ingredients yet. Add one below.</td></tr>';
-            } else {
-                tbody.innerHTML = '';
-                _rmLines.forEach((line, idx) => {
-                    const lineCost = (line.quantity || 0) * (line.cost_per_unit || 0);
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>${line.name}</td>
-                        <td class="col-qty"><input type="number" step="0.0001" min="0" value="${line.quantity}" data-idx="${idx}" oninput="rmEditQty(this)"></td>
-                        <td class="col-unit">${line.unit}</td>
-                        <td class="col-cost">${fmtMoney(lineCost)}</td>
-                        <td class="col-rm"><button type="button" class="recipe-rm-btn" onclick="rmRemove(${idx})" title="Remove"><i class="fas fa-times"></i></button></td>
-                    `;
-                    tbody.appendChild(tr);
-                });
+        function mmOpenItem(mode, tab, it) {
+            const form = mmEl('mmItemForm');
+            if (window.RHFormGuard) RHFormGuard.clearErrors(form);
+            MM_STATE.editing = mode === 'update' ? it : null;
+            MM_STATE.lines = [];
+            MM_STATE.changed = false;
+            MM_STATE.ready = mode === 'add' || !it.pos_id; // nothing to load
+            mmEl('mmItemTitle').textContent = mode === 'add' ? (tab === 'food' ? 'Add food item' : 'Add drink item') : 'Edit ' + (it.name || 'item');
+            mmEl('mmAction').value = mode;
+            mmEl('mmId').value = mode === 'update' ? it.id : '';
+            mmEl('mmType').value = tab;
+            mmEl('mmName').value = mode === 'update' ? it.name : '';
+            mmFillCategories(tab, it.category || '');
+            const free = mode === 'update' && Number(it.price) === 0;
+            mmEl('mmFree').checked = free;
+            mmEl('mmPrice').disabled = false;
+            mmEl('mmPrice').value = mode === 'update' ? Number(it.price).toFixed(2) : '';
+            mmSyncFree();
+            mmEl('mmStation').value = mode === 'update' ? it.station : (tab === 'food' ? 'kitchen' : 'bar');
+            mmEl('mmAvail').checked = mode === 'update' ? !!it.avail : true;
+            mmEl('mmShowPos').checked = mode === 'update' ? !!it.show_pos : true;
+            mmEl('mmShowRs').checked = mode === 'update' ? !!it.show_rs : true;
+            mmEl('mmDesc').value = mode === 'update' ? it.description : '';
+            mmEl('mmTags').value = mode === 'update' ? it.tags : '';
+            mmEl('mmTagsWrap').hidden = tab !== 'drinks';
+            mmEl('mmBarcode').value = mode === 'update' ? it.barcode : '';
+            mmEl('mmSaveBtn').textContent = mode === 'add' ? 'Add item' : 'Save changes';
+            mmEl('mmIngPick').value = '';
+            mmEl('mmIngQty').value = '';
+            mmIngChosen();
+            mmStockRender();
+            mmEl('mmItemModal').classList.add('open');
+            document.body.style.overflow = 'hidden';
+            setTimeout(function() {
+                mmEl('mmName').focus();
+            }, 50);
+            const loading = mode === 'update' && it.pos_id;
+            if (loading) {
+                mmEl('mmSaveBtn').disabled = true;
+                mmEl('mmIngPreview').textContent = 'Loading the stock link…';
             }
-            const total = _rmLines.reduce((s, l) => s + (l.quantity || 0) * (l.cost_per_unit || 0), 0);
-            document.getElementById('rm-line-count').textContent = _rmLines.length;
-            document.getElementById('rm-total-cost').textContent = fmtMoney(total);
-            const sell = _rmContext.item_price || 0;
-            document.getElementById('rm-plate-cost').textContent = fmtMoney(total);
-            document.getElementById('rm-food-pct').textContent = sell > 0 ?
-                ((total / sell) * 100).toFixed(1) + '%' :
-                '—';
+            mmLoadStock(mode === 'update' ? it : null).finally(function() {
+                if (loading && MM_STATE.editing === it) {
+                    mmEl('mmSaveBtn').disabled = false;
+                    if (MM_STATE.ready) mmEl('mmIngPreview').textContent = '';
+                }
+            });
         }
 
-        function rmEditQty(input) {
-            const idx = parseInt(input.dataset.idx, 10);
-            _rmLines[idx].quantity = parseFloat(input.value) || 0;
-            rmRender();
+        function mmCloseItem() {
+            mmEl('mmItemModal').classList.remove('open');
+            document.body.style.overflow = '';
         }
 
-        function rmRemove(idx) {
-            _rmLines.splice(idx, 1);
-            rmRender();
+        async function mmLoadIngredients() {
+            if (MM_STATE.ing) return MM_STATE.ing;
+            const res = await fetch(MM_RECIPE_API + '?action=list_ingredients', {
+                credentials: 'same-origin'
+            });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || 'Could not load stock items');
+            MM_STATE.ing = data.ingredients.map(function(i) {
+                return {
+                    id: parseInt(i.id, 10),
+                    name: i.name,
+                    unit: i.unit,
+                    cost: parseFloat(i.cost_per_unit) || 0,
+                    pack_name: i.pack_name || '',
+                    pack_size: parseFloat(i.pack_size) || 0,
+                    label: i.name + ' (' + i.unit + ')'
+                };
+            });
+            const dl = mmEl('mmIngList');
+            dl.innerHTML = '';
+            MM_STATE.ing.forEach(function(i) {
+                const o = document.createElement('option');
+                o.value = i.label;
+                dl.appendChild(o);
+            });
+            return MM_STATE.ing;
         }
 
-        function rmAddLine() {
-            const sel = document.getElementById('rm-add-select');
-            const qtyInp = document.getElementById('rm-add-qty');
-            const id = parseInt(sel.value, 10);
-            const qty = parseFloat(qtyInp.value);
-            if (!id || !qty || qty <= 0) {
-                Alert.show('Pick an ingredient and enter a quantity > 0', 'error');
+        async function mmLoadStock(it) {
+            const hint = mmEl('mmIngPreview');
+            try {
+                await mmLoadIngredients();
+            } catch (e) {
+                hint.textContent = 'Stock items could not be loaded: ' + e.message;
+                MM_STATE.ready = false;
                 return;
             }
-            const ing = _ingredientsCache.find(i => parseInt(i.id, 10) === id);
-            if (!ing) return;
-            const existing = _rmLines.findIndex(l => l.ingredient_id === id);
-            if (existing >= 0) {
-                _rmLines[existing].quantity = qty;
-            } else {
-                _rmLines.push({
-                    ingredient_id: id,
-                    quantity: qty,
-                    name: ing.name,
-                    unit: ing.unit,
-                    cost_per_unit: parseFloat(ing.cost_per_unit) || 0
-                });
-            }
-            sel.value = '';
-            qtyInp.value = '';
-            rmRender();
-        }
-
-        async function rmSave() {
-            const portions = Math.max(1, parseInt(document.getElementById('rm-portions').value, 10) || 1);
-            const fd = new FormData();
-            fd.append('action', 'save_recipe');
-            fd.append('menu_item_id', _rmContext.menu_item_id);
-            fd.append('menu_type', _rmContext.menu_type);
-            fd.append('portions', portions);
-            fd.append('lines', JSON.stringify(_rmLines.map(l => ({
-                ingredient_id: l.ingredient_id,
-                quantity: l.quantity
-            }))));
+            if (!it || !it.pos_id) return;
             try {
-                fd.append('csrf_token', <?= json_encode($csrf_token) ?>);
-                const res = await fetch(RECIPE_API, {
-                    method: 'POST',
-                    body: fd
+                const res = await fetch(MM_RECIPE_API + '?action=get_recipe&menu_item_id=' + encodeURIComponent(it.pos_id), {
+                    credentials: 'same-origin'
                 });
                 const data = await res.json();
-                if (!data.ok) throw new Error(data.error);
-                Alert.show(data.message || 'Recipe saved', 'success');
-                closeRecipeModal();
-                setTimeout(() => window.location.reload(), 600);
-            } catch (e) {
-                Alert.show('Save failed: ' + e.message, 'error');
-            }
-        }
-
-        async function rmDeleteRecipe() {
-            if (!confirm('Delete the recipe for this menu item? Stock auto-deduction will stop.')) return;
-            const fd = new FormData();
-            fd.append('action', 'delete_recipe');
-            fd.append('menu_item_id', _rmContext.menu_item_id);
-            fd.append('menu_type', _rmContext.menu_type);
-            try {
-                fd.append('csrf_token', <?= json_encode($csrf_token) ?>);
-                const res = await fetch(RECIPE_API, {
-                    method: 'POST',
-                    body: fd
+                if (!data.ok) throw new Error(data.error || 'Could not load the stock link');
+                if (MM_STATE.editing !== it) return; // another item was opened meanwhile
+                MM_STATE.lines = (data.lines || []).map(function(l) {
+                    return {
+                        ingredient_id: parseInt(l.ingredient_id, 10),
+                        name: l.name,
+                        unit: l.unit,
+                        cost: parseFloat(l.cost_per_unit) || 0,
+                        pack_name: l.pack_name || '',
+                        pack_size: parseFloat(l.pack_size) || 0,
+                        qty: parseFloat(l.quantity_per_portion) || 0,
+                        entry: 'base', // existing links keep their exact base-unit meaning
+                        yield_percent: parseFloat(l.yield_percent) || 100
+                    };
                 });
-                const data = await res.json();
-                if (!data.ok) throw new Error(data.error);
-                Alert.show('Recipe deleted', 'success');
-                closeRecipeModal();
-                setTimeout(() => window.location.reload(), 600);
+                MM_STATE.ready = true;
+                mmStockRender();
             } catch (e) {
-                Alert.show('Delete failed: ' + e.message, 'error');
+                hint.textContent = 'The existing stock link could not be loaded (' + e.message + '), so it will be left as it is.';
+                MM_STATE.ready = false;
             }
         }
 
-        function openIngredientModal() {
-            document.getElementById('ig-name').value = '';
-            document.getElementById('ig-category').value = 'General';
-            document.getElementById('ig-unit').value = 'g';
-            document.getElementById('ig-cost').value = 0;
-            document.getElementById('ig-yield').value = 100;
-            document.getElementById('ingredientModal').classList.add('open');
-            setTimeout(() => document.getElementById('ig-name').focus(), 50);
+        /* One plain sentence per line (same wording as the server: rh_recipe_preview_text). */
+        function mmLineBase(l) {
+            const q = parseFloat(l.qty) || 0;
+            return Math.round((l.entry === 'pack' && l.pack_size > 0 ? q * l.pack_size : q) * 10000) / 10000;
         }
 
-        function closeIngredientModal() {
-            document.getElementById('ingredientModal').classList.remove('open');
+        function mmPreviewText(l) {
+            const base = mmLineBase(l);
+            const hasPack = l.pack_size > 0;
+            const pw = (l.pack_name || 'pack').toLowerCase();
+            let t = 'Uses ' + mmFmtQty(base) + ' ' + l.unit + ' of ' + l.name;
+            if (hasPack) t += ' (' + pw + ' of ' + mmFmtQty(l.pack_size, 3) + ')';
+            t += ' per item sold';
+            if (hasPack && base > 0) t += ' → 1 ' + pw + ' serves ' + mmFmtQty(l.pack_size / base, 2);
+            return t;
         }
 
-        async function saveNewIngredient() {
-            const name = document.getElementById('ig-name').value.trim();
-            if (!name) {
-                Alert.show('Name is required', 'error');
+        function mmUnitOptions(sel, l, current) {
+            sel.innerHTML = '';
+            const b = document.createElement('option');
+            b.value = 'base';
+            b.textContent = l.unit;
+            sel.appendChild(b);
+            if (l.pack_size > 0) {
+                const p = document.createElement('option');
+                p.value = 'pack';
+                p.textContent = (l.pack_name || 'Pack') + ' (' + mmFmtQty(l.pack_size, 3) + ' ' + l.unit + ')';
+                sel.appendChild(p);
+            }
+            sel.value = current === 'pack' && l.pack_size > 0 ? 'pack' : 'base';
+            sel.disabled = !(l.pack_size > 0);
+        }
+
+        function mmStockRender() {
+            const box = mmEl('mmStockLines');
+            box.innerHTML = '';
+            if (!MM_STATE.lines.length) {
+                const e = document.createElement('div');
+                e.className = 'mm-stock-empty';
+                e.textContent = 'Nothing linked. Selling this item will not change stock.';
+                box.appendChild(e);
+            }
+            MM_STATE.lines.forEach(function(l, idx) {
+                const row = document.createElement('div');
+                row.className = 'mm-stock-line';
+                const name = document.createElement('div');
+                name.className = 'mm-stock-name';
+                name.textContent = l.name;
+                const qty = document.createElement('input');
+                qty.type = 'number';
+                qty.step = 'any';
+                qty.min = '0';
+                qty.inputMode = 'decimal';
+                qty.value = l.qty;
+                qty.setAttribute('aria-label', 'Quantity of ' + l.name);
+                const unit = document.createElement('select');
+                unit.setAttribute('aria-label', 'Unit for ' + l.name);
+                mmUnitOptions(unit, l, l.entry);
+                const rm = document.createElement('button');
+                rm.type = 'button';
+                rm.className = 'mm-btn mm-btn-sm';
+                rm.textContent = 'Remove';
+                const pv = document.createElement('p');
+                pv.className = 'mm-preview';
+                pv.textContent = mmPreviewText(l);
+                qty.addEventListener('input', function() {
+                    l.qty = qty.value;
+                    MM_STATE.changed = true;
+                    pv.textContent = mmPreviewText(l);
+                    mmStockTotals();
+                });
+                unit.addEventListener('change', function() {
+                    l.entry = unit.value;
+                    MM_STATE.changed = true;
+                    pv.textContent = mmPreviewText(l);
+                    mmStockTotals();
+                });
+                rm.addEventListener('click', function() {
+                    MM_STATE.lines.splice(idx, 1);
+                    MM_STATE.changed = true;
+                    mmStockRender();
+                });
+                row.appendChild(name);
+                row.appendChild(qty);
+                row.appendChild(unit);
+                row.appendChild(rm);
+                row.appendChild(pv);
+                if (!(l.pack_size > 0)) {
+                    const note = document.createElement('p');
+                    note.className = 'mm-sub';
+                    note.textContent = 'Counted in ' + l.unit + '. For part of one, use a decimal (1 of 10 = 0.1).';
+                    row.appendChild(note);
+                }
+                box.appendChild(row);
+            });
+            mmStockTotals();
+        }
+
+        function mmStockTotals() {
+            const wrap = mmEl('mmStockTotals');
+            if (!MM_STATE.lines.length) {
+                wrap.hidden = true;
                 return;
             }
-            const fd = new FormData();
-            fd.append('action', 'add_ingredient');
-            fd.append('name', name);
-            fd.append('category', document.getElementById('ig-category').value.trim() || 'General');
-            fd.append('unit', document.getElementById('ig-unit').value);
-            fd.append('cost_per_unit', document.getElementById('ig-cost').value || 0);
-            fd.append('yield_percent', document.getElementById('ig-yield').value || 100);
-            try {
-                fd.append('csrf_token', <?= json_encode($csrf_token) ?>);
-                const res = await fetch(RECIPE_API, {
-                    method: 'POST',
-                    body: fd
-                });
-                const data = await res.json();
-                if (!data.ok) throw new Error(data.error);
-                await loadIngredients(true);
-                rmFillIngredientSelect();
-                document.getElementById('rm-add-select').value = data.id;
-                Alert.show(data.reused ? 'Ingredient already existed — selected.' : 'Ingredient created', 'success');
-                closeIngredientModal();
-            } catch (e) {
-                Alert.show('Failed: ' + e.message, 'error');
-            }
+            let cost = 0;
+            MM_STATE.lines.forEach(function(l) {
+                const y = l.yield_percent > 0 ? l.yield_percent / 100 : 1;
+                cost += mmLineBase(l) / y * l.cost;
+            });
+            wrap.hidden = false;
+            mmEl('mmCostTotal').textContent = mmFmtMoney(cost);
+            const price = mmEl('mmFree').checked ? 0 : (parseFloat(mmEl('mmPrice').value) || 0);
+            mmEl('mmCostPct').textContent = price > 0 ? 'Food cost ' + (cost / price * 100).toFixed(1) + '% of the price, margin ' + mmFmtMoney(price - cost) : '';
         }
 
-        // ── AJAX save for Add Menu Modal ──────────────────────────────────
-        document.getElementById('addMenuForm').addEventListener('submit', function(e) {
+        function mmFindIng(text) {
+            const t = (text || '').trim().toLowerCase();
+            if (!t || !MM_STATE.ing) return null;
+            let hit = MM_STATE.ing.find(function(i) {
+                return i.label.toLowerCase() === t;
+            });
+            if (!hit) {
+                const m = MM_STATE.ing.filter(function(i) {
+                    return i.name.toLowerCase() === t;
+                });
+                if (m.length === 1) hit = m[0];
+            }
+            return hit || null;
+        }
+
+        /* The row being typed: pick a stock item, the unit choices follow it, the sentence updates live. */
+        function mmIngChosen() {
+            const ing = mmFindIng(mmEl('mmIngPick').value);
+            const sel = mmEl('mmIngUnit');
+            if (!ing) {
+                sel.innerHTML = '<option value="base">unit</option>';
+                sel.disabled = true;
+                mmEl('mmIngPreview').textContent = '';
+                return;
+            }
+            const prev = sel.value;
+            mmUnitOptions(sel, ing, prev);
+            mmIngLive();
+        }
+
+        function mmIngLive() {
+            const ing = mmFindIng(mmEl('mmIngPick').value);
+            const out = mmEl('mmIngPreview');
+            if (!ing) {
+                out.textContent = '';
+                return;
+            }
+            const q = parseFloat(mmEl('mmIngQty').value);
+            if (!(q > 0)) {
+                out.textContent = ing.pack_size > 0 ?
+                    'Counted in ' + ing.unit + '; one ' + (ing.pack_name || 'pack').toLowerCase() + ' is ' + mmFmtQty(ing.pack_size, 3) + ' ' + ing.unit + '. Enter how much one sale uses.' :
+                    'Counted in ' + ing.unit + '. Enter how much one sale uses (decimals are fine, for example 0.15).';
+                return;
+            }
+            out.textContent = mmPreviewText({
+                name: ing.name,
+                unit: ing.unit,
+                pack_name: ing.pack_name,
+                pack_size: ing.pack_size,
+                qty: q,
+                entry: mmEl('mmIngUnit').value
+            });
+        }
+
+        function mmStockAdd() {
+            const ing = mmFindIng(mmEl('mmIngPick').value);
+            const q = parseFloat(mmEl('mmIngQty').value);
+            if (!ing) {
+                Alert.show('Pick a stock item from the list first.', 'error');
+                return;
+            }
+            if (!(q > 0)) {
+                Alert.show('Enter how much one sale uses (more than 0).', 'error');
+                return;
+            }
+            if (MM_STATE.lines.some(function(l) {
+                    return l.ingredient_id === ing.id;
+                })) {
+                Alert.show(ing.name + ' is already in the list. Change its quantity there.', 'error');
+                return;
+            }
+            MM_STATE.lines.push({
+                ingredient_id: ing.id,
+                name: ing.name,
+                unit: ing.unit,
+                cost: ing.cost,
+                pack_name: ing.pack_name,
+                pack_size: ing.pack_size,
+                qty: q,
+                entry: ing.pack_size > 0 && mmEl('mmIngUnit').value === 'pack' ? 'pack' : 'base',
+                yield_percent: 0 // 0 = not sent: the server keeps this recipe's existing yield for the line, else 100
+            });
+            MM_STATE.changed = true;
+            mmEl('mmIngPick').value = '';
+            mmEl('mmIngQty').value = '';
+            mmIngChosen();
+            mmStockRender();
+        }
+
+        async function mmSubmit(e) {
             e.preventDefault();
-            const saveBtn = document.getElementById('addMenuSaveBtn');
-            const fb = document.getElementById('addMenuFeedback');
-            const origHtml = saveBtn.innerHTML;
-            saveBtn.disabled = true;
-            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
-            fb.className = 'admin-modal-feedback';
-            fb.innerHTML = '';
-            fetch(window.location.pathname, {
+            if (MM_STATE.busy) return;
+            const form = mmEl('mmItemForm');
+            const fail = function(msg) {
+                if (window.RHFormGuard) RHFormGuard.showError(form, msg);
+                else Alert.show(msg, 'error');
+            };
+            if (window.RHFormGuard) RHFormGuard.showError(form, '');
+            const invalid = form.querySelector('.rh-input-invalid');
+            if (invalid) {
+                invalid.focus();
+                fail(invalid.validationMessage || 'Fix the highlighted field first.');
+                return;
+            }
+            const name = mmEl('mmName').value.trim();
+            if (!name) {
+                mmEl('mmName').focus();
+                return fail('Item name is required.');
+            }
+            const cat = mmEl('mmCategory').value;
+            if (!cat || (cat === '__new__' && !mmEl('mmNewCategory').value.trim())) {
+                mmEl('mmCategory').focus();
+                return fail('Pick a category, or type the name of a new one.');
+            }
+            if (!mmEl('mmFree').checked && !(parseFloat(mmEl('mmPrice').value) > 0)) {
+                mmEl('mmPrice').focus();
+                return fail('Enter the price (more than 0). For a free item, tick "This item is free".');
+            }
+            const fd = new FormData(form);
+            fd.set('price', mmEl('mmFree').checked ? '0' : mmEl('mmPrice').value);
+            if (MM_STATE.ready && MM_STATE.changed) {
+                for (let i = 0; i < MM_STATE.lines.length; i++) {
+                    if (!(parseFloat(MM_STATE.lines[i].qty) > 0)) return fail('Enter a quantity above 0 for ' + MM_STATE.lines[i].name + ', or remove it.');
+                }
+                fd.set('recipe_changed', '1');
+                fd.set('recipe_lines', JSON.stringify(MM_STATE.lines.map(function(l) {
+                    const o = {
+                        ingredient_id: l.ingredient_id,
+                        quantity: parseFloat(l.qty),
+                        unit: l.entry
+                    };
+                    if (l.yield_percent > 0) o.yield_percent = l.yield_percent;
+                    return o;
+                })));
+            }
+            const btn = mmEl('mmSaveBtn');
+            const label = btn.textContent;
+            MM_STATE.busy = true;
+            btn.disabled = true;
+            btn.textContent = 'Saving…';
+            try {
+                const r = await fetch(window.location.pathname, {
                     method: 'POST',
                     headers: {
                         'X-Requested-With': 'XMLHttpRequest'
                     },
-                    body: new FormData(this)
-                })
-                .then(function(r) {
-                    if (!r.ok) throw new Error('HTTP ' + r.status);
-                    return r.json();
-                })
-                .then(function(res) {
-                    saveBtn.disabled = false;
-                    saveBtn.innerHTML = origHtml;
-                    fb.style.width = '100%';
-                    fb.className = 'admin-modal-feedback ' + (res.success ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
-                    fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + res.message;
-                    if (res.success) refreshMenuTab();
-                })
-                .catch(function() {
-                    saveBtn.disabled = false;
-                    saveBtn.innerHTML = origHtml;
-                    fb.className = 'admin-modal-feedback admin-modal-feedback--error visible';
-                    fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error — please try again.';
+                    body: fd
                 });
-        });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const res = await r.json();
+                if (!res.success) {
+                    fail(res.message || 'Could not save this item.');
+                    return;
+                }
+                mmCloseItem();
+                Alert.show(res.message || 'Saved.', 'success');
+                mmRefresh();
+            } catch (err) {
+                fail('Network error. Please try again.');
+            } finally {
+                MM_STATE.busy = false;
+                btn.disabled = false;
+                btn.textContent = label;
+            }
+        }
 
-        // ── Duplicate names flagged while typing (api/check-unique.php) ───────────
-        // Add modal: same name in the same category of the same menu. Inline rows: the same, ignoring the row itself.
-        (function() {
-            if (!window.RHFormGuard) return;
-            const form = document.getElementById('addMenuForm');
-            const nameInput = document.getElementById('add_name');
-            const category = document.getElementById('add_category');
-            const menuType = document.getElementById('menu_type');
-            RHFormGuard.watch(nameInput, function() {
-                return {
-                    form: menuType.value === 'drinks' ? 'menu_drink' : 'menu_food',
-                    params: { category: category.value }
-                };
-            }, [category]);
-            RHFormGuard.guardSubmit(form, { busy: false }); // saving is AJAX with its own busy button
-        })();
+        /* ---------- Quick actions ---------- */
+        async function mmPost(fields) {
+            const fd = new FormData();
+            Object.keys(fields).forEach(function(k) {
+                fd.append(k, fields[k]);
+            });
+            fd.append('csrf_token', MM_CSRF);
+            const r = await fetch(window.location.pathname, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: fd
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        }
 
-        function wireMenuNameChecks() {
-            if (!window.RHFormGuard) return;
-            document.querySelectorAll('tr[id] input[data-field="name"]').forEach(function(input) {
-                const row = input.closest('tr');
-                const m = /^(food|drink)-row-(\d+)$/.exec(row.id);
-                if (!m) return;
-                RHFormGuard.watch(input, function() {
-                    return {
-                        form: m[1] === 'drink' ? 'menu_drink' : 'menu_food',
-                        excludeId: m[2],
-                        params: { category: row.dataset.category || '' }
-                    };
+        async function mmToggle(id, tab) {
+            try {
+                const res = await mmPost({
+                    action: 'toggle_availability',
+                    id: id,
+                    menu_type: tab
                 });
+                Alert.show(res.message || 'Done', res.success ? 'success' : 'error');
+                if (res.success) mmRefresh();
+            } catch (e) {
+                Alert.show('Could not change availability. Please try again.', 'error');
+            }
+        }
+
+        function mmConfirmDelete(id, tab) {
+            const overlay = document.createElement('div');
+            overlay.className = 'mm-confirm-overlay';
+            overlay.innerHTML =
+                '<div class="mm-confirm-card" role="alertdialog" aria-modal="true">' +
+                '  <p class="mm-confirm-msg">Delete this menu item?<small>Its stock link goes with it. An item that has been sold is hidden instead, so past orders stay readable.</small></p>' +
+                '  <div class="mm-confirm-actions">' +
+                '    <button type="button" class="btn-action btn-delete mm-confirm-yes">Delete</button>' +
+                '    <button type="button" class="btn-action mm-confirm-no">Cancel</button>' +
+                '  </div>' +
+                '</div>';
+            document.body.appendChild(overlay);
+            const close = function() {
+                if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            };
+            overlay.querySelector('.mm-confirm-yes').addEventListener('click', async function() {
+                close();
+                try {
+                    const res = await mmPost({
+                        action: 'delete',
+                        id: id,
+                        menu_type: tab
+                    });
+                    Alert.show(res.message || 'Done', res.success ? 'success' : 'error');
+                    if (res.success) mmRefresh();
+                } catch (e) {
+                    Alert.show('Could not delete. Please try again.', 'error');
+                }
+            });
+            overlay.querySelector('.mm-confirm-no').addEventListener('click', close);
+            overlay.addEventListener('click', function(ev) {
+                if (ev.target === overlay) close();
             });
         }
-        wireMenuNameChecks();
 
-        function refreshMenuTab() {
-            var tabParam = document.querySelector('.tab-content.active') && document.querySelector('.tab-content.active').id === 'drinks-tab' ? 'drinks' : 'food';
-            fetch(window.location.pathname + '?tab=' + tabParam)
+        /* Re-read the lists from the server and keep the search and filters as they are. */
+        function mmRefresh() {
+            return fetch(window.location.pathname + '?tab=' + MM_STATE.tab, {
+                    credentials: 'same-origin'
+                })
                 .then(function(r) {
                     return r.text();
                 })
                 .then(function(html) {
-                    var doc = new DOMParser().parseFromString(html, 'text/html');
-                    var foodNext = doc.getElementById('food-tab');
-                    var foodCur = document.getElementById('food-tab');
-                    if (foodNext && foodCur) foodCur.innerHTML = foodNext.innerHTML;
-                    var drinkNext = doc.getElementById('drinks-tab');
-                    var drinkCur = document.getElementById('drinks-tab');
-                    if (drinkNext && drinkCur) drinkCur.innerHTML = drinkNext.innerHTML;
-                    initDragToReorder();
-                    wireMenuNameChecks();
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+                    ['food-tab', 'drinks-tab'].forEach(function(id) {
+                        const next = doc.getElementById(id);
+                        const cur = mmEl(id);
+                        if (next && cur) cur.innerHTML = next.innerHTML;
+                    });
+                    const nextCat = doc.getElementById('mmCatFilter');
+                    if (nextCat) {
+                        mmEl('mmCatFilter').innerHTML = nextCat.innerHTML;
+                        mmEl('mmCatFilter').value = MM_FILTER.cat;
+                        if (mmEl('mmCatFilter').value !== MM_FILTER.cat) MM_FILTER.cat = '';
+                    }
+                    mmReadCats(doc);
+                    mmInitDrag();
+                    mmWireNameChecks();
+                    mmApplyFilters(false);
                 }).catch(function() {});
         }
 
-        /* ============================================================
-           DRAG-TO-REORDER rows within a category table
-           ============================================================ */
-        function initDragToReorder() {
+        /* ---------- Drag to reorder rows inside a category (off while a filter is on) ---------- */
+        function mmInitDrag() {
             document.querySelectorAll('.menu-table tbody').forEach(function(tbody) {
-                var dragging = null;
-
+                let dragging = null;
                 tbody.querySelectorAll('tr').forEach(function(row) {
-                    var handle = row.querySelector('.drag-handle');
+                    const handle = row.querySelector('.drag-handle');
                     if (!handle) return;
-
                     handle.addEventListener('mousedown', function() {
                         row.setAttribute('draggable', 'true');
                     });
                     handle.addEventListener('mouseup', function() {
                         row.setAttribute('draggable', 'false');
                     });
-
                     row.addEventListener('dragstart', function(e) {
                         dragging = row;
                         row.classList.add('drag-dragging');
                         e.dataTransfer.effectAllowed = 'move';
                     });
-
                     row.addEventListener('dragend', function() {
                         row.classList.remove('drag-dragging');
                         tbody.querySelectorAll('tr').forEach(function(r) {
@@ -1530,9 +1520,8 @@ if ($stockReady) {
                         });
                         row.setAttribute('draggable', 'false');
                         dragging = null;
-                        saveRowOrder(tbody);
+                        mmSaveOrder(tbody);
                     });
-
                     row.addEventListener('dragover', function(e) {
                         e.preventDefault();
                         if (dragging && dragging !== row) {
@@ -1540,7 +1529,7 @@ if ($stockReady) {
                                 r.classList.remove('drag-over');
                             });
                             row.classList.add('drag-over');
-                            var rect = row.getBoundingClientRect();
+                            const rect = row.getBoundingClientRect();
                             if (e.clientY < rect.top + rect.height / 2) {
                                 tbody.insertBefore(dragging, row);
                             } else {
@@ -1552,53 +1541,139 @@ if ($stockReady) {
             });
         }
 
-        function saveRowOrder(tbody) {
-            var rows = Array.from(tbody.querySelectorAll('tr'));
-            var tabContent = tbody.closest('.tab-content');
-            var menuType = (tabContent && tabContent.id === 'drinks-tab') ? 'drinks' : 'food';
-            var formData = new FormData();
-            formData.append('action', 'reorder_items');
-            formData.append('menu_type', menuType);
-            rows.forEach(function(row, i) {
-                var m = row.id.match(/^(?:food|drink)-row-(\d+)$/);
-                if (m) {
-                    formData.append('ids[]', m[1]);
-                    var hidden = row.querySelector('[data-field="display_order"]');
-                    if (hidden) hidden.value = i + 1;
-                }
+        function mmSaveOrder(tbody) {
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const tc = tbody.closest('.tab-content');
+            const fd = new FormData();
+            fd.append('action', 'reorder_items');
+            fd.append('menu_type', tc && tc.id === 'drinks-tab' ? 'drinks' : 'food');
+            rows.forEach(function(row) {
+                const m = row.id.match(/^(?:food|drink)-row-(\d+)$/);
+                if (m) fd.append('ids[]', m[1]);
             });
-            fetch(window.location.href, {
+            fd.append('csrf_token', MM_CSRF);
+            fetch(window.location.pathname, {
                 method: 'POST',
-                body: formData
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: fd
             }).catch(function() {});
         }
 
-        /* ============================================================
-           DELETE CONFIRM — no window.confirm()
-           ============================================================ */
-        function mmConfirmDelete(id, menuType) {
-            var overlay = document.createElement('div');
-            overlay.className = 'mm-confirm-overlay';
-            overlay.innerHTML =
-                '<div class="mm-confirm-card">' +
-                '  <p class="mm-confirm-msg"><i class="fas fa-exclamation-triangle"></i> Delete this menu item?<br><small>Any attached stock recipe will also be removed.</small></p>' +
-                '  <div class="mm-confirm-actions">' +
-                '    <button class="btn-action btn-delete mm-confirm-yes"><i class="fas fa-trash-alt"></i> Delete</button>' +
-                '    <button class="btn-action mm-confirm-no">Cancel</button>' +
-                '  </div>' +
-                '</div>';
-            document.body.appendChild(overlay);
-            overlay.querySelector('.mm-confirm-yes').addEventListener('click', function() {
-                document.body.removeChild(overlay);
-                deleteRow(id, menuType);
-            });
-            overlay.querySelector('.mm-confirm-no').addEventListener('click', function() {
-                document.body.removeChild(overlay);
-            });
-            overlay.addEventListener('click', function(e) {
-                if (e.target === overlay) document.body.removeChild(overlay);
+        /* ---------- New stock item (small helper form) ---------- */
+        function openIngredientModal() {
+            mmEl('ig-name').value = mmEl('mmIngPick').value.trim();
+            mmEl('ig-category').value = 'General';
+            mmEl('ig-unit').value = 'each';
+            mmEl('ig-cost').value = 0;
+            mmEl('ig-yield').value = 100;
+            mmEl('ingredientModal').classList.add('open');
+            setTimeout(function() {
+                mmEl('ig-name').focus();
+            }, 50);
+        }
+
+        function closeIngredientModal() {
+            mmEl('ingredientModal').classList.remove('open');
+        }
+
+        async function saveNewIngredient() {
+            const name = mmEl('ig-name').value.trim();
+            if (!name) {
+                Alert.show('Name is required', 'error');
+                return;
+            }
+            const fd = new FormData();
+            fd.append('action', 'add_ingredient');
+            fd.append('name', name);
+            fd.append('category', mmEl('ig-category').value.trim() || 'General');
+            fd.append('unit', mmEl('ig-unit').value);
+            fd.append('cost_per_unit', mmEl('ig-cost').value || 0);
+            fd.append('yield_percent', mmEl('ig-yield').value || 100);
+            fd.append('csrf_token', MM_CSRF);
+            try {
+                const res = await fetch(MM_RECIPE_API, {
+                    method: 'POST',
+                    body: fd
+                });
+                const data = await res.json();
+                if (!data.ok) throw new Error(data.error);
+                MM_STATE.ing = null;
+                const list = await mmLoadIngredients();
+                const made = list.find(function(i) {
+                    return i.id === data.id;
+                });
+                if (made) {
+                    mmEl('mmIngPick').value = made.label;
+                    mmIngChosen();
+                }
+                Alert.show(data.reused ? 'That stock item already existed. It is selected.' : 'Stock item created. Enter the quantity and add it.', 'success');
+                closeIngredientModal();
+            } catch (e) {
+                Alert.show('Failed: ' + e.message, 'error');
+            }
+        }
+
+        /* ---------- Wiring ---------- */
+        function mmWireNameChecks() {
+            if (!window.RHFormGuard) return;
+            RHFormGuard.watch(mmEl('mmName'), function() {
+                const ed = MM_STATE.editing;
+                const cat = mmEl('mmCategory').value === '__new__' ? mmEl('mmNewCategory').value : mmEl('mmCategory').value;
+                return {
+                    form: mmEl('mmType').value === 'drinks' ? 'menu_drink' : 'menu_food',
+                    excludeId: ed ? ed.id : 0,
+                    params: {
+                        category: cat
+                    }
+                };
+            }, [mmEl('mmCategory')]);
+            RHFormGuard.watch(mmEl('mmBarcode'), function() {
+                const ed = MM_STATE.editing;
+                return {
+                    form: 'menu_item_barcode',
+                    excludeId: ed && ed.pos_id ? ed.pos_id : 0
+                };
             });
         }
+
+        function mmInit() {
+            mmReadCats(document);
+            mmInitFilters();
+            mmInitDrag();
+            mmWireNameChecks();
+            mmEl('mmItemForm').addEventListener('submit', mmSubmit);
+            mmEl('mmFree').addEventListener('change', mmSyncFree);
+            mmEl('mmPrice').addEventListener('input', mmStockTotals);
+            mmEl('mmCategory').addEventListener('change', function() {
+                const isNew = this.value === '__new__';
+                mmEl('mmNewCategory').hidden = !isNew;
+                if (isNew) mmEl('mmNewCategory').focus();
+            });
+            mmEl('mmIngPick').addEventListener('input', mmIngChosen);
+            mmEl('mmIngQty').addEventListener('input', mmIngLive);
+            mmEl('mmIngUnit').addEventListener('change', mmIngLive);
+            mmEl('mmIngQty').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    mmStockAdd();
+                }
+            });
+            // Close a form when its dark backdrop is clicked.
+            document.querySelectorAll('.mm-modal').forEach(function(m) {
+                m.addEventListener('click', function(e) {
+                    if (e.target === this) {
+                        this.classList.remove('open');
+                        document.body.style.overflow = '';
+                    }
+                });
+            });
+            if (window.RHFormGuard) RHFormGuard.guardSubmit(mmEl('mmItemForm'), {
+                busy: false
+            }); // saving is AJAX with its own busy button
+        }
+        mmInit();
     </script>
 
     <?php /* Modals sit before the footer: admin-footer.php closes #rh-admin-page, and the admin SPA

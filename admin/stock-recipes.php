@@ -10,6 +10,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/includes/menu-recipe-lib.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -33,9 +34,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_recipe') {
     $typeRaw = trim($_GET['menu_type'] ?? '');
     try {
         // Validate slug against menu_categories
-        $catChk = $pdo->prepare("SELECT slug FROM menu_categories WHERE slug = ? AND is_active = 1 LIMIT 1");
-        $catChk->execute([$typeRaw]);
-        $type = (string)($catChk->fetchColumn() ?: 'food');
+        $type = rh_menu_item_slug($pdo, $itemId); // the item's own category slug (what the till sells it under)
 
         // Menu item details from unified table
         $stmt = $pdo->prepare("SELECT mi.id, mi.item_name AS name, mi.price FROM menu_items mi WHERE mi.id = ?");
@@ -87,9 +86,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($action === 'save_recipe') {
                 $itemId = (int)($_POST['menu_item_id'] ?? 0);
                 $typeRaw = trim($_POST['menu_type'] ?? 'food');
-                $catChk2 = $pdo->prepare("SELECT slug FROM menu_categories WHERE slug = ? AND is_active = 1 LIMIT 1");
-                $catChk2->execute([$typeRaw]);
-                $type = (string)($catChk2->fetchColumn() ?: 'food');
+                $type = rh_menu_item_slug($pdo, $itemId);
                 $portions = max(1, (int)($_POST['portions_per_recipe'] ?? 1));
                 $ingIds   = $_POST['ingredient_id'] ?? [];
                 $qtys     = $_POST['quantity_per_portion'] ?? [];
