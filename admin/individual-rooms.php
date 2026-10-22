@@ -7,6 +7,8 @@
 require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/includes/bulk-actions.php';
+require_once __DIR__ . '/../includes/pricing.php';
+require_once __DIR__ . '/includes/child-charge-fields.php';
 /** @var string $csrf_token */
 
 /** Common field checks for an individual room (add + edit). Returns an error string or null. */
@@ -169,10 +171,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $floor = rh_clean_text($_POST['floor'] ?? '');
             $status = $_POST['status'] ?? 'available';
             $max_guests_override = ($_POST['max_guests_override'] ?? '') !== '' ? max(1, (int)$_POST['max_guests_override']) : null;
-            $child_price_multiplier = ($_POST['child_price_multiplier'] ?? '') !== '' ? (float)$_POST['child_price_multiplier'] : null;
-            if ($child_price_multiplier !== null && $child_price_multiplier < 0) {
-                $child_price_multiplier = 0.0;
-            }
+            // Child charge for this room: blank mode = same as the room type; the room's own setting wins over the type.
+            $cc = rh_child_rule_post($_POST, true);
             $single_override = (isset($_POST['single_occupancy_enabled_override']) && $_POST['single_occupancy_enabled_override'] !== '') ? (int)$_POST['single_occupancy_enabled_override'] : null;
             $double_override = (isset($_POST['double_occupancy_enabled_override']) && $_POST['double_occupancy_enabled_override'] !== '') ? (int)$_POST['double_occupancy_enabled_override'] : null;
             $triple_override = (isset($_POST['triple_occupancy_enabled_override']) && $_POST['triple_occupancy_enabled_override'] !== '') ? (int)$_POST['triple_occupancy_enabled_override'] : null;
@@ -187,13 +187,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $fieldError = ir_validate_room_fields($pdo, $room_type_id, $room_number, $room_name, $floor, $notes, $_POST['max_guests_override'] ?? '', $_POST['child_price_multiplier'] ?? '', $display_order);
             if ($fieldError !== null) {
                 $error = $fieldError;
+            } elseif ($cc['error'] !== null) {
+                $error = $cc['error'];
             } elseif (!in_array($status, $validRoomStatuses, true)) {
                 $error = 'Invalid room status.';
             } elseif (rhStatusBlocksRoom((string)$status) && !$canBlockRooms) {
                 $error = rhBlockRoomsDeniedMessage();
             } else {
                 // Check if room number already exists (case/space-insensitive, re-checked under a lock)
-                rh_with_create_lock($pdo, 'individual_room', function () use ($pdo, $user, $room_type_id, $room_number, $room_name, $floor, $status, $max_guests_override, $child_price_multiplier, $single_override, $double_override, $triple_override, $children_override, $notes, $display_order, $amenities_list, $photos_list, &$error, &$message) {
+                rh_with_create_lock($pdo, 'individual_room', function () use ($pdo, $user, $room_type_id, $room_number, $room_name, $floor, $status, $max_guests_override, $cc, $single_override, $double_override, $triple_override, $children_override, $notes, $display_order, $amenities_list, $photos_list, &$error, &$message) {
                     $dupRoom = rh_find_duplicate($pdo, 'individual_rooms', 'room_number', $room_number);
                     if ($dupRoom) {
                         $error = 'Room number "' . $dupRoom['value'] . '" already exists. Please use a unique room number.';
@@ -204,10 +206,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt = $pdo->prepare("
                         INSERT INTO individual_rooms (
                             room_type_id, room_number, room_name, floor, status, max_guests_override, child_price_multiplier,
+                            child_charge_mode, child_charge_amount, free_children, max_children,
                             single_occupancy_enabled_override, double_occupancy_enabled_override, triple_occupancy_enabled_override, children_allowed_override,
                             notes, display_order, housekeeping_status
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')
                     ");
                     $stmt->execute([
                         $room_type_id,
@@ -216,7 +219,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $floor,
                         $status,
                         $max_guests_override,
-                        $child_price_multiplier,
+                        $cc['percent'],
+                        $cc['mode'],
+                        $cc['amount'],
+                        $cc['free'],
+                        $cc['max'],
                         $single_override,
                         $double_override,
                         $triple_override,
@@ -247,10 +254,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $room_name = rh_clean_text($_POST['room_name'] ?? '');
             $floor = rh_clean_text($_POST['floor'] ?? '');
             $max_guests_override = ($_POST['max_guests_override'] ?? '') !== '' ? max(1, (int)$_POST['max_guests_override']) : null;
-            $child_price_multiplier = ($_POST['child_price_multiplier'] ?? '') !== '' ? (float)$_POST['child_price_multiplier'] : null;
-            if ($child_price_multiplier !== null && $child_price_multiplier < 0) {
-                $child_price_multiplier = 0.0;
-            }
+            $cc = rh_child_rule_post($_POST, true);
             $single_override = (isset($_POST['single_occupancy_enabled_override']) && $_POST['single_occupancy_enabled_override'] !== '') ? (int)$_POST['single_occupancy_enabled_override'] : null;
             $double_override = (isset($_POST['double_occupancy_enabled_override']) && $_POST['double_occupancy_enabled_override'] !== '') ? (int)$_POST['double_occupancy_enabled_override'] : null;
             $triple_override = (isset($_POST['triple_occupancy_enabled_override']) && $_POST['triple_occupancy_enabled_override'] !== '') ? (int)$_POST['triple_occupancy_enabled_override'] : null;
@@ -265,6 +269,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $fieldError = $id <= 0 ? 'Room not found.' : ir_validate_room_fields($pdo, $room_type_id, $room_number, $room_name, $floor, $notes, $_POST['max_guests_override'] ?? '', $_POST['child_price_multiplier'] ?? '', $display_order);
             if ($fieldError !== null) {
                 $error = $fieldError;
+            } elseif ($cc['error'] !== null) {
+                $error = $cc['error'];
             } else {
                 // Check if room number already exists (excluding current room)
                 $dupRoom = rh_find_duplicate($pdo, 'individual_rooms', 'room_number', $room_number, [], $id);
@@ -274,6 +280,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt = $pdo->prepare("
                         UPDATE individual_rooms
                         SET room_type_id = ?, room_number = ?, room_name = ?, floor = ?, max_guests_override = ?, child_price_multiplier = ?,
+                            child_charge_mode = ?, child_charge_amount = ?, free_children = ?, max_children = ?,
                             single_occupancy_enabled_override = ?, double_occupancy_enabled_override = ?, triple_occupancy_enabled_override = ?, children_allowed_override = ?,
                             notes = ?, is_active = ?, display_order = ?
                         WHERE id = ?
@@ -284,7 +291,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $room_name,
                         $floor,
                         $max_guests_override,
-                        $child_price_multiplier,
+                        $cc['percent'],
+                        $cc['mode'],
+                        $cc['amount'],
+                        $cc['free'],
+                        $cc['max'],
                         $single_override,
                         $double_override,
                         $triple_override,
@@ -924,7 +935,8 @@ if ($error !== '' && $_SERVER['REQUEST_METHOD'] === 'POST'
     && in_array((string)($action ?? ''), ['add_individual_room', 'update_individual_room'], true)) {
     $keepRoom = [];
     foreach (['id', 'room_type_id', 'room_number', 'room_name', 'floor', 'max_guests_override', 'status', 'display_order',
-              'child_price_multiplier', 'single_occupancy_enabled_override', 'double_occupancy_enabled_override',
+              'child_price_multiplier', 'child_charge_mode', 'child_charge_amount', 'free_children', 'max_children',
+              'single_occupancy_enabled_override', 'double_occupancy_enabled_override',
               'triple_occupancy_enabled_override', 'children_allowed_override', 'notes', 'amenities_list', 'photos_list'] as $keepField) {
         $keepRoom[$keepField] = (string)($_POST[$keepField] ?? '');
     }
@@ -2069,13 +2081,12 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             </label>
                             <input type="number" name="display_order" id="display_order" value="0" min="0">
                         </div>
-                        <div class="form-group">
-                            <label for="child_price_multiplier">Child Supplement Override (%)
-                                <i class="fas fa-question-circle field-help-icon" data-help="Child Supplement Override|A flat price added per child per night — e.g. enter 1500 for MWK 1,500/night per child. Leave blank to use the room type's default supplement from Room Management."></i>
-                            </label>
-                            <input type="number" name="child_price_multiplier" id="child_price_multiplier" step="0.01" min="0" placeholder="Leave blank to use room type default">
-                            <div class="field-hint">If blank, booking uses room type child supplement from room-management.</div>
-                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Children
+                            <i class="fas fa-question-circle field-help-icon" data-help="Children|Leave on Same as room type to follow the room type. Choose a percentage or a fixed amount per child per night to set a different charge for this room only. Free children and the most children in one room can also be set here."></i>
+                        </label>
+                        <?php rh_child_charge_fields('ir', true, getSetting('currency_symbol') ?: 'MWK'); ?>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
@@ -2248,6 +2259,20 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             echo json_encode((object)$memberRoomsJs, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
         ?>;
 
+        // Child charge fields: blank mode = same as the room type. A room that already carries its own % (set before
+        // fixed amounts existed) shows as a % override so saving does not lose it.
+        function fillChildCharge(room) {
+            const val = v => (v === null || v === undefined ? '' : v);
+            let mode = room.child_charge_mode || '';
+            if (mode === '' && val(room.child_price_multiplier) !== '') mode = 'percent';
+            document.getElementById('irChildMode').value = mode;
+            document.getElementById('irChildPct').value = val(room.child_price_multiplier);
+            document.getElementById('irChildAmt').value = val(room.child_charge_amount);
+            document.getElementById('irChildFree').value = val(room.free_children);
+            document.getElementById('irChildMax').value = val(room.max_children);
+            document.getElementById('irChildMode').dispatchEvent(new Event('change'));
+        }
+
         // Add Modal
         function openAddModal() {
             document.getElementById('modalTitle').innerHTML = '<i class="fas fa-plus"></i> Add Individual Room';
@@ -2255,7 +2280,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             document.getElementById('roomForm').reset();
             document.getElementById('roomId').value = '';
             document.getElementById('max_guests_override').value = '';
-            document.getElementById('child_price_multiplier').value = '';
+            fillChildCharge({});
             document.getElementById('single_occupancy_enabled_override').value = '';
             document.getElementById('double_occupancy_enabled_override').value = '';
             document.getElementById('triple_occupancy_enabled_override').value = '';
@@ -2278,7 +2303,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             document.getElementById('max_guests_override').value = room.max_guests_override ?? '';
             document.getElementById('status').value = room.status;
             document.getElementById('display_order').value = room.display_order || 0;
-            document.getElementById('child_price_multiplier').value = room.child_price_multiplier ?? '';
+            fillChildCharge(room);
             document.getElementById('single_occupancy_enabled_override').value = room.single_occupancy_enabled_override ?? '';
             document.getElementById('double_occupancy_enabled_override').value = room.double_occupancy_enabled_override ?? '';
             document.getElementById('triple_occupancy_enabled_override').value = room.triple_occupancy_enabled_override ?? '';
@@ -3259,11 +3284,12 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             }
             // Put back exactly what was typed (the edit/add openers fill from a stored room).
             ['room_type_id', 'room_number', 'room_name', 'floor', 'max_guests_override', 'status', 'display_order',
-             'child_price_multiplier', 'single_occupancy_enabled_override', 'double_occupancy_enabled_override',
+             'single_occupancy_enabled_override', 'double_occupancy_enabled_override',
              'triple_occupancy_enabled_override', 'children_allowed_override', 'notes', 'amenities_list', 'photos_list'].forEach(function (id) {
                 const el = document.getElementById(id);
                 if (el && d[id] !== undefined) el.value = d[id];
             });
+            fillChildCharge(d);
             if (r.action === 'update_individual_room') {
                 document.getElementById('is_active').checked = d.is_active == 1;
             }

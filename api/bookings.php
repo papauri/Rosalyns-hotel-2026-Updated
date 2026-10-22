@@ -173,6 +173,7 @@ try {
                COALESCE(price_double_occupancy, price_per_night) AS price_double_occupancy,
                COALESCE(price_triple_occupancy, price_per_night) AS price_triple_occupancy,
                COALESCE(child_price_multiplier, 50.00) AS child_price_multiplier,
+               r.child_charge_mode, r.child_charge_amount, r.free_children, r.max_children,
                GREATEST(
                    r.max_guests,
                    COALESCE((SELECT MAX(ir.max_guests_override) FROM individual_rooms ir WHERE ir.room_type_id = r.id AND ir.is_active = 1), 0),
@@ -247,15 +248,17 @@ try {
         $roomRate = (float)$room['price_double_occupancy'];
     }
 
-    $childPriceMultiplier = (float)($room['child_price_multiplier'] ?? 50);
-    if ($childPriceMultiplier < 0) {
-        $childPriceMultiplier = 0;
+    // One child-charge rule per room type (includes/pricing.php), shared with booking.php.
+    $childRule = rh_child_rule($room);
+    $childPriceMultiplier = $childRule['percent'];
+    $childSnapshot = rh_child_rule_snapshot($childRule);
+    $childLimitError = rh_child_limit_error($childRule, (int)$bookingData['child_guests'], !empty($occupancyPolicy['children_allowed']), (string)$room['name']);
+    if ($childLimitError !== '') {
+        ApiResponse::validationError(['child_guests' => $childLimitError]);
     }
 
     $baseAmount = $roomRate * $nights;
-    $childSupplementTotal = $bookingData['child_guests'] > 0
-        ? ($roomRate * ($childPriceMultiplier / 100) * $bookingData['child_guests'] * $nights)
-        : 0;
+    $childSupplementTotal = rh_child_supplement($childRule, (int)$bookingData['child_guests'], (int)$nights, (float)$roomRate);
     
     // Stay totals via the shared helper (same as booking.php): levy is OUTSIDE the VAT
     // base, levy = net * levy%. total_amount = net + levy (ex-VAT), vat_amount = VAT,
@@ -314,11 +317,12 @@ try {
             INSERT INTO bookings (
                 booking_reference, room_id, guest_name, guest_email, guest_phone,
                 guest_country, guest_address, number_of_guests, adult_guests, child_guests,
-                child_price_multiplier, check_in_date, check_out_date, number_of_nights,
+                child_price_multiplier, child_charge_mode, child_charge_amount, free_children,
+                check_in_date, check_out_date, number_of_nights,
                 total_amount, amount_due, vat_rate, vat_amount, total_with_vat,
                 child_supplement_total, tourism_levy_amount, tourism_levy_percent,
                 special_requests, status, is_tentative, tentative_expires_at, occupancy_type, client_uuid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
 
         $__bookingClientUuid = idem_normalize_uuid($__incomingClientUuid ?? null);
@@ -333,7 +337,10 @@ try {
             $bookingData['number_of_guests'],
             $adultGuests,
             $bookingData['child_guests'],
-            $childPriceMultiplier,
+            $childSnapshot['child_price_multiplier'],
+            $childSnapshot['child_charge_mode'],
+            $childSnapshot['child_charge_amount'],
+            $childSnapshot['free_children'],
             $bookingData['check_in_date'],
             $bookingData['check_out_date'],
             $nights,
@@ -408,6 +415,9 @@ try {
             'adult_guests' => $adultGuests,
             'child_guests' => $bookingData['child_guests'],
             'child_price_multiplier' => $childPriceMultiplier,
+            'child_charge_mode' => $childSnapshot['child_charge_mode'],
+            'child_charge_amount' => $childSnapshot['child_charge_amount'],
+            'free_children' => $childSnapshot['free_children'],
             'child_supplement_total' => $childSupplementTotal,
             'tourism_levy_amount' => $tourismLevyAmount,
             'tourism_levy_percent' => $tourismLevyPercent,
@@ -494,6 +504,9 @@ try {
                     'base_amount' => (float)($booking['total_amount'] - ($booking['child_supplement_total'] ?? 0) - ($booking['tourism_levy_amount'] ?? 0)),
                     'child_supplement_total' => (float)($booking['child_supplement_total'] ?? $childSupplementTotal),
                     'child_price_multiplier' => (float)($booking['child_price_multiplier'] ?? $childPriceMultiplier),
+                    'child_charge_mode' => (string)($booking['child_charge_mode'] ?? $childSnapshot['child_charge_mode']),
+                    'child_charge_amount' => isset($booking['child_charge_amount']) ? (float)$booking['child_charge_amount'] : $childSnapshot['child_charge_amount'],
+                    'free_children' => (int)($booking['free_children'] ?? $childSnapshot['free_children']),
                     'tourism_levy_amount' => (float)($booking['tourism_levy_amount'] ?? $tourismLevyAmount),
                     'tourism_levy_percent' => (float)($booking['tourism_levy_percent'] ?? $tourismLevyPercent),
                     'total_amount' => (float)$booking['total_amount'],

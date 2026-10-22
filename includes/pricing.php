@@ -474,3 +474,352 @@ if (!function_exists('rh_doc_stay_lines')) {
         ];
     }
 }
+
+/*
+ * Child charge rules (owner decision 2026-10-22): ONE rule, used by every booking path and document.
+ *
+ * Managers set, per room type and per individual room (the room overrides the type):
+ *   - how children are charged: a % of the room rate (child_price_multiplier) or a fixed amount per child per night
+ *     (child_charge_amount);
+ *   - free_children: the first N children in a room are free;
+ *   - max_children: most children in one room (NULL = no limit beyond the room's guest capacity).
+ * 0% and a fixed amount of 0 are both valid and mean free.
+ *
+ * A rule is a plain array: mode ('percent'|'fixed'), percent, amount, free, max (int|null), source ('type'|'room').
+ * A saved booking keeps the rule it was priced with (bookings.child_price_multiplier / child_charge_mode /
+ * child_charge_amount / free_children): rh_child_rule_from_booking().
+ */
+if (!function_exists('rh_child_rule')) {
+    /** Default child percentage when a room type row carries none (the old site-wide setting, else 50). */
+    function rh_child_default_percent(): float
+    {
+        if (function_exists('getSetting')) {
+            return max(0.0, (float)getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50)));
+        }
+        return 50.0;
+    }
+
+    function rh_child_clean_mode($mode): ?string
+    {
+        $mode = is_string($mode) ? strtolower(trim($mode)) : '';
+        return ($mode === 'percent' || $mode === 'fixed') ? $mode : null;
+    }
+
+    function rh_child_has($row, string $key): bool
+    {
+        return is_array($row) && array_key_exists($key, $row) && $row[$key] !== null && $row[$key] !== '';
+    }
+
+    /**
+     * Effective rule for a room type row (rooms.*) and, optionally, one individual room row (individual_rooms.*, whose
+     * child_* columns are NULL where they inherit). Missing columns behave like a percent rule with no free children.
+     */
+    function rh_child_rule(array $type, ?array $individual = null): array
+    {
+        $rule = [
+            'mode'    => rh_child_clean_mode($type['child_charge_mode'] ?? null) ?? 'percent',
+            'percent' => rh_child_has($type, 'child_price_multiplier') ? max(0.0, (float)$type['child_price_multiplier']) : rh_child_default_percent(),
+            'amount'  => rh_child_has($type, 'child_charge_amount') ? max(0.0, (float)$type['child_charge_amount']) : 0.0,
+            'free'    => rh_child_has($type, 'free_children') ? max(0, (int)$type['free_children']) : 0,
+            'max'     => rh_child_has($type, 'max_children') ? max(0, (int)$type['max_children']) : null,
+            'source'  => 'type',
+        ];
+        if ($individual === null) {
+            return $rule;
+        }
+
+        $indMode = rh_child_clean_mode($individual['child_charge_mode'] ?? null);
+        if (rh_child_has($individual, 'child_price_multiplier') && ($indMode === null || $indMode === 'percent')) {
+            // A room that carries its own percentage (including rooms set before fixed amounts existed).
+            $rule['mode'] = 'percent';
+            $rule['percent'] = max(0.0, (float)$individual['child_price_multiplier']);
+            $rule['source'] = 'room';
+        } elseif ($indMode === 'fixed') {
+            $rule['mode'] = 'fixed';
+            if (rh_child_has($individual, 'child_charge_amount')) {
+                $rule['amount'] = max(0.0, (float)$individual['child_charge_amount']);
+            }
+            $rule['source'] = 'room';
+        } elseif ($indMode === 'percent') {
+            $rule['mode'] = 'percent';
+            $rule['source'] = 'room';
+        }
+        if (rh_child_has($individual, 'free_children')) {
+            $rule['free'] = max(0, (int)$individual['free_children']);
+            $rule['source'] = 'room';
+        }
+        if (rh_child_has($individual, 'max_children')) {
+            $rule['max'] = max(0, (int)$individual['max_children']);
+            $rule['source'] = 'room';
+        }
+        return $rule;
+    }
+
+    /** Rule for a room type id (+ optional individual room id that belongs to it), read from the database. */
+    function rh_child_rule_for(PDO $pdo, int $roomTypeId, ?int $individualRoomId = null): array
+    {
+        $st = $pdo->prepare('SELECT * FROM rooms WHERE id = ?');
+        $st->execute([$roomTypeId]);
+        $type = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        $ind = null;
+        if ($individualRoomId) {
+            $st = $pdo->prepare('SELECT * FROM individual_rooms WHERE id = ? AND room_type_id = ?');
+            $st->execute([$individualRoomId, $roomTypeId]);
+            $ind = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+        return rh_child_rule($type, $ind);
+    }
+
+    /** The rule a saved booking was priced with (snapshot columns; older rows read as percent, nobody free). */
+    function rh_child_rule_from_booking(array $b): array
+    {
+        return [
+            'mode'    => rh_child_clean_mode($b['child_charge_mode'] ?? null) ?? 'percent',
+            'percent' => rh_child_has($b, 'child_price_multiplier') ? max(0.0, (float)$b['child_price_multiplier']) : rh_child_default_percent(),
+            'amount'  => rh_child_has($b, 'child_charge_amount') ? max(0.0, (float)$b['child_charge_amount']) : 0.0,
+            'free'    => rh_child_has($b, 'free_children') ? max(0, (int)$b['free_children']) : 0,
+            'max'     => null,
+            'source'  => 'booking',
+        ];
+    }
+
+    /** The bookings columns that store a rule (write these with the booking so it keeps its rule). */
+    function rh_child_rule_snapshot(array $rule): array
+    {
+        return [
+            'child_price_multiplier' => round((float)$rule['percent'], 2),
+            'child_charge_mode'      => (string)$rule['mode'],
+            'child_charge_amount'    => $rule['mode'] === 'fixed' ? round((float)$rule['amount'], 2) : null,
+            'free_children'          => (int)$rule['free'],
+        ];
+    }
+
+    /** Children who pay: the first N are free. */
+    function rh_child_charged(array $rule, int $children): int
+    {
+        return max(0, max(0, $children) - (int)$rule['free']);
+    }
+
+    /** Child charge for ONE night for $children children in one room at nightly room rate $rate (not rounded). */
+    function rh_child_night_charge(array $rule, int $children, float $rate): float
+    {
+        $charged = rh_child_charged($rule, $children);
+        if ($charged <= 0) {
+            return 0.0;
+        }
+        $each = $rule['mode'] === 'fixed' ? (float)$rule['amount'] : $rate * ((float)$rule['percent'] / 100);
+        return max(0.0, $each) * $charged;
+    }
+
+    /**
+     * Child supplement for one room over the stay, rounded to 2 decimals (what is saved and billed).
+     * $rate = the room's nightly rate for its occupancy tier after rate plans (the % is taken off this).
+     */
+    function rh_child_supplement(array $rule, int $children, int $nights, float $rate): float
+    {
+        if ($children <= 0 || $nights <= 0) {
+            return 0.0;
+        }
+        return round(rh_child_night_charge($rule, $children, $rate) * $nights, 2);
+    }
+
+    /**
+     * Refusal text when $children cannot sleep in one room under this rule, or '' when fine.
+     * $childrenAllowed is the room's own children policy (type, or individual override).
+     */
+    function rh_child_limit_error(array $rule, int $children, bool $childrenAllowed = true, string $roomName = 'this room'): string
+    {
+        if ($children <= 0) {
+            return '';
+        }
+        if (!$childrenAllowed) {
+            return "Children cannot stay in {$roomName}.";
+        }
+        if ($rule['max'] !== null && $children > (int)$rule['max']) {
+            return (int)$rule['max'] === 0
+                ? "Children cannot stay in {$roomName}."
+                : "{$roomName} takes at most " . (int)$rule['max'] . ' child' . ((int)$rule['max'] === 1 ? '' : 'ren') . ' per room.';
+        }
+        return '';
+    }
+
+    /** Rule as a small array for JavaScript / data attributes. */
+    function rh_child_rule_js(array $rule): array
+    {
+        return [
+            'mode'    => (string)$rule['mode'],
+            'percent' => round((float)$rule['percent'], 2),
+            'amount'  => round((float)$rule['amount'], 2),
+            'free'    => (int)$rule['free'],
+            'max'     => $rule['max'],
+        ];
+    }
+
+    /** Short plain description of a rule for staff screens, e.g. "50% of room rate, first 2 free, max 3 per room". */
+    function rh_child_rule_summary(array $rule, string $currency = 'MWK'): string
+    {
+        if ($rule['mode'] === 'fixed') {
+            $core = (float)$rule['amount'] > 0 ? $currency . ' ' . number_format((float)$rule['amount'], 0) . ' per child per night' : 'Free';
+        } else {
+            $p = (float)$rule['percent'];
+            $core = $p > 0 ? rtrim(rtrim(number_format($p, 2), '0'), '.') . '% of room rate' : 'Free';
+        }
+        if ((int)$rule['free'] > 0) {
+            $core .= ', first ' . (int)$rule['free'] . ' free';
+        }
+        if ($rule['max'] !== null) {
+            $core .= ', max ' . (int)$rule['max'] . ' per room';
+        }
+        return $core;
+    }
+
+    /**
+     * Line text for quotations, invoices, statements and emails, from a saved booking row (its snapshot rule):
+     * "2 children, first 2 free" or "1 child x MWK 10,000 x 7 nights".
+     * $children defaults to the booking's own count; $rooms > 1 describes a group (children spread over several
+     * rooms, each room with its own free allowance).
+     */
+    function rh_child_charge_label(array $b, string $currency = 'MWK', ?int $children = null, int $rooms = 1): string
+    {
+        $children = $children ?? (int)($b['child_guests'] ?? 0);
+        if ($children <= 0) {
+            return '';
+        }
+        $rule = rh_child_rule_from_booking($b);
+        $nights = max(1, (int)($b['number_of_nights'] ?? 1));
+        $word = function (int $n): string {
+            return $n . ' child' . ($n === 1 ? '' : 'ren');
+        };
+        $free = (int)$rule['free'];
+        $each = $rule['mode'] === 'fixed' ? (float)$rule['amount'] : (float)$rule['percent'];
+        $unit = $rule['mode'] === 'fixed'
+            ? $currency . ' ' . number_format($each, 0)
+            : rtrim(rtrim(number_format($each, 2), '0'), '.') . '% of room rate';
+        $nightsTxt = $nights . ' night' . ($nights === 1 ? '' : 's');
+        if ($rooms > 1 && !empty($b['child_rule_mixed'])) {
+            // The rooms of this booking charge children differently (different room types): say so neutrally.
+            return $word($children) . ' in ' . $rooms . ' rooms';
+        }
+        if ($rooms > 1) {
+            $head = $word($children) . ' in ' . $rooms . ' rooms' . ($free > 0 ? ', first ' . $free . ' free in each room' : '');
+            return $each > 0 ? $head . ', ' . $unit . ' x ' . $nightsTxt : $head . ($free > 0 ? '' : ', no charge');
+        }
+        $charged = rh_child_charged($rule, $children);
+        if ($charged <= 0 || $each <= 0) {
+            return $word($children) . ($free > 0 ? ', first ' . $free . ' free' : ', no charge');
+        }
+        $line = $word($charged) . ' x ' . $unit . ' x ' . $nightsTxt;
+        if ($free > 0 && $children > $charged) {
+            $line = $word($children) . ', first ' . $free . ' free: ' . $line;
+        }
+        return $line;
+    }
+
+    /**
+     * Same label for a set of booking rows (a group booking's rooms): children are added up across the rooms that carry
+     * them. When those rooms charge children by different rules (different room types) the label is neutral.
+     */
+    function rh_child_doc_label(array $rows, string $currency = 'MWK'): string
+    {
+        $kids = 0;
+        $rooms = 0;
+        $first = null;
+        $sigs = [];
+        foreach ($rows as $r) {
+            $c = (int)($r['child_guests'] ?? 0);
+            if ($c > 0) {
+                $kids += $c;
+                $rooms++;
+                $first = $first ?? $r;
+                $sigs[json_encode(rh_child_rule_snapshot(rh_child_rule_from_booking($r)))] = true;
+            }
+        }
+        if ($kids <= 0) {
+            return '';
+        }
+        return rh_child_charge_label($first + ['child_rule_mixed' => count($sigs) > 1], $currency, $kids, $rooms);
+    }
+
+    /** Children who actually pay across a set of booking rows (each room's own free allowance taken off). */
+    function rh_child_doc_charged(array $rows, int $fallbackChildren = 0): int
+    {
+        $charged = 0;
+        $any = false;
+        foreach ($rows as $r) {
+            $c = (int)($r['child_guests'] ?? 0);
+            if ($c > 0) {
+                $any = true;
+                $charged += rh_child_charged(rh_child_rule_from_booking($r), $c);
+            }
+        }
+        if (!$any && $fallbackChildren > 0 && $rows) {
+            $charged = rh_child_charged(rh_child_rule_from_booking(reset($rows)), $fallbackChildren);
+        }
+        return $charged;
+    }
+}
+
+if (!function_exists('rh_child_rule_post')) {
+    /**
+     * Read and validate the child charge fields of a room-type or individual-room form
+     * (child_charge_mode, child_price_multiplier, child_charge_amount, free_children, max_children).
+     *
+     * Room type: mode is always set; free_children defaults to 0; max_children blank = no limit.
+     * Individual room: a blank mode means "same as room type" and stores NULL for the mode, % and amount;
+     * a blank free / max box also stores NULL (inherit).
+     *
+     * @return array{error:?string,mode:?string,percent:?float,amount:?float,free:?int,max:?int}
+     */
+    function rh_child_rule_post(array $p, bool $individual): array
+    {
+        $out = ['error' => null, 'mode' => null, 'percent' => null, 'amount' => null, 'free' => null, 'max' => null];
+        $get = static function (string $k) use ($p): string {
+            return trim(str_replace(',', '', (string)($p[$k] ?? '')));
+        };
+        $mode = strtolower(trim((string)($p['child_charge_mode'] ?? '')));
+        if ($mode === '' && !$individual) {
+            $mode = 'percent';
+        }
+        if ($mode !== '' && $mode !== 'percent' && $mode !== 'fixed') {
+            $out['error'] = 'Choose how children are charged: a % of the room rate or a fixed amount per child per night.';
+            return $out;
+        }
+        $pct = $get('child_price_multiplier');
+        $amt = $get('child_charge_amount');
+        $free = $get('free_children');
+        $max = $get('max_children');
+
+        if ($pct !== '' && (!is_numeric($pct) || (float)$pct < 0 || (float)$pct > 100)) {
+            $out['error'] = 'Child price percentage must be between 0 and 100.';
+            return $out;
+        }
+        if ($amt !== '' && (!is_numeric($amt) || (float)$amt < 0 || (float)$amt > 99999999)) {
+            $out['error'] = 'The child amount per night must be 0 or more.';
+            return $out;
+        }
+        if ($mode === 'fixed' && $amt === '') {
+            $out['error'] = 'Enter the fixed amount per child per night (0 means children stay free).';
+            return $out;
+        }
+        foreach (['free_children' => $free, 'max_children' => $max] as $label => $v) {
+            if ($v !== '' && (!ctype_digit($v) || (int)$v > 20)) {
+                $out['error'] = ($label === 'free_children' ? 'Free children' : 'Most children in one room') . ' must be a whole number from 0 to 20.';
+                return $out;
+            }
+        }
+
+        if ($individual) {
+            $out['mode'] = $mode === '' ? null : $mode;
+            $out['percent'] = ($mode === 'percent' && $pct !== '') ? (float)$pct : null;
+            $out['amount'] = ($mode === 'fixed') ? (float)$amt : null;
+            $out['free'] = $free === '' ? null : (int)$free;
+        } else {
+            $out['mode'] = $mode;
+            $out['percent'] = $pct === '' ? rh_child_default_percent() : (float)$pct;
+            $out['amount'] = $amt === '' ? null : (float)$amt;
+            $out['free'] = $free === '' ? 0 : (int)$free;
+        }
+        $out['max'] = $max === '' ? null : (int)$max;
+        return $out;
+    }
+}

@@ -2234,7 +2234,9 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         'child_guests' => (string)($booking['child_guests'] ?? 0),
         'tentative_expires_at_formatted' => !empty($booking['tentative_expires_at']) ? date('F j, Y g:i A', strtotime((string)$booking['tentative_expires_at'])) : '',
         'tentative_status' => ucfirst((string)($booking['status'] ?? '')),
-        'child_price_multiplier' => (string)($booking['child_price_multiplier'] ?? getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50))),
+        // The % only means something for a percent rule; a fixed-amount booking has no % to print.
+        'child_price_multiplier' => (($booking['child_charge_mode'] ?? 'percent') === 'fixed') ? '' : (string)($booking['child_price_multiplier'] ?? getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50))),
+        'child_charge_rule' => function_exists('rh_child_charge_label') ? rh_child_charge_label($booking, (string)getSetting('currency_symbol', 'MWK'), null, max(1, (int)($booking['rooms_in_group'] ?? 1))) : '',
         'child_supplement_total_formatted' => isset($booking['child_supplement_total']) ? number_format((float)$booking['child_supplement_total'], 0) : number_format(0, 0),
         // Guest-facing total = what is actually owed (VAT + levy included)
         'total_amount_formatted' => isset($booking['total_amount']) ? number_format((float)rh_booking_owed($booking)['owed'], 0) : '',
@@ -6259,8 +6261,9 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
             <h2 style="color:#8B7355;font-family:Georgia,serif;font-weight:400;margin-top:0;font-size:18px;">Pricing Breakdown</h2>
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0">'
             . $trow($room_line, $fmt($room_subtotal));
-        if ($child_supp > 0) {
-            $htmlBody .= $trow('Child supplement' . ($children > 0 ? ' (' . $children . ' child' . ($children !== 1 ? 'ren' : '') . ')' : ''), $fmt($child_supp));
+        $childLabel = $children > 0 ? rh_child_charge_label($booking, (string)$currency, $children, max(1, (int)($booking['rooms_in_group'] ?? 1))) : '';
+        if ($child_supp > 0 || ($childLabel !== '' && stripos($childLabel, 'free') !== false)) {
+            $htmlBody .= $trow('Child supplement' . ($childLabel !== '' ? ' (' . htmlspecialchars($childLabel) . ')' : ($children > 0 ? ' (' . $children . ' child' . ($children !== 1 ? 'ren' : '') . ')' : '')), $fmt($child_supp));
         }
         if ($pkg_amount > 0) {
             $htmlBody .= $trow('Package add-ons', $fmt($pkg_amount));

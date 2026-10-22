@@ -252,14 +252,14 @@ function edit_booking_reprice(array $booking, array $roomType, int $nights, stri
     $newRack = rh_room_type_rack_night($roomType, array_merge($booking, ['occupancy_type' => $occupancy, 'child_guests' => $children]));
     $newNight = max(0.0, $split['per_night'] + ($newRack - $oldRack));
     $gross = round($newNight * max(1, $nights) + $split['package_gross'], 2);
-    $base = rh_room_type_rack_night(array_merge($roomType, ['child_price_multiplier' => 0]), array_merge($booking, ['occupancy_type' => $occupancy, 'child_guests' => 0]));
-    $childNightGross = max(0.0, $newRack - $base);
+    // Stored on the price basis (VAT and levy are not inside it), like create-booking and the documents expect.
+    $childNight = rh_room_type_child_night($roomType, array_merge($booking, ['occupancy_type' => $occupancy, 'child_guests' => $children]));
     return [
         'totals' => rh_stay_totals($gross, 'final', rh_booking_has_levy($booking)),
         'gross' => $gross,
         'per_night' => round($newNight, 2),
         'rack_delta_night' => round($newRack - $oldRack, 2),
-        'child_supplement' => round($childNightGross * max(1, $nights), 2),
+        'child_supplement' => round($childNight * max(1, $nights), 2),
     ];
 }
 
@@ -324,6 +324,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     $error = 'Selected occupancy type is disabled for this room type.';
                 } elseif (empty($policy['children_allowed']) && $child_guests > 0) {
                     $error = 'Children are not allowed for this room type.';
+                }
+            }
+            if (empty($error) && $child_guests > 0 && ($child_guests !== (int)($booking['child_guests'] ?? 0)
+                    || (int)($individual_room_id ?? 0) !== (int)($booking['individual_room_id'] ?? 0))) {
+                // Most children one room takes: the picked room's own limit overrides its type's.
+                $ebRule = rh_child_rule_for($pdo, $room_id, ($individual_room_id && !$editPair) ? (int)$individual_room_id : null);
+                $ebLimit = rh_child_limit_error($ebRule, $child_guests, true, (string)($booking['room_name'] ?? 'this room'));
+                if ($ebLimit !== '') {
+                    $error = $ebLimit;
                 }
             }
             if (empty($error) && $individual_room_id && $is_joined_type && !$editPair) {
@@ -414,7 +423,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 // Price follows the stay (never typed in): booked rate kept; occupancy / children add or remove the rack difference.
                 $newGross = $storedGross;
                 if ($can_edit_stay && ($datesChanged || $occChanged)) {
-                    $rp = edit_booking_reprice($locked, $roomTypeRow, $number_of_nights, $occupancy_type, $child_guests);
+                    // Children are priced with the rule the booking was saved with (its snapshot), so editing never reprices on today's rule.
+                    $rp = edit_booking_reprice($locked, array_merge($roomTypeRow, rh_child_rule_snapshot(rh_child_rule_from_booking($locked))), $number_of_nights, $occupancy_type, $child_guests);
                     rh_write_booking_stay_totals($pdo, (int)$booking_id, $rp['totals'], null, null, null, $rp['child_supplement']);
                     $newGross = $rp['gross'];
                     if (abs($newGross - $storedGross) > BALANCE_TOLERANCE) {
@@ -522,9 +532,15 @@ if (!$booking) {
 $preview_split = rh_booked_stay_split($booking);
 $preview_rack = [];
 foreach (['single', 'double', 'triple'] as $occ) {
-    $base = $roomTypeRow ? rh_room_type_rack_night(array_merge($roomTypeRow, ['child_price_multiplier' => 0]), array_merge($booking, ['occupancy_type' => $occ, 'child_guests' => 0])) : 0.0;
-    $withChild = $roomTypeRow ? rh_room_type_rack_night($roomTypeRow, array_merge($booking, ['occupancy_type' => $occ, 'child_guests' => 1])) : 0.0;
-    $preview_rack[$occ] = ['base' => $base, 'child' => max(0.0, $withChild - $base)];
+    $roomTypeSaved = array_merge($roomTypeRow, rh_child_rule_snapshot(rh_child_rule_from_booking($booking)));
+    $base = $roomTypeRow ? rh_room_type_rack_night($roomTypeSaved, array_merge($booking, ['occupancy_type' => $occ, 'child_guests' => 0])) : 0.0;
+    // Child gross for 0..20 children in the room (free children make it non-linear): the same function the server uses.
+    $childBy = [];
+    for ($n = 0; $n <= 20; $n++) {
+        $withChild = $roomTypeRow ? rh_room_type_rack_night($roomTypeSaved, array_merge($booking, ['occupancy_type' => $occ, 'child_guests' => $n])) : 0.0;
+        $childBy[] = round(max(0.0, $withChild - $base), 4);
+    }
+    $preview_rack[$occ] = ['base' => $base, 'childBy' => $childBy];
 }
 $preview_data = [
     'bookedNight' => round($preview_split['per_night'], 2),
@@ -839,8 +855,8 @@ $back_url = 'booking-details.php?id=' . $booking_id;
             const currency = <?php echo json_encode((string)$currency_symbol); ?>;
             const money = v => currency + ' ' + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const rack = (occ, children) => {
-                const r = P.rack[occ] || P.rack[P.occupancy] || { base: 0, child: 0 };
-                return r.base + r.child * Math.max(0, children);
+                const r = P.rack[occ] || P.rack[P.occupancy] || { base: 0, childBy: [0] };
+                return r.base + r.childBy[Math.min(Math.max(0, children), r.childBy.length - 1)];
             };
             const $ = id => document.getElementById(id);
 

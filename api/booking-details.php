@@ -128,6 +128,9 @@ try {
             ],
             'pricing' => [
                 'child_price_multiplier' => (float)($booking['child_price_multiplier'] ?? getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50))),
+                'child_charge_mode' => (string)($booking['child_charge_mode'] ?? 'percent'),
+                'child_charge_amount' => isset($booking['child_charge_amount']) ? (float)$booking['child_charge_amount'] : null,
+                'free_children' => (int)($booking['free_children'] ?? 0),
                 'child_supplement_total' => (float)($booking['child_supplement_total'] ?? 0),
                 'total_amount' => (float)$booking['total_amount'],
                 'currency' => getSetting('currency_symbol'),

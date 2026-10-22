@@ -47,10 +47,8 @@ function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, s
         ];
     }
 
-    $childPriceMultiplier = isset($room['child_price_multiplier'])
-        ? (float)$room['child_price_multiplier']
-        : (float)getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50));
-    $childPriceMultiplier = max(0.0, $childPriceMultiplier);
+    // One child-charge rule per room type (includes/pricing.php), the same one booking.php saves with.
+    $childRule = rh_child_rule($room);
 
     $allocation = [];
     $roomRateTotalPerNight = 0.0;
@@ -67,9 +65,7 @@ function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, s
         $baseRate = ga_price_for_occupancy($room, $occupancyType);
         $dynamicResult = applyDynamicPricing($pdo, (int)$room['id'], $checkIn, $checkOut, $nights, $baseRate);
         $rateThisRoom = (float)$dynamicResult['final_price'];
-        $childSupplementThisRoom = $childrenThisRoom > 0
-            ? ($rateThisRoom * ($childPriceMultiplier / 100) * $childrenThisRoom * $nights)
-            : 0.0;
+        $childSupplementThisRoom = rh_child_supplement($childRule, $childrenThisRoom, (int)$nights, $rateThisRoom);
 
         if (!empty($dynamicResult['rate_plan_id'])) {
             $ratePlan = [
@@ -339,7 +335,7 @@ try {
         $placeholders = implode(',', array_fill(0, count($room_ids), '?'));
         $batchStmt = $pdo->prepare("
                  SELECT id, name, price_per_night, price_single_occupancy, price_double_occupancy,
-                     price_triple_occupancy, child_price_multiplier,
+                     price_triple_occupancy, child_price_multiplier, child_charge_mode, child_charge_amount, free_children, max_children,
                      GREATEST(
                       max_guests,
                       COALESCE((SELECT MAX(ir.max_guests_override) FROM individual_rooms ir WHERE ir.room_type_id = rooms.id AND ir.is_active = 1), 0),
@@ -391,7 +387,7 @@ try {
     // Check if room exists and is active
     $roomStmt = $pdo->prepare("
          SELECT id, name, price_per_night, price_single_occupancy, price_double_occupancy,
-             price_triple_occupancy, child_price_multiplier,
+             price_triple_occupancy, child_price_multiplier, child_charge_mode, child_charge_amount, free_children, max_children,
              GREATEST(
                  max_guests,
                  COALESCE((SELECT MAX(ir.max_guests_override) FROM individual_rooms ir WHERE ir.room_type_id = rooms.id AND ir.is_active = 1), 0),

@@ -58,22 +58,36 @@ function rh_room_change_reasons(string $direction): array
     ];
 }
 
-/** Rack (catalogue) GROSS rate per night of a room type for this booking's occupancy and children. */
-function rh_room_type_rack_night(array $room, array $b): float
+/** Catalogue room rate per night (price basis) of a room type at this booking's occupancy, children not included. */
+function rh_room_type_base_rate(array $room, array $b): float
 {
     $occ = (string)($b['occupancy_type'] ?? 'single');
     if ($occ === 'double' && (float)($room['price_double_occupancy'] ?? 0) > 0) {
-        $base = (float)$room['price_double_occupancy'];
-    } elseif ($occ === 'triple' && (float)($room['price_triple_occupancy'] ?? 0) > 0) {
-        $base = (float)$room['price_triple_occupancy'];
-    } elseif ($occ === 'single' && (float)($room['price_single_occupancy'] ?? 0) > 0) {
-        $base = (float)$room['price_single_occupancy'];
-    } else {
-        $base = (float)($room['price_per_night'] ?? 0);
+        return (float)$room['price_double_occupancy'];
     }
+    if ($occ === 'triple' && (float)($room['price_triple_occupancy'] ?? 0) > 0) {
+        return (float)$room['price_triple_occupancy'];
+    }
+    if ($occ === 'single' && (float)($room['price_single_occupancy'] ?? 0) > 0) {
+        return (float)$room['price_single_occupancy'];
+    }
+    return (float)($room['price_per_night'] ?? 0);
+}
+
+/**
+ * Child charge per night for this booking's children, on the PRICE basis (the basis bookings.child_supplement_total is
+ * stored on and documents split out). The room type's own child rule: percent or fixed, free children.
+ */
+function rh_room_type_child_night(array $room, array $b): float
+{
     $children = max(0, (int)($b['child_guests'] ?? 0));
-    $child = $children > 0 ? $base * ((float)($room['child_price_multiplier'] ?? 50) / 100) * $children : 0.0;
-    return rh_stay_totals($base + $child, 'price', rh_booking_has_levy($b))['total_with_vat'];
+    return $children > 0 ? rh_child_night_charge(rh_child_rule($room), $children, rh_room_type_base_rate($room, $b)) : 0.0;
+}
+
+/** Rack (catalogue) GROSS rate per night of a room type for this booking's occupancy and children. */
+function rh_room_type_rack_night(array $room, array $b): float
+{
+    return rh_stay_totals(rh_room_type_base_rate($room, $b) + rh_room_type_child_night($room, $b), 'price', rh_booking_has_levy($b))['total_with_vat'];
 }
 
 /** [stayed nights (history, kept at booked rate), affected nights (re-rated)] for the booking. */
@@ -101,7 +115,8 @@ function rh_room_change_quote(array $b, array $oldRoom, array $newRoom): array
 {
     $split = rh_booked_stay_split($b);
     [$stayed, $affected] = rh_room_change_nights($b);
-    $oldRack = rh_room_type_rack_night($oldRoom, $b);
+    // The old type is priced with the child rule the booking was saved with, the new type with its own current rule.
+    $oldRack = rh_room_type_rack_night(array_merge($oldRoom, rh_child_rule_snapshot(rh_child_rule_from_booking($b))), $b);
     $newRack = rh_room_type_rack_night($newRoom, $b);
     $diff = round($newRack - $oldRack, 2);
     $direction = abs($diff) <= BALANCE_TOLERANCE ? 'same' : ($diff > 0 ? 'upgrade' : 'downgrade');
@@ -113,11 +128,8 @@ function rh_room_change_quote(array $b, array $oldRoom, array $newRoom): array
     $oldChild = (float)($b['child_supplement_total'] ?? 0);
     $childNights = max(1, $split['nights']);
     $children = max(0, (int)($b['child_guests'] ?? 0));
-    $newChildNight = 0.0;
-    if ($children > 0) {
-        $occBase = rh_room_type_rack_night(array_merge($newRoom, ['child_price_multiplier' => 0]), $b);
-        $newChildNight = max(0.0, $newRack - $occBase);
-    }
+    // Price basis, like the stored supplement it is added to (not the VAT/levy-inclusive rack figure).
+    $newChildNight = $children > 0 ? rh_room_type_child_night($newRoom, $b) : 0.0;
     $newChild = round(($oldChild / $childNights) * $stayed + $newChildNight * $affected, 2);
 
     return [
@@ -177,6 +189,8 @@ function rh_room_change_options(PDO $pdo, int $bookingId): array
             $why = 'Sleeps ' . (int)$room['max_guests'] . ' (booking has ' . (int)$b['number_of_guests'] . ' guests)';
         } elseif ((int)($b['child_guests'] ?? 0) > 0 && isset($room['children_allowed']) && (int)$room['children_allowed'] === 0) {
             $why = 'Children not allowed in this room type';
+        } elseif ((int)($b['child_guests'] ?? 0) > 0 && rh_child_limit_error(rh_child_rule($room), (int)$b['child_guests'], true, 'This room type') !== '') {
+            $why = rh_child_limit_error(rh_child_rule($room), (int)$b['child_guests'], true, 'This room type');
         } else {
             $av = checkRoomAvailability((int)$room['id'], $from, $to, $bookingId, (int)($b['child_guests'] ?? 0));
             if (empty($av['available'])) {
@@ -269,6 +283,11 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
             throw new RuntimeException($newRoom['name'] . ' sleeps ' . (int)$newRoom['max_guests'] . '; this booking has ' . (int)$b['number_of_guests'] . ' guests.');
         }
 
+        $childLimit = rh_child_limit_error(rh_child_rule($newRoom), (int)($b['child_guests'] ?? 0), true, (string)$newRoom['name']);
+        if ($childLimit !== '') {
+            throw new RuntimeException($childLimit);
+        }
+
         $q = rh_room_change_quote($b, $oldRoom, $newRoom);
         $direction = $q['direction'];
         if ($direction === 'same') {
@@ -305,8 +324,16 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
                 throw new RuntimeException('No ' . $newRoom['name'] . ' room is free from tonight to ' . $b['check_out_date'] . ', so the guest stays where they are.');
             }
         }
-        $pdo->prepare("UPDATE bookings SET room_id = ?, child_price_multiplier = ?, updated_at = NOW() WHERE id = ?")
-            ->execute([$newRoomId, $newRoom['child_price_multiplier'] ?? 50, $bookingId]);
+        // The booking takes the new type's child rule only when the whole stay is re-priced on it (charge pricing and no
+        // nights already stayed at the old rate). A complimentary move, or an in-house move that re-rates only the later
+        // nights, keeps the rule the booking was priced with.
+        if ($pricing === 'charge' && (int)$q['stayed'] === 0) {
+            $newChildRule = rh_child_rule_snapshot(rh_child_rule($newRoom));
+            $pdo->prepare("UPDATE bookings SET room_id = ?, child_price_multiplier = ?, child_charge_mode = ?, child_charge_amount = ?, free_children = ?, updated_at = NOW() WHERE id = ?")
+                ->execute([$newRoomId, $newChildRule['child_price_multiplier'], $newChildRule['child_charge_mode'], $newChildRule['child_charge_amount'], $newChildRule['free_children'], $bookingId]);
+        } else {
+            $pdo->prepare("UPDATE bookings SET room_id = ?, updated_at = NOW() WHERE id = ?")->execute([$newRoomId, $bookingId]);
+        }
         if ($pricing === 'charge') {
             $tt = rh_stay_totals($q['charge_total'], 'final', rh_booking_has_levy($b));
             rh_write_booking_stay_totals($pdo, $bookingId, $tt, null, null, null, $q['new_child_supplement']);

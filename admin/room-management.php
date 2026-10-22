@@ -13,6 +13,8 @@ if (!$is_ajax) {
 }
 require_once 'video-upload-handler.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/../includes/pricing.php';
+require_once __DIR__ . '/includes/child-charge-fields.php';
 
 function syncRoomManagedMedia(array $room): void
 {
@@ -174,6 +176,10 @@ function rm_validate_room_input(PDO $pdo, string $name, int $total, int $avail, 
     if ($cm !== '' && (!is_numeric($cm) || (float)$cm < 0 || (float)$cm > 100)) {
         return 'Child price percentage must be between 0 and 100.';
     }
+    $childRulePost = rh_child_rule_post($_POST, false);
+    if ($childRulePost['error'] !== null) {
+        return $childRulePost['error'];
+    }
     $dup = rh_find_duplicate($pdo, 'rooms', 'name', $name, [], $excludeId);
     if ($dup) {
         return rh_duplicate_message('room type', (string)$dup['value']);
@@ -222,6 +228,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     UPDATE rooms
                     SET name = ?, description = ?, short_description = ?, price_per_night = ?,
                         price_single_occupancy = ?, price_double_occupancy = ?, price_triple_occupancy = ?, child_price_multiplier = ?,
+                        child_charge_mode = ?, child_charge_amount = ?, free_children = ?, max_children = ?,
                         single_occupancy_enabled = ?, double_occupancy_enabled = ?, triple_occupancy_enabled = ?, children_allowed = ?,
                         size_sqm = ?, max_guests = ?, rooms_available = ?, total_rooms = ?,
                         bed_type = ?, amenities = ?, image_url = ?, is_featured = ?, is_active = ?, display_order = ?
@@ -232,6 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $doubleEnabled = $maxGuests >= 2 ? 1 : 0;
                 $tripleEnabled = ($maxGuests >= 3 && isset($_POST['triple_occupancy_enabled'])) ? 1 : 0;
                 $childrenAllowed = isset($_POST['children_allowed']) ? 1 : 0;
+                $cc = rh_child_rule_post($_POST, false);   // validated above
                 $stmt->execute([
                     trim((string)$_POST['name']),
                     $description,
@@ -240,7 +248,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     rm_num($_POST['price_single_occupancy'] ?? null, null),
                     rm_num($_POST['price_double_occupancy'] ?? null, null),
                     rm_num($_POST['price_triple_occupancy'] ?? null, null),
-                    min(100.0, rm_num($_POST['child_price_multiplier'] ?? 50, 50.0)),
+                    $cc['percent'],
+                    $cc['mode'],
+                    $cc['amount'],
+                    $cc['free'],
+                    $cc['max'],
                     $singleEnabled,
                     $doubleEnabled,
                     $tripleEnabled,
@@ -467,11 +479,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare("
                 INSERT INTO rooms (name, description, short_description, price_per_night,
                     price_single_occupancy, price_double_occupancy, price_triple_occupancy,
-                    child_price_multiplier,
+                    child_price_multiplier, child_charge_mode, child_charge_amount, free_children, max_children,
                     single_occupancy_enabled, double_occupancy_enabled, triple_occupancy_enabled, children_allowed,
                     size_sqm, max_guests, rooms_available, total_rooms,
                     bed_type, amenities, image_url, is_featured, is_active, display_order, video_path, video_type, slug)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             // slug is required (NOT NULL): derive it from the name and keep it unique.
             $slugBase = substr(trim(preg_replace('/[^a-z0-9]+/', '-', strtolower((string)($_POST['name'] ?? 'room'))), '-'), 0, 90) ?: 'room'; // slug is VARCHAR(100)
@@ -480,8 +492,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $doubleEnabled = $maxGuests >= 2 ? 1 : 0;
             $tripleEnabled = ($maxGuests >= 3 && isset($_POST['triple_occupancy_enabled'])) ? 1 : 0;
             $childrenAllowed = isset($_POST['children_allowed']) ? 1 : 0;
+            $cc = rh_child_rule_post($_POST, false);   // validated above
             $newRoomId = 0;
-            rh_with_create_lock($pdo, 'room_type', function () use ($pdo, $stmt, $slugBase, &$newRoomId, $addTotal, $addAvail, $maxGuests, $singleEnabled, $doubleEnabled, $tripleEnabled, $childrenAllowed, $room_image_url, $videoPath, $videoType) {
+            rh_with_create_lock($pdo, 'room_type', function () use ($pdo, $stmt, $cc, $slugBase, &$newRoomId, $addTotal, $addAvail, $maxGuests, $singleEnabled, $doubleEnabled, $tripleEnabled, $childrenAllowed, $room_image_url, $videoPath, $videoType) {
             // re-check the name and pick a free slug under the lock
             $dupNow = rh_find_duplicate($pdo, 'rooms', 'name', (string)$_POST['name']);
             if ($dupNow) {
@@ -500,7 +513,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 rm_num($_POST['price_single_occupancy'] ?? null, null),
                 rm_num($_POST['price_double_occupancy'] ?? null, null),
                 rm_num($_POST['price_triple_occupancy'] ?? null, null),
-                min(100.0, rm_num($_POST['child_price_multiplier'] ?? 50, 50.0)),
+                $cc['percent'],
+                $cc['mode'],
+                $cc['amount'],
+                $cc['free'],
+                $cc['max'],
                 $singleEnabled,
                 $doubleEnabled,
                 $tripleEnabled,
@@ -777,7 +794,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                                     <?php if ($room['price_single_occupancy']): ?>Single: <?php echo $currency; ?> <?php echo number_format($room['price_single_occupancy'], 0); ?> <?php endif; ?>
                                 <?php if ($room['price_double_occupancy']): ?>| Double: <?php echo $currency; ?> <?php echo number_format($room['price_double_occupancy'], 0); ?> <?php endif; ?>
                             <?php if ($room['price_triple_occupancy']): ?>| Triple: <?php echo $currency; ?> <?php echo number_format($room['price_triple_occupancy'], 0); ?> <?php endif; ?>
-                        | Child: +<?php echo number_format((float)($room['child_price_multiplier'] ?? 50), 0); ?>%
+                        | Children: <?php echo htmlspecialchars(rh_child_rule_summary(rh_child_rule($room), $currency)); ?>
                                 </div>
                             <?php endif; ?>
 
@@ -918,10 +935,10 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                                     <label>Triple Occupancy Price</label>
                                     <input type="number" name="price_triple_occupancy" id="editPriceTriple" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                 </div>
-                                <div class="form-group">
-                                    <label>Child Supplement (%)</label>
-                                    <input type="number" name="child_price_multiplier" id="editChildPriceMultiplier" step="0.01" min="0" placeholder="50">
-                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Children</label>
+                                <?php rh_child_charge_fields('edit', false, $currency); ?>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
@@ -1051,10 +1068,10 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                                     <label>Triple Occupancy Price</label>
                                     <input type="number" name="price_triple_occupancy" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                 </div>
-                                <div class="form-group">
-                                    <label>Child Supplement (%)</label>
-                                    <input type="number" name="child_price_multiplier" step="0.01" min="0" value="50">
-                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Children</label>
+                                <?php rh_child_charge_fields('add', false, $currency); ?>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
@@ -1305,7 +1322,13 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                 document.getElementById('editPriceSingle').value = room.price_single_occupancy || '';
                 document.getElementById('editPriceDouble').value = room.price_double_occupancy || '';
                 document.getElementById('editPriceTriple').value = room.price_triple_occupancy || '';
-                document.getElementById('editChildPriceMultiplier').value = room.child_price_multiplier || 50;
+                // Child charge: percent (default) or fixed amount, free children, most children per room.
+                document.getElementById('editChildMode').value = room.child_charge_mode === 'fixed' ? 'fixed' : 'percent';
+                document.getElementById('editChildPct').value = (room.child_price_multiplier === null || room.child_price_multiplier === undefined || room.child_price_multiplier === '') ? 50 : room.child_price_multiplier;
+                document.getElementById('editChildAmt').value = (room.child_charge_amount === null || room.child_charge_amount === undefined) ? '' : room.child_charge_amount;
+                document.getElementById('editChildFree').value = room.free_children || 0;
+                document.getElementById('editChildMax').value = (room.max_children === null || room.max_children === undefined) ? '' : room.max_children;
+                document.getElementById('editChildMode').dispatchEvent(new Event('change'));
                 document.getElementById('editTripleOccupancyEnabled').checked = String(room.triple_occupancy_enabled || '0') === '1';
                 document.getElementById('editChildrenAllowed').checked = String(room.children_allowed || '0') === '1';
                 document.getElementById('editSize').value = room.size_sqm || '';

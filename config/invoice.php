@@ -135,6 +135,7 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
         $siblings_stmt  = $pdo->prepare("
             SELECT b.id, b.booking_reference, b.total_amount, b.child_supplement_total,
                    b.tourism_levy_amount, b.vat_amount, b.total_with_vat,
+                   b.child_guests, b.child_price_multiplier, b.child_charge_mode, b.child_charge_amount, b.free_children,
                    b.occupancy_type, b.number_of_nights,
                    r.name as room_name
             FROM bookings b
@@ -701,6 +702,12 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $docLines[$pkgRowIdx]['room'] = round($docLines[$pkgRowIdx]['room'] + $ratePlanDiscount, 2);
     }
     $childSuppTotal  = array_sum(array_column($docLines, 'child'));
+    // How the children were charged, from the rule each booking was saved with (e.g. "2 children, first 2 free").
+    $childDocLabel   = rh_child_doc_label($docRows, trim((string)$currency_symbol) !== '' ? trim((string)$currency_symbol) : 'MWK');
+    // Quantity = the children who pay (the free ones are named in the description), so qty x unit = the amount.
+    $childDocQty     = rh_child_doc_charged($docRows, $childGuests);
+    // A line also prints when children stay free under a free allowance, so the guest sees the allowance applied.
+    $showChildLine   = $childSuppTotal > 0 || ($childDocLabel !== '' && stripos($childDocLabel, 'free') !== false);
     $tourismLevyAmt  = array_sum(array_column($docLines, 'levy'));
     $tourismLevyPct  = (float)(!empty($group_bookings)
         ? ($group_bookings[0]['tourism_levy_percent'] ?? ($booking['tourism_levy_percent'] ?? 0))
@@ -863,12 +870,13 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             rh_pdf_e($money($roomSubtotal)),
         ];
     }
-    if ($childSuppTotal > 0) {
-        $childQty = max(1, $childGuests);
+    if ($showChildLine) {
+        $childQty = $childDocQty;
         $itemRows[] = [
-            rh_pdf_e('Child supplement x ' . $childQty),
+
+            rh_pdf_e('Child supplement') . rh_inv_sub($childDocLabel !== '' ? $childDocLabel : ('x ' . $childQty)),
             rh_pdf_e((string)$childQty),
-            rh_pdf_e($money($childSuppTotal / $childQty)),
+            rh_pdf_e($money($childQty > 0 ? $childSuppTotal / $childQty : 0)),
             rh_pdf_e($money($childSuppTotal)),
         ];
     }
@@ -1000,11 +1008,11 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
         </tr>';
     }
 
-    if ($childGuests > 0 && $childSuppTotal > 0) {
+    if ($childGuests > 0 && $showChildLine) {
         $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">Child Supplement &times; ' . $childGuests . '</td>
-            <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $childGuests . '</td>
-            <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($childSuppTotal / $childGuests, 2) . '</td>
+            <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">Child Supplement' . ($childDocLabel !== '' ? '<br><span style="font-size:10px; color:#5E554D;">' . htmlspecialchars($childDocLabel) . '</span>' : ' &times; ' . $childGuests) . '</td>
+            <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $childDocQty . '</td>
+            <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($childDocQty > 0 ? $childSuppTotal / $childDocQty : 0, 2) . '</td>
             <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($childSuppTotal, 2) . '</td>
         </tr>';
     }

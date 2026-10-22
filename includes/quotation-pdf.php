@@ -147,8 +147,9 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
         rh_pdf_e($fmt($rate_per_night)),
         rh_pdf_e($fmt($room_subtotal)),
     ]];
-    if ($child_supp > 0) {
-        $itemRows[] = [rh_pdf_e('Child supplement' . ($children > 0 ? ' (' . $children . ' child' . ($children !== 1 ? 'ren' : '') . ')' : '')), '', '', rh_pdf_e($fmt($child_supp))];
+    $childLabel = $children > 0 ? rh_child_charge_label($booking, (string)$currency, $children) : '';
+    if ($child_supp > 0 || ($childLabel !== '' && stripos($childLabel, 'free') !== false)) {
+        $itemRows[] = [rh_pdf_e('Child supplement' . ($childLabel !== '' ? ' (' . $childLabel . ')' : ($children > 0 ? ' (' . $children . ' child' . ($children !== 1 ? 'ren' : '') . ')' : ''))), '', '', rh_pdf_e($fmt($child_supp))];
     }
     if ($pkg_amount > 0) {
         $itemRows[] = [rh_pdf_e('Package add-ons'), '', '', rh_pdf_e($fmt($pkg_amount))];

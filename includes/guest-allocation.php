@@ -22,6 +22,8 @@
  * No money is calculated here; pricing stays in includes/pricing.php and callers.
  */
 
+require_once __DIR__ . '/pricing.php';
+
 if (!function_exists('ga_resolve_policy')) {
 
     /**
@@ -119,6 +121,11 @@ if (!function_exists('ga_resolve_policy')) {
         if ($childGuests > 0 && empty($policy['children_allowed'])) {
             return ga_failure('children_not_allowed', $roomsNeeded, "{$roomName} is adults only. Children cannot stay in this room type.");
         }
+        // Most children one room of this type takes (rooms.max_children; NULL = no limit beyond capacity).
+        $maxChildrenPerRoom = null;
+        if ($childGuests > 0 && function_exists('rh_child_rule')) {
+            $maxChildrenPerRoom = rh_child_rule($room)['max'];
+        }
         if ($adultGuests < $roomsNeeded) {
             return ga_failure(
                 'adults_per_room',
@@ -143,6 +150,9 @@ if (!function_exists('ga_resolve_policy')) {
             }
 
             $childrenThisRoom = min($remainingChildren, max(0, $guestsThisRoom - 1));
+            if ($maxChildrenPerRoom !== null) {
+                $childrenThisRoom = min($childrenThisRoom, $maxChildrenPerRoom);
+            }
             $adultsThisRoom = $guestsThisRoom - $childrenThisRoom;
 
             if ($adultsThisRoom > $adultsAvailableThisRoom) {
@@ -155,6 +165,9 @@ if (!function_exists('ga_resolve_policy')) {
             }
             if ($adultsThisRoom < 1 || $childrenThisRoom < 0) {
                 return ga_failure('adults_per_room', $roomsNeeded, 'Unable to allocate guests while keeping at least one adult in each room.');
+            }
+            if ($maxChildrenPerRoom !== null && $childrenThisRoom > $maxChildrenPerRoom) {
+                return ga_failure('children_max', $roomsNeeded, rh_child_limit_error(rh_child_rule($room), $childrenThisRoom, true, $roomName) . ' Add adults, reduce the children or book another room type.');
             }
 
             $occupancyType = ga_pick_occupancy($guestsThisRoom, $policy);
@@ -179,6 +192,9 @@ if (!function_exists('ga_resolve_policy')) {
             $remainingChildren -= $childrenThisRoom;
         }
 
+        if ($maxChildrenPerRoom !== null && $remainingChildren > 0) {
+            return ga_failure('children_max', $roomsNeeded, rh_child_limit_error(rh_child_rule($room), $maxChildrenPerRoom + 1, true, $roomName) . ' Add adults, reduce the children or book another room type.');
+        }
         if ($remainingGuests !== 0 || $remainingAdults !== 0 || $remainingChildren !== 0) {
             return ga_failure('capacity', $roomsNeeded, 'Unable to allocate the full guest list across the required rooms.');
         }
@@ -244,7 +260,7 @@ if (!function_exists('ga_resolve_policy')) {
      * nobody beyond a room's capacity, children only in rooms that allow them.
      * Children are seated first-room-first, then the remaining adults fill up.
      *
-     * @param array $rows list of ['capacity' => int, 'children_allowed' => bool, 'name' => string]
+     * @param array $rows list of ['capacity' => int, 'children_allowed' => bool, 'name' => string, 'max_children' => ?int]
      * @return array {valid, message, rows: [['adults' => int, 'children' => int, 'guests' => int], ...]}
      */
     function ga_distribute_party(array $rows, int $adults, int $children): array
@@ -274,6 +290,9 @@ if (!function_exists('ga_resolve_policy')) {
                 continue;
             }
             $take = min($childrenLeft, $seated[$i]['left']);
+            if (isset($row['max_children']) && $row['max_children'] !== null) {
+                $take = min($take, max(0, (int)$row['max_children']));
+            }
             $seated[$i]['children'] += $take;
             $seated[$i]['left'] -= $take;
             $childrenLeft -= $take;
@@ -288,6 +307,13 @@ if (!function_exists('ga_resolve_policy')) {
                     return (string)($row['name'] ?? 'room');
                 }, $rows));
                 return $fail('Children are not allowed in ' . implode(', ', $names) . '. Remove the children or choose a family-friendly room type.');
+            }
+            $capped = false;
+            foreach ($rows as $row) {
+                $capped = $capped || (!empty($row['children_allowed']) && isset($row['max_children']) && $row['max_children'] !== null);
+            }
+            if ($capped) {
+                return $fail("{$childrenLeft} child(ren) cannot be seated: the rooms selected take only a limited number of children each (maximum children per room). Add another room or reduce the children.");
             }
             return $fail("{$childrenLeft} child(ren) cannot be seated: the child-friendly rooms selected are full. Add a child-friendly room or reduce the party.");
         }

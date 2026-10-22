@@ -12,6 +12,7 @@ header('Cache-Control: no-store, private');
 require_once 'config/base-url.php';
 require_once 'config/database.php';
 require_once 'includes/public-csrf.php';
+require_once 'includes/pricing.php';
 
 // Get booking reference from URL
 $booking_reference = is_string($_GET['ref'] ?? null) ? trim($_GET['ref']) : null;
@@ -336,7 +337,16 @@ try {
                                 <?php if ($child_guests > 0): ?>
                                 <div class="conf-detail-row">
                                     <span>Child Supplement</span>
-                                    <span><?php echo $currency_symbol . number_format($group_child_supplement_total, 0); ?></span>
+                                    <span><?php
+                                        echo $currency_symbol . number_format($group_child_supplement_total, 0);
+                                        // One room: say how the children were charged (e.g. "2 children, first 2 free").
+                                        if ($split_count === 1 && function_exists('rh_child_charge_label')) {
+                                            $childLabel = rh_child_charge_label($booking, (string)$currency_symbol, $child_guests);
+                                            if ($childLabel !== '') {
+                                                echo ' <small>(' . htmlspecialchars($childLabel) . ')</small>';
+                                            }
+                                        }
+                                    ?></span>
                                 </div>
                                 <?php endif; ?>
                                 <?php if ($group_levy_total > 0): ?>

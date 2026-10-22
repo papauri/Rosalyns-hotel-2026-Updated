@@ -90,6 +90,40 @@
             return { valid: false, reason: reason, roomsNeeded: roomsNeeded, allocation: [], message: message, summary: '' };
         }
 
+        // Child charge rule of a room type (same fields the server uses: includes/pricing.php rh_child_rule).
+        function getChildRule(room) {
+            const r = room && room.child_rule ? room.child_rule : null;
+            const percent = r ? Number(r.percent) : Number(room && room.child_price_multiplier !== undefined ? room.child_price_multiplier : childPriceMultiplier);
+            return {
+                mode: r && r.mode === 'fixed' ? 'fixed' : 'percent',
+                percent: Math.max(0, Number.isFinite(percent) ? percent : 50),
+                amount: r ? Math.max(0, Number(r.amount) || 0) : 0,
+                free: r ? Math.max(0, Number(r.free) || 0) : 0,
+                max: r && r.max !== null && r.max !== undefined ? Math.max(0, Number(r.max)) : null
+            };
+        }
+
+        // Charge for ONE night for the children in one room (the first `free` are free).
+        function childNightCharge(rule, children, ratePerNight) {
+            const charged = Math.max(0, children - rule.free);
+            if (charged <= 0) return 0;
+            const each = rule.mode === 'fixed' ? rule.amount : ratePerNight * (rule.percent / 100);
+            return Math.max(0, each) * charged;
+        }
+
+        // Plain sentence for the hint under the children field.
+        function childRuleText(rule) {
+            let core;
+            if (rule.mode === 'fixed') {
+                core = rule.amount > 0 ? `${currencySymbol}${rule.amount.toLocaleString()} per child per night` : 'Children stay free';
+            } else {
+                core = rule.percent > 0 ? `Children stay at ${rule.percent}% of the room rate` : 'Children stay free';
+            }
+            if (rule.free > 0) core += `, the first ${rule.free} free in each room`;
+            if (rule.max !== null) core += `, up to ${rule.max} per room`;
+            return core + '.';
+        }
+
         function getPartyPlan(totalGuests, childGuests, room) {
             const total = Math.max(0, Number(totalGuests || 0));
             if (!room || total < 1) {
@@ -105,6 +139,7 @@
             if (children > 0 && Number(room.children_allowed || 0) !== 1) {
                 return planFailure('children_not_allowed', roomsNeeded, `${name} is adults only. Children cannot stay in this room type.`);
             }
+            const maxChildrenPerRoom = children > 0 ? getChildRule(room).max : null;
             if (adults < roomsNeeded) {
                 return planFailure('adults_per_room', roomsNeeded, `${total} guests need ${roomsNeeded} ${name} rooms (up to ${maxPerRoom} guests each) and every room needs at least 1 adult. Add adults or reduce the number of children.`);
             }
@@ -121,6 +156,7 @@
                 if (adultsAvailableThisRoom < 1) return planFailure('adults_per_room', roomsNeeded, 'At least one adult is required in each room.');
 
                 let childrenThisRoom = Math.min(remainingChildren, Math.max(0, guestsThisRoom - 1));
+                if (maxChildrenPerRoom !== null) childrenThisRoom = Math.min(childrenThisRoom, maxChildrenPerRoom);
                 let adultsThisRoom = guestsThisRoom - childrenThisRoom;
                 if (adultsThisRoom > adultsAvailableThisRoom) {
                     adultsThisRoom = adultsAvailableThisRoom;
@@ -132,6 +168,9 @@
                 }
                 if (adultsThisRoom < 1 || childrenThisRoom < 0) {
                     return planFailure('adults_per_room', roomsNeeded, 'Unable to allocate guests while keeping at least one adult in each room.');
+                }
+                if (maxChildrenPerRoom !== null && childrenThisRoom > maxChildrenPerRoom) {
+                    return planFailure('children_max', roomsNeeded, `${name} takes at most ${plural(maxChildrenPerRoom, 'child').replace('childs', 'children')} per room. Add adults, reduce the children or book another room type.`);
                 }
 
                 const occupancyType = pickOccupancyForGuestCount(guestsThisRoom, room);
@@ -151,6 +190,9 @@
                 remainingChildren -= childrenThisRoom;
             }
 
+            if (maxChildrenPerRoom !== null && remainingChildren > 0) {
+                return planFailure('children_max', roomsNeeded, `${name} takes at most ${plural(maxChildrenPerRoom, 'child').replace('childs', 'children')} per room. Add adults, reduce the children or book another room type.`);
+            }
             if (remainingGuests !== 0 || remainingAdults !== 0 || remainingChildren !== 0) {
                 return planFailure('capacity', roomsNeeded, 'Unable to allocate the full guest list across the required rooms.');
             }
@@ -719,8 +761,7 @@
                         escapeHtml(room.name) + ' is adults only. Children cannot stay in this room type.';
                     childHint.style.color = '#dc3545';
                 } else {
-                    const childMultiplier = Number(room.child_price_multiplier || childPriceMultiplier || 50);
-                    childHint.innerHTML = `<i class="fas fa-child"></i> Children under 12 stay at ${childMultiplier}% of adult rate. At least 1 adult required.`;
+                    childHint.innerHTML = `<i class="fas fa-child"></i> ${escapeHtml(childRuleText(getChildRule(room)))} At least 1 adult required.`;
                     childHint.style.color = '#666';
                 }
             }
@@ -1221,9 +1262,7 @@
                     let baseTotal = 0;
                     let childSupplement = 0;
                     let remainingChildren = childGuests;
-                    const roomChildMultiplier = selectedRoom.child_price_multiplier !== undefined ?
-                        Number(selectedRoom.child_price_multiplier) :
-                        Number(childPriceMultiplier);
+                    const roomChildRule = getChildRule(selectedRoom);
 
                     if (serverPricing) {
                         roomRateTotalPerNight = Number(serverPricing.room_rate_total_per_night || 0);
@@ -1235,13 +1274,12 @@
                             if (currentDynamicPricing && currentDynamicPricing.rate_plan_id && allocation.length === 1) {
                                 ratePerNight = Number(currentDynamicPricing.final_price || ratePerNight);
                             }
-                            const childrenThisRoom = Math.min(remainingChildren, Math.max(0, part.guests - 1));
+                            let childrenThisRoom = Math.min(remainingChildren, Math.max(0, part.guests - 1));
+                            if (roomChildRule.max !== null) childrenThisRoom = Math.min(childrenThisRoom, roomChildRule.max);
                             remainingChildren -= childrenThisRoom;
                             roomRateTotalPerNight += ratePerNight;
                             baseTotal += ratePerNight * nights;
-                            childSupplement += childrenThisRoom > 0 ?
-                                ratePerNight * (Math.max(0, roomChildMultiplier || 0) / 100) * childrenThisRoom * nights :
-                                0;
+                            childSupplement += Math.round(childNightCharge(roomChildRule, childrenThisRoom, ratePerNight) * nights * 100) / 100;
                             part.ratePerNight = ratePerNight;
                             part.children = childrenThisRoom;
                             part.adults = Math.max(1, part.guests - childrenThisRoom);
@@ -1347,7 +1385,9 @@
                     if (childChargeRow && childChargeEl) {
                         if (childGuests > 0) {
                             childChargeRow.style.display = '';
-                            childChargeEl.textContent = currencySymbol + childSupplement.toLocaleString() + ` (${childGuests} child${childGuests === 1 ? '' : 'ren'} across ${nights} night${nights === 1 ? '' : 's'})`;
+                            childChargeEl.textContent = childSupplement > 0
+                                ? currencySymbol + childSupplement.toLocaleString() + ` (${childGuests} child${childGuests === 1 ? '' : 'ren'} across ${nights} night${nights === 1 ? '' : 's'})`
+                                : `No charge (${childGuests} child${childGuests === 1 ? '' : 'ren'})`;
                         } else {
                             childChargeRow.style.display = 'none';
                             childChargeEl.textContent = '-';
@@ -1479,11 +1519,11 @@
             const adults = Math.max(0, totalGuests - childGuests);
 
             // Get room-specific child price multiplier
-            let effectiveMultiplier = childPriceMultiplier;
+            let childRuleSentence = childRuleText(getChildRule(null));
             if (selectedRoomId) {
                 const selectedRoom = roomsData.find(room => room.id === selectedRoomId);
-                if (selectedRoom && selectedRoom.child_price_multiplier !== undefined) {
-                    effectiveMultiplier = Number(selectedRoom.child_price_multiplier);
+                if (selectedRoom) {
+                    childRuleSentence = childRuleText(getChildRule(selectedRoom));
                 }
             }
 
@@ -1492,11 +1532,11 @@
                 if (childGuests > 0 && adults >= 1) {
                     // Show breakdown with pricing
                     hintHtml = `<i class="fas fa-users"></i> ${adults} adult${adults === 1 ? '' : 's'} + ${childGuests} child${childGuests === 1 ? '' : 'ren'}`;
-                    hintHtml += ` <span style="color: var(--gold);">• Child rate: ${effectiveMultiplier}% of adult price</span>`;
+                    hintHtml += ` <span style="color: var(--gold);">• ${escapeHtml(childRuleSentence)}</span>`;
                 } else if (adults < 1) {
                     hintHtml = `<i class="fas fa-exclamation-triangle" style="color: #dc3545;"></i> At least 1 adult is required. Current: ${adults} adult${adults === 1 ? '' : 's'}`;
                 } else {
-                    hintHtml = `<i class="fas fa-child"></i> Children under 12 stay at ${effectiveMultiplier}% of adult rate. At least 1 adult is required in each room. Max ${maxChildren} children for this selection.`;
+                    hintHtml = `<i class="fas fa-child"></i> ${escapeHtml(childRuleSentence)} At least 1 adult is required in each room. Max ${maxChildren} children for this selection.`;
                 }
                 childHint.innerHTML = hintHtml;
             }

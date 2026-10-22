@@ -82,6 +82,7 @@ try {
     $rooms_stmt = $pdo->query("
          SELECT r.id, r.name, r.price_per_night, r.price_single_occupancy, r.price_double_occupancy,
              r.price_triple_occupancy, r.child_price_multiplier,
+             r.child_charge_mode, r.child_charge_amount, r.free_children, r.max_children,
              GREATEST(
                  r.max_guests,
                  COALESCE((SELECT MAX(ir.max_guests_override) FROM individual_rooms ir WHERE ir.room_type_id = r.id AND ir.is_active = 1), 0),
@@ -195,7 +196,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
             $pair_stmt = $pdo->prepare("
                 SELECT rc.id, rc.combined_name, rc.room_a_id, rc.room_b_id,
                        a.room_number AS a_number, a.floor AS a_floor, b.room_number AS b_number, b.floor AS b_floor,
-                       r.child_price_multiplier
+                       r.child_price_multiplier, r.child_charge_mode, r.child_charge_amount, r.free_children, r.max_children
                 FROM room_combinations rc
                 JOIN individual_rooms a ON a.id = rc.room_a_id AND a.is_active = 1
                 JOIN individual_rooms b ON b.id = rc.room_b_id AND b.is_active = 1
@@ -215,6 +216,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
                     'available'         => $isFree,
                     'conflict'          => !$isFree,
                     'child_multiplier'  => (float)($pr['child_price_multiplier'] ?? 50),
+                    'child_rule'        => rh_child_rule_js(rh_child_rule($pr)),
                     'single_override'   => null,
                     'double_override'   => null,
                     'triple_override'   => null,
@@ -227,10 +229,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
         }
         $ir_stmt = $pdo->prepare("
             SELECT ir.id, ir.room_number, ir.room_name, ir.status, ir.floor, ir.view_type,
-                   ir.child_price_multiplier, ir.children_allowed_override,
+                   ir.child_price_multiplier, ir.child_charge_mode, ir.child_charge_amount, ir.free_children, ir.max_children,
+                   ir.children_allowed_override,
                    ir.single_occupancy_enabled_override, ir.double_occupancy_enabled_override,
                    ir.triple_occupancy_enabled_override,
-                   COALESCE(ir.child_price_multiplier, r.child_price_multiplier) AS effective_child_multiplier
+                   r.child_price_multiplier AS t_child_price_multiplier, r.child_charge_mode AS t_child_charge_mode,
+                   r.child_charge_amount AS t_child_charge_amount, r.free_children AS t_free_children, r.max_children AS t_max_children
             FROM individual_rooms ir
             JOIN rooms r ON ir.room_type_id = r.id
             WHERE ir.room_type_id = ? AND ir.is_active = 1 ORDER BY ir.room_number ASC
@@ -257,6 +261,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
             ");
             $conflict_stmt->execute(array_merge([$ir['id'], $ir['id']], $blocking_statuses, [$co, $ci]));
             $has_conflict = (int)$conflict_stmt->fetchColumn() > 0;
+            // The room's own child charge overrides its type's (blank = inherit): the same rule the save uses.
+            $ind_child_rule = rh_child_rule([
+                'child_price_multiplier' => $ir['t_child_price_multiplier'], 'child_charge_mode' => $ir['t_child_charge_mode'],
+                'child_charge_amount' => $ir['t_child_charge_amount'], 'free_children' => $ir['t_free_children'], 'max_children' => $ir['t_max_children'],
+            ], $ir);
             $label = $ir['room_number'];
             if (!empty($ir['room_name'])) $label .= ' – ' . $ir['room_name'];
             if (!empty($ir['floor']))     $label .= ' (Floor ' . $ir['floor'] . ')';
@@ -270,7 +279,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_a
                 // service (maintenance / out of order) cannot be picked.
                 'available'         => !$has_conflict && !in_array($ir['status'], ['maintenance', 'out_of_order'], true),
                 'conflict'          => $has_conflict,
-                'child_multiplier'  => (float)($ir['effective_child_multiplier'] ?? 50),
+                'child_multiplier'  => $ind_child_rule['percent'],
+                'child_rule'        => rh_child_rule_js($ind_child_rule),
                 'single_override'   => $ir['single_occupancy_enabled_override'],
                 'double_override'   => $ir['double_occupancy_enabled_override'],
                 'triple_override'   => $ir['triple_occupancy_enabled_override'],
@@ -481,9 +491,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         // only sleep in rooms whose policy allows them. One entry per physical room row.
         $total_rooms_booked = array_sum(array_column($room_lines, 'qty'));
         $party_rows = [];
-        foreach ($room_lines as $li_idx => $pl) {
+        foreach ($room_lines as $li_idx => &$pl) {
+            // One child-charge rule per line: the chosen individual room's own rule when ONE room is booked and picked
+            // by hand (it overrides its type), otherwise the room type's. Joined pairs always use the type's rule.
+            $pick_individual = ($total_rooms_booked === 1 && $individual_room_id && !$auto_assign && empty($pl['combination_queue']));
+            $pl['child_rule'] = rh_child_rule_for($pdo, (int)$pl['room_id'], $pick_individual ? $individual_room_id : null);
             for ($q = 0; $q < (int)$pl['qty']; $q++) {
                 $party_rows[] = [
+                    'max_children' => $pl['child_rule']['max'],
                     'capacity' => max(1, (int)($pl['room_data']['max_guests'] ?? 1)),
                     'children_allowed' => !empty($pl['policy']['children_allowed']),
                     'name' => (string)$pl['room_data']['name'],
@@ -491,6 +506,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 ];
             }
         }
+        unset($pl);
         $party_split = ga_distribute_party($party_rows, $adult_guests, $child_guests);
         if (empty($party_split['valid'])) {
             throw new Exception($party_split['message']);
@@ -538,20 +554,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             $ovr = $line['price_override'];
             $qty = $line['qty'];
 
-            $cpm = max(0.0, (float)($r['child_price_multiplier'] ?? getSetting('booking_child_price_multiplier', 50)));
-            // A specific individual room may carry its own child multiplier; mirror the live preview.
-            if ($individual_room_id && !$auto_assign) {
-                $cpm_stmt = $pdo->prepare("
-                    SELECT COALESCE(ir.child_price_multiplier, r.child_price_multiplier)
-                    FROM individual_rooms ir
-                    JOIN rooms r ON r.id = ir.room_type_id
-                    WHERE ir.id = ? AND ir.room_type_id = ? AND ir.is_active = 1
-                ");
-                $cpm_stmt->execute([$individual_room_id, $line['room_id']]);
-                $cpm_ind = $cpm_stmt->fetchColumn();
-                if ($cpm_ind !== false && $cpm_ind !== null) {
-                    $cpm = max(0.0, (float)$cpm_ind);
-                }
+            // The line's child-charge rule (includes/pricing.php), chosen above next to the seating; mirrored by the live preview.
+            $child_rule = $line['child_rule'];
+            $child_snap = rh_child_rule_snapshot($child_rule);
+            if ($line['price_override'] !== null) {
+                // A manager override is the final price with any child charge folded in: nothing separate to show, so
+                // the saved rule must not make documents print "children, first N free" at 0.
+                $child_snap['free_children'] = 0;
             }
 
             $line['rows']  = [];
@@ -605,9 +614,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     // Each room is charged for the children seated in THAT room (same as the public
                     // booking page and Edit Booking), so identical rooms with identical guests cost the same.
                     $row_seated_children = (int)($party_split['rows'][$global_row_idx]['children'] ?? 0);
-                    $child_sup = $row_seated_children > 0
-                        ? $r_price * ($cpm / 100) * $row_seated_children * $number_of_nights
-                        : 0.0;
+                    $child_sup = rh_child_supplement($child_rule, $row_seated_children, (int)$number_of_nights, (float)$r_price);
                     // Levy sits outside the VAT base (shared helper)
                     $tt = rh_stay_totals($base_row + $child_sup, 'price');
                 }
@@ -642,7 +649,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
 
             $line['calc'] = [
                 'room_price' => $line['rows'][0]['room_price'],
-                'cpm'        => $cpm,
+                'cpm'        => $child_snap['child_price_multiplier'],
+                'child_snap' => $child_snap,
                 'levy_pct'   => $line['rows'][0]['levy_rate'],
                 'vat_rate'   => $line['rows'][0]['vat_rate'],
             ];
@@ -770,6 +778,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                         booking_reference, room_id, individual_room_id,
                         guest_name, guest_email, guest_phone, guest_country, guest_address,
                         number_of_guests, adult_guests, child_guests, child_price_multiplier,
+                        child_charge_mode, child_charge_amount, free_children,
                         check_in_date, check_out_date, number_of_nights,
                         total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
                         vat_rate, vat_amount, total_with_vat,
@@ -779,7 +788,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                         primary_booking_id,
                         created_at
                     ) VALUES (
-                        ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?,?, ?, NOW()
+                        ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?,?, ?, NOW()
                     )
                 ");
                 $insert->execute([
@@ -795,6 +804,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $row_adults,
                     $row_children,
                     $c['cpm'],
+                    $c['child_snap']['child_charge_mode'],
+                    $c['child_snap']['child_charge_amount'],
+                    $c['child_snap']['free_children'],
                     $check_in_date,
                     $check_out_date,
                     $number_of_nights,
@@ -1126,6 +1138,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             require_once '../config/email.php';
             $fl = $room_lines[0];
             $fc = $fl['calc'];
+            // Child wording for the email: rooms that carry children and whether they charge them by different rules.
+            $childRoomsEmail = 0;
+            $childSigsEmail = [];
+            $firstChildSnap = null;
+            $gi = 0;
+            foreach ($room_lines as $eln) {
+                for ($q = 0; $q < (int)$eln['qty']; $q++) {
+                    if ((int)($party_split['rows'][$gi]['children'] ?? 0) > 0) {
+                        $childRoomsEmail++;
+                        $childSigsEmail[json_encode($eln['calc']['child_snap'])] = true;
+                        $firstChildSnap = $firstChildSnap ?? $eln['calc']['child_snap'];
+                    }
+                    $gi++;
+                }
+            }
             // Room name label: list all room names for multi-room bookings
             $room_name_for_email = count($created_bookings) > 1
                 ? implode(', ', array_unique(array_map(fn($cb) => $cb['room_name'], $created_bookings)))
@@ -1143,7 +1170,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 'number_of_guests'       => $number_of_guests,
                 'adult_guests'           => $adult_guests,
                 'child_guests'           => $child_guests,
-                'child_price_multiplier' => $fc['cpm'],
+                'child_price_multiplier' => ($firstChildSnap ?? $fc['child_snap'])['child_price_multiplier'],
+                'child_charge_mode'      => ($firstChildSnap ?? $fc['child_snap'])['child_charge_mode'],
+                'child_charge_amount'    => ($firstChildSnap ?? $fc['child_snap'])['child_charge_amount'],
+                'free_children'          => ($firstChildSnap ?? $fc['child_snap'])['free_children'],
+                'rooms_in_group'         => max(1, $childRoomsEmail), // rooms carrying children
+                'child_rule_mixed'       => count($childSigsEmail) > 1,
                 // Use grand totals across all rooms — correct for multi-room group bookings
                 'child_supplement_total' => $grand_child_supplement,
                 'total_amount'           => $grand_total_with_vat,
@@ -1322,9 +1354,8 @@ $rooms_json = json_encode(array_map(function ($r) {
         'price_single'           => (float)($r['price_single_occupancy'] ?? $r['price_per_night']),
         'price_double'           => (float)($r['price_double_occupancy'] ?? $r['price_per_night'] * 1.2),
         'price_triple'           => (float)($r['price_triple_occupancy'] ?? $r['price_per_night'] * 1.4),
-        'child_price_multiplier' => isset($r['child_price_multiplier'])
-            ? (float)$r['child_price_multiplier']
-            : (float)getSetting('booking_child_price_multiplier', getSetting('child_guest_price_multiplier', 50)),
+        'child_price_multiplier' => rh_child_rule($r)['percent'],
+        'child_rule'             => rh_child_rule_js(rh_child_rule($r)),
         'rooms_available'        => (int)$r['rooms_available'],
         'single_enabled'         => (int)$policy['single_enabled'],
         'double_enabled'         => (int)$policy['double_enabled'],
@@ -2300,7 +2331,7 @@ try {
                                 <td id="accQtyTotal">—</td>
                             </tr>
                             <tr id="accRowChild" style="display:none;" class="tax-row">
-                                <td>Child supplement (<span id="accChildCount">0</span> child × <span id="accChildPct">50</span>% rate)</td>
+                                <td>Child supplement (<span id="accChildCount">0</span> <span id="accChildWord">child</span> × <span id="accChildPct">50</span>% rate)</td>
                                 <td id="accChildTotal">—</td>
                             </tr>
                             <?php if ($levy_enabled): ?>
@@ -3052,6 +3083,47 @@ try {
         // includes/guest-allocation.php (the server re-runs it on submit and wins) ──────
         // 1+ adult in every room, nobody beyond a room's capacity, children only in rooms
         // that allow them (seated first-room-first), remaining adults fill up.
+        // Child-charge rule of a room type (rooms JSON), or of the individual room picked by hand when ONE room is booked.
+        // Same fields and order of precedence as rh_child_rule() in includes/pricing.php; the server re-prices on save.
+        function ruleForRoom(room, allowIndividual) {
+            // The picked individual room only counts while the screen is on "choose a room" (not auto-assign).
+            if (allowIndividual && !(el('autoAssignRoom') && el('autoAssignRoom').value === '0')) allowIndividual = false;
+            const r = room.child_rule || {};
+            const rule = {
+                mode: r.mode === 'fixed' ? 'fixed' : 'percent',
+                percent: Math.max(0, Number(r.percent !== undefined ? r.percent : room.child_price_multiplier) || 0),
+                amount: Math.max(0, Number(r.amount) || 0),
+                free: Math.max(0, parseInt(r.free || 0, 10) || 0),
+                max: r.max !== null && r.max !== undefined ? Math.max(0, parseInt(r.max, 10)) : null
+            };
+            if (allowIndividual) {
+                const ind = document.querySelector('input[name=individual_room_id]:checked');
+                const raw = ind ? ind.getAttribute('data-child-rule') : null;
+                if (raw && raw !== 'null') {
+                    try {
+                        const ir = JSON.parse(raw);
+                        if (ir) {
+                            return {
+                                mode: ir.mode === 'fixed' ? 'fixed' : 'percent',
+                                percent: Math.max(0, Number(ir.percent) || 0),
+                                amount: Math.max(0, Number(ir.amount) || 0),
+                                free: Math.max(0, parseInt(ir.free || 0, 10) || 0),
+                                max: ir.max !== null && ir.max !== undefined ? Math.max(0, parseInt(ir.max, 10)) : null
+                            };
+                        }
+                    } catch (e) { /* fall back to the type's rule */ }
+                }
+            }
+            return rule;
+        }
+
+        // Child charge for one night: the first `free` children in a room are free.
+        function childNightCharge(rule, children, rate) {
+            const charged = Math.max(0, children - rule.free);
+            if (charged <= 0) return 0;
+            return Math.max(0, rule.mode === 'fixed' ? rule.amount : rate * (rule.percent / 100)) * charged;
+        }
+
         function adminSeatParty() {
             const guests = Math.max(1, parseInt(el('numGuests')?.value || '1', 10));
             const children = Math.max(0, parseInt(el('childGuests')?.value || '0', 10) || 0);
@@ -3065,9 +3137,12 @@ try {
                 const rm = roomById(lineRoomId(ln));
                 if (rm) carry = rm;
                 const use = rm || carry || firstPicked;
+                // Most children one room may take: the picked individual room's own limit (single room) or its type's.
+                const rowRule = use ? ruleForRoom(use, lineList.length === 1) : null;
                 return {
                     name: use ? use.name : 'room',
                     capacity: use ? roomPhysicalCap(use) : 1,
+                    maxChildren: rowRule && rowRule.max !== null ? rowRule.max : null,
                     childrenAllowed: use ? !!use.children_allowed : true,
                     picked: !!rm
                 };
@@ -3082,7 +3157,8 @@ try {
             let childrenLeft = children;
             rows.forEach((r, i) => {
                 if (childrenLeft <= 0 || !r.childrenAllowed) return;
-                const take = Math.min(childrenLeft, seated[i].left);
+                let take = Math.min(childrenLeft, seated[i].left);
+                if (r.maxChildren !== null) take = Math.min(take, r.maxChildren);
                 seated[i].children += take;
                 seated[i].left -= take;
                 childrenLeft -= take;
@@ -3090,6 +3166,9 @@ try {
             if (childrenLeft > 0) {
                 if (!rows.some(r => r.childrenAllowed)) {
                     return fail(`Children are not allowed in ${Array.from(new Set(rows.map(r => r.name))).join(', ')}. Remove the children or choose a family-friendly room type.`);
+                }
+                if (rows.some(r => r.childrenAllowed && r.maxChildren !== null)) {
+                    return fail(`${childrenLeft} child(ren) cannot be seated: the rooms selected take only a limited number of children each (maximum children per room). Add another room or reduce the children.`);
                 }
                 return fail(`${childrenLeft} child(ren) cannot be seated: the child-friendly rooms selected are full. Add a child-friendly room or reduce the party.`);
             }
@@ -3420,6 +3499,7 @@ try {
                         radio.value = ir.id;
                         radio.disabled = !ir.available;
                         radio.setAttribute('data-child-multiplier', ir.child_multiplier);
+                        radio.setAttribute('data-child-rule', JSON.stringify(ir.child_rule || null));
                         radio.setAttribute('data-single-override', ir.single_override ?? '');
                         radio.setAttribute('data-double-override', ir.double_override ?? '');
                         radio.setAttribute('data-triple-override', ir.triple_override ?? '');
@@ -3503,6 +3583,18 @@ try {
             return '';
         }
 
+        // Plain words for one room's child charge, e.g. '2 children, first 2 free = MWK 0' or '1 child at 50% = MWK 20,000'.
+        function childLineText(rule, children, amount) {
+            const word = n => n + (n === 1 ? ' child' : ' children');
+            const charged = Math.max(0, children - rule.free);
+            const free = rule.free > 0 ? ', first ' + rule.free + ' free' : '';
+            if (charged <= 0 || (rule.mode === 'fixed' ? rule.amount : rule.percent) <= 0) {
+                return word(children) + (free || ', no charge') + ' = ' + fmt(0);
+            }
+            const how = rule.mode === 'fixed' ? fmt(rule.amount) + ' per night' : 'at ' + rule.percent + '%';
+            return word(children) + free + (rule.free > 0 ? ' (' + word(charged) + ' charged)' : '') + (rule.mode === 'fixed' ? ' x ' : ' ') + how + ' = ' + fmt(amount);
+        }
+
         // ── Core accounting calculator ─────────────────────────────────────────────
         function calculateTotal() {
             const ci = el('checkInDate')?.value;
@@ -3553,7 +3645,7 @@ try {
             const indRadio = lines.length === 1 ? document.querySelector('input[name=individual_room_id]:checked') : null;
 
             // Each row is priced for the guests seated in THAT room (same rule as the server).
-            let childPctSeen = null;
+            let childRuleSeen = null;
             const seatingAll = adminSeatParty();
             const nightsLbl = nights + ' night' + (nights !== 1 ? 's' : '');
             lines.forEach((ln, lnOrder) => {
@@ -3595,9 +3687,7 @@ try {
                 if (firstRate === null) firstRate = rate;
                 else if (firstRate !== rate) multiRates = true;
 
-                const cMult = indRadio ?
-                    parseFloat(indRadio.getAttribute('data-child-multiplier') || room.child_price_multiplier) :
-                    room.child_price_multiplier;
+                const cRule = ruleForRoom(room, !!indRadio && !(comboRates.length));
 
                 let lineBase = 0, lineChild = 0, tt;
                 if (override !== null) {
@@ -3606,13 +3696,14 @@ try {
                 } else {
                     lineBase = rate * nights * qty;
                     // Child supplement: only for the children seated in THIS room (matches the server)
-                    lineChild = rowChildren > 0 ? (rate * (cMult / 100) * rowChildren * nights) : 0;
+                    lineChild = Math.round(childNightCharge(cRule, rowChildren, rate) * nights * 100) / 100;
                     tt = stayTotals(lineBase + lineChild, 'price');
                 }
                 if (subEl) subEl.textContent = fmt(tt.total);
                 if (override === null && rowChildren > 0) {
-                    if (childPctSeen === null) childPctSeen = cMult;
-                    else if (childPctSeen !== cMult) childPctSeen = 'varies';
+                    const sig = cRule.mode + ':' + cRule.percent + ':' + cRule.amount + ':' + cRule.free;
+                    if (childRuleSeen === null) childRuleSeen = { sig: sig, rule: cRule };
+                    else if (childRuleSeen.sig !== sig) childRuleSeen.varies = true;
                 }
                 if (detEl) {
                     const seatTxt = seatRow ? 'Seated: ' + seatLabel(seatRow) + ' (room holds ' + roomPhysicalCap(room) + '). ' : '';
@@ -3621,7 +3712,7 @@ try {
                         detEl.textContent = seatTxt + 'Price override ' + fmt(override) + ' is the final amount for this room.' + occTxt;
                     } else {
                         let d = seatTxt + fmt(rate) + '/night × ' + nightsLbl + ' = ' + fmt(lineBase);
-                        if (lineChild > 0) d += ' + ' + rowChildren + (rowChildren === 1 ? ' child' : ' children') + ' at ' + cMult + '% = ' + fmt(lineChild);
+                        if (rowChildren > 0) d += ' + ' + childLineText(cRule, rowChildren, lineChild);
                         const tax = tt.total - (lineBase + lineChild);
                         if (tax > 0.005) d += (vatMode === 'exclusive' && tt.vat > 0 ? (tt.levy > 0 ? ' + VAT and levy ' : ' + VAT ') : ' + levy ') + fmt(tax);
                         detEl.textContent = d + occTxt;
@@ -3653,7 +3744,12 @@ try {
             if (el('accQtyTotal')) el('accQtyTotal').textContent = fmt(grandBase);
             if (el('accRowChild')) el('accRowChild').style.display = children > 0 ? '' : 'none';
             if (el('accChildCount')) el('accChildCount').textContent = children;
-            if (el('accChildPct')) el('accChildPct').textContent = childPctSeen === null ? '50' : String(childPctSeen);
+            if (el('accChildWord')) el('accChildWord').textContent = children === 1 ? 'child' : 'children';
+            if (el('accChildPct')) el('accChildPct').textContent = childRuleSeen === null ? '50' : (childRuleSeen.varies ? 'varies' : (childRuleSeen.rule.mode === 'fixed' ? fmt(childRuleSeen.rule.amount) + ' per night' : String(childRuleSeen.rule.percent)));
+            const pctSuffix = el('accChildPct') && el('accChildPct').nextSibling;
+            if (pctSuffix && pctSuffix.nodeType === 3) {
+                pctSuffix.textContent = childRuleSeen === null || (!childRuleSeen.varies && childRuleSeen.rule.mode === 'percent') ? '% rate)' : (childRuleSeen.varies ? ' rates)' : (childRuleSeen.rule.free > 0 ? ', first ' + childRuleSeen.rule.free + ' free)' : ')'));
+            }
             if (el('accChildTotal')) el('accChildTotal').textContent = fmt(grandChild);
             if (el('accRowLevy')) el('accRowLevy').style.display = levyEnabled && grandLevy > 0 ? '' : 'none';
             if (el('accLevyTotal')) el('accLevyTotal').textContent = fmt(grandLevy);
