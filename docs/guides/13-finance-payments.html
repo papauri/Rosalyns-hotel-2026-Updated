@@ -40,6 +40,7 @@
       <li><a href="#refund">How to refund a payment</a></li>
       <li><a href="#settle">How to settle a pending refund</a></li>
       <li><a href="#owing">How to see who still owes money</a></li>
+      <li><a href="#total-info">How a booking total is worked out (the small i)</a></li>
       <li><a href="#invoices">Invoices</a></li>
       <li><a href="#credit">Credit notes</a></li>
       <li><a href="#quotes">Quotations</a></li>
@@ -157,6 +158,9 @@
   <h3>How children show on these documents</h3>
   <p>When a room booking has children, the quotation, invoice and stay statement have a <strong>Child supplement</strong> line. Under it, the line says how the children were charged, using the rule the booking was made with. For example: <em>2 children, first 2 free</em> (nobody pays), or <em>1 child x MWK 10,000 x 7 nights</em>. The quantity on the line is the number of children who pay, so quantity times the unit price equals the amount. Children who stay free are named in the words under the line. A group booking adds up the children across its rooms. The same wording is available in emails as the <code>{{child_charge_rule}}</code> tag (see <a href="12-email-templates.php">Email templates</a>). The rule is set in <a href="09-packages-rates.html#child-charges">Child charges</a>.</p>
 
+  <h3>How a room guest name shows on these documents</h3>
+  <p>A room in a group booking can have its own <strong>Guest name for this room</strong> (set when the booking is created or edited, see <a href="07-reception-bookings.html#create">How to create a booking</a>). When it has one, the room line on the group quotation, invoice and stay statement reads <em>Room &ndash; Name</em>, for example <em>Deluxe Room &ndash; Mr &amp; Mrs Banda</em>. It is only a label. The document is still addressed to the lead booker, who pays, and no amount changes.</p>
+
   <h2 id="receipt">How to send or reprint a receipt</h2>
   <p>A receipt is emailed to the guest by itself when a payment is saved as Paid or Completed. Use this to send it again, to a different address, or by WhatsApp.</p>
   <ol class="steps">
@@ -209,6 +213,16 @@
   </ol>
   <p>A balance of one tambala (0.01) or less counts as paid. Anything above that is shown as owing.</p>
   <p>The money-owed total is the same everywhere it appears: the <strong>Owed to us</strong> card on the Dashboard and on Accounting, and the matching figures on End of Day, Reports and Invoices. It includes room, conference, gym and event accounts and open unpaid tabs. If a figure cannot be loaded, it shows <strong>Unavailable</strong> instead of a wrong number. Reload the page, and tell your manager if it still says Unavailable.</p>
+
+  <h2 id="total-info">How a booking total is worked out (the small <strong>i</strong>)</h2>
+  <p>Next to a booking total there is a small <strong>i</strong> button. On <strong>Payment Details</strong> (click the eye on a room payment) it sits next to <strong>Total (incl. VAT &amp; levy)</strong>. It also shows on Booking Details, the Bookings list, the Dashboard pending bookings, the Tentative page and Individual Rooms. It changes nothing. It only explains the number.</p>
+  <ol class="steps">
+    <li>Click or tap the <strong>i</strong> (or hover over it).</li>
+    <li>Read the window <strong>How this total is worked out</strong>: <strong>Room rate x nights</strong>, then <strong>Child charge</strong>, <strong>Packages / add-ons</strong>, <strong>Tourism levy</strong> and <strong>VAT</strong> where they apply, down to <strong>Total (incl. VAT &amp; levy)</strong>.</li>
+    <li>On Payment Details and Booking Details it goes on with <strong>Folio extras</strong>, <strong>Folio total</strong>, <strong>Paid</strong> and <strong>Balance due</strong> (or <strong>Credit owed to guest</strong> if the guest has paid too much).</li>
+    <li>Press <strong>Esc</strong> or click outside the window to close it.</li>
+  </ol>
+  <p>VAT is shown as <em>included in the room rate above</em> (not added again) or as <em>added</em>, depending on your VAT setting. If VAT is switched off there is no VAT line. The full explanation of each line is in <a href="07-reception-bookings.html#total-info">the Reception and Bookings guide</a>.</p>
 
   <h2 id="invoices">Invoices</h2>
   <p><strong>Money</strong> &rarr; <strong>Invoices</strong> (page title <strong>Invoices &amp; Credit Notes</strong>). It lists one line per payment, with the invoice number once an invoice exists. Filters: <strong>Booking Type</strong>, <strong>Payment Status</strong>, <strong>Search</strong> (invoice number, payment number, booking reference). Changing a dropdown applies at once. The fold-out <strong>Receivables aging and outstanding by source</strong> groups unpaid amounts into 0&ndash;30, 31&ndash;60, 61&ndash;90 and 90+ day age bands.</p>

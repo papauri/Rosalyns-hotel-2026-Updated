@@ -102,13 +102,15 @@
   <h3>Add an ingredient</h3>
   <ol class="steps">
     <li>Click <strong>Add Ingredient</strong>.</li>
-    <li>Fill in <strong>Name</strong> and <strong>Unit</strong> (both required). Units are Grams (g), Kilograms (kg), Millilitres (ml), Litres (L), Pieces (pcs), Slices, Teaspoons (tsp), Tablespoons (tbsp). Optionally set <strong>Category</strong>.</li>
+    <li>Fill in <strong>Name</strong> and <strong>Unit</strong> (both required). Units are Grams (g), Kilograms (kg), Millilitres (ml), Litres (L), Pieces (pcs), Packets, Boxes, Dozens (12), Slices, Teaspoons (tsp), Tablespoons (tbsp). Optionally set <strong>Category</strong>.</li>
+    <li>If the unit is <strong>Packets</strong> or <strong>Boxes</strong> (or another container), a box called <strong>Pieces in one packet</strong> (it reads <strong>Pieces in one box</strong> for boxes) appears. Type how many single pieces are inside one, for example <em>6</em> for 6 sausages in a packet. It is optional. Menu Management then lets staff sell <em>1 piece</em> and works out the part of the packet. <strong>Dozens (12)</strong> are always 12, so the box does not show. If you type something that is not a number above 0 you will see <em>"Pieces in one packet must be a number above 0."</em> You can also leave it blank and let staff type it once in Menu Management (see <a href="01-pos-till.html#menu-stock">What it uses from stock</a>); it is then saved here.</li>
     <li><strong>Min quantity (low-stock threshold)</strong>: when stock is at or below this, the ingredient shows Low.</li>
     <li><strong>Default yield %</strong>: the usable part after trimming or cooking. 100 means no loss. It can be 0.1 to 100.</li>
     <li>For buying: <strong>Reorder point</strong>, <strong>Par level (order up to)</strong>, <strong>Preferred supplier</strong> and <strong>Supplier lead time (days)</strong>. Notes are optional.</li>
     <li>If you buy this item by the crate, case, tray or box, fill in <strong>Bought in packs?</strong> with the pack name (for example <em>crate</em>) and <strong>Units in one pack</strong> (this is the pack size, for example <em>24</em> for a crate of 24 bottles). Leave both blank if you never buy it in packs. If you type a size but no name, the pack is called <em>pack</em>. A name with no size is ignored. The stock, counts and recipes for the item stay in the <strong>Unit</strong> you chose above (for example bottles), never in packs.</li>
     <li>Click <strong>Save</strong>. You will see <em>"Ingredient &quot;Chicken breast&quot; added."</em></li>
   </ol>
+  <p>Stock quantities are kept to <strong>6 decimal places</strong>, so small parts of a packet add up properly: 6 sales of 1 piece from a packet of 6 take exactly 1 packet off. On screen the numbers are shown shorter.</p>
   <p>Names are checked as you type. An ingredient name already used by another ingredient is flagged: <em>"A stock item with this name already exists (archived items count too)."</em> If the save is refused, the form stays open with what you typed and the reason shown.</p>
   <h3>Other actions on each row</h3>
   <ul>
