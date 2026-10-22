@@ -799,6 +799,54 @@ tr.drag-over > td {
     min-height: 1em;
 }
 
+.mm-qtytools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    margin-top: 6px;
+}
+
+.mm-qtytools[hidden],
+.mm-per[hidden] {
+    display: none;
+}
+
+.mm-stock-line > .mm-qtytools {
+    grid-column: 1 / -1;
+    margin: 0;
+}
+
+.mm-quick {
+    display: inline-flex;
+    gap: 6px;
+}
+
+.mm-quick .mm-btn {
+    min-width: 44px;
+    justify-content: center;
+}
+
+.mm-per {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    font-size: 12px;
+    color: var(--mm-muted);
+}
+
+.mm-per input {
+    width: 90px;
+    padding: 7px 8px;
+    border: 1px solid var(--mm-border);
+    border-radius: var(--mm-radius);
+    font-size: 13px;
+    font-family: inherit;
+    color: var(--mm-text);
+    background: #fff;
+}
+
 .mm-stock-totals {
     display: flex;
     flex-wrap: wrap;
@@ -926,7 +974,7 @@ tr.drag-over > td {
 
     .mm-restaurant .mm-stock-line,
     .mm-restaurant .mm-stock-add {
-        grid-template-columns: minmax(0, 1fr) 84px;
+        grid-template-columns: 96px minmax(0, 1fr);
     }
 
     .mm-restaurant .mm-stock-line .mm-stock-name {
@@ -975,6 +1023,7 @@ tr.drag-over > td {
     .mm-stock-line select,
     .mm-stock-add input,
     .mm-stock-add select,
+    .mm-per input,
     .mm-field input[type="text"],
     .mm-field input[type="number"],
     .mm-field select {

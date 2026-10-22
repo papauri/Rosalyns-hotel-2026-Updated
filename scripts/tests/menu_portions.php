@@ -201,6 +201,32 @@ try {
     check($r['mode'] === 'archived' && (int)col($pdo, "SELECT COUNT(*) FROM menu_items WHERE id = ? AND is_available = 0 AND show_pos = 0 AND show_room_service = 0", [$pos['id']]) === 1, 'A sold item is archived (hidden from till and room service), not deleted');
     check((int)col($pdo, "SELECT COUNT(*) FROM stock_order_items WHERE menu_item_id = ?", [$pos['id']]) === 1, 'Past orders still read the item');
     check((int)col($pdo, "SELECT COUNT(*) FROM stock_order_items WHERE order_id = ? AND unit_price = 100", [$oid]) === 1, 'Order lines keep the price they sold at (a later price change does not touch them)');
+
+    // "Pieces" entry: the page sends the base-unit part (pieces / pieces-in-a-packet); only that is stored.
+    // 1 sausage of a 6-sausage packet = 1/6 packet. The column keeps 4 decimals, so 1/6 is stored as 0.1667.
+    $col = (string)col($pdo, "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_recipe_ingredients' AND COLUMN_NAME = 'quantity_per_portion'");
+    check($col === 'decimal(12,4)', 'Recipe quantity column is decimal(12,4) (4 decimals, the precision the pieces guide warns about)', $col);
+    $pk6 = $mkIng("ZZMP $run Six pack", 'packet', 10, 15300, null, null);
+    $dz = $mkIng("ZZMP $run Eggs", 'dozen', 10, 12000, null, null);
+    $pc = rh_menu_pos_sync_item($pdo, 'food', $web("ZZMP $run Single sausage", $catA), null, null);
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 1 / 6, 'unit' => 'base']], $adminId);
+    $stored = (float)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]);
+    check($near($stored, 0.1667), '1 piece of a 6-piece packet is stored as 1/6 packet (0.1667)', (string)$stored);
+    $b = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$pk6]);
+    for ($i = 0; $i < 6; $i++) { deductStockForMenuItem($pc['id'], $pc['slug'], 1.0, 'pos_order', 987655000 + $i, $adminId); }
+    $a = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$pk6]);
+    check(abs(($b - $a) - 1.0) <= 0.0005, '6 sales of the 1-piece item take about 1 packet off (4-decimal rounding: 1.0002)', 'took ' . ($b - $a));
+    check($near(rh_menu_recipe_cost($pdo, $pc['id'], $pc['slug']), 15300 * 0.1667), 'Cost per piece = packet cost / 6 (2,550.51 at 4 decimals)', (string)rh_menu_recipe_cost($pdo, $pc['id'], $pc['slug']));
+    check(abs(rh_menu_recipe_cost($pdo, $pc['id'], $pc['slug']) - 15300 / 6) < 1.0, 'Cost per piece is within 1 of the exact 15,300 / 6 = 2,550');
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $dz, 'quantity' => 1 / 12, 'unit' => 'base']], $adminId);
+    $stored = (float)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]);
+    check($near($stored, 0.0833), '1 egg of a dozen is stored as 1/12 (0.0833)', (string)$stored);
+    $b = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$dz]);
+    for ($i = 0; $i < 12; $i++) { deductStockForMenuItem($pc['id'], $pc['slug'], 1.0, 'pos_order', 987655100 + $i, $adminId); }
+    $a = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$dz]);
+    check(abs(($b - $a) - 1.0) <= 0.0005, '12 sales of the 1-egg item take about 1 dozen off (0.9996)', 'took ' . ($b - $a));
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 0.5, 'unit' => 'base']], $adminId);
+    check($near(col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]), 0.5), '3 pieces of a 6-piece packet is stored as 0.5 packet (exact)');
 } catch (Throwable $e) {
     bad('In-process scenario', $e->getMessage() . ' @' . $e->getLine());
 }
@@ -239,6 +265,9 @@ check($near($qty($r, 3), 1.0), 'Page: "1 each" is stored as 1 base unit', json_e
 
 $r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{sau}', 'quantity' => 1, 'unit' => 'pack']])], $ingSetup, $ingVars, $verifyAdd);
 check($clean($r) && ($r['json']['success'] ?? false) === true && $near($qty($r, 3), 10.0), 'Page: "1 Pack (10 each)" is stored as 10 base units', json_encode($r['json'] ?? $r['verify'] ?? $r));
+
+$r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{sau}', 'quantity' => 1 / 6, 'unit' => 'base']])], $ingSetup, $ingVars, $verifyAdd);
+check($clean($r) && ($r['json']['success'] ?? false) === true && $near($qty($r, 3), 0.1667), 'Page: "1 piece of 6" (sent as 1/6 of the unit) is stored as 0.1667', json_encode($r['json'] ?? $r['verify'] ?? $r));
 
 $r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{rice}', 'quantity' => 0.15, 'unit' => 'base']])], $ingSetup, $ingVars, $verifyAdd);
 check($clean($r) && ($r['json']['success'] ?? false) === true && $near($qty($r, 3), 0.15), 'Page: 0.15 kg is stored as 0.15', json_encode($r['json'] ?? $r['verify'] ?? $r));
@@ -321,7 +350,7 @@ $r = $page(['action' => 'save_recipe', 'menu_item_id' => '{mid}', 'menu_type' =>
 check($clean($r) && $near($qty($r, 0), 1) && $near($qty($r, 1), 0), 'Stock > Recipes: an item in an inactive category is saved under its real slug, not "food"', json_encode($r['verify'] ?? $r['raw'] ?? $r));
 
 // Rendered page: search markup, filters, the stock section, the unit chooser, mobile-safe table labels.
-$r = $page([], array_merge($ingSetup, ["INSERT INTO food_menu (item_name, price, category, station) VALUES ('ZZMP $hr Shown', 100, 'ZZMP Cat $hr', 'kitchen')"]), [], [], 'GET', ['id="mmSearch"', 'No items match', 'mmApplyFilters', 'data-search=', 'id="mmCatFilter"', 'What it uses from stock', 'id="mmIngUnit"', 'This item is free', 'data-label="Item"', 'aria-controls="mmResults"']);
+$r = $page([], array_merge($ingSetup, ["INSERT INTO food_menu (item_name, price, category, station) VALUES ('ZZMP $hr Shown', 100, 'ZZMP Cat $hr', 'kitchen')"]), [], [], 'GET', ['id="mmSearch"', 'No items match', 'mmApplyFilters', 'data-search=', 'id="mmCatFilter"', 'What it uses from stock', 'id="mmIngUnit"', 'id="mmIngPer"', 'data-q="0.5"', 'function mmShowAsPieces', 'This item is free', 'data-label="Item"', 'aria-controls="mmResults"']);
 check($clean($r) && !empty($r['found']) && !in_array(false, $r['found'], true), 'Page: search box, filters, "No items match" state, stock section and unit chooser are on the page', json_encode($r['found'] ?? $r['raw'] ?? $r));
 
 echo "\n$pass passed, $fail failed\n";
