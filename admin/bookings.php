@@ -3191,12 +3191,24 @@ try {
     $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $current_page_count = count($bookings);
 
-    // Also fetch conference inquiries
-    $conf_stmt = $pdo->query("
-        SELECT * FROM conference_inquiries
-        ORDER BY created_at DESC
-    ");
-    $conference_inquiries = $conf_stmt->fetchAll(PDO::FETCH_ASSOC);
+    // Latest conference enquiries & bookings (one table holds both). Only when the person can open the
+    // Conference page (permission + module); the full list, quotes and payments live there.
+    $conference_inquiries = [];
+    $conference_total = 0;
+    if (!function_exists('isConferenceEnabled')) {
+        require_once __DIR__ . '/../includes/booking-functions.php';
+    }
+    // Hidden when the Conference module is off (admins included), else needs the Conference page.
+    $show_conference_block = isConferenceEnabled()
+        && function_exists('rhCanOpenPage') && rhCanOpenPage((int)($user['id'] ?? 0), 'conference-management.php');
+    if ($show_conference_block) {
+        $conference_total = (int)$pdo->query("SELECT COUNT(*) FROM conference_inquiries")->fetchColumn();
+        $conference_inquiries = $pdo->query("
+            SELECT * FROM conference_inquiries
+            ORDER BY created_at DESC
+            LIMIT 10
+        ")->fetchAll(PDO::FETCH_ASSOC);
+    }
 } catch (PDOException $e) {
     $error = 'Error fetching bookings: ' . $e->getMessage();
     $bookings = [];
@@ -3916,13 +3928,15 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             </div>
         </div><!-- /booking-results -->
 
-        <!-- Conference Inquiries -->
+        <?php if (!empty($show_conference_block)): ?>
+        <!-- Conference enquiries & bookings (latest 10; the Conference page has the full list) -->
         <div class="bookings-section">
             <h3 class="section-title">
-                <i class="fas fa-users"></i> Conference Inquiries
+                <i class="fas fa-users"></i> Conference enquiries &amp; bookings
                 <span style="font-size: 14px; font-weight: normal; color: #666;">
-                    (<?php echo count($conference_inquiries); ?> total)
+                    (<?php echo $conference_total > count($conference_inquiries) ? 'latest ' . count($conference_inquiries) . ' of ' . (int)$conference_total : (int)$conference_total . ' total'; ?>)
                 </span>
+                <a href="conference-management.php" class="rh-mini-link" style="margin-left: 8px; font-size: 14px;">Open Conference page</a>
             </h3>
 
             <?php if (!empty($conference_inquiries)): ?>
@@ -3967,10 +3981,11 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             <?php else: ?>
                 <div class="empty-state">
                     <i class="fas fa-inbox"></i>
-                    <p>No conference inquiries yet.</p>
+                    <p>No conference enquiries or bookings yet.</p>
                 </div>
             <?php endif; ?>
         </div>
+        <?php endif; ?>
     </div>
 
     <script>
