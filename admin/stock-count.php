@@ -453,7 +453,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                         // New or changed reading: variance is against what stock SHOULD have been at this moment
                         // (snapshot + sales/receipts since the count started), not the stale snapshot alone.
                         $expected = $sys + scMovementsBetween($pdo, (int)$snap['ingredient_id'], scSnapshotStart($count), $nowTs);
-                        $variance = round($actual - $expected, 4);
+                        $variance = round($actual - $expected, 6);
                         $varCost  = round($variance * $cost, 4);
                         $sql .= ", actual_quantity = ?, variance = ?, variance_cost = ?";
                         array_push($params, $actual, $variance, $varCost);
@@ -648,7 +648,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     $countedAt = ($hasCol && !empty($ln['counted_at'])) ? (string)$ln['counted_at'] : $approvalTs;
                     if ($countedAt > $approvalTs) $countedAt = $approvalTs;
                     $expected = (float)$ln['system_quantity'] + scMovementsBetween($pdo, $ingredientId, scSnapshotStart($count), $countedAt);
-                    $variance = round((float)$ln['actual_quantity'] - $expected, 4);
+                    $variance = round((float)$ln['actual_quantity'] - $expected, 6);
                     $varCost = round($variance * $costAtTime, 4);
                     $lineVarUpd->execute([$variance, $varCost, (int)$ln['id']]);
                     if ($varCost < 0) $totShort += $varCost; else $totSurplus += $varCost;
@@ -726,7 +726,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                                     if ($left <= 0.0001) break;
                                     $take = min((float)$pb['quantity'], $left);
                                     $slices[] = [$take, $pb['expiry_date'], (string)($pb['batch_label'] ?? ''), (int)$pb['id']];
-                                    $left = round($left - $take, 4);
+                                    $left = round($left - $take, 6);
                                 }
                                 if ($left > 0.0001) $slices[] = [$left, null, '', 0];
                             }
@@ -747,7 +747,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                                 $sliceQty,
                                 $settle['remaining'],
                                 max(0, $costAtTime),
-                                mb_substr('Stock count surplus ' . $count['reference'] . ($sliceLabel !== '' ? ' batch ' . $sliceLabel : '') . ($settle['settled'] > 0 ? ' (settled ' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' unallocated deficit)' : ''), 0, 500),
+                                mb_substr('Stock count surplus ' . $count['reference'] . ($sliceLabel !== '' ? ' batch ' . $sliceLabel : '') . ($settle['settled'] > 0 ? ' (settled ' . rtrim(rtrim(number_format($settle['settled'], 6, '.', ''), '0'), '.') . ' unallocated deficit)' : ''), 0, 500),
                                 $user['id'],
                             ]);
                             $batchId = (int)$pdo->lastInsertId();
@@ -777,9 +777,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                         $deductQty = abs($variance);
                         if ($deductQty > $liveQty + 0.0001) {
                             // Never fail the whole count: write off what is there and record the remainder.
-                            $uncovered = round($deductQty - max(0.0, $liveQty), 4);
+                            $uncovered = round($deductQty - max(0.0, $liveQty), 6);
                             $deductQty = max(0.0, $liveQty);
-                            $reasonShort = mb_substr($reason . ' [uncovered shortage ' . $uncovered . ' - live stock was only ' . round(max(0.0, $liveQty), 4) . ']', 0, 255);
+                            $reasonShort = mb_substr($reason . ' [uncovered shortage ' . $uncovered . ' - live stock was only ' . round(max(0.0, $liveQty), 6) . ']', 0, 255);
                         }
                         if ($deductQty < 0.0001) {
                             // Nothing left to deduct: keep an audit row so the shortfall is still on record.
@@ -1256,22 +1256,22 @@ $csrf_token = generateCsrfToken();
                                         <div style="font-size:10px; color:#6c757d;"><?php echo htmlspecialchars($ln['category']); ?> · <?php echo htmlspecialchars($ln['unit']); ?> · <?php echo $currency; ?> <?php echo number_format((float)$ln['cost_per_unit'], 2); ?>/<?php echo htmlspecialchars($ln['unit']); ?></div>
                                     </td>
                                     <?php if (!$blindCount): ?>
-                                    <td data-label="System Qty" style="text-align:right;"><?php echo number_format($sys, 4); ?></td>
-                                    <td data-label="Expected at count time" style="text-align:right;"><?php echo $expectedAt === null ? '—' : number_format($expectedAt, 4); ?></td>
+                                    <td data-label="System Qty" style="text-align:right;"><?php echo rh_stock_qty_fmt($sys, 4); ?></td>
+                                    <td data-label="Expected at count time" style="text-align:right;"><?php echo $expectedAt === null ? '—' : rh_stock_qty_fmt($expectedAt, 4); ?></td>
                                     <?php endif; ?>
                                     <td data-label="Actual Qty" style="text-align:right;">
                                         <?php if ($editable): ?>
-                                            <input class="qty" type="number" step="0.0001" min="0"
+                                            <input class="qty" type="number" step="0.000001" min="0"
                                                 name="line[<?php echo (int)$ln['id']; ?>][actual]"
-                                                value="<?php echo $lineCounted ? number_format($act, 4, '.', '') : ''; ?>"
+                                                value="<?php echo $lineCounted ? number_format($act, 6, '.', '') : ''; ?>"
                                                 placeholder="not counted"
-                                                <?php if (!$blindCount): ?>data-system="<?php echo number_format((float)($expectedAt ?? $ln['_preview']), 4, '.', ''); ?>"<?php endif; ?>
+                                                <?php if (!$blindCount): ?>data-system="<?php echo number_format((float)($expectedAt ?? $ln['_preview']), 6, '.', ''); ?>"<?php endif; ?>
 
                                                 data-cost="<?php echo number_format((float)$ln['cost_per_unit'], 4, '.', ''); ?>"
                                                 oninput="recalcRow(this)">
                                             <input type="hidden" class="touched" name="line[<?php echo (int)$ln['id']; ?>][touched]" value="0">
                                         <?php else: ?>
-                                            <?php echo $lineCounted ? number_format($act, 4) : '<span style="color:#6c757d;">not counted</span>'; ?>
+                                            <?php echo $lineCounted ? rh_stock_qty_fmt($act, 4) : '<span style="color:#6c757d;">not counted</span>'; ?>
                                         <?php endif; ?>
                                     </td>
                                     <?php if ($isOpeningCount): ?>
@@ -1284,7 +1284,7 @@ $csrf_token = generateCsrfToken();
                                     </td>
                                     <?php endif; ?>
                                     <?php if (!$blindCount): ?>
-                                    <td data-label="Variance" style="text-align:right;" class="var <?php echo $varClass; ?>"><?php echo $lineCounted ? number_format($var, 4) : '—'; ?></td>
+                                    <td data-label="Variance" style="text-align:right;" class="var <?php echo $varClass; ?>"><?php echo $lineCounted ? rh_stock_qty_fmt($var, 4) : '—'; ?></td>
                                     <td data-label="Cost Impact" style="text-align:right;" class="varCost <?php echo $varClass; ?>"><?php echo $lineCounted ? $currency . ' ' . number_format($varCost, 2) : '—'; ?></td>
                                     <?php endif; ?>
                                     <td data-label="Reason">
@@ -1411,7 +1411,7 @@ $csrf_token = generateCsrfToken();
                     const act = parseFloat(input.value) || 0;
                     const variance = act - sys;
                     const varCost = variance * cost;
-                    cells[0].textContent = variance.toFixed(4);
+                    cells[0].textContent = (function (n) { var t = n.toFixed(6).replace(/0+$/, ''); var d = t.length - t.indexOf('.') - 1; return d < 4 ? n.toFixed(4) : t; })(variance);
                     cells[1].textContent = currency + ' ' + Number(varCost || 0).toLocaleString('en-US', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2
@@ -1605,7 +1605,7 @@ $csrf_token = generateCsrfToken();
                                 <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--admin-surface-border, #eaecef);font-size:13px;">
                                     <div style="min-width:0;">
                                         <?php echo htmlspecialchars($r['name']); ?> <span style="color:#6c757d;font-size:11px;"><?php echo htmlspecialchars($r['unit']); ?></span>
-                                        <div style="color:#6c757d;font-size:11px;">Shortage <?php echo rtrim(rtrim(number_format((float)$r['shortage'], 4, '.', ''), '0'), '.') ?: '0'; ?> &middot; Manual out <?php echo rtrim(rtrim(number_format((float)$r['manual_out'], 4, '.', ''), '0'), '.') ?: '0'; ?></div>
+                                        <div style="color:#6c757d;font-size:11px;">Shortage <?php echo rtrim(rtrim(number_format((float)$r['shortage'], 6, '.', ''), '0'), '.') ?: '0'; ?> &middot; Manual out <?php echo rtrim(rtrim(number_format((float)$r['manual_out'], 6, '.', ''), '0'), '.') ?: '0'; ?></div>
                                     </div>
                                     <div style="font-weight:600;white-space:nowrap;color:#c82333;"><?php echo htmlspecialchars($currency . ' ' . number_format($cost, 2)); ?></div>
                                 </div>
@@ -1623,7 +1623,7 @@ $csrf_token = generateCsrfToken();
                                 <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--admin-surface-border, #eaecef);font-size:13px;">
                                     <div style="min-width:0;">
                                         <?php echo htmlspecialchars($m['ingredient_name']); ?>
-                                        <strong style="font-size:12px;">+<?php echo rtrim(rtrim(number_format((float)$m['qty'], 4, '.', ''), '0'), '.'); ?> <?php echo htmlspecialchars($m['unit']); ?></strong>
+                                        <strong style="font-size:12px;">+<?php echo rtrim(rtrim(number_format((float)$m['qty'], 6, '.', ''), '0'), '.'); ?> <?php echo htmlspecialchars($m['unit']); ?></strong>
                                         <div style="color:#6c757d;font-size:11px;"><?php echo htmlspecialchars(($m['who'] ?: 'Unknown') . ' · ' . date('Y-m-d H:i', strtotime((string)$m['created_at']))); ?></div>
                                         <div style="color:#6c757d;font-size:11px;overflow-wrap:anywhere;"><?php echo htmlspecialchars((string)$m['reason']); ?></div>
                                     </div>

@@ -243,7 +243,7 @@ echo "           Total adjustments: {$adjBalance['total_adjustments']} | Deducti
 
 $negativeIngredients = $pdo->query("
     SELECT si.id, si.name, si.current_quantity, si.unit FROM stock_ingredients si
-    WHERE si.current_quantity < 0
+    WHERE si.current_quantity < -0.0001
     ORDER BY si.current_quantity ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 

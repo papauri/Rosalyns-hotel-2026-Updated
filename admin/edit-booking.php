@@ -295,6 +295,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
         $guest_email = trim($_POST['guest_email'] ?? '');
         $guest_phone = trim($_POST['guest_phone'] ?? '');
         $guest_country = trim($_POST['guest_country'] ?? '');
+        $room_guest_name = rh_clean_room_guest_name($_POST['room_guest_name'] ?? '');
         $special_requests = trim($_POST['special_requests'] ?? '');
         $admin_notes = trim($_POST['booking_notes'] ?? '');
 
@@ -449,10 +450,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     $changes['guest_phone'] = ['old' => $locked['guest_phone'] ?? '', 'new' => $guest_phone];
                 }
 
-                $pdo->prepare("UPDATE bookings SET guest_name = ?, guest_email = ?, guest_phone = ?, guest_country = ?, special_requests = ?,
+                $pdo->prepare("UPDATE bookings SET guest_name = ?, room_guest_name = ?, guest_email = ?, guest_phone = ?, guest_country = ?, special_requests = ?,
                         check_in_date = ?, check_out_date = ?, number_of_nights = ?, number_of_guests = ?, adult_guests = ?, child_guests = ?,
                         occupancy_type = ?, individual_room_id = ?, updated_at = NOW() WHERE id = ?")
-                    ->execute([$guest_name, $guest_email, $guest_phone, $guest_country, $special_requests,
+                    ->execute([$guest_name, $room_guest_name !== '' ? $room_guest_name : null, $guest_email, $guest_phone, $guest_country, $special_requests,
                         $check_in, $check_out, $number_of_nights, $number_of_guests, $adult_guests, $child_guests,
                         $occupancy_type, $individual_room_id, $booking_id]);
 
@@ -511,7 +512,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     updateBookingRoomsStatus((int)$booking_id, 'occupied', 'Guest moved in: ' . $booking['booking_reference'], (int)($user['id'] ?? 0) ?: null);
                 }
 
-                $auditFields = ['guest_name', 'guest_email', 'guest_phone', 'guest_country', 'special_requests', 'check_in_date', 'check_out_date',
+                $auditFields = ['guest_name', 'room_guest_name', 'guest_email', 'guest_phone', 'guest_country', 'special_requests', 'check_in_date', 'check_out_date',
                     'number_of_nights', 'number_of_guests', 'adult_guests', 'child_guests', 'occupancy_type', 'individual_room_id', 'total_with_vat'];
                 $after = $pdo->prepare("SELECT * FROM bookings WHERE id = ?");
                 $after->execute([$booking_id]);
@@ -729,6 +730,13 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                         <label for="guest_country">Country</label>
                         <input type="text" id="guest_country" name="guest_country" maxlength="100"
                             value="<?php echo htmlspecialchars($booking['guest_country'] ?? ''); ?>">
+                    </div>
+                    <div class="form-group">
+                        <label for="room_guest_name">Guest name for this room <small style="font-weight:400;">(optional)</small></label>
+                        <input type="text" id="room_guest_name" name="room_guest_name" maxlength="150" autocomplete="off" style="min-height:44px;"
+                            placeholder="e.g. Mr &amp; Mrs Banda"
+                            value="<?php echo htmlspecialchars((string)($booking['room_guest_name'] ?? '')); ?>">
+                        <small>Who sleeps in this room. The booking stays in the lead booker's name.</small>
                     </div>
                 </div>
 

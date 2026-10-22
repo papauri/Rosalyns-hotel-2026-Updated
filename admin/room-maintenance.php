@@ -227,6 +227,7 @@ function getRoomsNeedingMaintenance(PDO $pdo): array
             ir.status as room_status,
             b.id as booking_id,
             b.guest_name,
+            b.room_guest_name,
             b.check_out_date,
             b.status as booking_status,
             CASE
@@ -1529,7 +1530,7 @@ try {
                                     <span class="room-condition"><?php echo ucfirst(str_replace('_', ' ', $room['room_status'] ?? 'available')); ?></span>
                                 </div>
                                 <?php if (!empty($room['guest_name'])): ?>
-                                    <div class="guest-info"><i class="fas fa-user"></i> <?php echo htmlspecialchars($room['guest_name']); ?></div>
+                                    <div class="guest-info"><i class="fas fa-user"></i> <?php echo htmlspecialchars($room['guest_name']); ?><?php if (trim((string)($room['room_guest_name'] ?? '')) !== ''): ?> <small class="room-guest-line">&middot; Room guest: <?php echo htmlspecialchars((string)$room['room_guest_name']); ?></small><?php endif; ?></div>
                                 <?php endif; ?>
                                 <div class="rm-room-select-indicator">
                                     <input type="checkbox" class="room-checkbox" value="<?php echo $room['id']; ?>" tabindex="-1" onclick="event.stopPropagation()">

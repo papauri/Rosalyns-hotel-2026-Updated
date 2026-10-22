@@ -125,6 +125,10 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
         !empty($room['size_sqm']) ? $room['size_sqm'] . ' sqm' : '',
         !empty($room['max_guests']) ? 'Max ' . (int)$room['max_guests'] . ' guests' : '',
     ]);
+    // Optional per-room guest name (group bookings): "Deluxe Room – Mr & Mrs Banda". Label only, no money.
+    $roomLabel = function_exists('rh_room_label_with_guest')
+        ? rh_room_label_with_guest((string)($room['name'] ?? ''), $booking['room_guest_name'] ?? '')
+        : (string)($room['name'] ?? '');
     $meta = [
         ['Quotation ref', $quote_ref],
         ['Date issued', date('F j, Y')],
@@ -132,7 +136,7 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
         ['Prepared for', (string)($booking['guest_name'] ?? '')],
         ['Booking ref', (string)($booking['booking_reference'] ?? '')],
         ['Guests', $guestsLabel],
-        ['Room', (string)($room['name'] ?? '') . ($roomMeta ? '  (' . implode(', ', $roomMeta) . ')' : ''), true],
+        ['Room', $roomLabel . ($roomMeta ? '  (' . implode(', ', $roomMeta) . ')' : ''), true],
         ['Check-in', !empty($booking['check_in_date']) ? date('D, d M Y', strtotime((string)$booking['check_in_date'])) . ' from ' . $check_in_time : ''],
         ['Check-out', !empty($booking['check_out_date']) ? date('D, d M Y', strtotime((string)$booking['check_out_date'])) . ' by ' . $check_out_time : ''],
         ['Duration', $nights . ' night' . ($nights !== 1 ? 's' : '')],
@@ -142,7 +146,7 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     }
 
     $itemRows = [[
-        rh_pdf_e((string)($room['name'] ?? 'Room')),
+        rh_pdf_e($roomLabel !== '' ? $roomLabel : 'Room'),
         rh_pdf_e((string)$nights),
         rh_pdf_e($fmt($rate_per_night)),
         rh_pdf_e($fmt($room_subtotal)),

@@ -107,6 +107,7 @@ try {
                 'image_url' => $booking['room_image'],
                 'amenities' => $roomAmenities
             ],
+            'room_guest_name' => (trim((string)($booking['room_guest_name'] ?? '')) !== '') ? (string)$booking['room_guest_name'] : null,
             'guest' => [
                 'name' => $booking['guest_name'],
                 'email' => $booking['guest_email'],

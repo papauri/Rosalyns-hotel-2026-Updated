@@ -16,6 +16,7 @@ $suites = [
     'User timezone display' => 'scripts/tests/user_timezone.php',
     'Rooms linked data'     => 'scripts/tests/linked_rooms.php',
     'Group booking pricing' => 'scripts/tests/group_booking.php',
+    'Room guest name'       => 'scripts/tests/room_guest_name.php',
     'Occupancy tier floor'  => 'scripts/tests/occupancy_tier.php',
     'Child charge rules'    => 'scripts/tests/child_pricing.php',
     'Booking full total'    => 'scripts/tests/booking_full_total.php',

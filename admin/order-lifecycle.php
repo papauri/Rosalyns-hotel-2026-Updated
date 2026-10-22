@@ -226,7 +226,7 @@ try {
             'icon'  => (float)$row['quantity_change'] < 0 ? 'fas fa-minus-circle' : 'fas fa-plus-circle',
             'color' => (float)$row['quantity_change'] < 0 ? '#c82333' : '#28a745',
             'event' => 'Stock ' . ((float)$row['quantity_change'] < 0 ? 'deducted' : 'restored') . ' — ' . ($row['ingredient'] ?? 'item'),
-            'note'  => $sign . number_format((float)$row['quantity_change'], 4) . ' ' . ($row['unit'] ?? '')
+            'note'  => $sign . rh_stock_qty_fmt((float)$row['quantity_change'], 4) . ' ' . ($row['unit'] ?? '')
                        . ' · ' . ($row['reason'] ?? $row['source_type'])
                        . ' · cost ' . $currency_symbol . ' ' . number_format($cost, 2),
         ];

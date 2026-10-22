@@ -45,7 +45,7 @@ try {
 
         case 'list_ingredients': {
                 $rows = $pdo->query(
-                    "SELECT id, name, category, unit, cost_per_unit, current_quantity, min_quantity, yield_percent, pack_name, pack_size
+                    "SELECT id, name, category, unit, cost_per_unit, current_quantity, min_quantity, yield_percent, pack_name, pack_size, pieces_per_unit
                  FROM stock_ingredients
                  WHERE is_archived = 0
                  ORDER BY category, name"
@@ -99,7 +99,7 @@ try {
                 // The recipe is keyed by the item's own category slug (what the till sells it under).
                 $type = rh_menu_item_slug($pdo, $mid);
 
-                $res = rh_menu_recipe_save($pdo, $mid, $type, $portions, $notes, $lines, (int)$_SESSION['admin_user_id']);
+                $res = rh_menu_recipe_save($pdo, $mid, $type, $portions, $notes, $lines, (int)$_SESSION['admin_user_id'], hasPermission((int)$_SESSION['admin_user_id'], 'stock_management'));
                 $written = $res['lines_written'];
                 echo json_encode([
                     'ok' => true,

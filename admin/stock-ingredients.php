@@ -84,6 +84,17 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (mb_strlen($packName) > 30) {
                     throw new RuntimeException('Pack name is too long (30 characters maximum).');
                 }
+                // Optional pieces in one container unit (6 per packet; a dozen is implied 12): Menu Management uses it so staff can type whole pieces.
+                $rawPieces = str_replace(',', '', trim((string)($_POST['pieces_per_unit'] ?? '')));
+                $piecesPerUnit = null;
+                if ($rawPieces !== '' && $rawPieces !== '0') {
+                    if (!is_numeric($rawPieces) || (float)$rawPieces <= 0 || (float)$rawPieces > 99999) {
+                        throw new RuntimeException('Pieces in one ' . $unit . ' must be a number above 0.');
+                    }
+                    if (rh_stock_unit_is_container($unit) && !rh_stock_unit_is_dozen($unit)) {
+                        $piecesPerUnit = round((float)$rawPieces, 2);
+                    }
+                }
                 $editId = (int)($_POST['id'] ?? 0);
 
                 if ($name === '' || $unit === '') {
@@ -103,7 +114,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                rh_with_create_lock($pdo, 'stock_ingredient', function () use ($pdo, $action, $name, $category, $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName, $packSize, $editId, &$message) {
+                rh_with_create_lock($pdo, 'stock_ingredient', function () use ($pdo, $action, $name, $category, $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName, $packSize, $piecesPerUnit, $editId, &$message) {
                     // Archived ingredients still block the name (restoring one would clash).
                     $dup = rh_find_duplicate($pdo, 'stock_ingredients', 'name', $name, [], $action === 'update' ? $editId : null);
                     if ($dup) {
@@ -111,10 +122,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     if ($action === 'add') {
                         $stmt = $pdo->prepare("
-                            INSERT INTO stock_ingredients (name, category, unit, min_quantity, yield_percent, notes, reorder_point, par_level, lead_time_days, preferred_supplier_id, pack_name, pack_size)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO stock_ingredients (name, category, unit, min_quantity, yield_percent, notes, reorder_point, par_level, lead_time_days, preferred_supplier_id, pack_name, pack_size, pieces_per_unit)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ");
-                        $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName !== '' ? $packName : null, $packSize]);
+                        $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName !== '' ? $packName : null, $packSize, $piecesPerUnit]);
                         $message = "Ingredient \"{$name}\" added.";
                     } else {
                         /* A unit change does not convert anything: quantity on hand, batches, cost per
@@ -143,10 +154,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmt = $pdo->prepare("
                             UPDATE stock_ingredients
                             SET name = ?, category = ?, unit = ?, min_quantity = ?, yield_percent = ?, notes = ?,
-                                reorder_point = ?, par_level = ?, lead_time_days = ?, preferred_supplier_id = ?, pack_name = ?, pack_size = ?, updated_at = NOW()
+                                reorder_point = ?, par_level = ?, lead_time_days = ?, preferred_supplier_id = ?, pack_name = ?, pack_size = ?, pieces_per_unit = ?, updated_at = NOW()
                             WHERE id = ?
                         ");
-                        $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName !== '' ? $packName : null, $packSize, $editId]);
+                        $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName !== '' ? $packName : null, $packSize, $piecesPerUnit, $editId]);
                         $message = "Ingredient updated.";
                     }
                 });
@@ -262,7 +273,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newAvg = calculateWeightedAvgCost($oldQty, $oldAvg, $qty, $cost);
                 // Settle any unallocated deficit so batch sum stays equal to current_quantity.
                 $settle = rh_stock_receipt_settlement($pdo, $id, $oldQty, $qty);
-                $settledTxt = rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.');
+                $settledTxt = rtrim(rtrim(number_format($settle['settled'], 6, '.', ''), '0'), '.');
                 if ($settle['settled'] > 0) {
                     // Late cost: sales made at zero cost for this deficit get costed at this receipt's unit cost.
                     rh_stock_backcost_settled_deficit($pdo, $id, (float)$settle['deficit'], (float)$settle['settled'], $cost, (int)($user['id'] ?? 0) ?: null, 'manual receipt');
@@ -371,7 +382,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         $qty,
                         $settle['remaining'],
                         max(0, $costAtTime),
-                        mb_substr('Manual adjustment add: ' . $reason . ($settle['settled'] > 0 ? ' (settled ' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' unallocated deficit)' : ''), 0, 500),
+                        mb_substr('Manual adjustment add: ' . $reason . ($settle['settled'] > 0 ? ' (settled ' . rtrim(rtrim(number_format($settle['settled'], 6, '.', ''), '0'), '.') . ' unallocated deficit)' : ''), 0, 500),
                         $user['id']
                     ]);
 
@@ -507,7 +518,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // person starting again (the reason is shown inside the form).
     if ($error && in_array((string)($action ?? ''), ['add', 'update'], true)) {
         $keep = [];
-        foreach (['id', 'name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'preferred_supplier_id', 'lead_time_days', 'pack_name', 'pack_size'] as $keepField) {
+        foreach (['id', 'name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'preferred_supplier_id', 'lead_time_days', 'pack_name', 'pack_size', 'pieces_per_unit'] as $keepField) {
             $keep[$keepField] = (string)($_POST[$keepField] ?? '');
         }
         $_SESSION['stock_ingredient_form_keep'] = ['action' => (string)$action, 'error' => $error, 'post' => $keep];
@@ -923,6 +934,9 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                             <option value="ml">Millilitres (ml)</option>
                             <option value="L">Litres (L)</option>
                             <option value="pcs">Pieces (pcs)</option>
+                            <option value="packet">Packets</option>
+                            <option value="box">Boxes</option>
+                            <option value="dozen">Dozens (12)</option>
                             <option value="slice">Slices</option>
                             <option value="tsp">Teaspoons (tsp)</option>
                             <option value="tbsp">Tablespoons (tbsp)</option>
@@ -982,6 +996,12 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     <div>
                         <label>Units in one pack <i class="help" data-tip="How many of the stock unit are in one pack, e.g. 24 for a crate of 24 bottles. Leave blank if you do not buy this item in packs.">?</i></label>
                         <input type="number" name="pack_size" id="ing_pack_size" step="0.001" min="0" placeholder="e.g. 24">
+                    </div>
+                </div>
+                <div class="form-row" id="ing_pieces_row" hidden>
+                    <div>
+                        <label id="ing_pieces_lbl">Pieces in one packet <i class="help" data-tip="Optional. How many single pieces are inside one of this unit, e.g. 6 sausages in a packet. Menu Management then lets staff type whole pieces (1 sausage) and works out the part of the packet. A dozen is always 12.">?</i></label>
+                        <input type="number" name="pieces_per_unit" id="ing_pieces" step="any" min="0.01" placeholder="e.g. 6">
                     </div>
                 </div>
                 </div>
@@ -1274,14 +1294,28 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 document.getElementById('ing_supplier').value = data.preferred_supplier_id || 0;
                 document.getElementById('ing_pack_name').value = data.pack_name || '';
                 document.getElementById('ing_pack_size').value = data.pack_size ? parseFloat(data.pack_size) : '';
+                document.getElementById('ing_pieces').value = data.pieces_per_unit ? parseFloat(data.pieces_per_unit) : '';
             } else {
                 document.getElementById('ingredientModalTitle').textContent = 'Add <?php echo $stockNoun; ?>';
                 document.getElementById('ing_action').value = 'add';
                 document.getElementById('ing_id').value = '';
                 setIngredientUnitLock(false, 'g');
             }
+            ingredientPiecesSync();
             openModal('ingredientModal');
         }
+
+        /* Pieces in one unit: only for container units (packet, box, tray...); a dozen is always 12. */
+        function ingredientPiecesSync() {
+            const ING_CONTAINER_RE = /^(packets?|packs?|packages?|boxe?s?|tins?|trays?|crates?|cartons?|bags?|sachets?|buckets?|containers?|bunch(es)?|bundles?|cases?|punnets?|dozens?|dz|doz)$/i;
+            const unit = (document.getElementById('ing_unit').value || '').trim();
+            const row = document.getElementById('ing_pieces_row');
+            const show = ING_CONTAINER_RE.test(unit) && !/^(dozens?|dz|doz)$/i.test(unit);
+            row.hidden = !show;
+            if (!show) document.getElementById('ing_pieces').value = '';
+            document.getElementById('ing_pieces_lbl').firstChild.textContent = 'Pieces in one ' + (unit || 'unit') + ' ';
+        }
+        document.getElementById('ing_unit').addEventListener('change', function () { ingredientPiecesSync(); });
 
         // Lock the Unit select (with a visible reason) when the ingredient already has stock,
         // batches, adjustments or recipes: the server refuses a unit change then.

@@ -249,7 +249,7 @@ if (!function_exists('rh_pack_convert')) {
         if (($orderIn === 'pack' || $priceIn === 'pack') && !$hasPack) {
             throw new RuntimeException('This item has no pack size. Enter the quantity and price per unit, or set a pack size on the item first.');
         }
-        $units = $orderIn === 'pack' ? round($qty * (float)$packSize, 4) : round($qty, 4);
+        $units = $orderIn === 'pack' ? round($qty * (float)$packSize, 6) : round($qty, 6);
         $unitCost = $priceIn === 'pack' ? round($price / (float)$packSize, 4) : round($price, 4);
         return [
             'order_in'    => $orderIn,
@@ -381,7 +381,7 @@ if (!function_exists('rh_receive_stock_line')) {
         if ($settle['settled'] > 0) {
             // Late cost: sales made at zero cost for this deficit get costed at this delivery's unit cost.
             rh_stock_backcost_settled_deficit($pdo, $ingredientId, (float)$settle['deficit'], (float)$settle['settled'], $cost, $doneBy, $purchaseOrderId ? 'PO #' . $purchaseOrderId : 'receipt');
-            $notes = trim(($notes ? $notes . ' | ' : '') . 'Settled ' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' unallocated deficit');
+            $notes = trim(($notes ? $notes . ' | ' : '') . 'Settled ' . rtrim(rtrim(number_format($settle['settled'], 6, '.', ''), '0'), '.') . ' unallocated deficit');
         }
         // Combined batch / stock_in_log note stays short (PO ref + over-delivery note + settlement text).
         $notes = $notes !== null ? mb_substr($notes, 0, 250) : null;
@@ -455,9 +455,9 @@ if (!function_exists('rh_receive_stock_line')) {
             INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by)
             VALUES (?, ?, ?, 'stock_in', ?, ?, ?)
         ")->execute([$ingredientId, $qty, $adjustmentReason !== null && $adjustmentReason !== ''
-            ? mb_substr($adjustmentReason . ($settle['settled'] > 0 ? ' (' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' settled unallocated deficit)' : ''), 0, 255)
+            ? mb_substr($adjustmentReason . ($settle['settled'] > 0 ? ' (' . rtrim(rtrim(number_format($settle['settled'], 6, '.', ''), '0'), '.') . ' settled unallocated deficit)' : ''), 0, 255)
             : ($settle['settled'] > 0
-                ? 'Received against purchase order (' . rtrim(rtrim(number_format($settle['settled'], 4, '.', ''), '0'), '.') . ' settled unallocated deficit)'
+                ? 'Received against purchase order (' . rtrim(rtrim(number_format($settle['settled'], 6, '.', ''), '0'), '.') . ' settled unallocated deficit)'
                 : 'Received against purchase order'), $batchId, $cost, $doneBy]);
 
         return $batchId;

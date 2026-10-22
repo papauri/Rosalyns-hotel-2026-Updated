@@ -416,7 +416,7 @@ if (!$is_card_insight_ajax) {
 
             // Everyone due out today (already departed ones included, so the list always matches
             // the Departures card) plus guests still checked in after their checkout date (overdue).
-            $st = $pdo->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.check_out_date, b.number_of_nights,
+            $st = $pdo->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.room_guest_name, b.check_in_date, b.check_out_date, b.number_of_nights,
                        b.amount_due, b.payment_status, b.status, r.name AS room_name,
                        ir.room_number AS individual_room_number, ir.room_name AS individual_room_name,
                        CASE WHEN b.status = 'checked-out' THEN 'departed'
@@ -2269,7 +2269,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <li class="ck-row" id="checkin-row-<?php echo (int)$booking['id']; ?>">
                             <span class="ck-avatar"><?php echo htmlspecialchars($initials((string)$booking['guest_name'])); ?></span>
                             <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
-                                <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong>
+                                <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong><?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small><?php endif; ?>
                                 <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars($booking['room_name']); ?> · <?php echo (int)$booking['number_of_nights']; ?> night<?php echo (int)$booking['number_of_nights'] === 1 ? '' : 's'; ?></span>
                             </a>
                             <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
@@ -2308,7 +2308,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <li class="ck-row">
                             <span class="ck-avatar ck-avatar--gold"><?php echo htmlspecialchars($initials((string)$d['guest_name'])); ?></span>
                             <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
-                                <strong><?php echo htmlspecialchars($d['guest_name']); ?></strong>
+                                <strong><?php echo htmlspecialchars($d['guest_name']); ?></strong><?php if (trim((string)($d['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$d['room_guest_name']); ?></small><?php endif; ?>
                                 <span><?php echo htmlspecialchars($d['booking_reference']); ?> · <?php echo htmlspecialchars($d['room_name']); ?> · since <?php echo date('j M', strtotime($d['check_in_date'])); ?></span>
                             </a>
                             <span class="ck-chip"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($d)); ?></span>
@@ -2560,7 +2560,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <li class="ck-row" data-ck-day-row="<?php echo htmlspecialchars($booking['check_in_date']); ?>">
                         <span class="ck-date"><b><?php echo date('j', strtotime($booking['check_in_date'])); ?></b><?php echo date('M', strtotime($booking['check_in_date'])); ?></span>
                         <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
-                            <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong>
+                            <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong><?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small><?php endif; ?>
                             <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars($booking['room_name']); ?> · <?php echo (int)$booking['number_of_nights']; ?> night(s)</span>
                         </a>
                         <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>

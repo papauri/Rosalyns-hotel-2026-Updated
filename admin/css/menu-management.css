@@ -785,7 +785,7 @@ tr.drag-over > td {
 
 .mm-stock-add {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 90px minmax(100px, 150px) auto;
+    grid-template-columns: 110px minmax(120px, 220px) auto;
     gap: 8px;
     align-items: center;
     margin-top: 10px;
@@ -845,6 +845,87 @@ tr.drag-over > td {
     font-family: inherit;
     color: var(--mm-text);
     background: #fff;
+}
+
+/* Stock item picker: category + search + item dropdown, then the unit line above the quantity box */
+.mm-picker {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.mm-pk-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+}
+
+.mm-pk-f {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--mm-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.mm-pk-f select,
+.mm-pk-f input {
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 10px;
+    border: 1px solid var(--mm-border);
+    border-radius: var(--mm-radius);
+    font-size: 14px;
+    font-family: inherit;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--mm-text);
+    background: #fff;
+    min-width: 0;
+}
+
+.mm-pk-none {
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--mm-bg-soft);
+    border-radius: var(--mm-radius);
+}
+
+.mm-unitline {
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--mm-bg-soft);
+    border-left: 3px solid var(--mm-accent-dark);
+    border-radius: var(--mm-radius);
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--mm-text);
+}
+
+.mm-unitline[hidden],
+.mm-pk-none[hidden] {
+    display: none;
+}
+
+/* The decimal working under a pieces quantity: small and grey, there for checking only */
+.mm-preview.mm-math {
+    font-size: 11px;
+    color: var(--mm-muted);
+}
+
+.mm-stock-add input,
+.mm-stock-add select,
+.mm-stock-add .mm-btn,
+.mm-stock-line input,
+.mm-stock-line select,
+.mm-qtytools .mm-btn,
+.mm-per input {
+    min-height: 44px;
 }
 
 .mm-stock-totals {
@@ -981,7 +1062,11 @@ tr.drag-over > td {
         grid-column: 1 / -1;
     }
 
-    .mm-restaurant .mm-stock-add input[list] {
+    .mm-restaurant .mm-pk-row {
+        grid-template-columns: 1fr;
+    }
+
+    .mm-restaurant .mm-stock-add .mm-btn {
         grid-column: 1 / -1;
     }
 

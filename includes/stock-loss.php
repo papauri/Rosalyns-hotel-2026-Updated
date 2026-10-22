@@ -125,7 +125,7 @@ if (!function_exists('rh_stock_alert_level')) {
     {
         $days = max(1, $days);
         $items = [];
-        $fmt = static fn(float $n): string => rtrim(rtrim(number_format($n, 4, '.', ''), '0'), '.');
+        $fmt = static fn(float $n): string => rtrim(rtrim(number_format($n, 6, '.', ''), '0'), '.');
 
         // Manual adjustments (adds and subtractions) and batch discards / write-offs / recalls / expiries.
         try {

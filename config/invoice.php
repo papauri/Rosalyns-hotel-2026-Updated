@@ -108,6 +108,7 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
                 $booking['room_name'] = trim((string)$booking['room_name'] . ' - ' . $room_assignment);
             }
         }
+        $booking['room_name'] = rh_room_label_with_guest((string)$booking['room_name'], $booking['room_guest_name'] ?? '');
 
         // For group bookings, always work from the primary booking so the invoice
         // shows all rooms.  If the requested booking is a secondary one, redirect
@@ -126,6 +127,7 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
                         $booking['room_name'] = trim((string)$booking['room_name'] . ' - ' . $room_assignment);
                     }
                 }
+                $booking['room_name'] = rh_room_label_with_guest((string)$booking['room_name'], $booking['room_guest_name'] ?? '');
             }
         }
 
@@ -136,7 +138,7 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
             SELECT b.id, b.booking_reference, b.total_amount, b.child_supplement_total,
                    b.tourism_levy_amount, b.vat_amount, b.total_with_vat,
                    b.child_guests, b.child_price_multiplier, b.child_charge_mode, b.child_charge_amount, b.free_children,
-                   b.occupancy_type, b.number_of_nights,
+                   b.occupancy_type, b.number_of_nights, b.room_guest_name,
                    r.name as room_name
             FROM bookings b
             JOIN rooms r ON b.room_id = r.id
@@ -151,6 +153,7 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
                 if ($room_assignment !== '') {
                     $group_booking['room_name'] = trim((string)$group_booking['room_name'] . ' - ' . $room_assignment);
                 }
+                $group_booking['room_name'] = rh_room_label_with_guest((string)$group_booking['room_name'], $group_booking['room_guest_name'] ?? '');
             }
             unset($group_booking);
         }

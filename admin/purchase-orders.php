@@ -279,7 +279,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $q = $fig['ordered_qty']; $c = $fig['unit_cost'];
                 $alreadyRecv = (float)$recvRow['received_qty'];
                 if ($q + 0.0001 < $alreadyRecv) {
-                    throw new RuntimeException('Quantity cannot be lower than the ' . rtrim(rtrim(number_format($alreadyRecv, 4, '.', ''), '0'), '.') . ' already received.');
+                    throw new RuntimeException('Quantity cannot be lower than the ' . rtrim(rtrim(number_format($alreadyRecv, 6, '.', ''), '0'), '.') . ' already received.');
                 }
                 $isPack = $fig['order_in'] === 'pack';
                 $pdo->prepare("UPDATE stock_purchase_order_items SET ordered_qty = ?, unit_cost = ?, line_total = ?, order_in = ?, pack_size_snapshot = ?, pack_name_snapshot = ? WHERE id = ? AND purchase_order_id = ?")
@@ -403,7 +403,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $qtyIn  = ($lnPackSize !== null && (string)($recvQtyIn[$k] ?? 'unit') === 'pack') ? 'pack' : 'unit';
                     $costIn = ($lnPackSize !== null && (string)($recvCostIn[$k] ?? 'unit') === 'pack') ? 'pack' : 'unit';
                     if ($qtyIn === 'pack') {
-                        $rq = round($rq * $lnPackSize, 4);
+                        $rq = round($rq * $lnPackSize, 6);
                     }
 
                     /* Over-delivery is allowed (the stock is physically here and must be booked), but it needs

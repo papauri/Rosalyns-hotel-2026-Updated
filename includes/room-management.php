@@ -936,6 +936,7 @@ function getRoomsRequiringHousekeeping(string $status = 'all'): array
                 au.username as assigned_to_name,
                 b.booking_reference as last_booking_ref,
                 b.guest_name as last_guest,
+                b.room_guest_name as last_room_guest,
                 b.check_out_date as last_checkout
             FROM individual_rooms ir
             LEFT JOIN rooms r ON ir.room_type_id = r.id
@@ -1002,7 +1003,8 @@ function getRoomsRequiringInspection(): array
                 ri.notes as inspection_notes,
                 ha.completed_at as cleaning_completed,
                 b.booking_reference as last_booking_ref,
-                b.guest_name as last_guest
+                b.guest_name as last_guest,
+                b.room_guest_name as last_room_guest
             FROM individual_rooms ir
             LEFT JOIN rooms r ON ir.room_type_id = r.id
             LEFT JOIN room_inspections ri ON ir.id = ri.individual_room_id AND ri.status = 'pending'

@@ -574,6 +574,7 @@
             const data = {
                 ref: trigger.dataset.bookingRef || '',
                 guestName: trigger.dataset.guestName || '',
+                roomGuest: trigger.dataset.roomGuest || '',
                 roomName: trigger.dataset.roomName || '',
                 roomNumber: trigger.dataset.roomNumber || '',
                 roomDisplay: trigger.dataset.roomDisplay || '',
@@ -600,6 +601,10 @@
                     <span class="tooltip-label">Guest:</span>
                     <span class="tooltip-value">${this.escapeHtml(data.guestName)}</span>
                 </div>
+                ${data.roomGuest ? `<div class="tooltip-row">
+                    <span class="tooltip-label">Room guest:</span>
+                    <span class="tooltip-value">${this.escapeHtml(data.roomGuest)}</span>
+                </div>` : ''}
                 <div class="tooltip-row">
                     <span class="tooltip-label">Room:</span>
                     <span class="tooltip-value">${this.escapeHtml(data.roomDisplay)}</span>

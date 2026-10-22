@@ -140,6 +140,7 @@ function getOccupiedRooms(PDO $pdo): array
             ir.housekeeping_status,
             b.id as booking_id,
             b.guest_name,
+            b.room_guest_name,
             b.check_out_date,
             b.status as booking_status,
             CASE
@@ -1551,7 +1552,7 @@ foreach ($assignments as $a) {
                                     <span class="room-number"><?php echo htmlspecialchars($room['room_number'] . ' ' . ($room['room_name'] ?? '')); ?></span>
                                     <span class="occupancy-badge"><?php echo $room['occupancy_type'] === 'checkout_today' ? '<i class="fas fa-sign-out-alt"></i> Checkout Today' : '<i class="fas fa-bed"></i> Occupied'; ?></span>
                                 </div>
-                                <div class="guest-info"><i class="fas fa-user"></i> <?php echo htmlspecialchars($room['guest_name'] ?? 'Guest'); ?></div>
+                                <div class="guest-info"><i class="fas fa-user"></i> <?php echo htmlspecialchars($room['guest_name'] ?? 'Guest'); ?><?php if (trim((string)($room['room_guest_name'] ?? '')) !== ''): ?> <small class="room-guest-line">&middot; Room guest: <?php echo htmlspecialchars((string)$room['room_guest_name']); ?></small><?php endif; ?></div>
                                 <div class="date-info"><i class="fas fa-calendar-alt"></i> Checkout: <strong><?php echo htmlspecialchars(date('M j, Y', strtotime($room['check_out_date']))); ?></strong></div>
                                 <div class="card-select-indicator">
                                     <input type="checkbox" class="room-checkbox" value="<?php echo $room['id']; ?>" tabindex="-1" onclick="event.stopPropagation()">

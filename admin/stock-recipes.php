@@ -560,7 +560,7 @@ $csrf_token = generateCsrfToken();
                     <select name="ingredient_id[]" required onchange="recalcCost()">${buildOptions(ingId)}</select>
                 </div>
                 <div class="qty-cell">
-                    <input type="number" name="quantity_per_portion[]" placeholder="e.g. 0.05" step="0.0001" min="0" required oninput="recalcCost()" title="How much per portion in the ingredient's base unit (g, ml, kg, etc.)">
+                    <input type="number" name="quantity_per_portion[]" placeholder="e.g. 0.05" step="0.000001" min="0" required oninput="recalcCost()" title="How much per portion in the ingredient's base unit (g, ml, kg, etc.)">
                     <span class="raw-qty"></span>
                 </div>
                 <input type="number" name="yield_percent[]" placeholder="100" step="0.1" min="0.1" max="100" value="100" oninput="recalcCost()" title="Usable percentage after preparation (peel, trim, cook). 100 = no loss.">

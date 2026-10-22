@@ -238,7 +238,7 @@ function getIndividualRoom($id) {
     // Get current booking if occupied
     if ($room['status'] === 'occupied') {
         $bookingStmt = $pdo->prepare("
-            SELECT id, booking_reference, guest_name, guest_email, 
+            SELECT id, booking_reference, guest_name, room_guest_name, guest_email, 
                    guest_phone, check_in_date, check_out_date, status
             FROM bookings
             WHERE individual_room_id = ?
@@ -253,7 +253,7 @@ function getIndividualRoom($id) {
     
     // Get upcoming bookings
     $upcomingStmt = $pdo->prepare("
-        SELECT id, booking_reference, guest_name, check_in_date, check_out_date
+        SELECT id, booking_reference, guest_name, room_guest_name, check_in_date, check_out_date
         FROM bookings
         WHERE individual_room_id = ?
         AND status IN ('confirmed', 'pending')

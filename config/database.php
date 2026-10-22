@@ -2706,6 +2706,32 @@ function rh_booking_reference_prefix(): string
 }
 
 /**
+ * Optional "guest name for this room" on a group booking (bookings.room_guest_name). Trimmed,
+ * control characters removed, whitespace collapsed, at most 150 characters; '' when not given.
+ * The lead booker stays the booking's guest; this is only who sleeps in that room.
+ */
+function rh_clean_room_guest_name($value): string
+{
+    if (!is_scalar($value)) {
+        return '';
+    }
+    $s = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', (string)$value);
+    $s = preg_replace('/\s+/u', ' ', (string)$s);
+    $s = trim((string)$s);
+    if (function_exists('mb_substr')) {
+        return trim(mb_substr($s, 0, 150, 'UTF-8'));
+    }
+    return trim(substr($s, 0, 150));
+}
+
+/** Room line label with the optional per-room guest name: "Deluxe Room – Mr & Mrs Banda". Plain text, escape on output. */
+function rh_room_label_with_guest(string $roomName, $roomGuestName): string
+{
+    $g = trim((string)$roomGuestName);
+    return $g === '' ? $roomName : $roomName . ' – ' . $g;
+}
+
+/**
  * Validate if a booking can be checked in
  *
  * @param array $booking Booking record (must include status, payment_status, individual_room_id, check_in_date)
@@ -11232,6 +11258,7 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
         $needByIngredient = [];
         foreach ($rows as $row) {
             $rawNeeded = ((float)$row['quantity_per_portion'] * $portions) / rh_stock_yield_factor((float)$row['yield_percent']);
+            $rawNeeded = round($rawNeeded, 6);
             if ($rawNeeded <= 0) continue;
             $ingKey = (int)$row['ingredient_id'];
             $needByIngredient[$ingKey] = ($needByIngredient[$ingKey] ?? 0.0) + $rawNeeded;
@@ -11336,7 +11363,7 @@ function ensureStockBatchCoverageForDeduction(int $ingredientId, float $required
             $available += (float)$row['quantity_remaining'];
         }
 
-        $gap = round($requiredQty - $available, 4);
+        $gap = round($requiredQty - $available, 6);
         if ($gap > 0.0001) {
             $tmpBatchNumber = 'TMP-R-' . date('YmdHis') . '-' . strtoupper(substr(str_replace('.', '', uniqid('', true)), -8));
             $ins = $pdo->prepare("\n                INSERT INTO stock_batches (\n                    ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,\n                    supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by\n                ) VALUES (?, ?, ?, ?, ?, NULL, NULL, CURDATE(), NULL, 7, 'active', ?, ?)\n            ");
@@ -11389,6 +11416,7 @@ function deductStockBatchFIFO(int $ingredientId, float $qty, string $sourceType,
 {
     global $pdo;
     if (!ensureStockTablesExist()) return null;
+    $qty = round($qty, 6); // the columns hold 6 decimals: record exactly what is taken off
     if ($qty <= 0) return null;
 
     $ownTx = !$pdo->inTransaction();
@@ -11483,14 +11511,14 @@ function deductStockBatchFIFO(int $ingredientId, float $qty, string $sourceType,
 
         if ($unallocated > 0.0001) {
             error_log(sprintf(
-                "deductStockBatchFIFO: ingredient %d went negative by %.4f units (source=%s/%s)",
+                "deductStockBatchFIFO: ingredient %d went negative by %.6f units (source=%s/%s)",
                 $ingredientId,
                 $unallocated,
                 $sourceType,
                 $sourceId ?? '-'
             ));
             rh_log_event('stock', 'warning', sprintf(
-                'Ingredient #%d went negative by %.4f units — stock needs reconciliation.',
+                'Ingredient #%d went negative by %.6f units — stock needs reconciliation.',
                 $ingredientId,
                 $unallocated
             ), ['ingredient_id' => $ingredientId, 'shortfall' => $unallocated, 'source_type' => $sourceType, 'source_id' => $sourceId]);
@@ -11671,6 +11699,7 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
             $rec->execute([$menuItemId, $menuType]);
             foreach ($rec->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $rawNeeded = ((float)$row['quantity_per_portion'] * $portions) / rh_stock_yield_factor((float)$row['yield_percent']);
+                $rawNeeded = round($rawNeeded, 6);
                 if ($rawNeeded > 0) {
                     $byIngredient[(int)$row['ingredient_id']] = ($byIngredient[(int)$row['ingredient_id']] ?? 0) + $rawNeeded;
                 }
@@ -11869,7 +11898,7 @@ function rh_stock_receipt_settlement(PDO $pdo, int $ingredientId, float $oldQty,
         return ['remaining' => $receivedQty, 'settled' => 0.0, 'deficit' => 0.0];
     }
     $settled = min($deficit, $receivedQty);
-    return ['remaining' => max(0.0, round($receivedQty - $settled, 4)), 'settled' => round($settled, 4), 'deficit' => round($deficit, 4)];
+    return ['remaining' => max(0.0, round($receivedQty - $settled, 6)), 'settled' => round($settled, 6), 'deficit' => round($deficit, 6)];
 }
 
 /**
@@ -12007,7 +12036,7 @@ function rh_stock_backcost_settled_deficit(PDO $pdo, int $ingredientId, float $d
             $add = round($q * $unitCost, 4);
             if ($add <= 0) continue;
             $upd->execute([$add, $orderId]);
-            $aud->execute([$orderId, $userId, json_encode(['ingredient_id' => $ingredientId, 'quantity' => round($q, 4), 'unit_cost' => $unitCost, 'cost_added' => $add, 'source' => $source]), $_SERVER['REMOTE_ADDR'] ?? null]);
+            $aud->execute([$orderId, $userId, json_encode(['ingredient_id' => $ingredientId, 'quantity' => round($q, 6), 'unit_cost' => $unitCost, 'cost_added' => $add, 'source' => $source]), $_SERVER['REMOTE_ADDR'] ?? null]);
             $orders++;
             $amount += $add;
         }
@@ -12118,6 +12147,46 @@ function rh_stock_yield_sql(string $column = 'sri.yield_percent'): string
     return "((CASE WHEN {$col} > 0 THEN {$col} ELSE 100 END) / 100)";
 }
 
+/**
+ * Stock quantities are stored with 6 decimals (a piece out of a packet of 6 is 0.166667). For
+ * screens: show up to 6 decimals but drop trailing zeros, keeping at least $minDec (12 -> "12.00",
+ * 0.166667 -> "0.166667"). $thousands '' for values that go back into an input.
+ */
+function rh_stock_qty_fmt(float $n, int $minDec = 2, string $thousands = ','): string
+{
+    $s = number_format($n, 6, '.', $thousands);
+    [$int, $dec] = explode('.', $s) + [1 => ''];
+    $dec = rtrim($dec, '0');
+    if (strlen($dec) < $minDec) {
+        $dec = str_pad($dec, $minDec, '0');
+    }
+    $out = $dec === '' ? $int : $int . '.' . $dec;
+    return $out === '-0.00' ? '0.00' : $out;
+}
+
+/** Units that are a container of smaller pieces (a packet of 6, a box, a dozen...). Same list as Menu Management's pieces entry. */
+function rh_stock_unit_is_container(string $unit): bool
+{
+    return (bool)preg_match('/^(packets?|packs?|packages?|boxe?s?|tins?|trays?|crates?|cartons?|bags?|sachets?|buckets?|containers?|bunch(es)?|bundles?|cases?|punnets?|dozens?|dz|doz)$/i', trim($unit));
+}
+
+function rh_stock_unit_is_dozen(string $unit): bool
+{
+    return (bool)preg_match('/^(dozens?|dz|doz)$/i', trim($unit));
+}
+
+/** Pieces in one stock unit: 12 for a dozen, the stored pieces_per_unit for other containers, else null (not known / not a container). */
+function rh_stock_pieces_per_unit(string $unit, $stored): ?float
+{
+    if (rh_stock_unit_is_dozen($unit)) {
+        return 12.0;
+    }
+    if (!rh_stock_unit_is_container($unit)) {
+        return null;
+    }
+    return ($stored !== null && (float)$stored > 0) ? (float)$stored : null;
+}
+
 /** Reorder threshold: reorder_point when set, otherwise min_quantity. */
 function rh_stock_threshold_sql(string $alias = ''): string
 {
@@ -12181,10 +12250,10 @@ function rh_stock_alert_summary(PDO $pdo, int $listLimit = 10): array
         $hist = rh_stock_history_sql($pdo, 'i');
         $row = $pdo->query("
             SELECT
-              SUM(CASE WHEN i.current_quantity <= 0 AND NOT {$hist} THEN 1 ELSE 0 END) AS never_n,
-              SUM(CASE WHEN i.current_quantity <= 0 AND {$hist} THEN 1 ELSE 0 END) AS out_n,
-              SUM(CASE WHEN i.current_quantity < 0 AND {$hist} THEN 1 ELSE 0 END) AS neg_n,
-              SUM(CASE WHEN i.current_quantity > 0 AND {$thr} > 0 AND i.current_quantity <= {$thr} THEN 1 ELSE 0 END) AS low_n
+              SUM(CASE WHEN i.current_quantity <= 0.0001 AND NOT {$hist} THEN 1 ELSE 0 END) AS never_n,
+              SUM(CASE WHEN i.current_quantity <= 0.0001 AND {$hist} THEN 1 ELSE 0 END) AS out_n,
+              SUM(CASE WHEN i.current_quantity < -0.0001 AND {$hist} THEN 1 ELSE 0 END) AS neg_n,
+              SUM(CASE WHEN i.current_quantity > 0.0001 AND {$thr} > 0 AND i.current_quantity <= {$thr} THEN 1 ELSE 0 END) AS low_n
             FROM stock_ingredients i WHERE i.is_archived = 0
         ")->fetch(PDO::FETCH_ASSOC) ?: [];
         $res['never_stocked'] = (int)($row['never_n'] ?? 0);
@@ -12194,16 +12263,16 @@ function rh_stock_alert_summary(PDO $pdo, int $listLimit = 10): array
         $res['attention']     = $res['out'] + $res['low'];
 
         $res['out_items'] = $pdo->query("SELECT i.id, i.name, i.unit, i.current_quantity, i.min_quantity, {$thr} AS threshold
-            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity <= 0 AND {$hist}
+            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity <= 0.0001 AND {$hist}
             ORDER BY i.current_quantity ASC, i.name ASC LIMIT {$listLimit}")->fetchAll(PDO::FETCH_ASSOC);
         $res['negative_items'] = $pdo->query("SELECT i.id, i.name, i.unit, i.current_quantity
-            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity < 0 AND {$hist}
+            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity < -0.0001 AND {$hist}
             ORDER BY i.current_quantity ASC, i.name ASC LIMIT {$listLimit}")->fetchAll(PDO::FETCH_ASSOC);
         $res['low_items'] = $pdo->query("SELECT i.id, i.name, i.unit, i.current_quantity, i.min_quantity, {$thr} AS threshold
-            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity > 0 AND {$thr} > 0 AND i.current_quantity <= {$thr}
+            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity > 0.0001 AND {$thr} > 0 AND i.current_quantity <= {$thr}
             ORDER BY (i.current_quantity / {$thr}) ASC, i.name ASC LIMIT {$listLimit}")->fetchAll(PDO::FETCH_ASSOC);
         $res['never_items'] = $pdo->query("SELECT i.id, i.name, i.unit, i.current_quantity, i.min_quantity, {$thr} AS threshold
-            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity <= 0 AND NOT {$hist}
+            FROM stock_ingredients i WHERE i.is_archived = 0 AND i.current_quantity <= 0.0001 AND NOT {$hist}
             ORDER BY i.name ASC LIMIT {$listLimit}")->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         error_log('rh_stock_alert_summary: ' . $e->getMessage());

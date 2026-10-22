@@ -394,7 +394,7 @@ if (!function_exists('rh_ssi_plan')) {
             }
             if ($blank && count($lines) === 1) { $flags[] = 'balance is blank on the sheet - counted as 0'; }
             if ($neg) { $flags[] = 'negative balance on the sheet - counted as 0'; }
-            $balance = round($balance, 4);
+            $balance = round($balance, 6);
 
             $maxes = array_filter(array_column($lines, 'max'), static fn($v) => $v !== null);
             $max = $maxes ? max($maxes) : 0.0;
@@ -689,7 +689,7 @@ if (!function_exists('rh_ssi_apply')) {
             foreach ($lines as $it) {
                 $sys = (float)($it['system_qty'] ?? 0);
                 $actual = (float)$it['balance'];
-                $variance = round($actual - $sys, 4);
+                $variance = round($actual - $sys, 6);
                 $cost = (float)($it['cost'] ?? ($it['existing']['cost_per_unit'] ?? 0));
                 $vc = round($variance * $cost, 4);
                 if ($vc < 0) { $short += $vc; } else { $surplus += $vc; }

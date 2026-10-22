@@ -526,7 +526,7 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                 <?php foreach ($typeBookings as $ub): ?>
                                     <li>
                                         <a href="booking-details.php?id=<?php echo (int)$ub['id']; ?>"><?php echo htmlspecialchars($ub['booking_reference']); ?></a>
-                                        &middot; <?php echo htmlspecialchars($ub['guest_name']); ?>
+                                        &middot; <?php echo htmlspecialchars($ub['guest_name']); ?><?php echo trim((string)($ub['room_guest_name'] ?? '')) !== '' ? ' (' . htmlspecialchars((string)$ub['room_guest_name']) . ')' : ''; ?>
                                         &middot; <?php echo date('j M', strtotime($ub['check_in_date'])); ?> &ndash; <?php echo date('j M', strtotime($ub['check_out_date'])); ?>
                                         &middot; <?php echo htmlspecialchars(ucfirst($ub['status'])); ?>
                                         <?php if ($ub['status'] === 'confirmed'): /* late arrivals can be given a room too */ ?>
@@ -688,13 +688,16 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
 
                                                 // Build tooltip data attributes (all properly escaped)
                                                 // Use actual newlines (%0A encoded) for white-space: pre-line to work
-                                                $tooltipText = $ref . ' - ' . $guestName . "\n" .
+                                                $roomGuestRaw = trim((string)($booking['room_guest_name'] ?? ''));
+                                                $roomGuestEsc = htmlspecialchars($roomGuestRaw, ENT_QUOTES, 'UTF-8');
+                                                $tooltipText = $ref . ' - ' . $guestName . ($roomGuestEsc !== '' ? ' (room guest: ' . $roomGuestEsc . ')' : '') . "\n" .
                                                     $individualRoomNumber . ' | ' . $checkIn . ' to ' . $checkOut . ' (' . $nights . ' nights)' . "\n" .
                                                     'Status: ' . $status . ' | Payment: ' . $paymentStatus;
 
                                                 $dataAttrs = [
                                                     'data-booking-ref' => $ref,
                                                     'data-guest-name' => $guestName,
+                                                    'data-room-guest' => $roomGuestEsc,
                                                     'data-room-name' => $roomName,
                                                     'data-room-number' => $individualRoomNumber,
                                                     'data-room-display' => $individualRoomNumber . ($individualRoomName ? ' - ' . $individualRoomName : ''),

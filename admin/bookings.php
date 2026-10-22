@@ -2699,6 +2699,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $export_where_clauses[] = "(
                 b.booking_reference LIKE ?
                 OR b.guest_name LIKE ?
+                OR b.room_guest_name LIKE ?
                 OR b.guest_email LIKE ?
                 OR b.guest_phone LIKE ?
                 OR b.guest_country LIKE ?
@@ -2720,7 +2721,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 )
             )";
             $search_param = "%{$search_query}%";
-            $export_params = array_merge($export_params, array_fill(0, 12, $search_param));
+            $export_params = array_merge($export_params, array_fill(0, 13, $search_param));
         }
 
         $export_where_clauses[] = $filter_status === 'deleted' ? "b.deleted_at IS NOT NULL" : "b.deleted_at IS NULL";
@@ -2850,6 +2851,7 @@ try {
         $where_clauses[] = "(
             b.booking_reference LIKE ?
             OR b.guest_name LIKE ?
+            OR b.room_guest_name LIKE ?
             OR b.guest_email LIKE ?
             OR b.guest_phone LIKE ?
             OR b.guest_country LIKE ?
@@ -2871,7 +2873,7 @@ try {
             )
         )";
         $search_param = "%{$search_query}%";
-        $params = array_merge($params, array_fill(0, 12, $search_param));
+        $params = array_merge($params, array_fill(0, 13, $search_param));
     }
 
     // Date filters belong to the shared scope (search + dates) so the tab counts and insight cards
@@ -3597,6 +3599,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         </td>
                                         <td data-label="Guest">
                                             <?php echo htmlspecialchars($booking['guest_name']); ?>
+                                            <?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?>
+                                                <br><small class="room-guest-line" style="color:#555;">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small>
+                                            <?php endif; ?>
                                             <br><small style="color: #666;"><?php echo htmlspecialchars($booking['guest_phone']); ?></small>
                                             <?php if (!empty($booking['guest_email'])): ?>
                                                 <br><small class="guest-email"><?php echo htmlspecialchars($booking['guest_email']); ?></small>
@@ -3768,7 +3773,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                         ? 'Cannot check in: booking must have at least partial payment.'
                                                         : (!$checkin_date_reached ? 'Cannot check in: arrival date is ' . $booking['check_in_date'] . '.' : '');
                                                     $room_assigned_bool = !empty($booking['individual_room_id']) ? 'true' : 'false';
-                                                    $checkin_attrs = 'data-booking-id="' . $bk_id . '" data-booking-ref="' . $bk_ref . '" data-guest-name="' . $bk_guest
+                                                    $checkin_attrs = 'data-booking-id="' . $bk_id . '" data-booking-ref="' . $bk_ref . '" data-guest-name="' . $bk_guest . (trim((string)($booking['room_guest_name'] ?? '')) !== '' ? htmlspecialchars(' (room guest: ' . $booking['room_guest_name'] . ')', ENT_QUOTES) : '')
                                                         . '" data-check-in-date="' . htmlspecialchars($booking['check_in_date'], ENT_QUOTES) . '" data-payment-status="' . htmlspecialchars((string)$bk_payment_st, ENT_QUOTES)
                                                         . '" data-room-assigned="' . $room_assigned_bool . '" data-booking-status="confirmed"';
                                                     ?>

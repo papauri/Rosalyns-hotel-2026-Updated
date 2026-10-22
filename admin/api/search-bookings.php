@@ -101,6 +101,7 @@ try {
                 WHERE (
                     b.booking_reference LIKE ?
                     OR b.guest_name LIKE ?
+                    OR b.room_guest_name LIKE ?
                     OR b.id LIKE ?
                     OR b.guest_email LIKE ?
                     OR b.guest_phone LIKE ?
@@ -108,7 +109,7 @@ try {
                 ORDER BY b.check_in_date DESC
                 LIMIT 20
             ");
-            $stmt->execute([$searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm]);
+            $stmt->execute([$searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm]);
         }
 
         $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);

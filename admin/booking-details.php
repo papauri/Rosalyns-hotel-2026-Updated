@@ -873,7 +873,7 @@ try {
         ? (int)$booking['primary_booking_id']
         : (int)$booking['id'];
     $sib_stmt = $pdo->prepare("
-        SELECT b.id, b.booking_reference, b.status, b.number_of_guests,
+        SELECT b.id, b.booking_reference, b.status, b.number_of_guests, b.room_guest_name,
                b.total_with_vat, b.total_amount, b.vat_amount, b.primary_booking_id,
                b.number_of_nights, b.tourism_levy_amount, b.tourism_levy_percent, b.vat_rate, b.child_supplement_total, b.child_guests,
                b.child_price_multiplier, b.child_charge_mode, b.child_charge_amount, b.free_children, b.package_total,
@@ -1378,6 +1378,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <?php echo date('D j M', strtotime($booking['check_in_date'])); ?> &ndash; <?php echo date('D j M Y', strtotime($booking['check_out_date'])); ?>
                     <span class="bd-sep" aria-hidden="true">&middot;</span>
                     <?php echo (int) $booking['number_of_nights']; ?> night<?php echo ((int) $booking['number_of_nights']) === 1 ? '' : 's'; ?>
+                    <?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?>
+                    <span class="bd-sep" aria-hidden="true">&middot;</span>
+                    Room guest: <strong><?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></strong>
+                    <?php endif; ?>
                 </p>
                 <p class="rh-page-head__meta">
                     Created <?php echo htmlspecialchars(rhToUserTime($booking['created_at'], 'M j, Y \a\t g:i A')); ?>
@@ -1619,7 +1623,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <?php foreach ($group_bookings as $gb): ?>
             <a href="booking-details.php?id=<?php echo (int)$gb['id']; ?>" class="bd-group-notice__link">
                 <i class="fas fa-door-open"></i>
-                <?php echo htmlspecialchars($gb['room_name']); ?> &mdash; <strong><?php echo htmlspecialchars($gb['booking_reference']); ?></strong>
+                <?php echo htmlspecialchars($gb['room_name']); ?><?php echo trim((string)($gb['room_guest_name'] ?? '')) !== '' ? ' (' . htmlspecialchars((string)$gb['room_guest_name']) . ')' : ''; ?> &mdash; <strong><?php echo htmlspecialchars($gb['booking_reference']); ?></strong>
             </a>
             <?php endforeach; ?>
             <?php
@@ -1702,6 +1706,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <th scope="row">Guest name</th>
                                 <td><?php echo htmlspecialchars($booking['guest_name']); ?></td>
                             </tr>
+                            <?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?>
+                            <tr>
+                                <th scope="row">Guest name for this room</th>
+                                <td><?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></td>
+                            </tr>
+                            <?php endif; ?>
                             <tr>
                                 <th scope="row">Email</th>
                                 <td>

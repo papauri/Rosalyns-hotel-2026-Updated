@@ -334,6 +334,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         $rl_qtys        = array_values((array)($_POST['room_line_qty']       ?? []));
         $rl_occupancies = array_values((array)($_POST['room_line_occupancy'] ?? []));
         $rl_overrides   = array_values((array)($_POST['room_line_override']  ?? []));
+        $rl_room_guests = array_values((array)($_POST['room_line_guest_name'] ?? []));   // optional: who sleeps in each room
         // Backwards-compat: old single-room fields → convert to first line
         if (empty($rl_room_ids) && !empty($_POST['room_id'])) {
             $rl_room_ids    = [(int)$_POST['room_id']];
@@ -398,6 +399,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             $qty = max(1, min(20, (int)($rl_qtys[$li] ?? 1)));
             $occ = in_array($rl_occupancies[$li] ?? '', ['single', 'double', 'triple']) ? $rl_occupancies[$li] : 'double';
             $ovr = isset($rl_overrides[$li]) && trim((string)$rl_overrides[$li]) !== '' ? (float)$rl_overrides[$li] : null;
+            $rgn = rh_clean_room_guest_name($rl_room_guests[$li] ?? '');
             if ($ovr !== null && $ovr < 0) {
                 throw new Exception('Price override cannot be negative.');
             }
@@ -475,6 +477,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 'qty' => $qty,
                 'occupancy_type' => $occ,
                 'price_override' => $ovr,
+                'room_guest_name' => $rgn,
                 'room_data' => $r_data,
                 'policy' => $policy,
                 'combination_candidates' => $combination_candidates,
@@ -807,7 +810,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 $insert = $pdo->prepare("
                     INSERT INTO bookings (
                         booking_reference, room_id, individual_room_id,
-                        guest_name, guest_email, guest_phone, guest_country, guest_address,
+                        guest_name, room_guest_name, guest_email, guest_phone, guest_country, guest_address,
                         number_of_guests, adult_guests, child_guests, child_price_multiplier,
                         child_charge_mode, child_charge_amount, free_children,
                         check_in_date, check_out_date, number_of_nights,
@@ -819,7 +822,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                         primary_booking_id,
                         created_at
                     ) VALUES (
-                        ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?,?, ?, NOW()
+                        ?,?,?, ?,?,?,?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?,?, ?, NOW()
                     )
                 ");
                 $insert->execute([
@@ -827,6 +830,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $line['room_id'],
                     $this_individual_room_id,
                     $guest_name,
+                    ($line['room_guest_name'] ?? '') !== '' ? $line['room_guest_name'] : null,
                     $guest_email,
                     $guest_phone,
                     $guest_country,
@@ -2817,6 +2821,10 @@ try {
                     <label>&nbsp;</label>
                     <span class="line-subtotal" id="line-subtotal-${idx}">—</span>
                 </div>
+            </div>
+            <div class="form-group">
+                <label for="line-room-guest-${idx}">Guest name for this room <small style="font-weight:400;">(optional)</small></label>
+                <input type="text" id="line-room-guest-${idx}" name="room_line_guest_name[]" class="line-room-guest-input" maxlength="150" autocomplete="off" placeholder="e.g. Mr &amp; Mrs Banda" style="min-height:44px;">
             </div>
             <div class="line-detail" id="line-detail-${idx}"></div>
             <div class="line-warn" id="line-warn-${idx}"></div>

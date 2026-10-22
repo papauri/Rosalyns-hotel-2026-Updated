@@ -412,7 +412,7 @@ function buildStockHealthReport(): array
                 (CASE WHEN {$hist} THEN 0 ELSE 1 END) AS never_stocked
          FROM stock_ingredients i
          WHERE i.is_archived = 0
-           AND ((i.current_quantity <= 0) OR ({$thr} > 0 AND i.current_quantity <= {$thr}))
+           AND ((i.current_quantity <= 0.0001) OR ({$thr} > 0 AND i.current_quantity <= {$thr}))
          ORDER BY (i.current_quantity - {$thr}) ASC, i.name ASC"
     )->fetchAll(PDO::FETCH_ASSOC);
     fputcsv($fp, ['LOW / OUT OF STOCK INGREDIENTS']);

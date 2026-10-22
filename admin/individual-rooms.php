@@ -609,6 +609,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     b.id,
                     b.booking_reference,
                     b.guest_name,
+                    b.room_guest_name,
                     b.check_in_date,
                     b.check_out_date,
                     b.status,
@@ -663,6 +664,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'id' => (int)$booking['id'],
                     'reference' => $booking['booking_reference'],
                     'guest_name' => $booking['guest_name'],
+                    'room_guest_name' => (string)($booking['room_guest_name'] ?? ''),
                     'check_in' => $booking['check_in_date'],
                     'check_out' => $booking['check_out_date'],
                     'status' => $booking['status'],
@@ -746,7 +748,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // All upcoming bookings
             $uStmt = $pdo->prepare("
-                SELECT b.id, b.booking_reference, b.guest_name, b.guest_email, b.guest_phone,
+                SELECT b.id, b.booking_reference, b.guest_name, b.room_guest_name, b.guest_email, b.guest_phone,
                        b.check_in_date, b.check_out_date, b.status, b.payment_status,
                        b.total_amount, b.total_with_vat, b.vat_amount, b.number_of_nights, b.tourism_levy_amount, b.tourism_levy_percent, b.vat_rate,
                        b.child_supplement_total, b.child_guests, b.child_price_multiplier, b.child_charge_mode, b.child_charge_amount, b.free_children,
@@ -805,6 +807,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'id'              => (int)$active['id'],
                     'reference'       => $active['booking_reference'],
                     'guest_name'      => $active['guest_name'],
+                    'room_guest_name' => (string)($active['room_guest_name'] ?? ''),
                     'guest_email'     => $active['guest_email'] ?? '',
                     'guest_phone'     => $active['guest_phone'] ?? '',
                     'check_in'        => $active['check_in_date'],
@@ -824,6 +827,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'id'             => (int)$b['id'],
                 'reference'      => $b['booking_reference'],
                 'guest_name'     => $b['guest_name'],
+                'room_guest_name' => (string)($b['room_guest_name'] ?? ''),
                 'guest_email'    => $b['guest_email'] ?? '',
                 'guest_phone'    => $b['guest_phone'] ?? '',
                 'check_in'       => $b['check_in_date'],
@@ -980,6 +984,7 @@ $stmt = $pdo->prepare("
         active_b.booking_reference as active_booking_ref,
         active_b.id as active_booking_id,
         active_b.guest_name as active_guest,
+        active_b.room_guest_name as active_room_guest,
         active_b.check_in_date as active_checkin,
         active_b.check_out_date as active_checkout,
         active_b.status as active_booking_status,
@@ -994,6 +999,7 @@ $stmt = $pdo->prepare("
         next_b.booking_reference as next_booking_ref,
         next_b.id as next_booking_id,
         next_b.guest_name as next_guest,
+        next_b.room_guest_name as next_room_guest,
         next_b.check_in_date as next_checkin,
         next_b.check_out_date as next_checkout,
         next_b.status as next_booking_status
@@ -1584,7 +1590,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                                     <?php echo htmlspecialchars($room['active_booking_ref']); ?>
                                                 </a>
                                                 <br>
-                                                <small><?php echo htmlspecialchars($room['active_guest']); ?></small>
+                                                <small><?php echo htmlspecialchars($room['active_guest']); ?><?php if (trim((string)($room['active_room_guest'] ?? '')) !== ''): ?> &middot; Room guest: <?php echo htmlspecialchars((string)$room['active_room_guest']); ?><?php endif; ?></small>
                                                 <br>
                                                 <small><?php echo $room['active_checkin']; ?> &rarr; <?php echo $room['active_checkout']; ?></small>
                                             </div>
@@ -1599,7 +1605,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                                     <?php echo htmlspecialchars($room['next_booking_ref']); ?>
                                                 </a>
                                                 <br>
-                                                <small><?php echo htmlspecialchars($room['next_guest']); ?></small>
+                                                <small><?php echo htmlspecialchars($room['next_guest']); ?><?php if (trim((string)($room['next_room_guest'] ?? '')) !== ''): ?> &middot; Room guest: <?php echo htmlspecialchars((string)$room['next_room_guest']); ?><?php endif; ?></small>
                                                 <br>
                                                 <small><?php echo $room['next_checkin']; ?> &rarr; <?php echo $room['next_checkout']; ?></small>
                                             </div>
@@ -2552,7 +2558,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                         <i class="fas fa-calendar-check" style="color: var(--gold);"></i>
                                         ${booking.reference}
                                     </div>
-                                    <small style="color: #666;">${booking.guest_name} • ${booking.room_name}</small><br>
+                                    <small style="color: #666;">${_esc(booking.guest_name)}${booking.room_guest_name ? ' (room guest: ' + _esc(booking.room_guest_name) + ')' : ''} • ${_esc(booking.room_name)}</small><br>
                                     <small style="color: #666;">${booking.check_in} → ${booking.check_out} (${booking.status})</small>
                                 </div>
                                 <div>
@@ -3032,6 +3038,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             <div class="rd-occ-col">
                                 <div class="rd-occ-label">Guest</div>
                                 <div class="rd-occ-value rd-occ-guest">${_esc(active.guest_name)}</div>
+                                ${active.room_guest_name ? `<div class="rd-occ-contacts">Room guest: ${_esc(active.room_guest_name)}</div>` : ''}
                                 ${guestContact ? `<div class="rd-occ-contacts">${guestContact}</div>` : ''}
                             </div>
                             <div class="rd-occ-col">
@@ -3131,7 +3138,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                     ${_esc(b.reference)} <i class="fas fa-external-link-alt" style="font-size:9px;"></i>
                                 </a>
                             </div>
-                            <div class="rd-up-guest">${_esc(b.guest_name)}</div>
+                            <div class="rd-up-guest">${_esc(b.guest_name)}${b.room_guest_name ? ` <small>(room guest: ${_esc(b.room_guest_name)})</small>` : ''}</div>
                             <div class="rd-up-dates">${_fmtDate(b.check_in)} → ${_fmtDate(b.check_out)} <span style="color:#766550;font-weight:500;">(${nights}n)</span></div>
                             <div class="rd-up-badges">
                                 ${_badge(_statusLabels[b.status] || b.status, _statusColors[b.status] || '#6b7280')}

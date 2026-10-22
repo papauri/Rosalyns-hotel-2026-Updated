@@ -34,7 +34,7 @@ check(near(rh_recipe_qty_to_base(1, 'pack', 10), 10.0), 'One Pack of 10 is 10 ba
 check(near(rh_recipe_qty_to_base(2.5, 'pack', 10), 25.0), 'Half packs are fine (2.5 packs = 25)');
 check(near(rh_recipe_qty_to_base(0.150, 'base', null), 0.15), 'A weight like 0.150 kg is kept exactly');
 check(near(rh_recipe_qty_to_base(0.05, 'pack', 24), 1.2), 'A part of a crate (0.05 of 24) converts to 1.2');
-foreach ([[0, 'base', 10, 'zero'], [-1, 'base', 10, 'negative'], [1, 'pack', null, 'pack with no pack size'], [1, 'pack', 0.0, 'pack size 0'], [1, 'carton', 10, 'unknown unit'], [0.00001, 'base', null, 'too small to record']] as [$q, $u, $ps, $why]) {
+foreach ([[0, 'base', 10, 'zero'], [-1, 'base', 10, 'negative'], [1, 'pack', null, 'pack with no pack size'], [1, 'pack', 0.0, 'pack size 0'], [1, 'carton', 10, 'unknown unit'], [0.0000001, 'base', null, 'too small to record (under 6 decimals)']] as [$q, $u, $ps, $why]) {
     $threw = false;
     try { rh_recipe_qty_to_base((float)$q, $u, $ps); } catch (RuntimeException $e) { $threw = true; }
     check($threw, "Refused: $why");
@@ -202,31 +202,84 @@ try {
     check((int)col($pdo, "SELECT COUNT(*) FROM stock_order_items WHERE menu_item_id = ?", [$pos['id']]) === 1, 'Past orders still read the item');
     check((int)col($pdo, "SELECT COUNT(*) FROM stock_order_items WHERE order_id = ? AND unit_price = 100", [$oid]) === 1, 'Order lines keep the price they sold at (a later price change does not touch them)');
 
-    // "Pieces" entry: the page sends the base-unit part (pieces / pieces-in-a-packet); only that is stored.
-    // 1 sausage of a 6-sausage packet = 1/6 packet. The column keeps 4 decimals, so 1/6 is stored as 0.1667.
-    $col = (string)col($pdo, "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_recipe_ingredients' AND COLUMN_NAME = 'quantity_per_portion'");
-    check($col === 'decimal(12,4)', 'Recipe quantity column is decimal(12,4) (4 decimals, the precision the pieces guide warns about)', $col);
+    // "Pieces" entry (owner 2026-10-23): staff type WHOLE pieces; the server divides by pieces-in-a-unit and stores 6 decimals.
+    // 1 sausage of a 6-sausage packet = 0.166667 packet; 6 sales = 1.000002 (was 1.0002 at 4 decimals).
+    $near6 = static fn($a, $b): bool => abs((float)$a - (float)$b) <= 0.000001;
+    $qCol = static fn(string $t, string $c): string => (string)col($pdo, "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?", [$t, $c]);
+    $wide = 0; $all = [];
+    foreach (['stock_recipe_ingredients' => ['quantity_per_portion'], 'stock_ingredients' => ['current_quantity', 'min_quantity', 'reorder_point', 'par_level'], 'stock_batches' => ['quantity_received', 'quantity_remaining'], 'stock_batch_deductions' => ['quantity_deducted'], 'stock_adjustments' => ['quantity_change'], 'stock_in_log' => ['quantity'], 'stock_wastage' => ['quantity'], 'stock_count_lines' => ['system_quantity', 'actual_quantity', 'variance'], 'stock_opening_batches' => ['quantity'], 'stock_purchase_order_items' => ['ordered_qty', 'received_qty']] as $t => $cs) {
+        foreach ($cs as $c) { $ty = $qCol($t, $c); $all[] = "$t.$c=$ty"; if ($ty === 'decimal(16,6)') { $wide++; } }
+    }
+    check($wide === 17, 'Every stock quantity column carries 6 decimals (decimal(16,6))', implode(' ', $all));
+    check($qCol('stock_ingredients', 'pieces_per_unit') === 'decimal(10,2)', 'stock_ingredients.pieces_per_unit exists (decimal(10,2))', $qCol('stock_ingredients', 'pieces_per_unit'));
+    check($qCol('stock_ingredients', 'cost_per_unit') === 'decimal(12,4)' && $qCol('stock_wastage', 'wastage_cost') === 'decimal(12,4)', 'Money columns are untouched (cost_per_unit, wastage_cost stay decimal(12,4))');
+    check(rh_stock_unit_is_dozen('Dozen') && rh_stock_unit_is_container('packet') && !rh_stock_unit_is_container('kg') && rh_stock_pieces_per_unit('dozen', null) === 12.0 && rh_stock_pieces_per_unit('packet', '6.00') === 6.0 && rh_stock_pieces_per_unit('packet', null) === null && rh_stock_pieces_per_unit('kg', 6) === null, 'Unit helpers: dozen = 12, packet uses the stored pieces, kg has none');
+    check($near6(rh_recipe_qty_to_base(1, 'pieces', null, 6.0), 0.166667) && $near6(rh_recipe_qty_to_base(1, 'pieces', null, 12.0), 0.083333) && $near6(rh_recipe_qty_to_base(3, 'pieces', null, 6.0), 0.5), 'Pieces to base: 1 of 6 = 0.166667, 1 of 12 = 0.083333, 3 of 6 = 0.5 (6 decimals)');
+    $threw = false; try { rh_recipe_qty_to_base(1, 'pieces', null, null); } catch (RuntimeException $e) { $threw = true; }
+    check($threw, 'Pieces with no pieces-per-unit known is refused');
     $pk6 = $mkIng("ZZMP $run Six pack", 'packet', 10, 15300, null, null);
     $dz = $mkIng("ZZMP $run Eggs", 'dozen', 10, 12000, null, null);
     $pc = rh_menu_pos_sync_item($pdo, 'food', $web("ZZMP $run Single sausage", $catA), null, null);
-    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 1 / 6, 'unit' => 'base']], $adminId);
-    $stored = (float)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]);
-    check($near($stored, 0.1667), '1 piece of a 6-piece packet is stored as 1/6 packet (0.1667)', (string)$stored);
+    // First time: staff types 6 once in the small box; it is saved on the stock item.
+    check(col($pdo, "SELECT pieces_per_unit FROM stock_ingredients WHERE id = ?", [$pk6]) === null, 'A new packet item has no pieces-per-unit yet');
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 1, 'unit' => 'pieces', 'pieces_per_unit' => '6']], $adminId);
+    $stored = (string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]);
+    check($stored === '0.166667', '1 piece of a 6-piece packet is stored as 0.166667 packet (6 decimals)', $stored);
+    check((float)col($pdo, "SELECT pieces_per_unit FROM stock_ingredients WHERE id = ?", [$pk6]) === 6.0, 'The 6 typed once is saved on the stock item for every device');
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 2, 'unit' => 'pieces']], $adminId);
+    check((string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]) === '0.333333', 'Next time no box needed: 2 pieces reuse the saved 6 (0.333333)');
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 1, 'unit' => 'pieces']], $adminId);
     $b = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$pk6]);
     for ($i = 0; $i < 6; $i++) { deductStockForMenuItem($pc['id'], $pc['slug'], 1.0, 'pos_order', 987655000 + $i, $adminId); }
     $a = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$pk6]);
-    check(abs(($b - $a) - 1.0) <= 0.0005, '6 sales of the 1-piece item take about 1 packet off (4-decimal rounding: 1.0002)', 'took ' . ($b - $a));
-    check($near(rh_menu_recipe_cost($pdo, $pc['id'], $pc['slug']), 15300 * 0.1667), 'Cost per piece = packet cost / 6 (2,550.51 at 4 decimals)', (string)rh_menu_recipe_cost($pdo, $pc['id'], $pc['slug']));
-    check(abs(rh_menu_recipe_cost($pdo, $pc['id'], $pc['slug']) - 15300 / 6) < 1.0, 'Cost per piece is within 1 of the exact 15,300 / 6 = 2,550');
-    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $dz, 'quantity' => 1 / 12, 'unit' => 'base']], $adminId);
-    $stored = (float)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]);
-    check($near($stored, 0.0833), '1 egg of a dozen is stored as 1/12 (0.0833)', (string)$stored);
+    check(abs(($b - $a) - 1.0) <= 0.000003, '6 sales of the 1-piece item take 1 packet off, within 3 millionths (1.000002)', sprintf('took %.6f', $b - $a));
+    $bs = (float)col($pdo, "SELECT COALESCE(SUM(quantity_remaining),0) FROM stock_batches WHERE ingredient_id = ?", [$pk6]);
+    check(abs($bs - $a) <= 0.000003, 'Batch total still matches the stock total after the 6 sales', sprintf('batches %.6f vs stock %.6f', $bs, $a));
+    check(abs(rh_menu_recipe_cost($pdo, $pc['id'], $pc['slug']) - 15300 * 0.166667) < 0.0001 && abs(15300 * 0.166667 - 2550.0) < 0.01, 'Cost per piece is exact: 15,300 x 0.166667 = 2,550.00 (to the cent)', (string)rh_menu_recipe_cost($pdo, $pc['id'], $pc['slug']));
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $dz, 'quantity' => 1, 'unit' => 'pieces']], $adminId);
+    $stored = (string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]);
+    check($stored === '0.083333', '1 egg of a dozen is stored as 0.083333 (dozen = 12 automatically, no box)', $stored);
+    check(col($pdo, "SELECT pieces_per_unit FROM stock_ingredients WHERE id = ?", [$dz]) === null, 'A dozen never stores a pieces-per-unit (12 is implied)');
     $b = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$dz]);
     for ($i = 0; $i < 12; $i++) { deductStockForMenuItem($pc['id'], $pc['slug'], 1.0, 'pos_order', 987655100 + $i, $adminId); }
     $a = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$dz]);
-    check(abs(($b - $a) - 1.0) <= 0.0005, '12 sales of the 1-egg item take about 1 dozen off (0.9996)', 'took ' . ($b - $a));
-    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 0.5, 'unit' => 'base']], $adminId);
-    check($near(col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]), 0.5), '3 pieces of a 6-piece packet is stored as 0.5 packet (exact)');
+    check(abs(($b - $a) - 1.0) <= 0.000005, '12 sales of the 1-egg item take 1 dozen off, within 5 millionths (0.999996)', sprintf('took %.6f', $b - $a));
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 3, 'unit' => 'pieces']], $adminId);
+    check($near6(col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]), 0.5), '3 pieces of a 6-piece packet is stored as 0.5 packet (exact)');
+    $threw = false; try { rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 1, 'unit' => 'pieces', 'pieces_per_unit' => '-3']], $adminId); } catch (Throwable $e) { $threw = true; }
+    check($threw, 'A negative pieces-per-unit is refused');
+    $kg = $mkIng("ZZMP $run Flour", 'kg', 10, 2000, null, null);
+    $threw = false; try { rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $kg, 'quantity' => 1, 'unit' => 'pieces']], $adminId); } catch (Throwable $e) { $threw = true; }
+    check($threw, 'Pieces are refused for stock counted in kg');
+    // QA round: server-side pieces rules.
+    foreach ([[0.3, 'a fraction other than a half'], [1.5, '1.5 pieces'], [100000, 'more than 99999 pieces']] as [$pq, $why]) {
+        $threw = false; try { rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => $pq, 'unit' => 'pieces']], $adminId); } catch (Throwable $e) { $threw = true; }
+        check($threw, "Pieces refused: $why");
+    }
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 0.5, 'unit' => 'pieces']], $adminId);
+    check($near6(col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]), 0.083333), 'Half a piece (0.5) is accepted: 0.5 of 6 = 0.083333');
+    $threw = false; try { rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 1, 'unit' => 'pieces', 'pieces_per_unit' => '0.004']], $adminId); } catch (Throwable $e) { $threw = true; }
+    check($threw, 'A pieces-per-unit that rounds below 0.01 is refused');
+    // Overwrite: a menu-only user keeps the saved 6; a stock_management user may change it.
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 1, 'unit' => 'pieces', 'pieces_per_unit' => '8']], $adminId, false);
+    check((float)col($pdo, "SELECT pieces_per_unit FROM stock_ingredients WHERE id = ?", [$pk6]) === 6.0 && (string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]) === '0.166667', 'A menu-only user cannot overwrite an existing pieces-per-unit (stays 6, line still 1/6)');
+    $res = rh_menu_recipe_save($pdo, $pc['id'], $pc['slug'], null, null, [['ingredient_id' => $pk6, 'quantity' => 1, 'unit' => 'pieces', 'pieces_per_unit' => '8']], $adminId, true);
+    check((float)col($pdo, "SELECT pieces_per_unit FROM stock_ingredients WHERE id = ?", [$pk6]) === 8.0 && (string)col($pdo, "SELECT quantity_per_portion FROM stock_recipe_ingredients WHERE recipe_id = ?", [$res['recipe_id']]) === '0.125000', 'A stock_management user may change it (8 per packet, line 0.125)');
+    // Negative-stock flag ignores 6-decimal crumbs.
+    $crumb = $mkIng("ZZMP $run Crumb", 'packet', 1, 100, null, null);
+    $pdo->prepare("UPDATE stock_ingredients SET current_quantity = -0.000002 WHERE id = ?")->execute([$crumb]);
+    $sum = rh_stock_alert_summary($pdo, 500);
+    $negIds = array_map('intval', array_column($sum['negative_items'], 'id'));
+    $outIds = array_map('intval', array_column($sum['out_items'], 'id'));
+    check(!in_array($crumb, $negIds, true) && in_array($crumb, $outIds, true), 'A -0.000002 crumb is out of stock but is NOT flagged as negative stock');
+    $pdo->prepare("UPDATE stock_ingredients SET current_quantity = -0.5 WHERE id = ?")->execute([$crumb]);
+    $sum = rh_stock_alert_summary($pdo, 500);
+    check(in_array($crumb, array_map('intval', array_column($sum['negative_items'], 'id')), true), 'A real shortfall (-0.5) is flagged as negative stock');
+    $pdo->prepare("UPDATE stock_ingredients SET current_quantity = 0.000002 WHERE id = ?")->execute([$crumb]);
+    $sum = rh_stock_alert_summary($pdo, 500);
+    check(!in_array($crumb, array_map('intval', array_column($sum['low_items'], 'id')), true) && in_array($crumb, array_map('intval', array_column($sum['out_items'], 'id')), true), 'A +0.000002 crumb counts as out of stock, not low');
+    $pdo->prepare("UPDATE stock_ingredients SET current_quantity = 0.166667 WHERE id = ?")->execute([$kg]);
+    check($near6(col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$kg]), 0.166667), 'A stock total keeps 6 decimals (0.166667)');
 } catch (Throwable $e) {
     bad('In-process scenario', $e->getMessage() . ' @' . $e->getLine());
 }
@@ -247,8 +300,10 @@ $hr = strtoupper(bin2hex(random_bytes(3)));
 $ingSetup = [
     "INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, pack_name, pack_size) VALUES ('ZZMP $hr Sausages', 'ZZMP', 'each', 100, 1500, 'Pack', 10)",
     "INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES ('ZZMP $hr Rice', 'ZZMP', 'kg', 50, 2000)",
+    "INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, pieces_per_unit) VALUES ('ZZMP $hr Packet', 'ZZMP', 'packet', 12, 15300, 6)",
+    "INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES ('ZZMP $hr Newpacket', 'ZZMP', 'packet', 12, 15300)",
 ];
-$ingVars = ['sau' => "SELECT id FROM stock_ingredients WHERE name = 'ZZMP $hr Sausages'", 'rice' => "SELECT id FROM stock_ingredients WHERE name = 'ZZMP $hr Rice'"];
+$ingVars = ['sau' => "SELECT id FROM stock_ingredients WHERE name = 'ZZMP $hr Sausages'", 'rice' => "SELECT id FROM stock_ingredients WHERE name = 'ZZMP $hr Rice'", 'pkt' => "SELECT id FROM stock_ingredients WHERE name = 'ZZMP $hr Packet'", 'npk' => "SELECT id FROM stock_ingredients WHERE name = 'ZZMP $hr Newpacket'"];
 $qty = static fn(array $r, int $i): float => (float)(($r['verify'][$i][0] ?? [])['q'] ?? -1);
 $verifyAdd = [
     "SELECT COUNT(*) AS n FROM food_menu WHERE item_name = 'ZZMP $hr Item'",
@@ -266,8 +321,16 @@ check($near($qty($r, 3), 1.0), 'Page: "1 each" is stored as 1 base unit', json_e
 $r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{sau}', 'quantity' => 1, 'unit' => 'pack']])], $ingSetup, $ingVars, $verifyAdd);
 check($clean($r) && ($r['json']['success'] ?? false) === true && $near($qty($r, 3), 10.0), 'Page: "1 Pack (10 each)" is stored as 10 base units', json_encode($r['json'] ?? $r['verify'] ?? $r));
 
-$r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{sau}', 'quantity' => 1 / 6, 'unit' => 'base']])], $ingSetup, $ingVars, $verifyAdd);
-check($clean($r) && ($r['json']['success'] ?? false) === true && $near($qty($r, 3), 0.1667), 'Page: "1 piece of 6" (sent as 1/6 of the unit) is stored as 0.1667', json_encode($r['json'] ?? $r['verify'] ?? $r));
+// Pieces: the page sends the WHOLE number typed (1); the server does the division by the stock item's pieces-per-unit.
+$verifyPcs = $verifyAdd;
+$verifyPcs[] = "SELECT CAST(quantity_per_portion * 1000000 AS UNSIGNED) AS q FROM stock_recipe_ingredients sri JOIN stock_recipes sr ON sr.id = sri.recipe_id JOIN menu_items mi ON mi.id = sr.menu_item_id WHERE mi.item_name = 'ZZMP $hr Item' ORDER BY sri.id LIMIT 1";
+$verifyPcs[] = "SELECT pieces_per_unit AS q FROM stock_ingredients WHERE name = 'ZZMP $hr Newpacket'";
+$r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{pkt}', 'quantity' => 1, 'unit' => 'pieces']])], $ingSetup, $ingVars, $verifyPcs);
+check($clean($r) && ($r['json']['success'] ?? false) === true && $qty($r, 4) === 166667.0, 'Page: "1 piece" of a packet that already knows it holds 6 is stored as 0.166667 (no box needed)', json_encode($r['json'] ?? $r['verify'] ?? $r));
+$r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{npk}', 'quantity' => 1, 'unit' => 'pieces', 'pieces_per_unit' => 6]])], $ingSetup, $ingVars, $verifyPcs);
+check($clean($r) && ($r['json']['success'] ?? false) === true && $qty($r, 4) === 166667.0 && $near($qty($r, 5), 6.0), 'Page: a packet with no pieces yet - the 6 typed once is saved on the stock item and used', json_encode($r['json'] ?? $r['verify'] ?? $r));
+$r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{npk}', 'quantity' => 1, 'unit' => 'pieces']])], $ingSetup, $ingVars, $verifyPcs);
+check($clean($r) && ($r['json']['success'] ?? true) === false && (int)(($r['verify'][0][0] ?? [])['n'] ?? 1) === 0, 'Page: pieces with no pieces-per-unit known anywhere is refused and nothing is saved', json_encode($r['json'] ?? $r));
 
 $r = $page($basePost + ['recipe_changed' => '1', 'recipe_lines' => json_encode([['ingredient_id' => '{rice}', 'quantity' => 0.15, 'unit' => 'base']])], $ingSetup, $ingVars, $verifyAdd);
 check($clean($r) && ($r['json']['success'] ?? false) === true && $near($qty($r, 3), 0.15), 'Page: 0.15 kg is stored as 0.15', json_encode($r['json'] ?? $r['verify'] ?? $r));
@@ -350,8 +413,15 @@ $r = $page(['action' => 'save_recipe', 'menu_item_id' => '{mid}', 'menu_type' =>
 check($clean($r) && $near($qty($r, 0), 1) && $near($qty($r, 1), 0), 'Stock > Recipes: an item in an inactive category is saved under its real slug, not "food"', json_encode($r['verify'] ?? $r['raw'] ?? $r));
 
 // Rendered page: search markup, filters, the stock section, the unit chooser, mobile-safe table labels.
-$r = $page([], array_merge($ingSetup, ["INSERT INTO food_menu (item_name, price, category, station) VALUES ('ZZMP $hr Shown', 100, 'ZZMP Cat $hr', 'kitchen')"]), [], [], 'GET', ['id="mmSearch"', 'No items match', 'mmApplyFilters', 'data-search=', 'id="mmCatFilter"', 'What it uses from stock', 'id="mmIngUnit"', 'id="mmIngPer"', 'data-q="0.5"', 'function mmShowAsPieces', 'This item is free', 'data-label="Item"', 'aria-controls="mmResults"']);
+$r = $page([], array_merge($ingSetup, ["INSERT INTO food_menu (item_name, price, category, station) VALUES ('ZZMP $hr Shown', 100, 'ZZMP Cat $hr', 'kitchen')"]), [], [], 'GET', ['id="mmSearch"', 'No items match', 'mmApplyFilters', 'data-search=', 'id="mmCatFilter"', 'What it uses from stock', 'id="mmIngUnit"', 'id="mmIngPer"', 'data-q="0.5"', 'data-q="3"', 'function mmShowAsPieces', 'id="mmIngCat"', 'All categories', 'id="mmIngSearch"', 'id="mmIngPick"', 'No stock items match', 'id="mmIngUnitLine"', 'function mmIngOptionText', 'pieces in one', 'in stock', 'function mmPiecesGuard', 'This item is free', 'data-label="Item"', 'aria-controls="mmResults"']);
 check($clean($r) && !empty($r['found']) && !in_array(false, $r['found'], true), 'Page: search box, filters, "No items match" state, stock section and unit chooser are on the page', json_encode($r['found'] ?? $r['raw'] ?? $r));
+
+// The picker's data: every stock item carries category, unit, cost, stock on hand and pieces-per-unit (what the dropdown lines show).
+$cfg = base64_encode(json_encode(['post' => [], 'ajax' => false, 'method' => 'GET', 'get' => ['action' => 'list_ingredients'], 'setup' => $ingSetup, 'vars' => [], 'verify' => [], 'grep' => ["\"name\":\"ZZMP $hr Packet\"", '"category":"ZZMP"', '"unit":"packet"', '"cost_per_unit":"15300.0000"', '"current_quantity":"12.000000"', '"pieces_per_unit":"6.00"', '"pieces_per_unit":null']]));
+$out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' admin/api/menu-recipe.php ' . escapeshellarg($cfg) . ' 2>&1');
+$apiRes = ['raw' => substr($out, -500)];
+if (preg_match('/@@RESULT@@(.*)$/m', $out, $m)) { $x = json_decode($m[1], true); if (is_array($x)) { $apiRes = $x; } }
+check($clean($apiRes) && !empty($apiRes['found']) && !in_array(false, $apiRes['found'], true), 'Picker data: list_ingredients carries name, category, unit, cost, stock on hand and pieces-per-unit', json_encode($apiRes['found'] ?? $apiRes['raw'] ?? $apiRes));
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

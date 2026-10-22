@@ -206,7 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $recipeLines = [];
                 }
                 if ($recipeLines) {
-                    $saved = rh_menu_recipe_save($pdo, $pos['id'], $pos['slug'], null, null, $recipeLines, (int)$user['id']);
+                    $saved = rh_menu_recipe_save($pdo, $pos['id'], $pos['slug'], null, null, $recipeLines, (int)$user['id'], hasPermission((int)$user['id'], 'stock_management'));
                     $stockMsg = ' Stock link saved (' . $saved['lines_written'] . ' stock item' . ($saved['lines_written'] === 1 ? '' : 's') . ').';
                 } else {
                     $removed = rh_menu_recipe_clear($pdo, $pos['id'], $pos['slug']);
@@ -660,11 +660,21 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                     <!-- What one sale uses from stock -->
                     <section class="mm-stock" id="mmStock" aria-labelledby="mmStockTitle">
                         <h4 id="mmStockTitle">What it uses from stock</h4>
-                        <p class="mm-hint">Each time one is sold, stock goes down by this amount. Selling one sausage from a packet of 6? Pick the packet, choose "pieces", enter 1 and tell it there are 6 in a packet. Leave this empty if the item does not use tracked stock.</p>
+                        <p class="mm-hint">Each time one is sold, stock goes down by this amount. Selling one sausage from a packet of 6? Pick the packet, leave "pieces" chosen and type the whole number 1 (the sums are done for you). Leave this empty if the item does not use tracked stock.</p>
                         <div id="mmStockLines"></div>
+                        <div class="mm-picker">
+                            <div class="mm-pk-row">
+                                <label class="mm-pk-f"><span>Category</span>
+                                    <select id="mmIngCat" aria-label="Stock category"><option value="">All categories</option></select></label>
+                                <label class="mm-pk-f"><span>Search</span>
+                                    <input type="search" id="mmIngSearch" placeholder="Type to find a stock item…" autocomplete="off" aria-label="Search stock items"></label>
+                            </div>
+                            <label class="mm-pk-f"><span>Stock item</span>
+                                <select id="mmIngPick" aria-label="Stock item"><option value="">Choose a stock item…</option></select></label>
+                            <p class="mm-hint mm-pk-none" id="mmIngNone" role="status" hidden>No stock items match</p>
+                            <p class="mm-unitline" id="mmIngUnitLine" aria-live="polite" hidden></p>
+                        </div>
                         <div class="mm-stock-add">
-                            <input type="text" id="mmIngPick" list="mmIngList" placeholder="Search stock items…" autocomplete="off" aria-label="Stock item">
-                            <datalist id="mmIngList"></datalist>
                             <input type="number" id="mmIngQty" step="any" min="0" inputmode="decimal" placeholder="Qty" aria-label="Quantity used per item sold">
                             <select id="mmIngUnit" aria-label="Unit"></select>
                             <button type="button" class="mm-btn" id="mmIngAdd" onclick="mmStockAdd()">Add</button>
@@ -672,11 +682,12 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                         <div class="mm-qtytools" id="mmIngTools" hidden>
                             <span class="mm-quick" role="group" aria-label="Quick quantity">
                                 <button type="button" class="mm-btn mm-btn-sm" data-q="1" aria-label="Use 1">1</button>
-                                <button type="button" class="mm-btn mm-btn-sm" data-q="0.5" aria-label="Use one half">&frac12;</button>
                                 <button type="button" class="mm-btn mm-btn-sm" data-q="2" aria-label="Use 2">2</button>
+                                <button type="button" class="mm-btn mm-btn-sm" data-q="3" aria-label="Use 3">3</button>
+                                <button type="button" class="mm-btn mm-btn-sm" data-q="0.5" aria-label="Use one half">&frac12;</button>
                             </span>
                             <label class="mm-per" id="mmIngPerWrap" hidden><span id="mmIngPerLbl">How many pieces in one pack?</span>
-                                <input type="number" id="mmIngPer" step="any" min="1" inputmode="decimal" placeholder="e.g. 6" aria-label="Pieces in one pack"></label>
+                                <input type="number" id="mmIngPer" step="any" min="0.01" inputmode="decimal" placeholder="e.g. 6" aria-label="Pieces in one pack"></label>
                         </div>
                         <p class="mm-preview" id="mmIngPreview" aria-live="polite"></p>
                         <p class="mm-hint"><button type="button" class="mm-linkbtn" onclick="openIngredientModal()">Stock item not listed? Create it</button></p>
@@ -1036,7 +1047,10 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             mmEl('mmBarcode').value = mode === 'update' ? it.barcode : '';
             mmEl('mmSaveBtn').textContent = mode === 'add' ? 'Add item' : 'Save changes';
             mmEl('mmIngPick').value = '';
+            mmEl('mmIngCat').value = '';
+            mmEl('mmIngSearch').value = '';
             mmEl('mmIngQty').value = '';
+            mmIngRenderPicker();
             mmIngChosen();
             mmStockRender();
             mmEl('mmItemModal').classList.add('open');
@@ -1073,21 +1087,113 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 return {
                     id: parseInt(i.id, 10),
                     name: i.name,
+                    category: i.category || 'General',
                     unit: i.unit,
                     cost: parseFloat(i.cost_per_unit) || 0,
+                    stock: parseFloat(i.current_quantity) || 0,
                     pack_name: i.pack_name || '',
                     pack_size: parseFloat(i.pack_size) || 0,
-                    label: i.name + ' (' + i.unit + ')'
+                    pieces: parseFloat(i.pieces_per_unit) || 0
                 };
             });
-            const dl = mmEl('mmIngList');
-            dl.innerHTML = '';
+            const cats = [];
             MM_STATE.ing.forEach(function(i) {
-                const o = document.createElement('option');
-                o.value = i.label;
-                dl.appendChild(o);
+                if (cats.indexOf(i.category) === -1) cats.push(i.category);
             });
+            cats.sort(function(a, b) {
+                return a.localeCompare(b);
+            });
+            const cs = mmEl('mmIngCat');
+            cs.innerHTML = '<option value="">All categories</option>';
+            cats.forEach(function(c) {
+                const o = document.createElement('option');
+                o.value = c;
+                o.textContent = c;
+                cs.appendChild(o);
+            });
+            mmIngRenderPicker();
             return MM_STATE.ing;
+        }
+
+        /* Money without forced decimals: MWK 15,300 (or MWK 2,550.5). */
+        function mmFmtMoneyShort(n) {
+            return MM_CURRENCY + ' ' + (Number(n) || 0).toLocaleString('en-US', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 2
+            });
+        }
+
+        /* Units that are plain measures read "counted in kg"; counted things read "counted per packet". */
+        function mmUnitWord(unit) {
+            return /^(g|kg|ml|l|litres?|liters?|grams?|tsp|tbsp)$/i.test((unit || '').trim()) ? 'in' : 'per';
+        }
+
+        /* One dropdown line: name, how it is counted, pieces, cost, what is in stock. */
+        function mmIngOptionText(i) {
+            let t = i.name + ' — counted ' + mmUnitWord(i.unit) + ' ' + i.unit;
+            const per = mmPer({
+                unit: i.unit,
+                per: 0,
+                pieces: i.pieces
+            });
+            if (mmIsContainer(i.unit) && per > 0) t += ' (' + mmFmtQty(per, 2) + ' pieces)';
+            if (i.cost > 0) t += ', ' + mmFmtMoneyShort(i.cost) + ' / ' + i.unit;
+            t += ', ' + mmFmtQty(i.stock, 4) + ' in stock';
+            return t;
+        }
+
+        /* The clear unit line shown above the quantity box once a stock item is picked. */
+        function mmUnitLine(i) {
+            let t = i.name + ' is counted ' + mmUnitWord(i.unit) + ' ' + i.unit;
+            if (mmIsContainer(i.unit)) {
+                const per = mmPer({
+                    unit: i.unit,
+                    per: 0,
+                    pieces: i.pieces
+                });
+                t += per > 0 ? ' (' + mmFmtQty(per, 2) + ' pieces in one ' + i.unit + ')' : ' (pieces in one ' + i.unit + ' not set yet)';
+            }
+            if (i.pack_size > 0) t += '; one ' + (i.pack_name || 'pack').toLowerCase() + ' = ' + mmFmtQty(i.pack_size, 3) + ' ' + i.unit;
+            t += '. ' + (i.cost > 0 ? 'Cost ' + mmFmtMoneyShort(i.cost) + ' / ' + i.unit + ', ' : '') + mmFmtQty(i.stock, 4) + ' in stock.';
+            return t;
+        }
+
+        /* Rebuild the Item dropdown from the Category choice and the typed search (name, any part, any case). */
+        function mmIngRenderPicker() {
+            const sel = mmEl('mmIngPick');
+            const none = mmEl('mmIngNone');
+            const keep = sel.value;
+            const cat = mmEl('mmIngCat').value;
+            const q = mmEl('mmIngSearch').value.trim().toLowerCase();
+            const list = (MM_STATE.ing || []).filter(function(i) {
+                return (!cat || i.category === cat) && (!q || i.name.toLowerCase().indexOf(q) !== -1);
+            });
+            sel.innerHTML = '';
+            const ph = document.createElement('option');
+            ph.value = '';
+            ph.textContent = !MM_STATE.ing ? 'Loading stock items…' : (list.length ? 'Choose a stock item… (' + list.length + ')' : 'No stock items match');
+            sel.appendChild(ph);
+            let group = null;
+            let groupCat = null;
+            list.forEach(function(i) {
+                if (!cat && i.category !== groupCat) {
+                    group = document.createElement('optgroup');
+                    group.label = i.category;
+                    sel.appendChild(group);
+                    groupCat = i.category;
+                }
+                const o = document.createElement('option');
+                o.value = String(i.id);
+                o.textContent = mmIngOptionText(i);
+                o.title = o.textContent;
+                (cat ? sel : group).appendChild(o);
+            });
+            none.hidden = list.length > 0 || !(MM_STATE.ing && MM_STATE.ing.length);
+            if (keep && list.some(function(i) {
+                    return String(i.id) === keep;
+                })) sel.value = keep;
+            else sel.value = '';
+            if (sel.value !== keep) mmIngChosen();
         }
 
         async function mmLoadStock(it) {
@@ -1118,6 +1224,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                         qty: parseFloat(l.quantity_per_portion) || 0,
                         entry: 'base', // existing links keep their exact base-unit meaning
                         per: 0,
+                        pieces: parseFloat(l.pieces_per_unit) || 0,
                         yield_percent: parseFloat(l.yield_percent) || 100
                     };
                 }).map(mmShowAsPieces);
@@ -1130,8 +1237,8 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
         }
 
         /* One plain sentence per line (same wording as the server: rh_recipe_preview_text). */
-        /* "Pieces": for stock counted in a container (packet, box, dozen...), staff type pieces
-           (1 sausage) and the page works out the part of the container. Only the base-unit quantity is saved. */
+        /* "Pieces": for stock counted in a container (packet, box, dozen...), staff type WHOLE pieces
+           (1 sausage) and the page works out the part of the container. Only the base-unit quantity is saved (6 decimals). */
         const MM_CONTAINER_RE = /^(packets?|packs?|packages?|boxe?s?|tins?|trays?|crates?|cartons?|bags?|sachets?|buckets?|containers?|bunch(es)?|bundles?|cases?|punnets?|dozens?|dz|doz)$/i;
 
         function mmIsContainer(unit) {
@@ -1142,91 +1249,84 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             return /^(dozens?|dz|doz)$/i.test((unit || '').trim());
         }
 
-        /* Pieces in one base unit: 12 for a dozen, else what staff typed (0 = not known yet). */
+        /* Pieces in one base unit: 12 for a dozen; else what the stock item says (l.pieces); else what staff
+           typed once in the small box (l.per). 0 = not known yet. Stock keeps the saved value for every device. */
         function mmPer(l) {
             if (mmIsDozen(l.unit)) return 12;
+            if (parseFloat(l.pieces) > 0) return parseFloat(l.pieces);
             const p = parseFloat(l.per);
             return p > 0 ? p : 0;
         }
 
-        function mmPieceMemo(id, per) {
-            try {
-                const m = JSON.parse(localStorage.getItem('rhMmPieces') || '{}') || {};
-                if (per === undefined) return parseFloat(m[id]) || 0;
-                if (per > 0) {
-                    m[id] = per;
-                    localStorage.setItem('rhMmPieces', JSON.stringify(m));
-                }
-            } catch (e) {}
-            return 0;
-        }
-
-        /* Reopening an item: show pieces again when the saved quantity is an exact fraction of a known piece count. */
+        /* Reopening an item: show whole pieces again when the saved quantity is a whole (or half) number of pieces. */
         function mmShowAsPieces(l) {
             const q = l.qty;
-            if (!mmIsContainer(l.unit) || !(q > 0) || q >= 1) return l;
-            const r4 = function(x) {
-                return Math.round(x * 10000) / 10000;
-            };
-            const tryPer = function(n) {
-                const k = Math.round(q * n);
-                if (n >= 2 && k >= 1 && r4(k / n) === r4(q)) {
-                    l.per = mmIsDozen(l.unit) ? 0 : n;
-                    l.entry = 'pieces';
-                    l.qty = k;
-                    return true;
-                }
-                return false;
-            };
-            if (mmIsDozen(l.unit)) {
-                tryPer(12);
-                return l;
-            }
-            const memo = mmPieceMemo(l.ingredient_id);
-            if (memo > 0 && tryPer(memo)) return l;
-            for (let n = 3; n <= 24; n++) { // one piece of n, only where the fraction is not a tidy decimal
-                let m = n;
-                while (m % 2 === 0) m /= 2;
-                while (m % 5 === 0) m /= 5;
-                if (m !== 1 && r4(1 / n) === r4(q)) {
-                    l.per = n;
-                    l.entry = 'pieces';
-                    l.qty = 1;
-                    return l;
-                }
+            const per = mmPer(l);
+            if (!mmIsContainer(l.unit) || !(q > 0) || q >= 1 || !(per >= 2)) return l;
+            const k = Math.round(q * per * 2) / 2;
+            if (k >= 0.5 && Math.abs(k / per - q) < 0.000001) {
+                l.entry = 'pieces';
+                l.qty = k;
             }
             return l;
+        }
+
+        /* Unrounded part of a unit, for cost only (1 piece of 6 = exactly 1/6, so 1 piece costs 2,550.00 and the line total agrees). */
+        function mmLineExact(l) {
+            if (l.entry === 'pieces') {
+                const per = mmPer(l);
+                return per > 0 ? (parseFloat(l.qty) || 0) / per : 0;
+            }
+            return mmLineBase(l);
         }
 
         function mmLineBase(l) {
             const q = parseFloat(l.qty) || 0;
             if (l.entry === 'pieces') {
                 const per = mmPer(l);
-                return per > 0 ? Math.round(q / per * 10000) / 10000 : 0;
+                return per > 0 ? Math.round(q / per * 1000000) / 1000000 : 0;
             }
-            return Math.round((l.entry === 'pack' && l.pack_size > 0 ? q * l.pack_size : q) * 10000) / 10000;
+            return Math.round((l.entry === 'pack' && l.pack_size > 0 ? q * l.pack_size : q) * 1000000) / 1000000;
         }
 
-        /* The quantity sent to the server, in base units (the server rounds it to 4 decimals). */
-        function mmLineSend(l) {
-            const q = parseFloat(l.qty) || 0;
-            return l.entry === 'pieces' ? q / mmPer(l) : q;
+        /* Pieces are typed as whole numbers (1, 2, 3); a half comes only from the half button. Anything else is cut to a whole number. */
+        function mmPiecesGuard(inp, entry) {
+            if (entry !== 'pieces') return;
+            if (inp.dataset.half === '1' && inp.value === '0.5') return;
+            inp.dataset.half = '0';
+            const v = inp.value;
+            if (v === '') return;
+            const n = parseFloat(v);
+            if (!(n >= 0)) {
+                inp.value = '';
+                return;
+            }
+            if (n !== Math.floor(n)) inp.value = Math.floor(n) > 0 ? String(Math.floor(n)) : '';
         }
 
+        /* Whole numbers of pieces (or the half button's 0.5) only. */
+        function mmPiecesOk(q) {
+            return q > 0 && (q === Math.floor(q) || q === 0.5);
+        }
+
+        function mmQtyMode(inp, entry) {
+            inp.inputMode = entry === 'pieces' ? 'numeric' : 'decimal';
+            inp.placeholder = entry === 'pieces' ? 'Pieces' : 'Qty';
+        }
+
+        /* Small grey print under the box: the decimal working, for people who want to check it. */
         function mmPiecesText(l) {
             const per = mmPer(l);
             const k = parseFloat(l.qty) || 0;
-            if (!(per > 0)) return 'Type how many pieces are in one ' + l.unit + ' to see how much stock one sale uses.';
+            if (!(per > 0)) return 'Type how many pieces are in one ' + l.unit + ' (box below) and the stock amount is worked out for you.';
+            if (!(k > 0)) return '';
             const base = mmLineBase(l);
-            const pct = mmFmtQty(k / per * 100, 1);
-            let t = mmFmtQty(k, 4) + (k === 1 ? ' piece' : ' pieces') + ' = ' + mmFmtQty(k, 4) + '/' + mmFmtQty(per, 4) + ' ' + l.unit +
-                ' = ' + mmFmtQty(base, 4) + ' ' + l.unit + ' (' + pct + '%)';
-            if (k > 0) t += ' → 1 ' + l.unit + ' serves ' + mmFmtQty(per / k, 2);
-            if (base > 0 && Math.abs(base * per / k - 1) > 0.00001 && Math.abs(Math.round(per / k) - per / k) < 1e-9) {
-                const n = Math.round(per / k);
-                t += '. Stock keeps 4 decimals, so ' + n + ' sold use ' + mmFmtQty(base * n, 4) + ' ' + l.unit + '.';
+            let t = '= ' + mmFmtQty(k, 2) + ' ÷ ' + mmFmtQty(per, 2) + ' ' + l.unit + ' = ' + mmFmtQty(base, 6) + ' ' + l.unit;
+            if (l.cost > 0) t += ' · cost ' + mmFmtMoney(l.cost / per) + ' each';
+            const n = per / k;
+            if (base > 0 && n >= 2 && Math.abs(Math.round(n) - n) < 1e-9) {
+                t += ' · ' + Math.round(n) + ' sold use ' + mmFmtQty(base * Math.round(n), 4) + ' ' + l.unit;
             }
-            if (l.cost > 0) t += ' One piece costs ' + mmFmtMoney(l.cost / per) + '.';
             return t;
         }
 
@@ -1235,11 +1335,17 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             const base = mmLineBase(l);
             const hasPack = l.pack_size > 0;
             const pw = (l.pack_name || 'pack').toLowerCase();
-            let t = 'Uses ' + mmFmtQty(base) + ' ' + l.unit + ' of ' + l.name;
+            let t = 'Uses ' + mmFmtQty(base, 6) + ' ' + l.unit + ' of ' + l.name;
             if (hasPack) t += ' (' + pw + ' of ' + mmFmtQty(l.pack_size, 3) + ')';
             t += ' per item sold';
             if (hasPack && base > 0) t += ' → 1 ' + pw + ' serves ' + mmFmtQty(l.pack_size / base, 2);
             return t;
+        }
+
+        /* The pieces working is small grey print; every other sentence keeps the normal preview look. */
+        function mmSetPreview(el, l) {
+            el.textContent = mmPreviewText(l);
+            el.classList.toggle('mm-math', l.entry === 'pieces');
         }
 
         function mmUnitOptions(sel, l, current) {
@@ -1257,17 +1363,19 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             if (mmIsContainer(l.unit)) {
                 const pc = document.createElement('option');
                 pc.value = 'pieces';
-                pc.textContent = mmIsDozen(l.unit) ? 'pieces (12 in a dozen)' : 'pieces';
+                const per = mmPer(l);
+                pc.textContent = per > 0 ? 'pieces (' + mmFmtQty(per, 2) + ' in a ' + l.unit + ')' : 'pieces';
                 sel.appendChild(pc);
             }
             sel.value = current === 'pack' && l.pack_size > 0 ? 'pack' : (current === 'pieces' && mmIsContainer(l.unit) ? 'pieces' : 'base');
             sel.disabled = sel.options.length < 2;
         }
 
-        /* Quick 1 / half / 2 buttons and the "pieces in one packet" box, shared by the add row and each saved line. */
+        /* Quick 1 / 2 / 3 / half buttons, shared by the add row and each saved line. The half button is the only way to get a half piece. */
         function mmWireTools(tools, qtyInput) {
             tools.querySelectorAll('[data-q]').forEach(function(b) {
                 b.addEventListener('click', function() {
+                    qtyInput.dataset.half = b.getAttribute('data-q') === '0.5' ? '1' : '0';
                     qtyInput.value = b.getAttribute('data-q');
                     qtyInput.dispatchEvent(new Event('input', {
                         bubbles: true
@@ -1276,11 +1384,11 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             });
         }
 
-        /* Show or hide the pieces box and fill its wording from the current line. */
+        /* Show the small "pieces in one packet" box only when the stock item does not know it yet. */
         function mmToolsSync(l, perWrap, perLbl) {
-            const need = l.entry === 'pieces' && mmIsContainer(l.unit) && !mmIsDozen(l.unit);
+            const need = l.entry === 'pieces' && mmIsContainer(l.unit) && !mmIsDozen(l.unit) && !(parseFloat(l.pieces) > 0);
             perWrap.hidden = !need;
-            perLbl.textContent = 'How many pieces in one ' + l.unit + '?';
+            perLbl.textContent = 'How many pieces in one ' + l.unit + '? (saved on the stock item for everyone)';
         }
 
         function mmStockRender() {
@@ -1302,8 +1410,9 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 qty.type = 'number';
                 qty.step = 'any';
                 qty.min = '0';
-                qty.inputMode = 'decimal';
                 qty.value = l.qty;
+                if (l.entry === 'pieces' && Number(l.qty) === 0.5) qty.dataset.half = '1';
+                mmQtyMode(qty, l.entry);
                 qty.setAttribute('aria-label', 'Quantity of ' + l.name);
                 const unit = document.createElement('select');
                 unit.setAttribute('aria-label', 'Unit for ' + l.name);
@@ -1314,14 +1423,15 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 rm.textContent = 'Remove';
                 const pv = document.createElement('p');
                 pv.className = 'mm-preview';
-                pv.textContent = mmPreviewText(l);
+                mmSetPreview(pv, l);
                 const tools = document.createElement('div');
                 tools.className = 'mm-qtytools';
                 tools.innerHTML = '<span class="mm-quick" role="group" aria-label="Quick quantity">' +
                     '<button type="button" class="mm-btn mm-btn-sm" data-q="1" aria-label="Use 1">1</button>' +
-                    '<button type="button" class="mm-btn mm-btn-sm" data-q="0.5" aria-label="Use one half">½</button>' +
-                    '<button type="button" class="mm-btn mm-btn-sm" data-q="2" aria-label="Use 2">2</button></span>' +
-                    '<label class="mm-per"><span></span><input type="number" step="any" min="1" inputmode="decimal" placeholder="e.g. 6"></label>';
+                    '<button type="button" class="mm-btn mm-btn-sm" data-q="2" aria-label="Use 2">2</button>' +
+                    '<button type="button" class="mm-btn mm-btn-sm" data-q="3" aria-label="Use 3">3</button>' +
+                    '<button type="button" class="mm-btn mm-btn-sm" data-q="0.5" aria-label="Use one half">½</button></span>' +
+                    '<label class="mm-per"><span></span><input type="number" step="any" min="0.01" inputmode="decimal" placeholder="e.g. 6"></label>';
                 const perWrap = tools.querySelector('.mm-per');
                 const perLbl = perWrap.querySelector('span');
                 const perIn = perWrap.querySelector('input');
@@ -1332,26 +1442,25 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 const refresh = function() {
                     MM_STATE.changed = true;
                     mmToolsSync(l, perWrap, perLbl);
-                    pv.textContent = mmPreviewText(l);
+                    mmSetPreview(pv, l);
                     mmStockTotals();
                 };
                 qty.addEventListener('input', function() {
+                    mmPiecesGuard(qty, l.entry);
                     l.qty = qty.value;
                     refresh();
                 });
                 perIn.addEventListener('input', function() {
                     l.per = perIn.value;
-                    if (mmPer(l) > 0) mmPieceMemo(l.ingredient_id, mmPer(l));
                     refresh();
                 });
                 unit.addEventListener('change', function() {
                     l.entry = unit.value;
-                    if (l.entry === 'pieces' && !(mmPer(l) > 0)) {
-                        const m = mmPieceMemo(l.ingredient_id);
-                        if (m > 0) {
-                            l.per = m;
-                            perIn.value = m;
-                        }
+                    mmQtyMode(qty, l.entry);
+                    if (l.entry === 'pieces') {
+                        mmPiecesGuard(qty, 'pieces');
+                        if (!(parseFloat(qty.value) > 0)) qty.value = '1';
+                        l.qty = qty.value;
                     }
                     refresh();
                 });
@@ -1386,7 +1495,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             let cost = 0;
             MM_STATE.lines.forEach(function(l) {
                 const y = l.yield_percent > 0 ? l.yield_percent / 100 : 1;
-                cost += mmLineBase(l) / y * l.cost;
+                cost += mmLineExact(l) / y * l.cost;
             });
             wrap.hidden = false;
             mmEl('mmCostTotal').textContent = mmFmtMoney(cost);
@@ -1394,25 +1503,20 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             mmEl('mmCostPct').textContent = price > 0 ? 'Food cost ' + (cost / price * 100).toFixed(1) + '% of the price, margin ' + mmFmtMoney(price - cost) : '';
         }
 
-        function mmFindIng(text) {
-            const t = (text || '').trim().toLowerCase();
-            if (!t || !MM_STATE.ing) return null;
-            let hit = MM_STATE.ing.find(function(i) {
-                return i.label.toLowerCase() === t;
-            });
-            if (!hit) {
-                const m = MM_STATE.ing.filter(function(i) {
-                    return i.name.toLowerCase() === t;
-                });
-                if (m.length === 1) hit = m[0];
-            }
-            return hit || null;
+        /* The picked stock item (the Item dropdown holds the stock item id). */
+        function mmFindIng(value) {
+            const id = parseInt(value, 10);
+            if (!id || !MM_STATE.ing) return null;
+            return MM_STATE.ing.find(function(i) {
+                return i.id === id;
+            }) || null;
         }
 
-        /* The row being typed: pick a stock item, the unit choices follow it, the sentence updates live. */
+        /* The row being typed: pick a stock item, the unit line and unit choices follow it, the sentence updates live. */
         function mmIngChosen() {
             const ing = mmFindIng(mmEl('mmIngPick').value);
             const sel = mmEl('mmIngUnit');
+            const ul = mmEl('mmIngUnitLine');
             if (!ing) {
                 MM_STATE.draftId = 0;
                 sel.innerHTML = '<option value="base">unit</option>';
@@ -1420,6 +1524,9 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 mmEl('mmIngPreview').textContent = '';
                 mmEl('mmIngTools').hidden = true;
                 mmEl('mmIngPer').value = '';
+                ul.hidden = true;
+                ul.textContent = '';
+                mmQtyMode(mmEl('mmIngQty'), 'base');
                 return;
             }
             let prev = sel.value;
@@ -1427,10 +1534,13 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 MM_STATE.draftId = ing.id;
                 prev = mmIsContainer(ing.unit) ? 'pieces' : 'base';
                 if (mmIsContainer(ing.unit) && !(parseFloat(mmEl('mmIngQty').value) > 0)) mmEl('mmIngQty').value = '1';
-                const m = mmPieceMemo(ing.id);
-                mmEl('mmIngPer').value = m > 0 && !mmIsDozen(ing.unit) ? m : '';
+                mmEl('mmIngPer').value = '';
             }
             mmUnitOptions(sel, ing, prev);
+            ul.hidden = false;
+            ul.textContent = mmUnitLine(ing);
+            mmQtyMode(mmEl('mmIngQty'), sel.value);
+            mmPiecesGuard(mmEl('mmIngQty'), sel.value);
             mmIngLive();
         }
 
@@ -1443,6 +1553,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 cost: ing.cost,
                 pack_name: ing.pack_name,
                 pack_size: ing.pack_size,
+                pieces: ing.pieces,
                 qty: mmEl('mmIngQty').value,
                 entry: mmEl('mmIngUnit').value,
                 per: mmEl('mmIngPer').value
@@ -1461,12 +1572,13 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             mmToolsSync(d, mmEl('mmIngPerWrap'), mmEl('mmIngPerLbl'));
             const q = parseFloat(mmEl('mmIngQty').value);
             if (!(q > 0)) {
-                out.textContent = mmIsContainer(ing.unit) ? 'Counted in ' + ing.unit + '. Choose "pieces" and type how many pieces one sale uses (1 for one sausage), or tap 1, ½ or 2.' : ing.pack_size > 0 ?
-                    'Counted in ' + ing.unit + '; one ' + (ing.pack_name || 'pack').toLowerCase() + ' is ' + mmFmtQty(ing.pack_size, 3) + ' ' + ing.unit + '. Enter how much one sale uses.' :
-                    'Counted in ' + ing.unit + '. Enter how much one sale uses (decimals are fine, for example 0.15).';
+                out.classList.remove('mm-math');
+                out.textContent = mmIsContainer(ing.unit) ? 'Choose "pieces" and type a whole number (1 for one sausage), or tap 1, 2, 3 or ½.' : ing.pack_size > 0 ?
+                    'One ' + (ing.pack_name || 'pack').toLowerCase() + ' is ' + mmFmtQty(ing.pack_size, 3) + ' ' + ing.unit + '. Enter how much one sale uses.' :
+                    'Enter how much one sale uses (decimals are fine, for example 0.15).';
                 return;
             }
-            out.textContent = mmPreviewText(d);
+            mmSetPreview(out, d);
         }
 
         function mmStockAdd() {
@@ -1491,13 +1603,17 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             nl.yield_percent = 0; // 0 = not sent: the server keeps this recipe's existing yield for the line, else 100
             if (nl.entry === 'pieces') {
                 if (!mmIsContainer(ing.unit)) nl.entry = 'base';
-                else if (!(mmPer(nl) > 0)) {
+                else if (!mmPiecesOk(q)) {
+                    mmEl('mmIngQty').focus();
+                    Alert.show('Type a whole number of pieces (1, 2, 3), or tap the ½ button for half a piece.', 'error');
+                    return;
+                } else if (!(mmPer(nl) > 0)) {
                     mmEl('mmIngPer').focus();
                     Alert.show('Type how many pieces are in one ' + ing.unit + ' of ' + ing.name + ', or choose "' + ing.unit + '" as the unit.', 'error');
                     return;
-                } else mmPieceMemo(ing.id, mmPer(nl));
+                }
             } else if (nl.entry === 'pack' && !(ing.pack_size > 0)) nl.entry = 'base';
-            nl.per = mmPer(nl);
+            nl.per = parseFloat(ing.pieces) > 0 ? 0 : mmPer(nl); // typed once here; the server saves it on the stock item
             MM_STATE.lines.push(nl);
             MM_STATE.changed = true;
             mmEl('mmIngPick').value = '';
@@ -1539,16 +1655,20 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             fd.set('price', mmEl('mmFree').checked ? '0' : mmEl('mmPrice').value);
             if (MM_STATE.ready && MM_STATE.changed) {
                 for (let i = 0; i < MM_STATE.lines.length; i++) {
-                    if (!(parseFloat(MM_STATE.lines[i].qty) > 0)) return fail('Enter a quantity above 0 for ' + MM_STATE.lines[i].name + ', or remove it.');
-                    if (MM_STATE.lines[i].entry === 'pieces' && !(mmPer(MM_STATE.lines[i]) > 0)) return fail('Type how many pieces are in one ' + MM_STATE.lines[i].unit + ' of ' + MM_STATE.lines[i].name + ', or choose "' + MM_STATE.lines[i].unit + '" as the unit.');
+                    const ln = MM_STATE.lines[i];
+                    if (!(parseFloat(ln.qty) > 0)) return fail('Enter a quantity above 0 for ' + ln.name + ', or remove it.');
+                    if (ln.entry === 'pieces' && !mmPiecesOk(parseFloat(ln.qty))) return fail('Type a whole number of pieces for ' + ln.name + ' (1, 2, 3), or use the ½ button for half a piece.');
+                    if (ln.entry === 'pieces' && !(mmPer(ln) > 0)) return fail('Type how many pieces are in one ' + ln.unit + ' of ' + ln.name + ', or choose "' + ln.unit + '" as the unit.');
                 }
                 fd.set('recipe_changed', '1');
                 fd.set('recipe_lines', JSON.stringify(MM_STATE.lines.map(function(l) {
                     const o = {
                         ingredient_id: l.ingredient_id,
-                        quantity: mmLineSend(l),
-                        unit: l.entry === 'pieces' ? 'base' : l.entry
+                        quantity: parseFloat(l.qty),
+                        unit: l.entry
                     };
+                    // The whole pieces are sent as typed; the server divides by pieces-in-a-unit and stores 6 decimals.
+                    if (l.entry === 'pieces' && !mmIsDozen(l.unit) && !(parseFloat(l.pieces) > 0) && parseFloat(l.per) > 0) o.pieces_per_unit = parseFloat(l.per);
                     if (l.yield_percent > 0) o.yield_percent = l.yield_percent;
                     return o;
                 })));
@@ -1573,6 +1693,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                     return;
                 }
                 mmCloseItem();
+                MM_STATE.ing = null; // a pieces-per-unit saved with this item is now on the stock item: reload the list next time
                 Alert.show(res.message || 'Saved.', 'success');
                 mmRefresh();
             } catch (err) {
@@ -1747,7 +1868,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
 
         /* ---------- New stock item (small helper form) ---------- */
         function openIngredientModal() {
-            mmEl('ig-name').value = mmEl('mmIngPick').value.trim();
+            mmEl('ig-name').value = mmEl('mmIngSearch').value.trim();
             mmEl('ig-category').value = 'General';
             mmEl('ig-unit').value = 'each';
             mmEl('ig-cost').value = 0;
@@ -1789,7 +1910,10 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                     return i.id === data.id;
                 });
                 if (made) {
-                    mmEl('mmIngPick').value = made.label;
+                    mmEl('mmIngCat').value = '';
+                    mmEl('mmIngSearch').value = '';
+                    mmIngRenderPicker();
+                    mmEl('mmIngPick').value = String(made.id);
                     mmIngChosen();
                 }
                 Alert.show(data.reused ? 'That stock item already existed. It is selected.' : 'Stock item created. Enter the quantity and add it.', 'success');
@@ -1835,9 +1959,22 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 mmEl('mmNewCategory').hidden = !isNew;
                 if (isNew) mmEl('mmNewCategory').focus();
             });
-            mmEl('mmIngPick').addEventListener('input', mmIngChosen);
-            mmEl('mmIngQty').addEventListener('input', mmIngLive);
-            mmEl('mmIngUnit').addEventListener('change', mmIngLive);
+            mmEl('mmIngPick').addEventListener('change', mmIngChosen);
+            mmEl('mmIngCat').addEventListener('change', mmIngRenderPicker);
+            mmEl('mmIngSearch').addEventListener('input', mmIngRenderPicker);
+            mmEl('mmIngQty').addEventListener('input', function() {
+                mmPiecesGuard(mmEl('mmIngQty'), mmEl('mmIngUnit').value);
+                mmIngLive();
+            });
+            mmEl('mmIngUnit').addEventListener('change', function() {
+                const q = mmEl('mmIngQty');
+                mmQtyMode(q, mmEl('mmIngUnit').value);
+                if (mmEl('mmIngUnit').value === 'pieces') {
+                    mmPiecesGuard(q, 'pieces');
+                    if (!(parseFloat(q.value) > 0)) q.value = '1';
+                }
+                mmIngLive();
+            });
             mmEl('mmIngPer').addEventListener('input', mmIngLive);
             mmWireTools(mmEl('mmIngTools'), mmEl('mmIngQty'));
             mmEl('mmIngQty').addEventListener('keydown', function(e) {

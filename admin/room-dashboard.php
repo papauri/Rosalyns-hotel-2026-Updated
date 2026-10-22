@@ -272,7 +272,7 @@ $roomStatuses = getRoomStatuses();
                 <div class="room-info">
                     <div class="guest">
                         <?php if ($room['last_guest']): ?>
-                            Last: <?php echo htmlspecialchars($room['last_guest']); ?>
+                            Last: <?php echo htmlspecialchars($room['last_guest']); ?><?php if (trim((string)($room['last_room_guest'] ?? '')) !== ''): ?> (room guest: <?php echo htmlspecialchars((string)$room['last_room_guest']); ?>)<?php endif; ?>
                         <?php else: ?>
                             No recent guest
                         <?php endif; ?>

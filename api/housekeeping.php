@@ -152,6 +152,7 @@ function getOccupiedRooms(): array {
             ir.housekeeping_status,
             b.id as booking_id,
             b.guest_name,
+            b.room_guest_name,
             b.check_out_date,
             b.status as booking_status,
             CASE 
@@ -189,6 +190,7 @@ function getCheckoutCleanupRooms(): array {
             ir.room_name,
             b.id as booking_id,
             b.guest_name,
+            b.room_guest_name,
             b.check_out_date
         FROM individual_rooms ir
         INNER JOIN bookings b ON b.individual_room_id = ir.id

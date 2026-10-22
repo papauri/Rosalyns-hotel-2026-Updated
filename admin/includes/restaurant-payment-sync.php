@@ -413,7 +413,7 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
     $recorded = 0;
     foreach ($reqs as $r) {
         $iid = (int)$r['ingredient_id'];
-        $q = round((float)$r['required_qty'], 4);
+        $q = round((float)$r['required_qty'], 6);
         if ($iid <= 0 || $q <= 0) {
             continue;
         }
