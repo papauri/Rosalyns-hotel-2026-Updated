@@ -123,6 +123,16 @@
     <p>Check-in is refused before the booked arrival date. Use <strong>Adjust Stay Dates</strong> on the booking first, then check in. See <a href="07-reception-bookings.html#dates">How to change the stay dates</a>.</p>
   </details>
 
+  <details class="faq" id="faq-checkin-room-not-clean">
+    <summary>Check-in says the room is not marked clean.</summary>
+    <p>The room is blocked when its status is anything other than Available (for example Cleaning), or when it has a cleaning task due today or earlier that is not done. Ask housekeeping to mark the task done, then check in again. Someone with <strong>Check-in to Room Not Clean</strong> can click <strong>Check in anyway</strong>. See <a href="06-housekeeping.html#checkin">Checking a guest in to a room that is not clean</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-move-in-house-guest">
+    <summary>How do I move a guest who is already in the hotel to another room?</summary>
+    <p>On the Bookings list click <strong>Change room</strong> on the booking. You can pick a room of the same type or of another type. The old room goes to Cleaning. The booking then shows only the new room. See <a href="07-reception-bookings.html#assign">How to assign or change a room</a>.</p>
+  </details>
+
   <details class="faq" id="faq-checkin-payment">
     <summary>Check-in is greyed out or says a payment is needed.</summary>
     <p>At least a part payment must be recorded before check-in. Record the deposit or payment, then check in. A physical room must also be assigned. See <a href="07-reception-bookings.html#checkin">How to check a guest in</a>.</p>
@@ -306,6 +316,16 @@
     <p>Open the payment and click <strong>Refund</strong>. Choose the amount, the reason and the status (use <strong>Pending</strong> until the money has actually gone out, then settle it). Mobile money refunds must start as Pending or Processing. See <a href="13-finance-payments.html#refund">How to refund a payment</a>.</p>
   </details>
 
+  <details class="faq" id="faq-whatsapp-invoice-expired">
+    <summary>A guest says the invoice link I sent on WhatsApp does not open.</summary>
+    <p>The link is valid for 30 days. It also stops working at once if the booking is cancelled or deleted. The guest sees <em>"This link has expired"</em> and is asked to contact the hotel. Send the invoice again with <strong>Send via WhatsApp</strong> if the booking is still active. See <a href="07-reception-bookings.html#invoice">How to send an invoice or quotation</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-receipt-one-number">
+    <summary>Why does a till sale have one receipt number and a separate order number?</summary>
+    <p>Each till sale has one receipt number. The order number is shown separately on the receipt, so the two are not confused. A walk-in sale with no email sends nothing by itself, so use the receipt options on the till. See <a href="01-pos-till.html#receipts">How to print a kitchen ticket or send a receipt</a>.</p>
+  </details>
+
   <details class="faq" id="faq-no-receipt">
     <summary>Why didn't the guest get a receipt?</summary>
     <p>A receipt with a PDF is emailed by itself, once, whenever a payment is saved as Paid or Completed (room, conference, gym, event, and till or room-service sales that have a customer email). Read the green message you saw when you saved the payment. It says what happened: <em>"Receipt emailed to the guest."</em> or why not:</p>
@@ -337,7 +357,7 @@
 
   <details class="faq" id="faq-quote-invoice-receipt">
     <summary>Quote, invoice or receipt: which one is sent when?</summary>
-    <p>A <strong>quotation</strong> is the price before the stay: it goes with a front-desk booking that has nothing paid. An <strong>invoice</strong> asks for money: it is sent by hand (<strong>Send invoice (balance due)</strong>, only while something is owed), or at check-out when the guest still owes. A <strong>receipt</strong> says money came in: it is sent by itself for every payment. A payment never sends an invoice. At check-out the guest gets a <strong>Final Invoice</strong> if a balance is owed, or a <strong>Stay Statement - paid in full</strong> if nothing is owed. When money goes back, the guest gets a refund notice or a credit note. See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</p>
+    <p>A <strong>quotation</strong> is the price before the stay: it goes with a front-desk booking that has nothing paid. An <strong>invoice</strong> asks for money: it is sent by hand (<strong>Send invoice (balance due)</strong>, only while something is owed), or at check-out when the guest still owes. A <strong>receipt</strong> says money came in: it is sent by itself for every payment. A payment never sends an invoice. At check-out the guest gets a <strong>Final Invoice</strong> if a balance is owed, or a <strong>Stay statement (paid in full)</strong> if nothing is owed. When money goes back, the guest gets a refund notice or a credit note. See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</p>
   </details>
 
   <details class="faq" id="faq-delete-payment">
@@ -348,6 +368,16 @@
   <details class="faq" id="faq-credit-note-money">
     <summary>Where did my credit note money go?</summary>
     <p>If the guest paid by credit note, the money went back to <strong>that same credit note</strong> when the booking was cancelled. It is never paid out as cash. The cancel summary says so: <em>"... paid by credit note was returned to credit note CN-... (re-opened, no cash paid out)."</em> Check the note under <strong>Money</strong> &rarr; <strong>Credit Notes</strong>. If the note was voided or has expired, it cannot be reopened. That share then shows on the booking as <em>credit owed back</em>: refund it, or issue a new credit note. See <a href="13-finance-payments.html#credit-paid">Money paid by credit note</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-money-owed-unavailable">
+    <summary>Why does a figure say Unavailable, and why do the money-owed totals match?</summary>
+    <p>The money-owed total is one figure. It is the same on the Dashboard (the <strong>Owed to us</strong> card), Accounting, End of Day, Reports and Invoices. It includes room, conference, gym and event accounts and open unpaid tabs. <strong>Unavailable</strong> means that figure could not be loaded, so it is not shown as a wrong number. Reload the page. See <a href="13-finance-payments.html#owing">How to see who still owes money</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-shop-void-stock">
+    <summary>A shop sale was voided. Did the goods go back on the shelf?</summary>
+    <p>In shop mode (the restaurant module is off) the screen asks <em>"Put the goods back in stock?"</em>. <strong>OK</strong> puts them back on the shelf. <strong>Cancel</strong> records them as damaged waste. In a restaurant, stock for food already started is recorded as wastage. See <a href="01-pos-till.html#cancel-void">How to cancel or void an order</a>.</p>
   </details>
 
   <details class="faq" id="faq-end-of-day">
@@ -382,6 +412,11 @@
     <p>A pending booking with no payment lapses after the hours set in <strong>Hotel Settings</strong> &rarr; Hotel details &rarr; <strong>Unpaid pending bookings lapse after</strong> (48 hours unless changed). Its room is released. Tentative holds expire when their time runs out, and unpaid confirmed bookings are only released if you set hours above 0. See <a href="19-hotel-settings.html#by-itself">Everything the system does by itself</a>.</p>
   </details>
 
+  <details class="faq" id="faq-media-inactive">
+    <summary>I switched off a photo and cannot find it to switch it back on.</summary>
+    <p>In the <strong>Media Portal</strong> use the status filter: <strong>Active</strong> (the default), <strong>Inactive (N)</strong> or <strong>Active and inactive</strong>. Open the item and make it active again. In <strong>Gallery</strong> you can also drag a photo by its handle, or use <strong>Move up</strong> and <strong>Move down</strong>, to change the order. See <a href="99-admin-dashboard-full-guide.html#media">Media Portal</a>.</p>
+  </details>
+
   <details class="faq" id="faq-by-itself">
     <summary>What does the system do by itself, and what does it never do by itself?</summary>
     <p>By itself: expire tentative holds and unpaid pending bookings, send reminder emails (if switched on), create the next recurring maintenance task, take the nightly backup after 01:00, and take stock off when something is sold. Never by itself: send the End of Day report or the daily station reports, close a cashier's shift, or restore a backup. See <a href="19-hotel-settings.html#by-itself">Everything the system does by itself</a>.</p>
@@ -400,6 +435,16 @@
   <details class="faq" id="faq-time-zone">
     <summary>The times look wrong (wrong time or time zone).</summary>
     <p>Times on a booking's page, on the till and on an order receipt are shown in your own device's time zone. Fix the clock and time zone on the phone or computer. The hotel's own time zone is fixed at installation. See <a href="99-admin-dashboard-full-guide.html#lists">Lists, number cards, tabs and times</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-api-key-lost">
+    <summary>I lost an API key. Can I see it again?</summary>
+    <p>No. A key is shown once, when it is created or regenerated, with the words <em>"copy this key now"</em>. Click <strong>Regenerate</strong> on the key in <strong>Settings</strong> &rarr; <strong>API Keys</strong> and send the new key to the client. The old key stops working. See <a href="99-admin-dashboard-full-guide.html#apikeys">API Keys</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-receptionist-payments">
+    <summary>Can a receptionist take a payment and print a receipt?</summary>
+    <p>Yes. The normal Receptionist role has <strong>Add Payments</strong> and <strong>Receipts</strong>. <strong>POS Accounting</strong> is for the accountant only, and is granted to one person at a time. See <a href="18-staff-access.html#receptionist">Example: set up a receptionist</a>.</p>
   </details>
 
   <details class="faq" id="faq-permissions-list">

@@ -271,6 +271,7 @@
     <li>Click <strong>Tabs</strong>, <strong>More</strong> on the tab card, then <strong>Void</strong>.</li>
     <li>Type a reason of at least 8 characters (an optional follow-up note is also offered) and click <strong>Void order</strong>.</li>
     <li>You will see <em>"Order voided."</em> Stock is restored for items the kitchen or bar had not started; items already started are recorded as wastage (the ingredients are gone), and counted once, not also as usage. The order is removed from the station screens, any payment is reversed with a matching refund line, and any room-service charge is taken off the folio.</li>
+    <li>In shop mode (the restaurant module is off), a voided sale is different. The screen asks <em>"Put the goods back in stock?"</em>. <strong>OK</strong> puts the goods back on the shelf. <strong>Cancel</strong> means the goods are damaged, and they are recorded as waste.</li>
   </ol>
   <p>Many tabs at once: select them and click <strong>Bulk void</strong>. You see <em>"3 tabs voided."</em> A void is permanent and is recorded with your name and reason.</p>
   <div class="note"><p>A room-service order that has been delivered can still be voided while the guest is in-house; after check-out use a credit on the booking instead. See the <a href="05-room-service.html">Room service guide</a>.</p></div>
@@ -279,11 +280,11 @@
   <h2 id="refund">How to refund a paid order</h2>
   <ol class="steps">
     <li>Click <strong>Recent</strong>. Only people with <strong>POS Refunds</strong> see the <strong>Refund</strong> button next to paid orders. (Without that permission, ask a manager to do it.)</li>
-    <li>Click <strong>Refund</strong>. The <strong>Process refund</strong> window explains the order will be marked as refunded and a negative payment record created, and that stock is <em>not</em> automatically restored.</li>
+    <li>Click <strong>Refund</strong>. The <strong>Process refund</strong> window explains the order will be marked as refunded and a negative payment record created, and that stock is <em>not</em> automatically restored in a restaurant. In shop mode the goods go back on the shelf, unless they are damaged.</li>
     <li>Type the <strong>Reason for refund</strong> (at least 5 characters, for example "Guest complaint, overcharge, duplicate order").</li>
     <li>Click <strong>Confirm refund</strong>. You will see <em>"Refund processed for ORD-..."</em></li>
   </ol>
-  <p>The whole order is refunded, including every leg of a split bill, in the method it was paid with. Only paid orders can be refunded, and an order that is already fully refunded is refused. Because stock is not put back, a manager must correct stock by hand if needed.</p>
+  <p>The whole order is refunded, including every leg of a split bill, in the method it was paid with. Only paid orders can be refunded, and an order that is already fully refunded is refused. In a restaurant stock is not put back, so a manager must correct stock by hand if needed. In shop mode the goods go back on the shelf, unless they are damaged.</p>
 
   <h2 id="86">How to 86 an item (mark it unavailable)</h2>
   <p>"86" means the item is finished. This hides it from the till for everyone.</p>
@@ -387,7 +388,7 @@
   <p>Replies and notes from the stations appear in the <strong>Messages</strong> chat and as alert cards. A station's "ready for collection" message appears as <strong>Ready for collection</strong> with the order reference. An alert from the station about an 86'd item tells you to inform the guest and offer an alternative.</p>
 
   <h2 id="receipts">How to print a kitchen ticket or send a receipt</h2>
-  <p>When the order has a customer email address, the receipt is emailed by itself, once, as soon as the payment is saved. On a split bill each person's payment sends its own receipt, to the email on the order. Orders with no email (walk-ins) send nothing by themselves: use the options below.</p>
+  <p>When the order has a customer email address, the receipt is emailed by itself, once, as soon as the payment is saved. On a split bill each person's payment sends its own receipt, to the email on the order. Orders with no email (walk-ins) send nothing by themselves: use the options below. Each till sale has one receipt number. The order number is shown separately on the receipt, so the two are not confused.</p>
   <ul>
     <li><strong>Kitchen ticket (KOT):</strong> click <strong>Print KOT</strong> in the <strong>Order Fired!</strong> window, or click <strong>Tabs</strong>, <strong>More</strong>, <strong>KOT</strong> on a tab card.</li>
     <li><strong>Receipt after payment:</strong> the <strong>Payment received</strong> or <strong>Tab settled</strong> window offers <strong>Email</strong> (type the address and click <strong>Send email</strong>), <strong>WhatsApp</strong>, and <strong>Print receipt</strong>. Click <strong>Done</strong> when finished.</li>

@@ -103,7 +103,7 @@
   <ol class="steps">
     <li>Type the amount the guest handed over. A warning appears: <em>"That is MWK ... more than owed. The extra will be issued to the guest as a credit note."</em></li>
     <li>Tick <strong>The guest paid more than owed</strong>. The tick is required; you cannot save without it. (On <strong>Create Booking</strong> the <strong>Amount Collected</strong> box has the same tick. In <strong>Payments &amp; balance</strong> on the bookings list it is in the same place.)</li>
-    <li>Record the payment as <strong>Completed</strong> or <strong>Paid</strong>.</li>
+    <li>Record the payment as <strong>Completed</strong> or <strong>Paid</strong>. The payment gets its receipt, the same as any other payment.</li>
     <li>You will see <em>"Overpayment detected — credit note CN... for ... issued and queued under Credit Notes."</em></li>
     <li>On the booking, the extra shows as a refund line with reason <strong>Overpayment</strong>, paid by credit note. The booking reads Paid with no balance.</li>
     <li>If the guest has an email address, the credit note is emailed to them.</li>
@@ -140,7 +140,7 @@
       <tr><td>Any payment is saved as Paid or Completed (Room, Conference, Gym, Event)</td><td>A <strong>Receipt</strong> with a PDF, one per payment</td><td>By itself, once. Also when a Pending payment is later marked Paid or Completed</td></tr>
       <tr><td>A restaurant or room-service sale is paid on the till</td><td>A <strong>Receipt</strong></td><td>By itself, only when the order has a customer email. A bill split between several people sends one receipt for each part, to the email on the order</td></tr>
       <tr><td>Check-out and the guest still owes money</td><td>A <strong>Final Invoice</strong></td><td>By itself at check-out</td></tr>
-      <tr><td>Check-out and nothing is owed</td><td>A <strong>Stay Statement - paid in full</strong> (the same itemised list, with no request for money)</td><td>By itself at check-out</td></tr>
+      <tr><td>Check-out and nothing is owed</td><td>A <strong>Stay statement (paid in full)</strong> (the same itemised list, with no request for money)</td><td>By itself at check-out. If the guest had already checked out and the last payment clears the balance later, it is emailed once at that point, with the same invoice number</td></tr>
       <tr><td>A payment comes in later for a balance</td><td>A <strong>Receipt</strong> (never an invoice)</td><td>By itself</td></tr>
       <tr><td>Money goes back to the guest</td><td>A <strong>Refund Notice</strong> (refund to the original method, or unused nights at an early check-out) or a <strong>Credit Note</strong> (store credit or an overpayment)</td><td>By itself when the refund or credit note is saved, if the guest has an email</td></tr>
     </tbody>
@@ -205,17 +205,18 @@
     <li>Click <strong>Back to payment ledger</strong> to return.</li>
   </ol>
   <p>A balance of one tambala (0.01) or less counts as paid. Anything above that is shown as owing.</p>
+  <p>The money-owed total is the same everywhere it appears: the <strong>Owed to us</strong> card on the Dashboard and on Accounting, and the matching figures on End of Day, Reports and Invoices. It includes room, conference, gym and event accounts and open unpaid tabs. If a figure cannot be loaded, it shows <strong>Unavailable</strong> instead of a wrong number. Reload the page, and tell your manager if it still says Unavailable.</p>
 
   <h2 id="invoices">Invoices</h2>
   <p><strong>Money</strong> &rarr; <strong>Invoices</strong> (page title <strong>Invoices &amp; Credit Notes</strong>). It lists one line per payment, with the invoice number once an invoice exists. Filters: <strong>Booking Type</strong>, <strong>Payment Status</strong>, <strong>Search</strong> (invoice number, payment number, booking reference). Changing a dropdown applies at once. The fold-out <strong>Receivables aging and outstanding by source</strong> groups unpaid amounts into 0&ndash;30, 31&ndash;60, 61&ndash;90 and 90+ day age bands.</p>
   <table>
     <thead><tr><th>Button</th><th>What it does</th></tr></thead>
     <tbody>
-      <tr><td><strong>View</strong></td><td>Opens the saved PDF in a new tab.</td></tr>
+      <tr><td><strong>View</strong></td><td>Opens the saved PDF in a new tab. Staff open it through a checked download page, so a stored PDF cannot be opened by typing its web address.</td></tr>
       <tr><td><strong>Resend</strong> / <strong>Email</strong></td><td>Emails the invoice to the customer. Message: <em>"Invoice resent successfully!"</em></td></tr>
       <tr><td><strong>Reminder</strong></td><td>Only for Pending or Partial payments. Sends the invoice as a reminder: <em>"Payment reminder email sent successfully!"</em></td></tr>
       <tr><td><strong>WhatsApp</strong></td><td>Opens WhatsApp with a reminder message.</td></tr>
-      <tr><td><strong>Regenerate</strong></td><td>Rebuilds the PDF. You are asked to confirm.</td></tr>
+      <tr><td><strong>Regenerate</strong></td><td>Rebuilds the PDF. You are asked to confirm. On a fully paid booking it gives the <strong>Stay statement (paid in full)</strong>, under the same invoice number.</td></tr>
       <tr><td><strong>Credit Note</strong></td><td>Only on refund lines that have no document yet.</td></tr>
       <tr><td><strong>Send receipt</strong></td><td>Shown instead of Resend / Email, Reminder and WhatsApp when the account is fully paid. One payment: you confirm. Several payments: you pick one from a list, with the latest selected.</td></tr>
       <tr><td>Booking (<em>View booking</em> / <em>View conference inquiry</em>)</td><td>For a room payment, opens the booking details page. For a conference payment, opens Conference Management at that enquiry's row.</td></tr>
@@ -253,6 +254,7 @@
     <li><strong>Booking</strong> opens the booking.</li>
     <li>The tick marks it accepted. For a room it confirms a pending or tentative booking: <em>"Quotation marked as accepted and booking confirmed."</em> An expired one gives <em>"Cannot accept an expired quotation (expired date)."</em></li>
     <li>The cross marks it declined: <em>"Quotation marked as declined."</em></li>
+    <li>Room quotations and invoices show prices the way your VAT setting is set (VAT included in the price, or added on top), and the lines add up to the total on the PDF.</li>
   </ul>
   <p>A quotation still marked Sent after its <strong>Valid Until</strong> date changes to Expired when you open the page.</p>
 

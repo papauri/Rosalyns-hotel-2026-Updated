@@ -170,7 +170,7 @@
     </tbody>
   </table>
   <p>Charges that come in from POS or room-service orders are added by those orders and do not need <strong>Edit Bookings</strong>.</p>
-  <div class="note"><p>The normal Receptionist role has <strong>Check-in Guests</strong> and <strong>Check-out Guests</strong>, but not <strong>Cancel Bookings</strong>, <strong>Add Payments</strong> or <strong>Edit Bookings</strong>. Tick those only for receptionists you trust with them.</p></div>
+  <div class="note"><p>The normal Receptionist role has <strong>Check-in Guests</strong>, <strong>Check-out Guests</strong>, <strong>Add Payments</strong> and <strong>Receipts</strong>, so reception can take a payment and print the receipt at checkout. It does not have <strong>Cancel Bookings</strong> or <strong>Edit Bookings</strong>. Tick those only for receptionists you trust with them.</p></div>
 
   <h2 id="all-perms">Every permission, in plain words</h2>
   <p>This is the whole list you see in the <strong>Permissions</strong> window, in the same groups. <strong>Default for</strong> says which roles tick it for you; an Administrator always has every one. "Nobody" means it is only ticked when you choose to.</p>
@@ -221,7 +221,7 @@
       <tr><td><strong>Room Maintenance</strong></td><td>Open Room Maintenance and report or work repair requests. Also lets them change a room's status.</td><td>Manager, Receptionist, Housekeeping</td></tr>
       <tr><td><strong>Housekeeping</strong></td><td>Open Housekeeping, create and work cleaning tasks. Also lets them change a room's status.</td><td>Manager, Receptionist, Housekeeping</td></tr>
       <tr><td><strong>Gallery</strong></td><td>Open the website Gallery and change its pictures.</td><td>Manager</td></tr>
-      <tr><td><strong>Media Portal</strong>, <strong>Create Media</strong>, <strong>Edit Media</strong>, <strong>Delete Media</strong></td><td>Open the Media Portal; upload new pictures and videos; change them; delete them. Each is a separate tick.</td><td>Manager (not Delete Media)</td></tr>
+      <tr><td><strong>Media Portal</strong>, <strong>Create Media</strong>, <strong>Edit Media</strong>, <strong>Delete Media</strong></td><td>Open the Media Portal; upload new pictures and videos; change them; delete them. Each is a separate tick. Changing a room's pictures also needs <strong>Edit Media</strong>.</td><td>Manager (not Delete Media)</td></tr>
       <tr><td><strong>Conference Bookings</strong></td><td>Open Conference and handle enquiries day to day: confirm, cancel, complete, add notes.</td><td>Manager, Conference Staff</td></tr>
       <tr><td><strong>Manage Conference Rooms</strong></td><td>Add, edit, switch off and delete conference rooms.</td><td>Manager</td></tr>
       <tr><td><strong>Conference Invoicing &amp; Pricing</strong></td><td>Set a conference price, send a quotation or invoice.</td><td>Manager</td></tr>
@@ -296,7 +296,7 @@
     <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
     <tbody>
       <tr><td><strong>Accounting</strong></td><td>Open the Accounting dashboard (money figures and VAT).</td><td>Manager, Accountant</td></tr>
-      <tr><td><strong>POS Accounting</strong></td><td>Review till sales and close cashier shifts from accounting.</td><td>Accountant</td></tr>
+      <tr><td><strong>POS Accounting</strong></td><td>Review till sales and close cashier shifts from accounting. Only the accountant has it by default; grant it to one person at a time, and only if they need it.</td><td>Accountant</td></tr>
       <tr><td><strong>View Payments</strong></td><td>Open Payments and see payment records.</td><td>Manager, Accountant</td></tr>
       <tr><td><strong>Receipts</strong></td><td>Make, send, export and check receipts.</td><td>Manager, Accountant</td></tr>
       <tr><td><strong>Add Payments</strong></td><td>Record a payment, mark a booking paid, change a payment.</td><td>Manager, Accountant</td></tr>
@@ -343,7 +343,7 @@
     <li>Open <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong> and click <strong>Add New User</strong>.</li>
     <li>Fill in the name, username and email. Choose the role <strong>Receptionist</strong>.</li>
     <li>Tick <strong>Set their permissions before the invitation goes out</strong> and click <strong>Create User</strong>.</li>
-    <li>In the permissions window the Receptionist ticks are already set (Dashboard, View Bookings, Calendar View, Check-in Guests, Check-out Guests and more). Leave them.</li>
+    <li>In the permissions window the Receptionist ticks are already set (Dashboard, View Bookings, Calendar View, Check-in Guests, Check-out Guests, Add Payments, Receipts and more). Leave them.</li>
     <li>Also tick <strong>Edit Bookings</strong> (to confirm bookings and change dates), <strong>Add Payments</strong> (to mark a booking paid) and, if they may cancel, <strong>Cancel Bookings</strong>.</li>
     <li>Leave the Finance permissions unticked.</li>
     <li>Click <strong>Save &amp; send invitation</strong>.</li>

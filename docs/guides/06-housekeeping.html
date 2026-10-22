@@ -122,6 +122,7 @@
     <li>A supervisor looks at the room and clicks <strong>Verify</strong>. The task becomes <strong>Verified</strong> and is locked. Verifying does not change the room status. It only records who checked the room and when. On a maintenance request, the person who verifies is the one recorded as the verifier.</li>
   </ol>
   <div class="note"><p>A room is ready for the next guest as soon as its cleaning task is <strong>Completed</strong>. You do not have to wait for <strong>Verify</strong>.</p></div>
+  <div class="note"><p>A new individual room starts with its cleaning marked done. It does not need a cleaning task before its first guest.</p></div>
   <div class="note"><p>A cleaning task never takes a room off sale. A room that is being turned over (a Pending or In progress clean, or the previous guest still in it) stays bookable on the website and in the <strong>Assign Room</strong> list, where it is marked <strong>Turnover</strong> with the note <em>"Being cleaned"</em> or <em>"Previous guest still in the room"</em>. Reception can assign it to tonight's guest. Only the check-in waits until the room is clean (see <a href="#checkin">Checking a guest in to a room that is not clean</a>).</p></div>
   <h2 id="room-board">The Room board (room status at a glance)</h2>
   <p>The Room board shows every room's status and the rooms waiting for cleaning. Open it from the <strong>Dashboard</strong>: in the <strong>Occupancy</strong> card (for example <em>"1 of 15 sellable rooms occupied"</em>; sellable means all rooms minus out of order and maintenance rooms) click <strong>Room board</strong> (<code>/admin/room-dashboard.php</code>, page title <strong>Room Management Dashboard</strong>). It needs the <strong>Room Dashboard</strong> permission and the Bookings module.</p>
@@ -270,7 +271,7 @@
   <p>If the room has no open request left (all are Verified, Cancelled or deleted) and its status is <strong>Maintenance</strong>, the room goes to <strong>Cleaning</strong> and a housekeeping task <em>"Post-maintenance cleaning"</em> is created. It becomes Available only when that clean is done. This only happens for rooms the maintenance request put into Maintenance. A room that staff set to Maintenance by hand stays there until staff change its status.</p>
 
   <h2 id="checkin">Checking a guest in to a room that is not clean</h2>
-  <p>Reception cannot check a guest in while the room is not ready. A room is not ready when its status is anything other than <strong>Available</strong>, or when its cleaning is <strong>Pending</strong> or <strong>In progress</strong>.</p>
+  <p>Reception cannot check a guest in while the room is not ready. A room is not ready when its status is anything other than <strong>Available</strong> (for example <strong>Cleaning</strong>, <strong>Occupied</strong> or <strong>Out of Order</strong>), or when it has an open cleaning task due today or earlier. Old leftover flags on a room do not block check-in. A cleaning task due later than today does not block it either.</p>
   <ul>
     <li>Without the permission <strong>Check-in to Room Not Clean</strong> you will see <em>"Check-in blocked: Room 12 (cleaning pending) is not marked clean yet. Ask housekeeping to finish the room, or ask someone with the "Check-in to Room Not Clean" permission."</em> Ask housekeeping to click <strong>Mark done</strong> on the task, then check the guest in again.</li>
     <li>With that permission, a box titled <strong>Room not marked clean</strong> asks you to confirm. Click <strong>Check in anyway</strong> to go ahead. The check-in is recorded in the booking timeline as <em>"Checked in to a room not marked clean"</em>, with your name.</li>
@@ -322,7 +323,7 @@
       <tr><td><em>"Invalid security token. Please refresh and try again."</em></td><td>The page was open too long.</td><td>Refresh the page and try again.</td></tr>
       <tr><td><em>"Network error — please try again."</em></td><td>The connection dropped while saving in the window.</td><td>Check the connection and click Save again.</td></tr>
       <tr><td><em>"Failed to load audit history."</em></td><td>The history could not be loaded.</td><td>Close the window and try again.</td></tr>
-      <tr><td><em>"Check-in blocked: Room ... is not marked clean yet."</em></td><td>The room is not Available, or cleaning is still Pending or In progress.</td><td>Mark the cleaning done, or use someone with the <strong>Check-in to Room Not Clean</strong> permission.</td></tr>
+      <tr><td><em>"Check-in blocked: Room ... is not marked clean yet."</em></td><td>The room's status is not Available (for example Cleaning), or it has a cleaning task due today or earlier that is not done.</td><td>Mark the cleaning done, or use someone with the <strong>Check-in to Room Not Clean</strong> permission.</td></tr>
       <tr><td><em>"Database error: ..."</em></td><td>The system could not save.</td><td>Try again. If it keeps happening, tell your manager and give them the full message.</td></tr>
     </tbody>
   </table>
