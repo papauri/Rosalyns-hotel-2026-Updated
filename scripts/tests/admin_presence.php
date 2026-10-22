@@ -39,6 +39,8 @@ session_start();
 ob_end_clean();
 $tbl = $pdo->query("SHOW TABLES LIKE 'admin_presence'")->rowCount() > 0;
 if (!check($tbl, 'admin_presence table exists (migration 064)')) { echo "$pass passed, $fail failed\n"; exit(1); }
+$hasCtx = $pdo->query("SHOW COLUMNS FROM admin_presence LIKE 'booking_context'")->rowCount() > 0;
+if (!check($hasCtx, 'admin_presence.booking_context exists (migration 065)')) { echo "$pass passed, $fail failed\n"; exit(1); }
 
 // ---- Pure helpers ----
 check(rh_presence_bucket(0) === 'active' && rh_presence_bucket(120) === 'active', 'seen up to 2 min ago is Active now');
@@ -172,6 +174,88 @@ try {
     ob_start(); rh_presence_render_panel($pdo, 'admin', $adminId); $ap = ob_get_clean();
     check(strpos($ap, '10.0.0.1') !== false, 'the admin panel shows IP addresses');
 
+    // ---- "Also booking right now" banner data ----
+    $dash = "\u{2013}";
+    $c = rh_presence_booking_ctx_clean('2031-11-12', '2031-11-14', '3, 5,5,x,-2,0, 7', 90);
+    check($c['ci'] === '2031-11-12' && $c['co'] === '2031-11-14' && $c['rooms'] === [3, 5, 7] && abs($c['since'] - (time() - 90)) <= 2, 'booking context keeps valid dates and unique whole-number room ids', json_encode($c));
+    $c = rh_presence_booking_ctx_clean('2031-11-14', '2031-11-14', '', 0);
+    check($c['ci'] === '' && $c['co'] === '' && $c['rooms'] === [], 'check-out not after check-in drops both dates');
+    $c = rh_presence_booking_ctx_clean('2031-02-30', '<b>', '1;DROP', 999999);
+    check($c['ci'] === '' && $c['co'] === '' && $c['rooms'] === [1] && $c['since'] >= time() - 86400 - 2, 'impossible dates and markup are dropped, age is capped at a day', json_encode($c));
+    check(rh_presence_fmt_range('2031-11-12', '2031-11-14') === '12' . $dash . '14 Nov', 'range inside one month reads 12-14 Nov', rh_presence_fmt_range('2031-11-12', '2031-11-14'));
+    check(rh_presence_fmt_range('2031-10-30', '2031-11-02') === '30 Oct' . $dash . '2 Nov', 'range across months shows both months');
+    check(rh_presence_ago(10) === 'just now' && rh_presence_ago(180) === '3 min ago' && rh_presence_ago(7200) === 'over an hour ago', 'started-ago wording');
+
+    $rm = $pdo->query("SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY id LIMIT 2")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $rmIds = array_keys($rm);
+    $roomA = (int)($rmIds[0] ?? 0);
+    $roomB = (int)($rmIds[1] ?? 999999);
+    $nameA = (string)($rm[$roomA] ?? '');
+    $roles = getAllRoles();
+    $mgrRow = $pdo->prepare("SELECT full_name, username, role FROM admin_users WHERE id = ?");
+    $mgrRow->execute([$mgrId]);
+    $mg = $mgrRow->fetch(PDO::FETCH_ASSOC);
+    $mgrWho = (string)($mg['full_name'] !== '' ? $mg['full_name'] : $mg['username']);
+    $mgrLabel = (string)($roles[$mg['role']]['label'] ?? ucfirst((string)$mg['role']));
+
+    $setBooker = function (int $uid, int $ageSecs, string $page, ?array $ctx) use ($pdo) {
+        $pdo->prepare("INSERT INTO admin_presence (user_id, last_seen_at, current_page, session_started_at, booking_context)
+            VALUES (?, DATE_SUB(NOW(), INTERVAL ? SECOND), ?, DATE_SUB(NOW(), INTERVAL 2 HOUR), ?)
+            ON DUPLICATE KEY UPDATE last_seen_at = VALUES(last_seen_at), current_page = VALUES(current_page), booking_context = VALUES(booking_context)")
+            ->execute([$uid, $ageSecs, $page, $ctx === null ? null : json_encode($ctx)]);
+    };
+    $pdo->prepare("DELETE FROM admin_presence WHERE user_id IN (?, ?, ?)")->execute([$adminId, $mgrId, $staffId]);
+    $none = ['ci' => '', 'co' => '', 'rooms' => []];
+    $mineA = ['ci' => '2031-11-13', 'co' => '2031-11-15', 'rooms' => [$roomA]];
+
+    // Another person on Create Booking, no dates yet: plain line, not amber
+    $setBooker($mgrId, 20, 'create-booking.php', ['ci' => '', 'co' => '', 'rooms' => [], 'since' => time() - 190]);
+    $o = rh_presence_booking_others($pdo, $adminId, $none);
+    check(count($o) === 1 && $o[0]['overlap'] === false && $o[0]['text'] === $mgrWho . ' (' . $mgrLabel . ') ' . "\u{2014}" . ' started 3 min ago', 'other active booker is listed as "Name (Role) - started 3 min ago"', json_encode($o));
+    // Self is hidden
+    check(rh_presence_booking_others($pdo, $mgrId, $none) === [], 'the person never sees themselves');
+    // Stale (over 2 min) and people on other pages are hidden
+    $setBooker($mgrId, 150, 'create-booking.php', ['ci' => '', 'co' => '', 'rooms' => [], 'since' => time()]);
+    check(rh_presence_booking_others($pdo, $adminId, $none) === [], 'someone not seen for over 2 minutes is not shown');
+    $setBooker($mgrId, 10, 'bookings.php', ['ci' => '', 'co' => '', 'rooms' => [], 'since' => time()]);
+    check(rh_presence_booking_others($pdo, $adminId, $none) === [], 'someone who has left Create Booking is not shown');
+    // A deactivated account is not shown
+    $setBooker($mgrId, 10, 'create-booking.php', ['ci' => '2031-11-12', 'co' => '2031-11-14', 'rooms' => [$roomA], 'since' => time() - 30]);
+    $pdo->prepare("UPDATE admin_users SET is_active = 0 WHERE id = ?")->execute([$mgrId]);
+    check(rh_presence_booking_others($pdo, $adminId, $none) === [], 'a deactivated account is not shown');
+    $pdo->prepare("UPDATE admin_users SET is_active = 1 WHERE id = ?")->execute([$mgrId]);
+
+    // Overlap: same room type, dates overlap (12-14 vs 13-15)
+    $o = rh_presence_booking_others($pdo, $adminId, $mineA);
+    check(count($o) === 1 && $o[0]['overlap'] === true, 'same room type and overlapping dates turn the banner amber', json_encode($o));
+    check($nameA !== '' && count($o) === 1 && $o[0]['text'] === $mgrWho . ' is booking ' . $nameA . ' for 12' . $dash . '14 Nov too. If you both pick the last room, the second save will be refused.', 'amber sentence names the person, room type and dates', json_encode($o));
+    // No overlap: different room type, dates only touching, or no dates chosen yet by the viewer
+    $o = rh_presence_booking_others($pdo, $adminId, ['ci' => '2031-11-13', 'co' => '2031-11-15', 'rooms' => [$roomB]]);
+    check(count($o) === 1 && $o[0]['overlap'] === ($roomB === $roomA), 'a different room type is not an overlap', json_encode($o));
+    $o = rh_presence_booking_others($pdo, $adminId, ['ci' => '2031-11-14', 'co' => '2031-11-16', 'rooms' => [$roomA]]);
+    check(count($o) === 1 && $o[0]['overlap'] === false, 'my check-in on their check-out day is not an overlap (night model)', json_encode($o));
+    $o = rh_presence_booking_others($pdo, $adminId, ['ci' => '2031-11-10', 'co' => '2031-11-12', 'rooms' => [$roomA]]);
+    check(count($o) === 1 && $o[0]['overlap'] === false, 'my check-out on their check-in day is not an overlap', json_encode($o));
+    $o = rh_presence_booking_others($pdo, $adminId, ['ci' => '', 'co' => '', 'rooms' => [$roomA]]);
+    check(count($o) === 1 && $o[0]['overlap'] === false, 'no dates chosen yet is not an overlap');
+    // Text from the database is returned as plain text (the page puts it in with textContent)
+    $pdo->prepare("UPDATE admin_users SET full_name = ? WHERE id = ?")->execute(['<img src=x onerror=alert(1)>', $mgrId]);
+    $o = rh_presence_booking_others($pdo, $adminId, $mineA);
+    check(count($o) === 1 && strpos($o[0]['text'], '<img src=x onerror=alert(1)>') === 0, 'a name with markup is returned as plain text for textContent');
+    $pdo->prepare("UPDATE admin_users SET full_name = ? WHERE id = ?")->execute([(string)$mg['full_name'], $mgrId]);
+
+    // Writing my own note
+    $pdo->prepare("DELETE FROM admin_presence WHERE user_id = ?")->execute([$staffId]);
+    rh_presence_booking_write($pdo, $staffId, rh_presence_booking_ctx_clean('2031-12-01', '2031-12-03', (string)$roomA, 45));
+    $r = $row($staffId);
+    $bc = $r ? json_decode((string)$r['booking_context'], true) : null;
+    check($r && $r['current_page'] === 'create-booking.php' && (int)$r['secs'] <= 5 && is_array($bc) && $bc['ci'] === '2031-12-01' && $bc['rooms'] === [$roomA], 'booking note is written to my own row', json_encode($r));
+    check(count(rh_presence_booking_others($pdo, $adminId, $none)) === 2, 'a freshly written note shows to the others');
+    // A broken database never raises
+    $threw = false;
+    try { if ($failPdo) { rh_presence_booking_write($failPdo, $staffId, $none); rh_presence_booking_others($failPdo, $adminId, $none); } } catch (Throwable $e) { $threw = true; }
+    check(!$threw, 'a failing database never raises out of the booking banner functions');
+
     // Sign-out clears
     rh_presence_clear($pdo, $mgrId);
     check($row($mgrId) === false, 'sign-out removes the presence row');
@@ -256,6 +340,35 @@ if ($tempMgr) {
 }
 $r = run_page('admin/system-logs.php', ['post' => [], 'setup' => ["DELETE FROM admin_presence"], 'grep' => ["Who's online", 'rh-presence-panel']]);
 check(!empty($r['found']['rh-presence-panel']), 'System Logs (audit area) also shows the panel to an admin', json_encode($r['found'] ?? $r));
+
+// Banner endpoint (?booking=1): any signed-in user who can open Create Booking
+$bkSeed = ["DELETE FROM admin_presence",
+    "INSERT INTO admin_presence (user_id, last_seen_at, current_page, session_started_at, booking_context) VALUES ($staffId, NOW(), 'create-booking.php', NOW(), "
+        . $pdo->quote(json_encode(['ci' => '2031-11-12', 'co' => '2031-11-14', 'rooms' => [$roomA], 'since' => time() - 240])) . ")"];
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'ajax' => true, 'get' => ['booking' => '1', 'ci' => '2031-11-13', 'co' => '2031-11-15', 'rooms' => (string)$roomA, 'age' => '30'],
+    'setup' => $bkSeed, 'verify' => ["SELECT user_id, current_page, booking_context FROM admin_presence WHERE user_id = $adminId"]]);
+$others = $r['json']['data']['others'] ?? null;
+check(($r['json']['success'] ?? false) === true && is_array($others) && count($others) === 1 && ($others[0]['overlap'] ?? null) === true && ($r['json']['data']['overlap'] ?? null) === true, 'booking banner endpoint: lists the other booker and flags the overlap', json_encode($r['json'] ?? $r));
+$v = $r['verify'][0] ?? [];
+$vc = json_decode((string)($v[0]['booking_context'] ?? ''), true);
+check(count($v) === 1 && ($v[0]['current_page'] ?? '') === 'create-booking.php' && is_array($vc) && ($vc['ci'] ?? '') === '2031-11-13' && ($vc['rooms'] ?? []) === [$roomA], 'booking banner endpoint: writes only my own note', json_encode($r['verify'] ?? $r));
+check($clean($r), 'booking banner run rolled back', json_encode($r));
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'ajax' => true, 'get' => ['booking' => '1', 'idle' => '1', 'ci' => '2031-11-13', 'co' => '2031-11-15', 'rooms' => (string)$roomA],
+    'setup' => $bkSeed, 'verify' => ["SELECT COUNT(*) AS n FROM admin_presence WHERE user_id = $adminId"]]);
+check(($r['json']['success'] ?? false) === true && (int)($r['verify'][0][0]['n'] ?? -1) === 0 && count($r['json']['data']['others'] ?? []) === 1, 'booking banner endpoint: an idle tab reads the banner but writes nothing', json_encode($r['json'] ?? $r));
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'get' => ['booking' => '1'], 'setup' => $bkSeed]);
+check(($r['json']['success'] ?? null) === false && !isset($r['json']['data']), 'booking banner endpoint: refused without the X-Requested-With header', json_encode($r['json'] ?? $r));
+$denySql = "INSERT INTO user_permissions (user_id, permission_key, is_granted, granted_by) VALUES ($staffId, 'create_booking', 0, $adminId) ON DUPLICATE KEY UPDATE is_granted = 0";
+$r = run_page('admin/api/presence.php', ['method' => 'GET', 'ajax' => true, 'as_username' => $staffName, 'get' => ['booking' => '1', 'ci' => '2031-11-13', 'co' => '2031-11-15', 'rooms' => (string)$roomA],
+    'setup' => array_merge($bkSeed, [$denySql]), 'verify' => ["SELECT COUNT(*) AS n FROM admin_presence WHERE user_id = $adminId", "SELECT booking_context FROM admin_presence WHERE user_id = $staffId"]]);
+$raw = json_encode($r['json'] ?? []);
+check(($r['json']['success'] ?? null) === false && !isset($r['json']['data']) && strpos($raw, $staffName) === false, 'booking banner endpoint: refused, with no names, for someone who cannot open Create Booking', $raw);
+$vc = json_decode((string)($r['verify'][1][0]['booking_context'] ?? ''), true);
+check(is_array($vc) && ($vc['ci'] ?? '') === '2031-11-12', 'refused request wrote nothing (the seeded note is unchanged)', json_encode($r['verify'] ?? $r));
+check($clean($r), 'refused booking banner run rolled back');
+$r = run_page('admin/create-booking.php', ['method' => 'GET', 'grep' => ['id="rh-cb-presence"', 'api/presence.php', 'cb-presence__list']]);
+check(!empty($r['found']['id="rh-cb-presence"']) && !empty($r['found']['cb-presence__list']), 'Create Booking page carries the banner and its script', json_encode($r['found'] ?? $r));
+check($clean($r), 'Create Booking page run rolled back');
 
 // Logout clears
 $r = run_page('admin/logout.php', ['method' => 'GET',

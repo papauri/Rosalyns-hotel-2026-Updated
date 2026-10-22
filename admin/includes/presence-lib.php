@@ -163,6 +163,183 @@ if (!function_exists('rh_presence_can_view')) {
     }
 
     /**
+     * Tidy what the Create Booking page tells us about the booking being made: check-in and
+     * check-out (both valid dates, check-out after check-in, otherwise both dropped), the chosen
+     * room type ids (whole numbers, at most 10) and how many seconds ago the page was opened.
+     *
+     * @return array{ci:string,co:string,rooms:int[],since:int}
+     */
+    function rh_presence_booking_ctx_clean(string $ci, string $co, string $rooms, int $ageSeconds): array
+    {
+        $valid = function (string $d): bool {
+            return preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $d, $m) === 1 && checkdate((int)$m[2], (int)$m[3], (int)$m[1]);
+        };
+        if (!$valid($ci) || !$valid($co) || $co <= $ci) {
+            $ci = '';
+            $co = '';
+        }
+        $ids = [];
+        foreach (explode(',', substr($rooms, 0, 120)) as $part) {
+            $n = (int)trim($part);
+            if ($n > 0 && !in_array($n, $ids, true)) {
+                $ids[] = $n;
+            }
+            if (count($ids) >= 10) {
+                break;
+            }
+        }
+        $age = max(0, min($ageSeconds, 86400));
+        return ['ci' => $ci, 'co' => $co, 'rooms' => $ids, 'since' => time() - $age];
+    }
+
+    /**
+     * Note on the person's own presence row that they have Create Booking open (and what they have
+     * picked so far). Cheap: one upsert; silent when the table or column is missing.
+     */
+    function rh_presence_booking_write(PDO $pdo, int $userId, array $ctx): void
+    {
+        if ($userId <= 0) {
+            return;
+        }
+        try {
+            $started = (int)($_SESSION['rh_presence_started'] ?? time());
+            $ip = substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45);
+            $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 120);
+            $json = json_encode([
+                'ci' => (string)($ctx['ci'] ?? ''),
+                'co' => (string)($ctx['co'] ?? ''),
+                'rooms' => array_values(array_map('intval', (array)($ctx['rooms'] ?? []))),
+                'since' => (int)($ctx['since'] ?? time()),
+            ]);
+            $stmt = $pdo->prepare(
+                "INSERT INTO admin_presence (user_id, last_seen_at, current_page, session_started_at, ip, user_agent_short, booking_context)
+                 VALUES (?, NOW(), 'create-booking.php', FROM_UNIXTIME(?), ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE last_seen_at = NOW(), current_page = 'create-booking.php', booking_context = VALUES(booking_context)"
+            );
+            $stmt->execute([$userId, $started, $ip !== '' ? $ip : null, $ua !== '' ? $ua : null, $json]);
+            $_SESSION['rh_presence_ts'] = time();
+            $_SESSION['rh_presence_page'] = 'create-booking.php';
+        } catch (Throwable $e) {
+            // best effort
+        }
+    }
+
+    /** "12-14 Nov" style range (en dash); month shown on both ends when they differ. */
+    function rh_presence_fmt_range(string $ci, string $co): string
+    {
+        $a = strtotime($ci);
+        $b = strtotime($co);
+        if (!$a || !$b) {
+            return '';
+        }
+        if (date('Y-m', $a) === date('Y-m', $b)) {
+            return date('j', $a) . "\u{2013}" . date('j M', $b);
+        }
+        return date('j M', $a) . "\u{2013}" . date('j M', $b);
+    }
+
+    /** "just now", "3 min ago", "over an hour ago". */
+    function rh_presence_ago(int $seconds): string
+    {
+        if ($seconds < 60) {
+            return 'just now';
+        }
+        if ($seconds < 3600) {
+            return floor($seconds / 60) . ' min ago';
+        }
+        return 'over an hour ago';
+    }
+
+    /**
+     * Other staff who have Create Booking open right now (seen within 2 min), for the banner. Never
+     * includes the viewer. Each item: name, role label, a ready sentence and whether this booking
+     * overlaps the viewer's (stay dates overlap AND at least one room type in common; night model:
+     * check-out day is free, so 12-14 and 14-16 do not overlap).
+     *
+     * @param array{ci:string,co:string,rooms:int[]} $mine the viewer's own cleaned context
+     * @return array<int,array{name:string,role_label:string,started:string,overlap:bool,text:string}>
+     */
+    function rh_presence_booking_others(PDO $pdo, int $viewerId, array $mine): array
+    {
+        try {
+            $stmt = $pdo->prepare(
+                "SELECT p.user_id, p.booking_context, TIMESTAMPDIFF(SECOND, p.last_seen_at, NOW()) AS secs,
+                        u.full_name, u.username, u.role
+                 FROM admin_presence p
+                 JOIN admin_users u ON u.id = p.user_id
+                 WHERE u.is_active = 1 AND p.user_id <> ? AND p.current_page = 'create-booking.php'
+                   AND p.last_seen_at >= DATE_SUB(NOW(), INTERVAL ? SECOND)
+                 ORDER BY p.last_seen_at DESC
+                 LIMIT 10"
+            );
+            $stmt->execute([$viewerId, RH_PRESENCE_ACTIVE_SECONDS]);
+            $found = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable $e) {
+            return [];
+        }
+        if (!$found) {
+            return [];
+        }
+        $roles = function_exists('getAllRoles') ? getAllRoles() : [];
+        $myIn = (string)($mine['ci'] ?? '');
+        $myOut = (string)($mine['co'] ?? '');
+        $myRooms = array_map('intval', (array)($mine['rooms'] ?? []));
+        $parsed = [];
+        $needNames = [];
+        foreach ($found as $r) {
+            $c = json_decode((string)$r['booking_context'], true);
+            $c = is_array($c) ? $c : [];
+            $ci = (string)($c['ci'] ?? '');
+            $co = (string)($c['co'] ?? '');
+            $rooms = array_values(array_filter(array_map('intval', (array)($c['rooms'] ?? [])), function ($n) { return $n > 0; }));
+            $datesOverlap = $myIn !== '' && $myOut !== '' && $ci !== '' && $co !== '' && $ci < $myOut && $co > $myIn;
+            $shared = $datesOverlap ? array_values(array_intersect($rooms, $myRooms)) : [];
+            foreach ($shared as $id) {
+                $needNames[$id] = true;
+            }
+            $parsed[] = ['row' => $r, 'ci' => $ci, 'co' => $co, 'shared' => $shared, 'since' => (int)($c['since'] ?? 0)];
+        }
+        $names = [];
+        if ($needNames) {
+            try {
+                $ids = array_keys($needNames);
+                $in = implode(',', array_fill(0, count($ids), '?'));
+                $ns = $pdo->prepare("SELECT id, name FROM rooms WHERE id IN ($in)");
+                $ns->execute($ids);
+                foreach ($ns->fetchAll(PDO::FETCH_ASSOC) as $n) {
+                    $names[(int)$n['id']] = (string)$n['name'];
+                }
+            } catch (Throwable $e) {
+                $names = [];
+            }
+        }
+        $out = [];
+        foreach ($parsed as $p) {
+            $r = $p['row'];
+            $who = (string)($r['full_name'] !== '' ? $r['full_name'] : $r['username']);
+            $roleLabel = (string)($roles[$r['role']]['label'] ?? ucfirst((string)$r['role']));
+            $startedSecs = $p['since'] > 0 ? max(0, time() - $p['since']) : 0;
+            $started = rh_presence_ago($startedSecs);
+            $overlap = count($p['shared']) > 0;
+            if ($overlap) {
+                $list = [];
+                foreach ($p['shared'] as $id) {
+                    if (isset($names[$id])) {
+                        $list[] = $names[$id];
+                    }
+                }
+                $what = $list ? (count($list) > 1 ? implode(', ', array_slice($list, 0, -1)) . ' and ' . end($list) : $list[0]) : 'the same room type';
+                $text = $who . ' is booking ' . $what . ' for ' . rh_presence_fmt_range($p['ci'], $p['co'])
+                    . ' too. If you both pick the last room, the second save will be refused.';
+            } else {
+                $text = $who . ' (' . $roleLabel . ') ' . "\u{2014}" . ' started ' . $started;
+            }
+            $out[] = ['name' => $who, 'role_label' => $roleLabel, 'started' => $started, 'overlap' => $overlap, 'text' => $text];
+        }
+        return $out;
+    }
+
+    /**
      * People online now (seen within 30 min), most recently seen first. IPs only when $withIp.
      *
      * @return array<int,array<string,mixed>>

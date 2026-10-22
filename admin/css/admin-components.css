@@ -3678,3 +3678,28 @@ select.rh-input-invalid.rh-input-invalid {
     .presence-since,
     .presence-ip { grid-column: 2 / 4; }
 }
+
+/* "Also booking right now" banner on Create Booking (admin/includes/presence-lib.php, admin/create-booking.php) */
+.cb-presence {
+    background: #fff;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    border-left-width: 4px;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin: 0 0 16px;
+    font-size: 14px;
+    color: var(--navy, #1f2a37);
+}
+.cb-presence[hidden] { display: none; }
+.cb-presence--overlap {
+    background: var(--admin-warning-bg);
+    border-color: var(--admin-warning-border, #9a7c53);
+    color: var(--admin-warning-text, #4f3f2a);
+}
+.cb-presence__title { display: block; font-size: 13px; margin-bottom: 2px; }
+.cb-presence__list { list-style: none; margin: 0; padding: 0; }
+.cb-presence__list li { padding: 2px 0; overflow-wrap: anywhere; line-height: 1.4; }
+.cb-presence__list li + li { border-top: 1px solid var(--border-color, #eaecef); margin-top: 4px; padding-top: 6px; }
+@media (max-width: 720px) {
+    .cb-presence { padding: 10px 12px; font-size: 13.5px; }
+}

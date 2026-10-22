@@ -2079,6 +2079,11 @@ try {
                 <div class="alert alert-error"><i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($error); ?></div>
             <?php endif; ?>
 
+            <?php /* "Also booking right now" banner: filled and refreshed by the script below (admin/api/presence.php?booking=1). Lives inside #rh-admin-page so in-app navigation re-runs it. Never blocks saving. */ ?>
+            <div class="cb-presence" id="rh-cb-presence" role="status" aria-live="polite" data-endpoint="api/presence.php" hidden>
+                <strong class="cb-presence__title">Also booking right now</strong>
+                <ul class="cb-presence__list" id="rh-cb-presence-list"></ul>
+            </div>
             <form method="POST" id="createBookingForm" data-offline-queue="1">
                 <?php
                 if (empty($_SESSION['admin_create_booking_uuid'])) {
@@ -2556,6 +2561,84 @@ try {
             </form>
         </div>
     </div>
+
+    <?php /* Banner refresh script (the banner itself is at the top of the page). Inside #rh-admin-page, re-runs after in-app navigation. */ ?>
+    <script>
+    (function () {
+        // Re-runs after every in-app page change: stop the old timer, then start one for this page.
+        var S = window.__rhBookPresence = window.__rhBookPresence || { timer: null, lastInput: Date.now(), wired: false };
+        if (S.timer) { clearInterval(S.timer); S.timer = null; }
+        var box = document.getElementById('rh-cb-presence');
+        if (!box) { return; }
+        var list = document.getElementById('rh-cb-presence-list');
+        var form = document.getElementById('createBookingForm');
+        var opened = Date.now();
+        var debounce = null;
+
+        if (!S.wired) {
+            S.wired = true;
+            ['pointerdown', 'keydown', 'touchstart', 'scroll'].forEach(function (evt) {
+                window.addEventListener(evt, function () { S.lastInput = Date.now(); }, { passive: true });
+            });
+            document.addEventListener('visibilitychange', function () { if (!document.hidden && S.timer && S.tick) { S.tick(); } });
+            // Left Create Booking by an in-app link: stop polling and say which screen is open now.
+            document.addEventListener('rh:content-updated', function () {
+                if (!document.getElementById('rh-cb-presence') && S.timer) {
+                    clearInterval(S.timer); S.timer = null;
+                    var page = (location.pathname.split('/').pop() || '').replace(/[^A-Za-z0-9_.-]/g, '');
+                    if (window.fetch) {
+                        fetch('api/presence.php?ping=1&page=' + encodeURIComponent(page), { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).catch(function () {});
+                    }
+                }
+            });
+        }
+
+        function params() {
+            var ci = document.getElementById('checkInDate');
+            var co = document.getElementById('checkOutDate');
+            var ids = [];
+            if (form) {
+                form.querySelectorAll('select[name="room_line_room_id[]"]').forEach(function (s) {
+                    if (!s.disabled && s.value && ids.indexOf(s.value) === -1) { ids.push(s.value); }
+                });
+            }
+            var q = 'booking=1&ci=' + encodeURIComponent(ci ? ci.value : '') + '&co=' + encodeURIComponent(co ? co.value : '') +
+                '&rooms=' + encodeURIComponent(ids.join(',')) + '&age=' + Math.round((Date.now() - opened) / 1000);
+            // Nobody has touched the page for 3 minutes: read the banner but stop saying "I am here".
+            if (Date.now() - S.lastInput > 180000) { q += '&idle=1'; }
+            return q;
+        }
+        function render(others) {
+            list.textContent = '';
+            if (!others || !others.length) { box.hidden = true; box.classList.remove('cb-presence--overlap'); return; }
+            var overlap = false;
+            others.forEach(function (o) {
+                var li = document.createElement('li');
+                li.textContent = o.text;
+                if (o.overlap) { overlap = true; }
+                list.appendChild(li);
+            });
+            box.classList.toggle('cb-presence--overlap', overlap);
+            box.hidden = false;
+        }
+        function tick() {
+            if (!document.getElementById('rh-cb-presence')) { clearInterval(S.timer); S.timer = null; return; }
+            if (document.hidden || !window.fetch) { return; }
+            fetch(box.getAttribute('data-endpoint') + '?' + params(), { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (j) { if (j && j.success && j.data) { render(j.data.others); } })
+                .catch(function () { /* keep what is shown */ });
+        }
+        function soon() { clearTimeout(debounce); debounce = setTimeout(tick, 1200); }
+
+        if (form) {
+            form.addEventListener('change', soon);
+        }
+        S.tick = tick;
+        S.timer = setInterval(tick, 30000);
+        tick();
+    })();
+    </script>
 
     <script>
         const roomsData = <?php echo $rooms_json; ?>;
