@@ -212,8 +212,87 @@ function scPendingOpeningBatches(PDO $pdo, int $countId, int $ingredientId): arr
     return $q->fetchAll(PDO::FETCH_ASSOC);
 }
 
+/* Number of leaf values in a posted array (what PHP's max_input_vars counts). */
+function scPostedVarCount(array $post): int
+{
+    $n = 0;
+    array_walk_recursive($post, static function () use (&$n) { $n++; });
+    return $n;
+}
+
+/* True when the request looks cut off by PHP's max_input_vars (PHP silently drops the rest, which would
+ * save only some readings). The page packs readings into a handful of fields, so a normal post is far below. */
+function scPostTruncated(array $post): bool
+{
+    $max = (int)ini_get('max_input_vars');
+    return $max > 0 && scPostedVarCount($post) >= $max;
+}
+
+/* The posted count readings, from the packed fields lines_json[] (the page packs every changed line into a few
+ * JSON chunks, because a 400-line count posted as line[ID][field] is ~2,000 form fields and gets cut off by PHP's
+ * max_input_vars or refused by the host firewall) or, for older pages/clients, from line[ID][...].
+ * @param int[] $ownIds ids of the lines that belong to this count
+ * @return array<int,array<string,string>> line id => [actual, touched, cost, reason, notes] (only keys that were sent)
+ * @throws RuntimeException on anything malformed or on an id that is not a line of this count (packed form only) */
+function scReadPostedLines(array $post, array $ownIds): array
+{
+    if (!isset($post['lines_json'])) {
+        $out = [];
+        foreach ((array)($post['line'] ?? []) as $lineId => $payload) {
+            $out[(int)$lineId] = is_array($payload) ? $payload : [];
+        }
+        return $out;
+    }
+    $chunks = is_array($post['lines_json']) ? $post['lines_json'] : [$post['lines_json']];
+    if (count($chunks) > 200) {
+        throw new RuntimeException('The readings were sent in a form this page does not accept. Reload the page and save again.');
+    }
+    $own = array_flip($ownIds);
+    $out = [];
+    $total = 0;
+    foreach ($chunks as $chunk) {
+        if (!is_string($chunk) || strlen($chunk) > 400000) {
+            throw new RuntimeException('The readings were sent in a form this page does not accept. Reload the page and save again.');
+        }
+        if (trim($chunk) === '') {
+            continue;
+        }
+        $rows = json_decode($chunk, true);
+        if (!is_array($rows)) {
+            throw new RuntimeException('The readings could not be read (the data was cut off or damaged). Nothing was saved - reload the page and save again.');
+        }
+        foreach ($rows as $row) {
+            if (!is_array($row) || !isset($row['id']) || !is_numeric($row['id']) || (int)$row['id'] <= 0) {
+                throw new RuntimeException('A reading had no valid line number. Nothing was saved - reload the page and try again.');
+            }
+            $id = (int)$row['id'];
+            if (!isset($own[$id])) {
+                throw new RuntimeException('A reading belongs to a line that is not part of this count. Nothing was saved - reload the page and try again.');
+            }
+            if (++$total > 5000) {
+                throw new RuntimeException('Too many lines in one save.');
+            }
+            $payload = [];
+            foreach (['actual', 'cost', 'reason', 'notes', 'touched'] as $k) {
+                if (!array_key_exists($k, $row) || $row[$k] === null) {
+                    continue;
+                }
+                if (!is_scalar($row[$k])) {
+                    throw new RuntimeException('A reading was in a form this page does not accept. Nothing was saved - reload the page and try again.');
+                }
+                $payload[$k] = is_bool($row[$k]) ? ($row[$k] ? '1' : '') : (string)$row[$k];
+            }
+            $out[$id] = $payload; // no 'actual' key (or null) = the box was cleared
+        }
+    }
+    return $out;
+}
+
 /* ============== POST handlers ============== */
-if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST)) {
+    /* Refuse rather than save a part: PHP keeps only the first max_input_vars fields of a larger post. */
+    $error = 'The page sent too many fields at once, so the server may have cut it off. Nothing was saved. Reload the page and try again; if it keeps happening, tell your administrator.';
+} elseif (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
     if (!validateCsrfToken($token)) {
         $error = 'Security token invalid.';
@@ -300,7 +379,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $hasCol = scHasLineCol($pdo, 'counted_at');
                 $hasBy  = scHasLineCol($pdo, 'counted_by');
                 $nowTs  = (string)$pdo->query("SELECT NOW()")->fetchColumn();
-                $lines = $_POST['line'] ?? [];
+                $ownQ = $pdo->prepare("SELECT id FROM stock_count_lines WHERE count_id = ?");
+                $ownQ->execute([$countId]);
+                $lines = scReadPostedLines($_POST, array_map('intval', $ownQ->fetchAll(PDO::FETCH_COLUMN)));
+                $pdo->beginTransaction(); // all readings or none: a bad value part-way must not leave half a save
                 /* The system quantity and cost are the SNAPSHOT taken when the count started (stored on the
                  * line). They are read back from the database, never from the posted form: a tampered or
                  * stale hidden field would otherwise set the variance - and, once approved, the stock
@@ -389,6 +471,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare($sql)->execute($params);
                 }
 
+                $pdo->commit();
                 $_SESSION['stock_msg'] = 'Count readings saved.';
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
@@ -490,6 +573,27 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 [$uncN, $uncNames] = scUncountedLines($pdo, $countId, $hasCol);
                 if ($uncN > 0) {
                     throw new RuntimeException(scUncountedMessage($uncN, $uncNames));
+                }
+
+                /* Stale-count guard. Variance is worked out against the stock snapshot of THIS count plus movements up
+                 * to the moment each line was counted. If another count that covers the same items was approved AFTER
+                 * a line here was counted, its posted variance is not in that window, so approving this one as well
+                 * would add the same physical stock a second time (two opening counts of the same shelves would double
+                 * the stock and its value). Refuse; the counter re-counts from a fresh snapshot (Reject, then Reopen). */
+                $staleQ = $pdo->prepare("SELECT sc2.reference, COUNT(DISTINCT l1.ingredient_id) AS n
+                    FROM stock_counts sc2
+                    INNER JOIN stock_count_lines l2 ON l2.count_id = sc2.id AND l2.adjustment_id IS NOT NULL
+                    INNER JOIN stock_count_lines l1 ON l1.ingredient_id = l2.ingredient_id AND l1.count_id = ?
+                    WHERE sc2.id <> ? AND sc2.status = 'approved' AND sc2.approved_at > " . ($hasCol ? 'COALESCE(l1.counted_at, ?)' : '?') . "
+                    GROUP BY sc2.id, sc2.reference ORDER BY sc2.approved_at LIMIT 3");
+                $staleQ->execute([$countId, $countId, scSnapshotStart($count)]);
+                $staleRows = $staleQ->fetchAll(PDO::FETCH_ASSOC);
+                if ($staleRows) {
+                    $parts = [];
+                    foreach ($staleRows as $sr) {
+                        $parts[] = displayCountReference((string)$sr['reference']) . ' (' . (int)$sr['n'] . ' of the same items)';
+                    }
+                    throw new RuntimeException('This count is out of date: another count was approved after these items were counted - ' . implode(', ', $parts) . '. Approving this one too would add the same stock twice. Use "Reject & send back", then "Reopen for re-count" to take a fresh stock snapshot and count again.');
                 }
 
                 if (!function_exists('deductStockBatchFIFO') || !function_exists('ensureStockBatchCoverageForDeduction')) {
@@ -1371,8 +1475,68 @@ $csrf_token = generateCsrfToken();
                     a.name = 'action';
                     a.value = 'reject_count';
                     form.appendChild(a);
+                    scPackLines(form, false);
                     form.submit();
                 }
+
+                /* A 400-line count is ~2,000 form fields (5 per line). PHP drops everything past max_input_vars (1000)
+                 * and the host firewall answers "406 Not Acceptable" long before that. So before any send, the
+                 * individual line inputs are switched off and, when saving, the CHANGED lines travel in a few
+                 * JSON fields (lines_json[]: 50 lines each). The server reads those first, line[...] as a fallback. */
+                function scPackLines(form, pack) {
+                    if (!form) return;
+                    form.querySelectorAll('input[data-sc-packed]').forEach(function (el) { el.remove(); });
+                    const fields = Array.from(form.querySelectorAll('[name^="line["]'));
+                    if (!fields.length) return;
+                    if (pack) {
+                        const byId = {};
+                        fields.forEach(function (el) {
+                            const m = /^line\[(\d+)\]\[(\w+)\]$/.exec(el.name);
+                            if (!m) return;
+                            (byId[m[1]] = byId[m[1]] || {})[m[2]] = el;
+                        });
+                        const dirty = [];
+                        Object.keys(byId).forEach(function (id) {
+                            const f = byId[id];
+                            let changed = !!(f.touched && f.touched.value === '1');
+                            ['actual', 'cost', 'notes'].forEach(function (k) {
+                                if (f[k] && f[k].value !== f[k].defaultValue) changed = true;
+                            });
+                            if (f.reason && Array.from(f.reason.options).some(function (o) { return o.selected !== o.defaultSelected; })) changed = true;
+                            if (!changed) return;
+                            const row = { id: parseInt(id, 10), actual: f.actual ? f.actual.value : '', touched: f.touched && f.touched.value === '1' ? '1' : '0' };
+                            if (f.cost) row.cost = f.cost.value;
+                            if (f.reason) row.reason = f.reason.value;
+                            if (f.notes) row.notes = f.notes.value;
+                            dirty.push(row);
+                        });
+                        for (let i = 0; i < dirty.length; i += 50) {
+                            const h = document.createElement('input');
+                            h.type = 'hidden';
+                            h.name = 'lines_json[]';
+                            h.value = JSON.stringify(dirty.slice(i, i + 50));
+                            h.setAttribute('data-sc-packed', '1');
+                            form.appendChild(h);
+                        }
+                    }
+                    /* Switched off only while the browser builds the request (it does that before this timer fires), so a
+                     * send that is cancelled, or a page restored from history, leaves the inputs usable. */
+                    fields.forEach(function (el) { el.disabled = true; });
+                    setTimeout(function () {
+                        fields.forEach(function (el) { el.disabled = false; });
+                        form.querySelectorAll('input[data-sc-packed]').forEach(function (el) { el.remove(); });
+                    }, 0);
+                }
+
+                (function () {
+                    const f = document.getElementById('countForm');
+                    if (!f) return;
+                    f.addEventListener('submit', function (e) {
+                        if (e.defaultPrevented) return;
+                        const s = e.submitter;
+                        scPackLines(f, !!(s && s.value === 'save_lines'));
+                    });
+                })();
             </script>
 
         <?php else: ?>
@@ -1610,6 +1774,7 @@ $csrf_token = generateCsrfToken();
             a.name = 'action';
             a.value = actionValue;
             form.appendChild(a);
+            if (typeof scPackLines === 'function') scPackLines(form, false); // draft count form: send no per-line fields
             form.submit();
         }
     </script>
