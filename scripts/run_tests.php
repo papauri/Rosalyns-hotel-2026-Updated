@@ -34,6 +34,7 @@ $suites = [
     'Cache logic'           => 'scripts/tests/cache_logic.php',
     'Error log clear'       => 'scripts/tests/error_log_clear.php',
     'Staff presence'        => 'scripts/tests/admin_presence.php',
+    'Login by email'        => 'scripts/tests/login_email.php',
     'System logs summary'   => 'scripts/tests/system_logs.php',
     'Payment limits'        => 'scripts/tests/payment_limits.php',
     'Rehearsal fixes'       => 'scripts/tests/rehearsal_fixes.php',

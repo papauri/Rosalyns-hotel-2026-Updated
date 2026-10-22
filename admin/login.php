@@ -185,6 +185,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([$username]);
                 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
+                // No such username: a typed email address also signs in, but only when exactly one
+                // staff row has that email (two people sharing one is treated as an unknown user).
+                if (!$user && strpos($username, '@') !== false) {
+                    $estmt = $pdo->prepare("SELECT id, username, password_hash, role, full_name, email, failed_login_attempts, is_active FROM admin_users WHERE LOWER(TRIM(email)) = ? LIMIT 2");
+                    $estmt->execute([strtolower($username)]);
+                    $emailRows = $estmt->fetchAll(PDO::FETCH_ASSOC);
+                    if (count($emailRows) === 1) {
+                        $user = $emailRows[0];
+                    }
+                }
+                if ($user) {
+                    $username = (string)$user['username']; // logs and lockout messages name the account, not the email typed
+                }
+                // Unknown, deactivated or locked accounts never reach password_verify below; check the
+                // password against a fixed dummy hash so every refusal takes about as long as a wrong
+                // password (the response time must not reveal which usernames or emails exist).
+                $rh_dummy_hash = '$2y$10$l/qdS4pWJY5P37L2TbaATuH751JBQeGS7exKr2BaO/jMzzW2qrf5C';
+                if (!$user || !$user['is_active'] || $user['failed_login_attempts'] >= $max_attempts) {
+                    password_verify($password, $rh_dummy_hash);
+                }
+
                 if ($user && !$user['is_active']) {
                     $error_message = $generic_login_error; // same text as a wrong password: do not reveal which usernames exist
 
@@ -289,7 +310,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error_message = 'Login error. Please try again.';
         }
     } else {
-        $error_message = 'Please enter both username and password.';
+        $error_message = 'Please enter both your username or email and your password.';
     }
 }
 
@@ -365,11 +386,11 @@ $site_name = getSetting('site_name');
                 <?php echo getCsrfField(); ?>
                 <input type="hidden" name="redirect" value="<?php echo htmlspecialchars($requested_redirect, ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="form-group">
-                    <label for="username">Username</label>
+                    <label for="username">Username or email</label>
                     <div class="input-wrapper">
                         <i class="fas fa-user"></i>
                         <input type="text" id="username" name="username" class="form-control<?php echo $error_message ? ' is-invalid' : ''; ?>"
-                            placeholder="Enter your username" autofocus autocomplete="username" maxlength="100"
+                            placeholder="Username or email" autofocus autocomplete="username" maxlength="100"
                             autocapitalize="none" spellcheck="false" aria-describedby="username-error"
                             value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>">
                     </div>
@@ -451,7 +472,7 @@ $site_name = getSetting('site_name');
             function validateUsername() {
                 const val = usernameEl.value.trim();
                 if (!val) {
-                    setError(usernameEl, 'username-error', 'Username is required.');
+                    setError(usernameEl, 'username-error', 'Enter your username or email.');
                     return false;
                 }
                 if (val.length > 100) {

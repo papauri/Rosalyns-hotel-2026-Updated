@@ -26,6 +26,20 @@ function rh_invite_failure_reason(string $message): string
     return $m !== '' ? rtrim($m, '. ') . '.' : 'unknown error.';
 }
 
+const RH_ADMIN_EMAIL_TAKEN_MSG = 'Another staff member already uses this email. Each person needs their own email to sign in.';
+
+/** True when another admin_users row already has this email (case-insensitive, trimmed). */
+function rh_admin_email_in_use(PDO $pdo, string $email, int $exceptId = 0): bool
+{
+    $email = strtolower(trim($email));
+    if ($email === '') {
+        return false;
+    }
+    $st = $pdo->prepare("SELECT 1 FROM admin_users WHERE LOWER(TRIM(email)) = ? AND id <> ? LIMIT 1");
+    $st->execute([$email, $exceptId]);
+    return (bool)$st->fetchColumn();
+}
+
 $site_name = getSetting('site_name');
 $success_msg = '';
 $error_msg = '';
@@ -117,13 +131,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     try {
                         rh_with_create_lock($pdo, 'admin_user', function () use ($pdo, $username, $email, $full_name, $role, $password, &$dup_msg, &$new_user_id) {
                             $dupU = rh_find_duplicate($pdo, 'admin_users', 'username', $username);
-                            $dupE = rh_find_duplicate($pdo, 'admin_users', 'email', $email);
                             if ($dupU) {
                                 $dup_msg = 'The username "' . $dupU['value'] . '" is already taken. Choose a different username.';
                                 return;
                             }
-                            if ($dupE) {
-                                $dup_msg = 'The email "' . $dupE['value'] . '" already belongs to another user.';
+                            if (rh_admin_email_in_use($pdo, $email)) {
+                                $dup_msg = RH_ADMIN_EMAIL_TAKEN_MSG;
                                 return;
                             }
                             // No password set = nobody can sign in until the invitation is accepted.
@@ -186,9 +199,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error_msg = 'Invalid role selected.';
                 } else {
                     // Check email uniqueness (excluding current user)
-                    $dupE = rh_find_duplicate($pdo, 'admin_users', 'email', $email, [], $uid);
-                    if ($dupE) {
-                        $error_msg = 'The email "' . $dupE['value'] . '" already belongs to another user.';
+                    // (strict: even a pre-existing twin must be given its own email before it can be saved)
+                    if (rh_admin_email_in_use($pdo, $email, $uid)) {
+                        $error_msg = RH_ADMIN_EMAIL_TAKEN_MSG;
                     } else {
                         // Check if this is the last admin
                         $current_role_stmt = $pdo->prepare("SELECT role FROM admin_users WHERE id = ?");
@@ -596,6 +609,7 @@ $nav_categories = getNavCategories();
                             <div class="user-details">
                                 <div class="user-name"><?php echo htmlspecialchars($u['full_name']); ?></div>
                                 <div class="user-email"><?php echo htmlspecialchars($u['email']); ?></div>
+                                <div class="user-username">Username: <strong><?php echo htmlspecialchars((string)$u['username']); ?></strong></div>
                             </div>
                         </div>
                     </td>

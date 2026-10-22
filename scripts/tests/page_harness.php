@@ -161,7 +161,11 @@ register_shutdown_function('__h_finish');
 ob_start();
 
 // Sign in as an existing active admin user via a throw-away session file in the scratch dir.
-if (!empty($cfg['as_username'])) {
+$admin = null;
+if (!empty($cfg['anon'])) {
+    // Optional cfg.anon = true: nobody signed in (the login page itself); only a CSRF token is in the session.
+    $admin = ['id' => 0, 'username' => '', 'full_name' => '', 'role' => ''];
+} elseif (!empty($cfg['as_username'])) {
     // Optional: run as that existing active user instead (to test what a non-admin may do). Needs no new user.
     $asSt = $pdo->prepare("SELECT id, username, full_name, role FROM admin_users WHERE is_active = 1 AND username = ? LIMIT 1");
     $asSt->execute([(string)$cfg['as_username']]);
@@ -177,13 +181,15 @@ define('RH_SESSION_KEEP_SAVE_PATH', true); // pages' rh_session_start() must rea
 ini_set('session.use_cookies', '0');
 session_id('harness' . bin2hex(random_bytes(6)));
 session_start();
-$_SESSION['admin_user_id'] = (int)$admin['id'];
-$_SESSION['admin_username'] = $admin['username'];
-$_SESSION['admin_role'] = $admin['role'];
-$_SESSION['admin_full_name'] = $admin['full_name'];
-$_SESSION['admin_user'] = ['id' => (int)$admin['id'], 'username' => $admin['username'], 'full_name' => $admin['full_name'], 'role' => $admin['role']]; // what api/*.php endpoints read
+if (empty($cfg['anon'])) {
+    $_SESSION['admin_user_id'] = (int)$admin['id'];
+    $_SESSION['admin_username'] = $admin['username'];
+    $_SESSION['admin_role'] = $admin['role'];
+    $_SESSION['admin_full_name'] = $admin['full_name'];
+    $_SESSION['admin_user'] = ['id' => (int)$admin['id'], 'username' => $admin['username'], 'full_name' => $admin['full_name'], 'role' => $admin['role']]; // what api/*.php endpoints read
+    $_SESSION['admin_last_activity'] = time();
+}
 $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
-$_SESSION['admin_last_activity'] = time();
 session_write_close();
 
 // Optional seed rows (cfg.setup = [sql,...]): run inside the same never-committing transaction, before the page runs.
