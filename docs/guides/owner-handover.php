@@ -181,7 +181,7 @@ $notify = $s('booking_notification_email') ?: ($s('admin_notification_email') ?:
   <h3>Every month</h3>
   <ul>
     <li>Run the monthly reports (Money &rarr; Reports) and export what the accountant needs.</li>
-    <li>Run a stock count if the restaurant is in use — see <a href="08-stock-orders.html">Stock</a>. Look at Theft Radar on the Stock Count page and follow the weekly routine in <a href="20-stock-loss-prevention.html">Stopping stock going missing (anti-theft)</a>.</li>
+    <li>Run a stock count if the restaurant is in use — see <a href="08-stock-orders.html">Stock</a>. Look at Missing stock on the Stock Count page and follow the weekly routine in <a href="20-stock-loss-prevention.html">Stopping stock going missing (anti-theft)</a>.</li>
     <li>Check room prices and rate plans for the coming season.</li>
   </ul>
   <?php if ($backupAgeH === null || $backupAgeH > 36): ?>

@@ -305,7 +305,7 @@
 
   <details class="faq" id="faq-one-sausage" data-module="pos">
     <summary>How do I sell one sausage from a pack?</summary>
-    <p>Open <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong>, click <strong>Edit</strong> on the item (or <strong>Add item</strong>) and go to <strong>What it uses from stock</strong>. Find the sausages with the <strong>Category</strong> list or the <strong>Search</strong> box, and pick them in the <strong>Stock item</strong> list. Choose <strong>pieces</strong> as the unit and type the whole number <strong>1</strong> (or tap the <strong>1</strong> button). If the page asks <strong>How many pieces in one packet?</strong>, type it once (for example 6). It is saved on the stock item for everyone. The small grey print shows the working, for example <em>= 1 &divide; 6 packet = 0.166667 packet</em>. Click <strong>Add</strong>, then <strong>Save changes</strong> (or <strong>Add item</strong> for a new item). Each sale now takes 1 sausage off stock, not the whole packet, and 6 sales use 1 packet (to within 0.000002 of a packet). If the unit list has no <strong>pieces</strong> choice, the stock item is not counted in packets, packs, boxes or dozens: change its <strong>Unit</strong> in Stock &rarr; Ingredients, or use a fraction of its own unit. The number of pieces in a packet can also be set there, in <strong>Pieces in one packet</strong>. See <a href="01-pos-till.html#menu-stock">What it uses from stock</a>.</p>
+    <p>Open <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong>, click <strong>Edit</strong> on the item (or <strong>Add item</strong>) and go to <strong>What it uses from stock</strong>. Find the sausages with the <strong>Category</strong> list or the <strong>Search</strong> box, and pick them in the <strong>Stock item</strong> list. Choose <strong>pieces</strong> as the unit and type the whole number <strong>1</strong> (or tap the <strong>1</strong> button). If the <strong>pieces</strong> choice is greyed out, the number of pieces in one packet is not set yet. Set it in Stock &rarr; Ingredients under <strong>Pieces in one packet</strong> (for example 6). The menu only reads that number and cannot change it, so a menu change never changes stock for everyone. The small grey print shows the working, for example <em>= 1 &divide; 6 packet = 0.166667 packet</em>. Click <strong>Add</strong>, then <strong>Save changes</strong> (or <strong>Add item</strong> for a new item). Each sale now takes 1 sausage off stock, not the whole packet, and 6 sales use 1 packet (to within 0.000002 of a packet). If the unit list has no <strong>pieces</strong> choice, the stock item is not counted in packets, packs, boxes or dozens: change its <strong>Unit</strong> in Stock &rarr; Ingredients, or use a fraction of its own unit. The number of pieces in a packet is set there only, in <strong>Pieces in one packet</strong>. See <a href="01-pos-till.html#menu-stock">What it uses from stock</a>.</p>
   </details>
 
   <details class="faq" id="faq-menu-item-not-on-till" data-module="pos">
@@ -316,7 +316,7 @@
 
   <details class="faq" id="faq-opening-stock" data-module="stock">
     <summary>What does "Opening stock not recorded (N items)" mean, and how do I fix it?</summary>
-    <p>N ingredients have never had a quantity recorded, so they are not counted as out of stock or low. To fix it: open <strong>Stock</strong> &rarr; <strong>Stock Count</strong>, tick <strong>This is the opening stock count</strong>, click <strong>Start count</strong>, type the quantity and the unit cost for every item, click <strong>Save readings</strong> and <strong>Submit for approval</strong>. A different manager then clicks <strong>Approve &amp; post variances</strong>. See <a href="08-stock-orders.html#opening">How to do the Opening stock count</a>.</p>
+    <p>N ingredients have never had a quantity recorded, so they are not counted as out of stock or low. To fix it: open <strong>Stock</strong> &rarr; <strong>Stock Count</strong>, tick <strong>Opening stock count (first set-up only)</strong> at the bottom of <strong>Start a count</strong>, click <strong>Start count</strong>, type the quantity and the unit cost for every item, click <strong>Save readings</strong> and <strong>Submit for approval</strong>. A different manager then clicks <strong>Approve &amp; correct stock</strong>. See <a href="08-stock-orders.html#opening">How to do the Opening stock count</a>.</p>
   </details>
 
   <details class="faq" id="faq-po-wont-send" data-module="stock">
@@ -342,7 +342,7 @@
 
   <details class="faq" id="faq-count-cannot-approve" data-module="stock">
     <summary>I can't approve a stock count - it says another count was approved</summary>
-    <p>The page says <em>"This count is out of date: another count was approved after these items were counted ..."</em>. Another count that covers some of the same items was approved after you counted them. Approving this one too would add the same stock twice, so it is refused and nothing is posted. Click <strong>Reject &amp; send back</strong> (type a reason of at least 8 characters), then <strong>Reopen for re-count</strong>. This takes a fresh snapshot of stock. Count the lines again and submit. See <a href="08-stock-orders.html#count">How to do a stock count</a>.</p>
+    <p>The page says <em>"This count is out of date: another count was approved after these items were counted ..."</em>. Another count that covers some of the same items was approved after you counted them. Approving this one too would add the same stock twice, so it is refused and nothing is posted. Click <strong>Reject count</strong> (type a reason of at least 8 characters), then <strong>Count again</strong>. This takes a fresh snapshot of stock. Count the lines again and submit. See <a href="08-stock-orders.html#count">How to do a stock count</a>.</p>
   </details>
 
   <details class="faq" id="faq-count-406" data-module="stock">
@@ -358,7 +358,7 @@
 
   <details class="faq" id="faq-anti-theft" data-module="stock">
     <summary>How does the system stop stock theft?</summary>
-    <p>It cannot stop a person, but it makes stock hard to lose without a trace. Every sale takes stock off by recipe. Wastage must be written down with a reason and a name. Stock counts are blind for the person counting, every shortage needs a reason, and a big shortage cannot be approved by the person who counted. Manual adjustments and batch write-offs are for managers only and need a reason. <strong>Theft Radar</strong> on the Stock Count page lists ingredients losing stock that no sale or wastage explains. Every change is saved with who made it. Run a surprise count each week. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
+    <p>It cannot stop a person, but it makes stock hard to lose without a trace. Every sale takes stock off by recipe. Wastage must be written down with a reason and a name. Stock counts are blind for the person counting, every shortage needs a reason, and a big shortage cannot be approved by the person who counted. Manual adjustments and batch write-offs are for managers only and need a reason. <strong>Missing stock</strong> on the Stock Count page lists ingredients losing stock that no sale or wastage explains. Every change is saved with who made it. Run a surprise count each week. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
   </details>
 
   <details class="faq" id="faq-stock-missing" data-module="stock">
@@ -367,8 +367,8 @@
   </details>
 
   <details class="faq" id="faq-theft-radar" data-module="stock">
-    <summary>What is Theft Radar?</summary>
-    <p><strong>Theft Radar (last 30 days)</strong> is a list on the <strong>Stock Count</strong> page. It shows up to 20 ingredients that lost stock in the last 30 days through count shortages or manual subtractions, which no sale or wastage entry explains, with the cost lost on the right. If nothing is found it says <em>"No unaccounted shortages detected. All stock movement traces to sales or recorded events."</em> Under it, <strong>Manual additions (last 30 days)</strong> lists stock added by hand, because an addition can hide an earlier loss. It shows where to look, not who is to blame. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
+    <summary>What is Missing stock?</summary>
+    <p><strong>Missing stock (last 30 days)</strong> is a list on the <strong>Stock Count</strong> page. It shows up to 20 ingredients that lost stock in the last 30 days through count shortages or manual subtractions, which no sale or wastage entry explains, with the cost lost on the right. If nothing is found it says <em>"No unaccounted shortages detected. All stock movement traces to sales or recorded events."</em> Under it, <strong>Stock added by hand (last 30 days)</strong> lists stock added by hand, because an addition can hide an earlier loss. It shows where to look, not who is to blame. See <a href="20-stock-loss-prevention.html#protect">How the system protects your stock</a>.</p>
   </details>
 
   <details class="faq" id="faq-count-shading" data-module="stock">
