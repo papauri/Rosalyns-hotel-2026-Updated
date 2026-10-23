@@ -55,7 +55,7 @@ satisfied … reach it without looping into something else").** Fixed list; noth
       partly refunded till orders in earned revenue, POS Accounting net on one basis — shipped both hotels.
 - [x] G2 PATCH: levy report takes refunded levy back off (levy follows the money; a kept night keeps
       its levy) — shipped both hotels.
-- [ ] G3 Verify once: `php scripts/run_tests.php` + `php scripts/data-health.php` green in both hotels
+- [x] G3 Verify once: `php scripts/run_tests.php` + `php scripts/data-health.php` green in both hotels
       (after the owner runs migration 069), one headless pass over the money screens touched today.
 - [ ] G4 Owner: run `php admin/migrations/migrate.php --run` on both hotels; owner items in 4.
 When G1–G3 are ticked the code is FINISHED. Claude then does nothing proactive: no audits, no

@@ -65,11 +65,15 @@ $user = dx_user($pdo);
 function dx_pdf_text(string $pdf): string {
     // Plain text of a TCPDF file (core-font strings in the compressed content streams), for asserting printed amounts.
     $txt = '';
-    if (preg_match_all('/stream\r?\n(.*?)\r?\nendstream/s', $pdf, $m)) {
-        foreach ($m[1] as $st) {
-            $d = @gzuncompress($st);
-            if ($d !== false) { $txt .= $d . "\n"; }
-        }
+    // strpos walk, not a regex: a large logo stream (Liwonde's PDF is ~500KB) exhausts PCRE's backtrack limit.
+    $pos = 0;
+    while (($a = strpos($pdf, 'stream', $pos)) !== false && ($b = strpos($pdf, 'endstream', $a + 6)) !== false) {
+        $st = substr($pdf, $a + 6, $b - $a - 6);
+        $st = preg_replace('/^\r?\n/', '', $st, 1);   // exactly one EOL each side: the zlib data
+        $st = preg_replace('/\r?\n$/D', '', $st, 1);  // can itself end in a \r or \n byte
+        $d = @gzuncompress($st);
+        if ($d !== false) { $txt .= $d . "\n"; }
+        $pos = $b + 9;
     }
     preg_match_all('/\(([^)]*)\)\s*Tj|\[(.*?)\]\s*TJ/s', $txt, $mm, PREG_SET_ORDER);
     $out = [];
