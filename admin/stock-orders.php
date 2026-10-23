@@ -1264,31 +1264,37 @@ if (!$error || strpos($error, 'not yet') === false) {
         ");
         $orderTypeSplit = $channelStmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Yesterday totals for delta comparison
-        $ydayStmt = $pdo->query("
-            SELECT
-                COUNT(*) AS orders_yesterday,
-                COALESCE(SUM(CASE WHEN status = 'paid' THEN total_amount ELSE 0 END), 0) AS revenue_yesterday,
-                COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS settled_revenue_yesterday
-            FROM stock_orders
-            WHERE DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-        ");
-        $yesterday = $ydayStmt->fetch(PDO::FETCH_ASSOC)
-            ?: ['orders_yesterday' => 0, 'revenue_yesterday' => 0, 'settled_revenue_yesterday' => 0];
+        // Yesterday totals for delta comparison: the PREVIOUS trading window, on the same rules as
+        // today - sales by the shared shift maths (paid time, paid/refunded/voided later, the same
+        // statuses as the bar above) and orders by the time they were started.
+        $soPrevWindow = rh_station_union_window_for_date(
+            (new DateTimeImmutable($soShiftWindow['business_date']))->modify('-1 day')->format('Y-m-d')
+        );
+        $soPrevTotals = rh_pos_shift_totals($pdo, null, $soPrevWindow['start_sql'], $soPrevWindow['end_sql'], $soPrevWindow['start_sql']);
+        $ydayStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_orders WHERE created_at >= ? AND created_at < ?");
+        $ydayStmt->execute([$soPrevWindow['start_sql'], $soPrevWindow['end_sql']]);
+        $yesterday = [
+            'orders_yesterday'          => (int)$ydayStmt->fetchColumn(),
+            'revenue_yesterday'         => (float)$soPrevTotals['sales_total'],
+            'settled_revenue_yesterday' => (float)$soPrevTotals['sales_total'],
+        ];
 
-        // Void reasons today (for manager review)
-        $voidStmt = $pdo->query("
+        // Void reasons today (breakdown only - the card totals come from the shift figures above).
+        // Same rule as the shift bar: voided in the trading window by voided_at.
+        $voidStmt = $pdo->prepare("
             SELECT
                 COALESCE(NULLIF(TRIM(o.void_reason), ''), 'No reason given') AS reason,
                 COUNT(*) AS count,
                 COALESCE(SUM(o.total_amount), 0) AS amount_total
             FROM stock_orders o
             WHERE o.status = 'voided'
-              AND DATE(o.updated_at) = CURDATE()
+              AND ((o.voided_at IS NOT NULL AND o.voided_at >= ? AND o.voided_at < ?)
+                OR (o.voided_at IS NULL AND o.created_at >= ? AND o.created_at < ?))
             GROUP BY COALESCE(NULLIF(TRIM(o.void_reason), ''), 'No reason given')
             ORDER BY count DESC
             LIMIT 5
         ");
+        $voidStmt->execute($soSaleParam);
         $voidReasonsToday = $voidStmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         $error = 'Failed to load: ' . $e->getMessage();
@@ -1458,8 +1464,10 @@ $csrf_token = generateCsrfToken();
                 usort($hourlyBreakdown, fn(array $a, array $b): int => (int)$a['hour'] - (int)$b['hour']);
             }
 
-            $totalVoidedToday = array_sum(array_column($voidReasonsToday, 'count'));
-            $totalVoidedAmt   = array_sum(array_column($voidReasonsToday, 'amount_total'));
+            // Totals = every void in the trading window (same figure as the Voids card in the bar above);
+            // $voidReasonsToday is only the top-5 reason breakdown.
+            $totalVoidedToday = (int)($shift['void_count_today'] ?? 0);
+            $totalVoidedAmt   = (float)($shift['voided_today'] ?? 0);
 
             function insightsDelta(?float $delta): string
             {
@@ -1492,7 +1500,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="revenue-today"
                     data-insight-title="Revenue Today Breakdown"
                     aria-label="Open revenue today breakdown">
-                    <div class="lbl">Gross Sales Today <i class="help" aria-label="About gross sales today" data-tip="Money from orders paid in today&#x27;s trading window, before refunds and voids. The arrow compares with yesterday.">?</i></div>
+                    <div class="lbl">Gross Sales Today <i class="help" aria-label="About gross sales today" data-tip="Money from orders paid in today&#x27;s trading window, before refunds and voids. The arrow compares with all of yesterday&#x27;s trading window, counted the same way.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format($revToday, 2); ?></div>
                     <?php echo insightsDelta($revDelta); ?>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Yesterday: <?php echo $currency_symbol . ' ' . number_format($revYday, 2); ?></div>
@@ -1506,7 +1514,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="orders-today"
                     data-insight-title="Orders Today Throughput"
                     aria-label="Open orders today throughput">
-                    <div class="lbl">Orders Today <i class="help" aria-label="About orders today" data-tip="Orders started in today&#x27;s trading window, including any since cancelled or voided. The arrow compares with yesterday.">?</i></div>
+                    <div class="lbl">Orders Today <i class="help" aria-label="About orders today" data-tip="Orders started in today&#x27;s trading window, including any since cancelled or voided. The arrow compares with all of yesterday&#x27;s trading window, counted the same way.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $ordToday; ?></div>
                     <?php echo insightsDelta($ordDelta); ?>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Yesterday: <?php echo $ordYday; ?></div>
@@ -1563,9 +1571,9 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="cash-collected"
                     data-insight-title="Cash Collection Summary"
                     aria-label="Open cash collection summary">
-                    <div class="lbl">Cash Collected <i class="help" aria-label="About cash collected" data-tip="Cash taken for orders paid in today&#x27;s trading window, tips included. It does not take off refund payouts or add the opening float.">?</i></div>
+                    <div class="lbl">Cash Taken (incl. tips) <i class="help" aria-label="About cash taken" data-tip="Cash taken for orders paid in today&#x27;s trading window, tips included. It is not the drawer count: refund and void payouts are not taken off and the opening float is not added. Each cashier&#x27;s drawer total is on their shift close.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></div>
-                    <div style="font-size:11px;color:#6c757d;margin-top:3px;">Today's cash drawer total</div>
+                    <div style="font-size:11px;color:#6c757d;margin-top:3px;">By payment time, before payouts</div>
                     <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                 </div>
 
@@ -1602,7 +1610,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="voids-today"
                     data-insight-title="Voids Monitoring"
                     aria-label="Open voids monitoring">
-                    <div class="lbl">Voids Today <i class="help" aria-label="About voids today" data-tip="Orders voided since midnight, and what they were worth.">?</i></div>
+                    <div class="lbl">Voids Today <i class="help" aria-label="About voids today" data-tip="Every order voided in today&#x27;s trading window, paid or not: how many, and what they were worth. Same figure as Voids in the bar at the top.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $totalVoidedToday; ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">
                         <?php echo $totalVoidedToday > 0
@@ -1989,6 +1997,9 @@ $csrf_token = generateCsrfToken();
                                 <span><?php echo $totalVoidedToday; ?> void<?php echo $totalVoidedToday !== 1 ? 's' : ''; ?></span>
                                 <strong style="color:#721c24;"><?php echo $currency_symbol . ' ' . number_format($totalVoidedAmt, 2); ?> lost</strong>
                             </div>
+                            <?php if (!empty($voidReasonsToday)): ?>
+                                <div style="font-size:11px;color:#6c757d;margin-bottom:4px;">Top reasons<?php echo count($voidReasonsToday) >= 5 ? ' (up to 5)' : ''; ?></div>
+                            <?php endif; ?>
                             <?php foreach ($voidReasonsToday as $vr): ?>
                                 <a class="ops-panel__reason-link" href="stock-orders.php?date=today&status=voided#rh-results" title="View today's voided orders">
                                     <span style="color:#555;flex:1;">
@@ -2397,7 +2408,7 @@ $csrf_token = generateCsrfToken();
                         <th>Payment</th>
                         <th>Status</th>
                         <th>Health <i class="help" tabindex="0" role="button" aria-label="About order health" data-tip="Balanced means the items, payments and room charges agree with the order total. Review means something does not match.">?</i></th>
-                        <th>Cashier <i class="help" tabindex="0" role="button" aria-label="About cashier" data-tip="The person who started the order. Revenue by Cashier on the cards credits whoever took the payment instead.">?</i></th>
+                        <th>Opened by <i class="help" tabindex="0" role="button" aria-label="About opened by" data-tip="The person who started the order. It is not always the person who took the payment: Revenue by Cashier on the cards credits whoever took the payment instead.">?</i></th>
                         <th>Created</th>
                         <th>Actions</th>
                     </tr>
@@ -2660,7 +2671,7 @@ $csrf_token = generateCsrfToken();
         </div>
 
         <template id="stock-orders-insight-template-revenue-today">
-            <p class="stock-insight-note">Revenue today compares gross settled revenue against yesterday to show shift momentum.</p>
+            <p class="stock-insight-note">Revenue today compares gross sales (by payment time, before refunds and voids) against the whole of yesterday&#039;s trading window to show shift momentum.</p>
             <table class="stock-insight-table">
                 <tbody>
                     <tr><th>Revenue today</th><td><?php echo $currency_symbol . ' ' . number_format($revToday, 2); ?></td></tr>
@@ -2675,7 +2686,7 @@ $csrf_token = generateCsrfToken();
         </template>
 
         <template id="stock-orders-insight-template-orders-today">
-            <p class="stock-insight-note">Orders throughput compares completed volume against yesterday to flag operational acceleration or slowdown.</p>
+            <p class="stock-insight-note">Orders throughput compares orders started today against orders started in the whole of yesterday&#039;s trading window to flag operational acceleration or slowdown.</p>
             <table class="stock-insight-table">
                 <tbody>
                     <tr><th>Orders today</th><td><?php echo number_format($ordToday); ?></td></tr>
@@ -2707,7 +2718,7 @@ $csrf_token = generateCsrfToken();
             <p class="stock-insight-note">Counted by payment time (not order created date): a tab opened earlier and paid today counts today. Supports drawer reconciliation and should align with cash settlement records.</p>
             <table class="stock-insight-table">
                 <tbody>
-                    <tr><th>Cash collected today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Cash taken today (incl. tips)</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></td></tr>
                     <tr><th>of which tips</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['tips_today'] ?? 0), 2); ?></td></tr>
                     <tr><th>Settled from earlier tabs</th><td><?php echo (int)($shift['earlier_tabs_n'] ?? 0); ?> &middot; <?php echo $currency_symbol . ' ' . number_format((float)($shift['earlier_tabs_amt'] ?? 0), 2); ?></td></tr>
                     <tr><th>Refund / void payouts</th><td>-<?php echo $currency_symbol . ' ' . number_format((float)($shift['refund_cash'] ?? 0), 2); ?></td></tr>

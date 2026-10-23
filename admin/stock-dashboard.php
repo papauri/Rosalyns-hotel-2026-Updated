@@ -11,6 +11,7 @@ require_once dirname(__DIR__) . '/config/cache.php';
 require_once 'includes/procurement-schema.php';
 require_once 'includes/stock-budget-lib.php';
 require_once dirname(__DIR__) . '/includes/stock-loss.php';
+require_once dirname(__DIR__) . '/includes/station-hours.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -47,6 +48,10 @@ if (!$error && $canReview && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['a
 // Auto-run expiry sweep
 if (!$error) runStockExpiryCheck();
 
+// "Today" on this page = the trading window (station hours), the same window Orders & Tabs and the till use.
+$dashLive = rh_station_union_business_window();
+$dashWinParams = [$dashLive['start_sql'], $dashLive['end_sql']];
+
 $cacheKey = RH_STOCK_DASH_CACHE_KEY;
 $metrics = function_exists('getCache') ? getCache($cacheKey) : null;
 if (!$metrics && !$error) {
@@ -58,9 +63,17 @@ if (!$metrics && !$error) {
         $metrics['expiring_3d'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)")->fetchColumn();
         $metrics['expiring_7d'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date BETWEEN DATE_ADD(CURDATE(), INTERVAL 4 DAY) AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)")->fetchColumn();
 
-        $metrics['orders_today'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE status NOT IN ('voided','cancelled') AND DATE(created_at) = CURDATE()")->fetchColumn();
-        $metrics['orders_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE status = 'placed' AND DATE(created_at) = CURDATE()")->fetchColumn();
-        $metrics['revenue_today'] = (float)$pdo->query("SELECT COALESCE(SUM(total_amount), 0) FROM stock_orders WHERE status = 'paid' AND DATE(created_at) = CURDATE()")->fetchColumn();
+        // "Today" = the trading window (same as Orders & Tabs and the till shift totals), not midnight-to-midnight.
+        $dashWin = $dashLive;
+        $st = $pdo->prepare("SELECT COUNT(*) FROM stock_orders WHERE status NOT IN ('voided','cancelled') AND created_at >= ? AND created_at < ?");
+        $st->execute([$dashWin['start_sql'], $dashWin['end_sql']]);
+        $metrics['orders_today'] = (int)$st->fetchColumn();
+        $st = $pdo->prepare("SELECT COUNT(*) FROM stock_orders WHERE status = 'placed' AND created_at >= ? AND created_at < ?");
+        $st->execute([$dashWin['start_sql'], $dashWin['end_sql']]);
+        $metrics['orders_pending'] = (int)$st->fetchColumn();
+        $st = $pdo->prepare("SELECT COALESCE(SUM(total_amount), 0) FROM stock_orders WHERE status = 'paid' AND created_at >= ? AND created_at < ?");
+        $st->execute([$dashWin['start_sql'], $dashWin['end_sql']]);
+        $metrics['revenue_today'] = (float)$st->fetchColumn();
         $metrics['wastage_today'] = (float)$pdo->query("SELECT COALESCE(SUM(wastage_cost), 0) FROM stock_wastage WHERE recorded_date = CURDATE()")->fetchColumn();
         $metrics['wastage_30d'] = (float)$pdo->query("SELECT COALESCE(SUM(wastage_cost), 0) FROM stock_wastage WHERE recorded_date > DATE_SUB(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();
         $metrics['expired_batches'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_batches WHERE status = 'active' AND quantity_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date < CURDATE()")->fetchColumn();
@@ -91,15 +104,16 @@ if (!$error && $metrics) {
     $metrics['low_stock'] = $alertSummary['low'];
     $metrics['critical_stock'] = $alertSummary['out'];
 
-    // Sales cards are live too. "Settled today" = paid orders by the day they were PAID (a tab opened
-    // last night and settled today counts today, as on the Orders screen); "Open tabs" = every order
+    // Sales cards are live too. "Settled today" = paid orders by the TRADING WINDOW they were PAID in (same
+    // window as the Orders screen and shift totals; a tab opened last night and settled today counts
+    // today, and a night shift past midnight stays in one day); "Open tabs" = every order
     // still open, whatever day it was started, so the number matches the list it links to.
     // Settled = 'paid' or 'completed'. Room-service orders charged to a guest folio are left out, as on
     // End of Day: the folio payment already counts them. An order refunded or voided later drops out of
     // this card (it shows what still stands as sold today); End of Day instead nets it on the reversal day.
     $metrics['orders_paid_today'] = null;
     try {
-        $liveSales = $pdo->query("
+        $liveSalesSt = $pdo->prepare("
             SELECT SUM(CASE WHEN settled = 1 THEN 1 ELSE 0 END) AS paid_n,
                    COALESCE(SUM(CASE WHEN settled = 1 THEN total_amount ELSE 0 END), 0) AS paid_amt,
                    SUM(CASE WHEN status = 'placed' THEN 1 ELSE 0 END) AS open_n,
@@ -108,13 +122,15 @@ if (!$error && $metrics) {
             FROM (
                 SELECT o.status, o.total_amount,
                        -- Paid orders refunded or voided today: shown under the card so the net figure is explained.
-                       ((o.status = 'refunded' AND DATE(o.refunded_at) = CURDATE())
-                        OR (o.status = 'voided' AND o.paid_at IS NOT NULL AND DATE(o.voided_at) = CURDATE())) AS reversed,
-                       (o.status IN ('paid','completed') AND DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()
+                       ((o.status = 'refunded' AND o.refunded_at >= ? AND o.refunded_at < ?)
+                        OR (o.status = 'voided' AND o.paid_at IS NOT NULL AND o.voided_at >= ? AND o.voided_at < ?)) AS reversed,
+                       (o.status IN ('paid','completed') AND COALESCE(o.paid_at, o.created_at) >= ? AND COALESCE(o.paid_at, o.created_at) < ?
                         AND NOT (o.order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = o.id))) AS settled
                 FROM stock_orders o
             ) x
-        ")->fetch(PDO::FETCH_ASSOC);
+        ");
+        $liveSalesSt->execute(array_merge($dashWinParams, $dashWinParams, $dashWinParams));
+        $liveSales = $liveSalesSt->fetch(PDO::FETCH_ASSOC);
         if ($liveSales) {
             $metrics['orders_paid_today'] = (int)$liveSales['paid_n'];
             $metrics['revenue_today']     = (float)$liveSales['paid_amt'];
@@ -132,17 +148,19 @@ $topItemsToday = [];
 $mostWastedIngredients = [];
 if (!$error) {
     try {
-        $topItemsToday = $pdo->query("
+        $topSt = $pdo->prepare("
             SELECT oi.item_name, oi.menu_type, SUM(oi.quantity) AS qty_sold, SUM(oi.line_total) AS revenue,
                    COUNT(DISTINCT o.id) AS order_count
             FROM stock_order_items oi
             INNER JOIN stock_orders o ON o.id = oi.order_id
-            WHERE o.status IN ('paid','completed') AND DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()
+            WHERE o.status IN ('paid','completed') AND COALESCE(o.paid_at, o.created_at) >= ? AND COALESCE(o.paid_at, o.created_at) < ?
               AND NOT (o.order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = o.id))
             GROUP BY oi.item_name, oi.menu_type
             ORDER BY qty_sold DESC, revenue DESC
             LIMIT 8
-        ")->fetchAll(PDO::FETCH_ASSOC);
+        ");
+        $topSt->execute($dashWinParams);
+        $topItemsToday = $topSt->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) { $topItemsToday = []; }
 
     try {
@@ -367,7 +385,7 @@ $csrf_token = generateCsrfToken();
         <div class="ck-kpis ck-kpis--4">
             <a class="ck-kpi ck-kpi--info" href="stock-orders.php?date=today&status=settled">
                 <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
-                <span class="ck-kpi__label">Net Sales Today <i class="help" aria-label="About net sales today" data-tip="Money from orders paid today, after refunds and voids. Room-service orders put on a guest&#x27;s bill are left out because the bill counts them.">?</i></span>
+                <span class="ck-kpi__label">Net Sales Today <i class="help" aria-label="About net sales today" data-tip="Money from orders paid in today&#x27;s trading window (the same window as Orders &amp; Tabs), after refunds and voids. Room-service orders put on a guest&#x27;s bill are left out because the bill counts them.">?</i></span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['revenue_today'], 0); ?></span>
                 <span class="ck-kpi__sub">
                     <?php if (($metrics['orders_paid_today'] ?? null) === null): ?>
