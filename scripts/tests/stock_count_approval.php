@@ -121,6 +121,8 @@ try {
     check(!rh_sca_needs_second_person($pdo, $cnt($bigId), 10.0, 20000.0), 'Second person: under the minimum value does not');
 
     // --- Email on submit (captured) ----------------------------------------------------------------------
+    // These checks assume the two-person rule is ON. Set it inside this rolled-back run, whatever the hotel's real setting is.
+    updateSetting('stock_count_second_approver', '1');
     $GLOBALS['rh_test_email_capture'] = [];
     $r = rh_sca_email_approvers($pdo, $openId, $counter, 'submit');
     $cap = $GLOBALS['rh_test_email_capture'];
@@ -183,9 +185,11 @@ try {
     check(rh_sca_may_remind($mgr2, $denied, true) && rh_sca_may_remind($denied, $denied, false) && !rh_sca_may_remind($plain, $denied, false) && !rh_sca_may_remind(0, 0, false), 'Remind: helper allows the counter and approvers only');
 
     // --- The administrator switch for the two-person rule ------------------------------------------------------------------
-    if ($setRowBefore === false) {
-        check(rh_sca_second_approver_required(), 'Switch: with no saved setting the rule is ON (default)');
-    }
+    // With no saved setting the rule is ON (checked inside this rolled-back run by taking away whatever the hotel has saved).
+    $pdo->prepare("DELETE FROM site_settings WHERE setting_key = 'stock_count_second_approver'")->execute();
+    unset($GLOBALS['_SITE_SETTINGS']['stock_count_second_approver']);
+    if (function_exists('deleteCache')) { deleteCache('setting_stock_count_second_approver'); }
+    check(rh_sca_second_approver_required(), 'Switch: with no saved setting the rule is ON (default)');
     updateSetting('stock_count_second_approver', '1');
     check(rh_sca_second_approver_required(), 'Switch: value 1 means ON');
     $fld = rh_hotel_details_fields()['Restaurant & stock']['stock_count_second_approver'] ?? null;

@@ -140,6 +140,12 @@ ok('The person who counted cannot approve it: still submitted', ($v[2][0]['statu
 $ing = []; foreach (($v[0] ?? []) as $x) { $ing[$x['name']] = $x; }
 ok('Refused approval puts no stock in', near(($ing["ZZT {$run} Castelite"]['current_quantity'] ?? -1), 0) && count($v[1] ?? []) === 0);
 
+$s = ssi_run('self_approve_off', $run, $verify);
+ok('Self-approve (rule OFF) scenario ran and rolled back', !empty($s['rolled_back']) && empty($s['leak']), json_encode($s['raw'] ?? $s));
+$v = $s['verify'] ?? [];
+$ing = []; foreach (($v[0] ?? []) as $x) { $ing[$x['name']] = $x; }
+ok('Rule OFF: the person who counted can approve it, and the stock goes in', ($v[2][0]['status'] ?? '') === 'approved' && near(($ing["ZZT {$run} Castelite"]['current_quantity'] ?? -1), 16), json_encode([$v[2] ?? null, $ing["ZZT {$run} Castelite"] ?? null]));
+
 $left = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'ZZT {$run} %'")->fetchColumn();
 ok('Rollback: no test ingredients left behind', $left === 0, (string)$left);
 $leftC = (int)$pdo->query("SELECT COUNT(*) FROM stock_counts WHERE notes LIKE 'Stock sheet import%'")->fetchColumn() - $countsBefore;

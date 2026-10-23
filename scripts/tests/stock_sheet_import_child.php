@@ -7,7 +7,9 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); }
  * scenario "apply": plan + apply a small made-up sheet, then plan again (idempotency), print JSON.
  * scenario "approve": same, then approve the opening count through the real admin/stock-count.php page as the
  *                     signed-in admin (counted_by is another admin, so the "different manager" rule is met).
- * scenario "self_approve": counted_by is the signed-in admin, so approval must be refused.
+ * scenario "self_approve": counted_by is the signed-in admin and the two-person rule is ON (set here, inside the rolled-back
+ *                     run, whatever the hotel's real setting is), so approval must be refused.
+ * scenario "self_approve_off": the same with the rule OFF: the person who counted may approve it.
  * scenario "gap": another opening count that holds Rice appears AFTER the plan was made and before it is applied (a manual
  *                  start in the gap): apply leaves Rice out of the import's count. Prints the names on the import's count.
  * scenario "partial": a manual partial opening count that is still open already holds Rice, and a rejected one holds
@@ -23,7 +25,11 @@ require_once $root . '/admin/includes/stock-sheet-import-lib.php';
 
 $me = (int)($_SESSION['admin_user_id'] ?? 0);
 $other = (int)$pdo->query("SELECT id FROM admin_users WHERE is_active = 1 AND id <> " . $me . " ORDER BY id LIMIT 1")->fetchColumn();
-$counter = $sc === 'self_approve' ? $me : $other;
+$counter = in_array($sc, ['self_approve', 'self_approve_off'], true) ? $me : $other;
+if ($sc === 'self_approve' || $sc === 'self_approve_off') {
+    // Rolled back with everything else: the checks must not depend on the hotel's Hotel Settings switch.
+    updateSetting('stock_count_second_approver', $sc === 'self_approve' ? '1' : '0');
+}
 
 $n = static fn(string $s) => 'ZZT ' . $run . ' ' . $s;
 $row = static function (string $dept, string $section, string $name, string $batch, string $unit, string $bal, string $max, string $price, string $exp, int $r): array {
@@ -125,7 +131,7 @@ $out['counts_total'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_counts WHERE
 $out['report_ok'] = strlen(rh_ssi_report($plan)) > 500;
 echo json_encode(['scenario' => $sc] + $out) . "\n";
 
-if ($sc === 'approve' || $sc === 'self_approve') {
+if ($sc === 'approve' || $sc === 'self_approve' || $sc === 'self_approve_off') {
     $_POST = ['action' => 'approve_count', 'count_id' => (string)$res['count_id'], 'csrf_token' => $csrfTok];
     $_REQUEST = $_POST;
     chdir($root . '/admin');
