@@ -817,3 +817,294 @@ table.count-list td.sc-row-actions form {
     min-height: 44px;
     min-width: 96px;
 }
+
+/* "Only the items I choose": search box + scrollable tick-box list + a count (replaces the Ctrl-click multi-select,
+   which cannot be used on a phone). */
+.sc-picker {
+    border: 1px solid #d6d8db;
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.form-field .sc-picker input.sc-picker__search {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 0;
+    border-bottom: 1px solid #d6d8db;
+    border-radius: 0;
+    font-size: 16px;
+    box-sizing: border-box;
+}
+
+.sc-picker__list {
+    max-height: 15rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.form-field .sc-picker label.sc-picker__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    margin: 0;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--admin-surface-border, #eaecef);
+    font-size: 13px;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: #212529;
+    cursor: pointer;
+}
+
+.form-field .sc-picker label.sc-picker__row[hidden] {
+    display: none;
+}
+
+.form-field .sc-picker label.sc-picker__row:hover {
+    background: var(--admin-table-hover, #f8f9fb);
+}
+
+.form-field .sc-picker input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin: 0;
+}
+
+.sc-picker__name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.sc-picker__cat {
+    flex: 0 1 auto;
+    max-width: 40%;
+    font-size: 11px;
+    color: #6c757d;
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+.sc-picker__none {
+    margin: 0;
+    padding: 14px 12px;
+    font-size: 13px;
+    color: #6c757d;
+}
+
+.sc-picker__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 44px;
+    padding: 4px 12px;
+    background: #f8f9fb;
+    border-top: 1px solid var(--admin-surface-border, #eaecef);
+    font-size: 12px;
+    font-weight: 600;
+    color: #495057;
+}
+
+.sc-picker__clear {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 8px;
+    border: 0;
+    background: transparent;
+    color: var(--color-primary, #766550);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+/* ---- Count sheet: filter row, lines card, approval box, action buttons ---- */
+.sc-filter-row {
+    display: grid;
+    grid-template-columns: minmax(12rem, 1.6fr) repeat(2, minmax(8.8rem, 1fr)) auto auto;
+    gap: 0.5rem;
+    align-items: end;
+    margin-bottom: 0.7rem;
+}
+
+.sc-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+    min-width: 0;
+}
+
+.sc-filter-label {
+    font-size: 11px;
+    color: #6c757d;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.sc-filter-field :is(input, select) {
+    width: 100%;
+    min-width: 0;
+    min-height: 38px;
+    box-sizing: border-box;
+}
+
+.sc-filter-row #scFilterReset {
+    min-height: 38px;
+}
+
+.sc-filter-count {
+    font-size: 12px;
+    color: #6c757d;
+    justify-self: end;
+    white-space: nowrap;
+}
+
+.sc-lines-card {
+    overflow: auto;
+    max-height: 65vh;
+    padding: 0;
+}
+
+.qty--cost {
+    width: 96px;
+}
+
+.approval-box {
+    background: #eef6ff;
+    border: 1px solid #b6d4fe;
+    color: #1e3a5f;
+    padding: 12px 14px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.sc-remind {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin: 8px 0 0;
+}
+
+.sc-remind__note {
+    font-size: 12px;
+    color: #556;
+}
+
+.sc-lockednote {
+    color: #856404;
+    background: #fff3cd;
+    border: 1px solid #ffe69c;
+    padding: 8px 12px;
+    border-radius: 8px;
+}
+
+.sc-actionbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.sc-emailbox {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    font-size: 13px;
+    color: #495057;
+}
+
+.sc-emailbox input {
+    width: 20px;
+    height: 20px;
+}
+
+.sc-emailbox__who {
+    color: #6c757d;
+    font-size: 12px;
+}
+
+/* Tablet and phone: 44px inputs and buttons in the filter row. */
+@media (max-width: 64rem) {
+    .sc-filter-field :is(input, select),
+    .sc-filter-row #scFilterReset {
+        min-height: 44px;
+        font-size: 16px;
+    }
+
+    .sc-filter-row {
+        grid-template-columns: minmax(12rem, 1.6fr) repeat(2, minmax(8.8rem, 1fr)) auto;
+    }
+
+    .sc-filter-count {
+        grid-column: 1 / -1;
+        justify-self: start;
+    }
+}
+
+/* Phone: the filters wrap (search on its own line, the two selects side by side, Reset full width), the
+   lines are cards on the page itself (no card inside a card), and the buttons stack full width. */
+@media (max-width: 47.99rem) {
+    .sc-filter-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .sc-filter-row .sc-filter-field:first-child,
+    .sc-filter-row #scFilterReset {
+        grid-column: 1 / -1;
+    }
+
+    .stock-count-page .sc-lines-card {
+        overflow: visible;
+        max-height: none;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .lines-table input.qty.qty--cost {
+        width: 100%;
+    }
+
+    .sc-actionbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .stock-count-page .sc-actionbar :is(.btn-primary, .btn-secondary, .btn-success, .btn-danger) {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .sc-emailbox {
+        align-items: flex-start;
+    }
+
+    .sc-remind {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .stock-count-page .sc-remind .btn-secondary {
+        width: 100%;
+    }
+
+    .stock-count-page :is(.sc-draftbox, .sc-rejected) .sc-actions,
+    .stock-count-page :is(.sc-draftbox, .sc-rejected) .sc-actions form,
+    .stock-count-page :is(.sc-draftbox, .sc-rejected) .sc-actions button {
+        width: 100%;
+    }
+}

@@ -39,6 +39,24 @@
     .admin-header .admin-gsearch-btn kbd { display: none; }
     .admin-header .admin-gsearch-btn { padding: 0 10px; }
 }
+/* Tablet and phone: the header buttons are square icon buttons with the icon dead centre
+   (flex centring, no padding or baseline offset), same size as the menu button. */
+.admin-header .admin-gsearch-btn i { line-height: 1; }
+@media (max-width: 1024px) {
+    .admin-header .admin-gsearch-btn { justify-content: center; }
+}
+@media (max-width: 900px) {
+    .admin-header .admin-gsearch-btn,
+    .admin-header .admin-help-btn {
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        gap: 0;
+        justify-content: center;
+        box-sizing: border-box;
+    }
+    .admin-header .admin-gsearch-btn i { width: 1em; text-align: center; }
+}
 
 .rh-gs {
     position: fixed;

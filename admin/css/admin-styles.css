@@ -233,6 +233,7 @@ footer {
 
 .admin-nav-toggle i {
     color: white;
+    line-height: 1;
     pointer-events: none;
     /* Let clicks pass through to the button */
 }
@@ -2343,6 +2344,11 @@ table.fit-or-card:not(.mobile-enhanced) td {
         display: flex;
         align-items: center;
         justify-content: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        line-height: 1;
+        box-sizing: border-box;
         order: 3;
         /* Move to end in mobile flex order */
     }

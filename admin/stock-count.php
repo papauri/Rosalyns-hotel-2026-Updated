@@ -273,7 +273,7 @@ function scUncountedMessage(int $n, array $names, string $for = 'submit'): strin
     if ($for === 'approve') {
         return 'This count can’t be approved: ' . $what . '. Press “Reject count” so the counter can finish those lines, then submit it again.';
     }
-    return 'This count can’t be submitted yet: ' . $what . '. Type a reading on each (0 if there is none), save, and use the “Not counted only” filter to find them.';
+    return 'This count can’t be submitted yet: ' . $what . '. Type a reading on each (0 if there is none), and use the “Not counted only” filter to find them.';
 }
 
 /* Net stock movement for an ingredient inside (from, to] - sales, receipts, wastage, other counts. */
@@ -606,7 +606,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     throw new RuntimeException('A category count needs a category. Pick one in the Category box and press Start count again.');
                 }
                 if ($scope === 'spot' && !preg_match('/^\s*\d+(\s*,\s*\d+)*\s*$/', $scopeValue)) {
-                    throw new RuntimeException('Choose at least one item to count. Pick them in the Items to count list (hold Ctrl for more), or choose One category or Everything.');
+                    throw new RuntimeException('Choose at least one item to count. Tick the items in the list, or choose One category or Everything.');
                 }
 
                 // Double-submit guard: the same user starting the identical draft count within 30 seconds
@@ -629,7 +629,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     $params[] = $scopeValue;
                 } elseif ($scope === 'spot') {
                     $ids = array_filter(array_map('intval', explode(',', $scopeValue)));
-                    if (empty($ids)) throw new RuntimeException('Choose at least one item to count. Pick them in the Items to count list (hold Ctrl for more), or choose One category or Everything.');
+                    if (empty($ids)) throw new RuntimeException('Choose at least one item to count. Tick the items in the list, or choose One category or Everything.');
                     $ph = implode(',', array_fill(0, count($ids), '?'));
                     $sql .= " AND id IN ($ph)";
                     $params = array_merge($params, $ids);
@@ -1414,7 +1414,7 @@ $csrf_token = generateCsrfToken();
                 $remindWait = rh_sca_remind_wait($pdo, (int)$activeCount['id']);
                 $mayRemind = rh_sca_may_remind((int)$user['id'], (int)$activeCount['counted_by'], $canApprove);
             ?>
-                <div class="approval-box" style="background:#eef6ff;border:1px solid #b6d4fe;color:#1e3a5f;padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;line-height:1.6;">
+                <div class="approval-box">
                     <div><strong><i class="fas fa-hourglass-half"></i> Waiting for approval.</strong>
                         <?php if (!$secondRuleOn): ?>
                             The person who counted it (<?php echo htmlspecialchars($counterNm); ?>) can approve it too.
@@ -1440,7 +1440,7 @@ $csrf_token = generateCsrfToken();
                         <div><i class="fas fa-user-lock"></i> You can&rsquo;t approve counts. Ask one of the people above.</div>
                     <?php endif; ?>
                     <?php if ($mayRemind): ?>
-                    <form method="POST" style="margin-top:8px;">
+                    <form method="POST" class="sc-remind">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                         <input type="hidden" name="action" value="remind_count">
                         <input type="hidden" name="count_id" value="<?php echo (int)$activeCount['id']; ?>">
@@ -1448,7 +1448,7 @@ $csrf_token = generateCsrfToken();
                             <button type="button" class="btn-secondary" disabled><i class="fas fa-envelope"></i> Approvers emailed &mdash; remind again in <?php echo (int)ceil($remindWait / 60); ?> min</button>
                         <?php else: ?>
                             <button type="submit" class="btn-secondary"><i class="fas fa-envelope"></i> Remind approvers</button>
-                            <span style="font-size:12px;color:#556;">Sends them an email with a link to this count.</span>
+                            <span class="sc-remind__note">Sends them an email with a link to this count.</span>
                         <?php endif; ?>
                     </form>
                     <?php endif; ?>
@@ -1504,14 +1504,14 @@ $csrf_token = generateCsrfToken();
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="count_id" value="<?php echo (int)$activeCount['id']; ?>">
 
-                <div style="display:grid;grid-template-columns:minmax(12rem,1.6fr) repeat(2,minmax(8.8rem,1fr)) auto auto;gap:0.5rem;align-items:end;margin-bottom:0.7rem;">
-                    <label style="display:flex;flex-direction:column;gap:0.28rem;">
-                        <span style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Search ingredient</span>
-                        <input type="text" id="scFilterSearch" placeholder="Name, category, unit..." style="min-height:38px;">
+                <div class="sc-filter-row">
+                    <label class="sc-filter-field">
+                        <span class="sc-filter-label">Search ingredient</span>
+                        <input type="text" id="scFilterSearch" placeholder="Name, category, unit...">
                     </label>
-                    <label style="display:flex;flex-direction:column;gap:0.28rem;">
-                        <span style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;letter-spacing:.04em;"><?php echo $blindCount ? 'Status' : 'Difference'; ?></span>
-                        <select id="scFilterVariance" style="min-height:38px;">
+                    <label class="sc-filter-field">
+                        <span class="sc-filter-label"><?php echo $blindCount ? 'Status' : 'Difference'; ?></span>
+                        <select id="scFilterVariance">
                             <option value="all">All rows</option>
                             <?php if (!$blindCount): ?>
                                 <option value="shortage">Shortage only</option>
@@ -1522,9 +1522,9 @@ $csrf_token = generateCsrfToken();
                             <option value="uncounted">Not counted only</option>
                         </select>
                     </label>
-                    <label style="display:flex;flex-direction:column;gap:0.28rem;">
-                        <span style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Reason</span>
-                        <select id="scFilterReason" style="min-height:38px;">
+                    <label class="sc-filter-field">
+                        <span class="sc-filter-label">Reason</span>
+                        <select id="scFilterReason">
                             <option value="all">All reasons</option>
                             <option value="none">No reason</option>
                             <?php foreach (['spillage', 'expired', 'staff_meal', 'sampling', 'prep_waste', 'theft_suspected', 'correction', 'other'] as $rc): ?>
@@ -1532,11 +1532,11 @@ $csrf_token = generateCsrfToken();
                             <?php endforeach; ?>
                         </select>
                     </label>
-                    <button type="button" class="btn-secondary" id="scFilterReset" style="min-height:38px;"><i class="fas fa-rotate-left"></i> Reset</button>
-                    <span id="scFilterCount" style="font-size:12px;color:#6c757d;justify-self:end;white-space:nowrap;"></span>
+                    <button type="button" class="btn-secondary" id="scFilterReset"><i class="fas fa-rotate-left"></i> Reset</button>
+                    <span id="scFilterCount" class="sc-filter-count"></span>
                 </div>
 
-                <div class="card" style="overflow:auto; max-height:65vh; padding:0;">
+                <div class="card sc-lines-card">
                     <table class="lines-table no-card-mobile">
                         <thead>
                             <tr>
@@ -1604,7 +1604,7 @@ $csrf_token = generateCsrfToken();
                                     <?php if ($isOpeningCount): ?>
                                     <td data-label="Unit cost (<?php echo htmlspecialchars($currency); ?>)" style="text-align:right;">
                                         <?php if ($editable): ?>
-                                            <input class="qty" type="number" step="0.0001" min="0" style="width:96px;" name="line[<?php echo (int)$ln['id']; ?>][cost]" value="<?php echo (float)$ln['cost_per_unit'] > 0 ? number_format((float)$ln['cost_per_unit'], 4, '.', '') : ''; ?>" placeholder="required">
+                                            <input class="qty qty--cost" type="number" step="0.0001" min="0" name="line[<?php echo (int)$ln['id']; ?>][cost]" value="<?php echo (float)$ln['cost_per_unit'] > 0 ? number_format((float)$ln['cost_per_unit'], 4, '.', '') : ''; ?>" placeholder="required">
                                         <?php else: ?>
                                             <?php echo number_format((float)$ln['cost_per_unit'], 4); ?>
                                         <?php endif; ?>
@@ -1639,7 +1639,7 @@ $csrf_token = generateCsrfToken();
                     </table>
                 </div>
 
-                <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+                <div class="sc-actionbar">
                     <?php if ($editable && $canWorkCount): ?>
                         <button type="submit" name="action" value="save_lines" class="btn-secondary"><i class="fas fa-save"></i> Save readings</button>
                         <?php $oneStepSubmit = !$secondRuleOn && rh_sca_may_decide((int)$user['id'], (int)$activeCount['counted_by'], $canApprove, false); ?>
@@ -1647,15 +1647,15 @@ $csrf_token = generateCsrfToken();
                         <button type="button" class="btn-primary" onclick="scSubmitConfirm(this.form, true)"><i class="fas fa-check"></i> Submit &amp; correct stock</button>
                         <?php else: ?>
                         <button type="button" class="btn-primary" onclick="scSubmitConfirm(this.form, false)"><i class="fas fa-paper-plane"></i> Submit for approval</button>
-                        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#495057;">
+                        <label class="sc-emailbox">
                             <input type="checkbox" name="email_approvers" value="1" checked>
                             Email the approvers
                             <?php $draftApprovers = $approversFor((int)$activeCount['counted_by']); ?>
-                            <span style="color:#6c757d;font-size:12px;">(<?php echo $draftApprovers ? htmlspecialchars(rh_sca_approver_names($draftApprovers)) : 'nobody else can approve yet'; ?>)</span>
+                            <span class="sc-emailbox__who">(<?php echo $draftApprovers ? htmlspecialchars(rh_sca_approver_names($draftApprovers)) : 'nobody else can approve yet'; ?>)</span>
                         </label>
                         <?php endif; ?>
                     <?php elseif ($isSubmitted && $canDecide && $blockSelfApprove): ?>
-                        <span style="color:#856404;background:#fff3cd;border:1px solid #ffe69c;padding:8px 12px;border-radius:8px;"><i class="fas fa-user-lock"></i> <?php echo $isOpeningCount ? 'An opening stock count' : 'This count has shortages over the approval threshold, so it'; ?> must be approved by someone other than the person who counted it.</span>
+                        <span class="sc-lockednote"><i class="fas fa-user-lock"></i> <?php echo $isOpeningCount ? 'An opening stock count' : 'This count has shortages over the approval threshold, so it'; ?> must be approved by someone other than the person who counted it.</span>
                         <button type="button" class="btn-danger" onclick="rejectPrompt(this.form)"><i class="fas fa-times"></i> Reject count</button>
                         <input type="hidden" name="rejection_reason" id="rejection_reason" value="">
                         <span id="reject_err" style="color:#c82333;font-size:13px;display:none;"></span>
@@ -1921,13 +1921,25 @@ $csrf_token = generateCsrfToken();
                                 </select>
                             </div>
                             <div class="form-field" id="scope-spot" style="display:none;">
-                                <label>Items to count (hold Ctrl to pick more than one)</label>
-                                <select id="scope_spot_select" multiple size="8" style="width:100%;">
-                                    <?php foreach ($ingredientList as $ing): ?>
-                                        <option value="<?php echo (int)$ing['id']; ?>"><?php echo htmlspecialchars($ing['category'] . ' · ' . $ing['name']); ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <input type="hidden" name="scope_value" id="scope_value_spot">
+                                <label for="scSpotSearch">Items to count</label>
+                                <div class="sc-picker">
+                                    <input type="search" id="scSpotSearch" class="sc-picker__search" placeholder="Search by name or category" autocomplete="off" aria-controls="scSpotList">
+                                    <div class="sc-picker__list" id="scSpotList" role="group" aria-label="Items to count">
+                                        <?php foreach ($ingredientList as $ing): ?>
+                                            <label class="sc-picker__row" data-search="<?php echo htmlspecialchars(function_exists('mb_strtolower') ? mb_strtolower($ing['category'] . ' ' . $ing['name']) : strtolower($ing['category'] . ' ' . $ing['name']), ENT_QUOTES, 'UTF-8'); ?>">
+                                                <input type="checkbox" value="<?php echo (int)$ing['id']; ?>">
+                                                <span class="sc-picker__name"><?php echo htmlspecialchars($ing['name']); ?></span>
+                                                <span class="sc-picker__cat"><?php echo htmlspecialchars($ing['category']); ?></span>
+                                            </label>
+                                        <?php endforeach; ?>
+                                        <p class="sc-picker__none" id="scSpotNone" hidden>No items match your search.</p>
+                                    </div>
+                                    <div class="sc-picker__foot">
+                                        <span id="scSpotCount" aria-live="polite">0 selected</span>
+                                        <button type="button" class="sc-picker__clear" id="scSpotClear">Clear</button>
+                                    </div>
+                                </div>
+                                <input type="hidden" id="scope_value_spot">
                             </div>
                             <div class="form-field">
                                 <label>Label (optional)</label>
@@ -2075,12 +2087,42 @@ $csrf_token = generateCsrfToken();
                         // ensure neither spot nor category sends scope_value
                         document.getElementById('scope_value_cat').name = '';
                     }
+                    // Only the chosen-items list sends scope_value (a comma list of item ids) when that scope is picked.
+                    document.getElementById('scope_value_spot').name = (v === 'spot') ? 'scope_value' : '';
                 }
-                document.getElementById('scope_spot_select').addEventListener('change', e => {
-                    const ids = [...e.target.selectedOptions].map(o => o.value).join(',');
-                    document.getElementById('scope_value_spot').value = ids;
-                    document.getElementById('scope_value_spot').name = 'scope_value';
-                });
+                // Tick-box list for "Only the items I choose": search narrows the list, ticks stay when the search changes.
+                (function () {
+                    const list = document.getElementById('scSpotList');
+                    const search = document.getElementById('scSpotSearch');
+                    const hidden = document.getElementById('scope_value_spot');
+                    const countEl = document.getElementById('scSpotCount');
+                    const none = document.getElementById('scSpotNone');
+                    const rows = Array.from(list.querySelectorAll('.sc-picker__row'));
+                    function sync() {
+                        const ids = rows.map(r => r.querySelector('input')).filter(i => i.checked).map(i => i.value);
+                        hidden.value = ids.join(',');
+                        countEl.textContent = ids.length + ' selected';
+                    }
+                    function filter() {
+                        const q = search.value.trim().toLowerCase();
+                        let shown = 0;
+                        rows.forEach(r => {
+                            const hit = q === '' || (r.dataset.search || '').indexOf(q) !== -1;
+                            r.hidden = !hit;
+                            if (hit) shown++;
+                        });
+                        none.hidden = shown !== 0;
+                    }
+                    list.addEventListener('change', sync);
+                    search.addEventListener('input', filter);
+                    // Enter in the search box must not submit the form.
+                    search.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+                    document.getElementById('scSpotClear').addEventListener('click', () => {
+                        rows.forEach(r => { r.querySelector('input').checked = false; });
+                        sync();
+                    });
+                    sync();
+                })();
                 onOpeningChange();
             </script>
         <?php endif; ?>
