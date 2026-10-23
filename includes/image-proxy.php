@@ -54,31 +54,36 @@ if (!$allowed) {
     exit('Host not allowed');
 }
 
-// Cache directory - use absolute path
-$cacheDir = dirname(__DIR__) . '/data/image-cache/';
+// Image Cache switch (Admin > Cache Management): off = fetch and serve, never read or write the cache.
+// Read from a flag file (config/cache.php has no database or site start-up), so images still load
+// when the database is down or the site is in maintenance mode.
+require_once dirname(__DIR__) . '/config/cache.php';
+$cacheFile = imageProxyCacheFile($imageUrl); // null when the Image Cache (or global) switch is off
 
-// Create cache directory if it doesn't exist
-if (!file_exists($cacheDir)) {
-    if (!mkdir($cacheDir, 0755, true)) {
-        error_log("Image Proxy Error: Failed to create cache directory: " . $cacheDir);
+if ($cacheFile !== null) {
+    // Cache directory - use absolute path
+    $cacheDir = dirname($cacheFile) . '/';
+
+    // Create cache directory if it doesn't exist
+    if (!file_exists($cacheDir)) {
+        if (!mkdir($cacheDir, 0755, true)) {
+            error_log("Image Proxy Error: Failed to create cache directory: " . $cacheDir);
+            header('HTTP/1.0 500 Internal Server Error');
+            exit('Cannot create cache directory');
+        }
+    }
+
+    // Check if cache directory is writable
+    if (!is_writable($cacheDir)) {
+        error_log("Image Proxy Error: Cache directory not writable: " . $cacheDir);
         header('HTTP/1.0 500 Internal Server Error');
-        exit('Cannot create cache directory');
+        exit('Cache directory not writable');
     }
 }
 
-// Check if cache directory is writable
-if (!is_writable($cacheDir)) {
-    error_log("Image Proxy Error: Cache directory not writable: " . $cacheDir);
-    header('HTTP/1.0 500 Internal Server Error');
-    exit('Cache directory not writable');
-}
-
-// Generate cache filename from URL hash
-$cacheFile = $cacheDir . md5($imageUrl) . '.jpg';
-
 // Check if cached file exists and is fresh (7 days)
 $cacheTime = 7 * 24 * 60 * 60; // 7 days in seconds
-if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < $cacheTime) {
+if ($cacheFile !== null && file_exists($cacheFile) && (time() - filemtime($cacheFile)) < $cacheTime) {
     // Serve cached file
     $imageInfo = @getimagesize($cacheFile);
     if ($imageInfo) {
@@ -92,7 +97,7 @@ if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < $cacheTime) {
 }
 
 // Fetch the image
-header('X-Image-Cache: MISS');
+header('X-Image-Cache: ' . ($cacheFile !== null ? 'MISS' : 'OFF'));
 
 $imageData = null;
 $contentType = null;
@@ -175,8 +180,10 @@ if (!$imgCheck || strlen((string)$imageData) > 10485760) {
 }
 $contentType = $imgCheck['mime'];
 
-// Save to cache
-@file_put_contents($cacheFile, $imageData);
+// Save to cache (only while the Image Cache switch is on)
+if ($cacheFile !== null) {
+    @file_put_contents($cacheFile, $imageData);
+}
 
 // Detect content type if not provided
 if (empty($contentType)) {
@@ -191,7 +198,8 @@ if (empty($contentType)) {
 // Serve the image
 header('Content-Type: ' . $contentType);
 header('Content-Length: ' . strlen($imageData));
-header('Cache-Control: public, max-age=604800'); // 7 days
+// With the Image Cache switch off the browser is not told to keep the image for 7 days either.
+header($cacheFile !== null ? 'Cache-Control: public, max-age=604800' : 'Cache-Control: no-cache'); // 7 days
 header('X-Content-Type-Options: nosniff');
 
 echo $imageData;

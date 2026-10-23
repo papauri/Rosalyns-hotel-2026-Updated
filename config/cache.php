@@ -8,7 +8,9 @@
 // Cache directory configuration
 // Use dirname(__DIR__) to get the parent directory of config/
 define('CACHE_DIR', dirname(__DIR__) . '/cache');
-define('IMAGE_CACHE_DIR', dirname(__DIR__) . '/data/image-cache');
+if (!defined('IMAGE_CACHE_DIR')) {
+    define('IMAGE_CACHE_DIR', dirname(__DIR__) . '/data/image-cache'); // tests may point it at a scratch folder first
+}
 
 // Global cache enable/disable flag
 define('CACHE_ENABLED', true); // This can be overridden by database setting
@@ -84,6 +86,58 @@ function cacheTypeForKey(string $key, string $type = 'settings'): string
         }
     }
     return 'settings';
+}
+
+/**
+ * Image Cache switch for includes/image-proxy.php, which must not start the whole site (database,
+ * maintenance mode, booking housekeeping) just to serve a picture. So the switch is mirrored as a
+ * flag file: present = the Image Cache or the global cache switch is off. It lives next to, not
+ * inside, data/image-cache so "Clear image cache" never removes it. Missing file = cache on.
+ */
+define('IMAGE_CACHE_OFF_FLAG', dirname(__DIR__) . '/data/image-cache-off.flag');
+
+/**
+ * Where includes/image-proxy.php may keep (and read) a proxied image, or null while the off flag
+ * exists, in which case the proxy neither serves from nor writes to data/image-cache.
+ * Same file name as before (md5 of the source URL). No database access.
+ */
+function imageProxyCacheFile(string $url): ?string
+{
+    if (is_file(IMAGE_CACHE_OFF_FLAG)) {
+        return null;
+    }
+    return IMAGE_CACHE_DIR . '/' . md5($url) . '.jpg';
+}
+
+/**
+ * Bring the off flag in line with the saved switches (cache_images_enabled / cache_global_enabled).
+ * Called when Cache Management saves either switch and whenever its page loads, so a switch already
+ * saved in the database takes effect without re-saving. Returns true when the image cache is on.
+ * If the flag cannot be written the cache stays on (fail open) and the problem is logged.
+ */
+function rhSyncImageCacheFlag(): bool
+{
+    rhCacheFlagsReset();
+    $on = isCacheEnabled('images');
+    // isCacheEnabled() fails open when the switches cannot be read; do not act on a guess, so a
+    // database hiccup never removes an existing off flag.
+    if (!isset($GLOBALS['_RH_CACHE_FLAGS']['flags'])) {
+        return !is_file(IMAGE_CACHE_OFF_FLAG);
+    }
+    $has = is_file(IMAGE_CACHE_OFF_FLAG);
+    if (!$on && !$has) {
+        if (!is_dir(dirname(IMAGE_CACHE_OFF_FLAG))) {
+            @mkdir(dirname(IMAGE_CACHE_OFF_FLAG), 0755, true);
+        }
+        if (@file_put_contents(IMAGE_CACHE_OFF_FLAG, "off\n") === false) {
+            error_log('Image cache off flag could not be written: ' . IMAGE_CACHE_OFF_FLAG);
+        }
+    } elseif ($on && $has) {
+        if (!@unlink(IMAGE_CACHE_OFF_FLAG)) {
+            error_log('Image cache off flag could not be removed: ' . IMAGE_CACHE_OFF_FLAG);
+        }
+    }
+    return $on;
 }
 
 /**

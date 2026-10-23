@@ -80,3 +80,6 @@ receipts/*.pdf
 
 # Private runtime storage (PHP sessions) - never commit
 storage/
+
+# Image proxy on/off flag (runtime file written by Cache Management)
+data/image-cache-off.flag

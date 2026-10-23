@@ -84,6 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
                 $stmt->execute(["cache_{$cache_type}_enabled", $enabled, $enabled]);
                 rhCacheFlagsReset();
+                rhSyncImageCacheFlag(); // the image proxy reads a flag file, not the database
 
                 $message = "Cache '{$cache_type}' " . ($enabled ? 'enabled' : 'disabled') . " successfully!";
                 $success = true;
@@ -200,6 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
                 $stmt->execute([$enabled, $enabled]);
                 rhCacheFlagsReset();
+                rhSyncImageCacheFlag(); // the image proxy reads a flag file, not the database
 
                 $message = "Global caching " . ($enabled ? 'enabled' : 'disabled') . "!";
                 $success = true;
@@ -374,6 +376,12 @@ try {
     }
 } catch (PDOException $e) {
     $error = 'Error fetching cache settings: ' . $e->getMessage();
+}
+
+// The image proxy reads a flag file for its on/off switch: keep it in line with what is saved above
+// (so a switch saved before this flag existed takes effect without re-saving it).
+if (function_exists('rhSyncImageCacheFlag')) {
+    rhSyncImageCacheFlag();
 }
 
 // Last time caches were cleared: the later of a manual clear (this page) and the scheduled run

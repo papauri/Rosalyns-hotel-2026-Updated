@@ -56,11 +56,80 @@ try {
     $put->execute(['cache_global_enabled', '1']);
     rhCacheFlagsReset();
     check(getCache($k1) === ['v' => 1], 'switching back on: the entry (not overwritten while off) is served again');
+
+    // Image Cache switch: mirrored as a flag file that includes/image-proxy.php reads without the database
+    $imgUrl = 'https://scontent.fbcdn.net/zz_cachetest_' . bin2hex(random_bytes(3)) . '.jpg';
+    $put->execute(['cache_images_enabled', '1']);
+    check(rhSyncImageCacheFlag() === true && !is_file(IMAGE_CACHE_OFF_FLAG), 'Image Cache on: no off flag exists');
+    check(imageProxyCacheFile($imgUrl) === IMAGE_CACHE_DIR . '/' . md5($imgUrl) . '.jpg', 'Image Cache on: the proxy uses data/image-cache/md5(url).jpg as before');
+    $put->execute(['cache_images_enabled', '0']);
+    check(rhSyncImageCacheFlag() === false && is_file(IMAGE_CACHE_OFF_FLAG), 'saving Image Cache off creates the off flag');
+    check(imageProxyCacheFile($imgUrl) === null, 'Image Cache off: the proxy gets no cache file (nothing read, nothing written)');
+    check(isCacheEnabled('settings') && getCache($k1) === ['v' => 1], 'Image Cache off does not switch off other cache types');
+    check(rhSyncImageCacheFlag() === false && is_file(IMAGE_CACHE_OFF_FLAG), 'syncing again while off keeps the flag (page load on a host that already had it off)');
+    $put->execute(['cache_images_enabled', '1']);
+    check(rhSyncImageCacheFlag() === true && !is_file(IMAGE_CACHE_OFF_FLAG), 'saving Image Cache on removes the off flag');
+    $put->execute(['cache_global_enabled', '0']);
+    check(rhSyncImageCacheFlag() === false && is_file(IMAGE_CACHE_OFF_FLAG) && imageProxyCacheFile($imgUrl) === null, 'global switch off also turns the image cache off');
+    $put->execute(['cache_global_enabled', '1']);
+    check(rhSyncImageCacheFlag() === true && !is_file(IMAGE_CACHE_OFF_FLAG), 'global switch back on removes the flag');
+
+    // A failed read of the switches must not touch an existing off flag (here: no connection object)
+    file_put_contents(IMAGE_CACHE_OFF_FLAG, "off
+");
+    $savedPdo = $pdo; $pdo = null;
+    $r = rhSyncImageCacheFlag();
+    $pdo = $savedPdo; rhCacheFlagsReset();
+    check($r === false && is_file(IMAGE_CACHE_OFF_FLAG), 'switches unreadable: an existing off flag is left in place');
+    @unlink(IMAGE_CACHE_OFF_FLAG);
+    $savedPdo = $pdo; $pdo = null;
+    rhSyncImageCacheFlag();
+    $pdo = $savedPdo; rhCacheFlagsReset();
+    check(!is_file(IMAGE_CACHE_OFF_FLAG), 'switches unreadable: no flag is created on a guess');
+
+    // The real proxy (CLI), pointed at a scratch image-cache folder: flag absent = a cached image is a HIT;
+    // flag present = nothing is served from the cache and the cache folder is never created or written
+    $scratch = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'rh_imgproxy_' . bin2hex(random_bytes(4));
+    $scratchCache = str_replace(chr(92), '/', $scratch) . '/image-cache';
+    $nullDev = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
+    $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+    $runProxy = function (string $u) use ($root, $scratchCache, $nullDev): string {
+        $code = 'define(' . var_export('IMAGE_CACHE_DIR', true) . ', ' . var_export($scratchCache, true) . '); '
+            . 'ob_start(fn($b) => base64_encode($b)); $_GET[' . var_export('url', true) . ']=' . var_export($u, true)
+            . '; include ' . var_export($root . '/includes/image-proxy.php', true) . ';';
+        $cmd = escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' 2>' . $nullDev;
+        return (string)base64_decode((string)shell_exec($cmd)); // base64: a Windows pipe would cut the PNG at its Ctrl-Z byte
+    };
+    $proxyHost = 'zz-nonexistent-' . bin2hex(random_bytes(3)) . '.fbcdn.net';
+    $seedUrl = 'https://' . $proxyHost . '/seed.jpg';
+    $freshUrl = 'https://' . $proxyHost . '/fresh.jpg';
+
+    // flag present, scratch folder absent: the proxy must not create it
+    file_put_contents(IMAGE_CACHE_OFF_FLAG, "off
+");
+    $runProxy($freshUrl);
+    check(!is_dir($scratchCache), 'flag present: the proxy does not create or touch the cache folder');
+    // flag absent: the same request does create it (shows the check above can fail)
+    @unlink(IMAGE_CACHE_OFF_FLAG);
+    $runProxy($freshUrl);
+    check(is_dir($scratchCache), 'flag absent: the proxy sets up the cache folder (control for the check above)');
+    // HIT with the flag absent; not served with the flag present
+    file_put_contents($scratchCache . '/' . md5($seedUrl) . '.jpg', $png);
+    check($runProxy($seedUrl) === $png, 'flag absent: the proxy serves the cached image (HIT) without any site start-up');
+    file_put_contents(IMAGE_CACHE_OFF_FLAG, "off
+");
+    check($runProxy($seedUrl) !== $png, 'flag present: the proxy does not serve from the cache');
 } finally {
     $pdo->rollBack();
     rhCacheFlagsReset();
     deleteCache($k1);
     deleteCache($k2);
+    if (isset($scratchCache) && is_dir($scratchCache)) {
+        foreach (glob($scratchCache . '/*') ?: [] as $f) { @unlink($f); }
+        @rmdir($scratchCache);
+        @rmdir(dirname($scratchCache));
+    }
+    rhSyncImageCacheFlag(); // put the off flag back in line with the real (rolled back) switches
 }
 
 // ---- Clear helpers ----
