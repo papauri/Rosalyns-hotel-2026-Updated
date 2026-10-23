@@ -56,9 +56,23 @@ do not re-derive plans or re-scan the repo ad hoc.
 - **Reporting**: STATUS block after every task (finished / in-progress / next 3 / blocked);
   SESSION SUMMARY at end of every run (completed, remaining by phase, blockers,
   one-line recommendation).
-- **Autonomy**: never pause because a task finished — pull the next queued task. Stop only
-  for: blocker needing owner, task failed twice, safety violation, or Phase 3 complete.
-  Ambiguous-but-not-blocking → best assumption, logged as `ASSUMPTION:` in BUILD_PLAN.md.
+- **Autonomy (owner 2026-10-24, overrides /build-loop's "advance automatically")**: the code is
+  FINISHED (BUILD_PLAN.md §6). Do only what the owner asks or a reported PATCH fault; when it ships,
+  stop. Never pull queued/LATER work on your own. Ambiguous-but-not-blocking → best assumption,
+  logged as `ASSUMPTION:` in BUILD_PLAN.md.
+
+## Token rules (owner 2026-10-24: "usage is way over normal") — apply before every step
+1. Fresh session per task: `/clear` after each shipped task; never `/resume` a long session (it
+   re-reads the whole history uncached). State lives in `.claude/TASKS.md` "Open" — read only that.
+2. Do it inline when it is under ~10 tool calls (one-file fix, lookup, port, test). An agent only for
+   real multi-file build work: ONE builder + ONE review, never parallel audits "to be safe".
+3. Builders run only their own test file (`php scripts/tests/<x>.php`), never the full
+   `run_tests.php` (10+ min, agents loop on it). The orchestrator runs the full suite once at ship.
+4. Never read big files whole: `.claude/CODE_INDEX.md` + Grep + offset reads. `config/database.php`
+   (~9.5k lines), BUILD_PLAN/SYSTEM_MAP/CODE_INDEX are lookup-only. Shipped history is in
+   `.claude/archive/`, never read unless asked.
+5. Briefs carry the facts (paths, lines, rule, test cases) so agents don't re-discover them; reports
+   under 150 words. Haiku for lint/docs/guides, Sonnet for build, Opus only for the orchestrator.
 
 ## Code conventions (enforced by qa-auditor)
 

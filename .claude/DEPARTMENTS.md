@@ -65,8 +65,8 @@ finish, say `NEEDS_UI_DECISION: <question>` and carry on with the rest.
   `admin/includes/*`). Read-only AUDITs may run in parallel.
 - Never run git. Never edit `.env`. No DDL (schema changes are owner decisions).
 - `php -l` every changed PHP file; `node --check` every changed inline script (extract it).
-- Run `php scripts/run_tests.php` at the end of a FIX pass (never in parallel with another
-  agent's run — the brief tells you if you may).
+- Run only the test file(s) for your change (`php scripts/tests/<x>.php`), once. Never the full
+  `php scripts/run_tests.php` (10+ min) — the orchestrator runs it once at ship (token rule 3).
 - Admin SPA: `admin/js/admin-spa.js` swaps only `#rh-admin-page`; modals printed after
   `includes/admin-footer.php` vanish after in-place navigation and inline `<head>` scripts are
   not re-run. Guest-site navigation keeps only `<main>`.
