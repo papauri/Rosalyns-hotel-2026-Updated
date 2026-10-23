@@ -320,7 +320,7 @@
 
   <details class="faq" id="faq-opening-stock" data-module="stock">
     <summary>What does "Opening stock not recorded (N items)" mean, and how do I fix it?</summary>
-    <p>N ingredients have never had a quantity recorded, so they are not counted as out of stock or low. To fix it: open <strong>Stock</strong> &rarr; <strong>Stock Count</strong>, tick <strong>Opening stock count (first set-up)</strong> under <strong>Start a count</strong>, choose <strong>What to count</strong>, click <strong>Start count</strong>, type the quantity and the unit cost for every item, click <strong>Save readings</strong> and <strong>Submit for approval</strong>. A different manager then clicks <strong>Approve &amp; correct stock</strong>. See <a href="08-stock-orders.html#opening">How to do the Opening stock count</a>.</p>
+    <p>N ingredients have never had a quantity recorded, so they are not counted as out of stock or low. To fix it: open <strong>Stock</strong> &rarr; <strong>Stock Count</strong>, tick <strong>Opening stock count (first set-up)</strong> under <strong>Start a count</strong>, choose <strong>What to count</strong>, click <strong>Start count</strong>, type the quantity and the unit cost for every item, click <strong>Save readings</strong> and <strong>Submit for approval</strong> (or <strong>Submit &amp; correct stock</strong> if the second-person setting is Off). When the setting is On, a different manager then clicks <strong>Approve &amp; correct stock</strong>. See <a href="08-stock-orders.html#opening">How to do the Opening stock count</a>.</p>
   </details>
 
   <details class="faq" id="faq-opening-in-parts" data-module="stock">
@@ -418,6 +418,11 @@
   <details class="faq" id="faq-approve-own-count" data-module="stock">
     <summary>Why can't I approve my own stock count?</summary>
     <p>Because a big shortage must be checked by someone other than the person who counted. If a shortage is over both the cost limit and the percentage limit you will see <em>"This count has shortages over the approval threshold (MWK 5,000.00 and 10%). It must be approved by a different manager or admin than the person who counted it."</em> Ask another manager or admin to approve it. Approving or rejecting a count also needs the Admin or Manager role: without it you see <em>"Only admin/manager can approve counts."</em> An opening stock count needs a different approver too, unless an administrator has switched the second-person rule off in Hotel Settings. See <a href="20-stock-loss-prevention.html#setup">Setting it up</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-one-step-submit" data-module="stock">
+    <summary>Can I submit and approve a stock count in one step? Why do I need approval from a second person?</summary>
+    <p>Only when the setting <strong>Stock count: a second person must approve</strong> in Hotel Settings is <strong>Off</strong>. Then the count button reads <strong>Submit &amp; correct stock</strong>, and one press submits and approves the count, so stock is corrected at once. With the setting On (the default), the button reads <strong>Submit for approval</strong>, and a different person must press <strong>Approve &amp; correct stock</strong> before stock changes. That way the person who counted cannot hide a loss on their own. If a check fails, the count stays <strong>Waiting for approval</strong> with the reason. See <a href="08-stock-orders.html#count">How to do a stock count</a> and <a href="20-stock-loss-prevention.html#setup">Setting it up</a>.</p>
   </details>
 
   <details class="faq" id="faq-receptionist-cant" data-module="bookings">
