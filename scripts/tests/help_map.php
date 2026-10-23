@@ -12,9 +12,10 @@ require $root . '/config/database.php';
 
 // Judge the guides as if every module were switched on, so the answer does not depend on live settings.
 $src = (string)file_get_contents($root . '/includes/guide-knowledge-base.php');
-$src = str_replace(['<?php', 'declare(strict_types=1);', '__DIR__', "function rh_kb_module_state(): ?array\n{"],
-    ['', '', "'" . $root . "/includes'", "function rh_kb_module_state(): ?array\n{ return null;"], $src);
-if (strpos($src, 'return null;') === false) { echo "FAIL could not neutralise module state\n"; exit(1); }
+$src = str_replace(['<?php', 'declare(strict_types=1);', '__DIR__'], ['', '', "'" . $root . "/includes'"], $src);
+// Line endings may be LF or CRLF, so match the function head with a pattern, not a fixed string.
+$src = preg_replace('/(function rh_kb_module_state\(\): \?array\s*\{)/', '$1 return null;', $src, 1, $neutralised);
+if (!$neutralised) { echo "FAIL could not neutralise module state\n"; exit(1); }
 eval($src);
 require $root . '/includes/guide-system-knowledge.php';
 rh_kb_sys_load();
