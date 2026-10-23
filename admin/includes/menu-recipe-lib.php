@@ -57,11 +57,13 @@ if (!function_exists('rh_recipe_qty_to_base')) {
             $qty = $qty * $packSize;
         } elseif ($entryUnit === 'pieces') {
             if ($piecesPerUnit === null || $piecesPerUnit <= 0) {
-                throw new RuntimeException('Type how many pieces are in one unit of this stock item first.');
+                throw new RuntimeException('Set "Pieces in one packet" on this stock item in Stock first.');
             }
-            // Whole pieces only (1, 2, 3), or exactly one half from the half button.
-            if ($qty > 99999 || (abs($qty - round($qty)) > 1e-9 && abs($qty - 0.5) > 1e-9)) {
-                throw new RuntimeException('Pieces must be a whole number (1, 2, 3) or one half, and at most 99999.');
+            // Whole pieces only (1, 2, 3), or a quarter / half / three-quarters from the fraction buttons.
+            $frac = $qty - floor($qty);
+            $okFrac = $frac < 1e-9 || abs($frac - 0.25) < 1e-9 || abs($frac - 0.5) < 1e-9 || abs($frac - 0.75) < 1e-9;
+            if ($qty > 99999 || !$okFrac) {
+                throw new RuntimeException('Pieces must be a whole number (1, 2, 3) or end in a quarter, half or three-quarters, and at most 99999.');
             }
             $qty = $qty / $piecesPerUnit;
         } elseif ($entryUnit !== 'base') {
@@ -153,14 +155,13 @@ if (!function_exists('rh_recipe_qty_to_base')) {
      * Save (replace) the recipe of one menu item.
      *
      * @param ?int $portions / ?string $notes null = keep the recipe's current value (1 / empty for a new recipe)
-     * @param bool $canSetPieces true when the user may overwrite a pieces_per_unit the stock item already has (stock_management);
-     *                           anyone may set it while it is still empty
+     * Pieces per packet is read from the stock item and is NEVER written from here (it is set in Stock only).
      * @param array $lines each: ingredient_id, quantity (as typed), unit ('base'|'pack'|'pieces'|'small', default base),
      *                     yield_percent (optional, 1-100; omitted = keep what the item had, else 100)
      * @return array{recipe_id:int,lines_written:int}
      * @throws RuntimeException|InvalidArgumentException on bad input (nothing is written)
      */
-    function rh_menu_recipe_save(PDO $pdo, int $menuItemId, string $menuType, ?int $portions, ?string $notes, array $lines, ?int $userId, bool $canSetPieces = false): array
+    function rh_menu_recipe_save(PDO $pdo, int $menuItemId, string $menuType, ?int $portions, ?string $notes, array $lines, ?int $userId): array
     {
         if ($menuItemId <= 0 || $menuType === '') {
             throw new InvalidArgumentException('Menu item required.');
@@ -186,7 +187,6 @@ if (!function_exists('rh_recipe_qty_to_base')) {
         }
 
         $ingStmt = $pdo->prepare("SELECT id, name, unit, pack_size, pieces_per_unit, is_archived FROM stock_ingredients WHERE id = ?");
-        $savePieces = []; // ingredient id => pieces in one unit, typed once on a line and kept on the stock item for every device
         $clean = [];
         $seen = [];
         foreach ($lines as $line) {
@@ -216,19 +216,8 @@ if (!function_exists('rh_recipe_qty_to_base')) {
                 if (!rh_stock_unit_is_container((string)$ing['unit'])) {
                     throw new RuntimeException($ing['name'] . ': pieces can only be used for stock counted in a packet, box, dozen or similar.');
                 }
-                $typedPer = trim((string)($line['pieces_per_unit'] ?? ''));
-                if ($typedPer !== '' && !rh_stock_unit_is_dozen((string)$ing['unit'])) {
-                    if (!is_numeric($typedPer) || round((float)$typedPer, 2) < 0.01 || (float)$typedPer > 99999) {
-                        throw new RuntimeException($ing['name'] . ': pieces in one ' . $ing['unit'] . ' must be a number of 0.01 or more.');
-                    }
-                    $typedRounded = round((float)$typedPer, 2);
-                    if ($ing['pieces_per_unit'] === null) {
-                        $piecesPer = $typedRounded;
-                        $savePieces[$ingId] = $piecesPer;
-                    } elseif ($canSetPieces && abs((float)$ing['pieces_per_unit'] - $typedRounded) > 0.004) {
-                        $piecesPer = $typedRounded;
-                        $savePieces[$ingId] = $piecesPer;
-                    } // else the stock item's saved value stands (a menu-only user cannot change it)
+                if ($piecesPer === null) {
+                    throw new RuntimeException($ing['name'] . ': set "Pieces in one ' . $ing['unit'] . '" on this stock item in Stock first, then you can use single pieces.');
                 }
             }
             if ($entryUnit === 'small' && rh_recipe_small_unit((string)$ing['unit']) === null) {
@@ -264,12 +253,6 @@ if (!function_exists('rh_recipe_qty_to_base')) {
             $up->execute([$menuItemId, $menuType, $portions, $notes, $userId]);
             $recipeId = (int)$pdo->lastInsertId();
 
-            if ($savePieces) {
-                $pu = $pdo->prepare("UPDATE stock_ingredients SET pieces_per_unit = ?, updated_at = NOW() WHERE id = ?");
-                foreach ($savePieces as $pid => $pp) {
-                    $pu->execute([$pp, $pid]);
-                }
-            }
             $pdo->prepare("DELETE FROM stock_recipe_ingredients WHERE recipe_id = ?")->execute([$recipeId]);
             $ins = $pdo->prepare(
                 "INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent) VALUES (?, ?, ?, ?)"

@@ -282,6 +282,77 @@
     border-bottom: 0;
 }
 
+/* Shared "share all on Facebook" bar: flat panel, same on every department page. */
+.rh-share-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 0 0 16px;
+    padding: 12px 16px;
+    background: #fff;
+    border: 1px solid var(--admin-surface-border, #ddd3c6);
+    border-radius: 8px;
+}
+
+.rh-share-bar__icon {
+    flex-shrink: 0;
+    font-size: 20px;
+    color: #1565C0;
+}
+
+.rh-share-bar__text {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.rh-share-bar__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--navy, #231F1C);
+}
+
+.rh-share-bar__sub {
+    margin-top: 2px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.rh-share-bar__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 16px;
+    border: 1px solid #1565C0;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+@media (max-width: 1024px) {
+    .rh-share-bar__btn {
+        min-height: 44px;
+    }
+}
+
+@media (max-width: 680px) {
+    .rh-share-bar__btn {
+        width: 100%;
+    }
+}
+
+.rh-share-bar__btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: auto;
+}
+
 /* Share buttons are shown but unusable until Facebook is connected (title carries the hint). */
 .btn-facebook:disabled,
 .btn-action.btn-facebook:disabled,

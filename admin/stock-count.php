@@ -68,10 +68,31 @@ function displayCountReference(?string $reference): string
     return (string)preg_replace('/^SC-/i', '', $ref);
 }
 
-/* Plain label for a count status: a submitted count is "Waiting for approval". */
+/* Plain label for a count status. */
 function scStatusLabel(string $status): string
 {
-    return $status === 'submitted' ? 'Waiting for approval' : $status;
+    $labels = ['draft' => 'Being counted', 'submitted' => 'Waiting for approval', 'approved' => 'Approved', 'rejected' => 'Rejected'];
+    return $labels[$status] ?? $status;
+}
+
+/* What was counted, in plain words: "Everything", "Category: Meat", "3 chosen items". */
+function scScopeLabel(array $c): string
+{
+    $scope = (string)($c['scope'] ?? '');
+    $val = trim((string)($c['scope_value'] ?? ''));
+    if ($scope === 'full') return 'Everything';
+    if ($scope === 'category') return $val !== '' ? 'Category: ' . $val : 'One category';
+    $n = $val === '' ? 0 : count(array_filter(explode(',', $val), 'strlen'));
+    return $n > 0 ? $n . ' chosen item' . ($n === 1 ? '' : 's') : 'Chosen items';
+}
+
+/* A rejected count may be deleted by an administrator, or by an approver who did not count it
+ * (so nobody can quietly remove their own rejected count). */
+function scMayDeleteCount(array $c, array $user, bool $canApprove): bool
+{
+    if (($c['status'] ?? 'rejected') !== 'rejected') return false;
+    if (($user['role'] ?? '') === 'admin') return true;
+    return $canApprove && (int)$c['counted_by'] !== (int)$user['id'];
 }
 
 /* Feature-detect stock_count_lines.counted_at / counted_by (migration 062). Cached per request. */
@@ -898,6 +919,29 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
             }
+
+            if ($action === 'delete_count') {
+                /* Only a REJECTED count can be deleted: it never changed stock (only approval writes adjustments).
+                 * Its lines and any opening batches typed with it go too; the deletion is kept in the activity log. */
+                $countId = (int)($_POST['count_id'] ?? 0);
+                $pdo->beginTransaction();
+                $hdr = $pdo->prepare("SELECT id, reference, counted_by, rejection_reason FROM stock_counts WHERE id = ? AND status = 'rejected' FOR UPDATE");
+                $hdr->execute([$countId]);
+                $count = $hdr->fetch(PDO::FETCH_ASSOC);
+                if (!$count) throw new RuntimeException('Only a rejected count can be deleted.');
+                if (!scMayDeleteCount($count, $user, $canApprove)) {
+                    throw new RuntimeException('Only an administrator, or someone who approves stock counts and did not count this one, can delete it.');
+                }
+                $pdo->prepare("DELETE FROM stock_count_lines WHERE count_id = ?")->execute([$countId]);
+                $hasOb = $pdo->query("SHOW TABLES LIKE 'stock_opening_batches'")->rowCount() > 0;
+                if ($hasOb) $pdo->prepare("DELETE FROM stock_opening_batches WHERE count_id = ?")->execute([$countId]);
+                $pdo->prepare("DELETE FROM stock_counts WHERE id = ? AND status = 'rejected'")->execute([$countId]);
+                $pdo->commit();
+                logActivity((int)$user['id'], 'stock_count_deleted', 'Deleted rejected stock count ' . displayCountReference((string)$count['reference']) . ' (reason it was rejected: ' . mb_substr((string)$count['rejection_reason'], 0, 200) . ')');
+                $_SESSION['stock_msg'] = 'Rejected count ' . displayCountReference((string)$count['reference']) . ' deleted. Stock was not changed.';
+                header('Location: stock-count.php');
+                exit;
+            }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             if (!empty($scApproveLock)) scReleaseApproveLock($pdo, $scApproveLock);
@@ -1003,7 +1047,7 @@ $csrf_token = generateCsrfToken();
 
 <head>
     <meta charset="UTF-8">
-    <title>Stock Count — Variance & Anti-Theft</title>
+    <title>Stock Counts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
@@ -1016,8 +1060,8 @@ $csrf_token = generateCsrfToken();
 
     <div class="content stock-count-page">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-clipboard-check" style="color:#7E684B;"></i> Stock Count &amp; Anti-Theft</h2>
-            <p style="color:#6c757d; margin-top:4px;">Every gram of physical stock must tie to a sale, wastage entry, or an approved variance. Surprise counts catch shrinkage before it grows.</p>
+            <h2 class="page-title">Stock Counts</h2>
+            <p class="page-subtitle">Count what is really on the shelf. The system compares it with what it expects, and once someone approves the count, stock is corrected to match.</p>
         </div>
 
         <?php if ($message): showAlert($message, 'success');
@@ -1100,16 +1144,16 @@ $csrf_token = generateCsrfToken();
 
             <div class="summary-grid">
                 <div class="sum-card">
-                    <div class="lbl">Lines</div>
+                    <div class="lbl">Items</div>
                     <div class="val"><?php echo $totalLines; ?></div>
                 </div>
                 <?php if (!$blindCount): ?>
                 <div class="sum-card<?php echo $pendingShort < 0 ? ' bad' : ''; ?>">
-                    <div class="lbl">Shortage Cost</div>
+                    <div class="lbl">Shortage</div>
                     <div class="val"><?php echo $currency . ' ' . number_format(abs($pendingShort), 2); ?></div>
                 </div>
                 <div class="sum-card<?php echo $pendingSurplus > 0 ? ' good' : ''; ?>">
-                    <div class="lbl">Surplus Cost</div>
+                    <div class="lbl">Surplus</div>
                     <div class="val"><?php echo $currency . ' ' . number_format($pendingSurplus, 2); ?></div>
                 </div>
                 <div class="sum-card">
@@ -1123,9 +1167,9 @@ $csrf_token = generateCsrfToken();
                 </div>
             </div>
             <?php if ($blindCount): ?>
-                <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;"><i class="fas fa-eye-slash"></i> <strong>Blind count.</strong> Enter what you physically count. System quantities and variances are hidden while the count is open and are shown to the approver after you submit it.</p>
+                <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;"><i class="fas fa-eye-slash"></i> <strong>Blind count.</strong> Enter what you physically count. What the system expects is hidden while you count, and the approver sees it after you submit.</p>
             <?php else: ?>
-                <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;">Variance is measured against <strong>expected stock at count time</strong> (the starting snapshot plus any sales, receipts or wastage recorded while the count was open), so movements during the count are not counted twice.</p>
+                <p style="font-size:12px;color:#6c757d;margin:-4px 0 12px;">The difference is measured against the stock the system expects <strong>at the moment you counted</strong> (stock at the start, plus any sales, deliveries or wastage recorded while the count was open).</p>
                 <?php if ($overAlertLines > 0): ?>
                     <div style="background:#fff7e6; border:1px solid #ffe0a3; color:#7a5200; padding:10px 14px; border-radius:8px; margin-bottom:12px;">
                         <strong><?php echo (int)$overAlertLines; ?> line<?php echo $overAlertLines === 1 ? '' : 's'; ?> over the alert level.</strong>
@@ -1189,19 +1233,31 @@ $csrf_token = generateCsrfToken();
 
             <?php if ($activeCount['status'] === 'draft' && trim((string)($activeCount['rejection_reason'] ?? '')) !== ''): ?>
                 <div style="background:#fff3cd; border:1px solid #ffe69c; padding:10px 14px; border-radius:8px; margin-bottom:14px;">
-                    <strong>Returned for reasons:</strong> <?php echo htmlspecialchars($activeCount['rejection_reason']); ?>
+                    <strong>Sent back. Reason:</strong> <?php echo htmlspecialchars($activeCount['rejection_reason']); ?>
                 </div>
             <?php endif; ?>
 
-            <?php if ($activeCount['status'] === 'rejected' && $canWorkCount): ?>
-                <div style="background:#f8d7da; border:1px solid #f1b0b7; padding:10px 14px; border-radius:8px; margin-bottom:14px;">
-                    <strong>Rejected:</strong> <?php echo htmlspecialchars($activeCount['rejection_reason'] ?? ''); ?>
-                    <form method="POST" style="display:inline; margin-left:14px;">
-                        <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
-                        <input type="hidden" name="action" value="reopen_count">
-                        <input type="hidden" name="count_id" value="<?php echo (int)$activeCount['id']; ?>">
-                        <button class="btn-secondary">Reopen for re-count</button>
-                    </form>
+            <?php $mayDeleteActive = scMayDeleteCount($activeCount, $user, $canApprove); ?>
+            <?php if ($activeCount['status'] === 'rejected' && ($canWorkCount || $mayDeleteActive)): ?>
+                <div class="sc-rejected">
+                    <div class="sc-rejected__text"><strong>Rejected.</strong> Reason: <?php echo htmlspecialchars($activeCount['rejection_reason'] ?? ''); ?></div>
+                    <div class="sc-actions">
+                        <?php if ($canWorkCount): ?>
+                        <form method="POST">
+                            <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                            <input type="hidden" name="action" value="reopen_count">
+                            <input type="hidden" name="count_id" value="<?php echo (int)$activeCount['id']; ?>">
+                            <button class="btn-secondary">Count again</button>
+                        </form>
+                        <?php endif; ?>
+                        <?php if ($mayDeleteActive): ?>
+                        <form method="POST">
+                            <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                            <input type="hidden" name="count_id" value="<?php echo (int)$activeCount['id']; ?>">
+                            <button type="button" class="btn-danger" onclick="scConfirm(this.form,'delete_count','Delete this rejected count? It is removed for good. Stock is not changed.','Delete count')">Delete count</button>
+                        </form>
+                        <?php endif; ?>
+                    </div>
                 </div>
             <?php endif; ?>
 
@@ -1215,7 +1271,7 @@ $csrf_token = generateCsrfToken();
                         <input type="text" id="scFilterSearch" placeholder="Name, category, unit..." style="min-height:38px;">
                     </label>
                     <label style="display:flex;flex-direction:column;gap:0.28rem;">
-                        <span style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;letter-spacing:.04em;"><?php echo $blindCount ? 'Status' : 'Variance'; ?></span>
+                        <span style="font-size:11px;color:#6c757d;font-weight:600;text-transform:uppercase;letter-spacing:.04em;"><?php echo $blindCount ? 'Status' : 'Difference'; ?></span>
                         <select id="scFilterVariance" style="min-height:38px;">
                             <option value="all">All rows</option>
                             <?php if (!$blindCount): ?>
@@ -1246,14 +1302,14 @@ $csrf_token = generateCsrfToken();
                             <tr>
                                 <th>Ingredient</th>
                                 <?php if (!$blindCount): ?>
-                                <th style="text-align:right;">System Qty (at start)</th>
-                                <th style="text-align:right;">Expected at count time</th>
+                                <th style="text-align:right;">In stock at start</th>
+                                <th style="text-align:right;">Should be there</th>
                                 <?php endif; ?>
-                                <th style="text-align:right;">Actual Qty</th>
+                                <th style="text-align:right;">Counted</th>
                                 <?php if ($isOpeningCount): ?><th style="text-align:right;">Unit cost (<?php echo htmlspecialchars($currency); ?>)</th><?php endif; ?>
                                 <?php if (!$blindCount): ?>
-                                <th style="text-align:right;">Variance</th>
-                                <th style="text-align:right;">Cost Impact</th>
+                                <th style="text-align:right;">Difference</th>
+                                <th style="text-align:right;">Value</th>
                                 <?php endif; ?>
                                 <th>Reason</th>
                                 <th>Notes</th>
@@ -1355,12 +1411,12 @@ $csrf_token = generateCsrfToken();
                         </label>
                     <?php elseif ($isSubmitted && $canDecide && $blockSelfApprove): ?>
                         <span style="color:#856404;background:#fff3cd;border:1px solid #ffe69c;padding:8px 12px;border-radius:8px;"><i class="fas fa-user-lock"></i> <?php echo $isOpeningCount ? 'An opening stock count' : 'This count has shortages over the approval threshold, so it'; ?> must be approved by someone other than the person who counted it.</span>
-                        <button type="button" class="btn-danger" onclick="rejectPrompt(this.form)"><i class="fas fa-times"></i> Reject &amp; send back</button>
+                        <button type="button" class="btn-danger" onclick="rejectPrompt(this.form)"><i class="fas fa-times"></i> Reject count</button>
                         <input type="hidden" name="rejection_reason" id="rejection_reason" value="">
                         <span id="reject_err" style="color:#c82333;font-size:13px;display:none;"></span>
                     <?php elseif ($isSubmitted && $canDecide): ?>
-                        <button type="button" class="btn-success" onclick="scConfirm(this.form,'approve_count','Approve count and post variances to stock? This cannot be undone.')"><i class="fas fa-check"></i> Approve &amp; post variances</button>
-                        <button type="button" class="btn-danger" onclick="rejectPrompt(this.form)"><i class="fas fa-times"></i> Reject &amp; send back</button>
+                        <button type="button" class="btn-success" onclick="scConfirm(this.form,'approve_count','Approve this count? Stock will be corrected to match what was counted. This cannot be undone.')"><i class="fas fa-check"></i> Approve &amp; correct stock</button>
+                        <button type="button" class="btn-danger" onclick="rejectPrompt(this.form)"><i class="fas fa-times"></i> Reject count</button>
                         <input type="hidden" name="rejection_reason" id="rejection_reason" value="">
                         <span id="reject_err" style="color:#c82333;font-size:13px;display:none;"></span>
                     <?php elseif ($activeCount['status'] === 'approved'): ?>
@@ -1576,23 +1632,17 @@ $csrf_token = generateCsrfToken();
             <div class="grid-2">
                 <div class="count-side">
                     <div class="card" id="start-count">
-                        <h3><i class="fas fa-plus-circle"></i> Start a Count</h3>
-                        <p style="font-size:12px; color:#6c757d; margin-top:0;">Surprise counts catch shrinkage. Start narrow if you suspect a specific category.</p>
+                        <h3>Start a count</h3>
+                        <p class="sc-card-help">Count everything, one category, or just a few items. Surprise counts catch missing stock early.</p>
                         <form method="POST">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                             <input type="hidden" name="action" value="start_count">
-                            <div class="form-field" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;">
-                                <label style="display:flex;gap:8px;align-items:flex-start;">
-                                    <input type="checkbox" name="opening" value="1" id="opening_cb" <?php echo !empty($_GET['opening']) ? 'checked' : ''; ?> onchange="onOpeningChange()">
-                                    <span><strong>This is the opening stock count</strong> (first-time set-up). Counts every ingredient, needs a unit cost on each line, and must be approved by someone other than you. No supplier receipts are created.</span>
-                                </label>
-                            </div>
                             <div class="form-field">
-                                <label>Scope</label>
+                                <label>What to count</label>
                                 <select name="scope" id="scope" onchange="onScopeChange()">
-                                    <option value="full">Full count (every ingredient)</option>
-                                    <option value="category" selected>By category</option>
-                                    <option value="spot">Spot check (specific items)</option>
+                                    <option value="full">Everything</option>
+                                    <option value="category" selected>One category</option>
+                                    <option value="spot">Only the items I choose</option>
                                 </select>
                             </div>
                             <div class="form-field" id="scope-category">
@@ -1604,7 +1654,7 @@ $csrf_token = generateCsrfToken();
                                 </select>
                             </div>
                             <div class="form-field" id="scope-spot" style="display:none;">
-                                <label>Pick ingredients (Ctrl/Cmd-click for multi)</label>
+                                <label>Items to count (hold Ctrl to pick more than one)</label>
                                 <select id="scope_spot_select" multiple size="8" style="width:100%;">
                                     <?php foreach ($ingredientList as $ing): ?>
                                         <option value="<?php echo (int)$ing['id']; ?>"><?php echo htmlspecialchars($ing['category'] . ' · ' . $ing['name']); ?></option>
@@ -1613,52 +1663,57 @@ $csrf_token = generateCsrfToken();
                                 <input type="hidden" name="scope_value" id="scope_value_spot">
                             </div>
                             <div class="form-field">
-                                <label>Shift label (optional)</label>
+                                <label>Label (optional)</label>
                                 <input type="text" name="shift" placeholder="e.g. Morning, Closing, Surprise">
                             </div>
                             <div class="form-field">
-                                <label>Notes</label>
+                                <label>Notes (optional)</label>
                                 <textarea name="notes" rows="2" placeholder="Why this count?"></textarea>
                             </div>
-                            <button type="submit" class="btn-primary"><i class="fas fa-play"></i> Start count</button>
+                            <label class="sc-opening">
+                                <input type="checkbox" name="opening" value="1" id="opening_cb" <?php echo !empty($_GET['opening']) ? 'checked' : ''; ?> onchange="onOpeningChange()">
+                                <span>Opening stock count (first set-up only). Counts everything, every line needs a unit cost, and someone else must approve it.</span>
+                            </label>
+                            <button type="submit" class="btn-primary">Start count</button>
                         </form>
                     </div>
 
                     <div class="card">
-                        <h3 style="color:#c82333;">Theft Radar (last 30 days)</h3>
-                        <p style="font-size:12px; color:#6c757d; margin-top:0;">Top ingredients losing stock to <strong>shortage variances</strong> or <strong>manual adjustments</strong> — i.e. drains <em>not</em> attributable to a sale or wastage. Manual additions are listed in the next card, because adding stock by hand can cover up a loss.</p>
+                        <h3>Missing stock (last 30 days)</h3>
+                        <p class="sc-card-help">Stock that went down with no sale or wastage behind it: shortages found in counts, and stock taken off by hand. Biggest 20 by cost.</p>
                         <?php if (empty($theftRadar)): ?>
-                            <div style="padding:14px; background:#e9f5ee; border-radius:6px; color:#155724;"><i class="fas fa-check-circle"></i> No unaccounted shortages detected. All stock movement traces to sales or recorded events.</div>
+                            <div class="sc-empty">Nothing missing. Every drop in stock matches a sale or a wastage record.</div>
                         <?php else: ?>
                             <?php foreach ($theftRadar as $r):
                                 $cost = ((float)$r['shortage'] + (float)$r['manual_out']) * (float)$r['cost_per_unit'];
+                                $fmtQ = static fn($q): string => rtrim(rtrim(number_format((float)$q, 6, '.', ''), '0'), '.') ?: '0';
                             ?>
-                                <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--admin-surface-border, #eaecef);font-size:13px;">
-                                    <div style="min-width:0;">
-                                        <?php echo htmlspecialchars($r['name']); ?> <span style="color:#6c757d;font-size:11px;"><?php echo htmlspecialchars($r['unit']); ?></span>
-                                        <div style="color:#6c757d;font-size:11px;">Shortage <?php echo rtrim(rtrim(number_format((float)$r['shortage'], 6, '.', ''), '0'), '.') ?: '0'; ?> &middot; Manual out <?php echo rtrim(rtrim(number_format((float)$r['manual_out'], 6, '.', ''), '0'), '.') ?: '0'; ?></div>
+                                <div class="sc-item">
+                                    <div class="sc-item__main">
+                                        <?php echo htmlspecialchars($r['name']); ?> <span class="sc-item__unit"><?php echo htmlspecialchars($r['unit']); ?></span>
+                                        <div class="sc-item__sub">Short in counts <?php echo $fmtQ($r['shortage']); ?> &middot; Taken off by hand <?php echo $fmtQ($r['manual_out']); ?></div>
                                     </div>
-                                    <div style="font-weight:600;white-space:nowrap;color:#c82333;"><?php echo htmlspecialchars($currency . ' ' . number_format($cost, 2)); ?></div>
+                                    <div class="sc-item__cost sc-item__cost--bad"><?php echo htmlspecialchars($currency . ' ' . number_format($cost, 2)); ?></div>
                                 </div>
                             <?php endforeach; ?>
                         <?php endif; ?>
                     </div>
 
                     <div class="card">
-                        <h3>Manual additions (last 30 days)</h3>
-                        <p style="font-size:12px; color:#6c757d; margin-top:0;">Stock added by hand, not received from a supplier or found in a count. A manual addition can hide an earlier loss, so check these against the Theft Radar. Biggest 20 by cost.</p>
+                        <h3>Stock added by hand (last 30 days)</h3>
+                        <p class="sc-card-help">Stock added without a supplier delivery or a count. Adding stock by hand can hide a loss, so check these. Biggest 20 by cost.</p>
                         <?php if (empty($manualAdds)): ?>
-                            <div style="padding:14px; background:#e9f5ee; border-radius:6px; color:#155724;">No manual additions in the last 30 days.</div>
+                            <div class="sc-empty">Nothing added by hand in the last 30 days.</div>
                         <?php else: ?>
                             <?php foreach ($manualAdds as $m): ?>
-                                <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--admin-surface-border, #eaecef);font-size:13px;">
-                                    <div style="min-width:0;">
+                                <div class="sc-item">
+                                    <div class="sc-item__main">
                                         <?php echo htmlspecialchars($m['ingredient_name']); ?>
-                                        <strong style="font-size:12px;">+<?php echo rtrim(rtrim(number_format((float)$m['qty'], 6, '.', ''), '0'), '.'); ?> <?php echo htmlspecialchars($m['unit']); ?></strong>
-                                        <div style="color:#6c757d;font-size:11px;"><?php echo htmlspecialchars(($m['who'] ?: 'Unknown') . ' · ' . date('Y-m-d H:i', strtotime((string)$m['created_at']))); ?></div>
-                                        <div style="color:#6c757d;font-size:11px;overflow-wrap:anywhere;"><?php echo htmlspecialchars((string)$m['reason']); ?></div>
+                                        <strong class="sc-item__qty">+<?php echo rtrim(rtrim(number_format((float)$m['qty'], 6, '.', ''), '0'), '.'); ?> <?php echo htmlspecialchars($m['unit']); ?></strong>
+                                        <div class="sc-item__sub"><?php echo htmlspecialchars(($m['who'] ?: 'Unknown') . ' · ' . date('Y-m-d H:i', strtotime((string)$m['created_at']))); ?></div>
+                                        <div class="sc-item__sub sc-item__sub--wrap"><?php echo htmlspecialchars((string)$m['reason']); ?></div>
                                     </div>
-                                    <div style="font-weight:600;white-space:nowrap;"><?php echo htmlspecialchars($currency . ' ' . number_format((float)$m['total_cost'], 2)); ?></div>
+                                    <div class="sc-item__cost"><?php echo htmlspecialchars($currency . ' ' . number_format((float)$m['total_cost'], 2)); ?></div>
                                 </div>
                             <?php endforeach; ?>
                         <?php endif; ?>
@@ -1667,35 +1722,47 @@ $csrf_token = generateCsrfToken();
 
                 <div>
                     <div class="card">
-                        <h3><i class="fas fa-list"></i> Recent Counts</h3>
+                        <h3>Counts</h3>
+                        <p class="sc-card-help">Open a count to carry on counting, approve it or see the result. Shortage and surplus are what the missing or extra stock is worth.</p>
                         <div class="count-list-wrap">
                         <table class="count-list no-card-mobile">
                             <thead>
                                 <tr>
                                     <th>Reference</th>
                                     <th>Date</th>
-                                    <th>Scope</th>
-                                    <th>Lines</th>
-                                    <th style="text-align:right;">Shortage</th>
-                                    <th style="text-align:right;">Surplus</th>
+                                    <th>What was counted</th>
+                                    <th>Items</th>
+                                    <th class="sc-num">Shortage</th>
+                                    <th class="sc-num">Surplus</th>
                                     <th>Counted by</th>
                                     <th>Status</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($counts as $c): ?>
-                                    <tr style="cursor:pointer;" onclick="window.location='stock-count.php?id=<?php echo (int)$c['id']; ?>';">
+                                    <tr class="sc-row" onclick="window.location='stock-count.php?id=<?php echo (int)$c['id']; ?>';">
                                         <td data-label="Reference"><strong><?php echo htmlspecialchars(displayCountReference((string)$c['reference'])); ?></strong></td>
                                         <td data-label="Date"><?php echo htmlspecialchars($c['count_date']); ?></td>
-                                        <td data-label="Scope">
-                                            <?php echo htmlspecialchars($c['scope']); ?>
-                                            <?php if ($c['scope_value']): ?><div style="font-size:10px; color:#6c757d;"><?php echo htmlspecialchars(mb_strimwidth($c['scope_value'], 0, 30, '…')); ?></div><?php endif; ?>
+                                        <td data-label="What was counted">
+                                            <?php echo htmlspecialchars(scScopeLabel($c)); ?>
+                                            <?php if (!empty($c['is_opening'])): ?><div class="count-note">Opening stock</div><?php endif; ?>
                                         </td>
-                                        <td data-label="Lines"><?php echo (int)$c['line_count']; ?></td>
-                                        <?php $hideCountFigures = ($c['status'] === 'draft') || (!$canApprove && $c['status'] !== 'approved'); ?>
-                                        <td data-label="Shortage" style="text-align:right; color:#c82333;"><?php echo $hideCountFigures ? '—' : $currency . ' ' . number_format(abs((float)$c['shortage_cost']), 2); ?></td>
-                                        <td data-label="Surplus" style="text-align:right; color:#155724;"><?php echo $hideCountFigures ? '—' : $currency . ' ' . number_format((float)$c['surplus_cost'], 2); ?></td>
-                                        <td data-label="Counted by" style="font-size:12px;"><?php echo htmlspecialchars($c['counted_by_name'] ?: '—'); ?></td>
+                                        <td data-label="Items"><?php echo (int)$c['line_count']; ?></td>
+                                        <?php
+                                        $hideCountFigures = ($c['status'] === 'draft') || (!$canApprove && $c['status'] !== 'approved');
+                                        $shortAmt = abs((float)$c['shortage_cost']);
+                                        $extraAmt = (float)$c['surplus_cost'];
+                                        ?>
+                                        <td data-label="Shortage" class="sc-num"><?php
+                                            if ($hideCountFigures) echo '—';
+                                            elseif ($shortAmt < BALANCE_TOLERANCE) echo '<span class="sc-none">None</span>';
+                                            else echo '<span class="sc-money sc-money--short">' . htmlspecialchars($currency . ' ' . number_format($shortAmt, 2)) . '</span>'; ?></td>
+                                        <td data-label="Surplus" class="sc-num"><?php
+                                            if ($hideCountFigures) echo '—';
+                                            elseif ($extraAmt < BALANCE_TOLERANCE) echo '<span class="sc-none">None</span>';
+                                            else echo '<span class="sc-money sc-money--extra">' . htmlspecialchars($currency . ' ' . number_format($extraAmt, 2)) . '</span>'; ?></td>
+                                        <td data-label="Counted by"><?php echo htmlspecialchars($c['counted_by_name'] ?: '—'); ?></td>
                                         <td data-label="Status">
                                             <span class="pill st-<?php echo htmlspecialchars($c['status']); ?>"><?php echo htmlspecialchars(scStatusLabel((string)$c['status'])); ?></span>
                                             <?php if ($c['status'] === 'submitted'):
@@ -1706,11 +1773,16 @@ $csrf_token = generateCsrfToken();
                                                 <div class="count-note">Can approve: <?php echo $rowApprovers ? htmlspecialchars(rh_sca_approver_names($rowApprovers)) : '<span class="count-note--warn">nobody else yet</span>'; ?></div>
                                             <?php endif; ?>
                                         </td>
+                                        <td data-label="" class="sc-row-actions"><?php if (scMayDeleteCount($c, $user, $canApprove)): ?><form method="POST" onclick="event.stopPropagation();">
+                                                <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                                                <input type="hidden" name="count_id" value="<?php echo (int)$c['id']; ?>">
+                                                <button type="button" class="btn-danger btn-sm" data-ref="<?php echo htmlspecialchars(displayCountReference((string)$c['reference'])); ?>" onclick="scConfirm(this.form,'delete_count','Delete rejected count ' + this.dataset.ref + '? It is removed for good. Stock is not changed.','Delete count')">Delete</button>
+                                            </form><?php endif; ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                                 <?php if (empty($counts)): ?>
                                     <tr>
-                                        <td colspan="8" style="text-align:center; padding:30px; color:#6c757d;">No counts yet — start your first one →</td>
+                                        <td colspan="9" class="sc-empty-row">No counts yet. Start your first one with &ldquo;Start a count&rdquo;.</td>
                                     </tr>
                                 <?php endif; ?>
                             </tbody>
@@ -1759,7 +1831,7 @@ $csrf_token = generateCsrfToken();
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="scCloseConfirm()">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="scDoConfirm()">Confirm</button>
+                <button type="button" class="btn btn-primary" id="scConfirmBtn" onclick="scDoConfirm()">Confirm</button>
             </div>
         </div>
     </div>
@@ -1768,10 +1840,17 @@ $csrf_token = generateCsrfToken();
         var _scConfirmForm = null,
             _scConfirmAction = null;
 
-        function scConfirm(form, actionValue, message) {
+        function scConfirm(form, actionValue, message, okLabel) {
             _scConfirmForm = form;
             _scConfirmAction = actionValue;
             document.getElementById('scConfirmMessage').textContent = message;
+            /* A delete says what it does on the button and turns it red; every other confirm stays "Confirm". */
+            var okBtn = document.getElementById('scConfirmBtn');
+            if (okBtn) {
+                okBtn.textContent = okLabel || 'Confirm';
+                okBtn.classList.toggle('btn-danger', actionValue === 'delete_count');
+                okBtn.classList.toggle('btn-primary', actionValue !== 'delete_count');
+            }
             var modal = document.getElementById('scConfirmModal');
             if (modal) {
                 modal.classList.add('active');

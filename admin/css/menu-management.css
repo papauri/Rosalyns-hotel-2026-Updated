@@ -27,6 +27,14 @@
     margin: 0 0 24px;
 }
 
+/* Menu Management only (gym pages load this file too and keep their own tab look). */
+.mm-restaurant .menu-type-tabs {
+    gap: 8px;
+    padding: 0 0 12px;
+    background: none;
+    margin: 0 0 16px;
+}
+
 .menu-type-tab {
     background: none;
     border: none;
@@ -46,6 +54,14 @@
 .menu-type-tab.active {
     color: var(--mm-text);
     border-bottom-color: var(--mm-accent);
+}
+
+.mm-restaurant .menu-type-tab:hover {
+    transform: none;
+}
+
+.mm-restaurant .menu-type-tab.active {
+    box-shadow: none;
 }
 
 
@@ -354,7 +370,7 @@ body .btn-action.btn-facebook:hover {
     flex-wrap: wrap;
     align-items: center;
     gap: 10px;
-    margin: 0 0 14px;
+    margin: 0 0 16px;
 }
 
 .mm-search {
@@ -808,7 +824,8 @@ tr.drag-over > td {
 }
 
 .mm-qtytools[hidden],
-.mm-per[hidden] {
+.mm-per[hidden],
+.mm-quick .mm-btn[hidden] {
     display: none;
 }
 
@@ -819,6 +836,7 @@ tr.drag-over > td {
 
 .mm-quick {
     display: inline-flex;
+    flex-wrap: wrap;
     gap: 6px;
 }
 
@@ -827,24 +845,12 @@ tr.drag-over > td {
     justify-content: center;
 }
 
+/* Read-only: pieces in one packet comes from Stock and is never edited here. */
 .mm-per {
     display: inline-flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 6px 8px;
     font-size: 12px;
     color: var(--mm-muted);
-}
-
-.mm-per input {
-    width: 90px;
-    padding: 7px 8px;
-    border: 1px solid var(--mm-border);
-    border-radius: var(--mm-radius);
-    font-size: 13px;
-    font-family: inherit;
-    color: var(--mm-text);
-    background: #fff;
 }
 
 /* Stock item picker: category + search + item dropdown, then the unit line above the quantity box */
@@ -923,8 +929,7 @@ tr.drag-over > td {
 .mm-stock-add .mm-btn,
 .mm-stock-line input,
 .mm-stock-line select,
-.mm-qtytools .mm-btn,
-.mm-per input {
+.mm-qtytools .mm-btn {
     min-height: 44px;
 }
 
@@ -1108,7 +1113,6 @@ tr.drag-over > td {
     .mm-stock-line select,
     .mm-stock-add input,
     .mm-stock-add select,
-    .mm-per input,
     .mm-field input[type="text"],
     .mm-field input[type="number"],
     .mm-field select {

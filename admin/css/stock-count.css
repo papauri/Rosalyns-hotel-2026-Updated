@@ -269,7 +269,7 @@ table.count-list th {
 
 .summary-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 10px;
     margin: 0 0 14px;
 }
@@ -289,9 +289,11 @@ table.count-list th {
 }
 
 .sum-card .val {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
     margin-top: 4px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
 .sum-card.bad .val {
@@ -511,8 +513,21 @@ table.count-list th {
 }
 
 @media (max-width: 40rem) {
-    .summary-grid {
-        grid-template-columns: 1fr;
+    .summary-grid,
+    body #rh-admin-page .stock-count-page .summary-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* One figure per row: label left, amount right, so long amounts never wrap or clip. */
+    .sum-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .sum-card .val {
+        margin-top: 0;
     }
 
     .lines-table td,
@@ -524,5 +539,183 @@ table.count-list th {
     .lines-table tr,
     .count-list tr {
         grid-template-columns: 1fr;
+    }
+}
+
+/* ---- Plain, uniform pieces of the Stock Counts page ---- */
+.stock-count-page .page-subtitle {
+    margin: 4px 0 0;
+    color: #6c757d;
+}
+
+.sc-card-help {
+    margin: 0 0 12px;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+/* "All good" / "nothing to show" line inside a card. */
+.sc-empty {
+    padding: 12px 14px;
+    background: #e9f5ee;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #155724;
+}
+
+/* Opening-stock tick box: a normal sentence at the bottom of the Start card, not an uppercase field label. */
+.form-field label.sc-opening,
+.stock-count-page label.sc-opening {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin: 4px 0 14px;
+    padding: 10px 12px;
+    background: #f8f9fb;
+    border: 1px solid var(--admin-surface-border, #eaecef);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.45;
+    text-transform: none;
+    letter-spacing: 0;
+    color: #495057;
+    cursor: pointer;
+}
+
+.sc-opening input {
+    margin-top: 3px;
+    flex: 0 0 auto;
+}
+
+/* Missing stock / added by hand rows */
+.sc-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--admin-surface-border, #eaecef);
+    font-size: 13px;
+}
+
+.sc-item__main {
+    min-width: 0;
+}
+
+.sc-item__unit,
+.sc-item__sub {
+    font-size: 11px;
+    color: #6c757d;
+}
+
+.sc-item__sub--wrap {
+    overflow-wrap: anywhere;
+}
+
+.sc-item__qty {
+    font-size: 12px;
+}
+
+.sc-item__cost {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.sc-item__cost--bad,
+.sc-money--short {
+    color: #c82333;
+}
+
+.sc-money--extra {
+    color: #155724;
+}
+
+/* Counts table */
+table.count-list .sc-num {
+    text-align: right;
+}
+
+.sc-none {
+    color: #6c757d;
+}
+
+table.count-list tr.sc-row {
+    cursor: pointer;
+}
+
+table.count-list tr.sc-row:hover td {
+    background: var(--admin-table-hover, #f8f9fb);
+}
+
+table.count-list td.sc-row-actions {
+    text-align: right;
+    white-space: nowrap;
+}
+
+table.count-list td.sc-row-actions form {
+    margin: 0;
+}
+
+.stock-count-page .btn-danger.btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+.sc-empty-row {
+    text-align: center;
+    padding: 30px;
+    color: #6c757d;
+}
+
+/* Rejected count: the reason and what can be done, in one box. */
+.sc-rejected {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    background: #f8d7da;
+    border: 1px solid #f1b0b7;
+    border-radius: 8px;
+    color: #721c24;
+}
+
+.sc-rejected__text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.sc-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.sc-actions form {
+    margin: 0;
+}
+
+/* Touch: staff use this on tablets, so every action button is at least 44px tall. */
+@media (max-width: 64rem) {
+    .stock-count-page :is(.btn-primary, .btn-secondary, .btn-success, .btn-danger, .btn-danger.btn-sm) {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    /* The filter Reset button carries an inline 38px height. */
+    .stock-count-page #scFilterReset {
+        min-height: 44px !important;
+    }
+}
+
+@media (max-width: 40rem) {
+    table.count-list td.sc-row-actions {
+        text-align: left;
+    }
+
+    table.count-list td.sc-row-actions:empty {
+        display: none;
     }
 }

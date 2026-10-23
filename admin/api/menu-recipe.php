@@ -99,7 +99,7 @@ try {
                 // The recipe is keyed by the item's own category slug (what the till sells it under).
                 $type = rh_menu_item_slug($pdo, $mid);
 
-                $res = rh_menu_recipe_save($pdo, $mid, $type, $portions, $notes, $lines, (int)$_SESSION['admin_user_id'], hasPermission((int)$_SESSION['admin_user_id'], 'stock_management'));
+                $res = rh_menu_recipe_save($pdo, $mid, $type, $portions, $notes, $lines, (int)$_SESSION['admin_user_id']);
                 $written = $res['lines_written'];
                 echo json_encode([
                     'ok' => true,
