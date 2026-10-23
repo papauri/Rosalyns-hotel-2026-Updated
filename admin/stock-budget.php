@@ -40,7 +40,7 @@ if ($ym < rh_sbud_shift_month($now->format('Y-m'), -36) || $ym > rh_sbud_shift_m
 // Detail drawer data (JSON for the click-a-row panel).
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['detail'])) {
     $d = rh_sbud_detail($pdo, $ym, (string)$_GET['detail'], $now);
-    $out = ['receipts' => [], 'pos' => []];
+    $out = ['receipts' => [], 'pos' => [], 'receipts_total' => (int)($d['receipts_total'] ?? 0), 'pos_capped' => !empty($d['pos_capped'])];
     foreach ($d['receipts'] as $r) {
         $out['receipts'][] = [
             'date' => date('j M', strtotime($r['created_at'])), 'name' => $r['name'], 'qty' => rtrim(rtrim(number_format((float)$r['quantity'], 3, '.', ''), '0'), '.') . ' ' . $r['unit'],
@@ -116,7 +116,6 @@ if (!$error || $_SERVER['REQUEST_METHOD'] === 'GET') {
 $csrf_token = generateCsrfToken();
 $cur = $currency_symbol;
 $money = static function (float $v) use ($cur): string { return htmlspecialchars($cur) . ' ' . number_format($v, 0); };
-$pillText = ['ok' => 'On track', 'ahead' => 'Ahead of pace', 'near' => 'Nearly used', 'over' => 'Over budget', 'none' => 'No spend yet'];
 $prevYm = rh_sbud_shift_month($ym, -1);
 $nextYm = rh_sbud_shift_month($ym, 1);
 $thisYm = $now->format('Y-m');
@@ -168,7 +167,7 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
         .sbud-pill--ok { color:#2e6b34; background:#e3f0e4; }
         .sbud-pill--ahead, .sbud-pill--near { color:#8a6a2f; background:#f3ecdf; }
         .sbud-pill--over { color:#8a3a3a; background:#f0e3e3; }
-        .sbud-pill--none { color:#6a6255; background:#eee9df; }
+        .sbud-pill--none, .sbud-pill--nobasis, .sbud-pill--early { color:#6a6255; background:#eee9df; }
         .sbud-bar { position:relative; display:flex; height:12px; background:#eee9df; border-radius:6px; overflow:visible; width:100%; }
         .sbud-bar i { display:block; height:100%; }
         .sbud-bar__spent { background:#7E684B; border-radius:6px 0 0 6px; }
@@ -261,19 +260,19 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
         <?php if ($message): showAlert($message, 'success'); endif; ?>
         <?php if ($error):   showAlert($error,   'error');   endif; ?>
 
-        <?php if ($c): $s = $c['summary']; $hasBudget = $c['has_budget']; ?>
+        <?php if ($c): $s = $c['summary']; $hasBudget = $c['has_budget']; $noBasisAll = $s['status'] === 'nobasis'; ?>
 
             <!-- Summary -->
             <div class="ck-kpis ck-kpis--4">
-                <div class="ck-kpi"><span class="ck-kpi__label">Budget</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($s['budget']); ?></span>
-                    <span class="ck-kpi__sub"><?php echo $s['basis'] === 'whole' ? 'Whole-stock limit' : ($hasBudget ? 'All category budgets added up' : 'Not set'); ?></span></div>
-                <div class="ck-kpi"><span class="ck-kpi__label">Received</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($hasBudget ? $s['spent'] : $c['total']['spent']); ?></span>
+                <div class="ck-kpi"><span class="ck-kpi__label">Budget</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $noBasisAll ? '—' : $money($s['budget']); ?></span>
+                    <span class="ck-kpi__sub"><?php echo $noBasisAll ? 'No sales basis yet' : ($s['basis'] === 'whole' ? 'Whole-stock limit' : ($hasBudget ? 'All category budgets added up' : 'Not set')); ?></span></div>
+                <div class="ck-kpi"><span class="ck-kpi__label">Received</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($hasBudget && !$noBasisAll ? $s['received'] : $c['total']['spent']); ?></span>
                     <span class="ck-kpi__sub">Stock booked in this month</span></div>
-                <div class="ck-kpi"><span class="ck-kpi__label">Already ordered</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($hasBudget ? $s['committed'] : $c['total']['committed']); ?></span>
+                <div class="ck-kpi"><span class="ck-kpi__label">Already ordered</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($hasBudget && !$noBasisAll ? $s['ordered'] : $c['total']['committed']); ?></span>
                     <span class="ck-kpi__sub">Sent to suppliers, not yet received</span></div>
-                <div class="ck-kpi <?php echo !$hasBudget ? '' : ($s['left'] < -BALANCE_TOLERANCE ? 'ck-kpi--alert' : ($s['status'] === 'near' ? 'ck-kpi--warn' : 'ck-kpi--good')); ?>"><span class="ck-kpi__label">Left to spend</span>
-                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo $hasBudget ? ($s['left'] < -BALANCE_TOLERANCE ? '-' : '') . $money(abs($s['left'])) : '—'; ?></span>
-                    <span class="ck-kpi__sub"><?php echo $hasBudget ? 'Budget minus received minus ordered' : 'Set a budget to see this'; ?></span></div>
+                <div class="ck-kpi <?php echo (!$hasBudget || $noBasisAll) ? '' : ($s['left'] < -BALANCE_TOLERANCE ? 'ck-kpi--alert' : ($s['status'] === 'near' ? 'ck-kpi--warn' : 'ck-kpi--good')); ?>"><span class="ck-kpi__label">Left to spend</span>
+                    <span class="ck-kpi__value ck-kpi__value--money"><?php echo ($hasBudget && !$noBasisAll) ? ($s['left'] < -BALANCE_TOLERANCE ? '-' : '') . $money(abs($s['left'])) : '—'; ?></span>
+                    <span class="ck-kpi__sub"><?php echo $noBasisAll ? 'Starts once there are sales' : ($hasBudget ? (!empty($s['nobasis_lines']) ? 'Budget minus received and ordered on lines with a budget' : 'Budget minus received minus ordered') : 'Set a budget to see this'); ?></span></div>
             </div>
 
             <div class="sbud-card" style="margin-top:16px;">
@@ -286,14 +285,14 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                             <?php if ($c['info']['state'] === 'current'): ?><span><i style="background:#3e3930;opacity:.55;width:2px;height:12px"></i>Share of the month gone</span><?php endif; ?>
                         </div>
                         <div class="sbud-pace__text">
-                            <span><strong><?php echo number_format($s['pct_used'], 0); ?>%</strong> of the budget is used</span>
+                            <?php if (!$noBasisAll): ?><span><strong><?php echo number_format($s['pct_used'], 0); ?>%</strong> of the budget is used</span><?php endif; ?>
                             <?php if ($c['info']['state'] === 'current'): ?><span><strong><?php echo number_format($c['info']['month_pct'], 0); ?>%</strong> of the month has gone</span><?php endif; ?>
                             <?php if ($s['forecast'] !== null && $c['info']['state'] === 'current'): ?><span>Month-end forecast: <strong><?php echo $money($s['forecast']); ?></strong></span><?php endif; ?>
-                            <?php if ($c['sales']): ?><span>F&amp;B sales so far: <strong><?php echo $money($c['sales']['so_far']); ?></strong> &middot; expected for the month: <strong><?php echo $money($c['sales']['expected']); ?></strong></span><?php endif; ?>
+                            <?php if ($c['sales']): ?><span>F&amp;B sales before VAT so far: <strong><?php echo $money($c['sales']['so_far']); ?></strong> &middot; expected for the month: <strong><?php echo !empty($c['sales']['has_basis']) ? $money($c['sales']['expected']) : 'no sales basis yet'; ?></strong></span><?php endif; ?>
                         </div>
                     </div>
                     <div class="sbud-verdict">
-                        <span class="sbud-pill sbud-pill--<?php echo htmlspecialchars($s['status']); ?>"><?php echo htmlspecialchars($pillText[$s['status']] ?? ''); ?></span>
+                        <span class="sbud-pill sbud-pill--<?php echo htmlspecialchars(rh_sbud_pill_key($s['status'], $c['info'])); ?>"><?php echo htmlspecialchars(rh_sbud_pill_text($s['status'], $c['info'])); ?></span>
                         <span><?php echo htmlspecialchars(rh_sbud_verdict($s, $c['info'], $cur)); ?></span>
                     </div>
                 <?php else: ?>
@@ -326,14 +325,14 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                                         &middot; <?php echo $l['control'] === 'approval' ? 'Going over needs approval' : 'Going over shows a warning'; ?>
                                     </small>
                                 </span>
-                                <span class="sbud-pill sbud-pill--<?php echo htmlspecialchars($l['status']); ?>"><?php echo htmlspecialchars($pillText[$l['status']] ?? ''); ?></span>
+                                <span class="sbud-pill sbud-pill--<?php echo htmlspecialchars(rh_sbud_pill_key($l['status'], $c['info'])); ?>"><?php echo htmlspecialchars(rh_sbud_pill_text($l['status'], $c['info'])); ?></span>
                             </span>
                             <?php echo $bar($l['budget'], $l['spent'], $l['committed'], $c['info']['month_pct'], $c['info']['state'] === 'current'); ?>
                             <span class="sbud-figs">
-                                <span><em>Budget</em><?php echo $money($l['budget']); ?></span>
+                                <span><em>Budget</em><?php echo !empty($l['no_basis']) ? '—' : $money($l['budget']); ?></span>
                                 <span><em>Received</em><?php echo $money($l['spent']); ?></span>
                                 <span><em>Already ordered</em><?php echo $money($l['committed']); ?></span>
-                                <span><em>Left to spend</em><span class="<?php echo $l['left'] < -BALANCE_TOLERANCE ? 'neg' : ''; ?>"><?php echo ($l['left'] < -BALANCE_TOLERANCE ? '-' : '') . $money(abs($l['left'])); ?></span></span>
+                                <span><em>Left to spend</em><span class="<?php echo $l['left'] < -BALANCE_TOLERANCE ? 'neg' : ''; ?>"><?php echo !empty($l['no_basis']) ? '—' : ($l['left'] < -BALANCE_TOLERANCE ? '-' : '') . $money(abs($l['left'])); ?></span></span>
                             </span>
                         </button>
                     <?php endforeach; ?>
@@ -379,7 +378,7 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                     <div class="sbud-help" style="margin-top:10px;">
                         <p><strong>Received</strong> is the value of stock booked in during the month (goods-in, at the cost recorded when it was received). <strong>Already ordered</strong> is what is still to arrive on purchase orders you have sent. <strong>Left to spend</strong> is the budget minus both, so two people cannot both spend the same last amount.</p>
                         <p>Amounts are what the stock costs you, not selling prices. Costs are kept exactly as they are entered on receiving and on purchase orders, so if you enter them with VAT, budget with VAT.</p>
-                        <p>A budget can be a fixed amount, or a % of the food and drink sales we expect for the month (the same daily figure as the End of Day report, which includes VAT). Because sales include VAT, set the % on the same basis as your costs: if stock costs are entered without VAT, a 30% target here is really a lower share of your sales, so raise the % by about the VAT rate. Expected sales are this month's sales so far spread over the whole month, from day 4; in the first 3 days, or before any sale, last month's sales are used. A past month uses what was actually sold.</p>
+                        <p>A budget can be a fixed amount, or a % of the food and drink sales we expect for the month (the same daily figure as the End of Day report, with VAT taken out, because food and drink cost % is measured on sales before VAT). Expected sales are this month's sales so far spread over the whole month, once 7 days have gone; in the first 7 days, or before any sale, last month's sales are used. A past month uses what was actually sold. A % line with no sales to measure against shows no budget yet, but anything received or ordered in it still shows under Received and Already ordered.</p>
                         <p>When a purchase order would take a category over its budget, the order page shows it before you send. A line set to <em>warn</em> asks you to confirm; a line set to <em>needs approval</em> can only be sent by someone allowed to approve, who must give a reason. Orders already sent are only counted in the current month.</p>
                     </div>
                 </details>
@@ -432,7 +431,7 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                     <input type="hidden" name="action" value="save_budgets">
                     <input type="hidden" name="b_source" id="sbudSource" value="manual">
-                    <p class="sbud-note">One line per category. Give a fixed amount, or a % of the food and drink sales expected this month. Choose what happens when an order would go over.</p>
+                    <p class="sbud-note">One line per category. Give a fixed amount, or a % of the food and drink sales (before VAT) expected this month. Choose what happens when an order would go over.</p>
                     <div class="sbud-tools">
                         <button type="button" class="sbud-btn sbud-btn--ghost sbud-btn--sm" id="sbudCopy"<?php echo $copyProposal ? '' : ' disabled title="Last month has no budget to copy"'; ?>><i class="fas fa-copy"></i> Copy last month</button>
                         <button type="button" class="sbud-btn sbud-btn--ghost sbud-btn--sm" id="sbudSuggest"<?php echo $suggestProposal ? '' : ' disabled title="No stock received in the last 3 months"'; ?>><i class="fas fa-clock-rotate-left"></i> Fill from last 3 months</button>
@@ -485,9 +484,11 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                     body.appendChild(el('h4', null, 'Already ordered (open purchase orders)'));
                     if (!d.pos.length) body.appendChild(el('p', 'sbud-note', 'Nothing is waiting to arrive.'));
                     d.pos.forEach(function (p) { body.appendChild(item(p.ref, p.supplier + ' - ' + p.status, p.value, 'purchase-orders.php?id=' + p.id)); });
+                    if (d.pos_capped) body.appendChild(el('p', 'sbud-note', 'Showing the latest ' + d.pos.length + ' orders — the total above includes all of them.'));
                     body.appendChild(el('h4', null, 'Received this month'));
                     if (!d.receipts.length) body.appendChild(el('p', 'sbud-note', 'No stock received yet.'));
                     d.receipts.forEach(function (r) { body.appendChild(item(r.name, r.date + ' - ' + r.qty + (r.po ? ' - ' + r.po : ''), r.value, r.po_id ? 'purchase-orders.php?id=' + r.po_id : '')); });
+                    if (d.receipts_total > d.receipts.length) body.appendChild(el('p', 'sbud-note', 'Showing the latest ' + d.receipts.length + ' of ' + d.receipts_total + ' — the total above includes all of them.'));
                 })
                 .catch(function () { body.textContent = 'These details could not be loaded. Please try again.'; });
         }

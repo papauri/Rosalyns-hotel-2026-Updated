@@ -118,7 +118,7 @@ try {
     check(near($fc, 400.50 / (10.5 / 31)), 'Forecast: current run rate to month end', (string)$fc);
     check(near((float)rh_sbud_forecast($c['info'], 10, 500), 510), 'Forecast: never below spent + committed');
     $early = rh_sbud_month_info($ym, new DateTimeImmutable('2031-03-02 12:00:00', $tz));
-    check(rh_sbud_forecast($early, 50, 0) === null, 'Forecast: too early in the month (under 3 days) gives none');
+    check(rh_sbud_forecast($early, 50, 0) === null, 'Forecast: too early in the month (day 2) gives none');
     check(near((float)rh_sbud_forecast(rh_sbud_month_info('2031-02', $now), 77, 0), 77), 'Forecast: a past month is just what was spent');
     // 400.50 over 10.5 days -> ~1182 for the month, above the 1000 budget -> "ahead"; but used (520.5) is under 80%
     check($a['status'] === 'ahead', 'Status: under 80% used but forecast above budget = ahead of pace', $a['status']);
@@ -177,6 +177,120 @@ try {
     check($c6['sales']['basis'] === 'actual' && near($c6['sales']['expected'], 30000) && near(line_of($c6, $catA)['budget'], 3000), 'Target %: a past month uses its actual sales', json_encode($c6['sales']));
     check((int)col($pdo, "SELECT COUNT(*) FROM stock_budget_audit WHERE budget_month = ? AND action = 'changed' AND category = ? AND new_value LIKE '12.5% of F&B sales%'", [$ym . '-01', $catA]) === 1, 'Audit: mode change written with old and new text');
     rh_sbud_sales_provider(null);
+
+    // --- Finding 1: sales for a % budget are measured BEFORE VAT -------------------------------
+    $savedSet = [];
+    foreach (['vat_enabled', 'vat_rate', 'vat_pricing_mode'] as $k) { $savedSet[$k] = $GLOBALS['_SITE_SETTINGS'][$k] ?? null; }
+    $setVat = function (string $enabled, string $rate, string $mode) { $GLOBALS['_SITE_SETTINGS']['vat_enabled'] = $enabled; $GLOBALS['_SITE_SETTINGS']['vat_rate'] = $rate; $GLOBALS['_SITE_SETTINGS']['vat_pricing_mode'] = $mode; };
+    $setVat('1', '16.5', 'inclusive');
+    check(vat_mode() === 'inclusive' && near(rh_sbud_ex_vat(116.5), 100.0), 'Ex-VAT: "prices include VAT" takes 16.5% VAT out of the till figure', (string)rh_sbud_ex_vat(116.5));
+    $setVat('1', '16.5', 'exclusive');
+    check(vat_mode() === 'exclusive' && near(rh_sbud_ex_vat(116.5), 100.0), 'Ex-VAT: "VAT added on top" - F&B till prices are still gross, VAT taken out', (string)rh_sbud_ex_vat(116.5));
+    $setVat('0', '16.5', 'inclusive');
+    check(vat_mode() === 'off' && near(rh_sbud_ex_vat(116.5), 116.5), 'Ex-VAT: "No VAT" leaves the figure as it is', (string)rh_sbud_ex_vat(116.5));
+    check(near(rh_sbud_ex_vat(0), 0.0) && near(rh_sbud_ex_vat(-5), -5.0), 'Ex-VAT: zero / negative amounts pass through');
+    $setVat('1', '16.5', 'inclusive');
+    check(near(rh_sbud_ex_vat(-116.5), -100.0) && near(rh_sbud_ex_vat(0), 0.0), 'Ex-VAT: a negative day (refunds bigger than sales) has VAT taken out too, zero stays zero', (string)rh_sbud_ex_vat(-116.5));
+    // rh_pos_margin_basis follows the same VAT switch as vat_mode(): "yes" / case variants count as on.
+    foreach (['1', 'yes', 'YES', 'On', 'true'] as $onVal) {
+        $setVat($onVal, '16.5', 'inclusive');
+        check(near(rh_pos_margin_basis(116.5, 0.0)['net_ex_vat'], 100.0), 'Margin basis: vat_enabled "' . $onVal . '" takes VAT out', (string)rh_pos_margin_basis(116.5, 0.0)['net_ex_vat']);
+    }
+    foreach (['0', '', 'no', 'false'] as $offVal) {
+        $setVat($offVal, '16.5', 'inclusive');
+        check(near(rh_pos_margin_basis(116.5, 0.0)['net_ex_vat'], 116.5), 'Margin basis: vat_enabled "' . $offVal . '" leaves the amount as is');
+    }
+    foreach ($savedSet as $k => $v) { if ($v === null) { unset($GLOBALS['_SITE_SETTINGS'][$k]); } else { $GLOBALS['_SITE_SETTINGS'][$k] = $v; } }
+    check(stripos(rh_sbud_sales_basis_text(30, ['basis' => 'month', 'expected' => 1000000.0, 'has_basis' => true], 'MWK'), 'of expected sales before VAT') !== false, 'Target %: basis wording says "sales before VAT"');
+
+    // --- Finding 2: a % line with no sales basis is "no sales basis yet", never over ----------------
+    rh_sbud_sales_provider(function ($pdo, $m, $lastDay) { return 0.0; });
+    $r = rh_sbud_save($pdo, $ym, [
+        ['category' => $catA, 'mode' => 'target_pct', 'target_pct' => '30', 'control' => 'approval'],
+        ['category' => $catB, 'mode' => 'fixed', 'amount' => '500', 'control' => 'warn'],
+    ], $adminId, 'manual', $now);
+    $cn = rh_sbud_compute($pdo, $ym, ['now' => $now]);
+    $an = line_of($cn, $catA);
+    check($cn['sales'] && $cn['sales']['basis'] === 'none' && !$cn['sales']['has_basis'], 'No basis: no sales anywhere = basis "none"', json_encode($cn['sales']));
+    check($an && $an['status'] === 'nobasis' && $an['no_basis'] && $an['spent'] > 100 && near($an['left'], 0), 'No basis: the line shows "no sales basis yet" (not over) although goods came in', json_encode($an));
+    check(stripos(rh_sbud_sales_basis_text(30, $cn['sales'], 'MWK'), 'no sales basis yet') !== false, 'No basis: plain-words text says so');
+    check($cn['summary']['status'] !== 'over' && near($cn['summary']['budget'], 500) && $cn['summary']['nobasis_lines'] === 1 && stripos($cn['summary']['verdict'], 'no sales basis') !== false, 'No basis: the unbased line is left out of the summary and the verdict says so', json_encode($cn['summary']));
+    // Hidden spend: the unbased line's real spend still counts in Received / Already ordered (only its budget is left out).
+    check(near($cn['summary']['received'], $an['spent'] + line_of($cn, $catB)['spent']) && $cn['summary']['received'] > $cn['summary']['spent'] + 100
+        && near($cn['summary']['ordered'], $an['committed'] + line_of($cn, $catB)['committed']) && near($cn['summary']['budget'], 500) && near($cn['summary']['left'], 500 - $cn['summary']['used']),
+        'No basis: its spend still shows in Received / Already ordered, but not in Budget / Left', json_encode($cn['summary']));
+    $pdo->prepare("INSERT INTO stock_budgets (budget_month, category, mode, amount, target_pct, control) VALUES ('2031-02-01', ?, 'fixed', 100, 0, 'warn')")->execute([$catB]);
+    $hFeb = rh_sbud_history($pdo, '2031-03', 1)[0];
+    check($hFeb['has_budget'] && near($hFeb['budget'], 100) && $hFeb['actual'] >= 999 - BALANCE_TOLERANCE, 'No basis: history Received includes the unbased line spend', json_encode($hFeb));
+    $poNb = $mkPo('draft', [[$ingA, 100, 0, 1000]]);     // 100,000 into a line with no basis: must not block or warn
+    $e = rh_sbud_po_effect($pdo, $poNb, $now);
+    $x = rh_sbud_authorize_po($pdo, $poNb, $adminId, false, false, '', $now);
+    check(!$e['over'] && !$e['needs_approval'] && $x['ok'] && !$x['overridden'], 'No basis: a PO send is never blocked or warned on that line (even on an approval line)', $x['error']);
+    $dn = rh_sbud_dashboard($pdo, $now);
+    check($dn !== null && $dn['status'] !== 'over' && $dn['notice'] === '' && ($dn['worst']['category'] ?? '') !== $catA, 'No basis: the dashboard does not call it over and does not pick it as worst', json_encode($dn));
+    rh_sbud_save($pdo, $ym, [['category' => $catA, 'mode' => 'target_pct', 'target_pct' => '30', 'control' => 'warn']], $adminId, 'manual', $now);
+    $cn2 = rh_sbud_compute($pdo, $ym, ['now' => $now]);
+    check($cn2['summary']['status'] === 'nobasis' && stripos($cn2['summary']['verdict'], 'No sales basis') === 0, 'No basis: only unbased % lines = summary "no sales basis yet"', $cn2['summary']['status']);
+    check(rh_sbud_dashboard($pdo, $now) === null, 'No basis: the dashboard tile has nothing to show');
+    check(rh_sbud_pill_text('nobasis', $cn2['info']) === 'No sales basis yet', 'No basis: pill wording');
+    $h0 = rh_sbud_history($pdo, '2031-04', 1);
+    check($h0[0]['variance'] === null && !$h0[0]['has_budget'], 'No basis: a past month with only an unbased % line shows no variance', json_encode($h0));
+
+    // --- Finding 3: next month's basis ---------------------------------------------------------
+    rh_sbud_sales_provider(function ($pdo, $m, $lastDay) { return ['2031-03' => 10000.0, '2031-02' => 20000.0][$m] ?? 0.0; });
+    $nx = rh_sbud_expected_sales($pdo, '2031-04', $now);   // day 11 (10.5 of 31 days gone)
+    check($nx['basis'] === 'projected' && near($nx['expected'], round(10000 / (10.5 / 31), 2)) && $nx['has_basis'], 'Next month: this month projected to the full month once 7+ days have gone', json_encode($nx));
+    $day5 = new DateTimeImmutable('2031-03-05 12:00:00', $tz);   // 4.5 days gone
+    $nx5 = rh_sbud_expected_sales($pdo, '2031-04', $day5);
+    check($nx5['basis'] === 'last_month' && near($nx5['expected'], 20000), 'Next month: before 7 days the last full month is used', json_encode($nx5));
+    // One rule for every % basis: the current month also waits for 7 days of pace.
+    $cur5 = rh_sbud_expected_sales($pdo, '2031-03', $day5);
+    check($cur5['basis'] === 'last_month' && near($cur5['expected'], 20000), 'Current month: 4.5 days gone still uses last month sales (needs 7 days)', json_encode($cur5));
+    $cur7 = rh_sbud_expected_sales($pdo, '2031-03', new DateTimeImmutable('2031-03-07 12:00:00', $tz));
+    check($cur7['basis'] === 'last_month', 'Current month: 6.5 days gone still uses last month sales', json_encode($cur7));
+    $cur8 = rh_sbud_expected_sales($pdo, '2031-03', new DateTimeImmutable('2031-03-08 12:00:00', $tz));
+    check($cur8['basis'] === 'month' && near($cur8['expected'], round(10000 / (7.5 / 31), 2)), 'Current month: from 7 days it uses its own pace', json_encode($cur8));
+    $nx2 = rh_sbud_expected_sales($pdo, '2031-05', $now);
+    check($nx2['basis'] === 'last_month' && near($nx2['expected'], 20000), 'Two months ahead: the last full month\'s sales', json_encode($nx2));
+    $day7 = new DateTimeImmutable('2031-03-07 12:00:00', $tz);   // 6.5 days: still under 7
+    check(rh_sbud_expected_sales($pdo, '2031-04', $day7)['basis'] === 'last_month', 'Next month: 6.5 days gone is still too early to project');
+    rh_sbud_sales_provider(function ($pdo, $m, $lastDay) { return 0.0; });
+    check(rh_sbud_expected_sales($pdo, '2031-04', $now)['basis'] === 'none' && rh_sbud_expected_sales($pdo, '2031-06', $now)['basis'] === 'none', 'Future months with no sales anywhere: no sales basis yet');
+    check(rh_sbud_expected_sales($pdo, '2031-02', $now)['basis'] === 'none', 'A past month with no sales has no basis');
+    rh_sbud_sales_provider(null);
+
+    // --- Finding 5: no forecast verdicts in the first 7 days -----------------------------------
+    check(rh_sbud_forecast(rh_sbud_month_info($ym, $day5), 400, 0) === null, 'Forecast: 4.5 days in = too early (none)');
+    check(rh_sbud_forecast(rh_sbud_month_info($ym, $day7), 400, 0) === null, 'Forecast: 6.5 days in = still too early');
+    check(rh_sbud_forecast(rh_sbud_month_info($ym, new DateTimeImmutable('2031-03-08 12:00:00', $tz)), 400, 0) !== null, 'Forecast: 7.5 days in = shown');
+    rh_sbud_save($pdo, $ym, [
+        ['category' => $catA, 'mode' => 'fixed', 'amount' => '1000', 'control' => 'warn'],
+        ['category' => $catB, 'mode' => 'fixed', 'amount' => '500', 'control' => 'approval'],
+    ], $adminId, 'manual', $now);
+    $ce = rh_sbud_compute($pdo, $ym, ['now' => $day5]);
+    $ea = line_of($ce, $catA);
+    check($ea && $ea['status'] === 'ok' && rh_sbud_pill_text($ea['status'], $ce['info']) === 'Too early to tell', 'Early month: no "on track" / "ahead" pill, it says too early to tell', json_encode($ea));
+    check(stripos($ce['summary']['verdict'], 'too early') !== false && stripos($ce['summary']['verdict'], 'ahead') === false && stripos($ce['summary']['verdict'], 'on track') === false, 'Early month: the verdict says too early to tell', $ce['summary']['verdict']);
+
+    // --- Finding 4: a PO is "received" only when EVERY line has arrived ----------------------------
+    $poMixed = $mkPo('partial', [[$ingA, 10, 12, 5], [$ingB, 10, 4, 5]]);   // one over-delivered, one short
+    check(!rh_sbud_po_fully_received($pdo, $poMixed), 'PO status: an over-delivered line cannot hide a short line (stays partial)');
+    check(near(rh_sbud_committed_by_category($pdo)[rh_sbud_cat_key($catB)] ?? 0, 30), 'PO status: the short line\'s outstanding value is still committed (6 x 5)');
+    $poFull = $mkPo('draft', [[$ingA, 10, 12, 5], [$ingB, 10, 10, 5]]);
+    check(rh_sbud_po_fully_received($pdo, $poFull), 'PO status: every line in full (one over) = received');
+    $poTol = $mkPo('draft', [[$ingA, 10, 9.99995, 5]]);
+    check(rh_sbud_po_fully_received($pdo, $poTol), 'PO status: a tiny rounding shortfall is within tolerance');
+    $poShort = $mkPo('draft', [[$ingA, 10, 9.9, 5]]);
+    check(!rh_sbud_po_fully_received($pdo, $poShort), 'PO status: a real shortfall is not');
+    $poEmpty = $mkPo('draft', []);
+    check(!rh_sbud_po_fully_received($pdo, $poEmpty), 'PO status: a PO with no lines is not received');
+
+    // --- Finding 6: capped detail lists say so ---------------------------------------------------
+    $dd = rh_sbud_detail($pdo, $ym, $catA, $now);
+    check($dd['receipts_total'] === count($dd['receipts']) && $dd['pos_capped'] === false, 'Detail: under the cap, total = shown and no "capped" flag', json_encode([$dd['receipts_total'], count($dd['receipts'])]));
+    for ($i = 0; $i < RH_SBUD_DETAIL_RECEIPTS + 5; $i++) { $goodsIn($ingC, 1, '2031-03-04 08:00:00'); }
+    $dc = rh_sbud_detail($pdo, $ym, $catC, $now);
+    check(count($dc['receipts']) === RH_SBUD_DETAIL_RECEIPTS && $dc['receipts_total'] === RH_SBUD_DETAIL_RECEIPTS + 6, 'Detail: capped at 200 shown while the real count is reported (205 + 1 earlier)', json_encode([count($dc['receipts']), $dc['receipts_total']]));
 
     // --- PO check on send: warn vs needs-approval ---------------------------------------------
     $rb = rh_sbud_save($pdo, $ym, [

@@ -653,13 +653,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if ($received === 0) throw new RuntimeException('Enter a quantity to receive on at least one line.');
 
-                // Recompute PO status from line fulfilment.
-                $agg = $pdo->prepare("SELECT SUM(ordered_qty) AS o, SUM(received_qty) AS r FROM stock_purchase_order_items WHERE purchase_order_id = ?");
-                $agg->execute([$poId]);
-                $a = $agg->fetch(PDO::FETCH_ASSOC);
-                $ordered = (float)($a['o'] ?? 0);
-                $recv    = (float)($a['r'] ?? 0);
-                if ($recv + 0.0001 >= $ordered && $ordered > 0) {
+                // Recompute PO status line by line: received only when EVERY line has arrived in full
+                // (an over-delivered line must not hide a short one).
+                if (rh_sbud_po_fully_received($pdo, $poId)) {
                     $pdo->prepare("UPDATE stock_purchase_orders SET status = 'received', received_at = NOW() WHERE id = ?")->execute([$poId]);
                 } else {
                     $pdo->prepare("UPDATE stock_purchase_orders SET status = 'partial', received_at = COALESCE(received_at, NOW()) WHERE id = ?")->execute([$poId]);

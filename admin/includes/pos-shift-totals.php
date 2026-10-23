@@ -493,7 +493,10 @@ if (!function_exists('rh_pos_margin_basis')) {
     {
         $div = 1.0;
         if (function_exists('getSetting')) {
-            $on = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+            // Same switch as vat_mode(): rh_vat_enabled() (accepts 1/true/on/yes in any case).
+            $on = function_exists('rh_vat_enabled')
+                ? rh_vat_enabled()
+                : in_array(strtolower(trim((string)getSetting('vat_enabled'))), ['1', 'true', 'on', 'yes'], true);
             $rate = (float)getSetting('vat_rate');
             if ($on && $rate > 0) {
                 $div = 1 + ($rate / 100);

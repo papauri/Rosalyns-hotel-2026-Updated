@@ -15,7 +15,10 @@
  * go over) or "approval" (only a user with stock_budget_manage can send a PO that goes over, with a reason).
  *
  * Amounts are stock COST values exactly as stored (goods-in cost, PO unit cost) - not sales prices.
- * Target-% mode uses rh_eod_earned_revenue()['fnb_gross'] per day (the End-of-Day F&B figure, gross).
+ * Target-% mode uses rh_eod_earned_revenue()['fnb_gross'] per day (the End-of-Day F&B figure) taken BEFORE VAT
+ * (rh_sbud_ex_vat(): food and beverage cost % is measured on sales without VAT). F&B carries no tourism levy.
+ * A target-% line with no sales to measure against yet is "no sales basis yet": it has no budget figure, never
+ * shows as over and never blocks or warns a PO send.
  *
  * Schema is additive and self-healing (same pattern as procurement-schema.php): rh_sbud_ensure_schema().
  * Dates use the hotel timezone (PHP default timezone and MySQL session are both set to RH_TIMEZONE).
@@ -30,6 +33,13 @@ if (!defined('BALANCE_TOLERANCE')) {
 
 /** Category key of the optional whole-stock cap line. */
 const RH_SBUD_ALL = '*';
+
+/** Longest receipts / open-orders lists the detail panel returns (the totals on the page always include everything). */
+const RH_SBUD_DETAIL_RECEIPTS = 200;
+const RH_SBUD_DETAIL_ORDERS = 100;
+
+/** Days of the month that must have gone before pace is trusted: forecasts, and projecting this month onto the next. */
+const RH_SBUD_MIN_PACE_DAYS = 7.0;
 
 if (!function_exists('rh_sbud_ensure_schema')) {
     function rh_sbud_ensure_schema(PDO $pdo): bool
@@ -221,6 +231,25 @@ if (!function_exists('rh_sbud_record_nonstock_receipt')) {
     }
 }
 
+if (!function_exists('rh_sbud_po_fully_received')) {
+    /**
+     * Has EVERY line of the PO arrived in full? Decided line by line: an over-delivered line must not make up for
+     * a short one (that would drop the short line's committed value from the budget while it is still owed).
+     * Quantity tolerance 0.0001 (stock quantities are DECIMAL; never raw float equality). A PO with no
+     * ordered quantity is not "received".
+     */
+    function rh_sbud_po_fully_received(PDO $pdo, int $poId): bool
+    {
+        $st = $pdo->prepare("
+            SELECT SUM(CASE WHEN ordered_qty > 0 THEN 1 ELSE 0 END) AS n,
+                   SUM(CASE WHEN ordered_qty > 0 AND received_qty + 0.0001 < ordered_qty THEN 1 ELSE 0 END) AS short_lines
+            FROM stock_purchase_order_items WHERE purchase_order_id = ?");
+        $st->execute([$poId]);
+        $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        return (int)($r['n'] ?? 0) > 0 && (int)($r['short_lines'] ?? 0) === 0;
+    }
+}
+
 if (!function_exists('rh_sbud_committed_by_category')) {
     /** Outstanding value of sent / part-received POs, keyed like spent. $excludePoId leaves one PO out. */
     function rh_sbud_committed_by_category(PDO $pdo, int $excludePoId = 0): array
@@ -256,10 +285,29 @@ if (!function_exists('rh_sbud_sales_provider')) {
     }
 }
 
+if (!function_exists('rh_sbud_ex_vat')) {
+    /**
+     * An F&B gross amount (till / folio prices include VAT whatever the VAT pricing mode) taken before VAT.
+     * Uses the shared POS ex-VAT basis (rh_pos_margin_basis): "No VAT" leaves the amount as is; both
+     * "prices include VAT" and "VAT added on top" extract VAT at the configured rate.
+     */
+    function rh_sbud_ex_vat(float $gross): float
+    {
+        // Negative days (refunds/voids bigger than sales) come out of VAT too, exactly as the End-of-Day margin does;
+        // only a zero amount, or "No VAT", is left alone.
+        if (abs($gross) < 0.005 || !function_exists('vat_mode') || vat_mode() === 'off') {
+            return round($gross, 2);
+        }
+        require_once __DIR__ . '/pos-shift-totals.php';
+        return (float)rh_pos_margin_basis($gross, 0.0)['net_ex_vat'];
+    }
+}
+
 if (!function_exists('rh_sbud_fnb_sales')) {
     /**
-     * F&B sales of the month up to and including the last elapsed day: the SAME daily figure the End-of-Day
-     * report uses (rh_eod_earned_revenue()['fnb_gross'], gross incl. VAT).
+     * F&B sales of the month up to and including the last elapsed day, BEFORE VAT: the SAME daily figure the
+     * End-of-Day report uses (rh_eod_earned_revenue()['fnb_gross']) with VAT taken out of each day (rh_sbud_ex_vat).
+     * A test provider (rh_sbud_sales_provider) returns the figure already before VAT.
      */
     function rh_sbud_fnb_sales(PDO $pdo, string $ym, ?DateTimeImmutable $now = null): float
     {
@@ -282,7 +330,7 @@ if (!function_exists('rh_sbud_fnb_sales')) {
         try {
             for ($t = strtotime($info['first']); $t <= strtotime($lastDay); $t = strtotime('+1 day', $t)) {
                 $r = rh_eod_earned_revenue($pdo, date('Y-m-d', $t));
-                $total += (float)($r['fnb_gross'] ?? 0);
+                $total += rh_sbud_ex_vat((float)($r['fnb_gross'] ?? 0));
             }
         } catch (Throwable $e) {
             error_log('rh_sbud_fnb_sales: ' . $e->getMessage());
@@ -293,35 +341,57 @@ if (!function_exists('rh_sbud_fnb_sales')) {
 
 if (!function_exists('rh_sbud_expected_sales')) {
     /**
-     * F&B sales a target-% budget is a share of (whole month):
-     *  - past month: its actual total                                                   basis 'actual'
-     *  - current month from day 4 with sales: so far / days elapsed x days in month     basis 'month'
-     *  - days 1-3, or no sales yet this month (and any future month): LAST month's total basis 'last_month'
-     * @return array{so_far:float,expected:float,basis:string,last_month:float}
+     * F&B sales (before VAT) a target-% budget is a share of (whole month):
+     *  - past month: its actual total (none when nothing was sold)                          basis 'actual'
+     *  - current month once 7 days have gone and there are sales: so far / days elapsed x days in month   basis 'month'
+     *  - current month in its first 7 days, or no sales yet this month: LAST full month's total          basis 'last_month'
+     *  - next month: this month projected to the full month once 7 days have gone and there
+     *    are sales (same pace maths as 'month'); before that the last full month             basis 'projected' / 'last_month'
+     *  - two or more months ahead: the last full month's total                              basis 'last_month'
+     *  - nothing to go on at all                                                            basis 'none' (has_basis false)
+     * @return array{so_far:float,expected:float,basis:string,last_month:float,has_basis:bool}
      */
     function rh_sbud_expected_sales(PDO $pdo, string $ym, ?DateTimeImmutable $now = null): array
     {
         $now = $now ?: rh_sbud_now();
         $info = rh_sbud_month_info($ym, $now);
         $so = rh_sbud_fnb_sales($pdo, $ym, $now);
+        $make = static function (float $expected, string $basis, float $last) use ($so): array {
+            return ['so_far' => $so, 'expected' => $basis === 'none' ? 0.0 : $expected, 'basis' => $basis, 'last_month' => $last, 'has_basis' => $basis !== 'none'];
+        };
         if ($info['state'] === 'past') {
-            return ['so_far' => $so, 'expected' => $so, 'basis' => 'actual', 'last_month' => $so];
+            return $so > BALANCE_TOLERANCE ? $make($so, 'actual', $so) : $make(0.0, 'none', 0.0);
         }
-        if ($info['state'] === 'current' && $info['days_done'] >= 3.0 && $so > BALANCE_TOLERANCE) {
-            return ['so_far' => $so, 'expected' => round($so / ($info['days_done'] / $info['days']), 2), 'basis' => 'month', 'last_month' => 0.0];
+        $curYm = $now->format('Y-m');
+        if ($info['state'] === 'current' && $info['days_done'] >= RH_SBUD_MIN_PACE_DAYS && $so > BALANCE_TOLERANCE) {
+            return $make(round($so / ($info['days_done'] / $info['days']), 2), 'month', 0.0);
         }
-        $last = rh_sbud_fnb_sales($pdo, rh_sbud_shift_month($ym, -1), $now);
-        return ['so_far' => $so, 'expected' => $last, 'basis' => 'last_month', 'last_month' => $last];
+        if ($info['state'] === 'future' && $ym === rh_sbud_shift_month($curYm, 1)) {
+            // Next month: project the current month to its full length (needs 7 days of pace).
+            $curInfo = rh_sbud_month_info($curYm, $now);
+            $curSo = rh_sbud_fnb_sales($pdo, $curYm, $now);
+            if ($curInfo['days_done'] >= RH_SBUD_MIN_PACE_DAYS && $curSo > BALANCE_TOLERANCE) {
+                return $make(round($curSo / ($curInfo['days_done'] / $curInfo['days']), 2), 'projected', 0.0);
+            }
+        }
+        // Last FULL month (the month before the current one) - for a current month this is the month before it too.
+        $lastYm = $info['state'] === 'current' ? rh_sbud_shift_month($ym, -1) : rh_sbud_shift_month($curYm, -1);
+        $last = rh_sbud_fnb_sales($pdo, $lastYm, $now);
+        return $last > BALANCE_TOLERANCE ? $make($last, 'last_month', $last) : $make(0.0, 'none', 0.0);
     }
 }
 
 if (!function_exists('rh_sbud_sales_basis_text')) {
-    /** Plain-words basis for a target-% line, e.g. "30% of expected sales MWK 1,000,000 - based on this month so far". */
+    /** Plain-words basis for a target-% line, e.g. "30% of expected sales before VAT (MWK 1,000,000) - based on this month so far". */
     function rh_sbud_sales_basis_text(float $pct, array $sales, string $cur = ''): string
     {
         $p = rtrim(rtrim(number_format($pct, 2, '.', ''), '0'), '.');
-        $how = ['month' => 'based on this month so far', 'last_month' => 'based on last month', 'actual' => 'based on what was actually sold that month'][$sales['basis']] ?? '';
-        return $p . '% of expected sales ' . rh_sbud_money((float)$sales['expected'], $cur) . ' - ' . $how;
+        if (empty($sales['has_basis'])) {
+            return $p . '% of sales before VAT - no sales basis yet (there are no sales to measure it against)';
+        }
+        $how = ['month' => 'based on this month so far', 'projected' => 'based on this month\'s sales so far, projected to the full month',
+                'last_month' => 'based on last month', 'actual' => 'based on what was actually sold that month'][$sales['basis']] ?? '';
+        return $p . '% of expected sales before VAT (' . rh_sbud_money((float)$sales['expected'], $cur) . ') - ' . $how;
     }
 }
 
@@ -367,13 +437,13 @@ if (!function_exists('rh_sbud_line_status')) {
 }
 
 if (!function_exists('rh_sbud_forecast')) {
-    /** Month-end spend at the current rate; null when it is too early (under 3 days) or not the current month. */
+    /** Month-end spend at the current rate; null when it is too early (under 7 days of pace) or not the current month. */
     function rh_sbud_forecast(array $info, float $spent, float $committed): ?float
     {
         if ($info['state'] === 'past') {
             return $spent;
         }
-        if ($info['state'] !== 'current' || $info['days_done'] < 3.0) {
+        if ($info['state'] !== 'current' || $info['days_done'] < RH_SBUD_MIN_PACE_DAYS) {
             return null;
         }
         $run = $spent / ($info['days_done'] / $info['days']);
@@ -418,17 +488,20 @@ if (!function_exists('rh_sbud_compute')) {
             }
             $spent = $isAll ? $totalSpent : (float)($spentBy[$key] ?? 0.0);
             $comm = $isAll ? $totalComm : (float)($commBy[$key] ?? 0.0);
+            $noBasis = false;
             if ($r['mode'] === 'target_pct') {
                 $pct = (float)$r['target_pct'];
                 // Budget = target % of EXPECTED sales for the whole month (see rh_sbud_expected_sales()).
-                $budget = round($pct / 100 * (float)($sales['expected'] ?? 0), 2);
+                // No sales to measure against yet = "no sales basis yet", not a zero budget.
+                $noBasis = empty($sales['has_basis']);
+                $budget = $noBasis ? 0.0 : round($pct / 100 * (float)$sales['expected'], 2);
                 $fBudget = $budget;
             } else {
                 $budget = (float)$r['amount'];
                 $fBudget = $budget;
             }
             $used = $spent + $comm;
-            $forecast = rh_sbud_forecast($info, $spent, $comm);
+            $forecast = $noBasis ? null : rh_sbud_forecast($info, $spent, $comm);
             $lines[] = [
                 'category' => $r['category'],
                 'label' => $isAll ? 'Whole stock' : $r['category'],
@@ -441,11 +514,12 @@ if (!function_exists('rh_sbud_compute')) {
                 'spent' => $spent,
                 'committed' => $comm,
                 'used' => $used,
-                'left' => $budget - $used,
-                'pct_used' => $budget > BALANCE_TOLERANCE ? $used / $budget * 100 : ($used > BALANCE_TOLERANCE ? 100.0 : 0.0),
+                'left' => $noBasis ? 0.0 : $budget - $used,
+                'pct_used' => $noBasis ? 0.0 : ($budget > BALANCE_TOLERANCE ? $used / $budget * 100 : ($used > BALANCE_TOLERANCE ? 100.0 : 0.0)),
                 'forecast' => $forecast,
                 'forecast_budget' => $fBudget,
-                'status' => rh_sbud_line_status($budget, $used, $forecast, $fBudget),
+                'no_basis' => $noBasis,
+                'status' => $noBasis ? 'nobasis' : rh_sbud_line_status($budget, $used, $forecast, $fBudget),
             ];
         }
 
@@ -466,7 +540,22 @@ if (!function_exists('rh_sbud_compute')) {
         // Summary: the whole-stock cap when there is one, otherwise the category lines added up.
         $allLine = null;
         $cat = ['budget' => 0.0, 'spent' => 0.0, 'committed' => 0.0, 'forecast' => 0.0, 'fbudget' => 0.0, 'fc_ok' => true];
+        $usable = 0;
+        $unbased = 0;
+        $nbSpent = 0.0;
+        $nbComm = 0.0;
         foreach ($lines as $l) {
+            if ($l['no_basis']) {
+                // No budget figure yet: left out of Budget, Left and status so it can never look over,
+                // but its real spend is still tracked so Received / Already ordered stay true.
+                $unbased++;
+                if (!$l['is_all']) {
+                    $nbSpent += $l['spent'];
+                    $nbComm += $l['committed'];
+                }
+                continue;
+            }
+            $usable++;
             if ($l['is_all']) {
                 $allLine = $l;
                 continue;
@@ -486,14 +575,20 @@ if (!function_exists('rh_sbud_compute')) {
                   'forecast' => $allLine['forecast'], 'forecast_budget' => $allLine['forecast_budget']];
         } else {
             $s = ['basis' => 'categories', 'budget' => $cat['budget'], 'spent' => $cat['spent'], 'committed' => $cat['committed'],
-                  'forecast' => $cat['fc_ok'] && $lines ? $cat['forecast'] : null, 'forecast_budget' => $cat['fbudget']];
+                  'forecast' => $cat['fc_ok'] && $usable ? $cat['forecast'] : null, 'forecast_budget' => $cat['fbudget']];
         }
+        // What was really received / is on order: with a whole-stock cap the cap line already holds everything.
+        $s['received'] = $s['spent'] + ($s['basis'] === 'whole' ? 0.0 : $nbSpent);
+        $s['ordered'] = $s['committed'] + ($s['basis'] === 'whole' ? 0.0 : $nbComm);
         $s['used'] = $s['spent'] + $s['committed'];
         $s['left'] = $s['budget'] - $s['used'];
         $s['pct_used'] = $s['budget'] > BALANCE_TOLERANCE ? $s['used'] / $s['budget'] * 100 : ($s['used'] > BALANCE_TOLERANCE ? 100.0 : 0.0);
         $s['month_pct'] = $info['month_pct'];
         $s['has_lines'] = (bool)$lines;
-        $s['status'] = $lines ? rh_sbud_line_status($s['budget'], $s['used'], $s['forecast'], $s['forecast_budget']) : 'none';
+        $s['nobasis_lines'] = $unbased;
+        $s['status'] = !$lines ? 'none' : ($usable === 0
+            ? 'nobasis'
+            : rh_sbud_line_status($s['budget'], $s['used'], $s['forecast'], $s['forecast_budget']));
         $s['verdict'] = rh_sbud_verdict($s, $info);
 
         return [
@@ -519,17 +614,47 @@ if (!function_exists('rh_sbud_verdict')) {
         switch ($s['status']) {
             case 'none':
                 return !empty($s['has_lines']) ? 'Nothing spent yet.' : 'No budget set for this month.';
+            case 'nobasis':
+                return 'No sales basis yet - a % of sales budget needs some food and drink sales to measure against, so it is not checked until there are.';
             case 'over':
-                return 'Over budget by ' . rh_sbud_money($s['used'] - $s['budget'], $cur) . '.';
+                $t = 'Over budget by ' . rh_sbud_money($s['used'] - $s['budget'], $cur) . '.';
+                break;
             case 'near':
-                return rh_sbud_money($s['left'], $cur) . ' left to spend - ' . number_format($s['pct_used'], 0) . '% of the budget is used.';
+                $t = rh_sbud_money($s['left'], $cur) . ' left to spend - ' . number_format($s['pct_used'], 0) . '% of the budget is used.';
+                break;
             case 'ahead':
-                return 'Ahead of pace - at this rate you\'ll spend ' . rh_sbud_money((float)$s['forecast'], $cur) . ' by month end.';
+                $t = 'Ahead of pace - at this rate you\'ll spend ' . rh_sbud_money((float)$s['forecast'], $cur) . ' by month end.';
+                break;
             default:
-                return $info['state'] === 'current' && $s['forecast'] === null && $info['days_done'] < 3.0
-                    ? 'On track. Too early in the month to forecast.'
+                // Under 7 days of pace nothing can be said about "on track" or "behind".
+                $t = $info['state'] === 'current' && $s['forecast'] === null && $info['days_done'] < RH_SBUD_MIN_PACE_DAYS
+                    ? 'Too early in the month to tell how spending is going.'
                     : 'On track.';
         }
+        if (!empty($s['nobasis_lines'])) {
+            $t .= ' ' . (int)$s['nobasis_lines'] . ' line' . ((int)$s['nobasis_lines'] === 1 ? ' has' : 's have') . ' no sales basis yet and ' . ((int)$s['nobasis_lines'] === 1 ? 'is' : 'are') . ' not counted.';
+        }
+        return $t;
+    }
+}
+
+if (!function_exists('rh_sbud_pill_key')) {
+    /** The status a pill is styled and worded by: "ok" in the first 7 days of the current month becomes "early". */
+    function rh_sbud_pill_key(string $status, array $info): string
+    {
+        return $status === 'ok' && $info['state'] === 'current' && $info['days_done'] < RH_SBUD_MIN_PACE_DAYS ? 'early' : $status;
+    }
+}
+
+if (!function_exists('rh_sbud_pill_text')) {
+    /** Plain label for a status pill; an "ok" line early in the current month is "too early to tell", not "on track". */
+    function rh_sbud_pill_text(string $status, array $info): string
+    {
+        if (rh_sbud_pill_key($status, $info) === 'early') {
+            return 'Too early to tell';
+        }
+        return ['ok' => 'On track', 'ahead' => 'Ahead of pace', 'near' => 'Nearly used', 'over' => 'Over budget',
+                'none' => 'No spend yet', 'nobasis' => 'No sales basis yet'][$status] ?? '';
     }
 }
 
@@ -715,11 +840,13 @@ if (!function_exists('rh_sbud_history')) {
         for ($i = 1; $i <= $n; $i++) {
             $m = rh_sbud_shift_month($ym, -$i);
             $c = rh_sbud_compute($pdo, $m);
-            $actual = $c['summary']['basis'] === 'whole' ? $c['summary']['spent'] : ($c['has_budget'] ? $c['summary']['spent'] : $c['total']['spent']);
+            // Only % lines with no sales that month: there is no budget figure to compare against.
+            $known = $c['has_budget'] && $c['summary']['status'] !== 'nobasis';
+            $actual = $known ? $c['summary']['received'] : $c['total']['spent'];
             $out[] = [
-                'ym' => $m, 'label' => $c['info']['label'], 'has_budget' => $c['has_budget'],
+                'ym' => $m, 'label' => $c['info']['label'], 'has_budget' => $known,
                 'budget' => $c['summary']['budget'], 'actual' => $actual,
-                'variance' => $c['has_budget'] ? $c['summary']['budget'] - $actual : null,
+                'variance' => $known ? $c['summary']['budget'] - $actual : null,
             ];
         }
         return $out;
@@ -774,9 +901,16 @@ if (!function_exists('rh_sbud_detail')) {
             LEFT JOIN stock_ingredients i ON i.id = l.ingredient_id
             LEFT JOIN stock_purchase_orders po ON po.id = l.purchase_order_id
             WHERE l.created_at >= ? AND l.created_at < ? AND $where
-            ORDER BY l.created_at DESC, l.id DESC LIMIT 200");
+            ORDER BY l.created_at DESC, l.id DESC LIMIT " . RH_SBUD_DETAIL_RECEIPTS);
         $st->execute(array_merge([$info['start'], $info['end']], $params));
         $receipts = $st->fetchAll(PDO::FETCH_ASSOC);
+        // How many receipts there really are, so a capped list can say so (the totals above always include all).
+        $ct = $pdo->prepare("
+            SELECT COUNT(*) FROM stock_in_log l
+            LEFT JOIN stock_ingredients i ON i.id = l.ingredient_id
+            WHERE l.created_at >= ? AND l.created_at < ? AND $where");
+        $ct->execute(array_merge([$info['start'], $info['end']], $params));
+        $receiptsTotal = (int)$ct->fetchColumn();
         // Non-stock PO lines count as uncategorised spend (see rh_sbud_spent_by_category).
         $showNonStock = $category === RH_SBUD_ALL || rh_sbud_cat_key($category) === ''
             || ($category === '__other__' && !in_array('', $covered, true));
@@ -788,14 +922,19 @@ if (!function_exists('rh_sbud_detail')) {
                     FROM stock_nonstock_receipts n
                     LEFT JOIN stock_purchase_orders po ON po.id = n.purchase_order_id
                     WHERE n.created_at >= ? AND n.created_at < ?
-                    ORDER BY n.created_at DESC LIMIT 100");
+                    ORDER BY n.created_at DESC LIMIT " . RH_SBUD_DETAIL_RECEIPTS);
                 $ns->execute([$info['start'], $info['end']]);
                 $receipts = array_merge($receipts, $ns->fetchAll(PDO::FETCH_ASSOC));
+                $nc = $pdo->prepare("SELECT COUNT(*) FROM stock_nonstock_receipts WHERE created_at >= ? AND created_at < ?");
+                $nc->execute([$info['start'], $info['end']]);
+                $receiptsTotal += (int)$nc->fetchColumn();
                 usort($receipts, fn($a, $b) => strcmp((string)$b['created_at'], (string)$a['created_at']));
             } catch (Throwable $e) {
                 // table not provisioned yet
             }
         }
+        // The latest RH_SBUD_DETAIL_RECEIPTS of both kinds together.
+        $receipts = array_slice($receipts, 0, RH_SBUD_DETAIL_RECEIPTS);
 
         $pos = [];
         if ($info['state'] === 'current') {
@@ -809,11 +948,13 @@ if (!function_exists('rh_sbud_detail')) {
                 WHERE po.status IN ('sent','partial') AND $where
                 GROUP BY po.id, po.reference, po.status, s.name
                 HAVING outstanding > 0.0001
-                ORDER BY po.id DESC LIMIT 100");
+                ORDER BY po.id DESC LIMIT " . (RH_SBUD_DETAIL_ORDERS + 1));
             $st->execute($params);
             $pos = $st->fetchAll(PDO::FETCH_ASSOC);
         }
-        return ['receipts' => $receipts, 'pos' => $pos];
+        $posCapped = count($pos) > RH_SBUD_DETAIL_ORDERS;
+        $pos = array_slice($pos, 0, RH_SBUD_DETAIL_ORDERS);
+        return ['receipts' => $receipts, 'receipts_total' => $receiptsTotal, 'pos' => $pos, 'pos_capped' => $posCapped];
     }
 }
 
@@ -854,6 +995,9 @@ if (!function_exists('rh_sbud_po_effect')) {
         }
         $res['applies'] = true;
         foreach ($c['lines'] as $l) {
+            if (!empty($l['no_basis'])) {
+                continue; // no sales basis yet: nothing to be over, so it never blocks or warns
+            }
             $add = $l['is_all'] ? $res['po_total'] : (float)($poBy[rh_sbud_cat_key($l['category'])] ?? 0.0);
             if ($add <= BALANCE_TOLERANCE) {
                 continue;
@@ -954,12 +1098,16 @@ if (!function_exists('rh_sbud_dashboard')) {
     {
         $now = $now ?: rh_sbud_now();
         $c = rh_sbud_compute($pdo, $now->format('Y-m'), ['now' => $now]);
-        if (!$c['has_budget']) {
+        // No budget set, or only % lines with no sales basis yet: there is no figure to show.
+        if (!$c['has_budget'] || $c['summary']['status'] === 'nobasis') {
             return null;
         }
         $s = $c['summary'];
         $worst = null;
         foreach ($c['lines'] as $l) {
+            if (!empty($l['no_basis'])) {
+                continue;
+            }
             if ($l['is_all'] && $s['basis'] === 'whole' && count($c['lines']) > 1) {
                 continue;
             }
