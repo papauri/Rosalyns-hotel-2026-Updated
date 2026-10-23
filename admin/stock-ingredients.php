@@ -261,7 +261,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $pdo->beginTransaction();
                 // Lock ingredient row
-                $sel = $pdo->prepare("SELECT current_quantity, cost_per_unit FROM stock_ingredients WHERE id = ? FOR UPDATE");
+                $sel = $pdo->prepare("SELECT current_quantity, cost_per_unit, category FROM stock_ingredients WHERE id = ? FOR UPDATE");
                 $sel->execute([$id]);
                 $ing = $sel->fetch(PDO::FETCH_ASSOC);
                 if (!$ing) throw new RuntimeException('Ingredient not found.');
@@ -306,26 +306,17 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     ->execute(['B' . str_pad((string)$batchId, 6, '0', STR_PAD_LEFT), $batchId]);
 
                 // Stock-in log
-                $logIns = $pdo->prepare("
-                    INSERT INTO stock_in_log
-                        (ingredient_id, batch_id, quantity, cost_per_unit, cost_total, supplier_id, supplier_name, supplier_contact,
-                         avg_cost_before, avg_cost_after, notes, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ");
-                $logIns->execute([
-                    $id,
-                    $batchId,
-                    $qty,
-                    $cost,
-                    $qty * $cost,
-                    $supplierId ?: null,
-                    $supplier ?: null,
-                    $supplierContact ?: null,
-                    $oldAvg,
-                    $newAvg,
-                    $batchNotes ?: null,
-                    $user['id']
-                ]);
+                // Also records the item's category now and today's date (the stock budget's grouping and month; migration 069).
+                $logCols = ['ingredient_id', 'batch_id', 'quantity', 'cost_per_unit', 'cost_total', 'supplier_id', 'supplier_name', 'supplier_contact',
+                            'avg_cost_before', 'avg_cost_after', 'notes', 'created_by'];
+                $logVals = [$id, $batchId, $qty, $cost, $qty * $cost, $supplierId ?: null, $supplier ?: null, $supplierContact ?: null,
+                            $oldAvg, $newAvg, $batchNotes ?: null, $user['id']];
+                if (rh_stock_in_log_dated_cols($pdo)) {
+                    array_push($logCols, 'category', 'received_date');
+                    array_push($logVals, trim((string)($ing['category'] ?? '')), date('Y-m-d'));
+                }
+                $pdo->prepare("INSERT INTO stock_in_log (" . implode(', ', $logCols) . ") VALUES (" . implode(', ', array_fill(0, count($logCols), '?')) . ")")
+                    ->execute($logVals);
 
                 // Update ingredient (qty + new weighted avg)
                 $upd = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity + ?, cost_per_unit = ?, updated_at = NOW() WHERE id = ?");

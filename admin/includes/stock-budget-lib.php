@@ -5,7 +5,7 @@
  *
  * Per month, per ingredient category (plus an optional whole-stock cap):
  *   Budget     a fixed amount, or a target % of EXPECTED F&B sales for the month (see rh_sbud_expected_sales)
- *   Spent      goods received into stock in the month (stock_in_log.cost_total, hotel timezone)
+ *   Spent      goods received into stock in the month (stock_in_log.cost_total by delivery date, hotel timezone; category as at receipt)
  *   Committed  purchase orders sent / part-received but not yet received:
  *              sum of max(ordered - received, 0) x unit_cost, whatever the PO date. Counted against the
  *              CURRENT month only (it is money already promised); past and future months show none.
@@ -188,19 +188,46 @@ if (!function_exists('rh_sbud_cat_key')) {
     }
 }
 
+if (!function_exists('rh_sbud_log_exprs')) {
+    /**
+     * SQL for a goods-in row (alias l, ingredient alias i): [delivery date, category as at receipt].
+     * Migration 069 gave stock_in_log `received_date` and `category`; older rows (or a database not yet migrated)
+     * fall back to DATE(created_at) and the item's current category.
+     *
+     * @return array{0:string,1:string}
+     */
+    function rh_sbud_log_exprs(PDO $pdo): array
+    {
+        static $has = null;
+        if ($has === null) {
+            try {
+                $q = $pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_in_log' AND COLUMN_NAME IN ('category','received_date')");
+                $has = $q ? count($q->fetchAll(PDO::FETCH_COLUMN)) === 2 : false;
+            } catch (Throwable $e) {
+                $has = false;
+            }
+        }
+        return $has
+            ? ['COALESCE(l.received_date, DATE(l.created_at))', "TRIM(COALESCE(l.category, i.category, ''))"]
+            : ['DATE(l.created_at)', "TRIM(COALESCE(i.category, ''))"];
+    }
+}
+
 if (!function_exists('rh_sbud_spent_by_category')) {
-    /** Goods-in value received in the month, keyed by lower-cased category ('' = uncategorised). */
+    /** Goods-in value received in the month (by delivery date), keyed by lower-cased category as at receipt ('' = uncategorised). */
     function rh_sbud_spent_by_category(PDO $pdo, string $ym, ?DateTimeImmutable $now = null): array
     {
         $info = rh_sbud_month_info($ym, $now);
+        [$dateSql, $catExpr] = rh_sbud_log_exprs($pdo);
         $st = $pdo->prepare("
-            SELECT TRIM(COALESCE(i.category, '')) AS cat, COALESCE(SUM(l.cost_total), 0) AS v
+            SELECT $catExpr AS cat, COALESCE(SUM(l.cost_total), 0) AS v
             FROM stock_in_log l
             LEFT JOIN stock_ingredients i ON i.id = l.ingredient_id
-            WHERE l.created_at >= ? AND l.created_at < ?
-            GROUP BY TRIM(COALESCE(i.category, ''))
+            WHERE $dateSql >= ? AND $dateSql <= ?
+            GROUP BY $catExpr
         ");
-        $st->execute([$info['start'], $info['end']]);
+        $st->execute([$info['first'], $info['last']]);
         $out = [];
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $k = rh_sbud_cat_key($r['cat']);
@@ -881,35 +908,41 @@ if (!function_exists('rh_sbud_detail')) {
                 $covered[] = rh_sbud_cat_key($r['category']);
             }
         }
-        $catSql = "LOWER(TRIM(COALESCE(i.category, '')))";
-        $where = '1=1';
+        [$dateSql, $logCatExpr] = rh_sbud_log_exprs($pdo);
+        $catSql = "LOWER($logCatExpr)";   // goods-in rows: category as at receipt
+        $poCatSql = "LOWER(TRIM(COALESCE(i.category, '')))";   // open orders: the item's category now
+        $mkWhere = function (string $sql) use ($category, $covered): string {
+            if ($category === '__other__') {
+                return $covered ? "$sql NOT IN (" . implode(',', array_fill(0, count($covered), '?')) . ")" : '1=1';
+            }
+            return $category !== RH_SBUD_ALL ? "$sql = ?" : '1=1';
+        };
+        $where = $mkWhere($catSql);        // goods-in rows
+        $poWhere = $mkWhere($poCatSql);    // open orders
         $params = [];
         if ($category === '__other__') {
-            if ($covered) {
-                $where = "$catSql NOT IN (" . implode(',', array_fill(0, count($covered), '?')) . ")";
-                $params = $covered;
-            }
+            $params = $covered;
         } elseif ($category !== RH_SBUD_ALL) {
-            $where = "$catSql = ?";
             $params = [rh_sbud_cat_key($category)];
         }
 
+        // The date shown (and ordered by) is the delivery date; it is also what put the receipt in this month.
         $st = $pdo->prepare("
-            SELECT l.id, l.created_at, l.quantity, l.cost_total, l.purchase_order_id, COALESCE(i.name, '(deleted item)') AS name,
+            SELECT l.id, $dateSql AS created_at, l.quantity, l.cost_total, l.purchase_order_id, COALESCE(i.name, '(deleted item)') AS name,
                    COALESCE(i.unit, '') AS unit, po.reference AS po_reference
             FROM stock_in_log l
             LEFT JOIN stock_ingredients i ON i.id = l.ingredient_id
             LEFT JOIN stock_purchase_orders po ON po.id = l.purchase_order_id
-            WHERE l.created_at >= ? AND l.created_at < ? AND $where
-            ORDER BY l.created_at DESC, l.id DESC LIMIT " . RH_SBUD_DETAIL_RECEIPTS);
-        $st->execute(array_merge([$info['start'], $info['end']], $params));
+            WHERE $dateSql >= ? AND $dateSql <= ? AND $where
+            ORDER BY $dateSql DESC, l.id DESC LIMIT " . RH_SBUD_DETAIL_RECEIPTS);
+        $st->execute(array_merge([$info['first'], $info['last']], $params));
         $receipts = $st->fetchAll(PDO::FETCH_ASSOC);
         // How many receipts there really are, so a capped list can say so (the totals above always include all).
         $ct = $pdo->prepare("
             SELECT COUNT(*) FROM stock_in_log l
             LEFT JOIN stock_ingredients i ON i.id = l.ingredient_id
-            WHERE l.created_at >= ? AND l.created_at < ? AND $where");
-        $ct->execute(array_merge([$info['start'], $info['end']], $params));
+            WHERE $dateSql >= ? AND $dateSql <= ? AND $where");
+        $ct->execute(array_merge([$info['first'], $info['last']], $params));
         $receiptsTotal = (int)$ct->fetchColumn();
         // Non-stock PO lines count as uncategorised spend (see rh_sbud_spent_by_category).
         $showNonStock = $category === RH_SBUD_ALL || rh_sbud_cat_key($category) === ''
@@ -945,7 +978,7 @@ if (!function_exists('rh_sbud_detail')) {
                 INNER JOIN stock_purchase_orders po ON po.id = poi.purchase_order_id
                 LEFT JOIN stock_suppliers s ON s.id = po.supplier_id
                 LEFT JOIN stock_ingredients i ON i.id = poi.ingredient_id
-                WHERE po.status IN ('sent','partial') AND $where
+                WHERE po.status IN ('sent','partial') AND $poWhere
                 GROUP BY po.id, po.reference, po.status, s.name
                 HAVING outstanding > 0.0001
                 ORDER BY po.id DESC LIMIT " . (RH_SBUD_DETAIL_ORDERS + 1));

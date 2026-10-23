@@ -241,11 +241,9 @@ if (isset($_GET['ajax'])) {
                 $batchId = rh_receive_stock_line(
                     $pdo, $ingId, $qty, $cost, $supplierId, $supplier, null, $lineExpiry !== '' ? $lineExpiry : null, 7, null, (int)$user['id'],
                     'Received via barcode scanner' . ($supplier ? " - {$supplier}" : ''),
-                    'Stock received via barcode scan'
+                    'Stock received via barcode scan',
+                    $receivedDate   // the delivery date: dates the batch AND the stock-in log row (the budget month)
                 );
-                if ($receivedDate !== date('Y-m-d')) {
-                    $pdo->prepare("UPDATE stock_batches SET received_date = ? WHERE id = ?")->execute([$receivedDate, $batchId]);
-                }
 
                 $created++;
             }

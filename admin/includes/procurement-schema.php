@@ -333,6 +333,35 @@ if (!function_exists('rh_next_po_reference')) {
     }
 }
 
+if (!function_exists('rh_stock_in_log_dated_cols')) {
+    /**
+     * Does stock_in_log carry `category` + `received_date` (migration 069)? Cached per request. Writers add the two
+     * values only when it does, so code deployed before the migration keeps working.
+     */
+    function rh_stock_in_log_dated_cols(PDO $pdo): bool
+    {
+        static $has = null;
+        if ($has === null) {
+            try {
+                $has = rh_column_exists($pdo, 'stock_in_log', 'category') && rh_column_exists($pdo, 'stock_in_log', 'received_date');
+            } catch (Throwable $e) {
+                $has = false;
+            }
+        }
+        return $has;
+    }
+}
+
+if (!function_exists('rh_stock_receipt_date')) {
+    /** A real Y-m-d delivery date, else today (hotel timezone). */
+    function rh_stock_receipt_date(?string $date): string
+    {
+        $date = trim((string)$date);
+        $d = DateTime::createFromFormat('!Y-m-d', $date);
+        return ($d && $d->format('Y-m-d') === $date) ? $date : date('Y-m-d');
+    }
+}
+
 if (!function_exists('rh_receive_stock_line')) {
     /**
      * Receive a quantity of an ingredient into stock: creates a batch, a
@@ -356,13 +385,16 @@ if (!function_exists('rh_receive_stock_line')) {
         ?int $purchaseOrderId,
         ?int $doneBy,
         ?string $notes = null,
-        ?string $adjustmentReason = null
+        ?string $adjustmentReason = null,
+        ?string $receivedDate = null
     ): int {
         if ($qty <= 0) {
             throw new RuntimeException('Receive quantity must be greater than zero.');
         }
+        // The delivery date (barcode receive can back-date); today when none is given.
+        $receivedDate = rh_stock_receipt_date($receivedDate);
 
-        $sel = $pdo->prepare("SELECT current_quantity, cost_per_unit FROM stock_ingredients WHERE id = ? FOR UPDATE");
+        $sel = $pdo->prepare("SELECT current_quantity, cost_per_unit, category FROM stock_ingredients WHERE id = ? FOR UPDATE");
         $sel->execute([$ingredientId]);
         $ing = $sel->fetch(PDO::FETCH_ASSOC);
         if (!$ing) {
@@ -398,11 +430,11 @@ if (!function_exists('rh_receive_stock_line')) {
                 INSERT INTO stock_batches
                     (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,
                      supplier_id, purchase_order_id, supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by)
-                VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?)
+                VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $bIns->execute([
                 $ingredientId, $qty, $batchRemaining, $cost, $supplierId ?: null, $purchaseOrderId ?: null,
-                $supplierName ?: null, $supplierContact ?: null,
+                $supplierName ?: null, $supplierContact ?: null, $receivedDate,
                 ($expiry !== null && $expiry !== '') ? $expiry : null, $alertDays, $batchStatus, $notes ?: null, $doneBy,
             ]);
         } else {
@@ -410,10 +442,10 @@ if (!function_exists('rh_receive_stock_line')) {
                 INSERT INTO stock_batches
                     (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,
                      supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by)
-                VALUES (?, '', ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?)
+                VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $bIns->execute([
-                $ingredientId, $qty, $batchRemaining, $cost, $supplierName ?: null, $supplierContact ?: null,
+                $ingredientId, $qty, $batchRemaining, $cost, $supplierName ?: null, $supplierContact ?: null, $receivedDate,
                 ($expiry !== null && $expiry !== '') ? $expiry : null, $alertDays, $batchStatus, $notes ?: null, $doneBy,
             ]);
         }
@@ -422,29 +454,21 @@ if (!function_exists('rh_receive_stock_line')) {
             ->execute(['B' . str_pad((string)$batchId, 6, '0', STR_PAD_LEFT), $batchId]);
 
         // Stock-in log
+        // The budget groups by the category the item had NOW and the delivery date (columns from migration 069).
+        $logCols = ['ingredient_id', 'batch_id', 'quantity', 'cost_per_unit', 'cost_total'];
+        $logVals = [$ingredientId, $batchId, $qty, $cost, $qty * $cost];
         if ($hasLogSupplier) {
-            $logIns = $pdo->prepare("
-                INSERT INTO stock_in_log
-                    (ingredient_id, batch_id, quantity, cost_per_unit, cost_total, supplier_id, purchase_order_id, supplier_name, supplier_contact,
-                     avg_cost_before, avg_cost_after, notes, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-            $logIns->execute([
-                $ingredientId, $batchId, $qty, $cost, $qty * $cost, $supplierId ?: null, $purchaseOrderId ?: null,
-                $supplierName ?: null, $supplierContact ?: null, $oldAvg, $newAvg, $notes ?: null, $doneBy,
-            ]);
-        } else {
-            $logIns = $pdo->prepare("
-                INSERT INTO stock_in_log
-                    (ingredient_id, batch_id, quantity, cost_per_unit, cost_total, supplier_name, supplier_contact,
-                     avg_cost_before, avg_cost_after, notes, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-            $logIns->execute([
-                $ingredientId, $batchId, $qty, $cost, $qty * $cost, $supplierName ?: null, $supplierContact ?: null,
-                $oldAvg, $newAvg, $notes ?: null, $doneBy,
-            ]);
+            array_push($logCols, 'supplier_id', 'purchase_order_id');
+            array_push($logVals, $supplierId ?: null, $purchaseOrderId ?: null);
         }
+        array_push($logCols, 'supplier_name', 'supplier_contact', 'avg_cost_before', 'avg_cost_after', 'notes', 'created_by');
+        array_push($logVals, $supplierName ?: null, $supplierContact ?: null, $oldAvg, $newAvg, $notes ?: null, $doneBy);
+        if (rh_stock_in_log_dated_cols($pdo)) {
+            array_push($logCols, 'category', 'received_date');
+            array_push($logVals, trim((string)($ing['category'] ?? '')), $receivedDate);
+        }
+        $pdo->prepare("INSERT INTO stock_in_log (" . implode(', ', $logCols) . ") VALUES (" . implode(', ', array_fill(0, count($logCols), '?')) . ")")
+            ->execute($logVals);
 
         // Ingredient qty + weighted avg
         $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity + ?, cost_per_unit = ?, updated_at = NOW() WHERE id = ?")

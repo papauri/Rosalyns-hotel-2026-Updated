@@ -370,6 +370,46 @@ try {
     check(near($after - $before, 50.0), 'Non-stock PO line received counts as uncategorised spend', "before $before after $after");
     $det = rh_sbud_detail($pdo, $ym, RH_SBUD_ALL, $now);
     check((bool)array_filter($det['receipts'] ?? [], fn($x) => str_contains((string)$x['name'], '(non-stock)')), 'Non-stock receipt listed in the whole-stock detail');
+
+    // --- Category as at receipt + delivery date (migration 069) -----------------------------
+    $hasDated = (int)col($pdo, "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_in_log' AND COLUMN_NAME IN ('category','received_date')") === 2;
+    check($hasDated, 'Migration 069 applied: stock_in_log has category + received_date (run php admin/migrations/migrate.php --run)');
+    if ($hasDated) {
+        $catD = 'ZZT-D-' . $run; $catE = 'ZZT-E-' . $run;
+        $ingD = $mkIng($catD, 'Budget test D');
+        $dated = function (int $ing, float $total, string $createdAt, ?string $received, ?string $cat) use ($pdo) {
+            $pdo->prepare("INSERT INTO stock_in_log (ingredient_id, quantity, cost_per_unit, cost_total, created_at, received_date, category) VALUES (?,1,?,?,?,?,?)")
+                ->execute([$ing, $total, $total, $createdAt, $received, $cat]);
+        };
+        $dated($ingD, 100, '2032-07-10 10:00:00', '2032-07-10', $catD);
+        // The item is moved to another category afterwards: July's spend must stay where it was received.
+        $pdo->prepare("UPDATE stock_ingredients SET category = ? WHERE id = ?")->execute([$catE, $ingD]);
+        $sp = rh_sbud_spent_by_category($pdo, '2032-07');
+        check(near($sp[rh_sbud_cat_key($catD)] ?? 0, 100) && !isset($sp[rh_sbud_cat_key($catE)]), 'Spent: recategorising an item later does not move its closed-month spend', json_encode($sp));
+
+        // Delivered on the 31st, entered on the 2nd: counts in the delivery month.
+        $dated($ingD, 40, '2032-08-02 09:00:00', '2032-07-31', $catD);
+        $sp7 = rh_sbud_spent_by_category($pdo, '2032-07');
+        $sp8 = rh_sbud_spent_by_category($pdo, '2032-08');
+        check(near($sp7[rh_sbud_cat_key($catD)] ?? 0, 140), 'Spent: a receipt delivered on the 31st counts in that month though entered on the 2nd', json_encode($sp7));
+        check(!isset($sp8[rh_sbud_cat_key($catD)]), 'Spent: ...and not in the month it was typed in', json_encode($sp8));
+        $det7 = rh_sbud_detail($pdo, '2032-07', $catD);
+        check(near(array_sum(array_map(fn($r) => (float)$r['cost_total'], $det7['receipts'])), 140) && $det7['receipts_total'] === 2, 'Detail: lists the back-dated receipt under its delivery month and its original category', json_encode($det7['receipts']));
+        $det7e = rh_sbud_detail($pdo, '2032-07', $catE);
+        check($det7e['receipts_total'] === 0, 'Detail: the item\'s new category does not list its old receipts', (string)$det7e['receipts_total']);
+
+        // Rows written before the columns existed (both NULL): month from created_at, category from the item as it is now.
+        $dated($ingD, 25, '2032-07-15 12:00:00', null, null);
+        $spOld = rh_sbud_spent_by_category($pdo, '2032-07');
+        check(near($spOld[rh_sbud_cat_key($catE)] ?? 0, 25) && near($spOld[rh_sbud_cat_key($catD)] ?? 0, 140), 'Spent: an old row without the new columns still counts (created_at month, item category)', json_encode($spOld));
+
+        // Suggestions and history use the same basis.
+        $sg2 = rh_sbud_suggest_proposal($pdo, '2032-10');
+        $sd = null; foreach ($sg2 as $p) { if ($p['category'] === $catD) $sd = $p; }
+        check($sd && near($sd['amount'], 140), 'Suggest: uses category and delivery month as received', json_encode($sg2));
+        $hist = rh_sbud_history($pdo, '2032-08', 1);
+        check(isset($hist[0]) && $hist[0]['ym'] === '2032-07' && $hist[0]['actual'] >= 165 - BALANCE_TOLERANCE, 'History: the month total includes the back-dated receipt', json_encode($hist));
+    }
 } catch (Throwable $e) {
     bad('Unexpected error', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 }
