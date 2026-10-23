@@ -601,19 +601,20 @@ function rh_kb_list_items(DOMXPath $xp, DOMElement $ol): array
 function rh_kb_guide_requirements(): array
 {
     return [
-        '01-pos-till.html'                => ['label' => 'Point of Sale',                 'all' => ['pos']],
-        '02-kds-kitchen.html'             => ['label' => 'the Kitchen Display (KDS)',     'all' => ['pos', 'station_kds']],
-        '03-bds-bar.html'                 => ['label' => 'the Bar Display (BDS)',         'all' => ['pos', 'station_bds']],
-        '04-cds-coffee.html'              => ['label' => 'the Coffee Bar Display (CDS)',  'all' => ['pos', 'station_cds']],
-        '05-room-service.html'            => ['label' => 'Room Service',                  'all' => ['pos', 'station_room_service', 'bookings']],
-        '06-housekeeping.html'            => ['label' => 'Housekeeping',                  'all' => ['housekeeping']],
-        '07-reception-bookings.html'      => ['label' => 'Bookings & Reservations',       'all' => ['bookings']],
-        '08-stock-orders.html'            => ['label' => 'Stock & Inventory',             'all' => ['stock']],
-        '20-stock-loss-prevention.html'   => ['label' => 'Stock & Inventory',             'all' => ['stock']],
-        '09-packages-rates.html'          => ['label' => 'Bookings & Reservations',       'all' => ['bookings']],
-        '10-conference-events.html'       => ['label' => 'Conference & Events',           'any' => ['conference', 'flag:events']],
-        '11-social-facebook-sharing.html' => ['label' => 'Website & CMS',                'all' => ['website_cms']],
-        '17-gym-management.html'          => ['label' => 'Gym & Fitness',                 'all' => ['gym']],
+        // 'main' = the module the guide is about (a query that names it prefers this guide; see rh_kb_module_words)
+        '01-pos-till.html'                => ['label' => 'Point of Sale',                 'all' => ['pos'], 'main' => 'pos'],
+        '02-kds-kitchen.html'             => ['label' => 'the Kitchen Display (KDS)',     'all' => ['pos', 'station_kds'], 'main' => 'station_kds'],
+        '03-bds-bar.html'                 => ['label' => 'the Bar Display (BDS)',         'all' => ['pos', 'station_bds'], 'main' => 'station_bds'],
+        '04-cds-coffee.html'              => ['label' => 'the Coffee Bar Display (CDS)',  'all' => ['pos', 'station_cds'], 'main' => 'station_cds'],
+        '05-room-service.html'            => ['label' => 'Room Service',                  'all' => ['pos', 'station_room_service', 'bookings'], 'main' => 'station_room_service'],
+        '06-housekeeping.html'            => ['label' => 'Housekeeping',                  'all' => ['housekeeping'], 'main' => 'housekeeping'],
+        '07-reception-bookings.html'      => ['label' => 'Bookings & Reservations',       'all' => ['bookings'], 'main' => 'bookings'],
+        '08-stock-orders.html'            => ['label' => 'Stock & Inventory',             'all' => ['stock'], 'main' => 'stock'],
+        '20-stock-loss-prevention.html'   => ['label' => 'Stock & Inventory',             'all' => ['stock'], 'main' => 'stock'],
+        '09-packages-rates.html'          => ['label' => 'Bookings & Reservations',       'all' => ['bookings'], 'main' => 'bookings'],
+        '10-conference-events.html'       => ['label' => 'Conference & Events',           'any' => ['conference', 'flag:events'], 'main' => 'conference'],
+        '11-social-facebook-sharing.html' => ['label' => 'Website & CMS',                'all' => ['website_cms'], 'main' => 'website_cms'],
+        '17-gym-management.html'          => ['label' => 'Gym & Fitness',                 'all' => ['gym'], 'main' => 'gym'],
     ];
 }
 
@@ -814,6 +815,30 @@ function rh_kb_entry_allowed(array $e, ?array $state): bool
 // Searching
 // ---------------------------------------------------------------------------------------------
 
+/** Words that name a module, and the module key they mean (a query that names one prefers that module). */
+function rh_kb_module_words(): array
+{
+    return ['gym' => 'gym', 'fitness' => 'gym', 'conference' => 'conference', 'pos' => 'pos', 'till' => 'pos',
+        'stock' => 'stock', 'inventory' => 'stock', 'ingredient' => 'stock', 'housekeeping' => 'housekeeping',
+        'kds' => 'station_kds', 'kitchen' => 'station_kds', 'bds' => 'station_bds', 'cds' => 'station_cds'];
+}
+
+/** Module keys a query names, from its words that are not optional, e.g. "gym reports" -> ['gym']. */
+function rh_kb_named_modules(array $terms): array
+{
+    $alias = [];
+    foreach (rh_kb_module_words() as $w => $key) {
+        $alias[rh_kb_stem($w)] = $key;
+    }
+    $out = [];
+    foreach ($terms as $t) {
+        if (empty($t['optional']) && isset($alias[$t['stem']])) {
+            $out[$alias[$t['stem']]] = true;
+        }
+    }
+    return array_keys($out);
+}
+
 /**
  * Ranked matches for a query. Every query word must match (title, guide name or text);
  * when nothing matches all words, the closest partial matches are returned with 'partial' => true.
@@ -843,11 +868,39 @@ function rh_kb_search(string $q, int $limit = 10, ?array $state = null): array
         'module' => (bool)preg_match('/\b(module|modules|switch(ed)? (on|off)|turn (on|off)|enable|disable|feature)\b/i', $q),
         'hint' => (bool)preg_match('/\b(what (does|is|are)|button|field|tick ?box|toggle|mean|means|for\?)\b/i', $q),
     ];
+    // A query that names a module (see rh_kb_module_words) prefers that module's guide and module card.
+    $named = rh_kb_named_modules($terms);
+    $namedAnchor = [];  // module card anchor => key, for the named modules
+    $offAnchor = [];    // the same, only for named modules switched off in this business
+    foreach ($named as $key) {
+        $anchor = function_exists('rh_kb_sys_anchor') ? rh_kb_sys_anchor('module', $key) : '';
+        if ($anchor === '') {
+            continue;
+        }
+        $namedAnchor[$anchor] = $key;
+        if ($state !== null && !rh_kb_key_on($key, $state)) {
+            $offAnchor[$anchor] = $key;
+        }
+    }
+    $mainOf = []; // guide file => the module it is about
+    foreach (rh_kb_guide_requirements() as $f => $req) {
+        if (isset($req['main'])) {
+            $mainOf[$f] = $req['main'];
+        }
+    }
+    $namedSet = array_flip($named);
     $full = [];
     $part = [];
     foreach ($index['entries'] as $e) {
         if (!rh_kb_entry_allowed($e, $state)) {
             continue; // a guide or page for a module this business has switched off
+        }
+        if ($offAnchor && $e['type'] === 'module' && isset($offAnchor[$e['anchor']])) {
+            // The module the question names is switched off: say so first, instead of an unrelated answer.
+            $e['text'] = $e['title'] . ' is switched off for this hotel, so its guide and menu items are hidden. '
+                . 'Switched on and off in Settings → Modules (administrators).';
+            $full[] = [500, $e];
+            continue;
         }
         $t = rh_kb_normalize($e['title'] . ' ' . ($e['parent'] ?? ''));
         $g = rh_kb_normalize($e['guide']);
@@ -910,6 +963,11 @@ function rh_kb_search(string $q, int $limit = 10, ?array $state = null): array
             $score += 6; // a pasted error message
         } elseif ($e['anchor'] === '') {
             $score -= 4; // whole-guide entry only when nothing more specific
+        }
+        $ownsNamed = isset($mainOf[$e['file']], $namedSet[$mainOf[$e['file']]])
+            || ($e['type'] === 'module' && isset($namedAnchor[$e['anchor']]));
+        if ($ownsNamed) {
+            $score += 25; // the question names this module: its own guide and module card come first
         }
         if ($matched === $required) {
             $full[] = [$score, $e];
