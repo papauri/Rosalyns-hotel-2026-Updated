@@ -49,7 +49,7 @@ $blockPct = (float)(getSetting('stock_variance_block_pct') ?: 10);
 $minCost  = (float)(getSetting('stock_variance_min_cost') ?: 5000);
 
 if (!ensureStockTablesExist()) {
-    $error = 'Stock tables not yet created. Please run admin/migrations/015_stock_management.php first.';
+    $error = 'Stock counts can’t be used yet because the stock tables have not been created. Ask your administrator to run the stock set-up (admin/migrations/015_stock_management.php), then reload this page.';
 }
 
 /* Helper: generate a count reference */
@@ -191,9 +191,46 @@ function scUncountedLines(PDO $pdo, int $countId, bool $hasCol): array
     return [count($names), array_slice($names, 0, 6)];
 }
 
-function scUncountedMessage(int $n, array $names): string
+/* Wording used by the refusals below. Plain text only: no markup. */
+const SC_PERM_NAME = '“Approve stock counts”';
+const SC_ASK_PERM = 'an administrator can give it to you in User Management';
+const SC_RULE_WHERE = 'Hotel Settings → Restaurant & stock';
+
+/* The status a count has right now ('' when it does not exist) - only used to say WHY a refusal happened. */
+function scCountStatusNow(PDO $pdo, int $countId): string
 {
-    return $n . ' line' . ($n === 1 ? ' is' : 's are') . ' not counted yet (' . implode(', ', $names) . ($n > count($names) ? ', …' : '') . '). Enter a reading for every line (type 0 if there is none) before continuing.';
+    try {
+        $q = $pdo->prepare('SELECT status FROM stock_counts WHERE id = ?');
+        $q->execute([$countId]);
+        $s = $q->fetchColumn();
+        return $s === false ? '' : (string)$s;
+    } catch (Throwable $e) {
+        return '';
+    }
+}
+
+/* Where a count is now, in a few plain words, for "this count can't be ..." refusals. */
+function scStatusNowPhrase(string $status): string
+{
+    switch ($status) {
+        case 'draft':     return 'it is still being counted';
+        case 'submitted': return 'it is waiting for approval';
+        case 'approved':  return 'it has already been approved';
+        case 'rejected':  return 'it was rejected';
+        default:          return 'it was not found (it may have been deleted)';
+    }
+}
+
+/* $for: 'submit' (the counter can fix it) or 'approve' (an approver can only send it back). */
+function scUncountedMessage(int $n, array $names, string $for = 'submit'): string
+{
+    $more = $n - count($names);
+    $list = implode(', ', $names) . ($more > 0 ? ' and ' . $more . ' more' : '');
+    $what = $n . ' line' . ($n === 1 ? ' is' : 's are') . ' not counted yet (' . $list . ')';
+    if ($for === 'approve') {
+        return 'This count can’t be approved: ' . $what . '. Press “Reject count” so the counter can finish those lines, then submit it again.';
+    }
+    return 'This count can’t be submitted yet: ' . $what . '. Type a reading on each (0 if there is none), save, and use the “Not counted only” filter to find them.';
 }
 
 /* Net stock movement for an ingredient inside (from, to] - sales, receipts, wastage, other counts. */
@@ -258,10 +295,13 @@ function scOpeningOverlapMessage(array $found, string $did): string
 {
     $names = array_values(array_unique(array_column($found, 'name')));
     $refs = array_values(array_unique(array_map('displayCountReference', array_column($found, 'reference'))));
-    return 'Not ' . $did . ': ' . count($names) . ' of these items ' . (count($names) === 1 ? 'is' : 'are') . ' already in another opening stock count that is still open ('
+    $what = 'The opening count was not ' . $did . ': ' . count($names) . ' of these items ' . (count($names) === 1 ? 'is' : 'are') . ' already in another opening stock count that is still open ('
         . implode(', ', array_slice($names, 0, 6)) . (count($names) > 6 ? ' and ' . (count($names) - 6) . ' more' : '')
         . '; count ' . implode(', ', array_slice($refs, 0, 3)) . (count($refs) > 3 ? ' and others' : '')
-        . '). An item can be in only one open opening count. Finish or delete that count first, or leave those items out by choosing "Only the items I choose".';
+        . '). An item can be in only one open opening count at a time. ';
+    return $what . ($did === 'reopened'
+        ? 'Finish or delete that other count first, or delete this rejected count and start a new one without those items.'
+        : 'Finish or delete that other count first, or leave those items out by choosing “Only the items I choose”.');
 }
 
 /* One opening-count start / reopen at a time, so two people cannot both pass the overlap check. */
@@ -269,7 +309,7 @@ function scTakeOpeningLock(PDO $pdo): string
 {
     $name = substr('rh_stock_count_opening_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
     if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($name) . ', 10)')->fetchColumn() !== 1) {
-        throw new RuntimeException('Another opening count is being started right now. Wait a moment and try again.');
+        throw new RuntimeException('Another opening count is being started or reopened at this moment, so nothing was saved. Wait a few seconds and try again.');
     }
     return $name;
 }
@@ -326,32 +366,32 @@ function scReadPostedLines(array $post, array $ownIds): array
     }
     $chunks = is_array($post['lines_json']) ? $post['lines_json'] : [$post['lines_json']];
     if (count($chunks) > 200) {
-        throw new RuntimeException('The readings were sent in a form this page does not accept. Reload the page and save again.');
+        throw new RuntimeException('The readings were sent in a form the server does not accept, so nothing was saved. Reload the page, re-enter your changes and save again.');
     }
     $own = array_flip($ownIds);
     $out = [];
     $total = 0;
     foreach ($chunks as $chunk) {
         if (!is_string($chunk) || strlen($chunk) > 400000) {
-            throw new RuntimeException('The readings were sent in a form this page does not accept. Reload the page and save again.');
+            throw new RuntimeException('The readings were sent in a form the server does not accept, so nothing was saved. Reload the page, re-enter your changes and save again.');
         }
         if (trim($chunk) === '') {
             continue;
         }
         $rows = json_decode($chunk, true);
         if (!is_array($rows)) {
-            throw new RuntimeException('The readings could not be read (the data was cut off or damaged). Nothing was saved - reload the page and save again.');
+            throw new RuntimeException('Your readings could not be read - they were cut off or damaged on the way, so nothing was saved. Reload the page and save again; if it keeps happening, tell your administrator.');
         }
         foreach ($rows as $row) {
             if (!is_array($row) || !isset($row['id']) || !is_numeric($row['id']) || (int)$row['id'] <= 0) {
-                throw new RuntimeException('A reading had no valid line number. Nothing was saved - reload the page and try again.');
+                throw new RuntimeException('One reading had no valid line number, so nothing was saved. Reload the page and try again; if it keeps happening, tell your administrator.');
             }
             $id = (int)$row['id'];
             if (!isset($own[$id])) {
-                throw new RuntimeException('A reading belongs to a line that is not part of this count. Nothing was saved - reload the page and try again.');
+                throw new RuntimeException('A reading belongs to a line that is not part of this count (the page may be out of date or open on another count), so nothing was saved. Reload this count and save again.');
             }
             if (++$total > 5000) {
-                throw new RuntimeException('Too many lines in one save.');
+                throw new RuntimeException('That is too many lines for one save (the limit is 5,000), so nothing was saved. Start smaller counts, one category or a few chosen items at a time.');
             }
             $payload = [];
             foreach (['actual', 'cost', 'reason', 'notes', 'touched'] as $k) {
@@ -359,7 +399,7 @@ function scReadPostedLines(array $post, array $ownIds): array
                     continue;
                 }
                 if (!is_scalar($row[$k])) {
-                    throw new RuntimeException('A reading was in a form this page does not accept. Nothing was saved - reload the page and try again.');
+                    throw new RuntimeException('One reading was sent in a form the server does not accept, so nothing was saved. Reload the page and try again; if it keeps happening, tell your administrator.');
                 }
                 $payload[$k] = is_bool($row[$k]) ? ($row[$k] ? '1' : '') : (string)$row[$k];
             }
@@ -386,18 +426,18 @@ function scReleaseApproveLock(PDO $pdo, string &$name): void
 /* ============== POST handlers ============== */
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST)) {
     /* Refuse rather than save a part: PHP keeps only the first max_input_vars fields of a larger post. */
-    $error = 'The page sent too many fields at once, so the server may have cut it off. Nothing was saved. Reload the page and try again; if it keeps happening, tell your administrator.';
+    $error = 'The page sent too many fields at once for the server to take in, so nothing was saved. Reload the page and try again; if it keeps happening, tell your administrator.';
 } elseif (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
     if (!validateCsrfToken($token)) {
-        $error = 'Security token invalid.';
+        $error = 'This page has expired (you may have been signed out or left it open a long time), so nothing was saved. Reload the page, sign in again if asked, and try again.';
     } else {
         $action = $_POST['action'] ?? '';
         try {
             if ($action === 'start_count') {
                 $isOpeningStart = !empty($_POST['opening']);
                 if ($isOpeningStart && !scHasOpeningCol($pdo)) {
-                    throw new RuntimeException('Could not enable opening-stock counts (the stock_counts table could not be updated). Ask your administrator to add the is_opening column, then try again.');
+                    throw new RuntimeException('Opening stock counts can’t be started yet: the stock counts table needs one extra column (is_opening) that could not be added automatically. Ask your administrator to add it, then try again.');
                 }
                 // An opening count can cover everything, one category or chosen items, like any other count.
                 $scope = (string)($_POST['scope'] ?? 'spot');
@@ -406,13 +446,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $shift = rh_clean_text($_POST['shift'] ?? '');
                 $notes = trim((string)($_POST['notes'] ?? ''));
                 if (mb_strlen($scopeValue) > 255 || mb_strlen($shift) > 50 || mb_strlen($notes) > 1000) {
-                    throw new RuntimeException('Scope (255), shift (50) or notes (1000 characters) is too long.');
+                    throw new RuntimeException('The count was not started because something typed is too long. The label can be up to 50 characters, the notes up to 1,000, and the chosen items up to 255 characters in all - shorten them, or count a whole category instead.');
                 }
                 if ($scope === 'category' && $scopeValue === '') {
-                    throw new RuntimeException('Choose a category for a category count.');
+                    throw new RuntimeException('A category count needs a category. Pick one in the Category box and press Start count again.');
                 }
                 if ($scope === 'spot' && !preg_match('/^\s*\d+(\s*,\s*\d+)*\s*$/', $scopeValue)) {
-                    throw new RuntimeException('Choose at least one item to count.');
+                    throw new RuntimeException('Choose at least one item to count. Pick them in the Items to count list (hold Ctrl for more), or choose One category or Everything.');
                 }
 
                 // Double-submit guard: the same user starting the identical draft count within 30 seconds
@@ -435,7 +475,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     $params[] = $scopeValue;
                 } elseif ($scope === 'spot') {
                     $ids = array_filter(array_map('intval', explode(',', $scopeValue)));
-                    if (empty($ids)) throw new RuntimeException('Choose at least one item to count.');
+                    if (empty($ids)) throw new RuntimeException('Choose at least one item to count. Pick them in the Items to count list (hold Ctrl for more), or choose One category or Everything.');
                     $ph = implode(',', array_fill(0, count($ids), '?'));
                     $sql .= " AND id IN ($ph)";
                     $params = array_merge($params, $ids);
@@ -450,7 +490,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute($params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                if (!$rows) throw new RuntimeException('There are no stock items to count for that choice.');
+                if (!$rows) throw new RuntimeException('There are no stock items to count for that choice (archived items are left out). Pick a different category or Everything, or add the items in Stock Ingredients first.');
                 if ($isOpeningStart) {
                     $overlap = scOpeningOverlap($pdo, array_map(static fn($r) => (int)$r['id'], $rows));
                     if ($overlap) throw new RuntimeException(scOpeningOverlapMessage($overlap, 'started'));
@@ -483,9 +523,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $hdr = $pdo->prepare("SELECT * FROM stock_counts WHERE id = ? AND status = 'draft'");
                 $hdr->execute([$countId]);
                 $count = $hdr->fetch(PDO::FETCH_ASSOC);
-                if (!$count) throw new RuntimeException('Count not found or already submitted.');
+                if (!$count) throw new RuntimeException('These readings could not be saved because this count is no longer being counted (' . scStatusNowPhrase(scCountStatusNow($pdo, $countId)) . '). Open the Stock Counts list to see where it is now.');
                 if ((int)$count['counted_by'] !== (int)$user['id'] && !$canApprove) {
-                    throw new RuntimeException('Only the original counter or a manager can edit this count.');
+                    throw new RuntimeException('You can’t save readings on this count because someone else started it. Only the person who started it, or someone with the ' . SC_PERM_NAME . ' permission, can - ' . SC_ASK_PERM . '.');
                 }
 
                 $hasCol = scHasLineCol($pdo, 'counted_at');
@@ -504,13 +544,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     $lineId = (int)$lineId;
                     $actualRaw = trim((string)($payload['actual'] ?? ''));
                     if ($actualRaw !== '' && !is_numeric($actualRaw)) {
-                        throw new RuntimeException('Actual quantity must be a number.');
+                        throw new RuntimeException('A reading is not a number, so nothing was saved. Type digits only (for example 12 or 2.5), or 0 if there is none, then save again.');
                     }
                     $isBlank = ($actualRaw === '');
                     $touched = !empty($payload['touched']);
                     $actual = (float)$actualRaw;
                     if ($actual > 99999999) {
-                        throw new RuntimeException('Actual quantity is too large.');
+                        throw new RuntimeException('A reading is too large (the limit is 99,999,999), so nothing was saved. Check it for an extra digit and save again.');
                     }
                     $snapSel->execute([$lineId, $countId]);
                     $snap = $snapSel->fetch(PDO::FETCH_ASSOC);
@@ -524,7 +564,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     if (!empty($count['is_opening']) && isset($payload['cost']) && trim((string)$payload['cost']) !== '') {
                         $costRaw = trim((string)$payload['cost']);
                         if (!is_numeric($costRaw) || (float)$costRaw < 0 || (float)$costRaw > 99999999) {
-                            throw new RuntimeException('Unit cost must be a number of zero or more.');
+                            throw new RuntimeException('A unit cost is not valid, so nothing was saved. Type the cost of one unit as a number of 0 or more (for example 1500) and save again.');
                         }
                         $costSet = round((float)$costRaw, 4);
                         $cost = $costSet;
@@ -532,10 +572,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     $reason = (string)($payload['reason'] ?? '');
                     $notes  = trim((string)($payload['notes'] ?? ''));
                     if (mb_strlen($notes) > 500) {
-                        throw new RuntimeException('Line notes are too long (500 characters maximum).');
+                        throw new RuntimeException('A line note is too long (500 characters at most), so nothing was saved. Shorten the note and save again.');
                     }
                     if ($actual < 0) {
-                        throw new RuntimeException('Actual quantity cannot be negative.');
+                        throw new RuntimeException('A reading is negative, so nothing was saved. A reading is what is physically there, so it can’t be below 0 - type 0 if there is none.');
                     }
                     if (!in_array($reason, ['', 'spillage', 'expired', 'staff_meal', 'sampling', 'prep_waste', 'theft_suspected', 'correction', 'other'], true)) {
                         $reason = '';
@@ -595,22 +635,22 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $pdo->beginTransaction();
                 $hdr->execute([$countId]);
                 $count = $hdr->fetch(PDO::FETCH_ASSOC);
-                if (!$count) throw new RuntimeException('Count not found.');
+                if (!$count) throw new RuntimeException('This count can’t be submitted because it is no longer being counted (' . scStatusNowPhrase(scCountStatusNow($pdo, $countId)) . '). Open the Stock Counts list to see where it is now.');
                 if ((int)$count['counted_by'] !== (int)$user['id'] && !$canApprove) {
-                    throw new RuntimeException('Only the person who started this count or a manager can submit it.');
+                    throw new RuntimeException('You can’t submit this count because someone else started it. Only the person who started it, or someone with the ' . SC_PERM_NAME . ' permission, can - ' . SC_ASK_PERM . '.');
                 }
 
                 // Every line in scope must have been counted - blanks are never converted to zero.
                 [$uncN, $uncNames] = scUncountedLines($pdo, $countId, scHasLineCol($pdo, 'counted_at'));
                 if ($uncN > 0) {
-                    throw new RuntimeException(scUncountedMessage($uncN, $uncNames));
+                    throw new RuntimeException(scUncountedMessage($uncN, $uncNames, 'submit'));
                 }
 
                 // Opening stock: every line that adds stock needs a unit cost, or COGS and valuation start at zero.
                 if (!empty($count['is_opening'])) {
                     $uncosted = scOpeningUncostedLines($pdo, $countId);
                     if ($uncosted) {
-                        throw new RuntimeException('Opening stock needs a unit cost above zero on every line you counted (' . count($uncosted) . ' missing: ' . implode(', ', array_slice($uncosted, 0, 6)) . (count($uncosted) > 6 ? ', ...' : '') . '). Enter the costs, save readings, then submit.');
+                        throw new RuntimeException('This opening count can’t be submitted yet: ' . count($uncosted) . ' counted line' . (count($uncosted) === 1 ? ' has' : 's have') . ' no unit cost (' . implode(', ', array_slice($uncosted, 0, 6)) . (count($uncosted) > 6 ? ' and ' . (count($uncosted) - 6) . ' more' : '') . '). Type the cost of one unit (more than 0) on each of those lines, save readings, then submit again.');
                     }
                 }
 
@@ -618,7 +658,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $missing = $pdo->prepare("SELECT COUNT(*) FROM stock_count_lines WHERE count_id = ? AND variance < 0 AND (reason_code = '' OR reason_code IS NULL)");
                 $missing->execute([$countId]);
                 if ((int)$missing->fetchColumn() > 0) {
-                    throw new RuntimeException('Every shortage line must have a reason. Save your readings, pick a reason for each negative variance, then submit.');
+                    throw new RuntimeException('This count can’t be submitted yet: every line that is short needs a reason. Pick a reason on each shortage line (use the Reason filter, “No reason”, to find them), save readings, then submit again.');
                 }
 
                 // Compute totals
@@ -648,7 +688,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $remCounter = $pdo->prepare("SELECT counted_by FROM stock_counts WHERE id = ?");
                 $remCounter->execute([$countId]);
                 if (!rh_sca_may_remind((int)$user['id'], (int)$remCounter->fetchColumn(), $canApprove)) {
-                    throw new RuntimeException('Only the person who counted this or someone who can approve stock counts can remind the approvers.');
+                    throw new RuntimeException('You can’t remind the approvers about this count. Only the person who counted it, or someone with the ' . SC_PERM_NAME . ' permission, can - ' . SC_ASK_PERM . '.');
                 }
                 $em = rh_sca_email_approvers($pdo, $countId, (int)$user['id'], 'remind');
                 if ($em['ok']) {
@@ -671,7 +711,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $scApproveLock = substr('rh_stock_count_approve_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
                 if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($scApproveLock) . ', 30)')->fetchColumn() !== 1) {
                     $scApproveLock = '';
-                    throw new RuntimeException('Another count is being approved right now. Wait a moment and press Approve again - nothing was posted.');
+                    throw new RuntimeException('Another count is being approved at this moment, so nothing was posted. Wait a few seconds and press Approve again.');
                 }
                 register_shutdown_function(static function () use ($pdo, $scApproveLock) {
                     try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($scApproveLock) . ')'); } catch (Throwable $e) { /* connection closing releases it anyway */ }
@@ -681,13 +721,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $hdr = $pdo->prepare("SELECT * FROM stock_counts WHERE id = ? FOR UPDATE");
                 $hdr->execute([$countId]);
                 $count = $hdr->fetch(PDO::FETCH_ASSOC);
-                if (!$count) throw new RuntimeException('Count not found.');
+                if (!$count) throw new RuntimeException('This count was not found (it may have been deleted), so nothing was posted. Open the Stock Counts list to check.');
                 // The permission, or (only while an administrator has the two-person rule switched off) the counter.
                 $secondRuleOn = rh_sca_second_approver_required();
                 if (!rh_sca_may_decide((int)$user['id'], (int)$count['counted_by'], $canApprove, $secondRuleOn)) {
-                    throw new RuntimeException('You do not have permission to approve stock counts. Ask an administrator to give you "Approve stock counts" in User Management.');
+                    throw new RuntimeException('You can’t approve this count because you don’t have the ' . SC_PERM_NAME . ' permission. Ask someone who has it (managers and administrators do by default) to approve it, or ask an administrator to give you the permission in User Management.');
                 }
-                if ($count['status'] !== 'submitted') throw new RuntimeException('Only submitted counts can be approved.');
+                if ($count['status'] !== 'submitted') throw new RuntimeException('This count can’t be approved because ' . scStatusNowPhrase((string)$count['status']) . '. Only a count that has been submitted can be approved' . ($count['status'] === 'draft' ? ' - the counter must finish counting and submit it first.' : ($count['status'] === 'rejected' ? ' - it must be counted again and resubmitted first.' : '.')));
 
                 // Apply variance deltas for each line while keeping batch ledger in sync.
                 $lineSel = $pdo->prepare("SELECT * FROM stock_count_lines WHERE count_id = ?");
@@ -698,7 +738,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 // Nothing is approved while any line is uncounted - blanks are never read as zero.
                 [$uncN, $uncNames] = scUncountedLines($pdo, $countId, $hasCol);
                 if ($uncN > 0) {
-                    throw new RuntimeException(scUncountedMessage($uncN, $uncNames));
+                    throw new RuntimeException(scUncountedMessage($uncN, $uncNames, 'approve'));
                 }
 
                 /* Stale-count guard. Variance is worked out against the stock snapshot of THIS count plus movements up
@@ -719,21 +759,21 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     foreach ($staleRows as $sr) {
                         $parts[] = displayCountReference((string)$sr['reference']) . ' (' . (int)$sr['n'] . ' of the same items)';
                     }
-                    throw new RuntimeException('This count is out of date: another count was approved after these items were counted - ' . implode(', ', $parts) . '. Approving this one too would add the same stock twice. Use "Reject count", then "Count again" to take a fresh stock snapshot and count again.');
+                    throw new RuntimeException('This count is out of date: ' . implode(', ', $parts) . ' was approved after these items were counted here, and approving this one too would add the same stock twice. Press “Reject count”, then “Count again”, to start from fresh stock figures.');
                 }
 
                 if (!function_exists('deductStockBatchFIFO') || !function_exists('ensureStockBatchCoverageForDeduction')) {
-                    throw new RuntimeException('Stock engine helpers missing.');
+                    throw new RuntimeException('Stock can’t be updated right now because part of the stock system did not load, so nothing was posted. Reload the page and try again; if it keeps happening, tell your administrator.');
                 }
 
                 // Opening stock: never self-approved, and every counted line must carry a unit cost.
                 if (!empty($count['is_opening'])) {
                     if (rh_sca_self_approve_blocked((int)$user['id'], (int)$count['counted_by'], true, $secondRuleOn)) {
-                        throw new RuntimeException('An opening stock count must be approved by a different manager or admin than the person who counted it.');
+                        throw new RuntimeException('You can’t approve this opening count because you counted it. An opening count must be approved by a different person with the ' . SC_PERM_NAME . ' permission, so ask another manager or administrator (an administrator can change this rule in ' . SC_RULE_WHERE . ').');
                     }
                     $uncosted = scOpeningUncostedLines($pdo, $countId);
                     if ($uncosted) {
-                        throw new RuntimeException('Opening stock cannot be approved: ' . count($uncosted) . ' counted line(s) have no unit cost (' . implode(', ', array_slice($uncosted, 0, 6)) . (count($uncosted) > 6 ? ', ...' : '') . '). Reject it so the counter can add the costs.');
+                        throw new RuntimeException('This opening count can’t be approved: ' . count($uncosted) . ' counted line' . (count($uncosted) === 1 ? ' has' : 's have') . ' no unit cost (' . implode(', ', array_slice($uncosted, 0, 6)) . (count($uncosted) > 6 ? ' and ' . (count($uncosted) - 6) . ' more' : '') . '). Press “Reject count” so the counter can type the costs and submit it again.');
                     }
                 }
 
@@ -765,7 +805,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     $liveSel->execute([$ingredientId]);
                     $live = $liveSel->fetch(PDO::FETCH_ASSOC);
                     if (!$live) {
-                        throw new RuntimeException('Ingredient not found during count approval.');
+                        throw new RuntimeException('A stock item on this count could not be found (it may have been deleted), so nothing was posted. Reject the count and start a new one, or tell your administrator.');
                     }
                     $costAtTime = (float)$ln['cost_per_unit'];
                     if ($costAtTime <= 0) {
@@ -797,7 +837,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 /* A surplus creates a stock batch. With no unit cost on the line AND no average cost on the
                  * ingredient it would be booked at zero (COGS and valuation wrong), so it is not approvable. */
                 if (!empty($zeroCost)) {
-                    throw new RuntimeException('Cannot approve: ' . count($zeroCost) . ' line(s) add stock for ingredients with no unit cost (' . implode(', ', array_slice($zeroCost, 0, 6)) . (count($zeroCost) > 6 ? ', ...' : '') . '). Set a cost on the ingredient (Stock Ingredients), or reject the count and add the cost, then approve.');
+                    throw new RuntimeException('This count can’t be approved yet: ' . count($zeroCost) . ' line' . (count($zeroCost) === 1 ? ' adds' : 's add') . ' stock for items that have no unit cost (' . implode(', ', array_slice($zeroCost, 0, 6)) . (count($zeroCost) > 6 ? ' and ' . (count($zeroCost) - 6) . ' more' : '') . '). Set a cost on each item in Stock Ingredients and approve again, or reject the count so the counter can type the costs.');
                 }
 
                 /* Movement-aware variance can turn a line into a shortage that had no reason when it was
@@ -808,14 +848,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                         ->execute(['Recounted against stock movements during the count: these lines are now shortages and need a reason: ' . $list, round($totShort + $totSurplus, 4), round($totShort, 4), round($totSurplus, 4), $countId]);
                     $pdo->commit();
                     scReleaseApproveLock($pdo, $scApproveLock);
-                    $_SESSION['stock_msg'] = 'Not approved: ' . count($needReason) . ' line(s) became shortages after allowing for stock movements and need a reason (' . $list . '). Count returned to draft with readings kept - add the reasons and resubmit; nothing was posted to stock.';
+                    $_SESSION['stock_msg'] = 'Not approved, and nothing was posted to stock: ' . count($needReason) . ' line' . (count($needReason) === 1 ? ' turned' : 's turned') . ' out to be short once sales and other stock movements during the count were allowed for, and each needs a reason (' . $list . '). The count is back to being counted with your readings kept - add the reasons and submit it again.';
                     header('Location: stock-count.php?id=' . $countId);
                     exit;
                 }
 
                 // Shortages over the configured thresholds need an approver who is not the counter.
                 if (rh_sca_self_approve_blocked((int)$user['id'], (int)$count['counted_by'], $needsOtherApprover, $secondRuleOn)) {
-                    throw new RuntimeException('This count has shortages over the approval threshold (' . $currency . ' ' . number_format($minCost, 2) . ' and ' . rtrim(rtrim(number_format($blockPct, 2), '0'), '.') . '%). It must be approved by a different manager or admin than the person who counted it.');
+                    throw new RuntimeException('This count has shortages over the approval level (' . $currency . ' ' . number_format($minCost, 2) . ' and ' . rtrim(rtrim(number_format($blockPct, 2), '0'), '.') . '%), so the person who counted it can’t approve it. Ask another manager or administrator with the ' . SC_PERM_NAME . ' permission (an administrator can change this rule in ' . SC_RULE_WHERE . ').');
                 }
 
                 $pdo->prepare("UPDATE stock_counts SET total_variance_cost=?, shortage_cost=?, surplus_cost=? WHERE id = ?")
@@ -925,7 +965,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
 
                         $adjId = (int)(deductStockBatchFIFO($ingredientId, $deductQty, 'variance', $countId, $user['id']) ?? 0);
                         if ($adjId <= 0) {
-                            throw new RuntimeException('Failed to apply shortage variance for ingredient #' . $ingredientId . '.');
+                            throw new RuntimeException('The shortage on stock item #' . $ingredientId . ' could not be taken off stock, so nothing was posted. Try approving again; if it keeps happening, tell your administrator.');
                         }
                         $adjReasonUpd->execute([$reasonShort, $costAtTime, $adjId]);
                     }
@@ -952,10 +992,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $rejCounter = $pdo->prepare("SELECT counted_by FROM stock_counts WHERE id = ?");
                 $rejCounter->execute([$countId]);
                 if (!rh_sca_may_decide((int)$user['id'], (int)$rejCounter->fetchColumn(), $canApprove)) {
-                    throw new RuntimeException('You do not have permission to reject stock counts. Ask an administrator to give you "Approve stock counts" in User Management.');
+                    throw new RuntimeException('You can’t reject this count because you don’t have the ' . SC_PERM_NAME . ' permission. Ask someone who has it (managers and administrators do by default), or ask an administrator to give you the permission in User Management.');
                 }
                 $reason = trim($_POST['rejection_reason'] ?? '');
-                if (mb_strlen($reason) < 8) throw new RuntimeException('Provide a rejection reason (min 8 characters).');
+                if (mb_strlen($reason) < 8) throw new RuntimeException('The count was not rejected because the reason is too short. Give a reason of at least 8 characters so the counter knows what to fix, then press Reject count again.');
                 $pdo->prepare("UPDATE stock_counts SET status='rejected', rejection_reason=?, updated_at=NOW() WHERE id=? AND status='submitted'")
                     ->execute([mb_substr($reason, 0, 500), $countId]);
                 $_SESSION['stock_msg'] = 'Count rejected and sent back for re-counting.';
@@ -969,9 +1009,12 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $hdr = $pdo->prepare("SELECT * FROM stock_counts WHERE id = ? AND status = 'rejected' FOR UPDATE");
                 $hdr->execute([$countId]);
                 $count = $hdr->fetch(PDO::FETCH_ASSOC);
-                if (!$count) throw new RuntimeException('Only a rejected count can be reopened.');
+                if (!$count) {
+                    $nowSt = scCountStatusNow($pdo, $countId);
+                    throw new RuntimeException('This count can’t be counted again because ' . scStatusNowPhrase($nowSt) . '. Only a rejected count can be reopened' . ($nowSt === 'submitted' ? ' - ask someone who approves counts to reject it first.' : '.'));
+                }
                 if ((int)$count['counted_by'] !== (int)$user['id'] && !$canApprove) {
-                    throw new RuntimeException('Only the person who started this count or a manager can reopen it.');
+                    throw new RuntimeException('You can’t count this again because someone else started it. Only the person who started it, or someone with the ' . SC_PERM_NAME . ' permission, can - ' . SC_ASK_PERM . '.');
                 }
                 if (!empty($count['is_opening'])) {
                     // Since it was rejected, another opening count may have taken some of its items: reopening would put them in two.
@@ -1015,11 +1058,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $hdr = $pdo->prepare("SELECT id, reference, counted_by, status, rejection_reason FROM stock_counts WHERE id = ? AND status IN ('rejected','draft') FOR UPDATE");
                 $hdr->execute([$countId]);
                 $count = $hdr->fetch(PDO::FETCH_ASSOC);
-                if (!$count) throw new RuntimeException('Only a count that is being counted or was rejected can be deleted. A count waiting for approval or approved stays on record.');
+                if (!$count) {
+                    $nowSt = scCountStatusNow($pdo, $countId);
+                    throw new RuntimeException('This count can’t be deleted because ' . scStatusNowPhrase($nowSt) . '. Only a count that is being counted, or was rejected, can be deleted' . ($nowSt === 'submitted' ? ' - ask someone who approves counts to reject it first, then it can be deleted.' : ($nowSt === 'approved' ? '; an approved count stays on record.' : '.')));
+                }
                 if (!scMayDeleteCount($count, $user, $canApprove)) {
                     throw new RuntimeException($count['status'] === 'draft'
-                        ? 'Only the person who started this count, an administrator or someone who approves stock counts can delete it.'
-                        : 'Only an administrator, or someone who approves stock counts and did not count this one, can delete a rejected count.');
+                        ? 'You can’t delete this count because someone else started it. Only the person who started it, an administrator, or someone with the ' . SC_PERM_NAME . ' permission can - ' . SC_ASK_PERM . '.'
+                        : 'You can’t delete this rejected count. Only an administrator, or someone with the ' . SC_PERM_NAME . ' permission who did not count it, can - ask one of them' . ((int)$count['counted_by'] === (int)$user['id'] ? ' (you counted it yourself, so someone else has to do it).' : '.'));
                 }
                 $wasDraft = $count['status'] === 'draft';
                 $pdo->prepare("DELETE FROM stock_count_lines WHERE count_id = ?")->execute([$countId]);
@@ -1036,7 +1082,12 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
             if ($pdo->inTransaction()) $pdo->rollBack();
             if (!empty($scApproveLock)) scReleaseApproveLock($pdo, $scApproveLock);
             if (!empty($scStartLock)) scReleaseApproveLock($pdo, $scStartLock);
-            $error = $e->getMessage();
+            if ($e instanceof RuntimeException) {
+                $error = $e->getMessage();
+            } else {
+                error_log('stock-count: ' . get_class($e) . ': ' . $e->getMessage());
+                $error = 'Something went wrong on our side, so this may not have finished. Reload the page to see where the count is now, then try again; if it keeps happening, tell your administrator.';
+            }
         }
     }
 }
@@ -1659,7 +1710,7 @@ $csrf_token = generateCsrfToken();
                     if (!r || r.trim().length < 8) {
                         const el = document.getElementById('reject_err');
                         if (el) {
-                            el.textContent = 'Rejection reason required (min 8 characters).';
+                            el.textContent = 'The count was not rejected: give a reason of at least 8 characters so the counter knows what to fix.';
                             el.style.display = '';
                         }
                         return;

@@ -215,23 +215,23 @@ if (!function_exists('rh_sca_approvers')) {
             $q->execute([$countId]);
             $count = $q->fetch(PDO::FETCH_ASSOC);
             if (!$count) {
-                $res['message'] = 'Count not found.';
+                $res['message'] = 'This count was not found (it may have been deleted), so no emails were sent.';
                 return $res;
             }
             if ($count['status'] !== 'submitted') {
-                $res['message'] = 'Only a count that is waiting for approval can be emailed.';
+                $res['message'] = 'Approvers can only be emailed about a count that is waiting for approval, and this one is not (it may already be approved or rejected), so no emails were sent.';
                 return $res;
             }
             if ($kind === 'remind') {
                 if (!rh_sca_may_remind($byUserId, (int)$count['counted_by'], hasPermission($byUserId, 'stock_count_approve'))) {
-                    $res['message'] = 'Only the person who counted this or someone who can approve stock counts can remind the approvers.';
+                    $res['message'] = 'You can’t remind the approvers about this count. Only the person who counted it, or someone with the “Approve stock counts” permission, can - an administrator can give it to you in User Management.';
                     return $res;
                 }
                 $wait = rh_sca_remind_wait($pdo, $countId);
                 if ($wait > 0) {
                     $res['rate_limited'] = true;
                     $res['wait'] = $wait;
-                    $res['message'] = 'Approvers were emailed a moment ago. You can remind them again in ' . (int)ceil($wait / 60) . ' minute' . (ceil($wait / 60) == 1 ? '' : 's') . '.';
+                    $res['message'] = 'Approvers were emailed a moment ago, so no new reminder was sent. You can remind them again in ' . (int)ceil($wait / 60) . ' minute' . (ceil($wait / 60) == 1 ? '' : 's') . '.';
                     return $res;
                 }
             }
@@ -310,10 +310,10 @@ if (!function_exists('rh_sca_approvers')) {
             $res['ok'] = $res['emailed'] > 0;
             $res['message'] = $res['ok']
                 ? 'Approvers emailed: ' . $res['emailed'] . '.'
-                : (empty($approvers) ? 'Could not email approvers: there is nobody else who can approve this count.' : 'Could not email approvers.');
+                : (empty($approvers) ? 'Nobody was emailed because no one else has the “Approve stock counts” permission. Ask an administrator to give it to a manager in User Management.' : 'Nobody could be emailed (the approvers have no valid email address, or the mail server did not answer). Tell an approver in person, or try Remind approvers again later.');
         } catch (Throwable $e) {
             error_log('Stock count approver email error: ' . $e->getMessage());
-            $res['message'] = 'Could not email approvers.';
+            $res['message'] = 'Nobody could be emailed because something went wrong sending the emails. Tell an approver in person, or try Remind approvers again later.';
         }
         return $res;
     }

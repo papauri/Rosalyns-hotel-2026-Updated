@@ -176,7 +176,7 @@ try {
     $pdo->prepare("UPDATE stock_counts SET counted_by = ? WHERE id = ?")->execute([$denied, $rmId]); // counted by a user WITHOUT the permission
     $GLOBALS['rh_test_email_capture'] = [];
     $rem = rh_sca_email_approvers($pdo, $rmId, $plain, 'remind');
-    check(!$rem['ok'] && count($GLOBALS['rh_test_email_capture']) === 0 && strpos($rem['message'], 'Only the person who counted') === 0, 'Remind: refused for someone who is neither the counter nor an approver, nothing sent', json_encode($rem));
+    check(!$rem['ok'] && count($GLOBALS['rh_test_email_capture']) === 0 && strpos($rem['message'], 'You can’t remind the approvers') === 0, 'Remind: refused for someone who is neither the counter nor an approver, nothing sent', json_encode($rem));
     check(rh_sca_remind_wait($pdo, $rmId) === 0, 'Remind: a refused reminder does not start the 10 minute limit');
     $rem = rh_sca_email_approvers($pdo, $rmId, $denied, 'remind');
     check($rem['ok'] && count($GLOBALS['rh_test_email_capture']) === $rem['emailed'] && $rem['emailed'] > 0, 'Remind: allowed for the person who counted it, even without the approve permission', json_encode($rem));
@@ -232,7 +232,7 @@ try {
     // --- Page wiring (static) ------------------------------------------------------------------------------------
     $src = (string)file_get_contents(__DIR__ . '/../../admin/stock-count.php');
     check(strpos($src, "hasPermission((int)\$user['id'], 'stock_count_approve')") !== false && strpos($src, "['admin', 'manager'], true);\n\n\$message") === false, 'Page: $canApprove comes from the permission, not the role');
-    check(strpos($src, "An opening stock count must be approved by a different manager") !== false, 'Page: an opening count still cannot be approved by its counter');
+    check(strpos($src, "An opening count must be approved by a different person") !== false, 'Page: an opening count still cannot be approved by its counter');
     check(strpos($src, 'rh_sca_may_remind(') !== false && strpos($src, 'rh_sca_may_decide(') !== false && strpos($src, 'approved own count - second approver switched off') !== false, 'Page: reminders, own-count approval and the activity-log note are wired');
     check(strpos($src, 'name="email_approvers"') !== false && strpos($src, 'Remind approvers') !== false, 'Page: has the "Email the approvers" tickbox and the Remind button');
 } catch (Throwable $e) {
