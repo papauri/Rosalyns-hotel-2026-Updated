@@ -628,7 +628,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                  * to the moment each line was counted. If another count that covers the same items was approved AFTER
                  * a line here was counted, its posted variance is not in that window, so approving this one as well
                  * would add the same physical stock a second time (two opening counts of the same shelves would double
-                 * the stock and its value). Refuse; the counter re-counts from a fresh snapshot (Reject, then Reopen). */
+                 * the stock and its value). Refuse; the counter re-counts from a fresh snapshot (Reject, then Count again). */
                 $staleQ = $pdo->prepare("SELECT sc2.reference, COUNT(DISTINCT l1.ingredient_id) AS n
                     FROM stock_counts sc2
                     INNER JOIN stock_count_lines l2 ON l2.count_id = sc2.id AND l2.adjustment_id IS NOT NULL
@@ -642,7 +642,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     foreach ($staleRows as $sr) {
                         $parts[] = displayCountReference((string)$sr['reference']) . ' (' . (int)$sr['n'] . ' of the same items)';
                     }
-                    throw new RuntimeException('This count is out of date: another count was approved after these items were counted - ' . implode(', ', $parts) . '. Approving this one too would add the same stock twice. Use "Reject & send back", then "Reopen for re-count" to take a fresh stock snapshot and count again.');
+                    throw new RuntimeException('This count is out of date: another count was approved after these items were counted - ' . implode(', ', $parts) . '. Approving this one too would add the same stock twice. Use "Reject count", then "Count again" to take a fresh stock snapshot and count again.');
                 }
 
                 if (!function_exists('deductStockBatchFIFO') || !function_exists('ensureStockBatchCoverageForDeduction')) {
@@ -1343,10 +1343,10 @@ $csrf_token = generateCsrfToken();
                                         <div style="font-size:10px; color:#6c757d;"><?php echo htmlspecialchars($ln['category']); ?> · <?php echo htmlspecialchars($ln['unit']); ?> · <?php echo $currency; ?> <?php echo number_format((float)$ln['cost_per_unit'], 2); ?>/<?php echo htmlspecialchars($ln['unit']); ?></div>
                                     </td>
                                     <?php if (!$blindCount): ?>
-                                    <td data-label="System Qty" style="text-align:right;"><?php echo rh_stock_qty_fmt($sys, 4); ?></td>
-                                    <td data-label="Expected at count time" style="text-align:right;"><?php echo $expectedAt === null ? '—' : rh_stock_qty_fmt($expectedAt, 4); ?></td>
+                                    <td data-label="In stock at start" style="text-align:right;"><?php echo rh_stock_qty_fmt($sys, 4); ?></td>
+                                    <td data-label="Should be there" style="text-align:right;"><?php echo $expectedAt === null ? '—' : rh_stock_qty_fmt($expectedAt, 4); ?></td>
                                     <?php endif; ?>
-                                    <td data-label="Actual Qty" style="text-align:right;">
+                                    <td data-label="Counted" style="text-align:right;">
                                         <?php if ($editable): ?>
                                             <input class="qty" type="number" step="0.000001" min="0"
                                                 name="line[<?php echo (int)$ln['id']; ?>][actual]"
@@ -1371,8 +1371,8 @@ $csrf_token = generateCsrfToken();
                                     </td>
                                     <?php endif; ?>
                                     <?php if (!$blindCount): ?>
-                                    <td data-label="Variance" style="text-align:right;" class="var <?php echo $varClass; ?>"><?php echo $lineCounted ? rh_stock_qty_fmt($var, 4) : '—'; ?></td>
-                                    <td data-label="Cost Impact" style="text-align:right;" class="varCost <?php echo $varClass; ?>"><?php echo $lineCounted ? $currency . ' ' . number_format($varCost, 2) : '—'; ?></td>
+                                    <td data-label="Difference" style="text-align:right;" class="var <?php echo $varClass; ?>"><?php echo $lineCounted ? rh_stock_qty_fmt($var, 4) : '—'; ?></td>
+                                    <td data-label="Value" style="text-align:right;" class="varCost <?php echo $varClass; ?>"><?php echo $lineCounted ? $currency . ' ' . number_format($varCost, 2) : '—'; ?></td>
                                     <?php endif; ?>
                                     <td data-label="Reason">
                                         <?php if ($editable): ?>
