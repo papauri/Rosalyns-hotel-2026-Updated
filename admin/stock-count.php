@@ -452,6 +452,117 @@ function scReadPostedLines(array $post, array $ownIds): array
     return $out;
 }
 
+/* Save the posted count readings (reasons, notes, opening unit costs) on a DRAFT count, in one transaction: all or none.
+ * Used by Save readings and by Submit (which saves what is typed first, then submits the saved data). Throws RuntimeException
+ * with a plain message on any refusal; on success the transaction is committed. */
+function scSaveCountLines(PDO $pdo, int $countId, array $post, array $user, bool $canApprove): void
+{
+    $hdr = $pdo->prepare("SELECT * FROM stock_counts WHERE id = ? AND status = 'draft'");
+    $hdr->execute([$countId]);
+    $count = $hdr->fetch(PDO::FETCH_ASSOC);
+    if (!$count) throw new RuntimeException('These readings could not be saved because this count is no longer being counted (' . scStatusNowPhrase(scCountStatusNow($pdo, $countId)) . '). Open the Stock Counts list to see where it is now.');
+    if ((int)$count['counted_by'] !== (int)$user['id'] && !$canApprove) {
+        throw new RuntimeException('You can’t save readings on this count because someone else started it. Only the person who started it, or someone with the ' . SC_PERM_NAME . ' permission, can - ' . SC_ASK_PERM . '.');
+    }
+
+    $hasCol = scHasLineCol($pdo, 'counted_at');
+    $hasBy  = scHasLineCol($pdo, 'counted_by');
+    $nowTs  = (string)$pdo->query("SELECT NOW()")->fetchColumn();
+    $ownQ = $pdo->prepare("SELECT id FROM stock_count_lines WHERE count_id = ?");
+    $ownQ->execute([$countId]);
+    $lines = scReadPostedLines($post, array_map('intval', $ownQ->fetchAll(PDO::FETCH_COLUMN)));
+    $pdo->beginTransaction(); // all readings or none: a bad value part-way must not leave half a save
+    /* The system quantity and cost are the SNAPSHOT taken when the count started (stored on the
+     * line). They are read back from the database, never from the posted form: a tampered or
+     * stale hidden field would otherwise set the variance - and, once approved, the stock
+     * adjustment - to any figure. */
+    $snapSel = $pdo->prepare("SELECT ingredient_id, system_quantity, cost_per_unit, actual_quantity, variance" . ($hasCol ? ', counted_at' : '') . " FROM stock_count_lines WHERE id = ? AND count_id = ?");
+    foreach ($lines as $lineId => $payload) {
+        $lineId = (int)$lineId;
+        $actualRaw = trim((string)($payload['actual'] ?? ''));
+        if ($actualRaw !== '' && !is_numeric($actualRaw)) {
+            throw new RuntimeException('A reading is not a number, so nothing was saved. Type digits only (for example 12 or 2.5), or 0 if there is none, then save again.');
+        }
+        $isBlank = ($actualRaw === '');
+        $touched = !empty($payload['touched']);
+        $actual = (float)$actualRaw;
+        if ($actual > 99999999) {
+            throw new RuntimeException('A reading is too large (the limit is 99,999,999), so nothing was saved. Check it for an extra digit and save again.');
+        }
+        $snapSel->execute([$lineId, $countId]);
+        $snap = $snapSel->fetch(PDO::FETCH_ASSOC);
+        if (!$snap) {
+            continue;
+        }
+        $sys    = (float)$snap['system_quantity'];
+        $cost   = (float)$snap['cost_per_unit'];
+        /* Opening count only: the counter types the unit cost the stock was bought at. */
+        $costSet = null;
+        if (!empty($count['is_opening']) && isset($payload['cost']) && trim((string)$payload['cost']) !== '') {
+            $costRaw = trim((string)$payload['cost']);
+            if (!is_numeric($costRaw) || (float)$costRaw < 0 || (float)$costRaw > 99999999) {
+                throw new RuntimeException('A unit cost is not valid, so nothing was saved. Type the cost of one unit as a number of 0 or more (for example 1500) and save again.');
+            }
+            $costSet = round((float)$costRaw, 4);
+            $cost = $costSet;
+        }
+        $reason = (string)($payload['reason'] ?? '');
+        $notes  = trim((string)($payload['notes'] ?? ''));
+        if (mb_strlen($notes) > 500) {
+            throw new RuntimeException('A line note is too long (500 characters at most), so nothing was saved. Shorten the note and save again.');
+        }
+        if ($actual < 0) {
+            throw new RuntimeException('A reading is negative, so nothing was saved. A reading is what is physically there, so it can’t be below 0 - type 0 if there is none.');
+        }
+        if (!in_array($reason, ['', 'spillage', 'expired', 'staff_meal', 'sampling', 'prep_waste', 'theft_suspected', 'correction', 'other'], true)) {
+            $reason = '';
+        }
+
+        $sql = "UPDATE stock_count_lines SET reason_code = ?, reason_notes = ?";
+        $params = [$reason, $notes ?: null];
+        if ($costSet !== null) {
+            // variance_cost follows the new cost; a changed reading below overrides it with the same maths.
+            $sql .= ", cost_per_unit = ?, variance_cost = ROUND(variance * ?, 4)";
+            array_push($params, $costSet, $costSet);
+        }
+        $wasCounted = scLineIsCounted($snap, $hasCol);
+
+        if ($isBlank) {
+            /* Blank = "not counted". With the counted_at column that is always recorded; without
+             * it a blank is only acted on if the user actually cleared the box (touched flag),
+             * otherwise the stored reading is left alone - never silently stored as 0. */
+            if ($hasCol || $touched) {
+                $sql .= ", actual_quantity = 0, variance = 0, variance_cost = 0";
+                if ($hasCol) {
+                    $sql .= ", counted_at = NULL";
+                    if ($hasBy) $sql .= ", counted_by = NULL";
+                }
+            }
+        } elseif (!$wasCounted || abs($actual - (float)$snap['actual_quantity']) > 0.00005) {
+            // New or changed reading: variance is against what stock SHOULD have been at this moment
+            // (snapshot + sales/receipts since the count started), not the stale snapshot alone.
+            $expected = $sys + scMovementsBetween($pdo, (int)$snap['ingredient_id'], scSnapshotStart($count), $nowTs);
+            $variance = round($actual - $expected, 6);
+            $varCost  = round($variance * $cost, 4);
+            $sql .= ", actual_quantity = ?, variance = ?, variance_cost = ?";
+            array_push($params, $actual, $variance, $varCost);
+            if ($hasCol) {
+                $sql .= ", counted_at = ?";
+                $params[] = $nowTs;
+                if ($hasBy) {
+                    $sql .= ", counted_by = ?";
+                    $params[] = (int)$user['id'];
+                }
+            }
+        }
+        $sql .= " WHERE id = ? AND count_id = ?";
+        array_push($params, $lineId, $countId);
+        $pdo->prepare($sql)->execute($params);
+    }
+
+    $pdo->commit();
+}
+
 /* Release the "one approval at a time" lock (see approve_count). Safe to call twice or with an empty name. */
 function scReleaseApproveLock(PDO $pdo, string &$name): void
 {
@@ -562,111 +673,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
             }
 
             if ($action === 'save_lines') {
-                $countId = (int)($_POST['count_id'] ?? 0);
-                $hdr = $pdo->prepare("SELECT * FROM stock_counts WHERE id = ? AND status = 'draft'");
-                $hdr->execute([$countId]);
-                $count = $hdr->fetch(PDO::FETCH_ASSOC);
-                if (!$count) throw new RuntimeException('These readings could not be saved because this count is no longer being counted (' . scStatusNowPhrase(scCountStatusNow($pdo, $countId)) . '). Open the Stock Counts list to see where it is now.');
-                if ((int)$count['counted_by'] !== (int)$user['id'] && !$canApprove) {
-                    throw new RuntimeException('You can’t save readings on this count because someone else started it. Only the person who started it, or someone with the ' . SC_PERM_NAME . ' permission, can - ' . SC_ASK_PERM . '.');
-                }
-
-                $hasCol = scHasLineCol($pdo, 'counted_at');
-                $hasBy  = scHasLineCol($pdo, 'counted_by');
-                $nowTs  = (string)$pdo->query("SELECT NOW()")->fetchColumn();
-                $ownQ = $pdo->prepare("SELECT id FROM stock_count_lines WHERE count_id = ?");
-                $ownQ->execute([$countId]);
-                $lines = scReadPostedLines($_POST, array_map('intval', $ownQ->fetchAll(PDO::FETCH_COLUMN)));
-                $pdo->beginTransaction(); // all readings or none: a bad value part-way must not leave half a save
-                /* The system quantity and cost are the SNAPSHOT taken when the count started (stored on the
-                 * line). They are read back from the database, never from the posted form: a tampered or
-                 * stale hidden field would otherwise set the variance - and, once approved, the stock
-                 * adjustment - to any figure. */
-                $snapSel = $pdo->prepare("SELECT ingredient_id, system_quantity, cost_per_unit, actual_quantity, variance" . ($hasCol ? ', counted_at' : '') . " FROM stock_count_lines WHERE id = ? AND count_id = ?");
-                foreach ($lines as $lineId => $payload) {
-                    $lineId = (int)$lineId;
-                    $actualRaw = trim((string)($payload['actual'] ?? ''));
-                    if ($actualRaw !== '' && !is_numeric($actualRaw)) {
-                        throw new RuntimeException('A reading is not a number, so nothing was saved. Type digits only (for example 12 or 2.5), or 0 if there is none, then save again.');
-                    }
-                    $isBlank = ($actualRaw === '');
-                    $touched = !empty($payload['touched']);
-                    $actual = (float)$actualRaw;
-                    if ($actual > 99999999) {
-                        throw new RuntimeException('A reading is too large (the limit is 99,999,999), so nothing was saved. Check it for an extra digit and save again.');
-                    }
-                    $snapSel->execute([$lineId, $countId]);
-                    $snap = $snapSel->fetch(PDO::FETCH_ASSOC);
-                    if (!$snap) {
-                        continue;
-                    }
-                    $sys    = (float)$snap['system_quantity'];
-                    $cost   = (float)$snap['cost_per_unit'];
-                    /* Opening count only: the counter types the unit cost the stock was bought at. */
-                    $costSet = null;
-                    if (!empty($count['is_opening']) && isset($payload['cost']) && trim((string)$payload['cost']) !== '') {
-                        $costRaw = trim((string)$payload['cost']);
-                        if (!is_numeric($costRaw) || (float)$costRaw < 0 || (float)$costRaw > 99999999) {
-                            throw new RuntimeException('A unit cost is not valid, so nothing was saved. Type the cost of one unit as a number of 0 or more (for example 1500) and save again.');
-                        }
-                        $costSet = round((float)$costRaw, 4);
-                        $cost = $costSet;
-                    }
-                    $reason = (string)($payload['reason'] ?? '');
-                    $notes  = trim((string)($payload['notes'] ?? ''));
-                    if (mb_strlen($notes) > 500) {
-                        throw new RuntimeException('A line note is too long (500 characters at most), so nothing was saved. Shorten the note and save again.');
-                    }
-                    if ($actual < 0) {
-                        throw new RuntimeException('A reading is negative, so nothing was saved. A reading is what is physically there, so it can’t be below 0 - type 0 if there is none.');
-                    }
-                    if (!in_array($reason, ['', 'spillage', 'expired', 'staff_meal', 'sampling', 'prep_waste', 'theft_suspected', 'correction', 'other'], true)) {
-                        $reason = '';
-                    }
-
-                    $sql = "UPDATE stock_count_lines SET reason_code = ?, reason_notes = ?";
-                    $params = [$reason, $notes ?: null];
-                    if ($costSet !== null) {
-                        // variance_cost follows the new cost; a changed reading below overrides it with the same maths.
-                        $sql .= ", cost_per_unit = ?, variance_cost = ROUND(variance * ?, 4)";
-                        array_push($params, $costSet, $costSet);
-                    }
-                    $wasCounted = scLineIsCounted($snap, $hasCol);
-
-                    if ($isBlank) {
-                        /* Blank = "not counted". With the counted_at column that is always recorded; without
-                         * it a blank is only acted on if the user actually cleared the box (touched flag),
-                         * otherwise the stored reading is left alone - never silently stored as 0. */
-                        if ($hasCol || $touched) {
-                            $sql .= ", actual_quantity = 0, variance = 0, variance_cost = 0";
-                            if ($hasCol) {
-                                $sql .= ", counted_at = NULL";
-                                if ($hasBy) $sql .= ", counted_by = NULL";
-                            }
-                        }
-                    } elseif (!$wasCounted || abs($actual - (float)$snap['actual_quantity']) > 0.00005) {
-                        // New or changed reading: variance is against what stock SHOULD have been at this moment
-                        // (snapshot + sales/receipts since the count started), not the stale snapshot alone.
-                        $expected = $sys + scMovementsBetween($pdo, (int)$snap['ingredient_id'], scSnapshotStart($count), $nowTs);
-                        $variance = round($actual - $expected, 6);
-                        $varCost  = round($variance * $cost, 4);
-                        $sql .= ", actual_quantity = ?, variance = ?, variance_cost = ?";
-                        array_push($params, $actual, $variance, $varCost);
-                        if ($hasCol) {
-                            $sql .= ", counted_at = ?";
-                            $params[] = $nowTs;
-                            if ($hasBy) {
-                                $sql .= ", counted_by = ?";
-                                $params[] = (int)$user['id'];
-                            }
-                        }
-                    }
-                    $sql .= " WHERE id = ? AND count_id = ?";
-                    array_push($params, $lineId, $countId);
-                    $pdo->prepare($sql)->execute($params);
-                }
-
-                $pdo->commit();
+                scSaveCountLines($pdo, (int)($_POST['count_id'] ?? 0), $_POST, $user, $canApprove);
                 $_SESSION['stock_msg'] = 'Count readings saved.';
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
@@ -674,6 +681,15 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
 
             if ($action === 'submit_count') {
                 $countId = (int)($_POST['count_id'] ?? 0);
+                /* Readings typed but not yet saved travel with the submit: save them first (the same code as Save readings),
+                 * then submit the saved data. If the save is refused, nothing is submitted. */
+                if (isset($_POST['lines_json']) || !empty($_POST['line'])) {
+                    try {
+                        scSaveCountLines($pdo, $countId, $_POST, $user, $canApprove);
+                    } catch (RuntimeException $saveEx) {
+                        throw new RuntimeException(rtrim($saveEx->getMessage()) . ' The count was not submitted.');
+                    }
+                }
                 $hdr = $pdo->prepare("SELECT * FROM stock_counts WHERE id = ? AND status = 'draft' FOR UPDATE");
                 $pdo->beginTransaction();
                 $hdr->execute([$countId]);
@@ -691,14 +707,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $lineTotalQ->execute([$countId]);
                 $readingLines = (int)$lineTotalQ->fetchColumn() - count($leftOutNames);
                 if ($readingLines < 1) {
-                    throw new RuntimeException('Nothing to submit: no item has a reading yet. Type what you counted (0 if there is none) on at least one item, save readings, then submit again.');
+                    throw new RuntimeException('Nothing to submit: no item has a reading yet. Type what you counted (0 if there is none) on at least one item, then submit again.');
                 }
 
                 // Opening stock: every line that adds stock needs a unit cost, or COGS and valuation start at zero.
                 if (!empty($count['is_opening'])) {
                     $uncosted = scOpeningUncostedLines($pdo, $countId);
                     if ($uncosted) {
-                        throw new RuntimeException('This opening count can’t be submitted yet: ' . count($uncosted) . ' counted line' . (count($uncosted) === 1 ? ' has' : 's have') . ' no unit cost (' . implode(', ', array_slice($uncosted, 0, 6)) . (count($uncosted) > 6 ? ' and ' . (count($uncosted) - 6) . ' more' : '') . '). Type the cost of one unit (more than 0) on each of those lines, save readings, then submit again.');
+                        throw new RuntimeException('This opening count can’t be submitted yet: ' . count($uncosted) . ' counted line' . (count($uncosted) === 1 ? ' has' : 's have') . ' no unit cost (' . implode(', ', array_slice($uncosted, 0, 6)) . (count($uncosted) > 6 ? ' and ' . (count($uncosted) - 6) . ' more' : '') . '). Type the cost of one unit (more than 0) on each of those lines, then submit again.');
                     }
                 }
 
@@ -706,7 +722,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $missing = $pdo->prepare("SELECT COUNT(*) FROM stock_count_lines WHERE count_id = ? AND variance < 0 AND (reason_code = '' OR reason_code IS NULL)");
                 $missing->execute([$countId]);
                 if ((int)$missing->fetchColumn() > 0) {
-                    throw new RuntimeException('This count can’t be submitted yet: every line that is short needs a reason. Pick a reason on each shortage line (use the Reason filter, “No reason”, to find them), save readings, then submit again.');
+                    throw new RuntimeException('This count can’t be submitted yet: every line that is short needs a reason. Pick a reason on each shortage line (use the Reason filter, “No reason”, to find them), then submit again.');
                 }
 
                 // Checks passed: drop the blank lines (nothing was posted for them), so the count holds only what was read.
@@ -1502,6 +1518,7 @@ $csrf_token = generateCsrfToken();
                                 <option value="surplus">Surplus only</option>
                                 <option value="balanced">Balanced only</option>
                             <?php endif; ?>
+                            <option value="counted">Counted only</option>
                             <option value="uncounted">Not counted only</option>
                         </select>
                     </label>
@@ -1675,7 +1692,9 @@ $csrf_token = generateCsrfToken();
                         const rowReason = row.dataset.filterReason || 'none';
 
                         const matchSearch = q === '' || hay.includes(q);
-                        const matchVariance = varianceFilter === 'all' || rowVariance === varianceFilter;
+                        // "Counted only" = any row with a reading (typed or saved), whatever its difference band.
+                        const matchVariance = varianceFilter === 'all'
+                            || (varianceFilter === 'counted' ? rowVariance !== 'uncounted' : rowVariance === varianceFilter);
                         const matchReason = reasonFilter === 'all' || rowReason === reasonFilter;
                         const show = matchSearch && matchVariance && matchReason;
                         row.style.display = show ? '' : 'none';
@@ -1708,7 +1727,6 @@ $csrf_token = generateCsrfToken();
                     if (touchedEl) touchedEl.value = '1';
                     if (input.dataset.system === undefined) { // blind count: nothing to compute or reveal
                         tr.dataset.filterVariance = input.value.trim() === '' ? 'uncounted' : 'counted';
-                        applyStockLineFilters();
                         return;
                     }
                     const sys = parseFloat(input.dataset.system) || 0;
@@ -1720,7 +1738,6 @@ $csrf_token = generateCsrfToken();
                         cells[0].className = 'var var-zero';
                         cells[1].className = 'varCost var-zero';
                         tr.dataset.filterVariance = 'uncounted';
-                        applyStockLineFilters();
                         return;
                     }
                     const act = parseFloat(input.value) || 0;
@@ -1735,7 +1752,6 @@ $csrf_token = generateCsrfToken();
                     cells[0].className = 'var ' + cls;
                     cells[1].className = 'varCost ' + cls;
                     tr.dataset.filterVariance = Math.abs(variance) < 0.0001 ? 'balanced' : (variance > 0 ? 'surplus' : 'shortage');
-                    applyStockLineFilters();
                 }
 
                 document.addEventListener('DOMContentLoaded', function() {
@@ -1758,8 +1774,11 @@ $csrf_token = generateCsrfToken();
                         });
                     });
 
-                    document.querySelectorAll('#countForm .lines-table .qty').forEach((input) => {
+                    // Only the reading boxes decide counted / not counted (an opening count's unit-cost box must not).
+                    document.querySelectorAll('#countForm .lines-table .qty[name$="][actual]"]').forEach((input) => {
                         syncRowFilterStateFromInputs(input);
+                        // Re-filter when the box is left, not on every keystroke, so a row does not vanish while it is being typed.
+                        input.addEventListener('change', applyStockLineFilters);
                     });
 
                     if (resetEl) {
@@ -1844,18 +1863,14 @@ $csrf_token = generateCsrfToken();
                 }
 
                 /* Submit sends only the items that have a reading; items with no reading are left out of the count.
-                 * Before the confirm, say how many that is. Unsaved typed readings are not sent by a submit, so those
-                 * are saved first (the blank count below is then exactly what the server will see). */
+                 * Before the confirm, say how many that is, counting what is typed right now. Typed readings that are not
+                 * saved yet travel with the submit (scDoConfirm packs them) and the server saves them first. */
                 function scSubmitConfirm(form, oneStep) {
                     if (!form) return;
                     const inputs = Array.from(form.querySelectorAll('input[name$="][actual]"]'));
-                    if (inputs.some(function (el) { return el.value !== el.defaultValue; })) {
-                        scShowBanner('Save your readings first', 'You have typed readings that are not saved yet. Press “Save readings” first so they are included, then submit.', true);
-                        return;
-                    }
                     const blank = inputs.filter(function (el) { return el.value.trim() === ''; }).length;
                     if (inputs.length > 0 && blank === inputs.length) {
-                        scShowBanner('Nothing to submit', 'No item has a reading yet. Type what you counted (0 if there is none) on at least one item, press “Save readings”, then submit.', true);
+                        scShowBanner('Nothing to submit', 'No item has a reading yet. Type what you counted (0 if there is none) on at least one item, then submit.', true);
                         return;
                     }
                     const base = oneStep
@@ -2195,7 +2210,8 @@ $csrf_token = generateCsrfToken();
             a.name = 'action';
             a.value = actionValue;
             form.appendChild(a);
-            if (typeof scPackLines === 'function') scPackLines(form, false); // draft count form: send no per-line fields
+            // Draft count form: approve/reject/delete send no per-line fields; a submit sends the changed lines so they are saved with it.
+            if (typeof scPackLines === 'function') scPackLines(form, actionValue === 'submit_count');
             form.submit();
         }
     </script>

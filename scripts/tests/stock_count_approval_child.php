@@ -51,7 +51,7 @@ $pdo->prepare("UPDATE stock_counts SET shortage_cost = ?, surplus_cost = ? WHERE
 
 /* Partial-submit scenarios (do = submit_count): 'blanks' adds one not-counted line (Blank) and one typed-0 line (Zero);
  * 'allblank' un-counts the main line too, so nothing has a reading. */
-if ((string)($_POST['blanks'] ?? '') === 'yes' || (string)($_POST['blanks'] ?? '') === 'allblank') {
+if (in_array((string)($_POST['blanks'] ?? ''), ['yes', 'allblank', 'typed', 'typedbad'], true)) {
     foreach (['Blank', 'Zero'] as $nm) {
         $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES (?, 'Pantry', 'kg', 0, 200)")->execute(['ZZT ' . $run . ' ' . $nm]);
         $xid = (int)$pdo->lastInsertId();
@@ -67,7 +67,18 @@ if ((string)($_POST['blanks'] ?? '') === 'yes' || (string)($_POST['blanks'] ?? '
     }
 }
 
+/* Unsaved readings travelling with the submit (blanks = typed | typedbad): one more not-counted line (Typed) gets a reading
+ * in lines_json exactly as the page packs it. typed = 7 (valid, saved then submitted); typedbad = -3 (refused: nothing submitted). */
+$postedLines = null;
+if (in_array((string)($_POST['blanks'] ?? ''), ['typed', 'typedbad'], true)) {
+    $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES (?, 'Pantry', 'kg', 5, 200)")->execute(['ZZT ' . $run . ' Typed']);
+    $tid = (int)$pdo->lastInsertId();
+    $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost) VALUES (?,?,5,0,0,200,0)")->execute([$countId, $tid]);
+    $postedLines = json_encode([['id' => (int)$pdo->lastInsertId(), 'actual' => ((string)$_POST['blanks'] === 'typed' ? '7' : '-3'), 'touched' => '1']]);
+}
+
 $_POST = ['action' => $do, 'count_id' => (string)$countId, 'csrf_token' => $csrfTok, 'rejection_reason' => 'Test rejection reason for the check'];
+if ($postedLines !== null) $_POST['lines_json'] = [$postedLines];
 $_REQUEST = $_POST;
 chdir($root . '/admin');
 require $root . '/admin/stock-count.php';

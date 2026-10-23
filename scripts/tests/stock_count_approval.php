@@ -312,6 +312,10 @@ $partial = [
     ['rule ON, regular count: blank left out', ['kind' => 'big', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count', 'blanks' => 'yes'], 'submitted', ['Item', 'Zero'], 1, null],
     ['all lines blank: refused, nothing deleted', ['kind' => 'big', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count', 'blanks' => 'allblank'], 'draft', ['Blank', 'Item'], 0, 'Nothing to submit: no item has a reading yet'],
     ['no blanks: unchanged, nothing logged as left out', ['kind' => 'big', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count'], 'submitted', ['Item'], 0, null],
+    // Readings typed but NOT saved travel with the submit: saved first, then only the true blanks are left out.
+    ['unsaved typed reading is saved by the submit, only the true blank left out', ['kind' => 'big', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count', 'blanks' => 'typed'], 'submitted', ['Item', 'Typed', 'Zero'], 1, null],
+    ['unsaved typed reading, rule OFF one step: saved, submitted and approved', ['kind' => 'big', 'rule' => 'off', 'perm' => 'no', 'counter' => 'me', 'do' => 'submit_count', 'blanks' => 'typed'], 'approved', ['Item', 'Typed', 'Zero'], 1, null],
+    ['unsaved reading refused (negative): nothing submitted, nothing left out', ['kind' => 'big', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count', 'blanks' => 'typedbad'], 'draft', ['Blank', 'Item', 'Typed', 'Zero'], 0, 'The count was not submitted.'],
 ];
 foreach ($partial as [$label, $post, $wantStatus, $wantNames, $wantLog, $needle]) {
     $res = $hScenario($post, $needle === null ? [] : [$needle]);   // a success redirects before the page prints, so only a refusal can be read from the page
@@ -326,6 +330,12 @@ foreach ($partial as [$label, $post, $wantStatus, $wantNames, $wantLog, $needle]
         $zero = null;
         foreach ($np($res, 3) as $row) { if (substr((string)$row['name'], -5) === ' Zero') { $zero = (float)$row['actual_quantity']; } }
         check($zero !== null && abs($zero) < 0.00005, "Partial submit ($label): the typed 0 stays as a reading of 0");
+    }
+    if (in_array('Typed', $wantNames, true)) {
+        $typedQty = null;
+        foreach ($np($res, 3) as $row) { if (substr((string)$row['name'], -6) === ' Typed') { $typedQty = (float)$row['actual_quantity']; } }
+        $wantQty = $wantStatus === 'draft' ? 0.0 : 7.0;   // refused save leaves the line as it was (no reading)
+        check($typedQty !== null && abs($typedQty - $wantQty) < 0.00005, "Partial submit ($label): the typed line holds " . ($wantStatus === 'draft' ? 'no reading' : 'the typed 7'), json_encode($np($res, 3)));
     }
     if (strpos($label, 'opening count') !== false) {
         check((int)($np($res, 4)[0]['n'] ?? -1) === 0, "Partial submit ($label): the left-out item is in no open opening count, so a new opening count can start with it", json_encode($np($res, 4)));
