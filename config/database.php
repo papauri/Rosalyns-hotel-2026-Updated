@@ -9477,6 +9477,37 @@ function recalculateBookingFinancials(int $bookingId): bool
 }
 
 /**
+ * Split one refund of $refundGross (the full amount paid back, tax included) into its VAT and
+ * net parts, pro rata to the ORIGINAL payment's own vat_amount / total_amount. The refund mirrors
+ * the sale: a booking payment stores the nominal vat_rate but a vat_amount diluted by the tourism
+ * levy (gross = net x (1 + vat% + levy%)), so rate / (100 + rate) would hand back too much VAT.
+ * Falls back to the rate formula only when the original row carries no vat_amount at all.
+ * 'net' is "everything that is not VAT" (levy stays in it), matching payments.payment_amount.
+ * The cash paid out is always $refundGross; this only reverses the VAT line.
+ *
+ * @param array $origPayment payments row: total_amount, vat_amount, vat_rate
+ * @return array{vat:float,net:float,rate:float}
+ */
+function rh_refund_vat_split(array $origPayment, float $refundGross): array
+{
+    $refundGross = round($refundGross, 2);
+    $rate = (float)($origPayment['vat_rate'] ?? 0);
+    if ($refundGross <= 0) {
+        return ['vat' => 0.0, 'net' => $refundGross, 'rate' => $rate];
+    }
+    $origTotal = (float)($origPayment['total_amount'] ?? 0);
+    if (isset($origPayment['vat_amount']) && $origPayment['vat_amount'] !== null && $origPayment['vat_amount'] !== '') {
+        $vat = $origTotal > BALANCE_TOLERANCE
+            ? round($refundGross * ((float)$origPayment['vat_amount'] / $origTotal), 2)
+            : 0.0;
+    } else {
+        $vat = $rate > 0 ? round($refundGross * ($rate / (100 + $rate)), 2) : 0.0;
+    }
+    $vat = max(0.0, min($vat, $refundGross));
+    return ['vat' => $vat, 'net' => round($refundGross - $vat, 2), 'rate' => $rate];
+}
+
+/**
  * Split a room-booking refund across the original payments that still have a
  * refundable balance (newest payment first). Remaining refundable per payment =
  * its gross total_amount minus refund rows against it that are pending,
@@ -9500,7 +9531,7 @@ function allocateBookingRefunds(PDO $pdo, int $bookingId, float $amount, bool $l
         ? "AND p.payment_method = 'credit_note'"
         : ($scope === 'any' ? '' : "AND COALESCE(p.payment_method, '') <> 'credit_note'");
     $stmt = $pdo->prepare("
-        SELECT p.id, p.payment_method, p.booking_type, p.booking_reference, p.vat_rate, p.total_amount, p.credit_note_id,
+        SELECT p.id, p.payment_method, p.booking_type, p.booking_reference, p.vat_rate, p.vat_amount, p.total_amount, p.credit_note_id,
                COALESCE((
                    SELECT SUM(COALESCE(r.refund_amount, r.total_amount))
                    FROM payments r
@@ -9727,8 +9758,9 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
             foreach ($allocs as $alloc) {
                 $orig = $alloc['payment'];
                 $leg = (float)$alloc['amount'];
-                $vr = (float)($orig['vat_rate'] ?? 0);
-                $va = $vr > 0 ? round($leg * ($vr / (100 + $vr)), 2) : 0.0;
+                $sp = rh_refund_vat_split($orig, $leg);
+                $vr = $sp['rate'];
+                $va = $sp['vat'];
                 $legRef = finance_next_refund_reference($pdo, date('Y-m-d'));
                 $ins->execute([
                     $legRef, $bookingId, $ref,

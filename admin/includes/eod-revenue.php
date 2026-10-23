@@ -21,7 +21,8 @@
  *                can never double count the nights in (1).
  *   3. POS       sales paid on the business date (rh_pos_eod_summary, station business window) EXCLUDING
  *                room-service orders that were charged to a guest folio (already counted in (2)), less
- *                paid orders voided / refunded on the date (reversal on its own day, as the till does).
+ *                paid orders voided / refunded on the date (reversal on its own day, as the till does), and
+ *                completed partial refunds on still-paid orders settled on the date (at refund_amount).
  *   1b. KEPT ON CANCELLATIONS   a cancelled booking under "keep first night" earns its
  *                cancellation_retained_amount (gross) on its check-in date, as its own line. Not in ADR / RevPAR.
  *   4. CONFERENCE / EVENTS   confirmed and completed bookings earn their total including VAT
@@ -157,6 +158,11 @@ if (!function_exists('rh_eod_earned_revenue')) {
                     $st->execute([$a, $b]);
                     $out['pos_reversed'] += (float)$st->fetchColumn();
                 }
+                // Partial refunds: money paid back on orders that stay 'paid' (so the whole-order reversals
+                // above never see them), at the refund's own amount and settled date. 86 refunds are left out
+                // (the 86 already lowered the order total); orders refunded in full or voided are not counted
+                // again here.
+                $out['pos_reversed'] += rh_pos_partial_refunds($pdo, $a, $b, true)['amount'];
                 $out['pos_net'] = $out['pos_sales_gross'] - $out['pos_room_folio_gross'] - $out['pos_reversed'];
             } catch (Throwable $e) {
                 error_log('rh_eod_earned_revenue pos: ' . $e->getMessage());

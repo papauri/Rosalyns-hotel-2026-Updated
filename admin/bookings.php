@@ -1817,8 +1817,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         foreach (allocateBookingRefunds($pdo, (int)$booking_id, $refundAmt, true) as $alloc) {
                             $orig = $alloc['payment'];
                             $leg  = (float)$alloc['amount'];
-                            $vr   = (float)($orig['vat_rate'] ?? 0);
-                            $va   = $vr > 0 ? round($leg * ($vr / (100 + $vr)), 2) : 0.0;
+                            $spE  = rh_refund_vat_split($orig, $leg);
+                            $vr   = $spE['rate'];
+                            $va   = $spE['vat'];
                             $earlyLegRef = finance_next_refund_reference($pdo, $todayStr_s);
                             $insRef->execute([
                                 $earlyLegRef,

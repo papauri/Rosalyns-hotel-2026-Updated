@@ -427,6 +427,29 @@ try {
         ");
         $posTotalsStmt->execute([$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
         $posTotals = $posTotalsStmt->fetch(PDO::FETCH_ASSOC) ?: ['gross_revenue' => 0, 'cogs' => 0];
+
+        // Partial refunds on orders that are still paid (status 'refunded' orders are already out of the
+        // paid/completed sums above): subtract the completed refund rows settled in this period, at the
+        // full amount paid back, by order type so the by-type table still adds up to the total.
+        require_once __DIR__ . '/includes/pos-shift-totals.php';
+        $posPartial = rh_pos_partial_refunds($pdo, $startDate . ' 00:00:00', date('Y-m-d H:i:s', strtotime($endDate . ' 23:59:59') + 1));
+        if ($posPartial['amount'] > 0) {
+            $posTotals['gross_revenue'] = (float)$posTotals['gross_revenue'] - $posPartial['amount'];
+            foreach ($posPartial['by_type'] as $pType => $pAmt) {
+                $found = false;
+                foreach ($posByType as &$pRow) {
+                    if ((string)$pRow['order_type'] === (string)$pType) {
+                        $pRow['gross_revenue'] = (float)$pRow['gross_revenue'] - $pAmt;
+                        $found = true;
+                        break;
+                    }
+                }
+                unset($pRow);
+                if (!$found) {
+                    $posByType[] = ['order_type' => $pType, 'order_count' => 0, 'gross_revenue' => -$pAmt, 'cogs' => 0, 'voided_amount' => 0, 'voided_count' => 0];
+                }
+            }
+        }
     }
 
     // Inventory shrinkage — real stock losses NOT captured in COGS: wastage,

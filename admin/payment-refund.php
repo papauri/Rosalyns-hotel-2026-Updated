@@ -189,13 +189,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
 
             // Split the refund into net + VAT only now that the amount is final, pro rata to
             // the ORIGINAL payment's own VAT / gross ratio (the refund mirrors the sale).
-            $origTotalLocked = (float)$lockedPayment['total_amount'];
-            $origVatLocked   = (float)$lockedPayment['vat_amount'];
             $vat_rate        = $lockedPayment['vat_rate'] ?? ($payment['vat_rate'] ?? 0);
-            $vat_amount      = $origTotalLocked > BALANCE_TOLERANCE
-                ? round($refund_amount * ($origVatLocked / $origTotalLocked), 2)
-                : 0.0;
-            $payment_amount  = round($refund_amount - $vat_amount, 2);
+            $refundSplit     = rh_refund_vat_split($lockedPayment, $refund_amount);
+            $vat_amount      = $refundSplit['vat'];
+            $payment_amount  = $refundSplit['net'];
 
             // Allocate the refund reference only now — validation has passed and we hold the
             // locks — so a rejected refund never burns a number from the sequence.
@@ -801,7 +798,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
         // Calculate refund summary in real-time
         const originalAmount = <?php echo $payment['total_amount'] ?? 0; ?>;
         const maxRefundable = <?php echo $maxRefundable; ?>;
-        const vatRate = <?php echo $payment['vat_rate'] ?? 0; ?>;
+        // VAT share of the original payment (its own VAT / gross, as the server splits the refund).
+        const vatShare = <?php echo (float)($payment['total_amount'] ?? 0) > 0.01 ? round((float)($payment['vat_amount'] ?? 0) / (float)$payment['total_amount'], 8) : 0; ?>;
         const currencySymbol = '<?php echo $currency_symbol; ?>';
 
         const fmt = (n) => currencySymbol + Number(n).toLocaleString('en-US', {
@@ -819,7 +817,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             const refundAmount = parseFloat(refundEl.value) || 0;
 
             // Calculate VAT portion (pro-rated out of the gross refund)
-            const vatAmount = refundAmount * (vatRate / (100 + vatRate));
+            const vatAmount = Math.round(refundAmount * vatShare * 100) / 100;
             const exclVat = refundAmount - vatAmount;
             const remaining = maxRefundable - refundAmount;
 

@@ -369,7 +369,7 @@ $posUsers = [];
 $orders = [];
 $orderItemsByOrder = [];
 $logs = [];
-$summary = ['orders' => 0, 'paid_total' => 0.0, 'cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0, 'refunds' => 0, 'refund_total' => 0.0, 'voids' => 0, 'voided_total' => 0.0];
+$summary = ['orders' => 0, 'paid_total' => 0.0, 'cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0, 'net_takings' => 0.0, 'refunds' => 0, 'refund_total' => 0.0, 'voids' => 0, 'voided_total' => 0.0];
 
 try {
     // Per-cashier figures: who TOOK the money (paid_by, fallback created_by; split legs by
@@ -499,7 +499,10 @@ try {
         'card' => $dayTotals['gross_card'],
         'refunds' => $dayTotals['refund_count'],
         'refund_total' => $dayTotals['refund_amount'],
-        'voids' => $dayTotals['voids_count'],
+        // Net takings: money taken (tips included) less refunds and voids paid out (tips included) - the
+        // same basis on both sides, the figure the till close writes as total revenue.
+        'net_takings' => round((float)$dayTotals['cash'] + (float)$dayTotals['mobile'] + (float)$dayTotals['card'], 2),
+        'voids' =>$dayTotals['voids_count'],
         'voided_total' => $dayTotals['voids_amount'],
     ]);
 
@@ -558,7 +561,8 @@ try {
             <div data-filter-card class="ck-kpi">
                 <span class="ck-kpi__label">Gross POS sales</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)$summary['paid_total'], 2); ?></span>
-                <span class="ck-kpi__sub"><?php echo (int)$summary["orders"]; ?> paid order<?php echo (int)$summary["orders"] === 1 ? "" : "s"; ?> &middot; before refunds and voids &middot; net <?php echo rh_pos_accounting_money((float)$summary['paid_total'] - (float)$summary['refund_total'], $currency_symbol); ?> (tips not included)</span>
+                <span class="ck-kpi__sub"><?php echo (int)$summary["orders"]; ?> paid order<?php echo (int)$summary["orders"] === 1 ? "" : "s"; ?> &middot; before refunds and voids (tips not included)</span>
+                <span class="ck-kpi__sub" title="Cash, mobile and card taken today, tips included, less every refund and void paid out today at the full amount, tips included. It will not match Gross POS sales above, which leaves tips out.">Net takings after refunds and voids <?php echo rh_pos_accounting_money((float)$summary['net_takings'], $currency_symbol); ?> (tips included)</span>
             </div>
             <div data-filter-card class="ck-kpi ck-kpi--good">
                 <span class="ck-kpi__label">Cash collected</span>

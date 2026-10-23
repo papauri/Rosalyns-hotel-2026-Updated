@@ -878,8 +878,9 @@ if (!function_exists('rh_cancel_auto_refund_account')) {
         foreach ($allocs as $alloc) {
             $orig = $alloc['payment'];
             $leg = (float)$alloc['amount'];
-            $vr = (float)($orig['vat_rate'] ?? 0);
-            $va = $vr > 0 ? round($leg * ($vr / (100 + $vr)), 2) : 0.0;
+            $sp = rh_refund_vat_split($orig, $leg);
+            $vr = $sp['rate'];
+            $va = $sp['vat'];
             $legRef = finance_next_refund_reference($pdo, date('Y-m-d'));
             $ins->execute([
                 $legRef, $bookingType, $bookingId, (string)($orig['booking_reference'] ?? ''),
@@ -913,7 +914,7 @@ if (!function_exists('rh_allocate_account_refunds')) {
             return [];
         }
         $stmt = $pdo->prepare("
-            SELECT p.id, p.payment_method, p.booking_type, p.booking_reference, p.vat_rate, p.total_amount,
+            SELECT p.id, p.payment_method, p.booking_type, p.booking_reference, p.vat_rate, p.vat_amount, p.total_amount,
                    COALESCE((
                        SELECT SUM(COALESCE(r.refund_amount, r.total_amount))
                        FROM payments r

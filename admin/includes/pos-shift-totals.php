@@ -162,6 +162,62 @@ if (!function_exists('rh_pos_settled_refund_payouts')) {
     }
 }
 
+if (!function_exists('rh_pos_partial_refunds')) {
+    /**
+     * Money refunded on orders that are STILL paid (status paid / completed) and SETTLED in
+     * [start,end) - the partial refunds that rh_pos_eod_summary / rh_eod_earned_revenue / the
+     * accounting dashboard would otherwise miss, because only status 'refunded' orders are reversed
+     * there. Each completed refund row counts at refund_amount (the full amount paid back, VAT
+     * included) on its own date (refund_date_processed, else updated_at / created_at - the same
+     * event time the shift close uses). 86 refunds ('REF86-') are skipped: an 86 already lowers the
+     * order total. Orders refunded in full or voided are skipped: they are reversed at their whole
+     * total elsewhere, so nothing is counted twice. $excludeFolio drops room-service orders charged
+     * to a guest folio (those are folio revenue, not POS sales).
+     *
+     * @return array{amount:float,orders:int,by_type:array<string,float>}
+     */
+    function rh_pos_partial_refunds(PDO $pdo, string $start, string $end, bool $excludeFolio = false): array
+    {
+        $out = ['amount' => 0.0, 'orders' => 0, 'by_type' => []];
+        $at = "COALESCE(p.refund_date_processed, p.updated_at, p.created_at)";
+        $notFolio = '';
+        if ($excludeFolio && rh_pos_col_exists($pdo, 'booking_charges', 'stock_order_id')) {
+            $notFolio = " AND NOT (o.order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = o.id))";
+        }
+        try {
+            $st = $pdo->prepare("
+                SELECT COALESCE(NULLIF(o.order_type,''),'walk_in') AS order_type, o.id AS oid,
+                       CASE WHEN COALESCE(p.refund_amount, 0) > 0 THEN p.refund_amount ELSE p.total_amount END AS amt
+                FROM payments p
+                INNER JOIN stock_orders o ON o.id = p.booking_id
+                WHERE p.booking_type = 'restaurant' AND p.payment_type = 'refund'
+                  AND p.refund_status = 'completed' AND p.deleted_at IS NULL
+                  AND p.payment_reference NOT LIKE 'REF86-%'
+                  AND o.paid_at IS NOT NULL AND o.status IN ('paid','completed')
+                  AND $at >= ? AND $at < ?$notFolio");
+            $st->execute([$start, $end]);
+            $orders = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+                $amt = (float)$r['amt'];
+                if ($amt <= 0) {
+                    continue;
+                }
+                $out['amount'] += $amt;
+                $out['by_type'][(string)$r['order_type']] = ($out['by_type'][(string)$r['order_type']] ?? 0.0) + $amt;
+                $orders[(int)$r['oid']] = true;
+            }
+            $out['amount'] = round($out['amount'], 2);
+            $out['orders'] = count($orders);
+            foreach ($out['by_type'] as $k => $v) {
+                $out['by_type'][$k] = round($v, 2);
+            }
+        } catch (Throwable $e) {
+            error_log('rh_pos_partial_refunds: ' . $e->getMessage());
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('rh_pos_shift_reversals')) {
     /**
      * Refund / void payouts of PAID orders whose own timestamp falls in [start,end).
@@ -541,10 +597,14 @@ if (!function_exists('rh_pos_eod_summary')) {
         $out['totals']['orders'] = (int)($r['orders'] ?? 0);
         $out['totals']['gross'] = (float)($r['gross'] ?? 0);
         $out['totals']['cogs'] = (float)($r['cogs'] ?? 0);
-        $mb = rh_pos_margin_basis((float)($r['standing_gross'] ?? 0), $out['totals']['cogs']);
+        // Standing sales less money refunded on still-paid orders (partial refunds) settled in this window;
+        // orders refunded in full or voided are already out of standing_gross.
+        $partial = rh_pos_partial_refunds($pdo, $a, $b);
+        $mb = rh_pos_margin_basis((float)($r['standing_gross'] ?? 0) - $partial['amount'], $out['totals']['cogs']);
         $out['totals']['net_ex_vat'] = $mb['net_ex_vat'];
         $out['totals']['margin'] = $mb['margin'];
         $out['totals']['margin_pct'] = $mb['pct'];
+        $out['totals']['partial_refund_value'] = $partial['amount'];
 
         $st = $pdo->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(o.total_amount),0) AS v FROM stock_orders o WHERE o.status = 'voided' AND o.voided_at >= ? AND o.voided_at < ?");
         $st->execute([$a, $b]);
@@ -559,6 +619,9 @@ if (!function_exists('rh_pos_eod_summary')) {
             $out['totals']['refunded_count'] = (int)($r['n'] ?? 0);
             $out['totals']['refunded_value'] = (float)($r['v'] ?? 0);
         }
+        // "Refunds paid out" also covers partial refunds of orders that are still paid.
+        $out['totals']['refunded_count'] += $partial['orders'];
+        $out['totals']['refunded_value'] += $partial['amount'];
 
         $st = $pdo->prepare("SELECT COALESCE(NULLIF(o.order_type,''),'walk_in') AS order_type, COUNT(*) AS cnt,
                 COALESCE(SUM(o.total_amount),0) AS gross,

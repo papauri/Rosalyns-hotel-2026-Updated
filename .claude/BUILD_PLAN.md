@@ -51,7 +51,7 @@ triaged with rule 2. Then Rosalyn's, by the owner/staff on a real stay.
 
 **6. FINAL GOAL — the finish line (owner, 2026-10-24: "set a level where you are finally 100%
 satisfied … reach it without looping into something else").** Fixed list; nothing is added to it.
-- [ ] G1 PATCH: refund VAT correct when levy is on (all refund paths use the payment's own VAT share),
+- [x] G1 PATCH: refund VAT correct when levy is on (all refund paths use the payment's own VAT share),
       partly refunded till orders in earned revenue, POS Accounting net on one basis — shipped both hotels.
 - [ ] G2 PATCH: levy report takes refunded levy back off (levy follows the money; a kept night keeps
       its levy) — shipped both hotels.

@@ -526,8 +526,9 @@ if (!function_exists('recordCreditNoteRefundLegs')) {
         foreach ($allocs as $alloc) {
             $orig = $alloc['payment'];
             $leg  = (float)$alloc['amount'];
-            $vr   = (float)($orig['vat_rate'] ?? 0);
-            $va   = $vr > 0 ? round($leg * ($vr / (100 + $vr)), 2) : 0.0;
+            $sp   = rh_refund_vat_split($orig, $leg);
+            $vr   = $sp['rate'];
+            $va   = $sp['vat'];
             $ref  = finance_next_refund_reference($pdo, date('Y-m-d'));
             $ins->execute([
                 $ref, $bookingType, $bookingId, $bookingReference,
@@ -674,8 +675,9 @@ if (!function_exists('rh_refund_credit_note_payments')) {
                 $out['skipped'][] = $re['error'];
                 continue;
             }
-            $vr = (float)($orig['vat_rate'] ?? 0);
-            $va = $vr > 0 ? round($leg * ($vr / (100 + $vr)), 2) : 0.0;
+            $sp = rh_refund_vat_split($orig, $leg);
+            $vr = $sp['rate'];
+            $va = $sp['vat'];
             $ref = finance_next_refund_reference($pdo, date('Y-m-d'));
             $ins->execute([
                 $ref, $bookingId, $bookingReference,

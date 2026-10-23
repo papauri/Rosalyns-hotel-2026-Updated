@@ -687,9 +687,10 @@ function createNoShowRefund(array $booking, int $adminUserId, PDO $pdo): array
         foreach ($allocations as $alloc) {
             $orig      = $alloc['payment'];
             $legAmount = (float)$alloc['amount'];
-            $vatRate   = (float)($orig['vat_rate'] ?? 0);
-            $vatAmount = round($legAmount * ($vatRate / (100 + $vatRate)), 2);
-            $payAmount = round($legAmount - $vatAmount, 2);
+            $split     = rh_refund_vat_split($orig, $legAmount);
+            $vatRate   = $split['rate'];
+            $vatAmount = $split['vat'];
+            $payAmount = $split['net'];
             $legRef    = finance_next_refund_reference($pdo, date('Y-m-d'));
             $refundRef = $refundRef === '' ? $legRef : $refundRef . ', ' . $legRef;
 
