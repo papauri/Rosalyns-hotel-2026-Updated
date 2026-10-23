@@ -53,6 +53,17 @@ any verification command named in the brief.
    say which and why.
 7. **Scope** — any file changed outside the brief's path list = automatic FAIL.
 
+8. **DONE CHECKLIST** in `.claude/DEPARTMENTS.md` ("Right first time") — check the builder's
+   report against it. That checklist + the brief's criteria + steps 2–7 are the WHOLE review:
+   do not go hunting for other improvements.
+
+## Gate, not a hunt (owner, 2026-10-24)
+FAIL only for a BLOCKER: wrong number or money, security hole, error/crash, data loss, a broken
+or misleading screen, an unmet criterion, or any hit in steps 2–7. Anything else (nicer wording,
+small inconsistencies that show nothing wrong, hardening, refactors, pre-existing issues outside
+the diff) goes under `LATER:` and does NOT fail the change. On a re-check after a fix round, check
+ONLY the BLOCKERs you listed last time.
+
 ## Verdict format (nothing else)
 
 ```
@@ -63,7 +74,8 @@ INVARIANTS: <ok / numbered violations with file:line>
 UNSANCTIONED: <ok / the escalate-class decision made without authority, file:line>
 CRITERIA: <met N/N / list of unmet>
 SCOPE: <ok / out-of-scope files>
-FIX LIST: <numbered, specific, only if FAIL>
+FIX LIST: <numbered BLOCKERs only, specific, only if FAIL>
+LATER: <one line each, non-blocking — filed by the orchestrator, never a fix round>
 ```
 No code blocks beyond the verdict block. Never write a rewrite — the
 specialist gets one retry from your FIX LIST.

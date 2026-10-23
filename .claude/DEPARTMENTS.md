@@ -82,12 +82,49 @@ each one CLOSE / DELETE / KEEP / BLOCK in the same transaction — nothing linke
 (void/refund, never DELETE). A new table with a parent id column is added to the link map and to
 `scripts/data-health.php` (runs in `php scripts/run_tests.php`).
 
+## Right first time (owner, 2026-10-24: "If they did their job right once we would have completed this ages ago")
+
+Rework came from three places: builders weren't checking what reviewers check, reviewers were
+hunting for anything they could find, and side findings became new fix rounds. So:
+
+1. **One checklist, used by both sides.** The builder works through the DONE CHECKLIST below
+   before handing back and reports each line as done / not applicable. The reviewer checks the
+   same list and the brief's criteria — nothing new is invented at review time.
+2. **Builders test their own screens.** Any changed screen: the builder runs the headless browser
+   check (desktop 1400 + phone 390) itself, including the empty / no-data state.
+3. **Reviews are a gate, not a hunt.** A reviewer FAILs only for a BLOCKER: wrong number or money,
+   security hole, error/crash, data loss, a broken or misleading screen, or a brief criterion not
+   met. Everything else is one `LATER:` line — the orchestrator files it in `.claude/TASKS.md`
+   and it never triggers a fix round on this task.
+4. **One review per change.** Money changes: `dept-accounting-lead` is the gate (it applies the
+   qa-auditor checklist too) — not accounting review *and* qa-auditor. Everything else: qa-auditor.
+5. **One fix round, then stop.** The fix round fixes only the listed BLOCKERs; the re-check looks
+   only at those (orchestrator verifies if small). Still failing → nothing ships, it is reported
+   to the owner as "failed twice".
+6. **Audits sort before anything is built.** Each finding is `FIX-NOW` (wrong today with a real
+   effect on staff, guests or money) or `LATER`. Only FIX-NOW goes into one FIX brief, all at once.
+7. **No scope growth mid-task.** Faults found while doing something else (e.g. while writing
+   helpers) are written down as `LATER:` and batched per department after the current task ships —
+   unless they show staff a wrong money figure today, which counts as FIX-NOW for the next task.
+
+### DONE CHECKLIST (builder before hand-back = reviewer's checklist)
+- Every place that uses a changed function/value/label is found (Grep) and still right — totals,
+  dashboards, PDFs, emails, exports, JS that reads the markup, the "?" helper text.
+- Empty, zero, negative and first-day-of-period cases show something sensible (a dash, not 0% or NaN).
+- Money: BALANCE_TOLERANCE, both VAT modes, refunds/voids/negatives, rounding; owner rules in
+  `accounting-decisions-2026-10` respected.
+- Screens: desktop 1400 + phone 390 checked headless, 44px tap targets, no console errors,
+  labels and helpers say exactly what the number is.
+- Security basics: prepared statements, escaped output, CSRF on POST, permission checks.
+- A test for each fix (or the reason none is possible); `php -l` / `node --check`; the area's suites pass.
+- Both hotels: nothing hotel-specific added to shared code.
+
 ## Ship gate (every change, no exceptions)
 
-1. The lead's own checks: `php -l`, `node --check`, `php scripts/run_tests.php`.
-2. **Independent code review is mandatory before every commit**: `qa-auditor` (sonnet for
-   logic/money/security) reads the diff and must PASS; money changes also need
-   `dept-accounting-lead`, stock changes `dept-stock-lead`.
+1. The lead's own checks: the DONE CHECKLIST above, `php -l`, `node --check`, the area's tests.
+2. **One independent review before every commit** (see "Right first time" 3–5): `qa-auditor`
+   (sonnet for logic/stock/security, haiku for small markup/docs), or `dept-accounting-lead` as the
+   gate for money changes. BLOCKERs fail; everything else is `LATER:`.
 3. **Browser check before anything ships** that touches a screen — no MCP browser tools
    (too many tokens). Serve the repo with `php -S 0.0.0.0:8000 -t . scripts/tests/dev-router.php`
    and drive it with `node scripts/tests/browser_check.mjs steps.json` (headless Chrome;
@@ -113,8 +150,8 @@ each one CLOSE / DELETE / KEEP / BLOCK in the same transaction — nothing linke
    Briefs name exact files and functions/line ranges; no open-ended "explore".
 4. **Fresh small agent over a big resume.** For a fix round, start a new agent with just the
    finding list unless the original agent's context is small; resuming re-sends its whole history.
-5. **One QA per ship**, covering the whole change; re-gate only for non-trivial fixes —
-   one-line fixes of a finding are verified by the orchestrator.
+5. **One review per ship**, covering the whole change (see "Right first time"); one fix round at
+   most, re-checking only the failed BLOCKERs — small fixes are verified by the orchestrator.
 6. **Short output.** Reports ≤ 25 lines; list problems, not everything that was fine.
 7. **Tests by area while building** (`php scripts/ship.php --tests=pos` etc.); the full suite
    once at ship time. Browser checks only for the screens that changed.
