@@ -845,7 +845,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                     <div class="po-bud">
                         <h4><i class="fas fa-scale-balanced"></i> Budget effect <small>in <?php echo htmlspecialchars($currency_symbol); ?>, for <?php echo htmlspecialchars(date('F Y')); ?> &middot; <a class="po-link" href="stock-budget.php">open the budget</a></small></h4>
                         <div style="overflow-x:auto;"><table class="po-bud-table no-card-mobile no-auto-sort">
-                            <thead><tr><th>Category</th><th class="num">Left now</th><th class="num">This order</th><th class="num">Left after</th><th></th></tr></thead>
+                            <thead><tr><th>Category</th><th class="num">Left now <i class="help" aria-label="About left now" data-tip="What is left of this budget line for the month before this order: budget minus received minus other orders already sent.">?</i></th><th class="num">This order <i class="help" aria-label="About this order" data-tip="The value of this order's lines in that category: quantity still to arrive times order price.">?</i></th><th class="num">Left after <i class="help" aria-label="About left after" data-tip="Left now minus This order. A minus figure means the order takes the budget over.">?</i></th><th></th></tr></thead>
                             <tbody>
                             <?php foreach ($budgetEffect['rows'] as $be): ?>
                                 <tr>

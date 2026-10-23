@@ -123,6 +123,11 @@ $canNext = $nextYm <= rh_sbud_shift_month($thisYm, 12);
 $canPrev = $prevYm >= rh_sbud_shift_month($thisYm, -36);
 $isPast = $c && $c['info']['state'] === 'past';
 
+/** The small shared "?" helper. $focus adds keyboard focus (leave off inside buttons and table headings). */
+$help = static function (string $about, string $tip, bool $focus = false): string {
+    return '<i class="help"' . ($focus ? ' tabindex="0" role="button"' : '') . ' aria-label="' . htmlspecialchars('About ' . $about, ENT_QUOTES) . '" data-tip="' . htmlspecialchars($tip, ENT_QUOTES) . '">?</i>';
+};
+
 /** Render one progress bar (received + already ordered, with the "month gone" tick). */
 $bar = static function (float $budget, float $spent, float $comm, float $monthPct, bool $showPace) {
     $scale = max($budget, $spent + $comm, 0.01);
@@ -264,13 +269,13 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
 
             <!-- Summary -->
             <div class="ck-kpis ck-kpis--4">
-                <div class="ck-kpi"><span class="ck-kpi__label">Budget</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $noBasisAll ? '—' : $money($s['budget']); ?></span>
+                <div class="ck-kpi"><span class="ck-kpi__label">Budget <?php echo $help('budget', 'What you plan to spend on stock this month: the whole-stock limit if there is one, otherwise all category budgets added up.', true); ?></span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $noBasisAll ? '—' : $money($s['budget']); ?></span>
                     <span class="ck-kpi__sub"><?php echo $noBasisAll ? 'No sales basis yet' : ($s['basis'] === 'whole' ? 'Whole-stock limit' : ($hasBudget ? 'All category budgets added up' : 'Not set')); ?></span></div>
-                <div class="ck-kpi"><span class="ck-kpi__label">Received</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($hasBudget && !$noBasisAll ? $s['received'] : $c['total']['spent']); ?></span>
-                    <span class="ck-kpi__sub">Stock booked in this month</span></div>
-                <div class="ck-kpi"><span class="ck-kpi__label">Already ordered</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($hasBudget && !$noBasisAll ? $s['ordered'] : $c['total']['committed']); ?></span>
+                <div class="ck-kpi"><span class="ck-kpi__label">Received <?php echo $help('received', 'Goods booked in this month, by delivery date and at cost, for categories with a budget line. Everything if there is a whole-stock limit.', true); ?></span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($hasBudget && !$noBasisAll ? $s['received'] : $c['total']['spent']); ?></span>
+                    <span class="ck-kpi__sub"><?php echo ($hasBudget && !$noBasisAll && $s['basis'] !== 'whole' && $c['other']['spent'] > BALANCE_TOLERANCE) ? 'Stock booked in this month for categories with a budget (' . $money($c['other']['spent']) . ' more in other categories)' : 'Stock booked in this month'; ?></span></div>
+                <div class="ck-kpi"><span class="ck-kpi__label">Already ordered <?php echo $help('already ordered', 'Purchase orders sent or part-received and not yet in: quantity still to arrive times order price. Only counted in the current month.', true); ?></span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($hasBudget && !$noBasisAll ? $s['ordered'] : $c['total']['committed']); ?></span>
                     <span class="ck-kpi__sub">Sent to suppliers, not yet received</span></div>
-                <div class="ck-kpi <?php echo (!$hasBudget || $noBasisAll) ? '' : ($s['left'] < -BALANCE_TOLERANCE ? 'ck-kpi--alert' : ($s['status'] === 'near' ? 'ck-kpi--warn' : 'ck-kpi--good')); ?>"><span class="ck-kpi__label">Left to spend</span>
+                <div class="ck-kpi <?php echo (!$hasBudget || $noBasisAll) ? '' : ($s['left'] < -BALANCE_TOLERANCE ? 'ck-kpi--alert' : ($s['status'] === 'near' ? 'ck-kpi--warn' : 'ck-kpi--good')); ?>"><span class="ck-kpi__label">Left to spend <?php echo $help('left to spend', 'Budget minus Received minus Already ordered. A minus sign means over budget. Lines with no sales basis yet are left out.', true); ?></span>
                     <span class="ck-kpi__value ck-kpi__value--money"><?php echo ($hasBudget && !$noBasisAll) ? ($s['left'] < -BALANCE_TOLERANCE ? '-' : '') . $money(abs($s['left'])) : '—'; ?></span>
                     <span class="ck-kpi__sub"><?php echo $noBasisAll ? 'Starts once there are sales' : ($hasBudget ? (!empty($s['nobasis_lines']) ? 'Budget minus received and ordered on lines with a budget' : 'Budget minus received minus ordered') : 'Set a budget to see this'); ?></span></div>
             </div>
@@ -282,13 +287,13 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                         <div class="sbud-legend">
                             <span><i style="background:#7E684B"></i>Received</span>
                             <span><i style="background:#c9b38f"></i>Already ordered</span>
-                            <?php if ($c['info']['state'] === 'current'): ?><span><i style="background:#3e3930;opacity:.55;width:2px;height:12px"></i>Share of the month gone</span><?php endif; ?>
+                            <?php if ($c['info']['state'] === 'current'): ?><span><i style="background:#3e3930;opacity:.55;width:2px;height:12px"></i>Share of the month gone <?php echo $help('share of the month gone', 'The black tick on the bar: days gone this month, counting the part of today, out of all days in the month.', true); ?></span><?php endif; ?>
                         </div>
                         <div class="sbud-pace__text">
-                            <?php if (!$noBasisAll): ?><span><strong><?php echo number_format($s['pct_used'], 0); ?>%</strong> of the budget is used</span><?php endif; ?>
-                            <?php if ($c['info']['state'] === 'current'): ?><span><strong><?php echo number_format($c['info']['month_pct'], 0); ?>%</strong> of the month has gone</span><?php endif; ?>
-                            <?php if ($s['forecast'] !== null && $c['info']['state'] === 'current'): ?><span>Month-end forecast: <strong><?php echo $money($s['forecast']); ?></strong></span><?php endif; ?>
-                            <?php if ($c['sales']): ?><span>F&amp;B sales before VAT so far: <strong><?php echo $money($c['sales']['so_far']); ?></strong> &middot; expected for the month: <strong><?php echo !empty($c['sales']['has_basis']) ? $money($c['sales']['expected']) : 'no sales basis yet'; ?></strong></span><?php endif; ?>
+                            <?php if (!$noBasisAll): ?><span><strong><?php echo number_format($s['pct_used'], 0); ?>%</strong> of the budget is used <?php echo $help('budget used', 'Received plus Already ordered, as a share of the Budget.', true); ?></span><?php endif; ?>
+                            <?php if ($c['info']['state'] === 'current'): ?><span><strong><?php echo number_format($c['info']['month_pct'], 0); ?>%</strong> of the month has gone <?php echo $help('share of the month gone', 'Days gone this month, counting the part of today, out of all days in the month.', true); ?></span><?php endif; ?>
+                            <?php if ($s['forecast'] !== null && $c['info']['state'] === 'current'): ?><span>Month-end forecast: <strong><?php echo $money($s['forecast']); ?></strong> <?php echo $help('month-end forecast', 'Received so far spread over the month at the same daily rate, or Received plus Already ordered if that is higher. Shown after 7 days.', true); ?></span><?php endif; ?>
+                            <?php if ($c['sales']): ?><span>F&amp;B sales before VAT so far: <strong><?php echo $money($c['sales']['so_far']); ?></strong> <?php echo $help('food and drink sales so far', 'Food and drink sales this month up to today, with VAT taken out. Same daily figures as the End of Day report.', true); ?> &middot; expected for the month: <strong><?php echo !empty($c['sales']['has_basis']) ? $money($c['sales']['expected']) : 'no sales basis yet'; ?></strong> <?php echo $help('expected sales for the month', 'What the % budgets are a share of: this month so far spread over all days once 7 days have gone, otherwise last full month. Past months use actual sales.', true); ?></span><?php endif; ?>
                         </div>
                     </div>
                     <div class="sbud-verdict">
@@ -329,10 +334,11 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                             </span>
                             <?php echo $bar($l['budget'], $l['spent'], $l['committed'], $c['info']['month_pct'], $c['info']['state'] === 'current'); ?>
                             <span class="sbud-figs">
-                                <span><em>Budget</em><?php echo !empty($l['no_basis']) ? '—' : $money($l['budget']); ?></span>
-                                <span><em>Received</em><?php echo $money($l['spent']); ?></span>
-                                <span><em>Already ordered</em><?php echo $money($l['committed']); ?></span>
-                                <span><em>Left to spend</em><span class="<?php echo $l['left'] < -BALANCE_TOLERANCE ? 'neg' : ''; ?>"><?php echo !empty($l['no_basis']) ? '—' : ($l['left'] < -BALANCE_TOLERANCE ? '-' : '') . $money(abs($l['left'])); ?></span></span>
+                                <?php $scope = !empty($l['is_all']) ? 'all stock' : 'this category'; ?>
+                                <span><em>Budget <?php echo $help('line budget', 'The budget for ' . $scope . ': a fixed amount, or its % of expected food and drink sales before VAT. A dash means no sales basis yet.'); ?></em><?php echo !empty($l['no_basis']) ? '—' : $money($l['budget']); ?></span>
+                                <span><em>Received <?php echo $help('line received', 'Goods booked in this month for ' . $scope . ', by delivery date, at cost, under the category each item had when it arrived.'); ?></em><?php echo $money($l['spent']); ?></span>
+                                <span><em>Already ordered <?php echo $help('line already ordered', 'Sent or part-received purchase orders not yet in for ' . $scope . ': quantity still to arrive times order price. Current month only.'); ?></em><?php echo $money($l['committed']); ?></span>
+                                <span><em>Left to spend <?php echo $help('line left to spend', 'Budget minus Received minus Already ordered for ' . $scope . '. A minus sign means over budget.'); ?></em><span class="<?php echo $l['left'] < -BALANCE_TOLERANCE ? 'neg' : ''; ?>"><?php echo !empty($l['no_basis']) ? '—' : ($l['left'] < -BALANCE_TOLERANCE ? '-' : '') . $money(abs($l['left'])); ?></span></span>
                             </span>
                         </button>
                     <?php endforeach; ?>
@@ -343,8 +349,8 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                                     <small>Uncategorised items and categories without a budget. They only count against a whole-stock limit.</small></span>
                             </span>
                             <span class="sbud-figs">
-                                <span><em>Received</em><?php echo $money($c['other']['spent']); ?></span>
-                                <span><em>Already ordered</em><?php echo $money($c['other']['committed']); ?></span>
+                                <span><em>Received <?php echo $help('other received', 'Goods booked in this month, at cost, for uncategorised items and categories with no budget line.'); ?></em><?php echo $money($c['other']['spent']); ?></span>
+                                <span><em>Already ordered <?php echo $help('other already ordered', 'Sent or part-received purchase orders not yet in for those items: quantity still to arrive times order price. Current month only.'); ?></em><?php echo $money($c['other']['committed']); ?></span>
                             </span>
                         </button>
                     <?php endif; ?>
@@ -356,7 +362,7 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
             <div class="sbud-card">
                 <h3>Past months <small>Budget against what was received, in <?php echo htmlspecialchars($cur); ?></small></h3>
                 <div style="overflow-x:auto;"><table class="sbud-table no-card-mobile no-auto-sort">
-                    <thead><tr><th>Month</th><th class="num">Budget</th><th class="num">Received</th><th class="num">Difference</th></tr></thead>
+                    <thead><tr><th>Month</th><th class="num">Budget <?php echo $help('past budget', 'The month\'s total budget from its saved lines. A dash means none was set, or % lines had no sales to measure against.'); ?></th><th class="num">Received <?php echo $help('past received', 'Goods booked in that month, by delivery date and at cost, for categories with a budget line (all stock if no budget).'); ?></th><th class="num">Difference <?php echo $help('past difference', 'Budget minus Received. "left" means under budget, "over" means more was received than budgeted.'); ?></th></tr></thead>
                     <tbody>
                     <?php foreach ($history as $h): ?>
                         <tr>
@@ -466,6 +472,12 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
         var body = document.getElementById('sbudDrawerBody');
         function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
         function closeDrawer() { drawer.classList.remove('open'); drawer.setAttribute('aria-hidden', 'true'); }
+        function heading(text, about, tip) {
+            var h = el('h4', null, text + ' '), q = el('i', 'help', '?');
+            q.setAttribute('aria-label', 'About ' + about); q.setAttribute('data-tip', tip);
+            h.appendChild(q);
+            return h;
+        }
         function item(left, sub, right, href) {
             var d = el('div', 'sbud-d-item'), l = el('div');
             if (href) { var a = el('a', null, left); a.href = href; l.appendChild(a); } else { l.appendChild(el('span', null, left)); }
@@ -481,11 +493,11 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
                 .then(function (r) { if (!r.ok) throw new Error('bad'); return r.json(); })
                 .then(function (d) {
                     body.textContent = '';
-                    body.appendChild(el('h4', null, 'Already ordered (open purchase orders)'));
+                    body.appendChild(heading('Already ordered (open purchase orders)', 'open purchase orders', 'Orders sent or part-received and not yet in. The amount on the right is quantity still to arrive times order price.'));
                     if (!d.pos.length) body.appendChild(el('p', 'sbud-note', 'Nothing is waiting to arrive.'));
                     d.pos.forEach(function (p) { body.appendChild(item(p.ref, p.supplier + ' - ' + p.status, p.value, 'purchase-orders.php?id=' + p.id)); });
                     if (d.pos_capped) body.appendChild(el('p', 'sbud-note', 'Showing the latest ' + d.pos.length + ' orders — the total above includes all of them.'));
-                    body.appendChild(el('h4', null, 'Received this month'));
+                    body.appendChild(heading('Received this month', 'received this month', 'Goods booked in this month, newest first, at cost. Each shows the delivery date, quantity and order number; the amount on the right is the cost.'));
                     if (!d.receipts.length) body.appendChild(el('p', 'sbud-note', 'No stock received yet.'));
                     d.receipts.forEach(function (r) { body.appendChild(item(r.name, r.date + ' - ' + r.qty + (r.po ? ' - ' + r.po : ''), r.value, r.po_id ? 'purchase-orders.php?id=' + r.po_id : '')); });
                     if (d.receipts_total > d.receipts.length) body.appendChild(el('p', 'sbud-note', 'Showing the latest ' + d.receipts.length + ' of ' + d.receipts_total + ' — the total above includes all of them.'));
@@ -508,7 +520,11 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
         var source = document.getElementById('sbudSource');
         var filled = document.getElementById('sbudFilled');
         function opt(value, text, sel) { var o = document.createElement('option'); o.value = value; o.textContent = text; if (sel) o.selected = true; return o; }
-        function field(label, node) { var d = document.createElement('div'); var l = document.createElement('label'); l.textContent = label; d.appendChild(l); d.appendChild(node); return d; }
+        function field(label, node, tip) {
+            var d = document.createElement('div'); var l = document.createElement('label'); l.appendChild(document.createTextNode(label));
+            if (tip) { var q = document.createElement('i'); q.className = 'help'; q.textContent = '?'; q.setAttribute('aria-label', 'About ' + label.toLowerCase()); q.setAttribute('data-tip', tip); l.appendChild(document.createTextNode(' ')); l.appendChild(q); }
+            d.appendChild(l); d.appendChild(node); return d;
+        }
         function addRow(r) {
             r = r || { category: '', mode: 'fixed', value: '', control: 'warn' };
             var row = document.createElement('div'); row.className = 'sbud-erow';
@@ -528,10 +544,12 @@ $bar = static function (float $budget, float $spent, float $comm, float $monthPc
             ctl.appendChild(opt('approval', 'Needs approval', r.control === 'approval'));
             var rm = document.createElement('button'); rm.type = 'button'; rm.className = 'sbud-btn sbud-btn--ghost sbud-btn--sm'; rm.setAttribute('aria-label', 'Remove this line'); rm.innerHTML = '<i class="fas fa-trash"></i>';
             rm.addEventListener('click', function () { row.remove(); });
-            row.appendChild(field('Category', cat)); row.appendChild(field('Budget by', mode));
-            row.appendChild(field(r.mode === 'target_pct' ? '% of sales' : 'Value', val)); row.appendChild(field('When over', ctl));
+            row.appendChild(field('Category', cat, 'The stock category this line covers. Whole stock is one limit across every category together.'));
+            row.appendChild(field('Budget by', mode, 'Fixed amount is a set sum for the month. % of F&B sales is a share of expected food and drink sales before VAT.'));
+            row.appendChild(field(r.mode === 'target_pct' ? '% of sales' : 'Value', val, 'The fixed amount, or the percentage of expected food and drink sales before VAT, depending on Budget by.'));
+            row.appendChild(field('When over', ctl, 'Warn if over: the buyer must confirm before sending an order that goes over. Needs approval: only a budget manager can send it, with a reason.'));
             var rmWrap = document.createElement('div'); rmWrap.appendChild(rm); row.appendChild(rmWrap);
-            mode.addEventListener('change', function () { row.children[2].firstChild.textContent = mode.value === 'target_pct' ? '% of sales' : 'Amount'; });
+            mode.addEventListener('change', function () { row.children[2].firstChild.firstChild.nodeValue = mode.value === 'target_pct' ? '% of sales' : 'Amount'; });
             rowsEl.appendChild(row);
         }
         function fill(list, src, msg) {
