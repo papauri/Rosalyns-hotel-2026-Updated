@@ -53,7 +53,7 @@ triaged with rule 2. Then Rosalyn's, by the owner/staff on a real stay.
 satisfied … reach it without looping into something else").** Fixed list; nothing is added to it.
 - [x] G1 PATCH: refund VAT correct when levy is on (all refund paths use the payment's own VAT share),
       partly refunded till orders in earned revenue, POS Accounting net on one basis — shipped both hotels.
-- [ ] G2 PATCH: levy report takes refunded levy back off (levy follows the money; a kept night keeps
+- [x] G2 PATCH: levy report takes refunded levy back off (levy follows the money; a kept night keeps
       its levy) — shipped both hotels.
 - [ ] G3 Verify once: `php scripts/run_tests.php` + `php scripts/data-health.php` green in both hotels
       (after the owner runs migration 069), one headless pass over the money screens touched today.

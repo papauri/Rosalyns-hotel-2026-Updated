@@ -9477,6 +9477,38 @@ function recalculateBookingFinancials(int $bookingId): bool
 }
 
 /**
+ * Tourism levy for bookings created between $startDate and $endDate (Y-m-d), after refunds ("levy follows the money").
+ * Levy share = bookings.tourism_levy_amount / total_with_vat. Canonical net-paid rule (paid rows in
+ * completed/paid/refunded/partially_refunded, refunds with refund_status completed/processing).
+ *  - live bookings (not cancelled / expired / no-show): levy minus the levy share of their refunds;
+ *  - cancelled / no-show bookings: levy share of (paid - refunded) when > 0 (e.g. first night kept), capped at the levy;
+ *  - expired bookings count nothing. Zero-gross bookings count nothing (BALANCE_TOLERANCE guard).
+ */
+function rh_tourism_levy_for_period(PDO $pdo, string $startDate, string $endDate): float
+{
+    $stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(ROUND(CASE
+                WHEN b.tourism_levy_amount <= 0 OR b.total_with_vat <= :tol1 THEN 0
+                WHEN b.status = 'expired' THEN 0
+                WHEN b.status IN ('cancelled','no-show')
+                    THEN LEAST(b.tourism_levy_amount, GREATEST(0, COALESCE(p.paid,0) - COALESCE(p.refunded,0)) * b.tourism_levy_amount / b.total_with_vat)
+                ELSE GREATEST(0, b.tourism_levy_amount - COALESCE(p.refunded,0) * b.tourism_levy_amount / b.total_with_vat)
+            END, 2)), 0)
+        FROM bookings b
+        LEFT JOIN (
+            SELECT booking_id,
+                   SUM(CASE WHEN COALESCE(payment_type,'') <> 'refund' AND payment_status IN ('completed','paid','refunded','partially_refunded') THEN total_amount ELSE 0 END) AS paid,
+                   SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN total_amount ELSE 0 END) AS refunded
+            FROM payments
+            WHERE booking_type = 'room' AND deleted_at IS NULL
+            GROUP BY booking_id
+        ) p ON p.booking_id = b.id
+        WHERE b.deleted_at IS NULL AND DATE(b.created_at) BETWEEN :s AND :e");
+    $stmt->execute([':tol1' => BALANCE_TOLERANCE, ':s' => $startDate, ':e' => $endDate]);
+    return round((float)$stmt->fetchColumn(), 2);
+}
+
+/**
  * Split one refund of $refundGross (the full amount paid back, tax included) into its VAT and
  * net parts, pro rata to the ORIGINAL payment's own vat_amount / total_amount. The refund mirrors
  * the sale: a booking payment stores the nominal vat_rate but a vat_amount diluted by the tourism

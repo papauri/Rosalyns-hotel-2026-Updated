@@ -26,6 +26,7 @@ $suites = [
     'In-house moves + splits' => 'scripts/tests/inhouse_move.php',
     'Money linked data'     => 'scripts/tests/linked_money.php',
     'Refund VAT + POS refunds' => 'scripts/tests/refund_vat_pos.php',
+    'Levy after refunds'    => 'scripts/tests/levy_after_refunds.php',
     'Gym linked data'       => 'scripts/tests/linked_gym.php',
     'Block Rooms permission' => 'scripts/tests/block_rooms.php',
     'API payment delete'    => 'scripts/tests/api_payment_delete.php',

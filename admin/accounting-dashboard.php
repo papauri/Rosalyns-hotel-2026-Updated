@@ -713,15 +713,13 @@ if (!isset($folio_fnb)) {
         } catch (Throwable $e) { /* ignore */
         }
 
-        // Tourism levy accrued on bookings taken in the period (levy is charged on the
-        // booking, not per payment, so it is accrual-based; excludes dead bookings).
+        // Tourism levy on bookings taken in the period, after refunds, plus levy on money kept
+        // from cancelled / no-show bookings (rh_tourism_levy_for_period).
         $cat_levy_period = 0.0;
         $levyEnabled = in_array(getSetting('tourism_levy_enabled'), ['1', 1, true, 'true', 'on'], true);
         if ($levyEnabled && $mod_bookings) {
             try {
-                $levyStmt = $pdo->prepare("SELECT COALESCE(SUM(tourism_levy_amount),0) FROM bookings WHERE deleted_at IS NULL AND status NOT IN ('cancelled','expired','no-show') AND DATE(created_at) BETWEEN ? AND ?");
-                $levyStmt->execute([$startDate, $endDate]);
-                $cat_levy_period = (float)$levyStmt->fetchColumn();
+                $cat_levy_period = rh_tourism_levy_for_period($pdo, $startDate, $endDate);
             } catch (Throwable $e) { /* ignore */
             }
         }
@@ -1659,7 +1657,7 @@ if (!isset($folio_fnb)) {
                 <span class="ck-kpi__sub">
                     <?php echo $vatEnabled ? 'Enabled @ ' . $ckH($vatRate) . '%' : 'Disabled'; ?>
                     <?php if ($vatEnabled && $vatNumber): ?> &middot; VAT&nbsp;# <?php echo $ckH($vatNumber); ?><?php endif; ?>
-                    <?php if (!empty($levyEnabled)): ?> &middot; <span title="Tourism levy accrued on bookings taken in this period - remit to the Malawi Tourism Council">Tourism levy <?php echo $ckPlain($cat_levy_period); ?></span><?php endif; ?>
+                    <?php if (!empty($levyEnabled)): ?> &middot; <span title="Tourism levy on bookings taken in this period, after refunds, including levy on money kept from cancellations">Tourism levy <?php echo $ckPlain($cat_levy_period); ?></span><?php endif; ?>
                 </span>
             </div>
             <a class="ck-kpi<?php echo $cat_pending_refunds > 0.01 ? ' ck-kpi--warn' : ''; ?>" href="<?php echo $cat_pending_refunds > 0.01 ? 'payments.php?refund_status=pending' : $ckH($periodPaymentsLink); ?>" title="Refunds issued in this period">
