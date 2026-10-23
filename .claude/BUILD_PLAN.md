@@ -49,6 +49,22 @@ triaged with rule 2. Then Rosalyn's, by the owner/staff on a real stay.
       2026-10-21: Liwonde all green. Rosalyn's data-health green; POS/KDS smoke cannot run until one menu item has a recipe (setup, not a code fault). Owner 2026-10-21: Liwonde's passing POS/KDS run counts for both hotels (same code).
 - [ ] Two weeks of real use with no new P1/P2.
 
+**6. FINAL GOAL — the finish line (owner, 2026-10-24: "set a level where you are finally 100%
+satisfied … reach it without looping into something else").** Fixed list; nothing is added to it.
+- [ ] G1 PATCH: refund VAT correct when levy is on (all refund paths use the payment's own VAT share),
+      partly refunded till orders in earned revenue, POS Accounting net on one basis — shipped both hotels.
+- [ ] G2 PATCH: levy report takes refunded levy back off (levy follows the money; a kept night keeps
+      its levy) — shipped both hotels.
+- [ ] G3 Verify once: `php scripts/run_tests.php` + `php scripts/data-health.php` green in both hotels
+      (after the owner runs migration 069), one headless pass over the money screens touched today.
+- [ ] G4 Owner: run `php admin/migrations/migrate.php --run` on both hotels; owner items in 4.
+When G1–G3 are ticked the code is FINISHED. Claude then does nothing proactive: no audits, no
+reviews of untouched areas, no "while we're here". After that only two things start work:
+(a) a fault the owner or staff report that is one of the four PATCH kinds — fixed as a PATCH, one
+review, shipped, done; (b) a FEATURE the owner asks for in so many words, with its deliverables
+listed up front (e.g. "?" helpers for the remaining departments: waiting for the owner's go).
+Everything on the LATER list waits for the owner's monthly decision.
+
 **How to test from here on:** tests run against the live DBs (no local MariaDB on the owner's
 laptop) and must roll back or delete exactly what they create; real test entries go to Liwonde.
 Per change, run only the relevant suites + browser-check only changed screens; the full suite
