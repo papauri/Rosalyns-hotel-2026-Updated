@@ -107,6 +107,22 @@ hunting for anything they could find, and side findings became new fix rounds. S
    helpers) are written down as `LATER:` and batched per department after the current task ships —
    unless they show staff a wrong money figure today, which counts as FIX-NOW for the next task.
 
+### PATCH or FEATURE — label every task before anyone starts (owner, 2026-10-24)
+The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. Every line in
+`.claude/TASKS.md` and every brief starts with `PATCH` or `FEATURE`.
+- **PATCH** fixes a fault of one of the four kinds: (1) money is wrong, (2) a guest can't book or pay,
+  or a guest document is wrong, (3) staff are blocked, (4) data loss or a security hole. It is the
+  smallest change that removes the fault: no new screens, no new wording beyond what the fix
+  needs, no migrations unless the fault can't be fixed without one. It needs no approval.
+- **FEATURE** is everything else: new behaviour, new or changed screens, columns, helpers,
+  clearer wording, polish, "while we're here" improvements, and migrations that add capability.
+  It is built ONLY when the owner asked for it in so many words or it is on `.claude/PATCH_QUEUE.md`.
+  The brief lists the exact deliverables up front; the feature is done when that list is done.
+- **When unsure, it is a FEATURE**: log it as `LATER:` / Future Ideas and don't build it.
+- Findings from an audit or review are sorted the same way: PATCH-kind faults may be fixed next;
+  FEATURE-kind ideas go to the monthly list for the owner.
+- A PATCH brief never grows into a FEATURE. If a fix needs feature work, stop and ask the owner.
+
 ### DONE CHECKLIST (builder before hand-back = reviewer's checklist)
 - Every place that uses a changed function/value/label is found (Grep) and still right — totals,
   dashboards, PDFs, emails, exports, JS that reads the markup, the "?" helper text.
