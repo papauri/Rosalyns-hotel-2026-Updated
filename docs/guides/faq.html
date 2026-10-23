@@ -49,6 +49,10 @@
     <summary>How do I turn the on-screen hints (the round ? button) on or off?</summary>
     <p>Click the round <strong>?</strong> button at the bottom right of the admin screen. When hints are on, small gold <strong>?</strong> marks appear on buttons and cards: hover over one (or press and hold on a phone) to read what it does. Click the button again to switch them off. You can also press <kbd>?</kbd> on the keyboard when you are not typing in a box. On the POS Till, open <strong>More</strong> and choose <strong>Help mode</strong> (<strong>Help Tooltips</strong> in the menu on a phone). On the Kitchen, Bar and Coffee screens it is the <strong>?</strong> in the top bar.</p>
   </details>
+  <details class="faq" id="faq-question-mark-columns">
+    <summary>What does the question mark (?) next to a column heading or a figure card mean?</summary>
+    <p>The small question mark (<strong>?</strong>) tells you what the number counts, where it comes from and which period it covers. Tap it (or click it on a computer) to read it. On the Stock pages every column heading and figure card has one. On a phone, a <strong>What the columns mean</strong> list sits above each table. It is a short explanation only: it does not change any figure. See the note at the top of <a href="08-stock-orders.html#intro-help">Stock, Recipes and Orders</a>.</p>
+  </details>
   <details class="faq" id="faq-where-is">
     <summary>Where is a page, and who is allowed to open it?</summary>
     <p>The <a href="system-map.php">System map</a> lists every page in the admin menu with the permission it needs, the roles that have it by default and the module that must be switched on. It is read straight from the system, so it is always up to date. You can also type <em>"where is …"</em> in any search box.</p>
@@ -348,6 +352,16 @@
   <details class="faq" id="faq-set-stock-budget" data-module="stock">
     <summary>How do I set the stock budget?</summary>
     <p>Open <strong>Stock</strong> &rarr; <strong>Budget</strong>. You need <strong>Stock Budget (set &amp; approve)</strong>; managers have it. Click <strong>Add a line</strong>, pick <strong>Whole stock (all categories)</strong> or a category, and type a <strong>Fixed amount</strong> (or a % of expected sales). Choose <strong>Warn if over</strong> or <strong>Needs approval</strong>, then click <strong>Save budgets</strong>. You will see <em>"Budgets saved."</em> To start from last month, use <strong>Copy last month</strong> or <strong>Fill from last 3 months</strong>, then check the lines before you save. See <a href="08-stock-orders.html#budget">the stock budget section</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-budget-no-sales-basis" data-module="stock">
+    <summary>Why does my % budget say "No sales basis yet"?</summary>
+    <p>A budget set as a % of sales needs food and drink sales to work out the amount. If there are no sales to measure against yet, the line shows a dash for its budget and <em>"No sales basis yet"</em>. That is not a warning: the line is not counted as over, and it does not hold up any purchase order. Anything you receive or order for it still shows under <strong>Received</strong> and <strong>Already ordered</strong>. It starts working once there are sales. Until then you can set a fixed amount instead. See <a href="08-stock-orders.html#budget">How to set and watch the stock budget</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-budget-too-early" data-module="stock">
+    <summary>Why does the forecast say "Too early to tell"?</summary>
+    <p>In the first 7 days of the month there are not enough days to judge how fast stock is being spent, so the page says <em>"Too early to tell"</em> and does not give a month-end forecast or a pace verdict. From day 8 the page can show a month-end forecast. For a % of sales line in those first 7 days the page uses last month's full sales, so the budget already shows. See <a href="08-stock-orders.html#budget">How to set and watch the stock budget</a>.</p>
   </details>
 
   <details class="faq" id="faq-receive-no-cost" data-module="stock">

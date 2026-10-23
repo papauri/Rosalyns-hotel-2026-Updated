@@ -28,6 +28,8 @@
     </dl>
   </div>
 
+  <p id="intro-help">Column headings and figure cards on the Stock pages have a small <strong>?</strong> beside them. Tap it (or click it on a computer) to read what the number counts, where it comes from and which period it covers. On a phone, a <strong>What the columns mean</strong> list sits above each table.</p>
+
   <div class="toc">
     <ol>
       <li><a href="#perms">Who can do what</a></li>
@@ -206,7 +208,7 @@
       </ul>
     </li>
     <li>If more arrived than was ordered, you can still type the larger number, because the stock is really there. Fill in the box <strong>Over-delivery note (needed if above outstanding)</strong> under that line, at least 5 characters, saying why. The line is then flagged <strong>over-delivered</strong> with your note.</li>
-    <li>The order becomes partly received until every line is complete, then received.</li>
+    <li>The order becomes partly received until every line is complete, then received. It only says <strong>Received</strong> when every line is in: one line over-delivered does not hide a short line.</li>
     <li>Click <strong>Close</strong> when finished (outstanding lines will not be received) or <strong>Cancel</strong> for a draft or sent order. <strong>Print</strong> prints the order. You will see <em>"Purchase order cancelled."</em> or <em>"Purchase order closed."</em></li>
   </ol>
   <p>If an order would take its budget over, the order page warns you before it is sent. See <a href="#budget">How to set and watch the stock budget</a>.</p>
@@ -218,19 +220,23 @@
   <p>The budget is the most you plan to spend on stock in a month. It is counted in what the stock costs you, not in selling prices.</p>
   <p>The card for the month has four figures:</p>
   <ul>
-    <li><strong>Budget</strong>: the amount set for the month. It shows <em>Not set</em> until you set one.</li>
-    <li><strong>Received</strong>: the stock booked in this month, at the cost it was received for.</li>
-    <li><strong>Already ordered</strong>: what is still to arrive on purchase orders you have sent.</li>
-    <li><strong>Left to spend</strong>: the budget minus Received minus Already ordered. Orders you have sent are counted straight away, so two people cannot both spend the same last amount.</li>
+    <li><strong>Budget</strong>: the amount set for the month. It shows <em>Not set</em> until you set one. A % of sales line with no sales to measure yet shows a dash and <em>No sales basis yet</em>.</li>
+    <li><strong>Received</strong>: the stock booked in this month, at the cost it was received for. This includes lines with no sales basis yet.</li>
+    <li><strong>Already ordered</strong>: what is still to arrive on purchase orders you have sent. This includes lines with no sales basis yet.</li>
+    <li><strong>Left to spend</strong>: the budget minus Received minus Already ordered. Orders you have sent are counted straight away, so two people cannot both spend the same last amount. If some lines have no sales basis yet, the card says <em>Budget minus received and ordered on lines with a budget</em>: those lines are left out of Left to spend, but their spending still shows under Received and Already ordered.</li>
   </ul>
-  <p>Under the figures a bar shows <strong>Share of the month gone</strong> (how much of the budget is used) next to how far through the month we are. <strong>Month-end forecast</strong> is what you will spend by the end of the month at this pace. It starts from day 4 of the month. Typical messages:</p>
+  <p>Under the figures a bar shows <strong>Share of the month gone</strong> (how much of the budget is used) next to how far through the month we are. <strong>Month-end forecast</strong> is what you will spend by the end of the month at this pace. It starts once 7 days of the month have gone. Before that the page says <em>"Too early to tell"</em> and does not judge the pace. Typical messages:</p>
   <ul>
     <li><em>"Over budget by ..."</em> when the money is used up.</li>
     <li><em>"... left to spend - N% of the budget is used."</em> when 80% or more is used.</li>
     <li><em>"Ahead of pace - at this rate you'll spend ... by month end."</em> when the forecast is above the budget.</li>
     <li><em>"On track."</em> when none of the above applies.</li>
+    <li><em>"Too early in the month to tell how spending is going."</em> or the label <em>"Too early to tell"</em>, in the first 7 days of the month.</li>
+    <li><em>"No sales basis yet - a % of sales budget needs some food and drink sales to measure against, so it is not checked until there are."</em> on a % of sales line with no sales to measure yet.</li>
   </ul>
-  <p><strong>Fixed amount</strong> or <strong>% of expected sales</strong>. A line can be a fixed amount, or a percentage of the food and drink sales we expect for the month (the same daily sales figure as the End of Day report, VAT included). Expected sales are this month's sales so far spread over the whole month, from day 4. In the first 3 days of a month, or before any sale that month, last month's sales are used. A past month uses what was actually sold. Because sales include VAT, set the percentage on the same basis as the costs you enter.</p>
+  <p><strong>Fixed amount</strong> or <strong>% of expected sales</strong>. A line can be a fixed amount, or a percentage of the food and drink sales we expect for the month, <strong>before VAT</strong>. The till prices include VAT, so the page takes the VAT out before it works out the budget. Expected sales are this month's sales so far spread over the whole month, once 7 days of the month have gone. In the first 7 days of a month, or before any sale that month, last month's full sales are used. A past month uses what was actually sold. If there is no sales figure to measure against yet, the line shows <em>No sales basis yet</em>. It is not counted as over, and it never holds up a purchase order. Its spending still shows under Received and Already ordered.</p>
+  <p>Stock costs are used exactly as you enter them on receiving and on purchase orders. If you enter costs with VAT, budget with VAT.</p>
+  <p><strong>What the budget does not show yet.</strong> Returns to a supplier are not recorded yet, so spending on the budget only goes up. If the supplier's price is different from the price on the purchase order, the budget shows the real amount only when the goods are received, not when the order is sent. Long lists in the card's detail panel show the latest entries and say <em>"Showing the latest N of M"</em>. The total above the list still counts all of them.</p>
   <p>Each line also says what happens when an order would go over it:</p>
   <ul>
     <li><strong>Warn if over</strong>: the order can still be sent, but the person sending it must tick a box first.</li>
