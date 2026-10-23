@@ -85,7 +85,7 @@ function stock_reports_helper_content(string $tab, string $dateFrom, string $dat
     } elseif ($tab === 'wastage') {
         $content['example'] = 'If Wastage rate is 8.5%, it means wastage cost is 8.5% of your usage cost in this window; sustained high rates indicate leakage or prep-process issues.';
     } elseif ($tab === 'yield') {
-        $content['example'] = 'If Overall yield is 86.0%, then 14.0% of total output was lost to wastage/expiry; focus on ingredients with low yield badges first.';
+        $content['example'] = 'If Overall yield is 86.0%, then 14.0% of the value of stock that left was lost to wastage/expiry; focus on ingredients with low yield badges first.';
     } elseif ($tab === 'adjustments') {
         $content['example'] = 'If Net quantity change is strongly negative with many decrease events, audit adjustment reasons to separate valid consumption from shrinkage risk.';
     } elseif ($tab === 'expiry') {
@@ -136,7 +136,6 @@ if (($_GET['export'] ?? '') === 'csv') {
 }
 
 $vwSa = rh_voided_wastage_sql('sa');
-$vwPlain = rh_voided_wastage_sql('');
 $rows = [];
 $totalCount = 0;
 $summary = [];
@@ -259,14 +258,24 @@ try {
         $r = $tot->fetch(PDO::FETCH_NUM);
         $summary['total_cost'] = (float)$r[0];
         $summary['ingredient_count'] = (int)$r[1];
+        // Rate uses the same rule as the Usage tab: archived ingredients are left out of both sides.
         $usageCompareStmt = $pdo->prepare("
-            SELECT COALESCE(SUM(CASE WHEN source_type IN ('pos_order','room_service') AND NOT {$vwPlain} THEN ABS(quantity_change) * cost_at_time WHEN source_type = 'void_restore' THEN -ABS(quantity_change) * cost_at_time ELSE 0 END), 0)
-            FROM stock_adjustments
-            WHERE DATE(created_at) BETWEEN ? AND ?
+            SELECT COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " ELSE 0 END), 0)
+            FROM stock_adjustments sa
+            INNER JOIN stock_ingredients i ON i.id = sa.ingredient_id AND i.is_archived = 0
+            WHERE DATE(sa.created_at) BETWEEN ? AND ?
         ");
         $usageCompareStmt->execute([$dateFrom, $dateTo]);
         $usageCostWindow = (float)$usageCompareStmt->fetchColumn();
-        $wastageRate = $usageCostWindow > 0 ? ((float)$summary['total_cost'] / $usageCostWindow) * 100 : 0;
+        $wastageRateStmt = $pdo->prepare("
+            SELECT COALESCE(SUM(w.wastage_cost), 0)
+            FROM stock_wastage w
+            INNER JOIN stock_ingredients i ON i.id = w.ingredient_id AND i.is_archived = 0
+            WHERE w.recorded_date BETWEEN ? AND ?
+        ");
+        $wastageRateStmt->execute([$dateFrom, $dateTo]);
+        $hasUsageCost = $usageCostWindow > BALANCE_TOLERANCE;
+        $wastageRate = $hasUsageCost ? ((float)$wastageRateStmt->fetchColumn() / $usageCostWindow) * 100 : 0;
 
         $topReasonStmt = $pdo->prepare("
             SELECT reason, COALESCE(SUM(wastage_cost), 0) AS total_cost
@@ -282,7 +291,7 @@ try {
         $analysis_cards = [
             stock_reports_metric('Wastage entries', number_format($totalCount), 'Rows in selected date range'),
             stock_reports_metric('Wastage total', stock_reports_money((float)$summary['total_cost'], $currency_symbol), 'Direct write-off value'),
-            stock_reports_metric('Wastage rate', number_format($wastageRate, 1) . '%', $usageCostWindow > 0 ? 'As share of usage cost' : 'No comparable usage cost in range'),
+            stock_reports_metric('Wastage rate', $hasUsageCost ? number_format($wastageRate, 1) . '%' : '–', $hasUsageCost ? 'As share of usage cost' : 'No comparable usage cost in range'),
             stock_reports_metric('Impacted ingredients', number_format((int)$summary['ingredient_count']), 'Distinct ingredients with wastage'),
             stock_reports_metric('Top wastage reason', (string)($topReason['reason'] ?? 'n/a'), isset($topReason['total_cost']) ? stock_reports_money((float)$topReason['total_cost'], $currency_symbol) : 'No reason data'),
         ];
@@ -292,7 +301,8 @@ try {
                    COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) ELSE 0 END), 0) AS used,
                    COALESCE(SUM(CASE WHEN sa.source_type = 'wastage' OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS wasted,
                    COALESCE(SUM(CASE WHEN sa.source_type = 'expiry' THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS expired,
-                   COALESCE(SUM(CASE WHEN sa.source_type IN ('wastage','expiry') OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " ELSE 0 END), 0) AS loss_value
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('wastage','expiry') OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " ELSE 0 END), 0) AS loss_value,
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " ELSE 0 END), 0) AS used_value
             FROM stock_ingredients i
             LEFT JOIN stock_adjustments sa ON sa.ingredient_id = i.id AND DATE(sa.created_at) BETWEEN ? AND ?
             WHERE i.is_archived = 0
@@ -302,9 +312,7 @@ try {
         ");
         $st->execute([$dateFrom, $dateTo]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-        $totalUsed = 0.0;
-        $totalWasted = 0.0;
-        $totalExpired = 0.0;
+        $usedValueTotal = 0.0;
         $atRiskIngredients = 0;
         $lossCostTotal = 0.0;
         foreach ($rows as $row) {
@@ -317,19 +325,19 @@ try {
                 $atRiskIngredients++;
             }
 
-            $totalUsed += $usedQty;
-            $totalWasted += $wastedQty;
-            $totalExpired += $expiredQty;
+            $usedValueTotal += max(0.0, (float)($row['used_value'] ?? 0));
             $lossCostTotal += (float)($row['loss_value'] ?? 0); // valued at cost when it happened
         }
 
-        $overallYield = ($totalUsed + $totalWasted + $totalExpired) > 0
-            ? ($totalUsed / ($totalUsed + $totalWasted + $totalExpired)) * 100
+        // Value at cost, not raw quantity: kg, litres and pieces cannot be added together.
+        $hasYieldMovement = ($usedValueTotal + $lossCostTotal) > BALANCE_TOLERANCE;
+        $overallYield = $hasYieldMovement
+            ? ($usedValueTotal / ($usedValueTotal + $lossCostTotal)) * 100
             : 0;
 
         $analysis_cards = [
             stock_reports_metric('Ingredients in yield analysis', number_format(count($rows)), 'Rows with movement in selected range'),
-            stock_reports_metric('Overall yield', number_format($overallYield, 1) . '%', 'Weighted across used, wasted, and expired'),
+            stock_reports_metric('Overall yield', $hasYieldMovement ? number_format($overallYield, 1) . '%' : '–', $hasYieldMovement ? 'Share of stock value used, not wasted or expired' : 'No stock used or lost in this range'),
             stock_reports_metric('At-risk ingredients', number_format($atRiskIngredients), 'Yield below 85% threshold'),
             stock_reports_metric('Loss cost', stock_reports_money($lossCostTotal, $currency_symbol), 'Wasted + expired value'),
         ];
@@ -559,11 +567,11 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
             'Quantity used' => 'Total quantity used in the date range, shown separately for each unit of measure.',
             'Wastage entries' => 'How many wastage records are dated between the From and To dates.',
             'Wastage total' => 'Cost of everything recorded as wasted between the From and To dates.',
-            'Wastage rate' => 'Wastage total as a percent of the usage cost over the same dates. Shows 0 when there was no usage.',
+            'Wastage rate' => 'Wastage cost as a percent of the usage cost over the same dates. Archived ingredients are left out of both, the same as the Usage tab, so it can differ slightly from the Wastage total. Shows a dash (–) when there was no usage.',
             'Impacted ingredients' => 'How many different ingredients had wastage between the From and To dates.',
             'Top wastage reason' => 'The reason that cost the most in wastage in the date range, with its cost.',
             'Ingredients in yield analysis' => 'Ingredients that were used, wasted or expired between the From and To dates.',
-            'Overall yield' => 'Quantity used as a percent of everything that left stock (used plus wasted plus expired) in the date range. Higher is better.',
+            'Overall yield' => 'Value used as a percent of the value of everything that left stock (used plus wasted plus expired), each valued at the cost recorded when it happened, in the date range. Worked out by value so kilograms, litres and pieces are never added together. Higher is better. Shows a dash (–) when nothing was used or lost.',
             'At-risk ingredients' => 'Ingredients whose own yield is below 85 percent in the date range.',
             'Loss cost' => 'Cost of stock wasted or expired in the date range, at the cost recorded when it happened.',
             'Adjustment entries' => 'Every stock movement logged between the From and To dates: sales, deliveries, wastage, counts and hand changes.',

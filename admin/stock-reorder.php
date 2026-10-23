@@ -36,7 +36,7 @@ $itemCount = 0;
 
 if (!$error) {
     try {
-        // On-order quantities from open purchase orders (draft/sent/partial).
+        // On-order quantities from open purchase orders (sent and part-received only; drafts are not on order yet).
         $onOrder = [];
         try {
             $rows = $pdo->query("
