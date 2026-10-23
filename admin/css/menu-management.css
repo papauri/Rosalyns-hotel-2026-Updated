@@ -856,14 +856,25 @@ tr.drag-over > td {
 /* Stock item picker: category + search + item dropdown, then the unit line above the quantity box */
 .mm-picker {
     display: grid;
-    gap: 8px;
+    gap: 12px;
     margin-top: 10px;
+    padding: 12px;
+    background: var(--mm-bg-soft);
+    border: 1px solid var(--mm-border);
+    border-radius: var(--mm-radius);
 }
 
+/* One column at every width: Category, Search, its live list, then the chosen Stock item. */
 .mm-pk-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+}
+
+.mm-pk-hint {
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
 }
 
 .mm-pk-f {
@@ -902,10 +913,14 @@ tr.drag-over > td {
     border-radius: var(--mm-radius);
 }
 
+.mm-picker .mm-pk-none {
+    background: #fff;
+}
+
 .mm-unitline {
     margin: 0;
     padding: 8px 10px;
-    background: var(--mm-bg-soft);
+    background: #fff;
     border-left: 3px solid var(--mm-accent-dark);
     border-radius: var(--mm-radius);
     font-size: 13px;
@@ -916,6 +931,61 @@ tr.drag-over > td {
 .mm-unitline[hidden],
 .mm-pk-none[hidden] {
     display: none;
+}
+
+/* Search as you type: live list of matching stock items under the Search box (same look as the admin search results) */
+.mm-live {
+    list-style: none;
+    margin: 0;
+    padding: 4px;
+    margin-top: -6px; /* sits directly under the Search box it belongs to */
+    max-height: min(240px, 40vh);
+    overflow-y: auto;
+    border: 1px solid var(--mm-border-strong);
+    border-radius: var(--mm-radius);
+    background: #fff;
+}
+
+.mm-live[hidden] {
+    display: none;
+}
+
+.mm-live li[role="option"] {
+    display: block;
+    min-height: 44px;
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1.35;
+    color: var(--mm-text);
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.mm-live li.is-active {
+    background: var(--admin-hover-bg, #edf2f8);
+    box-shadow: inset 3px 0 0 var(--mm-accent-dark);
+}
+
+.mm-live-name {
+    font-weight: 600;
+}
+
+.mm-live-sub {
+    color: var(--mm-muted);
+}
+
+.mm-live mark {
+    background: rgba(200, 164, 90, 0.35);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+.mm-live-note {
+    padding: 10px;
+    font-size: 13px;
+    color: var(--mm-muted);
 }
 
 /* The decimal working under a pieces quantity: small and grey, there for checking only */
@@ -1151,4 +1221,16 @@ tr.drag-over > td {
     .mm-linkbtn {
         min-height: 44px;
     }
+}
+
+/* A quantity box left empty on purpose (never filled in for the person): marked until they type */
+.mm-stock-add input.mm-need,
+.mm-stock-line input.mm-need {
+    border-color: var(--mm-danger);
+    box-shadow: inset 0 0 0 1px var(--mm-danger);
+}
+
+.mm-stock-add input.mm-need::placeholder,
+.mm-stock-line input.mm-need::placeholder {
+    color: var(--mm-danger);
 }
