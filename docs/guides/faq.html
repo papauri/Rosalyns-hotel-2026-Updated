@@ -316,7 +316,22 @@
 
   <details class="faq" id="faq-opening-stock" data-module="stock">
     <summary>What does "Opening stock not recorded (N items)" mean, and how do I fix it?</summary>
-    <p>N ingredients have never had a quantity recorded, so they are not counted as out of stock or low. To fix it: open <strong>Stock</strong> &rarr; <strong>Stock Count</strong>, tick <strong>Opening stock count (first set-up only)</strong> at the bottom of <strong>Start a count</strong>, click <strong>Start count</strong>, type the quantity and the unit cost for every item, click <strong>Save readings</strong> and <strong>Submit for approval</strong>. A different manager then clicks <strong>Approve &amp; correct stock</strong>. See <a href="08-stock-orders.html#opening">How to do the Opening stock count</a>.</p>
+    <p>N ingredients have never had a quantity recorded, so they are not counted as out of stock or low. To fix it: open <strong>Stock</strong> &rarr; <strong>Stock Count</strong>, tick <strong>Opening stock count (first set-up)</strong> under <strong>Start a count</strong>, choose <strong>What to count</strong>, click <strong>Start count</strong>, type the quantity and the unit cost for every item, click <strong>Save readings</strong> and <strong>Submit for approval</strong>. A different manager then clicks <strong>Approve &amp; correct stock</strong>. See <a href="08-stock-orders.html#opening">How to do the Opening stock count</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-opening-in-parts" data-module="stock">
+    <summary>Can I do the opening stock count in parts?</summary>
+    <p>Yes. Under <strong>What to count</strong>, choose <strong>One category</strong> or <strong>Only the items I choose</strong> instead of <strong>Everything</strong>. For example, count the items that already have a cost first, then start another opening count for the rest. Items that are not in a count keep the stock they have now. Each item you count still needs a unit cost, and someone other than you must approve it. See <a href="08-stock-orders.html#opening">How to do the Opening stock count</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-opening-already-open" data-module="stock">
+    <summary>Why does it say some items are already in another opening stock count?</summary>
+    <p>An item can be in only one opening count that is still open (being counted or waiting for approval). The page says <em>"Not started: 2 of these items are already in another opening stock count that is still open (...)"</em> and names the items and the other count. Finish or delete that other count first. Or choose <strong>Only the items I choose</strong> and leave those items out. See <a href="08-stock-orders.html#opening">How to do the Opening stock count</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-count-delete-mistake" data-module="stock">
+    <summary>I started a stock count by mistake. How do I delete it?</summary>
+    <p>Open <strong>Stock</strong> &rarr; <strong>Stock Count</strong>. For a count still being counted, click <strong>Delete this count</strong> under <em>"Started this count by mistake?"</em>, or <strong>Delete</strong> on its row in the <strong>Counts</strong> list, then confirm. The person who started it, an administrator, or someone who approves stock counts can do this. A rejected count is deleted with <strong>Delete count</strong>, by an administrator or by an approver who did not count it. Stock is never changed by a delete, and the deletion is kept in the activity log. A count waiting for approval or approved cannot be deleted. See <a href="08-stock-orders.html#count">How to do a stock count</a>.</p>
   </details>
 
   <details class="faq" id="faq-po-wont-send" data-module="stock">
@@ -388,7 +403,7 @@
 
   <details class="faq" id="faq-approve-own-count" data-module="stock">
     <summary>Why can't I approve my own stock count?</summary>
-    <p>Because a big shortage must be checked by someone other than the person who counted. If a shortage is over both the cost limit and the percentage limit you will see <em>"This count has shortages over the approval threshold (MWK 5,000.00 and 10%). It must be approved by a different manager or admin than the person who counted it."</em> Ask another manager or admin to approve it. Approving or rejecting a count also needs the Admin or Manager role: without it you see <em>"Only admin/manager can approve counts."</em> An opening stock count always needs a different approver. See <a href="20-stock-loss-prevention.html#setup">Setting it up</a>.</p>
+    <p>Because a big shortage must be checked by someone other than the person who counted. If a shortage is over both the cost limit and the percentage limit you will see <em>"This count has shortages over the approval threshold (MWK 5,000.00 and 10%). It must be approved by a different manager or admin than the person who counted it."</em> Ask another manager or admin to approve it. Approving or rejecting a count also needs the Admin or Manager role: without it you see <em>"Only admin/manager can approve counts."</em> An opening stock count needs a different approver too, unless an administrator has switched the second-person rule off in Hotel Settings. See <a href="20-stock-loss-prevention.html#setup">Setting it up</a>.</p>
   </details>
 
   <details class="faq" id="faq-receptionist-cant" data-module="bookings">
