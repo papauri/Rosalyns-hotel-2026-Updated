@@ -248,12 +248,18 @@ try {
 // --- The real page, as the signed-in admin (page_harness.php: one outer transaction that never commits) ----------------
 $harness = __DIR__ . '/page_harness.php';
 $hRun = strtoupper(bin2hex(random_bytes(3)));
-$hScenario = function (array $post) use ($harness, $hRun): array {
+$hScenario = function (array $post, array $grep = []) use ($harness, $hRun): array {
     $refLike = "'%20991231-CH" . $hRun . "%'";
     $verify = [
         "SELECT status, approved_by, counted_by FROM stock_counts WHERE reference LIKE '20991231-CH" . $hRun . "%'",
         "SELECT COUNT(*) AS n FROM admin_activity_log WHERE action = 'stock_count_self_approved' AND details LIKE $refLike",
         "SELECT COUNT(*) AS n FROM admin_activity_log WHERE action IN ('stock_count_approvers_emailed','stock_count_approvers_reminded') AND details LIKE $refLike",
+        // 3: the lines the count holds now (partial-submit scenarios)
+        "SELECT i.name, scl.actual_quantity FROM stock_count_lines scl INNER JOIN stock_counts sc ON sc.id = scl.count_id INNER JOIN stock_ingredients i ON i.id = scl.ingredient_id WHERE sc.reference LIKE '20991231-CH" . $hRun . "%' ORDER BY i.name",
+        // 4: is the left-out item still inside any open opening count? (what scOpeningOverlap looks at)
+        "SELECT COUNT(*) AS n FROM stock_count_lines l INNER JOIN stock_counts sc ON sc.id = l.count_id INNER JOIN stock_ingredients i ON i.id = l.ingredient_id WHERE i.name = 'ZZT " . $hRun . " Blank' AND sc.is_opening = 1 AND sc.status IN ('draft','submitted')",
+        // 5: the left-out names were logged
+        "SELECT COUNT(*) AS n FROM admin_activity_log WHERE action = 'stock_count_lines_left_out' AND details LIKE $refLike AND details LIKE '%ZZT " . $hRun . " Blank%'",
     ];
     // "perm no" needs a signed-in user the admin role does not bypass: an existing active manager (the child denies them the permission).
     $asUser = '';
@@ -261,7 +267,7 @@ $hScenario = function (array $post) use ($harness, $hRun): array {
         global $pdo;
         $asUser = (string)$pdo->query("SELECT username FROM admin_users WHERE is_active = 1 AND role = 'manager' ORDER BY id LIMIT 1")->fetchColumn();
     }
-    $cfg = base64_encode(json_encode(['post' => $post + ['run' => $hRun], 'verify' => $verify] + ($asUser !== '' ? ['as_username' => $asUser] : [])));
+    $cfg = base64_encode(json_encode(['post' => $post + ['run' => $hRun], 'verify' => $verify, 'grep' => $grep] + ($asUser !== '' ? ['as_username' => $asUser] : [])));
     $out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' scripts/tests/stock_count_approval_child.php ' . escapeshellarg($cfg) . ' 2>&1');
     $res = ['error' => 'no result', 'raw' => substr((string)$out, -600), 'rolled_back' => false];
     if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $x = json_decode($m[1], true); if (is_array($x)) { $res = $x; } }
@@ -295,6 +301,54 @@ foreach ($hs as [$label, $post, $wantStatus, $wantLog]) {
         check((int)($res['verify'][2][0]['n'] ?? -1) === 0, 'Page (remind refused): no email was logged or sent');
     }
 }
+
+// --- Submit only the items that have a reading (items with no reading are left out of the count) -----------------------
+$np = static fn(array $r, int $i): array => is_array($r['verify'][$i] ?? null) ? $r['verify'][$i] : [];
+$names = static fn(array $rows): array => array_map(static fn($x) => (string)$x['name'], $rows);
+$partial = [
+    // label, post, wanted status, lines the count must hold afterwards (name after "ZZT <run> "), left-out log rows, text the page must show
+    ['rule ON, opening count: blank left out, typed 0 and counted line kept', ['kind' => 'opening', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count', 'blanks' => 'yes'], 'submitted', ['Item', 'Zero'], 1, null],
+    ['rule OFF one step: blank left out, approved with the read lines only', ['kind' => 'opening', 'rule' => 'off', 'perm' => 'no', 'counter' => 'me', 'do' => 'submit_count', 'blanks' => 'yes'], 'approved', ['Item', 'Zero'], 1, null],
+    ['rule ON, regular count: blank left out', ['kind' => 'big', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count', 'blanks' => 'yes'], 'submitted', ['Item', 'Zero'], 1, null],
+    ['all lines blank: refused, nothing deleted', ['kind' => 'big', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count', 'blanks' => 'allblank'], 'draft', ['Blank', 'Item'], 0, 'Nothing to submit: no item has a reading yet'],
+    ['no blanks: unchanged, nothing logged as left out', ['kind' => 'big', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count'], 'submitted', ['Item'], 0, null],
+];
+foreach ($partial as [$label, $post, $wantStatus, $wantNames, $wantLog, $needle]) {
+    $res = $hScenario($post, $needle === null ? [] : [$needle]);   // a success redirects before the page prints, so only a refusal can be read from the page
+    check(!empty($res['rolled_back']) && empty($res['leak']) && empty($res['marker_lost']), "Partial submit ($label): ran and rolled back", json_encode($res['raw'] ?? $res));
+    check((string)($res['verify'][0][0]['status'] ?? '?') === $wantStatus, "Partial submit ($label): count ends $wantStatus", json_encode($res['verify'][0] ?? null));
+    $want = array_map(static fn($n) => 'ZZT ' . $hRun . ' ' . $n, $wantNames); sort($want);
+    $got = $names($np($res, 3));
+    check($got === $want, "Partial submit ($label): the count holds exactly the lines " . implode(', ', $wantNames), json_encode($got));
+    check((int)($np($res, 5)[0]['n'] ?? -1) === $wantLog, "Partial submit ($label): left-out items " . ($wantLog ? 'logged' : 'not logged'), json_encode($np($res, 5)));
+    if ($needle !== null) check(!empty($res['found'][$needle]), "Partial submit ($label): page says \"$needle\"", json_encode($res['found'] ?? null));
+    if (in_array('Zero', $wantNames, true)) {
+        $zero = null;
+        foreach ($np($res, 3) as $row) { if (substr((string)$row['name'], -5) === ' Zero') { $zero = (float)$row['actual_quantity']; } }
+        check($zero !== null && abs($zero) < 0.00005, "Partial submit ($label): the typed 0 stays as a reading of 0");
+    }
+    if (strpos($label, 'opening count') !== false) {
+        check((int)($np($res, 4)[0]['n'] ?? -1) === 0, "Partial submit ($label): the left-out item is in no open opening count, so a new opening count can start with it", json_encode($np($res, 4)));
+    }
+}
+
+// The wording helpers of the page, taken from its source (the page itself redirects before printing on success).
+$pageSrc = (string)file_get_contents(__DIR__ . '/../../admin/stock-count.php');
+foreach (['scLeftOutSentence', 'scBannerTitle'] as $fn) {
+    if (preg_match('/^function ' . $fn . '\(.*?^\}/ms', $pageSrc, $fm)) { eval($fm[0]); }
+}
+if (function_exists('scLeftOutSentence') && function_exists('scBannerTitle')) {
+    $one = scLeftOutSentence(['Flour']);
+    $many = scLeftOutSentence(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']);
+    check(scLeftOutSentence([]) === '', 'Wording: nothing left out says nothing');
+    check(strpos($one, '1 item had no reading and was left out of this count: Flour.') === 0 && strpos($one, 'later count once you have it') !== false, 'Wording: one item left out', $one);
+    check(strpos($many, '10 items had no reading and were left out of this count: A, B, C, D, E, F, G, H and 2 more.') === 0 && strpos($many, 'once you have them') !== false, 'Wording: many items left out, first eight named', $many);
+    check(scBannerTitle('x', true, 'submit_count') === 'Can’t submit yet' && scBannerTitle('x', true, 'approve_count') === 'Not approved' && scBannerTitle('x', true, '') === 'Something needs fixing', 'Banner: error titles come from the action, generic fallback');
+    check(scBannerTitle('Count 1 submitted with 3 items.', false, '') === 'Count submitted' && scBannerTitle('Count 1 submitted and approved. Variances applied to stock.', false, '') === 'Count submitted and approved' && scBannerTitle('Count 1 approved. Variances applied to stock.', false, '') === 'Count approved' && scBannerTitle('Not approved, and nothing was posted', false, '') === 'Not approved' && scBannerTitle('whatever', false, '') === 'Done', 'Banner: success titles come from the message, generic fallback');
+} else {
+    bad('Wording: scLeftOutSentence / scBannerTitle not found in admin/stock-count.php');
+}
+check(strpos($pageSrc, 'Every line must have a reading') === false && strpos($pageSrc, "showAlert(htmlspecialchars((string)\$message") === false && strpos($pageSrc, 'id="scBannerOk"') !== false, 'Page: old "every line must have a reading" wording and the timed toast are gone; the banner has its OK button');
 
 // The setting must end exactly as it started (the harness and this test both roll back).
 $setRowAfter = $pdo->query("SELECT setting_value FROM site_settings WHERE setting_key = 'stock_count_second_approver'")->fetch(PDO::FETCH_NUM);

@@ -191,6 +191,49 @@ function scUncountedLines(PDO $pdo, int $countId, bool $hasCol): array
     return [count($names), array_slice($names, 0, 6)];
 }
 
+/* Every line of a count with no reading yet (ingredient names, A to Z). These are the lines a submit leaves out. */
+function scUncountedAllNames(PDO $pdo, int $countId, bool $hasCol): array
+{
+    $q = $pdo->prepare("SELECT i.name FROM stock_count_lines scl INNER JOIN stock_ingredients i ON i.id = scl.ingredient_id WHERE scl.count_id = ? AND " . scUncountedSql($hasCol) . " ORDER BY i.name");
+    $q->execute([$countId]);
+    return array_map('strval', $q->fetchAll(PDO::FETCH_COLUMN));
+}
+
+/* "7 items had no reading and were left out of this count: A, B, … and 3 more. They can be counted ..." Plain text; '' when nothing was left out. */
+function scLeftOutSentence(array $names): string
+{
+    $n = count($names);
+    if ($n === 0) return '';
+    $shown = array_slice($names, 0, 8);
+    $more = $n - count($shown);
+    return $n . ' item' . ($n === 1 ? ' had' : 's had') . ' no reading and ' . ($n === 1 ? 'was' : 'were') . ' left out of this count: ' . implode(', ', $shown) . ($more > 0 ? ' and ' . $more . ' more' : '')
+        . '. ' . ($n === 1 ? 'It' : 'They') . ' can be counted in a later count once you have ' . ($n === 1 ? 'it' : 'them') . '.';
+}
+
+/* Heading of the result banner. Errors are named after the action that failed; a success is named from its own message
+ * (it arrives through the session after a redirect, so the action is no longer known). Plain text. */
+function scBannerTitle(string $text, bool $isError, string $action): string
+{
+    if ($isError) {
+        $byAction = [
+            'submit_count' => 'Can’t submit yet', 'approve_count' => 'Not approved', 'reject_count' => 'Can’t send it back',
+            'reopen_count' => 'Can’t count again', 'delete_count' => 'Can’t delete', 'start_count' => 'Can’t start the count',
+            'save_lines' => 'Readings not saved', 'remind_count' => 'Reminder not sent',
+        ];
+        return $byAction[$action] ?? 'Something needs fixing';
+    }
+    if (strpos($text, 'Not approved') === 0) return 'Not approved';
+    if (strpos($text, 'submitted and approved') !== false) return 'Count submitted and approved';
+    if (strpos($text, ' submitted') !== false) return 'Count submitted';
+    if (strpos($text, 'Count readings saved') === 0) return 'Readings saved';
+    if (strpos($text, ' approved.') !== false) return 'Count approved';
+    if (strpos($text, 'rejected and sent back') !== false) return 'Count sent back';
+    if (strpos($text, 'reopened') !== false) return 'Count reopened';
+    if (strpos($text, ' deleted.') !== false) return 'Count deleted';
+    if (strpos($text, 'already started') !== false) return 'Count opened';
+    return 'Done';
+}
+
 /* Wording used by the refusals below. Plain text only: no markup. */
 const SC_PERM_NAME = '“Approve stock counts”';
 const SC_ASK_PERM = 'an administrator can give it to you in User Management';
@@ -640,10 +683,15 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     throw new RuntimeException('You can’t submit this count because someone else started it. Only the person who started it, or someone with the ' . SC_PERM_NAME . ' permission, can - ' . SC_ASK_PERM . '.');
                 }
 
-                // Every line in scope must have been counted - blanks are never converted to zero.
-                [$uncN, $uncNames] = scUncountedLines($pdo, $countId, scHasLineCol($pdo, 'counted_at'));
-                if ($uncN > 0) {
-                    throw new RuntimeException(scUncountedMessage($uncN, $uncNames, 'submit'));
+                /* Only lines with a reading are submitted. Lines with no reading are left out of this count (deleted from
+                 * this draft below, after every check has passed) - a blank is never turned into 0; a typed 0 is a reading. */
+                $hasColSub = scHasLineCol($pdo, 'counted_at');
+                $leftOutNames = scUncountedAllNames($pdo, $countId, $hasColSub);
+                $lineTotalQ = $pdo->prepare('SELECT COUNT(*) FROM stock_count_lines WHERE count_id = ?');
+                $lineTotalQ->execute([$countId]);
+                $readingLines = (int)$lineTotalQ->fetchColumn() - count($leftOutNames);
+                if ($readingLines < 1) {
+                    throw new RuntimeException('Nothing to submit: no item has a reading yet. Type what you counted (0 if there is none) on at least one item, save readings, then submit again.');
                 }
 
                 // Opening stock: every line that adds stock needs a unit cost, or COGS and valuation start at zero.
@@ -661,6 +709,11 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     throw new RuntimeException('This count can’t be submitted yet: every line that is short needs a reason. Pick a reason on each shortage line (use the Reason filter, “No reason”, to find them), save readings, then submit again.');
                 }
 
+                // Checks passed: drop the blank lines (nothing was posted for them), so the count holds only what was read.
+                if ($leftOutNames) {
+                    $pdo->prepare('DELETE scl FROM stock_count_lines scl WHERE scl.count_id = ? AND ' . scUncountedSql($hasColSub))->execute([$countId]);
+                }
+
                 // Compute totals
                 $tots = $pdo->prepare("SELECT COALESCE(SUM(variance_cost),0) AS total, COALESCE(SUM(CASE WHEN variance_cost<0 THEN variance_cost ELSE 0 END),0) AS shortage, COALESCE(SUM(CASE WHEN variance_cost>0 THEN variance_cost ELSE 0 END),0) AS surplus FROM stock_count_lines WHERE count_id = ?");
                 $tots->execute([$countId]);
@@ -670,18 +723,24 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     ->execute([(float)$t['total'], (float)$t['shortage'], (float)$t['surplus'], $countId]);
                 $pdo->commit();
 
+                $scLeftOutMsg = scLeftOutSentence($leftOutNames);
+                if ($leftOutNames) {
+                    logActivity((int)$user['id'], 'stock_count_lines_left_out', 'Count ' . displayCountReference((string)$count['reference']) . ' (#' . $countId . ') submitted with ' . $readingLines . ' item' . ($readingLines === 1 ? '' : 's') . '; ' . count($leftOutNames) . ' with no reading left out: ' . mb_substr(implode(', ', $leftOutNames), 0, 800));
+                }
+                $scSubmitHead = 'Count ' . displayCountReference((string)$count['reference']) . ' submitted' . ($leftOutNames ? ' with ' . $readingLines . ' item' . ($readingLines === 1 ? '' : 's') : ' for approval') . '.';
+
                 /* Two-person rule off and this user may decide: one press submits AND approves. The submit above is
                  * already committed; control falls straight into the approve_count block below (all its checks run
                  * unchanged). If approval fails the count simply stays submitted and the user can press Approve. */
                 if (!rh_sca_second_approver_required() && rh_sca_may_decide((int)$user['id'], (int)$count['counted_by'], $canApprove, false)) {
-                    $_SESSION['stock_msg'] = 'Count submitted for approval.';
+                    $_SESSION['stock_msg'] = $scSubmitHead . ($scLeftOutMsg !== '' ? ' ' . $scLeftOutMsg : '');
                     $scSubmitAndApprove = true;
                     $action = 'approve_count';
                 }
             }
 
             if ($action === 'submit_count') {
-                $_SESSION['stock_msg'] = 'Count submitted for approval.' . ($canApprove ? ' Shortage cost: ' . $currency . ' ' . number_format(abs((float)$t['shortage']), 2) . '.' : '');
+                $_SESSION['stock_msg'] = $scSubmitHead . ($scLeftOutMsg !== '' ? ' ' . $scLeftOutMsg : '') . ($canApprove ? ' Shortage cost: ' . $currency . ' ' . number_format(abs((float)$t['shortage']), 2) . '.' : '');
                 // Tell the approvers (tickbox, default on). The count is already submitted: an email problem only changes the message.
                 if (!empty($_POST['email_approvers'])) {
                     $em = rh_sca_email_approvers($pdo, $countId, (int)$user['id'], 'submit');
@@ -993,7 +1052,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     logActivity((int)$user['id'], 'stock_count_self_approved', 'Count ' . displayCountReference((string)$count['reference']) . ' (#' . $countId . '): approved own count - second approver switched off');
                 }
                 if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
-                $_SESSION['stock_msg'] = "Count " . displayCountReference((string)$count['reference']) . (!empty($scSubmitAndApprove) ? " submitted and approved." : " approved.") . " Variances applied to stock.";
+                $_SESSION['stock_msg'] = "Count " . displayCountReference((string)$count['reference']) . (!empty($scSubmitAndApprove) ? " submitted and approved." : " approved.") . " Variances applied to stock." . (!empty($scSubmitAndApprove) && !empty($scLeftOutMsg) ? ' ' . $scLeftOutMsg : '');
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
             }
@@ -1217,12 +1276,6 @@ $csrf_token = generateCsrfToken();
             <p class="page-subtitle">Count what is really on the shelf. The system compares it with what it expects, and once someone approves the count, stock is corrected to match.</p>
         </div>
 
-        <?php /* The toast puts the message into the page as HTML, and messages carry item names, category names and count
-           references typed by users: escape here, once, for every message this page can show (nothing escapes them earlier). */ ?>
-        <?php if ($message): showAlert(htmlspecialchars((string)$message, ENT_QUOTES, 'UTF-8'), 'success');
-        endif; ?>
-        <?php if ($error):   showAlert(htmlspecialchars((string)$error, ENT_QUOTES, 'UTF-8'), 'error');
-        endif; ?>
 
         <?php if ($activeCount): ?>
             <!-- ============= COUNT DETAIL ============= -->
@@ -1317,7 +1370,7 @@ $csrf_token = generateCsrfToken();
                 </div>
                 <?php endif; ?>
                 <div class="sum-card<?php echo ($uncountedTotal > 0 && $activeCount['status'] === 'draft') ? ' bad' : ''; ?>">
-                    <div class="lbl">Not counted <i class="help" tabindex="0" role="button" aria-label="About items not counted" data-tip="Items on this count that have no counted figure entered yet.">?</i></div>
+                    <div class="lbl">Not counted <i class="help" tabindex="0" role="button" aria-label="About items not counted" data-tip="Items on this count that have no counted figure entered yet. When you submit, these are left out of the count and can be counted in a later one.">?</i></div>
                     <div class="val"><?php echo (int)$uncountedTotal; ?></div>
                 </div>
             </div>
@@ -1574,9 +1627,9 @@ $csrf_token = generateCsrfToken();
                         <button type="submit" name="action" value="save_lines" class="btn-secondary"><i class="fas fa-save"></i> Save readings</button>
                         <?php $oneStepSubmit = !$secondRuleOn && rh_sca_may_decide((int)$user['id'], (int)$activeCount['counted_by'], $canApprove, false); ?>
                         <?php if ($oneStepSubmit): ?>
-                        <button type="button" class="btn-primary" onclick="scConfirm(this.form,'submit_count','Submit this count and correct stock now? Stock will be changed to match what was counted. This cannot be undone. Every line must have a reading.')"><i class="fas fa-check"></i> Submit &amp; correct stock</button>
+                        <button type="button" class="btn-primary" onclick="scSubmitConfirm(this.form, true)"><i class="fas fa-check"></i> Submit &amp; correct stock</button>
                         <?php else: ?>
-                        <button type="button" class="btn-primary" onclick="scConfirm(this.form,'submit_count','Submit count for approval? Once submitted you cannot edit it. Every line must have a reading.')"><i class="fas fa-paper-plane"></i> Submit for approval</button>
+                        <button type="button" class="btn-primary" onclick="scSubmitConfirm(this.form, false)"><i class="fas fa-paper-plane"></i> Submit for approval</button>
                         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#495057;">
                             <input type="checkbox" name="email_approvers" value="1" checked>
                             Email the approvers
@@ -1790,6 +1843,30 @@ $csrf_token = generateCsrfToken();
                     }, 0);
                 }
 
+                /* Submit sends only the items that have a reading; items with no reading are left out of the count.
+                 * Before the confirm, say how many that is. Unsaved typed readings are not sent by a submit, so those
+                 * are saved first (the blank count below is then exactly what the server will see). */
+                function scSubmitConfirm(form, oneStep) {
+                    if (!form) return;
+                    const inputs = Array.from(form.querySelectorAll('input[name$="][actual]"]'));
+                    if (inputs.some(function (el) { return el.value !== el.defaultValue; })) {
+                        scShowBanner('Save your readings first', 'You have typed readings that are not saved yet. Press “Save readings” first so they are included, then submit.', true);
+                        return;
+                    }
+                    const blank = inputs.filter(function (el) { return el.value.trim() === ''; }).length;
+                    if (inputs.length > 0 && blank === inputs.length) {
+                        scShowBanner('Nothing to submit', 'No item has a reading yet. Type what you counted (0 if there is none) on at least one item, press “Save readings”, then submit.', true);
+                        return;
+                    }
+                    const base = oneStep
+                        ? 'Submit this count and correct stock now? Stock will be changed to match what was counted. This cannot be undone.'
+                        : 'Submit count for approval? Once submitted you cannot edit it.';
+                    const left = blank > 0
+                        ? ' ' + blank + (blank === 1 ? ' item has' : ' items have') + ' no reading and will be left out of this count, so nothing is changed for ' + (blank === 1 ? 'it' : 'them') + '. ' + (blank === 1 ? 'It' : 'They') + ' can be counted in a later count once you have ' + (blank === 1 ? 'it' : 'them') + '.'
+                        : '';
+                    scConfirm(form, 'submit_count', base + left);
+                }
+
                 (function () {
                     const f = document.getElementById('countForm');
                     if (!f) return;
@@ -1993,6 +2070,66 @@ $csrf_token = generateCsrfToken();
             </script>
         <?php endif; ?>
     </div>
+
+    <?php /* Result banner: centred, stays until OK / Esc (no timer). Printed with the confirm modal, before the footer, so the
+       admin SPA keeps it. Messages carry item names, category names and count references typed by users: escaped here,
+       once, as text (nothing escapes them earlier); the script below only ever writes text (textContent). Always
+       present (hidden) so the page can also use it for its own "save first" notice. */ ?>
+    <?php
+    $scBannerShow = (bool)($message || $error);
+    $scBannerErr = (bool)$error;
+    $scBannerTitle = $scBannerShow ? scBannerTitle((string)($scBannerErr ? $error : $message), $scBannerErr, (string)($action ?? '')) : '';
+    ?>
+    <div id="scBanner" class="modal-overlay<?php echo $scBannerShow ? ' active' : ''; ?> sc-banner sc-banner--<?php echo $scBannerErr ? 'error' : 'success'; ?>" data-modal role="alertdialog" aria-modal="true" aria-labelledby="scBannerTitle" aria-describedby="scBannerMsg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="scBannerTitle"><?php echo htmlspecialchars($scBannerTitle, ENT_QUOTES, 'UTF-8'); ?></h3>
+            </div>
+            <div class="modal-body">
+                <?php if ($message && $scBannerErr): ?><p class="sc-banner-msg" style="margin-bottom:10px;"><?php echo htmlspecialchars((string)$message, ENT_QUOTES, 'UTF-8'); ?></p><?php endif; ?>
+                <p class="sc-banner-msg" id="scBannerMsg"><?php echo htmlspecialchars((string)($scBannerErr ? $error : $message), ENT_QUOTES, 'UTF-8'); ?></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="scBannerOk" onclick="scCloseBanner()">OK</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        function scBannerKey(e) {
+            if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); scCloseBanner(); }
+        }
+        function scCloseBanner() {
+            var b = document.getElementById('scBanner');
+            if (b) b.classList.remove('active');
+            document.removeEventListener('keydown', scBannerKey, true);
+            if (!document.querySelector('.modal-overlay.active')) document.body.classList.remove('modal-open');
+        }
+        function scShowBanner(title, message, isError) {
+            var b = document.getElementById('scBanner');
+            if (!b) return;
+            document.getElementById('scBannerTitle').textContent = title;
+            var m = document.getElementById('scBannerMsg');
+            if (m) {
+                /* drop the extra first paragraph (the success part of a two-part result) if one was printed */
+                var extra = m.previousElementSibling;
+                if (extra && extra.classList.contains('sc-banner-msg')) extra.remove();
+                m.textContent = message;
+            }
+            b.classList.toggle('sc-banner--error', !!isError);
+            b.classList.toggle('sc-banner--success', !isError);
+            b.classList.add('active');
+            scBannerOpened();
+        }
+        function scBannerOpened() {
+            document.body.classList.add('modal-open');
+            document.addEventListener('keydown', scBannerKey, true);
+            var ok = document.getElementById('scBannerOk');
+            if (ok) ok.focus();
+        }
+        <?php if ($scBannerShow): ?>
+        scBannerOpened();
+        <?php endif; ?>
+    </script>
 
     <div id="scConfirmModal" class="modal-overlay" data-modal role="dialog" aria-modal="true" aria-labelledby="scConfirmTitle">
         <div class="modal-content" style="max-width:min(96vw,25rem); width:min(96vw,25rem);">

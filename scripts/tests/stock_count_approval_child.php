@@ -49,6 +49,24 @@ $sql = "INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity,
 $pdo->prepare($sql)->execute([$countId, $ingId, $qty, $actual, $variance, 200, round($variance * 200, 4), $variance < 0 ? 'spillage' : '']);
 $pdo->prepare("UPDATE stock_counts SET shortage_cost = ?, surplus_cost = ? WHERE id = ?")->execute([$variance < 0 ? round($variance * 200, 4) : 0, $variance > 0 ? round($variance * 200, 4) : 0, $countId]);
 
+/* Partial-submit scenarios (do = submit_count): 'blanks' adds one not-counted line (Blank) and one typed-0 line (Zero);
+ * 'allblank' un-counts the main line too, so nothing has a reading. */
+if ((string)($_POST['blanks'] ?? '') === 'yes' || (string)($_POST['blanks'] ?? '') === 'allblank') {
+    foreach (['Blank', 'Zero'] as $nm) {
+        $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES (?, 'Pantry', 'kg', 0, 200)")->execute(['ZZT ' . $run . ' ' . $nm]);
+        $xid = (int)$pdo->lastInsertId();
+        if ($nm === 'Blank') {   // not counted: stock 5 at the start, no reading (actual 0 / variance 0, counted_at NULL)
+            $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost) VALUES (?,?,5,0,0,200,0)")->execute([$countId, $xid]);
+        } else {                 // typed 0 on an item with nothing in stock: a real reading
+            $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost" . ($hasCountedAt ? ', counted_at' : '') . ") VALUES (?,?,0,0,0,200,0" . ($hasCountedAt ? ', NOW()' : '') . ")")->execute([$countId, $xid]);
+        }
+    }
+    if ((string)$_POST['blanks'] === 'allblank') {
+        $pdo->prepare("DELETE FROM stock_count_lines WHERE count_id = ? AND ingredient_id <> ? AND actual_quantity = 0 AND system_quantity = 0")->execute([$countId, $ingId]);
+        $pdo->prepare("UPDATE stock_count_lines SET actual_quantity = 0, variance = 0, variance_cost = 0" . ($hasCountedAt ? ', counted_at = NULL' : '') . ", system_quantity = 5 WHERE count_id = ?")->execute([$countId]);
+    }
+}
+
 $_POST = ['action' => $do, 'count_id' => (string)$countId, 'csrf_token' => $csrfTok, 'rejection_reason' => 'Test rejection reason for the check'];
 $_REQUEST = $_POST;
 chdir($root . '/admin');

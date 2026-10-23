@@ -67,7 +67,7 @@ $mkCount = static function (string $tag, int $opening, string $status, array $it
     return $sql;
 };
 
-/** Runs the real page once in the harness. The messages the page shows (toast alerts) come back in output_flash. */
+/** Runs the real page once in the harness. The messages the page shows (the result banner) come back in output_flash. */
 $exec = function (array $post, array $setup, array $vars2, array $verify) use ($harness): array {
     $dump = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'sc_po_' . bin2hex(random_bytes(4)) . '.html';
     $cfg = base64_encode(json_encode(['post' => $post, 'setup' => $setup, 'vars' => $vars2, 'verify' => $verify, 'dump_html' => $dump]));
@@ -78,8 +78,9 @@ $exec = function (array $post, array $setup, array $vars2, array $verify) use ($
     @unlink($dump);
     $res['html'] = $html;
     $res['output_flash'] = [];
-    if (preg_match_all('/msg:("(?:[^"\\\\]|\\\\.)*"),type:/s', $html, $mm)) {
-        foreach ($mm[1] as $j) { $res['output_flash'][] = (string)json_decode($j); }
+    // The page shows its messages in a centred banner (no timer): each paragraph of it, as printed (escaped once).
+    if (preg_match('#<div class="modal-body">\s*((?:<p class="sc-banner-msg"[^>]*>.*?</p>\s*)+)</div>#s', $html, $mm) && preg_match_all('#<p class="sc-banner-msg"[^>]*>(.*?)</p>#s', $mm[1], $pp)) {
+        foreach ($pp[1] as $t) { $res['output_flash'][] = (string)$t; }
     }
     return $res;
 };
@@ -216,9 +217,9 @@ $setup = array_merge($setup, $mkCount('X', 1, 'draft', [$evilName => 10], $other
 $r = $page($startPost + ['scope' => 'category', 'scope_value' => $evilCat], $setup, $verify);
 $f = $flash($r);
 check($clean($r) && count($r['verify'][0] ?? []) === 0 && strpos($f, 'already in another opening stock count') !== false, 'Escaping: the refusal for an item with markup in its name is shown', $f);
-check(strpos($f, '&lt;b&gt;Bold&lt;/b&gt; &amp; Co') !== false && strpos($f, '<b>') === false, 'Escaping: the item name in the refusal message is HTML-escaped (a name with <b> and & cannot run in the toast)', $f);
+check(strpos($f, '&lt;b&gt;Bold&lt;/b&gt; &amp; Co') !== false && strpos($f, '<b>') === false, 'Escaping: the item name in the refusal message is HTML-escaped (a name with <b> and & cannot run in the banner)', $f);
 check(strpos((string)($r['html'] ?? ''), '<b>Bold</b>') === false && strpos((string)($r['html'] ?? ''), '<i>C3</i>') === false, 'Escaping: the raw markup never appears in the page');
-// No double escaping on screen: what the toast shows after the browser reads the escaped text is the plain name.
+// No double escaping on screen: what the banner shows after the browser reads the escaped text is the plain name.
 check(html_entity_decode($f, ENT_QUOTES, 'UTF-8') !== $f && strpos(html_entity_decode($f, ENT_QUOTES, 'UTF-8'), $evilName) !== false, 'Escaping: decoded once (as the browser does) the message shows the plain name, escaped only one time', $f);
 
 // ---- 7. The 30-second double-click guard ------------------------------------------------------------------------

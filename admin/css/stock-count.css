@@ -773,3 +773,47 @@ table.count-list td.sc-row-actions form {
     font-size: 13px;
     line-height: 1.5;
 }
+
+/* Centred message banner (replaces the timed toast on this page): stays until the user presses OK.
+   Same overlay and card as the confirm modal; only the accent colour differs (green = done, red = needs fixing).
+   The shared admin modal rules are all !important (they pin phone modals to the top and draw a plain border), so the few
+   rules that differ here are too. */
+#scBanner.sc-banner {
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+#scBanner.sc-banner .modal-content {
+    max-width: min(96vw, 28rem);
+    width: min(96vw, 28rem);
+    border-top: 6px solid var(--sc-banner-accent, #3f8f5a) !important;
+    margin: 0;
+}
+
+#scBanner.sc-banner--success {
+    --sc-banner-accent: var(--admin-success-border, #3f8f5a);
+}
+
+#scBanner.sc-banner--error {
+    --sc-banner-accent: #c82333;
+}
+
+#scBanner.sc-banner .modal-title {
+    color: var(--sc-banner-accent) !important;
+    font-size: 20px;
+}
+
+#scBanner .sc-banner-msg {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.55;
+    color: #374151;
+    overflow-wrap: anywhere;
+    max-height: 55vh;
+    overflow-y: auto;
+}
+
+#scBanner.sc-banner .modal-footer .btn {
+    min-height: 44px;
+    min-width: 96px;
+}
