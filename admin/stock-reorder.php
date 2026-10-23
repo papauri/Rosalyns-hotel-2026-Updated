@@ -211,12 +211,21 @@ $csrf_token = generateCsrfToken();
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                         <input type="hidden" name="action" value="create_from_reorder">
                         <input type="hidden" name="supplier_id" value="<?php echo (int)$g['supplier_id']; ?>">
-                        <?php foreach ($g['items'] as $it): ?>
-                            <input type="hidden" name="ingredient_id[]" value="<?php echo (int)$it['id']; ?>">
-                            <?php /* A pack item posts whole packs and the price of one pack; the order converts it to stock units. */ ?>
-                            <input type="hidden" name="order_in[]" value="<?php echo $it['packs'] !== null ? 'pack' : 'unit'; ?>">
-                            <input type="hidden" name="order_qty[]" value="<?php echo htmlspecialchars((string)($it['packs'] !== null ? $it['packs'] : $it['suggest'])); ?>">
-                            <input type="hidden" name="unit_cost[]" value="<?php echo htmlspecialchars((string)($it['packs'] !== null ? round($it['cost'] * $it['pack_size'], 4) : $it['cost'])); ?>">
+                        <?php
+                        /* The order lines travel in a few packed fields (50 items each) instead of 4 hidden fields per item:
+                         * 250 items would pass PHP's max_input_vars and be cut off. A pack item posts whole packs and the
+                         * price of one pack; the order converts it to stock units. */
+                        $roRows = [];
+                        foreach ($g['items'] as $it) {
+                            $roRows[] = [
+                                'id' => (int)$it['id'],
+                                'in' => $it['packs'] !== null ? 'pack' : 'unit',
+                                'q' => (string)($it['packs'] !== null ? $it['packs'] : $it['suggest']),
+                                'c' => (string)($it['packs'] !== null ? round($it['cost'] * $it['pack_size'], 4) : $it['cost']),
+                            ];
+                        }
+                        foreach (array_chunk($roRows, 50) as $roChunk): ?>
+                            <input type="hidden" name="lines_json[]" value="<?php echo htmlspecialchars(json_encode($roChunk), ENT_QUOTES); ?>">
                         <?php endforeach; ?>
                         <button type="submit" class="btn-ro" <?php echo $g['supplier_id'] === 0 ? 'disabled title="Assign a preferred supplier to these items first"' : (!empty($g['inactive']) ? 'disabled title="This supplier is deactivated. Reactivate it on the Suppliers page or pick another preferred supplier for these items."' : ''); ?>>
                             <i class="fas fa-file-invoice"></i> Create draft PO

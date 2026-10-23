@@ -288,6 +288,20 @@ function scReadPostedLines(array $post, array $ownIds): array
     return $out;
 }
 
+/* Release the "one approval at a time" lock (see approve_count). Safe to call twice or with an empty name. */
+function scReleaseApproveLock(PDO $pdo, string &$name): void
+{
+    if ($name === '') {
+        return;
+    }
+    try {
+        $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($name) . ')');
+    } catch (Throwable $e) {
+        /* the connection closing releases it anyway */
+    }
+    $name = '';
+}
+
 /* ============== POST handlers ============== */
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST)) {
     /* Refuse rather than save a part: PHP keeps only the first max_input_vars fields of a larger post. */
@@ -551,6 +565,20 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
             if ($action === 'approve_count') {
                 $countId = (int)($_POST['count_id'] ?? 0);
 
+                /* One approval at a time (all counts). The stale-count guard below reads the OTHER counts' approval
+                 * state; without this, two counts sharing items approved at the same instant could both pass it and
+                 * post the same stock twice. The lock is taken BEFORE the transaction starts so the transaction's
+                 * read snapshot is made after any earlier approval has committed; the waiting approval then re-runs
+                 * the guard and is refused with the usual message. Named lock = no row locks, so no deadlock risk. */
+                $scApproveLock = substr('rh_stock_count_approve_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+                if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($scApproveLock) . ', 30)')->fetchColumn() !== 1) {
+                    $scApproveLock = '';
+                    throw new RuntimeException('Another count is being approved right now. Wait a moment and press Approve again - nothing was posted.');
+                }
+                register_shutdown_function(static function () use ($pdo, $scApproveLock) {
+                    try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($scApproveLock) . ')'); } catch (Throwable $e) { /* connection closing releases it anyway */ }
+                });
+
                 $pdo->beginTransaction();
                 $hdr = $pdo->prepare("SELECT * FROM stock_counts WHERE id = ? FOR UPDATE");
                 $hdr->execute([$countId]);
@@ -681,6 +709,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     $pdo->prepare("UPDATE stock_counts SET status='draft', rejection_reason=?, total_variance_cost=?, shortage_cost=?, surplus_cost=?, updated_at=NOW() WHERE id=? AND status='submitted'")
                         ->execute(['Recounted against stock movements during the count: these lines are now shortages and need a reason: ' . $list, round($totShort + $totSurplus, 4), round($totShort, 4), round($totSurplus, 4), $countId]);
                     $pdo->commit();
+                    scReleaseApproveLock($pdo, $scApproveLock);
                     $_SESSION['stock_msg'] = 'Not approved: ' . count($needReason) . ' line(s) became shortages after allowing for stock movements and need a reason (' . $list . '). Count returned to draft with readings kept - add the reasons and resubmit; nothing was posted to stock.';
                     header('Location: stock-count.php?id=' . $countId);
                     exit;
@@ -809,6 +838,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $pdo->prepare("UPDATE stock_counts SET status='approved', approved_by=?, approved_at=NOW(), updated_at=NOW() WHERE id = ?")
                     ->execute([$user['id'], $countId]);
                 $pdo->commit();
+                scReleaseApproveLock($pdo, $scApproveLock);
 
                 if (!$secondRuleOn && (int)$count['counted_by'] === (int)$user['id']) {
                     logActivity((int)$user['id'], 'stock_count_self_approved', 'Count ' . displayCountReference((string)$count['reference']) . ' (#' . $countId . '): approved own count - second approver switched off');
@@ -870,6 +900,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
             }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
+            if (!empty($scApproveLock)) scReleaseApproveLock($pdo, $scApproveLock);
             $error = $e->getMessage();
         }
     }

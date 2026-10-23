@@ -94,6 +94,182 @@ function rh_po_date($raw, string $label): string
     return $raw;
 }
 
+/** Number of leaf values in a posted array (what PHP's max_input_vars counts). */
+function rh_po_post_var_count(array $post): int
+{
+    $n = 0;
+    array_walk_recursive($post, static function () use (&$n) { $n++; });
+    return $n;
+}
+
+/** True when the request looks cut off by PHP's max_input_vars (PHP silently drops the rest of a bigger post). */
+function rh_po_post_truncated(array $post): bool
+{
+    $max = (int)ini_get('max_input_vars');
+    return $max > 0 && rh_po_post_var_count($post) >= $max;
+}
+
+/**
+ * The receive lines as the old parallel arrays (line_id[], receive_qty[], receive_cost[], receive_qty_in[],
+ * receive_cost_in[], expiry_date[], over_note[]), from the packed fields lines_json[] (the page packs only the lines
+ * that have a quantity into a few JSON chunks, because ~8 fields per line passes PHP's max_input_vars at ~125 lines
+ * and gets refused by the host firewall) or, for older pages/clients, straight from those arrays.
+ * @param int[] $ownIds ids of the lines that belong to this purchase order
+ * @return array{line_id:array,receive_qty:array,receive_cost:array,receive_qty_in:array,receive_cost_in:array,expiry_date:array,over_note:array}
+ * @throws RuntimeException on anything malformed, a line that is not on this order, or a negative/non-numeric number (packed form only) */
+function rh_po_read_receive_post(array $post, array $ownIds): array
+{
+    $out = ['line_id' => [], 'receive_qty' => [], 'receive_cost' => [], 'receive_qty_in' => [], 'receive_cost_in' => [], 'expiry_date' => [], 'over_note' => []];
+    if (!isset($post['lines_json'])) {
+        foreach ($out as $k => $_) {
+            $out[$k] = isset($post[$k]) && is_array($post[$k]) ? $post[$k] : [];
+        }
+        return $out;
+    }
+    $bad = 'The received lines were sent in a form this page does not accept. Nothing was saved - reload the page and try again.';
+    $chunks = is_array($post['lines_json']) ? $post['lines_json'] : [$post['lines_json']];
+    if (count($chunks) > 200) {
+        throw new RuntimeException($bad);
+    }
+    $own = array_flip($ownIds);
+    $seen = [];
+    $total = 0;
+    foreach ($chunks as $chunk) {
+        if (!is_string($chunk) || strlen($chunk) > 400000) {
+            throw new RuntimeException($bad);
+        }
+        if (trim($chunk) === '') {
+            continue;
+        }
+        $rows = json_decode($chunk, true);
+        if (!is_array($rows)) {
+            throw new RuntimeException('The received lines could not be read (the data was cut off or damaged). Nothing was saved - reload the page and try again.');
+        }
+        foreach ($rows as $row) {
+            if (!is_array($row) || !isset($row['id']) || !is_numeric($row['id']) || (int)$row['id'] <= 0) {
+                throw new RuntimeException('A received line had no valid line number. Nothing was saved - reload the page and try again.');
+            }
+            $id = (int)$row['id'];
+            if (!isset($own[$id])) {
+                throw new RuntimeException('A received line is not part of this purchase order. Nothing was saved - reload the page and try again.');
+            }
+            if (isset($seen[$id])) {
+                throw new RuntimeException('The same line was sent twice. Nothing was saved - reload the page and try again.');
+            }
+            $seen[$id] = true;
+            if (++$total > 5000) {
+                throw new RuntimeException('Too many lines in one save.');
+            }
+            $str = static function ($k, int $max) use ($row, $bad): string {
+                if (!array_key_exists($k, $row) || $row[$k] === null) {
+                    return '';
+                }
+                if (!is_scalar($row[$k]) || is_bool($row[$k]) || strlen((string)$row[$k]) > $max) {
+                    throw new RuntimeException($bad);
+                }
+                return (string)$row[$k];
+            };
+            $q = trim($str('q', 40));
+            $c = trim($str('c', 40));
+            foreach ([['q', $q, 'Receive quantity'], ['c', $c, 'Price']] as [$_k, $v, $label]) {
+                if ($v === '') {
+                    continue;
+                }
+                if (!is_numeric(str_replace(',', '', $v)) || (float)str_replace(',', '', $v) < 0) {
+                    throw new RuntimeException($label . ' must be a number that is not negative. Nothing was saved.');
+                }
+            }
+            $qi = $str('qi', 8);
+            $ci = $str('ci', 8);
+            if (!in_array($qi, ['', 'unit', 'pack'], true) || !in_array($ci, ['', 'unit', 'pack'], true)) {
+                throw new RuntimeException($bad);
+            }
+            $out['line_id'][] = $id;
+            $out['receive_qty'][] = $q;
+            $out['receive_cost'][] = $c;
+            $out['receive_qty_in'][] = $qi === '' ? 'unit' : $qi;
+            $out['receive_cost_in'][] = $ci === '' ? 'unit' : $ci;
+            $out['expiry_date'][] = trim($str('e', 10));
+            $out['over_note'][] = $str('n', 500);
+        }
+    }
+    return $out;
+}
+
+/**
+ * The "Create draft PO" lines from the Reorder page, from its packed fields lines_json[] (50 items per chunk: ~4 hidden
+ * fields per item for 250 items passes PHP's max_input_vars). Each row is {id, in, q, c}: ingredient, 'pack'|'unit',
+ * quantity (> 0), price (>= 0, blank = none). Every ingredient must be a live (not archived) item whose preferred
+ * supplier is the supplier the order is for - what the Reorder page lists under that supplier.
+ * @return array<int,array{0:int,1:float,2:float,3:string}> [ingredient id, qty, cost, 'pack'|'unit']
+ * @throws RuntimeException on anything malformed - nothing is created */
+function rh_po_read_reorder_json(PDO $pdo, array $post, int $supplierId): array
+{
+    $bad = 'The order lines were sent in a form this page does not accept. Nothing was created - go back to Reorder / Buying and try again.';
+    $chunks = is_array($post['lines_json']) ? $post['lines_json'] : [$post['lines_json']];
+    if (count($chunks) > 200) {
+        throw new RuntimeException($bad);
+    }
+    $lines = [];
+    $seen = [];
+    foreach ($chunks as $chunk) {
+        if (!is_string($chunk) || strlen($chunk) > 400000) {
+            throw new RuntimeException($bad);
+        }
+        if (trim($chunk) === '') {
+            continue;
+        }
+        $rows = json_decode($chunk, true);
+        if (!is_array($rows)) {
+            throw new RuntimeException('The order lines could not be read (the data was cut off or damaged). Nothing was created - go back to Reorder / Buying and try again.');
+        }
+        foreach ($rows as $row) {
+            if (!is_array($row) || !isset($row['id']) || !is_numeric($row['id']) || (int)$row['id'] <= 0) {
+                throw new RuntimeException($bad);
+            }
+            $iid = (int)$row['id'];
+            foreach (['q', 'c'] as $k) {
+                if (isset($row[$k]) && (!is_scalar($row[$k]) || is_bool($row[$k]) || strlen((string)$row[$k]) > 40)) {
+                    throw new RuntimeException($bad);
+                }
+            }
+            $oin = (string)($row['in'] ?? 'unit');
+            if (!in_array($oin, ['unit', 'pack'], true)) {
+                throw new RuntimeException($bad);
+            }
+            $qRaw = trim((string)($row['q'] ?? ''));
+            if ($qRaw === '' || (is_numeric($qRaw) && (float)$qRaw == 0.0)) {
+                continue;
+            }
+            $q = rh_po_number($qRaw, 'Order quantity', true);
+            $c = rh_po_number($row['c'] ?? '', 'Unit cost', false, true);
+            if (isset($seen[$iid])) {
+                throw new RuntimeException('The same ingredient appears more than once in this order.');
+            }
+            if (count($seen) >= 5000) {
+                throw new RuntimeException('Too many lines in one order.');
+            }
+            $seen[$iid] = true;
+            $lines[] = [$iid, $q, $c, $oin];
+        }
+    }
+    if ($lines) {
+        $ok = [];
+        foreach (array_chunk(array_keys($seen), 500) as $part) {
+            $in = implode(',', array_fill(0, count($part), '?'));
+            $st = $pdo->prepare("SELECT id FROM stock_ingredients WHERE is_archived = 0 AND preferred_supplier_id = ? AND id IN ($in)");
+            $st->execute(array_merge([$supplierId], $part));
+            foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) {
+                $ok[(int)$id] = true;
+            }
+        }
+        if (count($ok) !== count($seen)) {
+            throw new RuntimeException('Some items on this order are no longer bought from this supplier (or have been archived). Nothing was created - go back to Reorder / Buying and try again.');
+        }
+    }
+    return $lines;
+}
+
 $redirectTo = 'purchase-orders.php';
 
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -102,6 +278,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Security token invalid.';
     } else {
         try {
+            if (rh_po_post_truncated($_POST)) {
+                /* Refuse rather than save a part: PHP keeps only the first max_input_vars fields of a larger post. */
+                throw new RuntimeException('The page sent too many fields at once, so the server may have cut it off. Nothing was saved. Reload the page and try again; if it keeps happening, tell your administrator.');
+            }
             $action = $_POST['action'] ?? '';
 
             if ($action === 'create' || $action === 'create_from_reorder') {
@@ -132,7 +312,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Validate reorder lines up front (quantities numeric > 0, costs numeric >= 0, no ingredient twice).
                 $reorderLines = [];
-                if ($action === 'create_from_reorder') {
+                if ($action === 'create_from_reorder' && isset($_POST['lines_json'])) {
+                    $reorderLines = rh_po_read_reorder_json($pdo, $_POST, $supplierId);
+                } elseif ($action === 'create_from_reorder') {
                     $ids   = $_POST['ingredient_id'] ?? [];
                     $qtys  = $_POST['order_qty'] ?? [];
                     $costs = $_POST['unit_cost'] ?? [];
@@ -347,13 +529,16 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             } elseif ($action === 'receive') {
                 $poId = (int)($_POST['po_id'] ?? 0);
-                $lineIds  = $_POST['line_id'] ?? [];
-                $recvQtys = $_POST['receive_qty'] ?? [];
-                $recvCosts = $_POST['receive_cost'] ?? [];
-                $recvQtyIn = $_POST['receive_qty_in'] ?? [];
-                $recvCostIn = $_POST['receive_cost_in'] ?? [];
-                $expiries = $_POST['expiry_date'] ?? [];
-                $overNotes = $_POST['over_note'] ?? [];
+                $ownQ = $pdo->prepare("SELECT id FROM stock_purchase_order_items WHERE purchase_order_id = ?");
+                $ownQ->execute([$poId]);
+                $recvPost = rh_po_read_receive_post($_POST, array_map('intval', $ownQ->fetchAll(PDO::FETCH_COLUMN)));
+                $lineIds  = $recvPost['line_id'];
+                $recvQtys = $recvPost['receive_qty'];
+                $recvCosts = $recvPost['receive_cost'];
+                $recvQtyIn = $recvPost['receive_qty_in'];
+                $recvCostIn = $recvPost['receive_cost_in'];
+                $expiries = $recvPost['expiry_date'];
+                $overNotes = $recvPost['over_note'];
 
                 $poStmt = $pdo->prepare("SELECT * FROM stock_purchase_orders WHERE id = ? LIMIT 1");
                 $poStmt->execute([$poId]);
@@ -720,7 +905,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
             </div>
 
             <!-- Lines / Receiving -->
-            <form method="POST">
+            <form method="POST" id="receiveForm" onsubmit="rcPackLines(this)">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" value="receive">
                 <input type="hidden" name="po_id" value="<?php echo (int)$po['id']; ?>">
@@ -990,6 +1175,40 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                 }
             }
             sel.setAttribute('data-last', sel.value);
+        }
+        /* Receiving a big order posts ~8 fields per line; PHP drops everything past max_input_vars (1000) and the host
+         * firewall can refuse it. So at submit the lines that have a quantity travel in a few JSON fields (lines_json[],
+         * 50 lines each) and the per-line inputs are switched off for that one request. The server reads lines_json[]
+         * first and the old arrays as a fallback. */
+        function rcPackLines(form) {
+            if (!form) return;
+            form.querySelectorAll('input[data-rc-packed]').forEach(function (el) { el.remove(); });
+            var fields = Array.from(form.querySelectorAll('[name$="[]"]'));
+            if (!fields.length) return;
+            var rows = [];
+            form.querySelectorAll('input[name="line_id[]"]').forEach(function (idEl) {
+                var cell = idEl.closest('tr');
+                if (!cell) return;
+                var get = function (n) { var el = cell.querySelector('[name="' + n + '[]"]'); return el ? el.value : ''; };
+                var q = get('receive_qty');
+                if (q === '') return;
+                rows.push({ id: parseInt(idEl.value, 10), q: q, qi: get('receive_qty_in'), c: get('receive_cost'), ci: get('receive_cost_in'), e: get('expiry_date'), n: get('over_note') });
+            });
+            for (var i = 0; i < rows.length; i += 50) {
+                var h = document.createElement('input');
+                h.type = 'hidden';
+                h.name = 'lines_json[]';
+                h.value = JSON.stringify(rows.slice(i, i + 50));
+                h.setAttribute('data-rc-packed', '1');
+                form.appendChild(h);
+            }
+            /* Disabled only while the browser builds the request (it does that before this timer fires), so a cancelled
+             * send or a page restored from history leaves the inputs usable. */
+            fields.forEach(function (el) { el.disabled = true; });
+            setTimeout(function () {
+                fields.forEach(function (el) { el.disabled = false; });
+                form.querySelectorAll('input[data-rc-packed]').forEach(function (el) { el.remove(); });
+            }, 0);
         }
         function alPreview() {
             var p = document.getElementById('al_preview');
