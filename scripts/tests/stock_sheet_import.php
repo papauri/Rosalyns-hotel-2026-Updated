@@ -101,6 +101,19 @@ ok('Report renders', !empty($c['report_ok']));
 $v = $a['verify'] ?? [];
 ok('Nothing was written to batches by the import itself', is_array($v[1] ?? null) && count($v[1]) === 0, json_encode($v[1] ?? null));
 
+$pa = ssi_run('partial', $run);
+ok('Partial scenario ran and rolled back', !empty($pa['rolled_back']) && empty($pa['leak']), json_encode($pa['raw'] ?? $pa));
+$pc = $pa['child'] ?? [];
+ok('Partial: an item already in another open opening count is left out of the import\'s count', ($pc['rice']['in_count'] ?? true) === false && ($pc['rice']['already'] ?? false) === true, json_encode($pc['rice'] ?? $pc));
+ok('Partial: an item that is only in a rejected opening count still goes into the import\'s count', ($pc['flour']['in_count'] ?? false) === true && ($pc['flour']['already'] ?? true) === false, json_encode($pc['flour'] ?? $pc));
+ok('Partial: the plan report still renders', !empty($pc['report_ok']));
+
+$ga = ssi_run('gap', $run);
+ok('Gap scenario ran and rolled back', !empty($ga['rolled_back']) && empty($ga['leak']), json_encode($ga['raw'] ?? $ga));
+$gc = $ga['child'] ?? [];
+ok('Gap: an item put in another open opening count after the plan was made is left out at apply time', ($gc['rice_in_import_count'] ?? true) === false && ($gc['left_out'] ?? 0) >= 1, json_encode($gc));
+ok('Gap: the other items still go into the import\'s count', ($gc['lines'] ?? 0) > 0, json_encode($gc));
+
 $b = ssi_run('approve', $run, $verify);
 ok('Approve scenario ran and rolled back', !empty($b['rolled_back']) && empty($b['leak']), json_encode($b['raw'] ?? $b));
 $v = $b['verify'] ?? [];

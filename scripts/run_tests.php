@@ -36,6 +36,7 @@ $suites = [
     'Stock count big form'  => 'scripts/tests/stock_count_bigform.php',
     'Stock count race'      => 'scripts/tests/stock_count_race.php',
     'Stock count delete'    => 'scripts/tests/stock_count_delete.php',
+    'Stock count partial opening' => 'scripts/tests/stock_count_partial_opening.php',
     'PO big forms'          => 'scripts/tests/po_bigform.php',
     'Stock sheet import'    => 'scripts/tests/stock_sheet_import.php',
     'Documents flow'        => 'scripts/tests/documents_flow.php',

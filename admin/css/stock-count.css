@@ -564,12 +564,22 @@ table.count-list th {
 }
 
 /* Opening-stock tick box: a normal sentence at the bottom of the Start card, not an uppercase field label. */
+.sc-opening-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 14px;
+}
+
 .form-field label.sc-opening,
 .stock-count-page label.sc-opening {
     display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 44px;
     gap: 8px;
-    align-items: flex-start;
-    margin: 4px 0 14px;
+    align-items: center;
+    margin: 0;
     padding: 10px 12px;
     background: #f8f9fb;
     border: 1px solid var(--admin-surface-border, #eaecef);
@@ -584,8 +594,32 @@ table.count-list th {
 }
 
 .sc-opening input {
-    margin-top: 3px;
     flex: 0 0 auto;
+}
+
+/* The "?" beside the tick box (the shared help-tip bubble shows its data-tip text). 44px tap area, 20px dot. */
+.sc-opening-row .help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    margin: 0 12px;
+    border-radius: 50%;
+    background: #e9ecef;
+    color: #495057;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 600;
+    cursor: help;
+    position: relative;
+}
+
+.sc-opening-row .help::before {
+    content: "";
+    position: absolute;
+    inset: -12px;
 }
 
 /* Missing stock / added by hand rows */
@@ -718,4 +752,44 @@ table.count-list td.sc-row-actions form {
     table.count-list td.sc-row-actions:empty {
         display: none;
     }
+}
+
+/* Draft count started by mistake: the way out, in a calm box (not the red rejected look). */
+.sc-draftbox {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    background: #f8f9fb;
+    border: 1px solid var(--admin-surface-border, #eaecef);
+    border-radius: 8px;
+    color: #495057;
+}
+
+.sc-draftbox form {
+    margin: 0;
+}
+
+/* Plain note under the count header (for example: this opening count covers only one category). */
+.sc-info-note {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #1e3a8a;
+}
+
+/* One family: note (blue), draft box (grey) and rejected box (red) share size, spacing, radius and text;
+   only the tone differs. */
+.sc-info-note,
+.sc-draftbox,
+.sc-rejected {
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    border-width: 1px;
+    border-style: solid;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.5;
 }

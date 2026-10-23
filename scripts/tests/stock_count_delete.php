@@ -1,13 +1,14 @@
 <?php
 /**
- * Deleting a rejected stock count (admin/stock-count.php, action delete_count).
+ * Deleting a rejected stock count, or a draft count started by mistake (admin/stock-count.php, action delete_count).
  * Usage: php scripts/tests/stock_count_delete.php
  *
  * Runs through the REAL page in scripts/tests/page_harness.php (one outer transaction that never commits):
  * an administrator can delete a rejected count (lines and opening batches go, the deletion is logged, stock
- * quantity unchanged, no stock movement written); a count that is being counted, waiting for approval or
- * approved can NOT be deleted; a non-admin approver can delete someone else's rejected count but NOT their
- * own, and a user without the approve permission cannot delete any. The page is the judge of the rule.
+ * quantity unchanged, no stock movement written); the same for a draft that is still being counted; a count waiting
+ * for approval or approved can NOT be deleted; the person who started a draft can delete their OWN draft (even without
+ * the approve permission); a non-admin approver can delete someone else's rejected or draft count but NOT their own
+ * rejected count, and a user without the approve permission cannot delete anyone else's count. The page is the judge of the rule.
  * Nothing is left behind.
  */
 declare(strict_types=1);
@@ -58,12 +59,18 @@ $before = $snapshot();
 $cases = [
     ['admin, rejected count counted by someone else', ['status' => 'rejected', 'counter' => 'other'], false, true],
     ['admin, rejected count the admin counted', ['status' => 'rejected', 'counter' => 'me'], false, true],
-    ['admin, count still being counted', ['status' => 'draft', 'counter' => 'other'], false, false],
+    ['admin, count still being counted (a draft started by mistake)', ['status' => 'draft', 'counter' => 'other'], false, true],
+    ['admin, a draft the admin started themselves', ['status' => 'draft', 'counter' => 'me'], false, true],
     ['admin, count waiting for approval', ['status' => 'submitted', 'counter' => 'other'], false, false],
     ['admin, approved count', ['status' => 'approved', 'counter' => 'other'], false, false],
     ['approver (manager), rejected count counted by someone else', ['status' => 'rejected', 'counter' => 'other', 'perm' => 'yes'], true, true],
     ['approver (manager), their OWN rejected count', ['status' => 'rejected', 'counter' => 'me', 'perm' => 'yes'], true, false],
+    ['user without the approve permission, their OWN rejected count', ['status' => 'rejected', 'counter' => 'me', 'perm' => 'no'], true, false],
     ['user without the approve permission, rejected count of someone else', ['status' => 'rejected', 'counter' => 'other', 'perm' => 'no'], true, false],
+    ['approver (manager), a draft counted by someone else', ['status' => 'draft', 'counter' => 'other', 'perm' => 'yes'], true, true],
+    ['approver (manager), their OWN draft (the person who started it)', ['status' => 'draft', 'counter' => 'me', 'perm' => 'yes'], true, true],
+    ['user without the approve permission, their OWN draft', ['status' => 'draft', 'counter' => 'me', 'perm' => 'no'], true, true],
+    ['user without the approve permission, draft of someone else', ['status' => 'draft', 'counter' => 'other', 'perm' => 'no'], true, false],
 ];
 if ($manager === '') {
     echo "SKIP manager scenarios: no active manager user\n";

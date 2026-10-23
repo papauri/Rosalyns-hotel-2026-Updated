@@ -30,6 +30,20 @@ if (!function_exists('rh_ssi_ensure_table')) {
     }
 }
 
+if (!function_exists('rh_ssi_opening_lock_name')) {
+    /** Same name admin/stock-count.php uses (scTakeOpeningLock): one opening count is started at a time. */
+    function rh_ssi_opening_lock_name(): string
+    {
+        return substr('rh_stock_count_opening_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+    }
+
+    /** Let go of that lock (the caller's commit has happened). Safe to call when it is not held. */
+    function rh_ssi_release_opening_lock(PDO $pdo): void
+    {
+        try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote(rh_ssi_opening_lock_name()) . ')'); } catch (Throwable $e) { /* closing the connection releases it */ }
+    }
+}
+
 if (!function_exists('rh_ssi_key')) {
     /** Case-insensitive, trimmed, single-spaced name used to match sheet rows to ingredients. */
     function rh_ssi_key(string $name): string
@@ -353,11 +367,15 @@ if (!function_exists('rh_ssi_plan')) {
             $existing[rh_ssi_key((string)$e['name'])] = $e;
         }
 
-        // Ingredients already counted by an earlier run of this import (so a re-run does not count them twice).
+        // Ingredients already counted by an earlier run of this import (so a re-run does not count them twice), and
+        // ingredients that are in ANY opening count still open (being counted or waiting for approval): an item may be
+        // in only one open opening count, so the import leaves those out of its own count.
         $covered = [];
         try {
+            $hasOpeningCol = (int)$pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_counts' AND COLUMN_NAME = 'is_opening'")->fetchColumn() > 0;
             $q = $pdo->query("SELECT DISTINCT l.ingredient_id FROM stock_count_lines l INNER JOIN stock_counts c ON c.id = l.count_id
-                              WHERE c.notes LIKE 'Stock sheet import%' AND c.status IN ('draft','submitted','approved')");
+                              WHERE (c.notes LIKE 'Stock sheet import%' AND c.status IN ('draft','submitted','approved'))"
+                . ($hasOpeningCol ? " OR (c.is_opening = 1 AND c.status IN ('draft','submitted'))" : ''));
             foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) {
                 $covered[(int)$id] = true;
             }
@@ -673,6 +691,27 @@ if (!function_exists('rh_ssi_apply')) {
         // ── One opening count, left SUBMITTED ────────────────────────────────────────
         $lines = array_filter($plan['items'], static fn($i) => !empty($i['in_count']) && !empty($i['id']));
         if ($lines) {
+            // Take the same lock a manual opening-count start takes (held until the caller's transaction ends and the
+            // connection closes or rh_ssi_release_opening_lock() is called), then re-check: an item that was put in
+            // another open opening count since the plan was made is left out of this count, never counted twice.
+            $lockName = rh_ssi_opening_lock_name();
+            if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($lockName) . ', 10)')->fetchColumn() !== 1) {
+                throw new RuntimeException('Another opening count is being started right now. Run the import again in a moment.');
+            }
+            $taken = [];
+            foreach (array_chunk(array_map(static fn($i) => (int)$i['id'], array_values($lines)), 400) as $chunk) {
+                $ph = implode(',', array_fill(0, count($chunk), '?'));
+                $q = $pdo->prepare("SELECT DISTINCT l.ingredient_id FROM stock_count_lines l INNER JOIN stock_counts c ON c.id = l.count_id
+                                    WHERE c.is_opening = 1 AND c.status IN ('draft','submitted') AND l.ingredient_id IN ($ph) LOCK IN SHARE MODE"); // locking read: sees rows committed since this transaction's snapshot (the plan's reads)
+                $q->execute($chunk);
+                foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $tid) { $taken[(int)$tid] = true; }
+            }
+            if ($taken) {
+                $lines = array_filter($lines, static fn($i) => !isset($taken[(int)$i['id']]));
+                $res['left_out_overlap'] = count($taken);
+            }
+        }
+        if ($lines) {
             $ref = date('Ymd') . '-' . substr(strtoupper(bin2hex(random_bytes(2))), 0, 4);
             $hasSnap = (int)$pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_counts' AND COLUMN_NAME = 'snapshot_at'")->fetchColumn() > 0;
             $hasCountedAt = (int)$pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_count_lines' AND COLUMN_NAME = 'counted_at'")->fetchColumn() > 0;
@@ -765,7 +804,7 @@ if (!function_exists('rh_ssi_report')) {
         $o[] = '  Bar crate sizes worked out:      ' . count($resolved) . ' of ' . count($bar) . ' bar items';
         $o[] = '  Bar priced per BOTTLE and kept (spirits/wines up to MWK 150,000): ' . count($perBottle);
         $o[] = '  Bar items with a crate-type price, crate size unknown: ' . count($flaggedBar) . '  (cost left blank, note added)';
-        $o[] = '  Opening count lines:             ' . count($inCount) . ($already ? '  (' . count($already) . ' already counted by an earlier run, not repeated)' : '');
+        $o[] = '  Opening count lines:             ' . count($inCount) . ($already ? '  (' . count($already) . ' already in an earlier import count or another open opening count, not repeated)' : '');
         $leftOut = $by(fn($i) => in_array($i['action'], ['create', 'update'], true) && $i['balance'] > 0 && !$i['in_count'] && !$i['already_counted']);
         $o[] = '  Left OUT of the count for a missing cost: ' . count($leftOut) . ' items with stock on hand (' . $q(array_sum(array_column($leftOut, 'balance'))) . ' units): ' . count(array_filter($leftOut, fn($i) => $i['cost_status'] === 'no_price')) . ' have no price, ' . count(array_filter($leftOut, fn($i) => $i['cost_status'] === 'pack_unknown')) . ' crate-priced with the crate size unknown, ' . count(array_filter($leftOut, fn($i) => $i['cost_status'] === 'unit_odd')) . ' priced per bottle against an ml/g unit';
         $o[] = '  Expiry batches to attach:        ' . array_sum(array_map(fn($i) => !empty($i['in_count']) ? count($i['batches']) : 0, $items));

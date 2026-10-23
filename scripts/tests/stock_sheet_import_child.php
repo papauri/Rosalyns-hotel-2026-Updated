@@ -8,6 +8,11 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); }
  * scenario "approve": same, then approve the opening count through the real admin/stock-count.php page as the
  *                     signed-in admin (counted_by is another admin, so the "different manager" rule is met).
  * scenario "self_approve": counted_by is the signed-in admin, so approval must be refused.
+ * scenario "gap": another opening count that holds Rice appears AFTER the plan was made and before it is applied (a manual
+ *                  start in the gap): apply leaves Rice out of the import's count. Prints the names on the import's count.
+ * scenario "partial": a manual partial opening count that is still open already holds Rice, and a rejected one holds
+ *                     Flour: the plan leaves Rice out of the import's count (an item may be in only one open opening
+ *                     count) but keeps Flour in. Plans only.
  */
 $sc = (string)($_POST['scenario'] ?? '');
 $csrfTok = (string)($_POST['csrf_token'] ?? '');
@@ -56,9 +61,37 @@ $qty = [
 ];
 $opts = ['budget_month' => '2031-05', 'budgets' => ['Bar' => 3387814.0, 'Kitchen' => 4730287.5, '77 Mug' => 0.0]];
 
+if ($sc === 'partial') {
+    $mk = $pdo->prepare("INSERT INTO stock_counts (reference, count_date, scope, status, counted_by, is_opening, created_at) VALUES (?, CURDATE(), 'spot', ?, ?, 1, NOW())");
+    $ln = $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost) SELECT ?, id, 0, 5, 5, 100, 500 FROM stock_ingredients WHERE name = ?");
+    $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES (?, 'Pantry', 'kg', 0, 0)")->execute([$n('Flour')]); // an existing Flour, so the plan matches it
+    $mk->execute(['20991231-SSP' . $run, 'draft', $other]);
+    $ln->execute([(int)$pdo->lastInsertId(), $n('Rice')]);
+    $mk->execute(['20991231-SSR' . $run, 'rejected', $other]);
+    $ln->execute([(int)$pdo->lastInsertId(), $n('Flour')]);
+}
+
 $countsBefore = (int)$pdo->query("SELECT COUNT(*) FROM stock_counts WHERE notes LIKE 'Stock sheet import%' AND status = 'submitted'")->fetchColumn();
 $plan = rh_ssi_plan($pdo, $rows, $qty, [], $opts);
 $items = $plan['items'];
+if ($sc === 'gap') {
+    $pdo->prepare("INSERT INTO stock_counts (reference, count_date, scope, status, counted_by, is_opening, created_at) VALUES (?, CURDATE(), 'spot', 'draft', ?, 1, NOW())")->execute(['20991231-SSG' . $run, $other]);
+    $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost) VALUES (?, ?, 0, 5, 5, 100, 500)")->execute([(int)$pdo->lastInsertId(), $riceId]);
+    $resGap = rh_ssi_apply($pdo, $plan, $counter);
+    $inImport = $pdo->prepare("SELECT i.name FROM stock_count_lines l INNER JOIN stock_ingredients i ON i.id = l.ingredient_id WHERE l.count_id = ? ORDER BY i.name");
+    $inImport->execute([(int)$resGap['count_id']]);
+    $names = $inImport->fetchAll(PDO::FETCH_COLUMN);
+    echo json_encode(['scenario' => 'gap', 'left_out' => $resGap['left_out_overlap'] ?? 0, 'rice_in_import_count' => in_array($n('Rice'), $names, true), 'flour_in_import_count' => in_array($n('Flour'), $names, true), 'lines' => $resGap['count_lines']]) . "\n";
+    return;
+}
+if ($sc === 'partial') {
+    echo json_encode(['scenario' => 'partial',
+        'rice' => ['in_count' => $items[rh_ssi_key($n('Rice'))]['in_count'], 'already' => $items[rh_ssi_key($n('Rice'))]['already_counted']],
+        'flour' => ['in_count' => $items[rh_ssi_key($n('Flour'))]['in_count'], 'already' => $items[rh_ssi_key($n('Flour'))]['already_counted']],
+        'tomato' => ['in_count' => $items[rh_ssi_key($n('Tomato paste'))]['in_count']],
+        'report_ok' => strlen(rh_ssi_report($plan)) > 500]) . "\n";
+    return;
+}
 $out = ['plan' => [
     'skipped' => count($plan['skipped']),
     'castelite' => ['balance' => $items[rh_ssi_key($n('Castelite'))]['balance'], 'pack' => $items[rh_ssi_key($n('Castelite'))]['pack'], 'cost' => $items[rh_ssi_key($n('Castelite'))]['cost'], 'batches' => count($items[rh_ssi_key($n('Castelite'))]['batches'])],

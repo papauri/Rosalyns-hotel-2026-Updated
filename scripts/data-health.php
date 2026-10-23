@@ -101,6 +101,10 @@ $checks[] = ['WARN', 'Purchase-order lines whose order is missing',
     "SELECT x.id FROM stock_purchase_order_items x LEFT JOIN stock_purchase_orders p ON p.id = x.purchase_order_id WHERE p.id IS NULL"];
 $checks[] = ['WARN', 'Opening-stock batches whose stock count is missing',
     "SELECT x.id FROM stock_opening_batches x LEFT JOIN stock_counts c ON c.id = x.count_id WHERE c.id IS NULL"];
+// An item may be in only one open (being counted / waiting for approval) opening stock count: two would add its opening stock twice.
+$checks[] = ['WARN', 'Items in more than one open opening stock count',
+    "SELECT l.ingredient_id FROM stock_count_lines l INNER JOIN stock_counts c ON c.id = l.count_id
+      WHERE c.is_opening = 1 AND c.status IN ('draft','submitted') GROUP BY l.ingredient_id HAVING COUNT(DISTINCT c.id) > 1"];
 $checks[] = ['WARN', 'User permissions whose user is missing',
     "SELECT x.id FROM user_permissions x LEFT JOIN admin_users u ON u.id = x.user_id WHERE u.id IS NULL"];
 

@@ -86,12 +86,28 @@ function scScopeLabel(array $c): string
     return $n > 0 ? $n . ' chosen item' . ($n === 1 ? '' : 's') : 'Chosen items';
 }
 
-/* A rejected count may be deleted by an administrator, or by an approver who did not count it
- * (so nobody can quietly remove their own rejected count). */
+/* The same, as a phrase in a sentence: "everything", "the category Meat", "3 chosen items". */
+function scScopePhrase(array $c): string
+{
+    $scope = (string)($c['scope'] ?? '');
+    $val = trim((string)($c['scope_value'] ?? ''));
+    if ($scope === 'full') return 'everything';
+    if ($scope === 'category' && $val !== '') return 'the category ' . $val;
+    return mb_strtolower(scScopeLabel($c), 'UTF-8');
+}
+
+/* Who may delete a count (it never changed stock either way: only approval writes stock movements):
+ *  - a DRAFT (still being counted): the person who started it (a count begun by mistake), an administrator,
+ *    or an approver;
+ *  - a REJECTED count: an administrator, or an approver who did not count it (so nobody can quietly remove
+ *    their own rejected count);
+ *  - a count waiting for approval or approved: nobody. */
 function scMayDeleteCount(array $c, array $user, bool $canApprove): bool
 {
-    if (($c['status'] ?? 'rejected') !== 'rejected') return false;
+    $status = (string)($c['status'] ?? 'rejected');
+    if (!in_array($status, ['rejected', 'draft'], true)) return false;
     if (($user['role'] ?? '') === 'admin') return true;
+    if ($status === 'draft' && (int)$c['counted_by'] === (int)$user['id']) return true;
     return $canApprove && (int)$c['counted_by'] !== (int)$user['id'];
 }
 
@@ -212,6 +228,50 @@ function scOpeningUncostedLines(PDO $pdo, int $countId): array
                         WHERE scl.count_id = ? AND scl.actual_quantity > 0.00005 AND scl.cost_per_unit <= 0.00001 ORDER BY i.name");
     $q->execute([$countId]);
     return $q->fetchAll(PDO::FETCH_COLUMN);
+}
+
+/* Items of $ingredientIds that are already in ANOTHER opening count that is still open (being counted or
+ * waiting for approval). An item may be in only one open opening count at a time, or approving both would add
+ * its opening stock twice. @return array<int,array{name:string,reference:string}> */
+function scOpeningOverlap(PDO $pdo, array $ingredientIds, int $excludeCountId = 0): array
+{
+    $ingredientIds = array_values(array_unique(array_map('intval', $ingredientIds)));
+    $found = [];
+    foreach (array_chunk($ingredientIds, 400) as $chunk) {
+        $ph = implode(',', array_fill(0, count($chunk), '?'));
+        $q = $pdo->prepare("SELECT DISTINCT i.name, sc.reference
+                            FROM stock_count_lines l
+                            INNER JOIN stock_counts sc ON sc.id = l.count_id
+                            INNER JOIN stock_ingredients i ON i.id = l.ingredient_id
+                            WHERE sc.is_opening = 1 AND sc.status IN ('draft','submitted') AND sc.id <> ? AND l.ingredient_id IN ($ph)
+                            ORDER BY i.name");
+        $q->execute(array_merge([$excludeCountId], $chunk));
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $found[] = ['name' => (string)$r['name'], 'reference' => (string)$r['reference']];
+        }
+    }
+    return $found;
+}
+
+/* Plain refusal text naming the items and the count(s) they are already in. */
+function scOpeningOverlapMessage(array $found, string $did): string
+{
+    $names = array_values(array_unique(array_column($found, 'name')));
+    $refs = array_values(array_unique(array_map('displayCountReference', array_column($found, 'reference'))));
+    return 'Not ' . $did . ': ' . count($names) . ' of these items ' . (count($names) === 1 ? 'is' : 'are') . ' already in another opening stock count that is still open ('
+        . implode(', ', array_slice($names, 0, 6)) . (count($names) > 6 ? ' and ' . (count($names) - 6) . ' more' : '')
+        . '; count ' . implode(', ', array_slice($refs, 0, 3)) . (count($refs) > 3 ? ' and others' : '')
+        . '). An item can be in only one open opening count. Finish or delete that count first, or leave those items out by choosing "Only the items I choose".';
+}
+
+/* One opening-count start / reopen at a time, so two people cannot both pass the overlap check. */
+function scTakeOpeningLock(PDO $pdo): string
+{
+    $name = substr('rh_stock_count_opening_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+    if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($name) . ', 10)')->fetchColumn() !== 1) {
+        throw new RuntimeException('Another opening count is being started right now. Wait a moment and try again.');
+    }
+    return $name;
 }
 
 /* Opening-stock batches waiting for an opening count to be approved (stock_opening_batches, created by
@@ -339,9 +399,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 if ($isOpeningStart && !scHasOpeningCol($pdo)) {
                     throw new RuntimeException('Could not enable opening-stock counts (the stock_counts table could not be updated). Ask your administrator to add the is_opening column, then try again.');
                 }
-                $scope = $isOpeningStart ? 'full' : ($_POST['scope'] ?? 'spot');
+                // An opening count can cover everything, one category or chosen items, like any other count.
+                $scope = (string)($_POST['scope'] ?? 'spot');
                 if (!in_array($scope, ['full', 'category', 'spot'], true)) $scope = 'spot';
-                $scopeValue = $isOpeningStart ? '' : rh_clean_text($_POST['scope_value'] ?? '');
+                $scopeValue = $scope === 'full' ? '' : rh_clean_text($_POST['scope_value'] ?? '');
                 $shift = rh_clean_text($_POST['shift'] ?? '');
                 $notes = trim((string)($_POST['notes'] ?? ''));
                 if (mb_strlen($scopeValue) > 255 || mb_strlen($shift) > 50 || mb_strlen($notes) > 1000) {
@@ -351,17 +412,48 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     throw new RuntimeException('Choose a category for a category count.');
                 }
                 if ($scope === 'spot' && !preg_match('/^\s*\d+(\s*,\s*\d+)*\s*$/', $scopeValue)) {
-                    throw new RuntimeException('Spot count needs ingredient IDs separated by commas.');
+                    throw new RuntimeException('Choose at least one item to count.');
                 }
 
                 // Double-submit guard: the same user starting the identical draft count within 30 seconds
                 // is a double click - open the count that already exists.
-                $recentCount = $pdo->prepare("SELECT id FROM stock_counts WHERE status = 'draft' AND counted_by = ? AND scope = ? AND scope_value <=> ? AND shift <=> ? AND created_at >= (NOW() - INTERVAL 30 SECOND) ORDER BY id DESC LIMIT 1");
+                // (An opening count and a regular count with the same scope are different counts: never merged.)
+                $recentCount = $pdo->prepare("SELECT id FROM stock_counts WHERE status = 'draft' AND counted_by = ? AND scope = ? AND scope_value <=> ? AND shift <=> ? AND created_at >= (NOW() - INTERVAL 30 SECOND)"
+                    . (scHasOpeningCol($pdo) ? ' AND is_opening = ' . ($isOpeningStart ? '1' : '0') : '') . " ORDER BY id DESC LIMIT 1");
                 $recentCount->execute([$user['id'], $scope, $scopeValue ?: null, $shift ?: null]);
                 if ($existingCountId = (int)$recentCount->fetchColumn()) {
                     $_SESSION['stock_msg'] = 'That count was already started - opened it.';
                     header('Location: stock-count.php?id=' . $existingCountId);
                     exit;
+                }
+
+                // The items in scope (current quantity + cost are the snapshot the count is measured against).
+                $sql = "SELECT id, current_quantity, cost_per_unit FROM stock_ingredients WHERE is_archived = 0";
+                $params = [];
+                if ($scope === 'category') {
+                    $sql .= " AND category = ?";
+                    $params[] = $scopeValue;
+                } elseif ($scope === 'spot') {
+                    $ids = array_filter(array_map('intval', explode(',', $scopeValue)));
+                    if (empty($ids)) throw new RuntimeException('Choose at least one item to count.');
+                    $ph = implode(',', array_fill(0, count($ids), '?'));
+                    $sql .= " AND id IN ($ph)";
+                    $params = array_merge($params, $ids);
+                }
+
+                $scStartLock = '';
+                if ($isOpeningStart) {
+                    // An item may be in only one open opening count: refuse (naming them) rather than leave some out silently.
+                    $scStartLock = scTakeOpeningLock($pdo);
+                }
+                $pdo->beginTransaction();
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($params);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                if (!$rows) throw new RuntimeException('There are no stock items to count for that choice.');
+                if ($isOpeningStart) {
+                    $overlap = scOpeningOverlap($pdo, array_map(static fn($r) => (int)$r['id'], $rows));
+                    if ($overlap) throw new RuntimeException(scOpeningOverlapMessage($overlap, 'started'));
                 }
 
                 $ref = generateCountReference();
@@ -372,30 +464,15 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     $pdo->prepare("UPDATE stock_counts SET is_opening = 1 WHERE id = ?")->execute([$countId]);
                 }
 
-                // Snapshot current quantities + cost for the chosen scope
-                $sql = "SELECT id, current_quantity, cost_per_unit FROM stock_ingredients WHERE is_archived = 0";
-                $params = [];
-                if ($scope === 'category' && $scopeValue !== '') {
-                    $sql .= " AND category = ?";
-                    $params[] = $scopeValue;
-                } elseif ($scope === 'spot') {
-                    $ids = array_filter(array_map('intval', explode(',', $scopeValue)));
-                    if (empty($ids)) throw new RuntimeException('Spot count requires at least one ingredient ID.');
-                    $ph = implode(',', array_fill(0, count($ids), '?'));
-                    $sql .= " AND id IN ($ph)";
-                    $params = array_merge($params, $ids);
-                }
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute($params);
-                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
                 $lineIns = $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost) VALUES (?, ?, ?, 0, 0, ?, 0)");
                 foreach ($rows as $r) {
                     $lineIns->execute([$countId, (int)$r['id'], (float)$r['current_quantity'], (float)$r['cost_per_unit']]);
                 }
+                $pdo->commit();
+                scReleaseApproveLock($pdo, $scStartLock);
 
                 $_SESSION['stock_msg'] = $isOpeningStart
-                    ? "Opening stock count {$ref} started. Enter the physical quantity AND the unit cost for every item you have; someone other than you must approve it."
+                    ? "Opening stock count {$ref} started for " . scScopePhrase(['scope' => $scope, 'scope_value' => $scopeValue]) . ' (' . count($rows) . ' item' . (count($rows) === 1 ? '' : 's') . "). Enter the quantity AND the unit cost for every item you have; someone other than you must approve it. Items that are not in this count are not changed."
                     : "Count {$ref} started. Enter your physical readings.";
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
@@ -896,6 +973,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 if ((int)$count['counted_by'] !== (int)$user['id'] && !$canApprove) {
                     throw new RuntimeException('Only the person who started this count or a manager can reopen it.');
                 }
+                if (!empty($count['is_opening'])) {
+                    // Since it was rejected, another opening count may have taken some of its items: reopening would put them in two.
+                    $scStartLock = scTakeOpeningLock($pdo);
+                    $ownIds = $pdo->prepare("SELECT ingredient_id FROM stock_count_lines WHERE count_id = ?");
+                    $ownIds->execute([$countId]);
+                    $overlap = scOpeningOverlap($pdo, array_map('intval', $ownIds->fetchAll(PDO::FETCH_COLUMN)), $countId);
+                    if ($overlap) throw new RuntimeException(scOpeningOverlapMessage($overlap, 'reopened'));
+                }
 
                 /* Re-snapshot: every line takes the CURRENT live quantity/cost and goes back to "not counted",
                  * so stale readings cannot be re-submitted against old stock. The snapshot time of a count is
@@ -915,36 +1000,42 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $pdo->prepare("UPDATE stock_counts SET status='draft', rejection_reason=NULL, " . (scHasSnapshotCol($pdo) ? 'snapshot_at=NOW()' : 'created_at=NOW()') . ", updated_at=NOW(), total_variance_cost=0, shortage_cost=0, surplus_cost=0 WHERE id=? AND status='rejected'")
                     ->execute([$countId]);
                 $pdo->commit();
+                if (!empty($scStartLock)) scReleaseApproveLock($pdo, $scStartLock);
                 $_SESSION['stock_msg'] = 'Count reopened with a fresh stock snapshot — re-enter every reading and resubmit.';
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
             }
 
             if ($action === 'delete_count') {
-                /* Only a REJECTED count can be deleted: it never changed stock (only approval writes adjustments).
-                 * Its lines and any opening batches typed with it go too; the deletion is kept in the activity log. */
+                /* Only a REJECTED count or a DRAFT (still being counted) can be deleted: neither ever changed stock (only
+                 * approval writes adjustments). Its lines and any opening batches typed with it go too; the deletion is
+                 * kept in the activity log. */
                 $countId = (int)($_POST['count_id'] ?? 0);
                 $pdo->beginTransaction();
-                $hdr = $pdo->prepare("SELECT id, reference, counted_by, rejection_reason FROM stock_counts WHERE id = ? AND status = 'rejected' FOR UPDATE");
+                $hdr = $pdo->prepare("SELECT id, reference, counted_by, status, rejection_reason FROM stock_counts WHERE id = ? AND status IN ('rejected','draft') FOR UPDATE");
                 $hdr->execute([$countId]);
                 $count = $hdr->fetch(PDO::FETCH_ASSOC);
-                if (!$count) throw new RuntimeException('Only a rejected count can be deleted.');
+                if (!$count) throw new RuntimeException('Only a count that is being counted or was rejected can be deleted. A count waiting for approval or approved stays on record.');
                 if (!scMayDeleteCount($count, $user, $canApprove)) {
-                    throw new RuntimeException('Only an administrator, or someone who approves stock counts and did not count this one, can delete it.');
+                    throw new RuntimeException($count['status'] === 'draft'
+                        ? 'Only the person who started this count, an administrator or someone who approves stock counts can delete it.'
+                        : 'Only an administrator, or someone who approves stock counts and did not count this one, can delete a rejected count.');
                 }
+                $wasDraft = $count['status'] === 'draft';
                 $pdo->prepare("DELETE FROM stock_count_lines WHERE count_id = ?")->execute([$countId]);
                 $hasOb = $pdo->query("SHOW TABLES LIKE 'stock_opening_batches'")->rowCount() > 0;
                 if ($hasOb) $pdo->prepare("DELETE FROM stock_opening_batches WHERE count_id = ?")->execute([$countId]);
-                $pdo->prepare("DELETE FROM stock_counts WHERE id = ? AND status = 'rejected'")->execute([$countId]);
+                $pdo->prepare("DELETE FROM stock_counts WHERE id = ? AND status IN ('rejected','draft')")->execute([$countId]);
                 $pdo->commit();
-                logActivity((int)$user['id'], 'stock_count_deleted', 'Deleted rejected stock count ' . displayCountReference((string)$count['reference']) . ' (reason it was rejected: ' . mb_substr((string)$count['rejection_reason'], 0, 200) . ')');
-                $_SESSION['stock_msg'] = 'Rejected count ' . displayCountReference((string)$count['reference']) . ' deleted. Stock was not changed.';
+                logActivity((int)$user['id'], 'stock_count_deleted', ($wasDraft ? 'Deleted unfinished stock count ' : 'Deleted rejected stock count ') . displayCountReference((string)$count['reference']) . ($wasDraft ? ' (it was still being counted)' : ' (reason it was rejected: ' . mb_substr((string)$count['rejection_reason'], 0, 200) . ')'));
+                $_SESSION['stock_msg'] = ($wasDraft ? 'Unfinished count ' : 'Rejected count ') . displayCountReference((string)$count['reference']) . ' deleted. Stock was not changed.';
                 header('Location: stock-count.php');
                 exit;
             }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             if (!empty($scApproveLock)) scReleaseApproveLock($pdo, $scApproveLock);
+            if (!empty($scStartLock)) scReleaseApproveLock($pdo, $scStartLock);
             $error = $e->getMessage();
         }
     }
@@ -1064,9 +1155,11 @@ $csrf_token = generateCsrfToken();
             <p class="page-subtitle">Count what is really on the shelf. The system compares it with what it expects, and once someone approves the count, stock is corrected to match.</p>
         </div>
 
-        <?php if ($message): showAlert($message, 'success');
+        <?php /* The toast puts the message into the page as HTML, and messages carry item names, category names and count
+           references typed by users: escape here, once, for every message this page can show (nothing escapes them earlier). */ ?>
+        <?php if ($message): showAlert(htmlspecialchars((string)$message, ENT_QUOTES, 'UTF-8'), 'success');
         endif; ?>
-        <?php if ($error):   showAlert($error,   'error');
+        <?php if ($error):   showAlert(htmlspecialchars((string)$error, ENT_QUOTES, 'UTF-8'), 'error');
         endif; ?>
 
         <?php if ($activeCount): ?>
@@ -1238,6 +1331,21 @@ $csrf_token = generateCsrfToken();
             <?php endif; ?>
 
             <?php $mayDeleteActive = scMayDeleteCount($activeCount, $user, $canApprove); ?>
+            <?php if (!empty($activeCount['is_opening']) && (string)($activeCount['scope'] ?? '') !== 'full'): ?>
+                <p class="sc-info-note"><strong>This opening count covers only <?php echo htmlspecialchars(scScopePhrase($activeCount)); ?>.</strong> Every other item keeps the stock it has now. Count the rest later in another opening count.</p>
+            <?php endif; ?>
+            <?php if ($activeCount['status'] === 'draft' && $mayDeleteActive): ?>
+                <div class="sc-draftbox">
+                    <div class="sc-rejected__text"><strong>Started this count by mistake?</strong> You can delete it. Nothing in it has changed stock.</div>
+                    <div class="sc-actions">
+                        <form method="POST">
+                            <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                            <input type="hidden" name="count_id" value="<?php echo (int)$activeCount['id']; ?>">
+                            <button type="button" class="btn-danger" onclick="scConfirm(this.form,'delete_count','Delete this count? Everything typed into it is removed for good. Stock is not changed.','Delete count')">Delete this count</button>
+                        </form>
+                    </div>
+                </div>
+            <?php endif; ?>
             <?php if ($activeCount['status'] === 'rejected' && ($canWorkCount || $mayDeleteActive)): ?>
                 <div class="sc-rejected">
                     <div class="sc-rejected__text"><strong>Rejected.</strong> Reason: <?php echo htmlspecialchars($activeCount['rejection_reason'] ?? ''); ?></div>
@@ -1670,10 +1778,13 @@ $csrf_token = generateCsrfToken();
                                 <label>Notes (optional)</label>
                                 <textarea name="notes" rows="2" placeholder="Why this count?"></textarea>
                             </div>
-                            <label class="sc-opening">
-                                <input type="checkbox" name="opening" value="1" id="opening_cb" <?php echo !empty($_GET['opening']) ? 'checked' : ''; ?> onchange="onOpeningChange()">
-                                <span>Opening stock count (first set-up only). Counts everything, every line needs a unit cost, and someone else must approve it.</span>
-                            </label>
+                            <div class="sc-opening-row">
+                                <label class="sc-opening">
+                                    <input type="checkbox" name="opening" value="1" id="opening_cb" <?php echo !empty($_GET['opening']) ? 'checked' : ''; ?> onchange="onOpeningChange()">
+                                    <span>Opening stock count (first set-up)</span>
+                                </label>
+                                <i class="help" tabindex="0" role="button" aria-label="About opening stock counts" data-tip="Every item you count needs a unit cost, and someone other than you must approve it. You can count some items now and the rest later. An item can be in only one open opening count at a time.">?</i>
+                            </div>
                             <button type="submit" class="btn-primary">Start count</button>
                         </form>
                     </div>
@@ -1776,7 +1887,7 @@ $csrf_token = generateCsrfToken();
                                         <td data-label="" class="sc-row-actions"><?php if (scMayDeleteCount($c, $user, $canApprove)): ?><form method="POST" onclick="event.stopPropagation();">
                                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                                                 <input type="hidden" name="count_id" value="<?php echo (int)$c['id']; ?>">
-                                                <button type="button" class="btn-danger btn-sm" data-ref="<?php echo htmlspecialchars(displayCountReference((string)$c['reference'])); ?>" onclick="scConfirm(this.form,'delete_count','Delete rejected count ' + this.dataset.ref + '? It is removed for good. Stock is not changed.','Delete count')">Delete</button>
+                                                <button type="button" class="btn-danger btn-sm" data-ref="<?php echo htmlspecialchars(displayCountReference((string)$c['reference'])); ?>" data-what="<?php echo $c['status'] === 'draft' ? 'unfinished' : 'rejected'; ?>" onclick="scConfirm(this.form,'delete_count','Delete ' + this.dataset.what + ' count ' + this.dataset.ref + '? It is removed for good. Stock is not changed.','Delete count')">Delete</button>
                                             </form><?php endif; ?></td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -1794,11 +1905,7 @@ $csrf_token = generateCsrfToken();
 
             <script>
                 function onOpeningChange() {
-                    const cb = document.getElementById('opening_cb');
-                    const scope = document.getElementById('scope');
-                    if (cb && cb.checked) { scope.value = 'full'; }
-                    scope.disabled = !!(cb && cb.checked);
-                    onScopeChange();
+                    onScopeChange(); // an opening count can cover everything, one category or chosen items
                 }
                 function onScopeChange() {
                     const v = document.getElementById('scope').value;

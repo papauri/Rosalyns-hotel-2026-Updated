@@ -107,14 +107,17 @@ try {
         $plan = rh_ssi_plan($pdo, $rows, $qty, $overrides);
         $res = rh_ssi_apply($pdo, $plan, $userId);
         $pdo->commit();
+        rh_ssi_release_opening_lock($pdo); // taken inside rh_ssi_apply; the count is now visible to a manual start
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        rh_ssi_release_opening_lock($pdo);
         throw $e;
     }
     $text = rh_ssi_report($plan, 'APPLIED') . "\nRESULT\n"
         . '  Ingredients created: ' . $res['created'] . '   updated: ' . $res['updated'] . "\n"
         . '  Opening count: ' . ($res['count_ref'] ?? 'none created (nothing new to count)') . ' - ' . $res['count_lines'] . ' lines, ' . $res['batches'] . " expiry batches waiting, status SUBMITTED, counted by user '" . $who . "'.\n"
         . "  A DIFFERENT manager must approve it on Stock Count before any stock appears.\n"
+        . (!empty($res['left_out_overlap']) ? '  ' . $res['left_out_overlap'] . " item(s) were left out of the opening count because another opening count that is still open already holds them.\n" : '')
         . '  Budget lines changed: ' . $res['budget_changed'] . "\n";
     echo $text;
     if (!empty($opt['report'])) {
