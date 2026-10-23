@@ -20,7 +20,7 @@ if (!function_exists('rh_ssi_ensure_table')) {
                 count_id INT UNSIGNED NOT NULL,
                 ingredient_id INT UNSIGNED NOT NULL,
                 batch_label VARCHAR(50) DEFAULT NULL,
-                quantity DECIMAL(12,4) NOT NULL DEFAULT 0,
+                quantity DECIMAL(16,6) NOT NULL DEFAULT 0,
                 expiry_date DATE DEFAULT NULL,
                 applied_batch_id INT UNSIGNED DEFAULT NULL,
                 created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,

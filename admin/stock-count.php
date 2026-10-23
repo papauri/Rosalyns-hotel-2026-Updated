@@ -1362,7 +1362,7 @@ $csrf_token = generateCsrfToken();
                                         <?php endif; ?>
                                     </td>
                                     <?php if ($isOpeningCount): ?>
-                                    <td data-label="Unit cost" style="text-align:right;">
+                                    <td data-label="Unit cost (<?php echo htmlspecialchars($currency); ?>)" style="text-align:right;">
                                         <?php if ($editable): ?>
                                             <input class="qty" type="number" step="0.0001" min="0" style="width:96px;" name="line[<?php echo (int)$ln['id']; ?>][cost]" value="<?php echo (float)$ln['cost_per_unit'] > 0 ? number_format((float)$ln['cost_per_unit'], 4, '.', '') : ''; ?>" placeholder="required">
                                         <?php else: ?>
