@@ -3196,7 +3196,7 @@ try {
         });
 
         document.querySelectorAll('.report-table, .rx-table').forEach(table => {
-            const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+            const headers = Array.from(table.querySelectorAll('thead th')).map(th => { const c = th.cloneNode(true); c.querySelectorAll('.help').forEach(d => d.remove()); return c.textContent.replace(/\s+/g, ' ').trim(); });
             table.querySelectorAll('tbody tr, tfoot tr').forEach(row => {
                 Array.from(row.children).forEach((cell, index) => {
                     if (!cell.hasAttribute('data-label')) {

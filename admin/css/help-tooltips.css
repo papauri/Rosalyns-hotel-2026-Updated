@@ -235,8 +235,97 @@ body.rh-help-on [data-help]::after {
     opacity: 0 !important;
 }
 
+/* The small "?" dot beside a column header or figure-card label
+   (<i class="help" data-tip="...">?</i>); one look on every page.
+   Colours come from the surrounding text (currentColor), so the same dot reads on
+   light table headers and on the dark cockpit cards. Negative vertical margin keeps
+   it from making a header row or card label taller. */
+.help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    position: relative;
+    width: 18px;
+    height: 18px;
+    margin: -3px 0 -3px 6px;
+    border-radius: 50%;
+    background: color-mix(in srgb, currentColor 14%, transparent);
+    color: inherit;
+    opacity: 0.75;
+    font-family: inherit;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0;
+    text-transform: none;
+    text-align: center;
+    vertical-align: middle;
+    cursor: help;
+    transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.help:hover,
+.help:focus-visible {
+    opacity: 1;
+    background: color-mix(in srgb, currentColor 26%, transparent);
+}
+
+.help:focus-visible {
+    outline: 2px solid var(--admin-accent, #766550);
+    outline-offset: 1px;
+}
+
+/* Touch screens: 44px tap area around the 18px dot, without changing the row height. */
+@media (pointer: coarse) {
+    .help::before {
+        content: "";
+        position: absolute;
+        inset: -13px;
+    }
+}
+
 /* The "Install App" bar sits along the bottom edge (admin/js/pwa-install.js): keep the round ?
    button above it instead of on top of the bar. */
 body.rh-pwa-bar-on .rh-help-toggle:not([data-inline="1"]) {
     bottom: 78px;
+}
+
+/* Phone/tablet card mode hides the table header, so its "?" helpers move into one
+   "What the columns mean" disclosure above the table (built by admin/js/admin-mobile.js). */
+.rh-col-help {
+    margin: 0 0 10px;
+    border: 1px solid var(--admin-border, #e3ded7);
+    border-radius: 8px;
+    background: var(--admin-card-bg, #fff);
+    font-size: 13px;
+}
+
+.rh-col-help summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.rh-col-help dl {
+    margin: 0;
+    padding: 0 12px 10px;
+}
+
+.rh-col-help dt {
+    margin-top: 8px;
+    font-weight: 600;
+    color: var(--admin-text, #1f2937);
+}
+
+.rh-col-help dd {
+    margin: 2px 0 0;
+    color: var(--admin-muted, #5f6b7c);
+    line-height: 1.4;
 }

@@ -280,8 +280,8 @@ $csrf_token = generateCsrfToken();
         <?php if ($error):   showAlert($error,   'error');   endif; ?>
 
         <div class="ck-kpis ck-kpis--2 sup-stats">
-            <div class="ck-kpi"><span class="ck-kpi__label">Suppliers</span><span class="ck-kpi__value"><?php echo (int)$stats['total']; ?></span></div>
-            <div class="ck-kpi ck-kpi--good"><span class="ck-kpi__label">Active</span><span class="ck-kpi__value"><?php echo (int)$stats['active']; ?></span></div>
+            <div class="ck-kpi"><span class="ck-kpi__label">Suppliers <i class="help" tabindex="0" role="button" aria-label="About suppliers" data-tip="All suppliers on record, active and inactive.">?</i></span><span class="ck-kpi__value"><?php echo (int)$stats['total']; ?></span></div>
+            <div class="ck-kpi ck-kpi--good"><span class="ck-kpi__label">Active <i class="help" tabindex="0" role="button" aria-label="About active suppliers" data-tip="Suppliers switched on, so they can be picked on purchase orders and receipts.">?</i></span><span class="ck-kpi__value"><?php echo (int)$stats['active']; ?></span></div>
         </div>
 
         <p class="sup-help"><i class="fas fa-circle-info"></i> <strong>Deactivate</strong> (<i class="fas fa-power-off"></i>) hides a supplier from pickers but keeps it on record — usually the right choice. <strong>Delete</strong> (<i class="fas fa-trash"></i>) removes it for good; past deliveries keep its name as text. Suppliers on purchase orders can only be deactivated (<i class="fas fa-lock"></i>).</p>
@@ -292,11 +292,11 @@ $csrf_token = generateCsrfToken();
                 <tr>
                     <th>Supplier</th>
                     <th>Contact</th>
-                    <th>Lead time</th>
-                    <th>Terms</th>
-                    <th class="num">Items</th>
-                    <th class="num">Total purchased</th>
-                    <th>Last delivery</th>
+                    <th>Lead time <i class="help" tabindex="0" role="button" aria-label="About lead time" data-tip="Usual days between placing an order with this supplier and the delivery arriving. The reorder list uses it.">?</i></th>
+                    <th>Terms <i class="help" tabindex="0" role="button" aria-label="About payment terms" data-tip="When and how you agree to pay this supplier, as typed on the supplier.">?</i></th>
+                    <th class="num">Items <i class="help" tabindex="0" role="button" aria-label="About items" data-tip="Ingredients that have this supplier as their preferred supplier. Archived ingredients are not counted.">?</i></th>
+                    <th class="num">Total purchased <i class="help" tabindex="0" role="button" aria-label="About total purchased" data-tip="Everything received from this supplier since you started, at cost. Taken from the stock-in records that name this supplier.">?</i></th>
+                    <th>Last delivery <i class="help" tabindex="0" role="button" aria-label="About last delivery" data-tip="The date stock was last received from this supplier. Never means nothing has been received yet.">?</i></th>
                     <th>Status</th>
                     <th></th>
                 </tr>

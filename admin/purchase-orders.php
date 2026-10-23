@@ -836,7 +836,7 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                     <div><div class="lbl">Supplier</div><div class="val"><?php echo htmlspecialchars($po['supplier_name'] ?? 'Unassigned'); ?></div></div>
                     <div><div class="lbl">Order date</div><div class="val"><?php echo htmlspecialchars($po['order_date']); ?></div></div>
                     <div><div class="lbl">Expected</div><div class="val"><?php echo htmlspecialchars($po['expected_date'] ?? '—'); ?></div></div>
-                    <div><div class="lbl">Total</div><div class="val"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$po['total_cost'], 2); ?></div></div>
+                    <div><div class="lbl">Total <i class="help" tabindex="0" role="button" aria-label="About order total" data-tip="What the order is worth: the sum of its line totals at the order prices. It can change when lines are added or edited.">?</i></div><div class="val"><?php echo htmlspecialchars($currency_symbol) . number_format((float)$po['total_cost'], 2); ?></div></div>
                     <div><div class="lbl">Raised by</div><div class="val"><?php echo htmlspecialchars($po['creator'] ?? '—'); ?></div></div>
                 </div>
                 <?php if (!empty($po['notes'])): ?>
@@ -913,11 +913,11 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                     <thead>
                         <tr>
                             <th>Item</th>
-                            <th class="num">Ordered</th>
-                            <th class="num">Received</th>
-                            <th class="num">Unit cost</th>
-                            <th class="num">Line total</th>
-                            <?php if ($canReceive): ?><th class="num">Receive now</th><th class="num">Price on invoice</th><th>Expiry</th><?php endif; ?>
+                            <th class="num">Ordered <i class="help" tabindex="0" role="button" aria-label="About quantity ordered" data-tip="How much you asked the supplier for on this line. Lines bought in packs also show the number of units.">?</i></th>
+                            <th class="num">Received <i class="help" tabindex="0" role="button" aria-label="About quantity received" data-tip="How much of this line has been booked in so far, in the item&#x27;s own unit. More than ordered is flagged as over-delivered.">?</i></th>
+                            <th class="num">Unit cost <i class="help" tabindex="0" role="button" aria-label="About unit cost" data-tip="The price per unit you agreed on this order. It is the order price, not the invoice price.">?</i></th>
+                            <th class="num">Line total <i class="help" tabindex="0" role="button" aria-label="About line total" data-tip="Quantity ordered times the unit cost for this line.">?</i></th>
+                            <?php if ($canReceive): ?><th class="num">Receive now <i class="help" tabindex="0" role="button" aria-label="About receive now" data-tip="How much has arrived in this delivery. Saving adds it to stock. Entering more than is outstanding counts as an over-delivery and needs a note.">?</i></th><th class="num">Price on invoice <i class="help" tabindex="0" role="button" aria-label="About price on invoice" data-tip="The price on the supplier&#x27;s invoice for this delivery. It sets the cost of the stock received; the order itself does not change.">?</i></th><th>Expiry <i class="help" tabindex="0" role="button" aria-label="About expiry date" data-tip="The use-by date of the stock in this delivery. Leave blank if it has none.">?</i></th><?php endif; ?>
                             <?php if ($isEditable): ?><th></th><?php endif; ?>
                         </tr>
                     </thead>
@@ -1058,10 +1058,10 @@ $canReceive = $po && in_array($po['status'], ['sent', 'partial'], true);
                         <th>Reference</th>
                         <th>Supplier</th>
                         <th>Status</th>
-                        <th class="num">Lines</th>
-                        <th class="num">Total</th>
+                        <th class="num">Lines <i class="help" tabindex="0" role="button" aria-label="About lines" data-tip="How many different items are on this order.">?</i></th>
+                        <th class="num">Total <i class="help" tabindex="0" role="button" aria-label="About total" data-tip="What the order is worth: the sum of its line totals at the order prices.">?</i></th>
                         <th>Order date</th>
-                        <th>Expected</th>
+                        <th>Expected <i class="help" tabindex="0" role="button" aria-label="About expected date" data-tip="The date the supplier is due to deliver, if one was entered.">?</i></th>
                     </tr>
                 </thead>
                 <tbody>

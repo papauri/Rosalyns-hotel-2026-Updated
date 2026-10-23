@@ -14,6 +14,14 @@
     // MODAL CONTROLLER
     // ============================================
 
+    // Column header text for card labels: the text of the <th> without its "?" help dot.
+    window.rhHeaderLabel = function (th) {
+        if (!th) return '';
+        const copy = th.cloneNode(true);
+        copy.querySelectorAll('.help').forEach((dot) => dot.remove());
+        return (copy.textContent || '').replace(/\s+/g, ' ').trim();
+    };
+
     window.Modal = {
         activeModals: [],
 
@@ -22,7 +30,7 @@
             const tables = root.querySelectorAll('.modal table, .modal-overlay table, .admin-modal table, .modal__body table, .modal-body table');
 
             tables.forEach((table) => {
-                const headers = Array.from(table.querySelectorAll('thead th')).map((cell) => cell.textContent.trim());
+                const headers = Array.from(table.querySelectorAll('thead th')).map((cell) => window.rhHeaderLabel(cell));
                 if (!headers.length) {
                     return;
                 }

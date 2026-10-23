@@ -597,29 +597,9 @@ table.count-list th {
     flex: 0 0 auto;
 }
 
-/* The "?" beside the tick box (the shared help-tip bubble shows its data-tip text). 44px tap area, 20px dot. */
+/* The "?" beside the tick box: shared dot (help-tooltips.css), only the spacing is local. */
 .sc-opening-row .help {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-    width: 20px;
-    height: 20px;
     margin: 0 12px;
-    border-radius: 50%;
-    background: #e9ecef;
-    color: #495057;
-    font-size: 12px;
-    font-style: normal;
-    font-weight: 600;
-    cursor: help;
-    position: relative;
-}
-
-.sc-opening-row .help::before {
-    content: "";
-    position: absolute;
-    inset: -12px;
 }
 
 /* Missing stock / added by hand rows */

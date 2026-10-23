@@ -294,6 +294,65 @@ define('RH_HELP_TOOLTIPS_RENDERED', true);
             });
         }
 
+        // ----- The small "?" dot (<i class="help" data-tip="...">) -----
+        // One tap / click / Enter shows the bubble and does nothing else, even when the dot sits
+        // inside a link, a button, a card that opens a modal or a sortable column header.
+        // Registered first and in the capture phase so it runs before any of those handlers.
+        const DOT_SELECTOR = '.help[data-tip]';
+
+        function toggleDotBubble(dot, e, viaKeyboard) {
+            clearTimeout(hoverTimer);
+            const coarse = window.matchMedia('(hover: none)').matches || window.matchMedia('(pointer: coarse)').matches;
+            const touchLike = viaKeyboard || coarse || (e && e.pointerType === 'touch');
+            if (touchLike && activeEl === dot && bubble.classList.contains('show')) {
+                hideBubble();
+                return;
+            }
+            showBubble(dot, undefined, undefined, true);
+        }
+
+        document.addEventListener('click', e => {
+            const dot = e.target instanceof Element ? e.target.closest(DOT_SELECTOR) : null;
+            if (!dot) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            toggleDotBubble(dot, e, false);
+        }, true);
+
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const dot = e.target instanceof Element ? e.target.closest(DOT_SELECTOR) : null;
+            if (!dot) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            toggleDotBubble(dot, e, true);
+        }, true);
+
+        // Keyboard access: dots on their own get tabindex + role; dots inside a link, button or
+        // sortable header are left out of the tab order (no nested focusable controls).
+        // A MutationObserver covers dots that arrive later (page swaps, rebuilt cards).
+        function enhanceDots() {
+            document.querySelectorAll(DOT_SELECTOR + ':not([data-rh-dot])').forEach(function(dot) {
+                dot.setAttribute('data-rh-dot', '1');
+                if (dot.closest('a[href], button, summary, [role="button"], th')) return;
+                if (!dot.hasAttribute('tabindex')) dot.setAttribute('tabindex', '0');
+                if (!dot.hasAttribute('role')) dot.setAttribute('role', 'button');
+            });
+        }
+        let dotFrame = 0;
+        function scheduleEnhanceDots() {
+            if (dotFrame) return;
+            dotFrame = requestAnimationFrame(function() {
+                dotFrame = 0;
+                enhanceDots();
+            });
+        }
+        new MutationObserver(scheduleEnhanceDots).observe(document.documentElement, {
+            childList: true,
+            subtree: true
+        });
+        scheduleEnhanceDots();
+
         // ----- Mouse hover (desktop) -----
         document.addEventListener('mouseover', e => {
             const t = getHelpTarget(e.target);

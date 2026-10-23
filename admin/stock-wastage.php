@@ -265,7 +265,7 @@ $csrf_token = generateCsrfToken();
                 data-insight-key="this-month"
                 data-insight-title="Current Month Wastage"
                 aria-label="Open current month wastage insight">
-                <span class="ck-kpi__label">This month wastage</span>
+                <span class="ck-kpi__label">This month wastage <i class="help" aria-label="About this month wastage" data-tip="Cost of everything recorded as wasted with a date in the current calendar month.">?</i></span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($totalThisMonth, 2); ?></span>
                 <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
             </button>
@@ -274,7 +274,7 @@ $csrf_token = generateCsrfToken();
                 data-insight-key="last-month"
                 data-insight-title="Previous Month Baseline"
                 aria-label="Open previous month baseline insight">
-                <span class="ck-kpi__label">Last month</span>
+                <span class="ck-kpi__label">Last month <i class="help" aria-label="About last month wastage" data-tip="Cost of everything recorded as wasted with a date in the previous calendar month.">?</i></span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($totalLastMonth, 2); ?></span>
                 <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
             </button>
@@ -283,7 +283,7 @@ $csrf_token = generateCsrfToken();
                 data-insight-key="recency"
                 data-insight-title="Logging Recency Health"
                 aria-label="Open wastage logging recency health">
-                <span class="ck-kpi__label">Days since last entry</span>
+                <span class="ck-kpi__label">Days since last entry <i class="help" aria-label="About days since last entry" data-tip="Days between today and the date of the newest wastage record. Daily logging keeps stock accurate.">?</i></span>
                 <span class="ck-kpi__value"><?php echo $daysSinceLast === null ? '—' : $daysSinceLast; ?></span>
                 <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
             </button>
@@ -383,10 +383,10 @@ $csrf_token = generateCsrfToken();
             <table class="stock-table">
                 <thead>
                     <tr>
-                        <th>Date</th>
+                        <th>Date <i class="help" tabindex="0" role="button" aria-label="About date" data-tip="The day the loss happened, which may be earlier than the day it was typed in. Months on this page follow this date.">?</i></th>
                         <th>Ingredient</th>
-                        <th style="text-align:right;">Quantity</th>
-                        <th style="text-align:right;">Cost</th>
+                        <th style="text-align:right;">Quantity <i class="help" tabindex="0" role="button" aria-label="About quantity" data-tip="How much was wasted, in the ingredient&#x27;s own unit.">?</i></th>
+                        <th style="text-align:right;">Cost <i class="help" tabindex="0" role="button" aria-label="About cost" data-tip="What the wasted amount cost you, worked out when it was recorded: quantity times cost per unit.">?</i></th>
                         <th>Reason</th>
                         <th>Recorded by</th>
                     </tr>

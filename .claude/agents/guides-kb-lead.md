@@ -19,6 +19,19 @@ Read `.claude/DEPARTMENTS.md`. Then only the guide pages and code your brief nam
   if needed) and that a few searches for the changed topics return the right section
   (run the KB functions from a CLI script; read-only).
 
+## Screen helpers (owner 2026-10-24: "the helper should be the guide and KB lead's job")
+Every table column header and every figure card (dashboard tiles, summary cards, report totals) carries
+one small helper saying in plain words what the figure counts, from where, and for which period
+(e.g. "Received purchase-order lines this month, at cost"). You write and place them:
+- Pattern: the shared "?" — `<i class="help" tabindex="0" role="button" aria-label="About …" data-tip="…">?</i>`
+  (shown by the shared bubble in admin/includes/help-tooltips.php + admin/css/help-tooltips.css). No new
+  CSS/JS; if a spot can't take it cleanly, raise a UI_REQUEST for ui-lead instead of styling it yourself.
+- Wording must match the real code: read the query/function behind each figure before writing. If the
+  code looks wrong, don't describe the wrong behaviour as right — report it as a finding for the dept lead.
+- Skip self-explanatory columns (Name, Date, Actions, Status pills that already say it). One sentence,
+  max ~25 words, no jargon, no "smart"/AI wording. `htmlspecialchars` on any PHP-built text.
+- Markup only: never change queries, logic or layout. `php -l` every file you touch.
+
 ## How to write (owner's rule: easy enough to follow)
 - Plain English, short sentences, one action per step. Numbered steps for tasks, starting with
   where to click ("Open **POS Till** → tap **Today's orders**").

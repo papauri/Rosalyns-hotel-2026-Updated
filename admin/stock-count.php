@@ -1288,25 +1288,25 @@ $csrf_token = generateCsrfToken();
 
             <div class="summary-grid">
                 <div class="sum-card">
-                    <div class="lbl">Items</div>
+                    <div class="lbl">Items <i class="help" tabindex="0" role="button" aria-label="About items in this count" data-tip="How many ingredients are on this count.">?</i></div>
                     <div class="val"><?php echo $totalLines; ?></div>
                 </div>
                 <?php if (!$blindCount): ?>
                 <div class="sum-card<?php echo $pendingShort < 0 ? ' bad' : ''; ?>">
-                    <div class="lbl">Shortage</div>
+                    <div class="lbl">Shortage <i class="help" tabindex="0" role="button" aria-label="About shortage" data-tip="Worth of missing stock on the lines counted so far: how much short, times cost per unit.">?</i></div>
                     <div class="val"><?php echo $currency . ' ' . number_format(abs($pendingShort), 2); ?></div>
                 </div>
                 <div class="sum-card<?php echo $pendingSurplus > 0 ? ' good' : ''; ?>">
-                    <div class="lbl">Surplus</div>
+                    <div class="lbl">Surplus <i class="help" tabindex="0" role="button" aria-label="About surplus" data-tip="Worth of extra stock found on the lines counted so far: how much over, times cost per unit.">?</i></div>
                     <div class="val"><?php echo $currency . ' ' . number_format($pendingSurplus, 2); ?></div>
                 </div>
                 <div class="sum-card">
-                    <div class="lbl">Net</div>
+                    <div class="lbl">Net <i class="help" tabindex="0" role="button" aria-label="About net difference" data-tip="Surplus minus shortage. A minus figure means more stock is missing than was found.">?</i></div>
                     <div class="val"><?php echo $currency . ' ' . number_format($pendingSurplus + $pendingShort, 2); ?></div>
                 </div>
                 <?php endif; ?>
                 <div class="sum-card<?php echo ($uncountedTotal > 0 && $activeCount['status'] === 'draft') ? ' bad' : ''; ?>">
-                    <div class="lbl">Not counted</div>
+                    <div class="lbl">Not counted <i class="help" tabindex="0" role="button" aria-label="About items not counted" data-tip="Items on this count that have no counted figure entered yet.">?</i></div>
                     <div class="val"><?php echo (int)$uncountedTotal; ?></div>
                 </div>
             </div>
@@ -1461,14 +1461,14 @@ $csrf_token = generateCsrfToken();
                             <tr>
                                 <th>Ingredient</th>
                                 <?php if (!$blindCount): ?>
-                                <th style="text-align:right;">In stock at start</th>
-                                <th style="text-align:right;">Should be there</th>
+                                <th style="text-align:right;">In stock at start <i class="help" tabindex="0" role="button" aria-label="About stock at the start" data-tip="What the system showed on hand for this item when the count was started.">?</i></th>
+                                <th style="text-align:right;">Should be there <i class="help" tabindex="0" role="button" aria-label="About stock that should be there" data-tip="The start figure plus sales, deliveries and wastage recorded since the count started. Blank until the item is counted.">?</i></th>
                                 <?php endif; ?>
-                                <th style="text-align:right;">Counted</th>
-                                <?php if ($isOpeningCount): ?><th style="text-align:right;">Unit cost (<?php echo htmlspecialchars($currency); ?>)</th><?php endif; ?>
+                                <th style="text-align:right;">Counted <i class="help" tabindex="0" role="button" aria-label="About counted" data-tip="What you physically counted, in the ingredient&#x27;s own unit.">?</i></th>
+                                <?php if ($isOpeningCount): ?><th style="text-align:right;">Unit cost (<?php echo htmlspecialchars($currency); ?>) <i class="help" tabindex="0" role="button" aria-label="About unit cost" data-tip="What one unit of this item cost you. Needed for every item on an opening count so the stock can be valued.">?</i></th><?php endif; ?>
                                 <?php if (!$blindCount): ?>
-                                <th style="text-align:right;">Difference</th>
-                                <th style="text-align:right;">Value</th>
+                                <th style="text-align:right;">Difference <i class="help" tabindex="0" role="button" aria-label="About difference" data-tip="Counted minus what should be there. A minus figure means stock is missing.">?</i></th>
+                                <th style="text-align:right;">Value <i class="help" tabindex="0" role="button" aria-label="About value of the difference" data-tip="The difference times the cost per unit, in money.">?</i></th>
                                 <?php endif; ?>
                                 <th>Reason</th>
                                 <th>Notes</th>
@@ -1893,9 +1893,9 @@ $csrf_token = generateCsrfToken();
                                     <th>Reference</th>
                                     <th>Date</th>
                                     <th>What was counted</th>
-                                    <th>Items</th>
-                                    <th class="sc-num">Shortage</th>
-                                    <th class="sc-num">Surplus</th>
+                                    <th>Items <i class="help" tabindex="0" role="button" aria-label="About items" data-tip="How many ingredients are on this count.">?</i></th>
+                                    <th class="sc-num">Shortage <i class="help" tabindex="0" role="button" aria-label="About shortage" data-tip="Worth of missing stock found by this count. Shows a dash for draft counts, and for counts not yet approved if you cannot approve counts.">?</i></th>
+                                    <th class="sc-num">Surplus <i class="help" tabindex="0" role="button" aria-label="About surplus" data-tip="Worth of extra stock found by this count. Shows a dash for draft counts, and for counts not yet approved if you cannot approve counts.">?</i></th>
                                     <th>Counted by</th>
                                     <th>Status</th>
                                     <th></th>

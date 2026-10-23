@@ -262,7 +262,7 @@ function expiry_tier(?string $expiry, ?int $days): array
                 data-insight-key="critical"
                 data-insight-title="Critical Expiry (3 Days or Less)"
                 aria-label="Open critical expiry insight">
-                <span class="ck-kpi__label">Expiring ≤ 3 days</span>
+                <span class="ck-kpi__label">Expiring ≤ 3 days <i class="help" aria-label="About batches expiring within 3 days" data-tip="Active batches with stock left that expire between today and 3 days from now. Value at risk is quantity left times cost per unit.">?</i></span>
                 <span class="ck-kpi__value"><?php echo $cntCritical; ?></span>
                 <span class="ck-kpi__sub">Value at risk: <?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($valueAtRisk, 2); ?></span>
             </button>
@@ -271,7 +271,7 @@ function expiry_tier(?string $expiry, ?int $days): array
                 data-insight-key="soon"
                 data-insight-title="Expiry Watchlist (4-7 Days)"
                 aria-label="Open expiry watchlist insight">
-                <span class="ck-kpi__label">Expiring 4–7 days</span>
+                <span class="ck-kpi__label">Expiring 4–7 days <i class="help" aria-label="About batches expiring in 4 to 7 days" data-tip="Active batches with stock left that expire 4 to 7 days from today.">?</i></span>
                 <span class="ck-kpi__value"><?php echo $cntSoon; ?></span>
                 <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
             </button>
@@ -280,7 +280,7 @@ function expiry_tier(?string $expiry, ?int $days): array
                 data-insight-key="upcoming"
                 data-insight-title="Upcoming Expiry Horizon (8-30 Days)"
                 aria-label="Open upcoming expiry horizon insight">
-                <span class="ck-kpi__label">Expiring 8–30 days</span>
+                <span class="ck-kpi__label">Expiring 8–30 days <i class="help" aria-label="About batches expiring in 8 to 30 days" data-tip="Active batches with stock left that expire 8 to 30 days from today.">?</i></span>
                 <span class="ck-kpi__value"><?php echo $cntUpcoming; ?></span>
                 <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
             </button>
@@ -289,7 +289,7 @@ function expiry_tier(?string $expiry, ?int $days): array
                 data-insight-key="active"
                 data-insight-title="Active Batch Capacity"
                 aria-label="Open active batch capacity insight">
-                <span class="ck-kpi__label">Total active batches</span>
+                <span class="ck-kpi__label">Total active batches <i class="help" aria-label="About active batches" data-tip="All active batches that still have stock left, whatever the filters below are set to.">?</i></span>
                 <span class="ck-kpi__value"><?php echo $cntActive; ?></span>
                 <span class="ck-kpi__sub"><i class="fas fa-table-list"></i> Open detail</span>
             </button>
@@ -393,12 +393,12 @@ function expiry_tier(?string $expiry, ?int $days): array
                     <tr>
                         <th>Batch</th>
                         <th>Ingredient</th>
-                        <th style="text-align:right;">Received</th>
-                        <th style="text-align:right;">Remaining</th>
-                        <th style="text-align:right;">Cost / unit</th>
+                        <th style="text-align:right;">Received <i class="help" tabindex="0" role="button" aria-label="About quantity received" data-tip="How much arrived in this batch when it was received, in the ingredient&#x27;s unit.">?</i></th>
+                        <th style="text-align:right;">Remaining <i class="help" tabindex="0" role="button" aria-label="About quantity remaining" data-tip="How much of this batch is left now. It goes down as stock is used, oldest batch first, or written off.">?</i></th>
+                        <th style="text-align:right;">Cost / unit <i class="help" tabindex="0" role="button" aria-label="About cost per unit" data-tip="The price you paid for one unit of this batch when it was received.">?</i></th>
                         <th>Supplier</th>
                         <th>Received on</th>
-                        <th>Expiry</th>
+                        <th>Expiry <i class="help" tabindex="0" role="button" aria-label="About expiry" data-tip="The batch&#x27;s use-by date and days left. Red is 3 days or less, amber 4 to 7, teal 8 to 30, green more than that.">?</i></th>
                         <th>Status</th>
                         <th>Actions <i class="help" data-tip="Mark Wasted removes stock for spoilage or damage. Recall removes stock because the supplier or product is not safe to keep active.">?</i></th>
                     </tr>

@@ -367,7 +367,7 @@ $csrf_token = generateCsrfToken();
         <div class="ck-kpis ck-kpis--4">
             <a class="ck-kpi ck-kpi--info" href="stock-orders.php?date=today&status=settled">
                 <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
-                <span class="ck-kpi__label">Net Sales Today</span>
+                <span class="ck-kpi__label">Net Sales Today <i class="help" aria-label="About net sales today" data-tip="Money from orders paid today, after refunds and voids. Room-service orders put on a guest&#x27;s bill are left out because the bill counts them.">?</i></span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['revenue_today'], 0); ?></span>
                 <span class="ck-kpi__sub">
                     <?php if (($metrics['orders_paid_today'] ?? null) === null): ?>
@@ -388,21 +388,21 @@ $csrf_token = generateCsrfToken();
 
             <a class="ck-kpi <?php echo (int)($metrics['orders_pending'] ?? 0) > 0 ? 'ck-kpi--warn' : 'ck-kpi--good'; ?>" href="stock-orders.php?status=placed">
                 <span class="ck-kpi__icon"><i class="fas fa-hourglass-half"></i></span>
-                <span class="ck-kpi__label">Open Tabs</span>
+                <span class="ck-kpi__label">Open Tabs <i class="help" aria-label="About open tabs" data-tip="Orders that have been started but are not yet paid or closed, from any day. Tap the card to see the list.">?</i></span>
                 <span class="ck-kpi__value"><?php echo number_format((int)($metrics['orders_pending'] ?? 0)); ?></span>
                 <span class="ck-kpi__sub"><?php echo (int)($metrics['orders_pending'] ?? 0) > 0 ? 'Awaiting payment / close-out' : 'No open tabs right now'; ?></span>
             </a>
 
             <a class="ck-kpi ck-kpi--good" href="stock-ingredients.php">
                 <span class="ck-kpi__icon"><i class="fas fa-warehouse"></i></span>
-                <span class="ck-kpi__label">Inventory Value</span>
+                <span class="ck-kpi__label">Inventory Value <i class="help" aria-label="About inventory value" data-tip="What the stock you hold now is worth at cost: quantity on hand times cost per unit, for every ingredient not archived. Negative quantities count as nothing.">?</i></span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['total_inventory_value'], 0); ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format((int)$metrics['ingredient_count']); ?> ingredients tracked</span>
             </a>
 
             <a class="ck-kpi ck-kpi--warn" href="stock-wastage.php">
                 <span class="ck-kpi__icon"><i class="fas fa-trash-alt"></i></span>
-                <span class="ck-kpi__label">Wastage</span>
+                <span class="ck-kpi__label">Wastage <i class="help" aria-label="About wastage" data-tip="Cost of everything recorded as wasted in the last 30 days. Today&#x27;s amount shows underneath when there is any.">?</i></span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['wastage_30d'], 0); ?></span>
                 <span class="ck-kpi__sub">
                     30-day total
@@ -624,7 +624,7 @@ $csrf_token = generateCsrfToken();
                 ?>
                 <div class="sdash-coverage-row">
                     <div class="sdash-coverage-row__label">
-                        <i class="fas fa-utensils"></i> Food menu
+                        <i class="fas fa-utensils"></i> Food menu <i class="help" tabindex="0" role="button" aria-label="About food menu coverage" data-tip="Active menu items made in the kitchen that have a recipe with at least one ingredient, out of all active kitchen items.">?</i>
                         <span class="sdash-coverage-row__count"><?php echo (int)($metrics['food_with_recipe'] ?? 0); ?> / <?php echo (int)($metrics['food_total'] ?? 0); ?> items</span>
                     </div>
                     <div class="sdash-coverage-row__bar-wrap">
@@ -637,7 +637,7 @@ $csrf_token = generateCsrfToken();
                 </div>
                 <div class="sdash-coverage-row">
                     <div class="sdash-coverage-row__label">
-                        <i class="fas fa-cocktail"></i> Drinks menu
+                        <i class="fas fa-cocktail"></i> Drinks menu <i class="help" tabindex="0" role="button" aria-label="About drinks menu coverage" data-tip="Active menu items not made in the kitchen (bar and other stations) that have a recipe with at least one ingredient, out of all of them.">?</i>
                         <span class="sdash-coverage-row__count"><?php echo (int)($metrics['drink_with_recipe'] ?? 0); ?> / <?php echo (int)($metrics['drink_total'] ?? 0); ?> items</span>
                     </div>
                     <div class="sdash-coverage-row__bar-wrap">
@@ -668,9 +668,9 @@ $csrf_token = generateCsrfToken();
                         <tr style="border-bottom:2px solid #e5ddd0;text-align:left;">
                             <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;">Item</th>
                             <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:center;">Type</th>
-                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Qty Sold</th>
-                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Revenue</th>
-                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Orders</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Qty Sold <i class="help" tabindex="0" role="button" aria-label="About quantity sold" data-tip="How many of this item were sold today on paid orders. The list shows the 8 best sellers by quantity.">?</i></th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Revenue <i class="help" tabindex="0" role="button" aria-label="About revenue" data-tip="Money taken for this item today on paid orders, as sold.">?</i></th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Orders <i class="help" tabindex="0" role="button" aria-label="About orders" data-tip="How many separate paid orders today included this item.">?</i></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -707,9 +707,9 @@ $csrf_token = generateCsrfToken();
                     <thead>
                         <tr style="border-bottom:2px solid #e5ddd0;text-align:left;">
                             <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;">Ingredient</th>
-                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Qty Lost</th>
-                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Cost Lost</th>
-                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Entries</th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Qty Lost <i class="help" tabindex="0" role="button" aria-label="About quantity lost" data-tip="Total recorded as wasted in the last 30 days, in the ingredient&#x27;s own unit.">?</i></th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Cost Lost <i class="help" tabindex="0" role="button" aria-label="About cost lost" data-tip="What the wasted amount cost you in the last 30 days. The list is ranked by this, highest first.">?</i></th>
+                            <th style="padding:6px 8px;color:#766550;font-weight:600;font-size:11px;text-transform:uppercase;text-align:right;">Entries <i class="help" tabindex="0" role="button" aria-label="About entries" data-tip="How many separate wastage records were made for this ingredient in the last 30 days.">?</i></th>
                         </tr>
                     </thead>
                     <tbody>

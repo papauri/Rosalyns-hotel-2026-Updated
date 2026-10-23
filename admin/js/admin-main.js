@@ -735,11 +735,12 @@
                 if (!isSortableHeader(th)) return;
                 prepareSortableHeader(th);
                 th.addEventListener('click', function (event) {
-                    if (event.target.closest('input, button, select, a, textarea, label')) return;
+                    if (event.target.closest('input, button, select, a, textarea, label, .help')) return;
                     sortTableByColumn(table, body, headers, th, index);
                 });
                 th.addEventListener('keydown', function (event) {
                     if (event.key !== 'Enter' && event.key !== ' ') return;
+                    if (event.target.closest('.help')) return;
                     event.preventDefault();
                     sortTableByColumn(table, body, headers, th, index);
                 });

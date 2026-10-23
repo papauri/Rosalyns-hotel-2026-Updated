@@ -533,18 +533,55 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
 
         <?php if (!empty($summary)): ?>
             <div class="summary-strip">
-                <?php if (isset($summary['total_value'])): ?><strong>Total inventory value:</strong> <?php echo stock_reports_money((float)$summary['total_value'], $currency_symbol); ?><?php endif; ?>
-                    <?php if (isset($summary['total_spend'])): ?><strong>Total stock-in spend:</strong> <?php echo stock_reports_money((float)$summary['total_spend'], $currency_symbol); ?><?php endif; ?>
-                        <?php if (isset($summary['total_cost']) && $tab === 'usage'): ?><strong>Total usage cost:</strong> <?php echo stock_reports_money((float)$summary['total_cost'], $currency_symbol); ?><?php endif; ?>
-                            <?php if (isset($summary['total_cost']) && $tab === 'wastage'): ?><strong>Total wastage cost:</strong> <?php echo stock_reports_money((float)$summary['total_cost'], $currency_symbol); ?> across <?php echo (int)($summary['ingredient_count'] ?? 0); ?> item(s)<?php endif; ?>
+                <?php if (isset($summary['total_value'])): ?><strong>Total inventory value:</strong> <i class="help" tabindex="0" role="button" aria-label="About total inventory value" data-tip="Stock on hand now at cost: quantity times cost per unit for every ingredient not archived. Negative quantities count as nothing.">?</i> <?php echo stock_reports_money((float)$summary['total_value'], $currency_symbol); ?><?php endif; ?>
+                    <?php if (isset($summary['total_spend'])): ?><strong>Total stock-in spend:</strong> <i class="help" tabindex="0" role="button" aria-label="About total stock-in spend" data-tip="Cost of all stock received between the From and To dates.">?</i> <?php echo stock_reports_money((float)$summary['total_spend'], $currency_symbol); ?><?php endif; ?>
+                        <?php if (isset($summary['total_cost']) && $tab === 'usage'): ?><strong>Total usage cost:</strong> <i class="help" tabindex="0" role="button" aria-label="About total usage cost" data-tip="What the ingredients used by orders cost between the From and To dates.">?</i> <?php echo stock_reports_money((float)$summary['total_cost'], $currency_symbol); ?><?php endif; ?>
+                            <?php if (isset($summary['total_cost']) && $tab === 'wastage'): ?><strong>Total wastage cost:</strong> <i class="help" tabindex="0" role="button" aria-label="About total wastage cost" data-tip="Cost of everything recorded as wasted between the From and To dates.">?</i> <?php echo stock_reports_money((float)$summary['total_cost'], $currency_symbol); ?> across <?php echo (int)($summary['ingredient_count'] ?? 0); ?> item(s)<?php endif; ?>
             </div>
         <?php endif; ?>
 
+        <?php
+        // Plain-words helper for each card (shown by the shared ? bubble).
+        $cardTips = [
+            'Tracked ingredients' => 'Ingredients that are not archived, as they are right now. Not tied to the date range.',
+            'Average stock value' => 'Total stock value (quantity on hand times cost per unit, added up) divided by the number of ingredients tracked.',
+            'Low stock items' => 'Ingredients above zero but at or below their reorder point, or their minimum quantity if no reorder point is set.',
+            'Out of stock items' => 'Ingredients at zero or below that have stock history. Items never stocked are counted under Not yet stocked.',
+            'Not yet stocked' => 'Ingredients at zero with no stock history at all, because opening stock was never recorded.',
+            'Active batches' => 'Batches of any ingredient that are active and still have stock left.',
+            'Stock-in records' => 'How many stock-in entries were logged between the From and To dates.',
+            'Total stock-in spend' => 'Cost of all stock received between the From and To dates.',
+            'Average stock-in value' => 'Total stock-in spend divided by the number of stock-in records.',
+            'Ingredients received' => 'How many different ingredients were received between the From and To dates.',
+            'Ingredients consumed' => 'Ingredients used by restaurant and room-service orders between the From and To dates, after cancelled orders put stock back.',
+            'Total usage cost' => 'What the ingredients used by orders cost between the From and To dates, at the cost recorded when each was used.',
+            'Top usage ingredient' => 'The ingredient with the highest usage cost in the date range, and its share of the total usage cost.',
+            'Quantity used' => 'Total quantity used in the date range, shown separately for each unit of measure.',
+            'Wastage entries' => 'How many wastage records are dated between the From and To dates.',
+            'Wastage total' => 'Cost of everything recorded as wasted between the From and To dates.',
+            'Wastage rate' => 'Wastage total as a percent of the usage cost over the same dates. Shows 0 when there was no usage.',
+            'Impacted ingredients' => 'How many different ingredients had wastage between the From and To dates.',
+            'Top wastage reason' => 'The reason that cost the most in wastage in the date range, with its cost.',
+            'Ingredients in yield analysis' => 'Ingredients that were used, wasted or expired between the From and To dates.',
+            'Overall yield' => 'Quantity used as a percent of everything that left stock (used plus wasted plus expired) in the date range. Higher is better.',
+            'At-risk ingredients' => 'Ingredients whose own yield is below 85 percent in the date range.',
+            'Loss cost' => 'Cost of stock wasted or expired in the date range, at the cost recorded when it happened.',
+            'Adjustment entries' => 'Every stock movement logged between the From and To dates: sales, deliveries, wastage, counts and hand changes.',
+            'Increase events' => 'Movements in the date range that added stock.',
+            'Decrease events' => 'Movements in the date range that took stock away.',
+            'Source types' => 'How many different kinds of movement (sale, delivery, count and so on) appear in the date range.',
+            'Net quantity change' => 'Stock added minus stock removed over the whole date range, shown separately for each unit of measure.',
+            'Tracked batches' => 'Active batches with stock left that have an expiry date, plus batches that expired in the last 30 days.',
+            'Expiring in 7 days' => 'Batches that expire between today and 7 days from now.',
+            'Expired recently' => 'Batches already past their expiry date: those still listed, going back 30 days.',
+            'At-risk value (7d)' => 'Quantity left times cost per unit, for batches that expire within 7 days or are already past their date.',
+        ];
+        ?>
         <?php if (!empty($analysis_cards)): ?>
             <section class="report-analysis" aria-label="Report analysis">
                 <?php foreach ($analysis_cards as $card): ?>
                     <article class="report-analysis__card">
-                        <p class="report-analysis__label"><?php echo htmlspecialchars($card['label']); ?></p>
+                        <p class="report-analysis__label"><?php echo htmlspecialchars($card['label']); ?><?php if (isset($cardTips[$card['label']])): ?> <i class="help" aria-label="About <?php echo htmlspecialchars($card['label']); ?>" data-tip="<?php echo htmlspecialchars($cardTips[$card['label']]); ?>">?</i><?php endif; ?></p>
                         <p class="report-analysis__value"><?php echo htmlspecialchars($card['value']); ?></p>
                         <?php if (!empty($card['hint'])): ?>
                             <p class="report-analysis__hint"><?php echo htmlspecialchars($card['hint']); ?></p>
@@ -561,10 +598,10 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                         <tr>
                             <th>Ingredient</th>
                             <th>Category</th>
-                            <th class="stock-table__num-head">Current qty</th>
-                            <th class="stock-table__num-head">Cost / unit</th>
-                            <th class="stock-table__num-head">Stock value</th>
-                            <th class="stock-table__num-head">Active batches</th>
+                            <th class="stock-table__num-head">Current qty <i class="help" aria-label="About current quantity" data-tip="Stock on hand right now, in the ingredient&#x27;s own unit.">?</i></th>
+                            <th class="stock-table__num-head">Cost / unit <i class="help" aria-label="About cost per unit" data-tip="The ingredient&#x27;s current average cost for one unit.">?</i></th>
+                            <th class="stock-table__num-head">Stock value <i class="help" aria-label="About stock value" data-tip="Current quantity times cost per unit. Negative stock counts as nothing.">?</i></th>
+                            <th class="stock-table__num-head">Active batches <i class="help" aria-label="About active batches" data-tip="Batches of this ingredient that are active and still have stock left.">?</i></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -585,9 +622,9 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                             <th>Date</th>
                             <th>Ingredient</th>
                             <th>Batch</th>
-                            <th class="stock-table__num-head">Qty</th>
-                            <th class="stock-table__num-head">Unit cost</th>
-                            <th class="stock-table__num-head">Total</th>
+                            <th class="stock-table__num-head">Qty <i class="help" aria-label="About quantity received" data-tip="How much was received in this entry, in the ingredient&#x27;s own unit.">?</i></th>
+                            <th class="stock-table__num-head">Unit cost <i class="help" aria-label="About unit cost" data-tip="The price paid for one unit in this delivery.">?</i></th>
+                            <th class="stock-table__num-head">Total <i class="help" aria-label="About total cost" data-tip="Quantity received times the unit cost for this entry.">?</i></th>
                             <th>Supplier</th>
                             <th>By</th>
                         </tr>
@@ -610,8 +647,8 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                     <thead>
                         <tr>
                             <th>Ingredient</th>
-                            <th class="stock-table__num-head">Quantity used</th>
-                            <th class="stock-table__num-head">Cost</th>
+                            <th class="stock-table__num-head">Quantity used <i class="help" aria-label="About quantity used" data-tip="How much of this ingredient was used by orders in the date range, after cancelled orders put stock back.">?</i></th>
+                            <th class="stock-table__num-head">Cost <i class="help" aria-label="About usage cost" data-tip="Quantity used valued at the cost recorded when each use happened. The list is ranked by this.">?</i></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -629,7 +666,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                             <th>Date</th>
                             <th>Ingredient</th>
                             <th class="stock-table__num-head">Qty</th>
-                            <th class="stock-table__num-head">Cost</th>
+                            <th class="stock-table__num-head">Cost <i class="help" aria-label="About wastage cost" data-tip="What the wasted quantity cost, worked out when it was recorded.">?</i></th>
                             <th>Reason</th>
                             <th>By</th>
                         </tr>
@@ -650,11 +687,11 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                     <thead>
                         <tr>
                             <th>Ingredient</th>
-                            <th class="stock-table__num-head">Used</th>
-                            <th class="stock-table__num-head">Wasted</th>
-                            <th class="stock-table__num-head">Expired</th>
-                            <th class="stock-table__num-head">Yield %</th>
-                            <th class="stock-table__num-head">Loss cost</th>
+                            <th class="stock-table__num-head">Used <i class="help" aria-label="About used" data-tip="Quantity used by orders in the date range, in the ingredient&#x27;s own unit.">?</i></th>
+                            <th class="stock-table__num-head">Wasted <i class="help" aria-label="About wasted" data-tip="Quantity recorded as wasted in the date range, including orders cancelled as wasted.">?</i></th>
+                            <th class="stock-table__num-head">Expired <i class="help" aria-label="About expired" data-tip="Quantity written off because it passed its expiry date in the date range.">?</i></th>
+                            <th class="stock-table__num-head">Yield % <i class="help" aria-label="About yield percent" data-tip="Used divided by used plus wasted plus expired. The badge changes at 95 percent and at 85 percent: below 85 needs attention.">?</i></th>
+                            <th class="stock-table__num-head">Loss cost <i class="help" aria-label="About loss cost" data-tip="What the wasted and expired quantity cost, at the cost recorded when it happened. The list is ranked by this.">?</i></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -681,8 +718,8 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                         <tr>
                             <th>When</th>
                             <th>Ingredient</th>
-                            <th>Source</th>
-                            <th class="stock-table__num-head">Δ Qty</th>
+                            <th>Source <i class="help" aria-label="About source" data-tip="What caused the movement, such as a sale, delivery, count, wastage or a hand change.">?</i></th>
+                            <th class="stock-table__num-head">Δ Qty <i class="help" aria-label="About change in quantity" data-tip="How much stock moved. Plus means added, minus means removed.">?</i></th>
                             <th>Reason</th>
                             <th>By</th>
                         </tr>
@@ -707,8 +744,8 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                             <th>Batch</th>
                             <th>Ingredient</th>
                             <th>Expiry date</th>
-                            <th class="stock-table__num-head">Days left</th>
-                            <th class="stock-table__num-head">Remaining</th>
+                            <th class="stock-table__num-head">Days left <i class="help" aria-label="About days left" data-tip="Days until the batch expires. The badge changes at 7 days and at 3 days. Expired batches show how many days ago.">?</i></th>
+                            <th class="stock-table__num-head">Remaining <i class="help" aria-label="About remaining" data-tip="How much of this batch is left, in the ingredient&#x27;s own unit.">?</i></th>
                             <th>Status</th>
                         </tr>
                     </thead>

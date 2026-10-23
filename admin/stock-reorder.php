@@ -178,9 +178,9 @@ $csrf_token = generateCsrfToken();
 
         <?php if (!$error): /* a failed build must not show 0 items as fact */ ?>
         <div class="ck-kpis ck-kpis--3 ro-summary">
-            <div class="ck-kpi ck-kpi--warn"><span class="ck-kpi__label">Items to reorder</span><span class="ck-kpi__value"><?php echo (int)$itemCount; ?></span></div>
-            <div class="ck-kpi"><span class="ck-kpi__label">Supplier orders</span><span class="ck-kpi__value"><?php echo count($groups); ?></span></div>
-            <div class="ck-kpi"><span class="ck-kpi__label">Est. purchase value</span><span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($grandTotal, 2); ?></span>
+            <div class="ck-kpi ck-kpi--warn"><span class="ck-kpi__label">Items to reorder <i class="help" tabindex="0" role="button" aria-label="About items to reorder" data-tip="Ingredients at or below their reorder point where the stock on hand plus orders already on the way still falls short of the target.">?</i></span><span class="ck-kpi__value"><?php echo (int)$itemCount; ?></span></div>
+            <div class="ck-kpi"><span class="ck-kpi__label">Supplier orders <i class="help" tabindex="0" role="button" aria-label="About supplier orders" data-tip="How many separate purchase orders this list would make: one per preferred supplier, plus one for items with no supplier.">?</i></span><span class="ck-kpi__value"><?php echo count($groups); ?></span></div>
+            <div class="ck-kpi"><span class="ck-kpi__label">Est. purchase value <i class="help" tabindex="0" role="button" aria-label="About estimated purchase value" data-tip="Suggested quantities times each item&#x27;s current cost per unit, added up across all suppliers. The real invoice may differ.">?</i></span><span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($grandTotal, 2); ?></span>
                 <?php if ($budgetLeft): $afterBuy = $budgetLeft['left'] - $grandTotal; ?>
                     <span class="ck-kpi__sub">Left to spend this month: <a href="stock-budget.php"><?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($budgetLeft['left'], 0); ?></a><?php echo $grandTotal > 0 && $afterBuy < -BALANCE_TOLERANCE ? ' &middot; <strong style="color:#8a3a3a;">this would go over by ' . htmlspecialchars($currency_symbol) . ' ' . number_format(abs($afterBuy), 0) . '</strong>' : ''; ?></span>
                 <?php endif; ?>
@@ -236,12 +236,12 @@ $csrf_token = generateCsrfToken();
                     <thead>
                         <tr>
                             <th>Item</th>
-                            <th class="num">On hand</th>
-                            <th class="num">Reorder pt</th>
-                            <th class="num">Par</th>
-                            <th class="num">On order</th>
-                            <th class="num">Suggested</th>
-                            <th class="num">Est. cost</th>
+                            <th class="num">On hand <i class="help" tabindex="0" role="button" aria-label="About on hand" data-tip="Stock in the store right now, in the item&#x27;s own unit.">?</i></th>
+                            <th class="num">Reorder pt <i class="help" tabindex="0" role="button" aria-label="About reorder point" data-tip="The low-stock line for this item: its reorder point if set, otherwise its minimum quantity. At or below it, the item is listed here.">?</i></th>
+                            <th class="num">Par <i class="help" tabindex="0" role="button" aria-label="About par level" data-tip="The target to top the item back up to: its par level if set, otherwise twice the reorder point.">?</i></th>
+                            <th class="num">On order <i class="help" tabindex="0" role="button" aria-label="About on order" data-tip="Quantity still to arrive on purchase orders that are sent or part-received. Draft orders are not counted.">?</i></th>
+                            <th class="num">Suggested <i class="help" tabindex="0" role="button" aria-label="About suggested quantity" data-tip="Par minus on hand minus on order. For items bought in packs it is rounded up to whole packs.">?</i></th>
+                            <th class="num">Est. cost <i class="help" tabindex="0" role="button" aria-label="About estimated cost" data-tip="Suggested quantity times the item&#x27;s current cost per unit.">?</i></th>
                         </tr>
                     </thead>
                     <tbody>

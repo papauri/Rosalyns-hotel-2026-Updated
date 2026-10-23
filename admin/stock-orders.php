@@ -1329,11 +1329,11 @@ $csrf_token = generateCsrfToken();
              Each card is a clickable filter that scopes the orders list below. -->
         <div class="shift-bar">
             <a class="shift-card<?php echo ($filterDate === 'today' && !$filterMethod && !$filterOrderType && $filterHour === '' && !$filterStatus && $filterHealth !== 'review' && !$filterKitchenStatus) ? ' active' : ''; ?>" href="stock-orders.php?date=today" title="Show today's orders">
-                <div class="lbl">Orders Today</div>
+                <div class="lbl">Orders Today <i class="help" aria-label="About orders today" data-tip="Orders started in today&#x27;s trading window, including any since cancelled or voided. Tap to list them.">?</i></div>
                 <div class="val"><?php echo (int)($shift['orders_today'] ?? 0); ?></div>
             </a>
             <a class="shift-card" href="accounting-dashboard.php" title="Open accounting dashboard">
-                <div class="lbl">Gross Sales Today</div>
+                <div class="lbl">Gross Sales Today <i class="help" aria-label="About gross sales today" data-tip="Money from orders paid in today&#x27;s trading window, before refunds and voids come off. Uses the same figures as the till end-of-shift report.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time, before refunds and voids</div>
                 <?php if ((float)($shift['refund_amount'] ?? 0) > 0.004): ?>
@@ -1344,27 +1344,27 @@ $csrf_token = generateCsrfToken();
                 <?php endif; ?>
             </a>
             <a class="shift-card<?php echo ($filterMethod === 'cash') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=cash" title="Today's cash taken (sales settled today, tips included). Refund/void payouts are shown in the detail view.">
-                <div class="lbl">Cash</div>
+                <div class="lbl">Cash <i class="help" aria-label="About cash" data-tip="Cash taken for orders paid in today&#x27;s trading window, tips included. Refund and void payouts are not taken off here.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time</div>
                 <div class="shift-card__sub">Tips (included): <?php echo $currency_symbol . ' ' . number_format((float)($shift['tips_today'] ?? 0), 2); ?></div>
             </a>
             <a class="shift-card<?php echo ($filterMethod === 'mobile_money') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=mobile_money" title="Today's mobile-money orders">
-                <div class="lbl">Mobile Money</div>
+                <div class="lbl">Mobile Money <i class="help" aria-label="About mobile money" data-tip="Mobile money taken for orders paid in today&#x27;s trading window. Refund and void payouts are not taken off here.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time</div>
             </a>
             <a class="shift-card<?php echo ($filterMethod === 'card_manual') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=card_manual" title="Today's card orders">
-                <div class="lbl">Card</div>
+                <div class="lbl">Card <i class="help" aria-label="About card" data-tip="Card payments taken for orders paid in today&#x27;s trading window. Refund and void payouts are not taken off here.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time</div>
             </a>
             <a class="shift-card<?php echo ((int)($shift['void_count_today'] ?? 0) > 0) ? ' warn' : ''; ?><?php echo ($filterStatus === 'voided') ? ' active' : ''; ?>" href="stock-orders.php?date=today&status=voided" title="Today's voided orders">
-                <div class="lbl">Voids</div>
+                <div class="lbl">Voids <i class="help" aria-label="About voids" data-tip="Orders voided in today&#x27;s trading window, paid or not: how many, and what they were worth.">?</i></div>
                 <div class="val"><?php echo (int)($shift['void_count_today'] ?? 0); ?> · <?php echo $currency_symbol . ' ' . number_format((float)($shift['voided_today'] ?? 0), 2); ?></div>
             </a>
             <a class="shift-card<?php echo ((int)$healthSummary['unbalanced'] > 0) ? ' warn' : ''; ?><?php echo ($filterHealth === 'review') ? ' active' : ''; ?>" href="stock-orders.php?health=review" title="Orders that need manager review">
-                <div class="lbl">Needs Review</div>
+                <div class="lbl">Needs Review <i class="help" aria-label="About orders needing review" data-tip="Orders in the list below whose items, payments or room charges do not agree with each other. Tap to see them.">?</i></div>
                 <div class="val"><?php echo (int)$healthSummary['unbalanced']; ?></div>
             </a>
             <a href="stock-count.php" class="shift-card" style="background:#fff7e6; border-color:#ffc107;" title="Run end-of-shift stock count">
@@ -1492,7 +1492,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="revenue-today"
                     data-insight-title="Revenue Today Breakdown"
                     aria-label="Open revenue today breakdown">
-                    <div class="lbl">Gross Sales Today</div>
+                    <div class="lbl">Gross Sales Today <i class="help" aria-label="About gross sales today" data-tip="Money from orders paid in today&#x27;s trading window, before refunds and voids. The arrow compares with yesterday.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format($revToday, 2); ?></div>
                     <?php echo insightsDelta($revDelta); ?>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Yesterday: <?php echo $currency_symbol . ' ' . number_format($revYday, 2); ?></div>
@@ -1506,7 +1506,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="orders-today"
                     data-insight-title="Orders Today Throughput"
                     aria-label="Open orders today throughput">
-                    <div class="lbl">Orders Today</div>
+                    <div class="lbl">Orders Today <i class="help" aria-label="About orders today" data-tip="Orders started in today&#x27;s trading window, including any since cancelled or voided. The arrow compares with yesterday.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $ordToday; ?></div>
                     <?php echo insightsDelta($ordDelta); ?>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Yesterday: <?php echo $ordYday; ?></div>
@@ -1520,7 +1520,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="avg-ticket"
                     data-insight-title="Average Ticket Quality"
                     aria-label="Open average ticket quality">
-                    <div class="lbl">Avg Ticket</div>
+                    <div class="lbl">Avg Ticket <i class="help" aria-label="About average ticket" data-tip="Gross sales today divided by the number of orders paid in today&#x27;s trading window.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($operationsSnapshot['avg_ticket_today'] ?? 0), 2); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Gross, across <?php echo (int)($operationsSnapshot['settled_today'] ?? 0); ?> settled today</div>
                     <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
@@ -1531,7 +1531,7 @@ $csrf_token = generateCsrfToken();
                     onclick="window.location.href='stock-orders.php?status=placed'"
                     role="link" tabindex="0"
                     title="View all open orders">
-                    <div class="lbl">Live Open Orders</div>
+                    <div class="lbl">Live Open Orders <i class="help" aria-label="About live open orders" data-tip="Orders still open (not yet paid or closed), from any day. Walk-in and room-service counts are shown underneath.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo (int)($operationsSnapshot['open_orders'] ?? 0); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                         <a href="stock-orders.php?status=placed&order_type=walk_in"
@@ -1563,7 +1563,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="cash-collected"
                     data-insight-title="Cash Collection Summary"
                     aria-label="Open cash collection summary">
-                    <div class="lbl">Cash Collected</div>
+                    <div class="lbl">Cash Collected <i class="help" aria-label="About cash collected" data-tip="Cash taken for orders paid in today&#x27;s trading window, tips included. It does not take off refund payouts or add the opening float.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Today's cash drawer total</div>
                     <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
@@ -1576,7 +1576,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="mobile-money"
                     data-insight-title="Mobile Money Collection"
                     aria-label="Open mobile money collection">
-                    <div class="lbl">Mobile Money</div>
+                    <div class="lbl">Mobile Money <i class="help" aria-label="About mobile money" data-tip="Mobile money taken for orders paid in today&#x27;s trading window. Refund and void payouts are not taken off here.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Today's mobile transactions</div>
                     <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
@@ -1589,7 +1589,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="card-payments"
                     data-insight-title="Card Payments Summary"
                     aria-label="Open card payments summary">
-                    <div class="lbl">Card Payments</div>
+                    <div class="lbl">Card Payments <i class="help" aria-label="About card payments" data-tip="Card payments taken for orders paid in today&#x27;s trading window. Refund and void payouts are not taken off here.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">Card manual + POS</div>
                     <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
@@ -1602,7 +1602,7 @@ $csrf_token = generateCsrfToken();
                     data-insight-key="voids-today"
                     data-insight-title="Voids Monitoring"
                     aria-label="Open voids monitoring">
-                    <div class="lbl">Voids Today</div>
+                    <div class="lbl">Voids Today <i class="help" aria-label="About voids today" data-tip="Orders voided since midnight, and what they were worth.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $totalVoidedToday; ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">
                         <?php echo $totalVoidedToday > 0
@@ -1620,7 +1620,7 @@ $csrf_token = generateCsrfToken();
                         data-insight-key="peak-hour"
                         data-insight-title="Peak Hour Snapshot"
                         aria-label="Open peak hour snapshot">
-                        <div class="lbl">Peak Hour</div>
+                        <div class="lbl">Peak Hour <i class="help" aria-label="About peak hour" data-tip="The hour of today with the most money from paid orders, by the hour each order was started.">?</i></div>
                         <?php
                         $ph = (int)$peakHour['hour'];
                         $phLabel = $ph === 0 ? '12am' : ($ph < 12 ? $ph . 'am' : ($ph === 12 ? '12pm' : ($ph - 12) . 'pm'));
@@ -1642,7 +1642,7 @@ $csrf_token = generateCsrfToken();
                         data-insight-key="cashier-performance"
                         data-insight-title="Cashier Performance Snapshot"
                         aria-label="Open cashier performance snapshot">
-                        <div class="lbl"><i class="fas fa-user-check" style="color:#7E684B;font-size:11px;"></i> Revenue by Cashier</div>
+                        <div class="lbl"><i class="fas fa-user-check" style="color:#7E684B;font-size:11px;"></i> Revenue by Cashier <i class="help" aria-label="About revenue by cashier" data-tip="Money from today&#x27;s paid orders, credited to the person who took the payment. Open orders stay with whoever started them.">?</i></div>
                         <div style="margin-top:6px;width:100%;display:flex;flex-direction:column;gap:5px;">
                             <?php foreach ($cashierStats as $cs):
                                 if ((float)($cs['revenue'] ?? 0) == 0 && (int)($cs['orders_open'] ?? 0) == 0) continue;
@@ -1706,7 +1706,7 @@ $csrf_token = generateCsrfToken();
                             <div style="font-size:24px;font-weight:700;color:<?php echo $stage['color']; ?>;line-height:1.2;margin-top:4px;">
                                 <?php echo $stage['val']; ?>
                             </div>
-                            <div style="font-size:11px;color:#6c757d;line-height:1.3;"><?php echo htmlspecialchars($stage['label']); ?></div>
+                            <div style="font-size:11px;color:#6c757d;line-height:1.3;"><?php echo htmlspecialchars($stage['label']); ?><?php $pipeTips = ['awaiting_prep' => 'Open orders the kitchen or bar has not started yet.', 'in_progress_all' => 'Open orders being prepared now.', 'ready_all' => 'Open orders ready to be taken to the guest.', 'served' => 'Open orders already served, waiting for the guest to pay.', 'settled' => 'Orders paid or completed today.']; if (isset($pipeTips[$stage['stage_key']])): ?> <i class="help" aria-label="About <?php echo htmlspecialchars($stage['label']); ?>" data-tip="<?php echo htmlspecialchars($pipeTips[$stage['stage_key']]); ?>">?</i><?php endif; ?></div>
                             <?php if ($isActiveStage): ?><div style="font-size:9px;margin-top:3px;color:#0d6efd;font-weight:700;">● Active Filter</div><?php endif; ?>
                         </a>
                         <?php if ($idx < count($pipeline) - 1): ?>
@@ -1730,11 +1730,11 @@ $csrf_token = generateCsrfToken();
                             <thead>
                                 <tr>
                                     <th>Station</th>
-                                    <th style="text-align:center;">Pending</th>
-                                    <th style="text-align:center;">In Prog</th>
-                                    <th style="text-align:center;">Ready</th>
-                                    <th style="text-align:center;">Served</th>
-                                    <th>Load</th>
+                                    <th style="text-align:center;">Pending <i class="help" tabindex="0" role="button" aria-label="About pending items" data-tip="Items on open orders at this station that have not been started.">?</i></th>
+                                    <th style="text-align:center;">In Prog <i class="help" tabindex="0" role="button" aria-label="About items in progress" data-tip="Items on open orders at this station that are being prepared.">?</i></th>
+                                    <th style="text-align:center;">Ready <i class="help" tabindex="0" role="button" aria-label="About ready items" data-tip="Items on open orders at this station that are ready to be taken out.">?</i></th>
+                                    <th style="text-align:center;">Served <i class="help" tabindex="0" role="button" aria-label="About served items" data-tip="Items on open orders at this station that have been served.">?</i></th>
+                                    <th>Load <i class="help" tabindex="0" role="button" aria-label="About load" data-tip="Pending, in-progress and ready items at this station compared with the busiest station. Counts are items, not orders.">?</i></th>
                                     <th style="text-align:center;">Actions</th>
                                 </tr>
                             </thead>
@@ -2031,10 +2031,10 @@ $csrf_token = generateCsrfToken();
                                     <th>#</th>
                                     <th>Item</th>
                                     <th>Type</th>
-                                    <th style="text-align:center;">Qty Ordered</th>
-                                    <th style="text-align:center;">Progressed</th>
-                                    <th style="text-align:right;">Revenue</th>
-                                    <th style="text-align:center;">Fulfil %</th>
+                                    <th style="text-align:center;">Qty Ordered <i class="help" tabindex="0" role="button" aria-label="About quantity ordered" data-tip="How many of this item were ordered on orders started today that are not cancelled or voided. The list shows the top 10.">?</i></th>
+                                    <th style="text-align:center;">Progressed <i class="help" tabindex="0" role="button" aria-label="About progressed" data-tip="How many of those have reached ready or served at the station, out of how many were ordered.">?</i></th>
+                                    <th style="text-align:right;">Revenue <i class="help" tabindex="0" role="button" aria-label="About revenue" data-tip="Value of this item on today&#x27;s orders that are not cancelled or voided, whether or not they have been paid yet.">?</i></th>
+                                    <th style="text-align:center;">Fulfil % <i class="help" tabindex="0" role="button" aria-label="About fulfil percent" data-tip="Items ready or served as a share of items ordered. Green is 80 or more, amber 40 or more, red below 40.">?</i></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -2390,14 +2390,14 @@ $csrf_token = generateCsrfToken();
                         <th>Type</th>
                         <th>Customer</th>
                         <th>Table</th>
-                        <th>Table Status</th>
-                        <th>Room / Folio</th>
-                        <th>Items</th>
-                        <th style="text-align:right;">Total</th>
+                        <th>Table Status <i class="help" tabindex="0" role="button" aria-label="About table status" data-tip="Whether the table is still tied up by this order: occupied while open, awaiting payment once served, released when paid, cancelled or voided.">?</i></th>
+                        <th>Room / Folio <i class="help" tabindex="0" role="button" aria-label="About room and folio" data-tip="For room-service orders: the room, the booking reference the charge goes to, and when it was posted to the guest bill.">?</i></th>
+                        <th>Items <i class="help" tabindex="0" role="button" aria-label="About items" data-tip="How many lines are on the order.">?</i></th>
+                        <th style="text-align:right;">Total <i class="help" tabindex="0" role="button" aria-label="About total" data-tip="What the order comes to, as it stands now.">?</i></th>
                         <th>Payment</th>
                         <th>Status</th>
-                        <th>Health</th>
-                        <th>Cashier</th>
+                        <th>Health <i class="help" tabindex="0" role="button" aria-label="About order health" data-tip="Balanced means the items, payments and room charges agree with the order total. Review means something does not match.">?</i></th>
+                        <th>Cashier <i class="help" tabindex="0" role="button" aria-label="About cashier" data-tip="The person who started the order. Revenue by Cashier on the cards credits whoever took the payment instead.">?</i></th>
                         <th>Created</th>
                         <th>Actions</th>
                     </tr>

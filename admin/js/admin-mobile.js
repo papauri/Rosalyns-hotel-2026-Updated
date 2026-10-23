@@ -386,6 +386,53 @@
         }
     }
 
+    /** Header text without its "?" help dot (shared helper lives in admin-components.js). */
+    function headerLabel(th) {
+        if (typeof window.rhHeaderLabel === 'function') return window.rhHeaderLabel(th);
+        const copy = th.cloneNode(true);
+        copy.querySelectorAll('.help').forEach(function (dot) { dot.remove(); });
+        return (copy.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+
+    /**
+     * Card mode hides the header row, so the "?" column helpers would be unreachable.
+     * One "What the columns mean" disclosure above the table lists each helped column
+     * (text only, no per-row markup).
+     */
+    function addColumnHelpNote(table) {
+        const anchor = table.closest('.table-responsive, .table-wrapper, .table-container') || table;
+        const prev = anchor.previousElementSibling;
+        if (prev && prev.classList.contains('rh-col-help')) return;
+        const dots = table.querySelectorAll('thead th .help[data-tip]');
+        if (!dots.length || !anchor.parentNode) return;
+
+        const details = document.createElement('details');
+        details.className = 'rh-col-help';
+        const summary = document.createElement('summary');
+        summary.textContent = 'What the columns mean';
+        details.appendChild(summary);
+        const list = document.createElement('dl');
+        dots.forEach(function (dot) {
+            const th = dot.closest('th');
+            const dt = document.createElement('dt');
+            dt.textContent = headerLabel(th);
+            const dd = document.createElement('dd');
+            const raw = dot.getAttribute('data-tip') || '';
+            const sep = raw.indexOf('|');
+            dd.textContent = sep > 0 ? raw.slice(sep + 1).trim() : raw;
+            list.appendChild(dt);
+            list.appendChild(dd);
+        });
+        details.appendChild(list);
+        anchor.parentNode.insertBefore(details, anchor);
+    }
+
+    function removeColumnHelpNote(table) {
+        const anchor = table.closest('.table-responsive, .table-wrapper, .table-container') || table;
+        const prev = anchor.previousElementSibling;
+        if (prev && prev.classList.contains('rh-col-help')) prev.remove();
+    }
+
     /**
      * Transform table rows into card layout
      */
@@ -420,7 +467,7 @@
                 // Get header text for this column
                 let labelText = '';
                 if (headers[index]) {
-                    labelText = headers[index].textContent.trim();
+                    labelText = headerLabel(headers[index]);
                 } else {
                     // Fallback: try to get label from data-label attribute
                     labelText = cell.getAttribute('data-label') || '';
@@ -436,6 +483,7 @@
         // Mark table as mobile-enhanced
         table.classList.add('mobile-enhanced');
         setCardModeWrappers(table, true);
+        addColumnHelpNote(table);
     }
 
     /**
@@ -444,6 +492,7 @@
     function restoreTableFromCards(table) {
         table.classList.remove('mobile-enhanced');
         setCardModeWrappers(table, false);
+        removeColumnHelpNote(table);
 
         const tbody = table.querySelector('tbody');
         if (!tbody) return;
@@ -483,7 +532,7 @@
                     }
 
                     if (headers[index] && !cell.getAttribute('data-label')) {
-                        const labelText = headers[index].textContent.trim();
+                        const labelText = headerLabel(headers[index]);
                         if (labelText) cell.setAttribute('data-label', labelText);
                     }
                 });
