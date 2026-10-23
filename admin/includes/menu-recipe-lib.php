@@ -86,22 +86,30 @@ if (!function_exists('rh_recipe_qty_to_base')) {
         return $s === '' || $s === '-0' ? '0' : $s;
     }
 
+    /** "bottle" for 1, "bottles" for more; kg, ml, dozen, each and other short units stay as they are. Same rule as Menu Management's page script (mmPlural). */
+    function rh_recipe_plural(string $unit, float $n): string
+    {
+        $u = trim($unit);
+        if (abs($n - 1) < 1e-9 || preg_match('/s$/i', $u) || preg_match('/^(kg|g|gm|mg|l|ltr|ml|cl|lb|oz|dozen|dz|doz|each|pc|pcs)$/i', $u)) {
+            return $u;
+        }
+        return preg_match('/(x|ch|sh)$/i', $u) ? $u . 'es' : $u . 's';
+    }
+
     /**
      * One plain sentence for a recipe line, e.g.
-     * "Uses 1 each of Sausages (pack of 10) per item sold -> 1 pack serves 10".
-     * $qtyBase is the base-unit quantity per item sold.
+     * "Each sale uses 1 each of Sausages. 1 pack (10 each) lasts 10 sales."
+     * $qtyBase is the base-unit quantity per sale. Same words as the preview in Menu Management (mmPreviewText).
      */
     function rh_recipe_preview_text(string $name, string $unit, ?string $packName, ?float $packSize, float $qtyBase): string
     {
         $hasPack = $packSize !== null && $packSize > 0;
         $packWord = ($packName !== null && trim($packName) !== '') ? mb_strtolower(trim($packName)) : 'pack';
-        $text = 'Uses ' . rh_recipe_fmt_qty($qtyBase) . ' ' . $unit . ' of ' . $name;
-        if ($hasPack) {
-            $text .= ' (' . $packWord . ' of ' . rh_recipe_fmt_qty((float)$packSize, 3) . ')';
-        }
-        $text .= ' per item sold';
+        $text = 'Each sale uses ' . rh_recipe_fmt_qty($qtyBase) . ' ' . rh_recipe_plural($unit, $qtyBase) . ' of ' . $name . '.';
         if ($hasPack && $qtyBase > 0) {
-            $text .= ' → 1 ' . $packWord . ' serves ' . rh_recipe_fmt_qty((float)$packSize / $qtyBase, 2);
+            $sales = (float)$packSize / $qtyBase;
+            $text .= ' 1 ' . $packWord . ' (' . rh_recipe_fmt_qty((float)$packSize, 3) . ' ' . rh_recipe_plural($unit, (float)$packSize) . ') lasts '
+                . rh_recipe_fmt_qty($sales, 2) . (abs($sales - 1) < 0.005 ? ' sale' : ' sales') . '.';
         }
         return $text;
     }

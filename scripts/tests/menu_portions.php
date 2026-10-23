@@ -39,10 +39,10 @@ foreach ([[0, 'base', 10, 'zero'], [-1, 'base', 10, 'negative'], [1, 'pack', nul
     try { rh_recipe_qty_to_base((float)$q, $u, $ps); } catch (RuntimeException $e) { $threw = true; }
     check($threw, "Refused: $why");
 }
-check(rh_recipe_preview_text('Sausages', 'each', 'Pack', 10.0, 1.0) === 'Uses 1 each of Sausages (pack of 10) per item sold → 1 pack serves 10', 'Preview sentence: 1 each of a pack of 10', rh_recipe_preview_text('Sausages', 'each', 'Pack', 10.0, 1.0));
-check(rh_recipe_preview_text('Sausages', 'each', 'Pack', 10.0, 10.0) === 'Uses 10 each of Sausages (pack of 10) per item sold → 1 pack serves 1', 'Preview sentence: a whole pack per item');
-check(rh_recipe_preview_text('Rice', 'kg', null, null, 0.15) === 'Uses 0.15 kg of Rice per item sold', 'Preview sentence: no pack, decimal weight');
-check(rh_recipe_preview_text('Beer', 'bottle', 'Crate', 24.0, 0.5) === 'Uses 0.5 bottle of Beer (crate of 24) per item sold → 1 crate serves 48', 'Preview sentence: crate serves 48');
+check(rh_recipe_preview_text('Sausages', 'each', 'Pack', 10.0, 1.0) === 'Each sale uses 1 each of Sausages. 1 pack (10 each) lasts 10 sales.', 'Preview sentence: 1 each of a pack of 10', rh_recipe_preview_text('Sausages', 'each', 'Pack', 10.0, 1.0));
+check(rh_recipe_preview_text('Sausages', 'each', 'Pack', 10.0, 10.0) === 'Each sale uses 10 each of Sausages. 1 pack (10 each) lasts 1 sale.', 'Preview sentence: a whole pack per item');
+check(rh_recipe_preview_text('Rice', 'kg', null, null, 0.15) === 'Each sale uses 0.15 kg of Rice.', 'Preview sentence: no pack, decimal weight');
+check(rh_recipe_preview_text('Beer', 'bottle', 'Crate', 24.0, 0.5) === 'Each sale uses 0.5 bottles of Beer. 1 crate (24 bottles) lasts 48 sales.', 'Preview sentence: crate serves 48');
 
 /* ---- 2. Database behaviour, one rolled-back transaction ---- */
 if (!ensureStockTablesExist()) { bad('Stock tables exist'); echo "\n$pass passed, $fail failed\n"; exit(1); }

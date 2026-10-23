@@ -1166,7 +1166,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
         /* "50 packets", "1 packet", "2 boxes", "12.5 kg" (short metric units and dozen stay as they are). */
         function mmPlural(unit, n) {
             const u = (unit || '').trim();
-            if (Math.abs(n - 1) < 1e-9 || /s$/i.test(u) || /^(kg|g|gm|mg|l|ltr|ml|cl|lb|oz|dozen|dz|doz)$/i.test(u)) return u;
+            if (Math.abs(n - 1) < 1e-9 || /s$/i.test(u) || /^(kg|g|gm|mg|l|ltr|ml|cl|lb|oz|dozen|dz|doz|each|pc|pcs)$/i.test(u)) return u;
             return /(x|ch|sh)$/i.test(u) ? u + 'es' : u + 's';
         }
 
@@ -1275,11 +1275,25 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
 
         /* Name with the typed words marked (text nodes only, so a stock item name can never inject markup). */
         function mmLiveMarkName(parent, name, q) {
-            const lower = name.toLowerCase();
+            /* Lower-case one character at a time and remember where each lower-case unit came from, so the marked part is
+               right even for letters whose lower case is longer or shorter (Turkish "İ" becomes two units). */
+            let lower = '';
+            const fromAt = []; // lower-case unit -> index in name where its character starts
+            const toAt = []; // lower-case unit -> index in name where its character ends
+            let idx = 0;
+            Array.from(name).forEach(function(ch) {
+                const lc = ch.toLowerCase();
+                for (let k = 0; k < lc.length; k++) {
+                    fromAt.push(idx);
+                    toAt.push(idx + ch.length);
+                }
+                lower += lc;
+                idx += ch.length;
+            });
             const spans = [];
             q.toLowerCase().split(/\s+/).filter(Boolean).forEach(function(w) {
                 const at = lower.indexOf(w);
-                if (at !== -1) spans.push([at, at + w.length]);
+                if (at !== -1) spans.push([fromAt[at], toAt[at + w.length - 1]]);
             });
             spans.sort(function(a, b) {
                 return a[0] - b[0];
