@@ -279,6 +279,11 @@ $hs = [
     ['rule OFF, counter without the permission rejects own', ['kind' => 'big', 'rule' => 'off', 'perm' => 'no', 'counter' => 'me', 'do' => 'reject_count'], 'rejected', 0],
     ['rule ON, counter without the permission cannot reject own', ['kind' => 'big', 'rule' => 'on', 'perm' => 'no', 'counter' => 'me', 'do' => 'reject_count'], 'submitted', 0],
     ['remind refused for someone who is neither counter nor approver', ['kind' => 'big', 'rule' => 'on', 'perm' => 'no', 'counter' => 'other', 'do' => 'remind_count'], 'submitted', 0],
+    // One step when the two-person rule is OFF: submitting also approves. Rule ON: submit only.
+    ['one step: rule OFF, counter without the permission submits own count', ['kind' => 'opening', 'rule' => 'off', 'perm' => 'no', 'counter' => 'me', 'do' => 'submit_count'], 'approved', 1],
+    ['one step: rule OFF, approver submits an over-threshold count', ['kind' => 'big', 'rule' => 'off', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count'], 'approved', 1],
+    ['one step: rule ON, submit only (still waits for approval)', ['kind' => 'opening', 'rule' => 'on', 'perm' => 'yes', 'counter' => 'me', 'do' => 'submit_count'], 'submitted', 0],
+    ['one step: rule OFF, non-approver cannot submit someone else\'s draft', ['kind' => 'opening', 'rule' => 'off', 'perm' => 'no', 'counter' => 'other', 'do' => 'submit_count'], 'draft', 0],
 ];
 foreach ($hs as [$label, $post, $wantStatus, $wantLog]) {
     $res = $hScenario($post);

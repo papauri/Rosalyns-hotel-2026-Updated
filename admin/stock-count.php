@@ -670,6 +670,17 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     ->execute([(float)$t['total'], (float)$t['shortage'], (float)$t['surplus'], $countId]);
                 $pdo->commit();
 
+                /* Two-person rule off and this user may decide: one press submits AND approves. The submit above is
+                 * already committed; control falls straight into the approve_count block below (all its checks run
+                 * unchanged). If approval fails the count simply stays submitted and the user can press Approve. */
+                if (!rh_sca_second_approver_required() && rh_sca_may_decide((int)$user['id'], (int)$count['counted_by'], $canApprove, false)) {
+                    $_SESSION['stock_msg'] = 'Count submitted for approval.';
+                    $scSubmitAndApprove = true;
+                    $action = 'approve_count';
+                }
+            }
+
+            if ($action === 'submit_count') {
                 $_SESSION['stock_msg'] = 'Count submitted for approval.' . ($canApprove ? ' Shortage cost: ' . $currency . ' ' . number_format(abs((float)$t['shortage']), 2) . '.' : '');
                 // Tell the approvers (tickbox, default on). The count is already submitted: an email problem only changes the message.
                 if (!empty($_POST['email_approvers'])) {
@@ -982,7 +993,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                     logActivity((int)$user['id'], 'stock_count_self_approved', 'Count ' . displayCountReference((string)$count['reference']) . ' (#' . $countId . '): approved own count - second approver switched off');
                 }
                 if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
-                $_SESSION['stock_msg'] = "Count " . displayCountReference((string)$count['reference']) . " approved. Variances applied to stock.";
+                $_SESSION['stock_msg'] = "Count " . displayCountReference((string)$count['reference']) . (!empty($scSubmitAndApprove) ? " submitted and approved." : " approved.") . " Variances applied to stock.";
                 header('Location: stock-count.php?id=' . $countId);
                 exit;
             }
@@ -1561,6 +1572,10 @@ $csrf_token = generateCsrfToken();
                 <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
                     <?php if ($editable && $canWorkCount): ?>
                         <button type="submit" name="action" value="save_lines" class="btn-secondary"><i class="fas fa-save"></i> Save readings</button>
+                        <?php $oneStepSubmit = !$secondRuleOn && rh_sca_may_decide((int)$user['id'], (int)$activeCount['counted_by'], $canApprove, false); ?>
+                        <?php if ($oneStepSubmit): ?>
+                        <button type="button" class="btn-primary" onclick="scConfirm(this.form,'submit_count','Submit this count and correct stock now? Stock will be changed to match what was counted. This cannot be undone. Every line must have a reading.')"><i class="fas fa-check"></i> Submit &amp; correct stock</button>
+                        <?php else: ?>
                         <button type="button" class="btn-primary" onclick="scConfirm(this.form,'submit_count','Submit count for approval? Once submitted you cannot edit it. Every line must have a reading.')"><i class="fas fa-paper-plane"></i> Submit for approval</button>
                         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#495057;">
                             <input type="checkbox" name="email_approvers" value="1" checked>
@@ -1568,6 +1583,7 @@ $csrf_token = generateCsrfToken();
                             <?php $draftApprovers = $approversFor((int)$activeCount['counted_by']); ?>
                             <span style="color:#6c757d;font-size:12px;">(<?php echo $draftApprovers ? htmlspecialchars(rh_sca_approver_names($draftApprovers)) : 'nobody else can approve yet'; ?>)</span>
                         </label>
+                        <?php endif; ?>
                     <?php elseif ($isSubmitted && $canDecide && $blockSelfApprove): ?>
                         <span style="color:#856404;background:#fff3cd;border:1px solid #ffe69c;padding:8px 12px;border-radius:8px;"><i class="fas fa-user-lock"></i> <?php echo $isOpeningCount ? 'An opening stock count' : 'This count has shortages over the approval threshold, so it'; ?> must be approved by someone other than the person who counted it.</span>
                         <button type="button" class="btn-danger" onclick="rejectPrompt(this.form)"><i class="fas fa-times"></i> Reject count</button>

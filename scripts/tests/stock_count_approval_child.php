@@ -40,8 +40,8 @@ if (!$opening) {
 }
 
 $ref = '20991231-CH' . $run . substr($kind, 0, 1);
-$pdo->prepare("INSERT INTO stock_counts (reference, count_date, scope, status, counted_by, is_opening, created_at) VALUES (?, CURDATE(), 'full', 'submitted', ?, ?, NOW() - INTERVAL 5 MINUTE)")
-    ->execute([$ref, $counter, $opening]);
+$pdo->prepare("INSERT INTO stock_counts (reference, count_date, scope, status, counted_by, is_opening, created_at) VALUES (?, CURDATE(), 'full', ?, ?, ?, NOW() - INTERVAL 5 MINUTE)")
+    ->execute([$ref, $do === 'submit_count' ? 'draft' : 'submitted', $counter, $opening]);   // submit_count starts from a draft
 $countId = (int)$pdo->lastInsertId();
 $actual = $opening ? 10 : 50;            // opening: 10 added at cost 200 (unit cost present); big: short 50 of 100 = 50%, worth 10,000
 $variance = $actual - $qty;
