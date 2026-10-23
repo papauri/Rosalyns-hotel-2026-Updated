@@ -3711,3 +3711,59 @@ select.rh-input-invalid.rh-input-invalid {
 @media (max-width: 720px) {
     .cb-presence { padding: 10px 12px; font-size: 13.5px; }
 }
+
+/* ==========================================================================
+   UNIFORM LINES (owner rule, 2026-10-23)
+   Boxes that sit side by side share one horizontal line.
+   1. Field rows: where a form grid puts fields beside each other, the input
+      boxes sit on one line and the labels grow upward, so a label that wraps
+      to two lines never pushes its box lower than its neighbours.
+      (Grids align items to the bottom; Hotel Settings uses subgrid so the
+      help text rows line up as well.) Phones: one column, nothing changes.
+   2. Card rows: cards side by side stretch to the same height (page grids
+      must not set align-items:start on a row of cards).
+   ========================================================================== */
+:is(.form-row, .form-row-2, .form-row-3, .form-grid, .form-grid-2, .form-grid-3,
+    .bs-field-grid, .ae-grid, .settings-grid, .mm-form-grid, .mm-field-row,
+    .rt-form-grid, .payment-form-row, .sh-form__grid, .vat-edit-fields,
+    .time-row, .schedule-form, .combo-grid-2, .so-settle-grid, .add-page-grid,
+    .bookings-checkin-modal__identity-grid, .fm-2col,
+    :is(.grid-2, .grid-3):has(> .form-group)) {
+    align-items: end;
+}
+
+/* Field rows with help text: label / box / help text each get their own row track shared by the
+   whole grid row, so boxes line up even when labels wrap or only some fields carry help text.
+   Hotel details & policies always uses it; the other form grids use it when every item in the grid is
+   a plain label + one box + optional help text (anything else keeps the bottom alignment above). */
+@supports (grid-template-rows: subgrid) {
+    .bs-field-grid {
+        align-items: stretch;
+    }
+
+    /* Every group in such a grid takes three row tracks (label, box, help), so a mixed row stays in step. */
+    :is(.form-row, .form-row-2, .form-row-3, .form-grid, .form-grid-2, .form-grid-3, .settings-grid, .ae-grid):not(:has(> :not(.form-group))) > .form-group {
+        grid-row: span 3;
+    }
+
+    .bs-field-grid > .form-group,
+    :is(.form-row, .form-row-2, .form-row-3, .form-grid, .form-grid-2, .form-grid-3, .settings-grid, .ae-grid):not(:has(> :not(.form-group))) > .form-group:not(:has(> :not(label, input, select, textarea, small, p, .help-text, .form-text, .form-hint, datalist))):not(:has(> :is(input, select, textarea):not([type="hidden"]) ~ :is(input, select, textarea):not([type="hidden"]))) {
+        display: grid;
+        grid-row: span 3;
+        grid-template-rows: subgrid;
+        row-gap: 0;
+        align-self: stretch;
+    }
+
+    .bs-field-grid > .form-group {
+        margin-bottom: 10px;
+    }
+
+    :is(.bs-field-grid, .form-row, .form-row-2, .form-row-3, .form-grid, .form-grid-2, .form-grid-3, .settings-grid, .ae-grid) > .form-group > label {
+        align-self: end;
+    }
+
+    :is(.bs-field-grid, .form-row, .form-row-2, .form-row-3, .form-grid, .form-grid-2, .form-grid-3, .settings-grid, .ae-grid) > .form-group > :is(input, select, textarea, small, p, .help-text, .form-text, .form-hint) {
+        align-self: start;
+    }
+}

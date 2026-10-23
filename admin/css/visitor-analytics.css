@@ -315,14 +315,14 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
     gap: 1rem;
-    align-items: start;
+    align-items: stretch;
     margin-bottom: 1rem;
 }
 
 .analytics-grid {
     grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
     gap: 1rem;
-    align-items: start;
+    align-items: stretch;
 }
 
 .va-grid > .rh-panel,
