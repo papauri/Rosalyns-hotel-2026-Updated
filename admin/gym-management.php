@@ -242,6 +242,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <link rel="stylesheet" href="css/gym-management.css?v=<?php echo urlencode($gym_css_version); ?>">
+    <link rel="stylesheet" href="css/facebook-settings.css?v=<?php echo @filemtime(__DIR__ . '/css/facebook-settings.css'); ?>">
     <style>
         /* Final page-scoped fallback so gym cards keep standardized icon sizing. */
         #rh-admin-page .gym-card-icon-area {
@@ -441,13 +442,13 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
 
             <!-- Share All Gym Packages banner -->
             <?php if ($fb_gym_posting_on && !empty($gym_packages)): ?>
-                <div class="fb-gym-all-banner">
-                    <div class="fb-gym-all-banner__icon"><i class="fab fa-facebook-f"></i></div>
-                    <div class="fb-gym-all-banner__text">
-                        <div class="fb-gym-all-banner__title">Share Our Wellness Packages on Facebook</div>
-                        <div class="fb-gym-all-banner__sub">Select packages to include and post a promotional update to your Facebook Page.</div>
+                <div class="rh-share-bar">
+                    <i class="fab fa-facebook-f rh-share-bar__icon" aria-hidden="true"></i>
+                    <div class="rh-share-bar__text">
+                        <div class="rh-share-bar__title">Share Our Wellness Packages on Facebook</div>
+                        <div class="rh-share-bar__sub">Select packages to include and post a promotional update to your Facebook Page.</div>
                     </div>
-                    <button type="button" class="fb-gym-all-btn" onclick="openFbAllGymModal()"<?php echo facebookShareButtonAttrs('Share all packages on Facebook'); ?>>
+                    <button type="button" class="rh-share-bar__btn btn-facebook" onclick="openFbAllGymModal()"<?php echo facebookShareButtonAttrs('Share all packages on Facebook'); ?>>
                         <i class="fab fa-facebook-f"></i> Share All Packages
                     </button>
                 </div>

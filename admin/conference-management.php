@@ -926,15 +926,13 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
 
         <!-- Conference Rooms Cards -->
         <?php if ($fb_conference_posting_on && !empty($conference_rooms)): ?>
-            <div class="fb-conf-all-banner">
-                <div class="fb-conf-all-banner__icon">
-                    <i class="fab fa-facebook-f"></i>
+            <div class="rh-share-bar">
+                <i class="fab fa-facebook-f rh-share-bar__icon" aria-hidden="true"></i>
+                <div class="rh-share-bar__text">
+                    <div class="rh-share-bar__title">Share All Conference Rooms on Facebook</div>
+                    <div class="rh-share-bar__sub">Pick rooms, edit the caption, and preview before you post — all in one place.</div>
                 </div>
-                <div class="fb-conf-all-banner__text">
-                    <div class="fb-conf-all-banner__title">Share All Conference Rooms on Facebook</div>
-                    <div class="fb-conf-all-banner__sub">Pick rooms, edit the caption, and preview before you post — all in one place.</div>
-                </div>
-                <button class="fb-conf-all-btn" type="button" onclick="openFbAllConferenceModal()"<?php echo facebookShareButtonAttrs('Compose a Facebook post'); ?>>
+                <button class="rh-share-bar__btn btn-facebook" type="button" onclick="openFbAllConferenceModal()"<?php echo facebookShareButtonAttrs('Compose a Facebook post'); ?>>
                     <i class="fab fa-facebook-f"></i> Compose &amp; Preview Post
                 </button>
             </div>

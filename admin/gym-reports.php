@@ -166,6 +166,7 @@ $gr_fmt_dur = static function (int $mins): string {
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <link rel="stylesheet" href="css/admin-finance.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-finance.css'); ?>">
     <link rel="stylesheet" href="css/menu-management.css?v=<?php echo @filemtime(__DIR__ . '/css/menu-management.css'); ?>">
+    <link rel="stylesheet" href="css/gym-pages.css?v=<?php echo @filemtime(__DIR__ . '/css/gym-pages.css'); ?>">
     <style>
         .gr-hour-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
         .gr-hour-label { width: 46px; font-size: .78rem; color: #7a6f63; text-align: right; flex-shrink: 0; }
@@ -183,13 +184,14 @@ $gr_fmt_dur = static function (int $mins): string {
     <div class="content">
         <div class="page-header">
             <h2 class="page-title"><i class="fas fa-chart-line" style="color:#7E684B;"></i> Gym Reports</h2>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                <?php foreach (['today' => 'Today', '7d' => '7 days', '30d' => '30 days', '90d' => '90 days'] as $rk => $rl): ?>
-                    <a class="menu-type-tab <?php echo $gr_range === $rk ? 'active' : ''; ?>" style="text-decoration:none;padding:7px 14px;" href="?range=<?php echo $rk; ?>"><?php echo $rl; ?></a>
-                <?php endforeach; ?>
-            </div>
         </div>
-        <p style="margin:-6px 0 18px;color:#7a6f63;font-size:.85rem;">
+
+        <div class="menu-type-tabs gym-tabs">
+            <?php foreach (['today' => 'Today', '7d' => '7 days', '30d' => '30 days', '90d' => '90 days'] as $rk => $rl): ?>
+                <a class="menu-type-tab <?php echo $gr_range === $rk ? 'active' : ''; ?>" href="?range=<?php echo $rk; ?>"><?php echo $rl; ?></a>
+            <?php endforeach; ?>
+        </div>
+        <p class="gym-range-note">
             <?php echo htmlspecialchars(date('M j, Y', strtotime($gr_start))); ?> — <?php echo htmlspecialchars(date('M j, Y', strtotime($gr_end))); ?>
         </p>
 

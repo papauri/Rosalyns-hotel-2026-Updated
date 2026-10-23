@@ -304,73 +304,6 @@
     transform: translateY(-1px);
 }
 
-/* ── Share All Gym banner ─────────────────────────────────────────────── */
-.fb-gym-all-banner {
-    margin-top: 20px;
-    border-radius: 12px;
-    background: linear-gradient(135deg, #1877F2 0%, #0d47a1 100%);
-    color: #fff;
-    padding: 18px 24px;
-    display: flex;
-    align-items: center;
-    gap: 18px;
-    flex-wrap: wrap;
-    box-shadow: 0 4px 16px rgba(24, 119, 242, 0.25);
-}
-
-.fb-gym-all-banner__icon {
-    width: 52px;
-    height: 52px;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.18);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 24px;
-    flex-shrink: 0;
-}
-
-.fb-gym-all-banner__text {
-    flex: 1;
-    min-width: 180px;
-}
-
-.fb-gym-all-banner__title {
-    font-weight: 700;
-    font-size: 1rem;
-    margin-bottom: 3px;
-    letter-spacing: 0.01em;
-}
-
-.fb-gym-all-banner__sub {
-    font-size: 0.82rem;
-    opacity: 0.82;
-    line-height: 1.4;
-}
-
-.fb-gym-all-btn {
-    background: rgba(0, 0, 0, 0.30);
-    color: #fff;
-    border: 2px solid rgba(255, 255, 255, 0.55);
-    border-radius: 8px;
-    padding: 10px 22px;
-    font-family: inherit;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    transition: background 0.18s, border-color 0.18s;
-    white-space: nowrap;
-    letter-spacing: 0.01em;
-}
-
-.fb-gym-all-btn:hover {
-    background: rgba(0, 0, 0, 0.42);
-    border-color: rgba(255, 255, 255, 0.9);
-}
-
 /* ── Gym package selection list in Share All modal ───────────────────── */
 .fb-gym-select-list {
     display: flex;
@@ -517,10 +450,5 @@
 @media (max-width: 600px) {
     .gym-cards-grid {
         grid-template-columns: 1fr;
-    }
-
-    .fb-gym-all-banner {
-        flex-direction: column;
-        align-items: flex-start;
     }
 }

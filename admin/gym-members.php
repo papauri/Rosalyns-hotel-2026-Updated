@@ -854,6 +854,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
     <link rel="stylesheet" href="css/admin-styles.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-styles.css'); ?>">
     <link rel="stylesheet" href="css/admin-components.css?v=<?php echo @filemtime(__DIR__ . '/css/admin-components.css'); ?>">
     <link rel="stylesheet" href="css/menu-management.css?v=<?php echo @filemtime(__DIR__ . '/css/menu-management.css'); ?>">
+    <link rel="stylesheet" href="css/gym-pages.css?v=<?php echo @filemtime(__DIR__ . '/css/gym-pages.css'); ?>">
 </head>
 
 <body>
@@ -921,10 +922,10 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
         </div>
         </details>
 
-        <div class="menu-type-tabs" style="margin-bottom:18px;">
+        <div class="menu-type-tabs gym-tabs">
             <?php foreach (['all' => 'All', 'active' => 'Active', 'expiring' => 'Expiring ≤30d', 'expired' => 'Expired'] as $fk => $fl): ?>
-                <a class="menu-type-tab <?php echo $gm_filter === $fk ? 'active' : ''; ?>" href="?filter=<?php echo $fk; ?>" style="text-decoration:none;">
-                    <?php echo $fl; ?> <span class="cat-count" style="margin-left:6px;"><?php echo (int)$gm_counts[$fk]; ?></span>
+                <a class="menu-type-tab <?php echo $gm_filter === $fk ? 'active' : ''; ?>" href="?filter=<?php echo $fk; ?>">
+                    <?php echo $fl; ?> <span class="mm-tab-n"><?php echo (int)$gm_counts[$fk]; ?></span>
                 </a>
             <?php endforeach; ?>
         </div>

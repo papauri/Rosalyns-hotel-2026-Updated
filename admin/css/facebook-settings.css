@@ -357,9 +357,7 @@
 .btn-facebook:disabled,
 .btn-action.btn-facebook:disabled,
 .gmc-icon-btn--facebook:disabled,
-.cmc-icon-btn--facebook:disabled,
-.fb-gym-all-btn:disabled,
-.fb-conf-all-btn:disabled {
+.cmc-icon-btn--facebook:disabled {
     opacity: 0.45;
     cursor: not-allowed;
     pointer-events: auto;

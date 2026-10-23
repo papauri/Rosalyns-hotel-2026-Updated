@@ -1433,6 +1433,14 @@ body:not(:has(> .admin-header)) .admin-page-loader {
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
 }
 
+/* Tablet and phone: page buttons reach a 44px tap target (look above 1024px unchanged). */
+@media (max-width: 1024px) {
+    :is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) :is(a.pg-btn, button.pg-btn, span.pg-current, .pagination a, .pagination button, .pagination .current, .pagination span.active, .pagination span.disabled, .pagination-item, .pagination-item--active, .receipts-pagination__link, .inv-pagination a, a.acct-btn--primary, span.acct-btn--primary) {
+        min-height: 44px !important;
+        min-width: 44px !important;
+    }
+}
+
 :is(.admin-content, #rh-admin-page) :is(.bookings-pagination, .pagination, .log-table-pagination, .receipts-pagination, .pagination-bar, .inv-pagination) :is(a.pg-btn, button.pg-btn, .pagination a, .pagination button, .pagination-item, .receipts-pagination__link, .inv-pagination a):hover:not(:disabled):not(.disabled):not(.is-disabled):not(.pagination-item--active):not(.acct-btn--primary) {
     background: #f7f3ee !important;
     border-color: #cfc4b8 !important;

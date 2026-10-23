@@ -738,13 +738,13 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
         <?php endif; ?>
 
         <?php if (!empty($rooms) && $fb_rooms_posting_on): ?>
-            <div class="fb-share-all-banner">
-                <div class="fb-share-all-banner__icon"><i class="fab fa-facebook-f"></i></div>
-                <div class="fb-share-all-banner__text">
-                    <div class="fb-share-all-banner__title">Share All Rooms on Facebook</div>
-                    <div class="fb-share-all-banner__sub">Compose one post showcasing all your rooms — pick which to include, preview exactly how it'll look, then post.</div>
+            <div class="rh-share-bar">
+                <i class="fab fa-facebook-f rh-share-bar__icon" aria-hidden="true"></i>
+                <div class="rh-share-bar__text">
+                    <div class="rh-share-bar__title">Share All Rooms on Facebook</div>
+                    <div class="rh-share-bar__sub">Compose one post showcasing all your rooms — pick which to include, preview exactly how it'll look, then post.</div>
                 </div>
-                <button class="fb-share-all-btn" type="button" onclick="openFbAllRoomsModal()"<?php echo facebookShareButtonAttrs('Share all rooms on Facebook'); ?>>
+                <button class="rh-share-bar__btn btn-facebook" type="button" onclick="openFbAllRoomsModal()"<?php echo facebookShareButtonAttrs('Share all rooms on Facebook'); ?>>
                     <i class="fab fa-facebook-f"></i> Compose &amp; Preview Post
                 </button>
             </div>

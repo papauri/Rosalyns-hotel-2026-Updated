@@ -1,0 +1,36 @@
+/* ============================================================
+   Gym Members / Gym Reports: tab row
+   Same flat, flush look as Menu Management's tabs (no hover scale,
+   no active shadow, left edge on the content edge, 16px rhythm).
+   Loaded after menu-management.css, scoped to .gym-tabs.
+   ============================================================ */
+.gym-tabs {
+    gap: 8px;
+    padding: 0 0 12px;
+    background: none;
+    margin: 0 0 16px;
+}
+
+.gym-tabs .menu-type-tab {
+    text-decoration: none;
+}
+
+.gym-tabs .menu-type-tab:hover {
+    transform: none;
+}
+
+.gym-tabs .menu-type-tab.active {
+    box-shadow: none;
+}
+
+.gym-range-note {
+    margin: 0 0 16px;
+    color: var(--mm-muted, #5E554D);
+    font-size: 13px;
+}
+
+@media (max-width: 1024px) {
+    .gym-tabs .menu-type-tab {
+        min-height: 44px;
+    }
+}
