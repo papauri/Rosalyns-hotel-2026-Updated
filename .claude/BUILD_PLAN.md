@@ -73,3 +73,6 @@ runs once per push.
 ---
 
 > Earlier rounds, PROJECT COMPLETE WHEN checklist, phases, owner decisions and dispatch briefs: `.claude/archive/BUILD_PLAN_HISTORY.md` (lookup only).
+
+
+- SETTLED OWNER RULE (2026-10-24): "The hotel room base rate includes all taxes and levies added already." A room rate (incl. child supplements and packages) is ALWAYS all-in in every vat_pricing_mode: rh_stay_totals extracts VAT and levy (net = price/(1+v+l)); a switched-off component is not extracted. Guests never see VAT/levy amounts (front end, confirmation page, guest booking emails): only "Includes VAT and tourism levy" naming what is on. Back end, documents and PDFs still show amounts (vat_shows_amount() unchanged). Existing bookings keep stored totals.

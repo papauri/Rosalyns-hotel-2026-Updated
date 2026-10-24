@@ -2467,14 +2467,9 @@ if (!function_exists('rh_booking_tax_rows_html')) {
         $row = function (string $label, float $amt) use ($cur): string {
             return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $label . ':</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . $cur . ' ' . number_format($amt, 0) . '</td></tr></table>';
         };
-        $html = '';
-        if ($t['levy'] > 0) {
-            $html .= $row('Tourism Levy', $t['levy']);
-        }
-        if (function_exists('vat_shows_amount') && vat_shows_amount() && $t['vat'] > 0) {
-            $html .= $row('VAT', $t['vat']);
-        }
-        return $html;
+        // All-in rate in every mode: guests are told what it includes, not the amounts (owner 2026-10-24).
+        $note = function_exists('rh_guest_includes_note') ? rh_guest_includes_note() : '';
+        return $note === '' ? '' : '<p style="margin:6px 0 10px;font-size:13px;color:#666;font-family:Segoe UI,Tahoma,Verdana,sans-serif;">' . htmlspecialchars($note) . '</p>';
     }
 }
 

@@ -1155,6 +1155,23 @@ if (!function_exists('vat_shows_amount')) {
     }
 }
 
+if (!function_exists('rh_guest_includes_note')) {
+    /**
+     * Guest-facing front-end note (owner 2026-10-24): the all-in rate is not itemised for guests, it just says what it
+     * includes, naming only what is switched on. '' when both are off. Back end / documents still show amounts.
+     */
+    function rh_guest_includes_note(): string
+    {
+        $vatOn  = vat_mode() !== 'off';
+        $levyOn = in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true)
+            && (float)getSetting('tourism_levy_percent', 0) > 0;
+        if ($vatOn && $levyOn) {
+            return 'Includes VAT and tourism levy';
+        }
+        return $vatOn ? 'Includes VAT' : ($levyOn ? 'Includes tourism levy' : '');
+    }
+}
+
 if (!function_exists('vat_document_value')) {
     /**
      * The value to print next to a "VAT" label on customer documents.
@@ -3990,6 +4007,12 @@ function rh_booking_total_breakdown(array $rows, array $opts = []): array
     $rooms = count($list);
     $nights = count($nightsSet) === 1 ? (int)array_key_first($nightsSet) : 0;
     $exclusive = ($mode === 'exclusive');
+    // Owner 2026-10-24: outside exclusive mode the room rate is all-in, so the levy sits inside the room line
+    // (shown as "included", not added), same as VAT.
+    $levyInside = (!$exclusive && $levy > BALANCE_TOLERANCE);
+    if ($levyInside) {
+        $room = round($room + $levy, 2);
+    }
     $trim = function (float $p): string {
         return rtrim(rtrim(number_format($p, 2), '0'), '.');
     };
@@ -3998,7 +4021,7 @@ function rh_booking_total_breakdown(array $rows, array $opts = []): array
     $hint = '';
     if ($nights > 0 && $room > 0) {
         $per = $room / ($nights * $rooms);
-        $hint = $nights . ' night' . ($nights === 1 ? '' : 's') . ($rooms > 1 ? ' x ' . $rooms . ' rooms' : '') . ' at ' . $fmt($per) . ($rooms > 1 ? ' average' : '') . ($mode === 'inclusive' && $vat > 0 ? ', VAT included' : '');
+        $hint = $nights . ' night' . ($nights === 1 ? '' : 's') . ($rooms > 1 ? ' x ' . $rooms . ' rooms' : '') . ' at ' . $fmt($per) . ($rooms > 1 ? ' average' : '') . ($mode !== 'exclusive' && ($vat > 0 || $levyInside) ? ', ' . ($vat > 0 && $levyInside ? 'VAT and levy' : ($levyInside ? 'levy' : 'VAT')) . ' included' : '');
     }
     $lines[] = ['label' => $rooms > 1 ? 'Room rate x nights (' . $rooms . ' rooms)' : 'Room rate x nights', 'hint' => $hint, 'value' => $fmt($room), 'kind' => 'add'];
     if ($disc > BALANCE_TOLERANCE) {
@@ -4012,12 +4035,12 @@ function rh_booking_total_breakdown(array $rows, array $opts = []): array
         $lines[] = ['label' => 'Packages / add-ons', 'hint' => '', 'value' => $fmt($pkg), 'kind' => 'add'];
     }
     if ($levy > BALANCE_TOLERANCE) {
-        $lines[] = ['label' => 'Tourism levy' . ($levyPct > 0 ? ' (' . $trim($levyPct) . '%)' : ''), 'hint' => '', 'value' => $fmt($levy), 'kind' => 'add'];
+        $lines[] = ['label' => 'Tourism levy' . ($levyPct > 0 ? ' (' . $trim($levyPct) . '%)' : ''), 'hint' => $levyInside ? 'included in the room rate above' : '', 'value' => $fmt($levy), 'kind' => $levyInside ? 'note' : 'add'];
     }
     if ($vat > BALANCE_TOLERANCE && $mode !== 'off') {
         $lines[] = ['label' => 'VAT' . ($vatPct > 0 ? ' (' . $trim($vatPct) . '%)' : ''), 'hint' => $exclusive ? 'added' : 'included in the room rate above', 'value' => $fmt($vat), 'kind' => $exclusive ? 'add' : 'note'];
     }
-    $sum = round($room + $child + $pkg + $levy + ($exclusive ? $vat : 0.0), 2);
+    $sum = round($room + $child + $pkg + ($levyInside ? 0.0 : $levy) + ($exclusive ? $vat : 0.0), 2);
     $diff = round($gross - $sum, 2);
     if (abs($diff) > 0.004) {
         $lines[] = ['label' => 'Rounding', 'hint' => '', 'value' => $fmt($diff), 'kind' => 'add'];

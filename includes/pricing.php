@@ -176,7 +176,10 @@ if (!function_exists('applyDynamicPricing')) {
         $l = $levyPct / 100;
         $amount = max(0.0, $amount);
 
-        if ($basis === 'final') {
+        // Owner 2026-10-24: a room price is ALWAYS the ALL-IN amount (base + VAT + levy), in every
+        // vat_pricing_mode; components switched off are simply not extracted. Every caller prices a
+        // stay (room, child supplement, packages), so there is no add-on-top branch any more.
+        if (true) {
             $total    = round($amount, 2);
             $netExact = $amount / (1 + $v + $l);
             $vat      = round($netExact * $v, 2);

@@ -2699,17 +2699,12 @@ try {
             const l = (levyEnabled ? levyPct : 0) / 100;
             amount = Math.max(0, amount || 0);
             let net, vat, levy, total;
-            if (basis === 'final') {
+            // Owner 2026-10-24: price is ALL-IN (base + VAT + levy) unless mode is 'exclusive'.
+            if (true) { // room price is ALWAYS all-in (owner 2026-10-24)
                 total = r2(amount);
                 const n = amount / (1 + v + l);
                 vat = r2(n * v);
                 levy = r2(n * l);
-                net = r2(total - vat - levy);
-            } else if (vatMode === 'inclusive' && v > 0) {
-                const n = amount / (1 + v);
-                vat = r2(amount - n);
-                levy = r2(n * l);
-                total = r2(r2(amount) + levy);
                 net = r2(total - vat - levy);
             } else {
                 net = r2(amount);

@@ -365,13 +365,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $child_supplement_total = rh_child_supplement($childRule, $child_guests, $number_of_nights, (float)$room_price);
         $total_amount = $base_amount + $child_supplement_total;
 
-        $tourism_levy_enabled = in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true);
         $tourism_levy_percent = (float)getSetting('tourism_levy_percent', 0);
-        $tourism_levy_amount = 0.0;
-        if ($tourism_levy_enabled && $tourism_levy_percent > 0) {
-            $tourism_levy_amount = ($base_amount + $child_supplement_total) * ($tourism_levy_percent / 100);
-            $total_amount += $tourism_levy_amount;
-        }
+        // Levy and VAT are inside the all-in room price (owner 2026-10-24): nothing is added on top here;
+        // the saved totals come from rh_stay_totals() below. This value is only a legacy fallback.
 
         // ── Packages: validate and cost selected add-ons ───────────────
         $selectedPackageIds  = [];

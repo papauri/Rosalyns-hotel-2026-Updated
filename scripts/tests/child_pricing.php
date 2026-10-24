@@ -311,7 +311,9 @@ foreach (['inclusive', 'exclusive'] as $vm) {
     ok("$vm VAT: booking total unchanged by the basis fix (" . number_format($expTotal, 2) . ')', near((float)($v['total_with_vat'] ?? -1), $expTotal, 0.05), json_encode($v));
     // What the documents print: room line = gross - levy (- VAT when exclusive) - child
     $lines = (float)$v['total_with_vat'] - (float)$v['tourism_levy_amount'] - ($vm === 'exclusive' ? (float)$v['vat_amount'] : 0.0);
-    ok("$vm VAT: documents' room line is 300,000 (lines " . number_format($lines, 2) . ' - child 150,000)', near($lines - (float)$v['child_supplement_total'], 300000, 0.1), json_encode($v));
+    // Owner 2026-10-24: inclusive price is all-in, so the levy is carved out of the 300,000 room share (was levy on top).
+    $expRoomLine = $vm === 'inclusive' ? 300000 - (float)$v['tourism_levy_amount'] : 300000;
+    ok("$vm VAT: documents' room line is " . number_format($expRoomLine, 2) . ' (lines ' . number_format($lines, 2) . ' - child 150,000)', near($lines - (float)$v['child_supplement_total'], $expRoomLine, 0.1), json_encode($v));
 }
 
 echo "== room type change keeps the child rule unless the whole stay is re-priced ==\n";

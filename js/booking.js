@@ -1059,7 +1059,7 @@
             }).join('');
             let totalLine = '';
             if (serverPricing && nights > 0) {
-                totalLine = `<p><strong>Total for ${plural(plan.roomsNeeded, 'room')}, ${plural(nights, 'night')}: ${currencySymbol}${Number(serverPricing.total_with_vat).toLocaleString()}</strong> (VAT included; tourism levy added where applicable)</p>`;
+                totalLine = `<p><strong>Total for ${plural(plan.roomsNeeded, 'room')}, ${plural(nights, 'night')}: ${currencySymbol}${Number(serverPricing.total_with_vat).toLocaleString()}</strong> (VAT and tourism levy included where applicable)</p>`;
             }
             optionsContainer.innerHTML = `<div class="booking-split-notice"><ul style="margin:0;padding-left:18px;">${rows}</ul>${totalLine}</div>`;
             validateFormForSubmit();
@@ -1340,26 +1340,25 @@
                         const rawStay = baseTotal + childSupplement;
                         const vr = vatModeNow === 'off' ? 0 : vatRateNow / 100;
                         const lr = (tourismLevyEnabled && tourismLevyPercent > 0) ? tourismLevyPercent / 100 : 0;
-                        if (vatModeNow === 'inclusive' && vr > 0) {
-                            const netExact = rawStay / (1 + vr);
-                            stayVat = rawStay - netExact;
+                        if (true) {
+                            // All-in price: VAT and levy are both inside it.
+                            const netExact = rawStay / (1 + vr + lr);
+                            stayVat = netExact * vr;
                             tourismLevyAmount = netExact * lr;
-                            stayTotalWithVat = rawStay + tourismLevyAmount;
+                            stayTotalWithVat = rawStay;
                         } else {
                             stayVat = rawStay * vr;
                             tourismLevyAmount = rawStay * lr;
                             stayTotalWithVat = rawStay + stayVat + tourismLevyAmount;
                         }
                     }
-                    // Package VAT: exclusive adds on top; inclusive is already inside the price.
+                    // Package VAT is already inside the price.
                     let pkgVat = 0;
                     let pkgWithVat = pkgTotal;
                     if (pkgTotal > 0 && vatRateNow > 0) {
-                        if (vatModeNow === 'inclusive') {
+                        if (vatModeNow !== 'off') {
+                            // Package price is all-in in every mode (owner 2026-10-24).
                             pkgVat = pkgTotal - pkgTotal / (1 + vatRateNow / 100);
-                        } else if (vatModeNow === 'exclusive') {
-                            pkgVat = pkgTotal * vatRateNow / 100;
-                            pkgWithVat = pkgTotal + pkgVat;
                         }
                     }
                     const vatTotalNow = stayVat + pkgVat;
@@ -1482,9 +1481,12 @@
                         maximumFractionDigits: 2
                     });
                     const levyPctShown = serverPricing ? Number(serverPricing.tourism_levy_percent || 0) : tourismLevyPercent;
-                    if (tourismLevyAmount > 0) {
+                    // All-in rate (every mode): guests see one plain note, no VAT/levy amounts (owner 2026-10-24).
+                    const incVat = vatModeNow !== 'off' && vatRateNow > 0;
+                    const incLevy = tourismLevyAmount > 0;
+                    if (incVat || incLevy) {
                         tourismLevyNote.style.display = '';
-                        tourismLevyText.textContent = `Includes ${levyPctShown}% Tourism Levy (${fmtMoney(tourismLevyAmount)})`;
+                        tourismLevyText.textContent = 'Includes ' + (incVat && incLevy ? 'VAT and tourism levy' : (incVat ? 'VAT' : 'tourism levy'));
                     } else {
                         tourismLevyNote.style.display = 'none';
                     }
@@ -1497,12 +1499,7 @@
                         tourismLevyNote.parentNode.insertBefore(vatNote, tourismLevyNote.nextSibling);
                     }
                     if (vatNote) {
-                        if (showVatAmount && vatTotalNow > 0) {
-                            vatNote.textContent = `Includes VAT ${vatRateNow}% (${fmtMoney(vatTotalNow)})`;
-                            vatNote.style.display = '';
-                        } else {
-                            vatNote.style.display = 'none';
-                        }
+                        vatNote.style.display = 'none'; // one combined "Includes ..." note above; no amounts for guests
                     }
 
                     bookingSummary.style.display = 'block';

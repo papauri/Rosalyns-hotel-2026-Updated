@@ -349,16 +349,10 @@ try {
                                     ?></span>
                                 </div>
                                 <?php endif; ?>
-                                <?php if ($group_levy_total > 0): ?>
+                                <?php if (rh_guest_includes_note() !== ''): ?>
                                 <div class="conf-detail-row">
-                                    <span>Tourism Levy<?php echo ((float)($booking['tourism_levy_percent'] ?? 0)) > 0 ? ' (' . rtrim(rtrim(number_format((float)$booking['tourism_levy_percent'], 2), '0'), '.') . '%)' : ''; ?></span>
-                                    <span><?php echo $currency_symbol . number_format($group_levy_total, 0); ?></span>
-                                </div>
-                                <?php endif; ?>
-                                <?php if (vat_shows_amount() && $group_vat_total > 0): ?>
-                                <div class="conf-detail-row">
-                                    <span>VAT</span>
-                                    <span><?php echo $currency_symbol . number_format($group_vat_total, 0); ?></span>
+                                    <span><?php echo htmlspecialchars(rh_guest_includes_note()); ?></span>
+                                    <span></span>
                                 </div>
                                 <?php endif; ?>
                                 <div class="conf-detail-row conf-detail-row--total">
