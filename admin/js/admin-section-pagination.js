@@ -286,6 +286,7 @@
         // then, and on resize, so the held height matches what the user actually sees.
         function remeasure() {
             if (!host.isConnected) return;
+            rows = collectDataRows(tbody);
             measureTallestPage();
             showRows(currentPage);
             holdPagerPosition();
@@ -304,6 +305,7 @@
         window.setTimeout(remeasure, 1200);
 
         function renderPage(targetPage, shouldScroll) {
+            rows = collectDataRows(tbody); // follow the live DOM order (a header sort re-orders rows)
             syncTotals();
             currentPage = Math.max(1, Math.min(totalPages, targetPage));
             var from = (currentPage - 1) * PAGE_SIZE;

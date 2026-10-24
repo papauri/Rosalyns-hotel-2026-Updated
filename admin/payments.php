@@ -197,7 +197,20 @@ $countStmt->execute($params);
 $total = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
 
 // Add ordering and pagination
-$sql .= " ORDER BY p.payment_date DESC, p.created_at DESC";
+// Header sort (whole list, fixed key -> ORDER BY map; never request text).
+require_once __DIR__ . '/includes/server-sort.php';
+[$payOrderBy, $paySortKey, $paySortDir] = rh_server_sort_resolve([
+    'reference'   => 'p.payment_reference',
+    'booking'     => 'booking_description',
+    'type'        => 'p.booking_type',
+    'date'        => 'p.payment_date',
+    'amount'      => 'p.total_amount',
+    'outstanding' => 'account_amount_due',
+    'method'      => 'p.payment_method',
+    'status'      => 'p.payment_status',
+    'created'     => 'p.created_at',
+], 'p.payment_date DESC, p.created_at DESC', 'p.id DESC');
+$sql .= " ORDER BY " . $payOrderBy;
 $sql .= " LIMIT ? OFFSET ?";
 $params[] = $limit;
 $params[] = $offset;
@@ -734,6 +747,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
         <!-- Detailed Filters -->
         <form method="GET" class="filter-section" data-live-search-form="payments">
+            <?php echo rh_server_sort_hidden($paySortKey, $paySortDir); ?>
             <div class="filter-form">
                 <div class="filter-group">
                     <label><?php echo $mod_bookings ? 'Booking Type' : 'Payment Source'; ?></label>
@@ -916,18 +930,18 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
         <!-- Payments Table -->
         <div class="table-container">
-            <table class="table fit-or-card">
+            <table class="table fit-or-card" data-server-sort="1">
                 <thead>
                     <tr>
-                        <th>Reference</th>
-                        <th>Booking</th>
-                        <th>Type</th>
-                        <th>Payment Date</th>
-                        <th>Amount</th>
-                        <th>Outstanding</th>
-                        <th>Method</th>
-                        <th>Status</th>
-                        <th>Created</th>
+                        <?php rh_server_sort_th('Reference', 'reference', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('Booking', 'booking', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('Type', 'type', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('Payment Date', 'date', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('Amount', 'amount', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('Outstanding', 'outstanding', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('Method', 'method', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('Status', 'status', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('Created', 'created', $paySortKey, $paySortDir); ?>
                         <th>Receipt / Txn</th>
                         <th>Actions</th>
                     </tr>

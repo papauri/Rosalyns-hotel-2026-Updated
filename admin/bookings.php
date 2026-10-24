@@ -2678,6 +2678,24 @@ if ($active_tab_override === '' && $filter_status !== '') {
 $current_page = max(1, (int)($_GET['page'] ?? 1));
 $per_page     = 10;
 
+// Header sort runs on the server (the whole list, then page 1): fixed key -> ORDER BY map.
+require_once __DIR__ . '/includes/server-sort.php';
+$bk_sort_map = [
+    'ref'       => 'b.booking_reference',
+    'guest'     => 'b.guest_name',
+    'room'      => 'COALESCE(ir.room_number, r.name)',
+    'check_in'  => 'b.check_in_date',
+    'check_out' => 'b.check_out_date',
+    'nights'    => 'DATEDIFF(b.check_out_date, b.check_in_date)',
+    'guests'    => 'b.number_of_guests',
+    'total'     => 'b.total_amount',
+    'status'    => 'b.status',
+    'payment'   => 'actual_payment_status',
+    'created'   => 'b.created_at',
+];
+$bk_sort_key = '';
+$bk_sort_dir = 'desc';
+
 // Pre-initialise stats in case the main query throws
 $total_bookings = $pending = $tentative = $confirmed = $checked_in = 0;
 $checked_out = $cancelled = $no_show = $paid = $unpaid = 0;
@@ -3156,6 +3174,11 @@ try {
     // Status-based tabs (pending, tentative, confirmed, checked-in, checked-out, cancelled, no-show)
     // are already handled by $filter_status → $where_clauses — no extra clauses needed.
 
+    [$bk_sort_order, $bk_sort_key, $bk_sort_dir] = rh_server_sort_resolve($bk_sort_map, $list_order_by);
+    if ($bk_sort_key !== '') {
+        $list_order_by = $bk_sort_order;
+    }
+
     $list_where_clauses = array_merge($where_clauses, $tab_extra_clauses);
     $list_where_sql = !empty($list_where_clauses) ? 'WHERE ' . implode(' AND ', $list_where_clauses) : '';
 
@@ -3206,7 +3229,7 @@ try {
         LEFT JOIN rooms rt ON ir.room_type_id = rt.id
         LEFT JOIN admin_users du ON du.id = b.deleted_by
         {$list_where_sql}
-        ORDER BY {$list_order_by}
+        ORDER BY {$list_order_by}, b.id DESC
         LIMIT ? OFFSET ?
     ");
     $stmt->execute(array_merge($params, [$per_page, $offset]));
@@ -3396,6 +3419,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         <!-- Search & Tools Bar -->
         <div class="bookings-toolbar">
             <form method="GET" data-live-search-form="room-bookings" class="bookings-toolbar__form">
+                <?php echo rh_server_sort_hidden($bk_sort_key, $bk_sort_dir); ?>
                 <div class="bookings-toolbar__search">
                     <i class="fas fa-search bookings-toolbar__search-icon" aria-hidden="true"></i>
                     <input type="text" name="search" value="<?php echo htmlspecialchars($search_query); ?>"
@@ -3528,20 +3552,20 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                 <?php if (!empty($bookings)): ?>
                     <div class="table-responsive">
-                        <table class="booking-table bookings-table tablet-table">
+                        <table class="booking-table bookings-table tablet-table" data-server-sort="1">
                             <thead>
                                 <tr>
-                                    <th>Ref</th>
-                                    <th>Guest Name</th>
-                                    <th>Room</th>
-                                    <th>Check In</th>
-                                    <th>Check Out</th>
-                                    <th>Nights</th>
-                                    <th>Guests</th>
-                                    <th class="bk-th-total">Total <span class="bk-th-total__sub">(incl. VAT &amp; levy)</span></th>
-                                    <th>Status</th>
-                                    <th>Payment</th>
-                                    <th>Created</th>
+                                    <?php rh_server_sort_th('Ref', 'ref', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Guest Name', 'guest', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Room', 'room', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Check In', 'check_in', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Check Out', 'check_out', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Nights', 'nights', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Guests', 'guests', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Total <span class="bk-th-total__sub">(incl. VAT &amp; levy)</span>', 'total', $bk_sort_key, $bk_sort_dir, 'bk-th-total'); ?>
+                                    <?php rh_server_sort_th('Status', 'status', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Payment', 'payment', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Created', 'created', $bk_sort_key, $bk_sort_dir); ?>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -3915,6 +3939,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         'date_from'     => $filter_date_from,
                         'date_to'       => $filter_date_to,
                     ], fn($v) => $v !== '');
+                    $pg_params = array_merge($pg_params, rh_server_sort_params($bk_sort_key, $bk_sort_dir));
                     $pg_base = 'bookings.php?' . (empty($pg_params) ? '' : http_build_query($pg_params) . '&');
                     ?>
                     <nav class="bookings-pagination" data-admin-pagination>
@@ -4812,6 +4837,17 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         e.preventDefault();
                         loadBookingResults(pgBtn.href);
                     }
+                });
+            }
+
+            // Column-header sort (admin-main.js fires rh:server-sort): reload the results in place.
+            if (!window.__bookingsSortBound) {
+                window.__bookingsSortBound = true;
+                document.addEventListener('rh:server-sort', function(e) {
+                    if (!/bookings\.php/i.test(window.location.pathname)) return;
+                    if (!document.getElementById('booking-results')) return;
+                    e.preventDefault();
+                    loadBookingResults(e.detail.url);
                 });
             }
 

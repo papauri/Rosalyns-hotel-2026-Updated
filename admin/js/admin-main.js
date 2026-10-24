@@ -688,9 +688,67 @@
     // ADMIN TABLES RESPONSIVENESS
     // ============================================
 
+    // Server-paginated lists (table[data-server-sort="1"], th[data-sort-key]): only one page of rows
+    // is in the browser, so a header click re-queries the whole list (sort + dir, back to page 1).
+    function initServerSortHeaders() {
+        if (window.__adminServerSortBound) return;
+        window.__adminServerSortBound = true;
+
+        function goServerSort(table, th) {
+            var key = th.getAttribute('data-sort-key');
+            if (!key) return;
+            var dir = th.getAttribute('aria-sort') === 'ascending' ? 'desc' : 'asc';
+            var url = new URL(window.location.href);
+            url.searchParams.set('sort', key);
+            url.searchParams.set('dir', dir);
+            url.searchParams.delete('page');
+
+            // A page with its own in-place loader (bookings.php) handles the event itself.
+            var ev = new CustomEvent('rh:server-sort', { bubbles: true, cancelable: true, detail: { url: url.href } });
+            table.dispatchEvent(ev);
+            if (ev.defaultPrevented) return;
+
+            // Otherwise ride the section pager's link path so the admin SPA reloads the section in place.
+            var host = table.closest('.table-responsive, .table-wrapper, .table-container, .acct-table-wrap, .invoices-table, .report-table-wrap') || table;
+            var PAGER_SEL = 'nav, .pagination, .pagination-bar, .bookings-pagination, .receipts-pagination, .log-table-pagination, .inv-pagination, [data-admin-pagination]';
+            var nav = null;
+            for (var sib = host.nextElementSibling; sib && !nav; sib = sib.nextElementSibling) {
+                if (sib.matches(PAGER_SEL)) nav = sib;
+            }
+            for (var prev = host.previousElementSibling; prev && !nav; prev = prev.previousElementSibling) {
+                if (prev.matches(PAGER_SEL)) nav = prev;
+            }
+            if (!nav) { window.location.href = url.href; return; }
+            var a = document.createElement('a');
+            a.href = url.href;
+            a.setAttribute('data-page-link', '1');
+            a.hidden = true;
+            nav.appendChild(a);
+            a.click();
+            window.setTimeout(function () { if (a.parentNode) a.parentNode.removeChild(a); }, 4000);
+        }
+
+        document.addEventListener('click', function (event) {
+            var th = event.target.closest ? event.target.closest('th[data-sort-key]') : null;
+            if (!th || event.target.closest('input, button, select, a, textarea, label, .help')) return;
+            var table = th.closest('table[data-server-sort="1"]');
+            if (table) goServerSort(table, th);
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            var th = event.target.closest ? event.target.closest('th[data-sort-key]') : null;
+            if (!th || event.target.closest('.help')) return;
+            var table = th.closest('table[data-server-sort="1"]');
+            if (!table) return;
+            event.preventDefault();
+            goServerSort(table, th);
+        });
+    }
+
     function initAdminTables() {
         if (window.__adminTablesInitialized) return;
         window.__adminTablesInitialized = true;
+        initServerSortHeaders();
 
         const seen = new Set();
         const tables = Array.from(document.querySelectorAll('.admin-content table, .admin-container table, .content table')).filter(function (table) {
@@ -702,6 +760,7 @@
         tables.forEach(function (table) {
             if (!table || table.dataset.adminSortReady === '1') return;
             if (table.dataset.disableAutoSort === '1' || table.classList.contains('no-auto-sort')) return;
+            if (table.dataset.serverSort === '1') return;
             if (table.querySelector('thead th[onclick], thead th[data-col], thead th.sortable')) return;
 
             const head = table.tHead;
@@ -843,6 +902,8 @@
 
             sortableRows.forEach(function (item) { body.appendChild(item.row); });
             fixedRows.forEach(function (row) { body.appendChild(row); });
+            // Whole-list sort: the pager re-reads the new order and shows page 1 of it.
+            if (typeof table.rhPagerRefresh === 'function') table.rhPagerRefresh(true);
         }
 
         function parseComparableValue(rawValue) {

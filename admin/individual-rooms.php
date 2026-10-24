@@ -2737,6 +2737,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 return 0;
             });
             rows.forEach(r => tbody.appendChild(r));
+            const sortedTable = tbody.closest('table');
+            if (sortedTable && typeof sortedTable.rhPagerRefresh === 'function') sortedTable.rhPagerRefresh(true);
         }
 
         // ── Children policy quick-toggle ─────────────────────────────────────

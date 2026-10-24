@@ -435,12 +435,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             $vPages = max(1, (int)ceil($vTotal / $perPage));
             if ($vpage > $vPages) { $vpage = $vPages; }
             $vOffset = ($vpage - 1) * $perPage;
+            // Header sort over the whole log: fixed key -> ORDER BY map, direction asc|desc only.
+            $vSortMap = ['in' => 'checked_in_at', 'out' => 'checked_out_at', 'duration' => 'minutes', 'method' => 'method'];
+            $vSortKey = (string)($_POST['sort'] ?? '');
+            $vOrderBy = 'checked_in_at DESC';
+            if (isset($vSortMap[$vSortKey])) {
+                $vDir = strtolower((string)($_POST['dir'] ?? '')) === 'asc' ? 'ASC' : 'DESC';
+                $vOrderBy = $vSortMap[$vSortKey] . ' ' . $vDir . ', checked_in_at DESC';
+            }
             $stmt = $pdo->prepare("
                 SELECT checked_in_at, checked_out_at, method,
                        CASE WHEN checked_out_at IS NULL THEN NULL
                             ELSE TIMESTAMPDIFF(MINUTE, checked_in_at, checked_out_at) END AS minutes
                 FROM gym_attendance WHERE member_id = ?
-                ORDER BY checked_in_at DESC LIMIT {$perPage} OFFSET {$vOffset}
+                ORDER BY {$vOrderBy} LIMIT {$perPage} OFFSET {$vOffset}
             ");
             $stmt->execute([$memberId]);
             $visits = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1407,7 +1415,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
         function gmFmtDT(dt) { if (!dt) return ''; var d = new Date(String(dt).replace(' ', 'T')); return isNaN(d) ? String(dt) : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
         function gmFmtDur(mins) { if (mins == null) return '<span style="color:#2e7d32;font-weight:700;">in gym</span>'; mins = parseInt(mins, 10); return mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm'; }
 
-        var gmLogState = { id: 0, name: '', page: 1, totalPages: 1 };
+        var gmLogState = { id: 0, name: '', page: 1, totalPages: 1, sort: '', dir: 'desc' };
 
         function gmVisitsRows(visits) {
             if (!visits.length) { return '<tr><td colspan="4" style="text-align:center;color:#9a8f82;padding:14px;">No visits on this page.</td></tr>'; }
@@ -1429,6 +1437,23 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 btn('Next &raquo;', p + 1, p >= tp) + '</div>';
         }
 
+        // Visit-log header: sort the whole log on the server, then show page 1 of the result.
+        function gmVisitsSortTh(label, key) {
+            var on = gmLogState.sort === key;
+            var icon = on ? (gmLogState.dir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort';
+            return '<th data-sort-key="' + key + '" role="button" tabindex="0" aria-sort="' + (on ? (gmLogState.dir === 'asc' ? 'ascending' : 'descending') : 'none') + '" style="cursor:pointer;" ' +
+                'onclick="gmVisitsSort(this.dataset.sortKey)" onkeydown="if (event.keyCode === 13) { gmVisitsSort(this.dataset.sortKey); }">' +
+                label + ' <i class="fas ' + icon + '" aria-hidden="true" style="margin-left:4px;opacity:' + (on ? '.95' : '.55') + ';"></i></th>';
+        }
+
+        function gmVisitsSort(key) {
+            gmLogState.dir = (gmLogState.sort === key && gmLogState.dir === 'asc') ? 'desc' : 'asc';
+            gmLogState.sort = key;
+            var head = document.getElementById('gmVisitsHead');
+            if (head) { head.innerHTML = gmVisitsSortTh('In', 'in') + gmVisitsSortTh('Out', 'out') + gmVisitsSortTh('Duration', 'duration') + gmVisitsSortTh('Method', 'method'); }
+            gmVisitsPage(1);
+        }
+
         function gmVisitsPage(page) {
             if (page < 1 || page > gmLogState.totalPages) { return; }
             var wrap = document.getElementById('gmVisitsWrap');
@@ -1438,6 +1463,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             fd.append('gm_action', 'member_attendance');
             fd.append('id', gmLogState.id);
             fd.append('page', page);
+            if (gmLogState.sort) { fd.append('sort', gmLogState.sort); fd.append('dir', gmLogState.dir); }
             fd.append('visits_only', 1);
             fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (r) { return r.json(); })
@@ -1452,7 +1478,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
         }
 
         function gmShowLog(id, name) {
-            gmLogState = { id: id, name: name, page: 1, totalPages: 1 };
+            gmLogState = { id: id, name: name, page: 1, totalPages: 1, sort: '', dir: 'desc' };
             document.getElementById('gmLogTitle').textContent = 'Fitness Report — ' + name;
             document.getElementById('gmLogBody').innerHTML = '<p style="color:#9a8f82;">Loading…</p>';
             gmOpen('gmLogModal');
@@ -1569,7 +1595,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                     // ── Visit log — paginated 10 per page ──
                     html += '<div style="font-weight:700;color:#7E684B;font-size:.8rem;margin-bottom:6px;"><i class="fas fa-list"></i> Visit log (' + parseInt(st.total_visits || 0, 10) + ' total)</div>' +
                         '<div id="gmVisitsWrap" style="transition:opacity .15s;">' +
-                        '<table class="menu-table" style="margin:0;"><thead><tr><th>In</th><th>Out</th><th>Duration</th><th>Method</th></tr></thead>' +
+                        '<table class="menu-table" style="margin:0;"><thead><tr id="gmVisitsHead">' + gmVisitsSortTh('In', 'in') + gmVisitsSortTh('Out', 'out') + gmVisitsSortTh('Duration', 'duration') + gmVisitsSortTh('Method', 'method') + '</tr></thead>' +
                         '<tbody id="gmVisitsBody">' + gmVisitsRows(visits) + '</tbody></table>' +
                         '<div id="gmVisitsPager">' + gmVisitsPager() + '</div></div>';
                     body.innerHTML = html;

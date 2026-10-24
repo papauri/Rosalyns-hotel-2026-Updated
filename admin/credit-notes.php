@@ -241,6 +241,21 @@ $countStmt->execute($params);
 $total      = (int)$countStmt->fetchColumn();
 $totalPages = (int)ceil($total / $limit);
 
+// Header sort (whole list, fixed key -> ORDER BY map; never request text).
+require_once __DIR__ . '/includes/server-sort.php';
+[$cnOrderBy, $cnSortKey, $cnSortDir] = rh_server_sort_resolve([
+    'number'  => 'cn.credit_note_number',
+    'guest'   => 'cn.guest_name',
+    'type'    => 'cn.booking_type',
+    'reason'  => 'cn.reason',
+    'face'    => 'cn.original_amount',
+    'used'    => 'cn.amount_used',
+    'balance' => 'cn.balance',
+    'status'  => 'cn.status',
+    'issued'  => 'cn.issued_at',
+    'expires' => 'cn.expires_at',
+], 'cn.issued_at DESC, cn.id DESC', 'cn.id DESC');
+
 $listParams = array_merge($params, [$limit, $offset]);
 $listStmt   = $pdo->prepare("
     SELECT cn.*,
@@ -248,7 +263,7 @@ $listStmt   = $pdo->prepare("
     FROM credit_notes cn
     LEFT JOIN admin_users au ON au.id = cn.issued_by
     $whereSql
-    ORDER BY cn.issued_at DESC, cn.id DESC
+    ORDER BY $cnOrderBy
     LIMIT ? OFFSET ?
 ");
 $listStmt->execute($listParams);
@@ -498,6 +513,7 @@ $modalsHtml = ob_get_clean();
         <!-- Filter bar -->
         <div class="filter-section">
             <form method="get" action="credit-notes.php" class="filter-bar">
+                <?php echo rh_server_sort_hidden($cnSortKey, $cnSortDir); ?>
                 <input type="text" name="search" class="filter-input" placeholder="Search CN#, guest name, email, booking ref..." value="<?php echo htmlspecialchars($search); ?>">
                 <select name="status" class="filter-select">
                     <option value="all" <?php if ($filterStatus === 'all') echo ' selected'; ?>>All Statuses</option>
@@ -546,19 +562,19 @@ $modalsHtml = ob_get_clean();
                     <button class="btn btn--primary" data-modal-open="modal-issue-cn">Issue First Credit Note</button>
                 </div>
             <?php else: ?>
-                <table class="admin-table cn-table">
+                <table class="admin-table cn-table" data-server-sort="1">
                     <thead>
                         <tr>
-                            <th>CN Number</th>
-                            <th>Guest</th>
-                            <th>Type / Booking</th>
-                            <th>Reason</th>
-                            <th class="text-right">Face Value</th>
-                            <th class="text-right">Used</th>
-                            <th class="text-right">Balance</th>
-                            <th>Status</th>
-                            <th>Issued</th>
-                            <th>Expires</th>
+                            <?php rh_server_sort_th('CN Number', 'number', $cnSortKey, $cnSortDir); ?>
+                            <?php rh_server_sort_th('Guest', 'guest', $cnSortKey, $cnSortDir); ?>
+                            <?php rh_server_sort_th('Type / Booking', 'type', $cnSortKey, $cnSortDir); ?>
+                            <?php rh_server_sort_th('Reason', 'reason', $cnSortKey, $cnSortDir); ?>
+                            <?php rh_server_sort_th('Face Value', 'face', $cnSortKey, $cnSortDir, 'text-right'); ?>
+                            <?php rh_server_sort_th('Used', 'used', $cnSortKey, $cnSortDir, 'text-right'); ?>
+                            <?php rh_server_sort_th('Balance', 'balance', $cnSortKey, $cnSortDir, 'text-right'); ?>
+                            <?php rh_server_sort_th('Status', 'status', $cnSortKey, $cnSortDir); ?>
+                            <?php rh_server_sort_th('Issued', 'issued', $cnSortKey, $cnSortDir); ?>
+                            <?php rh_server_sort_th('Expires', 'expires', $cnSortKey, $cnSortDir); ?>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -675,7 +691,7 @@ $modalsHtml = ob_get_clean();
                             'date_from' => $filterDateFrom,
                             'date_to'   => $filterDateTo,
                             'search'    => $search,
-                        ]));
+                        ] + rh_server_sort_params($cnSortKey, $cnSortDir)));
                         for ($p = 1; $p <= $totalPages; $p++): ?>
                             <a href="credit-notes.php?page=<?php echo $p; ?>&<?php echo $q; ?>"
                                 class="pagination-item<?php echo $p === $page ? ' pagination-item--active' : ''; ?>">
