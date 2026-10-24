@@ -728,6 +728,11 @@ if (!function_exists('rh_sbud_save')) {
         foreach (rh_sbud_lines($pdo, $ym) as $r0) {
             $valid[rh_sbud_cat_key($r0['category'])] = true; // a line already saved stays editable if the category was renamed
         }
+        if ($source === 'suggest') {
+            foreach (rh_sbud_received_category_names($pdo, $ym) as $k => $unused) {
+                $valid[$k] = true; // a suggested line for a category that only has spend as received
+            }
+        }
         $new = [];
         foreach ($input as $row) {
             $cat = trim((string)($row['category'] ?? ''));
@@ -827,6 +832,32 @@ if (!function_exists('rh_sbud_copy_proposal')) {
     }
 }
 
+if (!function_exists('rh_sbud_received_category_names')) {
+    /** key => original-case category name, for goods received in the 3 months before $ym (non-empty only). */
+    function rh_sbud_received_category_names(PDO $pdo, string $ym): array
+    {
+        $first = rh_sbud_month_info(rh_sbud_shift_month($ym, -3))['first'];
+        $last = rh_sbud_month_info(rh_sbud_shift_month($ym, -1))['last'];
+        [$dateSql, $catExpr] = rh_sbud_log_exprs($pdo);
+        $st = $pdo->prepare("
+            SELECT DISTINCT $catExpr AS cat
+            FROM stock_in_log l
+            LEFT JOIN stock_ingredients i ON i.id = l.ingredient_id
+            WHERE $dateSql >= ? AND $dateSql <= ?
+            ORDER BY cat
+        ");
+        $st->execute([$first, $last]);
+        $out = [];
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $c) {
+            $c = trim((string)$c);
+            if ($c !== '' && !isset($out[rh_sbud_cat_key($c)])) {
+                $out[rh_sbud_cat_key($c)] = $c;
+            }
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('rh_sbud_suggest_proposal')) {
     /**
      * Fixed amounts from what was actually received per category over the 3 months before $ym
@@ -849,8 +880,16 @@ if (!function_exists('rh_sbud_suggest_proposal')) {
         if ($monthsWithData === 0) {
             return $out;
         }
+        // Current categories first, then any category that only has spend as received (its items were moved since).
+        $names = [];
         foreach (rh_sbud_categories($pdo) as $c) {
-            $v = $sum[rh_sbud_cat_key($c)] ?? 0.0;
+            $names[rh_sbud_cat_key($c)] = $c;
+        }
+        foreach (rh_sbud_received_category_names($pdo, $ym) as $k => $c) {
+            $names[$k] = $names[$k] ?? $c;
+        }
+        foreach ($names as $k => $c) {
+            $v = $sum[$k] ?? 0.0;
             if ($v > BALANCE_TOLERANCE) {
                 $out[] = ['category' => $c, 'mode' => 'fixed', 'amount' => round($v / $monthsWithData, 0), 'target_pct' => 0.0, 'control' => 'warn'];
             }
