@@ -74,6 +74,7 @@
     <li>Click the eye button on a row to open the payment.</li>
   </ol>
   <p><strong>Quick Search</strong> matches payment reference, receipt number, invoice number, booking reference, transaction reference, method, status, the booking number, the amount, and the guest or company name, email, phone and reference. Results show 50 to a page.</p>
+  <p>Click a column heading to sort the whole payments list, not just the rows on the page. Click it again to reverse. The sort stays when you change page or use the filters.</p>
   <div class="note"><p>The list normally shows only the kinds of payment your hotel has switched on. If older records are hidden you will see <em>"Showing records for your active modules only"</em> with a link <strong>Show all history</strong>. Click it to see everything.</p></div>
   <div class="note"><p>Pending refunds show up when you set <strong>Status</strong> to <strong>Pending</strong>, because a pending refund has the status Pending. They are marked as refunds in the <strong>Type</strong> and <strong>Reference</strong> columns. To list refunds by their refund stage, add <code>refund_status=pending</code> to the Payments page address (also <code>processing</code>, <code>completed</code>, <code>failed</code> or <code>rejected</code>). Only refund lines are then shown, and the page counts it as an active filter.</p></div>
   <p>Each row has these buttons: the eye (<strong>View Details</strong>), the invoice button (only when invoicing is on), the undo arrow (<strong>Process Refund</strong>, only for Paid or Completed payments that are not refunds), the pencil (<strong>Edit</strong>, only for payments that are not yet Paid or Completed), and a WhatsApp button when the guest has a phone number. The <strong>Receipt / Txn</strong> column shows the receipt number, or <em>Missing</em> if a Paid or Completed payment has none.</p>
@@ -244,6 +245,7 @@
 
   <h2 id="credit">Credit notes</h2>
   <p><strong>Money</strong> &rarr; <strong>Credit Notes</strong>. A credit note is a stored amount owed to a guest that can be used against a later bill. Figures at the top: <strong>Total Issued</strong>, <strong>Total Redeemed</strong>, <strong>Outstanding Balance</strong>, <strong>Status Breakdown</strong>. Statuses: Active, Partial (partially applied), Used (fully applied), Voided, Expired.</p>
+  <p>Click a column heading to sort the whole credit notes list, not just the rows on the page. Click it again to reverse. The sort stays when you change page or use the filters.</p>
   <h3>Issue a credit note</h3>
   <ol class="steps">
     <li>Click <strong>Issue Credit Note</strong>.</li>
