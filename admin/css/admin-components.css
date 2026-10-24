@@ -3792,6 +3792,121 @@ select.rh-input-invalid.rh-input-invalid {
     }
 }
 
+/* ---- Phone table pattern (owner 2026-10-25: Bookings + Payments lists) ----
+   Phones (up to 640px) keep a REAL table with the priority columns only: put col-optional on
+   every other th/td. A one-line summary of a hidden column goes in <span class="rh-phone-sub">
+   inside the first cell (shown under the reference on phones, hidden in card mode and on
+   wider screens). Add class rh-phone-actions to the table and the Actions cell becomes a
+   compact two-wide grid of 36px buttons, so every action stays reachable without widening
+   the row. */
+.rh-phone-sub {
+    display: none;
+}
+
+/* rh-hide-md: secondary detail line (e.g. VAT note) dropped from table mode up to 900px. */
+@media (max-width: 900px) {
+    table:not(.mobile-enhanced) .rh-hide-md {
+        display: none;
+    }
+}
+
+/* rh-phone-sub--md: same summary line, shown up to 900px (tablet portrait) instead of 640px. */
+@media (max-width: 900px) {
+    table:not(.mobile-enhanced) .rh-phone-sub--md {
+        display: block;
+        margin-top: 2px;
+        font-size: 13px;
+        font-weight: 400;
+        color: #6b6258;
+        white-space: nowrap;
+    }
+}
+
+/* Tablet and phone (up to 900px): rh-phone-actions tables get 36px action buttons, tighter
+   cell padding, short headers and wrapping status pills so the priority columns fit for real. */
+@media (max-width: 900px) {
+    :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) td :is(.actions-row, .quick-actions) :is(.quick-action, .btn, .actions-more-toggle) {
+        width: 36px;
+        min-width: 36px;
+        height: 36px;
+        min-height: 36px;
+        padding: 0;
+        margin: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    table.rh-phone-actions:not(.mobile-enhanced) td .actions-more {
+        display: block;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) :is(th, td) {
+        padding-left: 8px !important; /* beats admin-uniform's !important cell padding */
+        padding-right: 8px !important;
+    }
+
+    table.rh-phone-actions:not(.mobile-enhanced) thead th {
+        letter-spacing: 0;
+    }
+
+    table.rh-phone-actions:not(.mobile-enhanced) thead th .admin-sort-icon {
+        margin-left: 3px !important;
+    }
+
+    table.rh-phone-actions:not(.mobile-enhanced) td .badge {
+        padding-left: 8px;
+        padding-right: 8px;
+        white-space: normal;
+        text-align: center;
+        border-radius: 12px;
+    }
+}
+
+/* Phone (up to 640px): reference summary line, two-wide action grid, tightest padding. */
+@media (max-width: 640px) {
+    :is(.admin-content, #rh-admin-page) .table-container:has(> table.rh-phone-actions:not(.mobile-enhanced)) {
+        padding: 0; /* the fit check counts the box padding, so keep it at zero */
+    }
+
+    table:not(.mobile-enhanced) .rh-phone-sub {
+        display: block;
+        margin-top: 2px;
+        font-size: 13px;
+        font-weight: 400;
+        color: #6b6258;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 120px;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) td :is(.actions-row, .quick-actions) {
+        display: inline-grid;
+        grid-template-columns: repeat(2, 36px);
+        gap: 4px;
+        align-items: center;
+        justify-items: center;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) :is(th, td) {
+        padding-left: 6px !important;
+        padding-right: 6px !important;
+    }
+}
+
+/* Small phones (iPhone 11 Pro and narrower): shave cell padding a little more. */
+@media (max-width: 420px) {
+    :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) :is(th, td) {
+        padding-left: 4px !important;
+        padding-right: 4px !important;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) td :is(.actions-row, .quick-actions) {
+        gap: 2px;
+    }
+}
+
 /* Slimmer section cards on tablet/phone: same look, less padding and gap. */
 @media (max-width: 1024px) {
     :is(.admin-content, #rh-admin-page) .card {

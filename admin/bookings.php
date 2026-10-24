@@ -3552,17 +3552,17 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                 <?php if (!empty($bookings)): ?>
                     <div class="table-responsive">
-                        <table class="booking-table bookings-table" data-server-sort="1">
+                        <table class="booking-table bookings-table rh-phone-actions" data-server-sort="1">
                             <thead>
                                 <tr>
                                     <?php rh_server_sort_th('Ref', 'ref', $bk_sort_key, $bk_sort_dir); ?>
-                                    <?php rh_server_sort_th('Guest Name', 'guest', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Guest Name', 'guest', $bk_sort_key, $bk_sort_dir, 'col-optional'); ?>
                                     <?php rh_server_sort_th('Room', 'room', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>
-                                    <?php rh_server_sort_th('Check In', 'check_in', $bk_sort_key, $bk_sort_dir); ?>
+                                    <?php rh_server_sort_th('Check In', 'check_in', $bk_sort_key, $bk_sort_dir, 'col-optional'); ?>
                                     <?php rh_server_sort_th('Check Out', 'check_out', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>
                                     <?php rh_server_sort_th('Nights', 'nights', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>
                                     <?php rh_server_sort_th('Guests', 'guests', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>
-                                    <?php rh_server_sort_th('Total <span class="bk-th-total__sub">(incl. VAT &amp; levy)</span>', 'total', $bk_sort_key, $bk_sort_dir, 'bk-th-total'); ?>
+                                    <?php rh_server_sort_th('Total <span class="bk-th-total__sub">(incl. VAT &amp; levy)</span>', 'total', $bk_sort_key, $bk_sort_dir, 'bk-th-total col-optional'); ?>
                                     <?php rh_server_sort_th('Status', 'status', $bk_sort_key, $bk_sort_dir); ?>
                                     <?php rh_server_sort_th('Payment', 'payment', $bk_sort_key, $bk_sort_dir, 'col-optional-md'); ?>
                                     <?php rh_server_sort_th('Created', 'created', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>
@@ -3614,6 +3614,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         data-tentative="<?php echo $is_tentative ? '1' : '0'; ?>">
                                         <td data-label="Reference">
                                             <strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong>
+                                            <span class="rh-phone-sub"><?php echo htmlspecialchars($booking['guest_name']); ?></span>
+                                            <span class="rh-phone-sub">In: <?php echo date('M d, Y', strtotime($booking['check_in_date'])); ?></span>
                                             <?php if ($is_tentative): ?>
                                                 <br><span class="tentative-indicator"><i class="fas fa-clock"></i> Tentative</span>
                                             <?php elseif ($is_missed_checkin): ?>
@@ -3622,7 +3624,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                 <br><span style="color: #856404; font-size: 11px; font-weight: 600;"><i class="fas fa-clock"></i> <?php echo $checkout_overdue_state === 'late' ? 'Late checkout' : 'Overdue checkout'; ?></span>
                                             <?php endif; ?>
                                         </td>
-                                        <td data-label="Guest">
+                                        <td class="col-optional" data-label="Guest">
                                             <?php echo htmlspecialchars($booking['guest_name']); ?>
                                             <?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?>
                                                 <br><small class="room-guest-line" style="color:#555;">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small>
@@ -3644,11 +3646,11 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                 <br><span class="room-chip room-chip--unassigned"><i class="fas fa-minus"></i> Unassigned</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td data-label="Check In"><?php echo date('M d, Y', strtotime($booking['check_in_date'])); ?></td>
+                                        <td class="col-optional" data-label="Check In"><?php echo date('M d, Y', strtotime($booking['check_in_date'])); ?></td>
                                         <td class="col-optional-lg" data-label="Check Out"><?php echo date('M d, Y', strtotime($booking['check_out_date'])); ?></td>
                                         <td class="col-optional-lg" data-label="Nights"><?php echo $booking['number_of_nights']; ?></td>
                                         <td class="col-optional-lg" data-label="Guests"><?php echo $booking['number_of_guests']; ?></td>
-                                        <td data-label="Total">
+                                        <td class="col-optional" data-label="Total">
                                             <strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <?php if ($expires_soon): ?>

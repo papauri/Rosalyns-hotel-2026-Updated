@@ -930,19 +930,19 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
         <!-- Payments Table -->
         <div class="table-container">
-            <table class="table fit-or-card" data-server-sort="1">
+            <table class="table fit-or-card rh-phone-actions" data-server-sort="1">
                 <thead>
                     <tr>
                         <?php rh_server_sort_th('Reference', 'reference', $paySortKey, $paySortDir); ?>
-                        <?php rh_server_sort_th('Booking', 'booking', $paySortKey, $paySortDir); ?>
-                        <?php rh_server_sort_th('Type', 'type', $paySortKey, $paySortDir); ?>
-                        <?php rh_server_sort_th('Payment Date', 'date', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('Booking', 'booking', $paySortKey, $paySortDir, 'col-optional'); ?>
+                        <?php rh_server_sort_th('Type', 'type', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
+                        <?php rh_server_sort_th('Payment Date', 'date', $paySortKey, $paySortDir, 'col-optional-md'); ?>
                         <?php rh_server_sort_th('Amount', 'amount', $paySortKey, $paySortDir); ?>
-                        <?php rh_server_sort_th('Outstanding', 'outstanding', $paySortKey, $paySortDir); ?>
-                        <?php rh_server_sort_th('Method', 'method', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('Outstanding', 'outstanding', $paySortKey, $paySortDir, 'col-optional'); ?>
+                        <?php rh_server_sort_th('Method', 'method', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
                         <?php rh_server_sort_th('Status', 'status', $paySortKey, $paySortDir); ?>
-                        <?php rh_server_sort_th('Created', 'created', $paySortKey, $paySortDir); ?>
-                        <th>Receipt / Txn</th>
+                        <?php rh_server_sort_th('Created', 'created', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
+                        <th class="col-optional-lg">Receipt / Txn</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -950,8 +950,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <?php if (!empty($payments)): ?>
                         <?php foreach ($payments as $payment): ?>
                             <tr id="payment-<?php echo (int)$payment['id']; ?>" data-focus="payment-<?php echo (int)$payment['id']; ?>">
-                                <td><strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong></td>
-                                <td>
+                                <td><strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong>
+                                    <span class="rh-phone-sub rh-phone-sub--md"><?php echo date('M j, Y', strtotime($payment['payment_date'])); ?></span></td>
+                                <td class="col-optional">
                                     <div><?php echo htmlspecialchars($payment['booking_description']); ?></div>
                                     <?php if ($payment['contact_email']): ?>
                                         <small style="color: #666;"><?php echo htmlspecialchars($payment['contact_email']); ?></small>
@@ -960,12 +961,12 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                         <br><small style="color: #666;"><?php echo htmlspecialchars($payment['contact_phone']); ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td>
+                                <td class="col-optional-lg">
                                     <span class="badge badge-<?php echo htmlspecialchars((string)$payment['booking_type']); ?>">
                                         <?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?>
                                     </span>
                                 </td>
-                                <td>
+                                <td class="col-optional-md">
                                     <?php echo date('M j, Y', strtotime($payment['payment_date'])); ?>
                                     <br><small style="color: #666; font-size: 11px;">
                                         <i class="fas fa-clock"></i> <?php echo date('H:i', strtotime($payment['created_at'])); ?>
@@ -974,10 +975,10 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                 <td>
                                     <strong><?php echo $currency_symbol; ?><?php echo number_format($payment['total_amount'], 0); ?></strong>
                                     <?php if ($payment['vat_amount'] > 0): ?>
-                                        <br><small style="color: #666;">(incl. <?php echo $currency_symbol; ?><?php echo number_format($payment['vat_amount'], 0); ?> VAT)</small>
+                                        <span class="rh-hide-md"><br><small style="color: #666;">(incl. <?php echo $currency_symbol; ?><?php echo number_format($payment['vat_amount'], 0); ?> VAT)</small></span>
                                     <?php endif; ?>
                                 </td>
-                                <td>
+                                <td class="col-optional">
                                     <?php
                                     // Outstanding balance on the underlying account. NULL means the
                                     // source type carries no receivable (e.g. restaurant/POS).
@@ -991,13 +992,13 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                     }
                                     ?>
                                 </td>
-                                <td><?php echo ucfirst(str_replace('_', ' ', $payment['payment_method'])); ?></td>
+                                <td class="col-optional-lg"><?php echo ucfirst(str_replace('_', ' ', $payment['payment_method'])); ?></td>
                                 <td>
                                     <span class="badge badge-<?php echo htmlspecialchars((string)$payment['payment_status']); ?>">
                                         <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_status']))); ?>
                                     </span>
                                 </td>
-                                <td>
+                                <td class="col-optional-lg">
                                     <small style="color: #666; font-size: 11px;">
                                         <i class="fas fa-clock"></i> <?php echo date('M j, H:i', strtotime($payment['created_at'])); ?>
                                     </small>
@@ -1007,7 +1008,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                         </small>
                                     <?php endif; ?>
                                 </td>
-                                <td>
+                                <td class="col-optional-lg">
                                     <?php if (!empty($payment['receipt_number'])): ?>
                                         <span style="color: #28a745;"><i class="fas fa-receipt"></i> <?php echo htmlspecialchars($payment['receipt_number']); ?></span>
                                     <?php elseif (in_array($payment['payment_status'], ['completed', 'paid'], true) && $payment['payment_type'] !== 'refund'): ?>
