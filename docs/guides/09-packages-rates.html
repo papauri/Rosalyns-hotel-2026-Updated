@@ -53,7 +53,7 @@
     <li>Any matching, active <strong>rate plan</strong> then raises or lowers that nightly price.</li>
     <li>The nightly price is multiplied by the number of nights.</li>
     <li>If children are staying, a child charge is added. The first children in each room can be free (<strong>Free children (first N in each room)</strong>). Each child after that pays either a percentage of the nightly price after the rate plan, or a fixed amount, for every night. The rule is set per room type, and a single room can have its own. See <a href="#child-charges">Child charges</a>.</li>
-    <li>If VAT or the tourism levy is switched on in Hotel Settings, they are worked out on the stay amount and added. The tourism levy is not charged on packages.</li>
+    <li>The room rate is all-in: it already includes VAT and the tourism levy (if they are switched on in Hotel Settings). The system takes them out of the rate to show the base price, VAT and levy. Nothing is added on top. The tourism levy is not charged on packages.</li>
     <li>Any <strong>packages</strong> the guest ticked are added on top.</li>
   </ol>
   <p>Example: a double room has a Double Occupancy Price of MWK 100,000. A 10% discount rate plan matches, so the night costs MWK 90,000. Two nights is MWK 180,000. One child with a Child Supplement of 50% adds 90,000 &times; 50% &times; 2 nights = MWK 90,000. With a fixed amount of MWK 10,000 per child per night, the same child adds 10,000 &times; 2 nights = MWK 20,000. With <strong>Free children</strong> set to 1, that child adds nothing.</p>
@@ -139,6 +139,7 @@
     <li>Click <strong>Save Changes</strong>. You will see <em>"Room updated successfully!"</em> inside the window.</li>
   </ol>
   <div class="note"><p>Prices are in Malawi Kwacha (MWK). Rate plans change these prices automatically; do not edit room prices just to run a short promotion. Use a rate plan so the normal price comes back by itself.</p></div>
+  <div class="note"><p><strong>Room rates are all-in.</strong> The price you type already includes VAT and the tourism levy. Nothing is added on top, whatever the VAT setting. The system works out the base rate, VAT and levy from inside the price. Example at VAT 17.5% and levy 1%: a rate of MWK 712,000 gives VAT MWK 105,147.68, levy MWK 6,008.44 and base rate MWK 600,843.88. The guest pays MWK 712,000. If VAT or the levy is switched off, that part is not taken out.</p></div>
 
   <h2 id="child-charges">Child charges</h2>
   <p>Set how children are charged in the <strong>Children</strong> part of the <strong>Add New Room</strong> and <strong>Edit Room</strong> windows (Settings &rarr; Rooms). You need the <strong>Room Management</strong> permission. This only changes the price of new bookings. Money already booked does not move.</p>
