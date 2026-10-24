@@ -742,13 +742,13 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 <thead>
                     <tr>
                         <th>Name <i class="help" data-tip="The ingredient's display name. Used everywhere — recipes, stock-in logs, wastage reports.">?</i></th>
-                        <th>Category <i class="help" data-tip="Free-text grouping (e.g. Dairy, Meat, Pantry). Used to keep the recipe-builder dropdown tidy.">?</i></th>
-                        <th>Unit <i class="help" data-tip="Base unit of measure for this ingredient. All stock-in receipts, recipe quantities, and adjustments use this same unit. Pick once and stick to it.">?</i></th>
+                        <th class="col-optional-lg">Category <i class="help" data-tip="Free-text grouping (e.g. Dairy, Meat, Pantry). Used to keep the recipe-builder dropdown tidy.">?</i></th>
+                        <th class="col-optional-md">Unit <i class="help" data-tip="Base unit of measure for this ingredient. All stock-in receipts, recipe quantities, and adjustments use this same unit. Pick once and stick to it.">?</i></th>
                         <th style="text-align:right;">Current <i class="help" data-tip="How much you have on hand right now (sum of all active batches). Updated automatically when you receive stock or when a recipe is sold/wasted.">?</i></th>
-                        <th style="text-align:right;">Min <i class="help" data-tip="The low-stock line: the reorder point if you set one, otherwise the minimum quantity. At or below it the row turns yellow (Low) and shows up in reorder reports.">?</i></th>
-                        <th style="text-align:right;">Yield % <i class="help" data-tip="Usable yield after prep losses. Example: 1 kg raw chicken at 75 % yield gives 750 g cooked. The recipe builder uses this to figure out how much RAW stock to deduct per portion. Set to 100 % for items with no trim/cook loss (rice, water, oil).">?</i></th>
+                        <th class="col-optional-lg" style="text-align:right;">Min <i class="help" data-tip="The low-stock line: the reorder point if you set one, otherwise the minimum quantity. At or below it the row turns yellow (Low) and shows up in reorder reports.">?</i></th>
+                        <th class="col-optional-lg" style="text-align:right;">Yield % <i class="help" data-tip="Usable yield after prep losses. Example: 1 kg raw chicken at 75 % yield gives 750 g cooked. The recipe builder uses this to figure out how much RAW stock to deduct per portion. Set to 100 % for items with no trim/cook loss (rice, water, oil).">?</i></th>
                         <th style="text-align:right;">Avg cost / unit <i class="help" data-tip="Weighted-average cost across all batches received. Recalculated automatically every time you stock-in at a different price. This drives recipe food-cost %.">?</i></th>
-                        <th>Next expiry <i class="help" data-tip="The earliest expiry date among all active batches of this ingredient. Click Batches to see/edit each batch individually. Green = plenty of time, yellow = within your alert window, red = ≤ 3 days or already expired.">?</i></th>
+                        <th class="col-optional-lg">Next expiry <i class="help" data-tip="The earliest expiry date among all active batches of this ingredient. Click Batches to see/edit each batch individually. Green = plenty of time, yellow = within your alert window, red = ≤ 3 days or already expired.">?</i></th>
                         <th>Status <i class="help" data-tip="OK · Low (≤ min) · Critical (zero or below) · Archived (hidden from recipes).">?</i></th>
                         <th>Actions</th>
                     </tr>
@@ -803,13 +803,13 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                                     <div style="color:#6c757d; font-size:11px; margin-top:2px;"><?php echo htmlspecialchars($i['notes']); ?></div>
                                 <?php endif; ?>
                             </td>
-                            <td><?php echo htmlspecialchars($i['category']); ?></td>
-                            <td><?php echo htmlspecialchars($i['unit']); ?></td>
+                            <td class="col-optional-lg"><?php echo htmlspecialchars($i['category']); ?></td>
+                            <td class="col-optional-md"><?php echo htmlspecialchars($i['unit']); ?></td>
                             <td class="qty-num <?php echo $qtyClass; ?>" style="text-align:right;"><?php echo number_format($cur, 3); ?></td>
-                            <td class="qty-num" style="text-align:right;"><?php echo number_format($min, 3); ?></td>
-                            <td class="qty-num" style="text-align:right;"><?php echo number_format((float)$i['yield_percent'], 1); ?></td>
+                            <td class="qty-num col-optional-lg" style="text-align:right;"><?php echo number_format($min, 3); ?></td>
+                            <td class="qty-num col-optional-lg" style="text-align:right;"><?php echo number_format((float)$i['yield_percent'], 1); ?></td>
                             <td class="qty-num" style="text-align:right;"><?php echo $currency_symbol . ' ' . number_format((float)$i['cost_per_unit'], 2); ?></td>
-                            <td>
+                            <td class="col-optional-lg">
                                 <?php if (!empty($i['next_expiry'])): ?>
                                     <div class="exp-pill <?php echo $expCls; ?>">
                                         <?php echo $expLabel; ?>

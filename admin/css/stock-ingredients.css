@@ -408,3 +408,8 @@
 .yield-explainer strong {
     color: #073867;
 }
+
+/* Tablet/phone kept table: the name column stays one clean line (notes show in card view and the edit form). */
+@media (max-width: 1024px) {
+    #stock-table:not(.mobile-enhanced) td:first-child > div { display: none; }
+}

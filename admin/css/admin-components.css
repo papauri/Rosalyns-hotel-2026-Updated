@@ -3785,6 +3785,13 @@ select.rh-input-invalid.rh-input-invalid {
     }
 }
 
+/* col-optional-lg: hidden at every tablet/phone width (up to 1024px). */
+@media (max-width: 1024px) {
+    table:not(.mobile-enhanced) .col-optional-lg {
+        display: none;
+    }
+}
+
 /* Slimmer section cards on tablet/phone: same look, less padding and gap. */
 @media (max-width: 1024px) {
     :is(.admin-content, #rh-admin-page) .card {
@@ -3797,13 +3804,25 @@ select.rh-input-invalid.rh-input-invalid {
         margin-bottom: 10px;
     }
 
-    /* Tables that stay tables on tablet/phone: tight cells, headers may wrap, so more of them fit. */
-    :is(.admin-content, #rh-admin-page) table:not(.mobile-enhanced):not(.no-card-mobile) :is(th, td) {
-        padding: 8px 3px !important;
+    /* Tables that stay tables on tablet/phone: normal padding, headers on one line, and
+       reference/money/date cells (.rh-nw, set by admin-mobile.js) never break mid-word.
+       admin-mobile.js measures with exactly these rules; a table that only fits by crushing
+       becomes cards. Row actions stay on one line. */
+    :is(.admin-content, #rh-admin-page) table:not(.mobile-enhanced):not(.no-card-mobile) th,
+    :is(.admin-content, #rh-admin-page) table:not(.mobile-enhanced):not(.no-card-mobile) .rh-nw {
+        white-space: nowrap;
     }
 
-    :is(.admin-content, #rh-admin-page) table:not(.mobile-enhanced):not(.no-card-mobile) th {
-        white-space: normal !important;
+    :is(.admin-content, #rh-admin-page) table:not(.mobile-enhanced) :is(.row-actions, .actions-row) {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 4px;
+        align-items: center;
+    }
+
+    :is(.admin-content, #rh-admin-page) table:not(.mobile-enhanced) :is(.row-actions, .actions-row) :is(button, a) {
+        white-space: nowrap;
+        flex: 0 0 auto;
     }
 }
 

@@ -2123,34 +2123,17 @@ hr.menu-divider {
 .booking-table th.bk-th-total { white-space: normal; }
 .booking-table th.bk-th-total .bk-th-total__sub { display: block; font-weight: 400; font-size: .85em; text-transform: none; letter-spacing: 0; }
 
-/* Tablet/phone: tighter cells and breakable emails so the table fits without sideways scroll
-   (admin-mobile.js falls back to cards only when it still cannot fit). */
+/* Tablet/phone kept tables: normal padding, no mid-word breaks, row actions on ONE line. */
 @media (max-width: 1024px) {
-    .bookings-table th,
-    .bookings-table td {
-        padding: 8px 5px;
-    }
-
+    body .content table.booking-table.bookings-table tbody td.actions-cell { white-space: nowrap; padding-left: 6px !important; padding-right: 6px !important; }
+    .bookings-table td.actions-cell .actions-row { display: flex; flex-wrap: nowrap; gap: 3px; }
+    .bookings-table td.actions-cell .quick-action { flex: 0 0 auto; min-width: 40px; min-height: 40px; }
+    .booking-table th.bk-th-total .bk-th-total__sub { white-space: normal; max-width: 7.5em; }
+    .bookings-table:not(.mobile-enhanced) { border-spacing: 0; }
+    /* hover tooltips are positioned boxes that widen the scroll area; touch has no hover */
+    .bookings-table td.actions-cell .quick-action[data-help]::after,
+    .bookings-table td.actions-cell .quick-action[data-help]::before { display: none; }
     .bookings-table .guest-email,
-    .bookings-table td small {
-        overflow-wrap: anywhere;
-    }
-
-    .bookings-table td:first-child strong {
-        overflow-wrap: anywhere;
-    }
-
-    .bookings-table td.actions-cell {
-        white-space: normal;
-    }
-
-    .bookings-table td.actions-cell .actions-row {
-        display: flex;
-        flex-wrap: wrap;
-        max-width: 6.2rem;
-    }
-
-    .bookings-table th .admin-sort-icon {
-        margin-left: 2px !important;
-    }
+    .bookings-table td:first-child strong,
+    .bookings-table td small { white-space: nowrap; }
 }

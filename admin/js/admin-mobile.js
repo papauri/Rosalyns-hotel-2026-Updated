@@ -245,6 +245,27 @@
         return _measureHost;
     }
 
+    // True when the plain table is wider than the box that actually clips it (its scroll wrapper,
+    // else its parent) - the card padding is NOT part of that box.
+    function tableOverflows(table) {
+        const box = table.closest('.table-responsive, .table-container, .table-wrapper, .admin-table-wrap, .admin-table-container') || table.parentElement;
+        if (!(box instanceof HTMLElement) || box.clientWidth <= 0) { return false; }
+        return table.scrollWidth > box.clientWidth + 2 || box.scrollWidth > box.clientWidth + 2;
+    }
+
+    // Cells whose text must never break mid-word (references, money, dates, numbers, single
+    // tokens) get .rh-nw; CSS makes them nowrap in kept tables, so measurement is honest.
+    function markNoWrapCells(table) {
+        table.querySelectorAll('td').forEach(function (td) {
+            if (td.classList.contains('rh-nw') || td.querySelector('table')) { return; }
+            const t = (td.textContent || '').replace(/\s+/g, ' ').trim();
+            if (t === '' || !/\s/.test(t) || /^[A-Za-z]{0,4}\.?\s?[\d,.]+\s?%?$/.test(t)
+                || /^\d{1,2}[ \/-][A-Za-z0-9]{2,4}[ \/-]\d{2,4}$/.test(t)) {
+                td.classList.add('rh-nw');
+            }
+        });
+    }
+
     function shouldUseCardLayout(table) {
         if (!(table instanceof HTMLTableElement)) {
             return false;
@@ -277,7 +298,8 @@
         // A clone measured outside the page container would miss those rules. Style recalculation
         // is synchronous, so nothing paints between this restore and the caller's decision.
         restoreTableFromCards(table);
-        return table.scrollWidth > availableWidth + 2;
+        markNoWrapCells(table);
+        return tableOverflows(table);
     }
 
     function enhanceMobileTables() {
@@ -292,8 +314,7 @@
                     // confirm on the live table that nothing overflows sideways; if it does, cards.
                     const vw = window.innerWidth || document.documentElement.clientWidth || 0;
                     if (vw <= 1024) {
-                        const avail = getTableAvailableWidth(table);
-                        if (avail > 0 && table.scrollWidth > avail + 2) {
+                        if (tableOverflows(table)) {
                             transformTableToCards(table);
                         }
                     }
@@ -302,6 +323,12 @@
         };
 
         apply();
+
+        // Re-measure once fonts and stylesheets have settled: text widths change after first paint.
+        window.addEventListener('load', function () { setTimeout(apply, 50); });
+        if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(function () { setTimeout(apply, 50); });
+        }
 
         let resizeTimer;
         window.addEventListener('resize', function () {
