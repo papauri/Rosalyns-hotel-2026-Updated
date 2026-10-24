@@ -1542,14 +1542,14 @@ $csrf_token = generateCsrfToken();
                             <tr>
                                 <th>Ingredient</th>
                                 <?php if (!$blindCount): ?>
-                                <th style="text-align:right;">In stock at start <i class="help" tabindex="0" role="button" aria-label="About stock at the start" data-tip="What the system showed on hand for this item when the count was started.">?</i></th>
-                                <th style="text-align:right;">Should be there <i class="help" tabindex="0" role="button" aria-label="About stock that should be there" data-tip="The start figure plus sales, deliveries and wastage recorded since the count started. Blank until the item is counted.">?</i></th>
+                                <th class="col-optional-md" style="text-align:right;">In stock at start <i class="help" tabindex="0" role="button" aria-label="About stock at the start" data-tip="What the system showed on hand for this item when the count was started.">?</i></th>
+                                <th class="col-optional-md" style="text-align:right;">Should be there <i class="help" tabindex="0" role="button" aria-label="About stock that should be there" data-tip="The start figure plus sales, deliveries and wastage recorded since the count started. Blank until the item is counted.">?</i></th>
                                 <?php endif; ?>
                                 <th style="text-align:right;">Counted <i class="help" tabindex="0" role="button" aria-label="About counted" data-tip="What you physically counted, in the ingredient&#x27;s own unit.">?</i></th>
                                 <?php if ($isOpeningCount): ?><th style="text-align:right;">Unit cost (<?php echo htmlspecialchars($currency); ?>) <i class="help" tabindex="0" role="button" aria-label="About unit cost" data-tip="What one unit of this item cost you. Needed for every item on an opening count so the stock can be valued.">?</i></th><?php endif; ?>
                                 <?php if (!$blindCount): ?>
                                 <th style="text-align:right;">Difference <i class="help" tabindex="0" role="button" aria-label="About difference" data-tip="Counted minus what should be there. A minus figure means stock is missing.">?</i></th>
-                                <th style="text-align:right;">Value <i class="help" tabindex="0" role="button" aria-label="About value of the difference" data-tip="The difference times the cost per unit, in money.">?</i></th>
+                                <th class="col-optional-md" style="text-align:right;">Value <i class="help" tabindex="0" role="button" aria-label="About value of the difference" data-tip="The difference times the cost per unit, in money.">?</i></th>
                                 <?php endif; ?>
                                 <th>Reason</th>
                                 <th>Notes</th>
@@ -1583,8 +1583,8 @@ $csrf_token = generateCsrfToken();
                                         <div style="font-size:10px; color:#6c757d;"><?php echo htmlspecialchars($ln['category']); ?> · <?php echo htmlspecialchars($ln['unit']); ?> · <?php echo $currency; ?> <?php echo number_format((float)$ln['cost_per_unit'], 2); ?>/<?php echo htmlspecialchars($ln['unit']); ?></div>
                                     </td>
                                     <?php if (!$blindCount): ?>
-                                    <td data-label="In stock at start" style="text-align:right;"><?php echo rh_stock_qty_fmt($sys, 4); ?></td>
-                                    <td data-label="Should be there" style="text-align:right;"><?php echo $expectedAt === null ? '—' : rh_stock_qty_fmt($expectedAt, 4); ?></td>
+                                    <td class="col-optional-md" data-label="In stock at start" style="text-align:right;"><?php echo rh_stock_qty_fmt($sys, 4); ?></td>
+                                    <td class="col-optional-md" data-label="Should be there" style="text-align:right;"><?php echo $expectedAt === null ? '—' : rh_stock_qty_fmt($expectedAt, 4); ?></td>
                                     <?php endif; ?>
                                     <td data-label="Counted" style="text-align:right;">
                                         <?php if ($editable): ?>
@@ -1612,7 +1612,7 @@ $csrf_token = generateCsrfToken();
                                     <?php endif; ?>
                                     <?php if (!$blindCount): ?>
                                     <td data-label="Difference" style="text-align:right;" class="var <?php echo $varClass; ?>"><?php echo $lineCounted ? rh_stock_qty_fmt($var, 4) : '—'; ?></td>
-                                    <td data-label="Value" style="text-align:right;" class="varCost <?php echo $varClass; ?>"><?php echo $lineCounted ? $currency . ' ' . number_format($varCost, 2) : '—'; ?></td>
+                                    <td data-label="Value" style="text-align:right;" class="col-optional-md varCost <?php echo $varClass; ?>"><?php echo $lineCounted ? $currency . ' ' . number_format($varCost, 2) : '—'; ?></td>
                                     <?php endif; ?>
                                     <td data-label="Reason">
                                         <?php if ($editable): ?>
@@ -2011,12 +2011,12 @@ $csrf_token = generateCsrfToken();
                             <thead>
                                 <tr>
                                     <th>Reference</th>
-                                    <th>Date</th>
-                                    <th>What was counted</th>
-                                    <th>Items <i class="help" tabindex="0" role="button" aria-label="About items" data-tip="How many ingredients are on this count.">?</i></th>
+                                    <th class="col-optional">Date</th>
+                                    <th class="col-optional">What was counted</th>
+                                    <th class="col-optional">Items <i class="help" tabindex="0" role="button" aria-label="About items" data-tip="How many ingredients are on this count.">?</i></th>
                                     <th class="sc-num">Shortage <i class="help" tabindex="0" role="button" aria-label="About shortage" data-tip="Worth of missing stock found by this count. Shows a dash for draft counts, and for counts not yet approved if you cannot approve counts.">?</i></th>
-                                    <th class="sc-num">Surplus <i class="help" tabindex="0" role="button" aria-label="About surplus" data-tip="Worth of extra stock found by this count. Shows a dash for draft counts, and for counts not yet approved if you cannot approve counts.">?</i></th>
-                                    <th>Counted by</th>
+                                    <th class="sc-num col-optional">Surplus <i class="help" tabindex="0" role="button" aria-label="About surplus" data-tip="Worth of extra stock found by this count. Shows a dash for draft counts, and for counts not yet approved if you cannot approve counts.">?</i></th>
+                                    <th class="col-optional">Counted by</th>
                                     <th>Status</th>
                                     <th></th>
                                 </tr>
@@ -2025,12 +2025,12 @@ $csrf_token = generateCsrfToken();
                                 <?php foreach ($counts as $c): ?>
                                     <tr class="sc-row" onclick="window.location='stock-count.php?id=<?php echo (int)$c['id']; ?>';">
                                         <td data-label="Reference"><strong><?php echo htmlspecialchars(displayCountReference((string)$c['reference'])); ?></strong></td>
-                                        <td data-label="Date"><?php echo htmlspecialchars($c['count_date']); ?></td>
-                                        <td data-label="What was counted">
+                                        <td class="col-optional" data-label="Date"><?php echo htmlspecialchars($c['count_date']); ?></td>
+                                        <td class="col-optional" data-label="What was counted">
                                             <?php echo htmlspecialchars(scScopeLabel($c)); ?>
                                             <?php if (!empty($c['is_opening'])): ?><div class="count-note">Opening stock</div><?php endif; ?>
                                         </td>
-                                        <td data-label="Items"><?php echo (int)$c['line_count']; ?></td>
+                                        <td class="col-optional" data-label="Items"><?php echo (int)$c['line_count']; ?></td>
                                         <?php
                                         $hideCountFigures = ($c['status'] === 'draft') || (!$canApprove && $c['status'] !== 'approved');
                                         $shortAmt = abs((float)$c['shortage_cost']);
@@ -2040,11 +2040,11 @@ $csrf_token = generateCsrfToken();
                                             if ($hideCountFigures) echo '—';
                                             elseif ($shortAmt < BALANCE_TOLERANCE) echo '<span class="sc-none">None</span>';
                                             else echo '<span class="sc-money sc-money--short">' . htmlspecialchars($currency . ' ' . number_format($shortAmt, 2)) . '</span>'; ?></td>
-                                        <td data-label="Surplus" class="sc-num"><?php
+                                        <td data-label="Surplus" class="sc-num col-optional"><?php
                                             if ($hideCountFigures) echo '—';
                                             elseif ($extraAmt < BALANCE_TOLERANCE) echo '<span class="sc-none">None</span>';
                                             else echo '<span class="sc-money sc-money--extra">' . htmlspecialchars($currency . ' ' . number_format($extraAmt, 2)) . '</span>'; ?></td>
-                                        <td data-label="Counted by"><?php echo htmlspecialchars($c['counted_by_name'] ?: '—'); ?></td>
+                                        <td class="col-optional" data-label="Counted by"><?php echo htmlspecialchars($c['counted_by_name'] ?: '—'); ?></td>
                                         <td data-label="Status">
                                             <span class="pill st-<?php echo htmlspecialchars($c['status']); ?>"><?php echo htmlspecialchars(scStatusLabel((string)$c['status'])); ?></span>
                                             <?php if ($c['status'] === 'submitted'):

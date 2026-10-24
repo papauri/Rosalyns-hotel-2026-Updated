@@ -341,94 +341,93 @@ table.count-list th {
 
 @media (max-width: 64rem) {
     .stock-count-page .card {
-        padding: 14px;
-        border-radius: 12px;
+        padding: 12px;
+        border-radius: 8px;
     }
 
     .summary-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .lines-table,
-    .count-list {
+    /* Recent Counts stays a real table on tablet and phone; narrow columns drop out below. */
+    table.count-list {
+        min-width: 0;
+        width: 100%;
+    }
+
+    table.count-list th,
+    table.count-list td {
+        padding: 8px 6px;
+    }
+}
+
+/* Recent Counts on a phone: only Reference, Shortage, Status (and Delete) stay, so it is still a table. */
+@media (max-width: 40rem) {
+    table.count-list .col-optional {
+        display: none;
+    }
+
+    table.count-list th,
+    table.count-list td {
+        font-size: 13px;
+        overflow-wrap: anywhere;
+    }
+}
+
+/* Count sheet on a phone (under 40rem): the lines hold inputs, so each line is a compact card. */
+@media (max-width: 40rem) {
+    .lines-table {
         display: block;
         width: 100%;
     }
 
-    table.count-list {
-        min-width: 0;
-    }
-
-    .count-list td[data-label="Status"] {
-        grid-column: 1 / -1;
-    }
-
-    .count-list td[data-label="Status"] .pill {
-        justify-self: start;
-    }
-
-    .lines-table thead,
-    .count-list thead {
+    .lines-table thead {
         display: none;
     }
 
-    .lines-table tbody,
-    .count-list tbody {
+    .lines-table tbody {
         display: grid;
-        gap: 0.7rem;
+        gap: 0.5rem;
     }
 
-    .lines-table tr,
-    .count-list tr {
+    .lines-table tr {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 0.46rem;
+        gap: 0.3rem 0.6rem;
         border: 1px solid var(--admin-surface-border, #eaecef);
-        border-radius: 10px;
-        padding: 0.7rem 0.78rem;
+        border-radius: 8px;
+        padding: 0.5rem 0.6rem;
         background: #fff;
-        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
     }
 
-    .lines-table td,
-    .count-list td {
+    .lines-table td {
         display: grid;
-        grid-template-columns: minmax(5.6rem, 38%) minmax(0, 1fr);
+        grid-template-columns: 1fr;
         align-items: start;
-        gap: 0.45rem;
+        gap: 0.12rem;
         border-bottom: 0;
         padding: 0;
         text-align: left !important;
     }
 
-    .lines-table td::before,
-    .count-list td::before {
+    .lines-table td::before {
         content: attr(data-label);
-        font-size: clamp(0.64rem, 0.58rem + 0.2vw, 0.75rem);
+        font-size: 0.68rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         color: #64748b;
-        line-height: 1.35;
+        line-height: 1.3;
     }
 
     .lines-table td[data-label="Ingredient"],
-    .count-list td[data-label="Ingredient"],
-    .count-list td[data-label="Reference"],
     .lines-table td[data-label="Notes"],
     .lines-table td[data-label="Reason"] {
         grid-column: 1 / -1;
-        grid-template-columns: 1fr;
-        gap: 0.28rem;
-        padding-bottom: 0.34rem;
-        border-bottom: 1px dashed rgba(100, 116, 139, 0.35);
-        margin-bottom: 0.1rem;
     }
 
-    .lines-table td[data-label="Ingredient"]::before,
-    .count-list td[data-label="Ingredient"]::before,
-    .count-list td[data-label="Reference"]::before {
-        margin-bottom: 0;
+    .lines-table td[data-label="Ingredient"]::before {
+        content: none;
     }
 
     .lines-table input.qty,
@@ -436,24 +435,47 @@ table.count-list th {
     .lines-table select.reason {
         width: 100%;
         max-width: 100%;
-        min-height: 2.72rem;
+        min-height: 2.75rem;
     }
 
     .lines-table input.qty,
     .lines-table .var,
-    .lines-table .varCost,
-    .count-list td[data-label="Shortage"],
-    .count-list td[data-label="Surplus"],
-    .count-list td[data-label="Cost lost"] {
+    .lines-table .varCost {
         font-weight: 600;
     }
 }
 
-/* Tablet (768-1024px): the count sheet stays a table - Ingredient, Actual, Reason, Notes fit
-   on one row - with 44px inputs. Cards are for phones only. */
-@media (min-width: 48rem) and (max-width: 64rem) {
-    .lines-table {
+/* Tablet and wide phone (640-1024px): the count sheet stays a table with 44px inputs.
+   Cards are for phones under 40rem only. Below 48rem the reference-only columns drop out. */
+@media (min-width: 40.01rem) and (max-width: 47.99rem) {
+    .lines-table .col-optional {
+        display: none;
+    }
+}
+
+@media (min-width: 40.01rem) and (max-width: 64rem) {
+    .stock-count-page .card table.lines-table {
         display: table;
+        overflow: visible;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        table-layout: fixed;
+    }
+
+    .stock-count-page .card table.lines-table th:first-child {
+        width: 24%;
+    }
+
+    .stock-count-page .card table.lines-table :is(input.qty, select.reason, input.notes) {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .stock-count-page .card table.lines-table :is(th, td) {
+        padding: 6px 4px !important;
+        white-space: normal;
     }
 
     .lines-table thead {
@@ -478,7 +500,7 @@ table.count-list th {
     .lines-table td[data-label="Reason"],
     .lines-table td[data-label="Notes"] {
         display: table-cell;
-        padding: 6px 8px;
+        padding: 6px 4px;
         margin: 0;
         border-bottom: 1px solid var(--admin-surface-border, #eaecef);
         vertical-align: middle;
@@ -497,18 +519,19 @@ table.count-list th {
     }
 
     .lines-table input.qty {
-        width: 7.5rem;
-        max-width: none;
+        width: 5.5rem;
+        max-width: 100%;
     }
 
     .lines-table select.reason {
         width: 100%;
-        min-width: 9.5rem;
-        max-width: none;
+        min-width: 6.5rem;
+        max-width: 100%;
     }
 
     .lines-table input.notes {
-        min-width: 8rem;
+        min-width: 5rem;
+        width: 100%;
     }
 }
 
@@ -530,15 +553,8 @@ table.count-list th {
         margin-top: 0;
     }
 
-    .lines-table td,
-    .count-list td {
-        grid-template-columns: 1fr;
-        gap: 0.18rem;
-    }
-
-    .lines-table tr,
-    .count-list tr {
-        grid-template-columns: 1fr;
+    .lines-table tr {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
@@ -725,6 +741,15 @@ table.count-list td.sc-row-actions form {
 }
 
 @media (max-width: 40rem) {
+    .stock-count-page .sc-lines-card {
+        overflow: visible;
+        max-height: none;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+        padding: 0;
+    }
+
     table.count-list td.sc-row-actions {
         text-align: left;
     }
@@ -1065,14 +1090,6 @@ table.count-list td.sc-row-actions form {
     .sc-filter-row .sc-filter-field:first-child,
     .sc-filter-row #scFilterReset {
         grid-column: 1 / -1;
-    }
-
-    .stock-count-page .sc-lines-card {
-        overflow: visible;
-        max-height: none;
-        border: 0;
-        background: transparent;
-        box-shadow: none;
     }
 
     .lines-table input.qty.qty--cost {

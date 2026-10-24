@@ -2122,3 +2122,35 @@ hr.menu-divider {
 /* Bookings list: "Total (incl. VAT & levy)" header keeps the bracket under the word so the column stays narrow */
 .booking-table th.bk-th-total { white-space: normal; }
 .booking-table th.bk-th-total .bk-th-total__sub { display: block; font-weight: 400; font-size: .85em; text-transform: none; letter-spacing: 0; }
+
+/* Tablet/phone: tighter cells and breakable emails so the table fits without sideways scroll
+   (admin-mobile.js falls back to cards only when it still cannot fit). */
+@media (max-width: 1024px) {
+    .bookings-table th,
+    .bookings-table td {
+        padding: 8px 5px;
+    }
+
+    .bookings-table .guest-email,
+    .bookings-table td small {
+        overflow-wrap: anywhere;
+    }
+
+    .bookings-table td:first-child strong {
+        overflow-wrap: anywhere;
+    }
+
+    .bookings-table td.actions-cell {
+        white-space: normal;
+    }
+
+    .bookings-table td.actions-cell .actions-row {
+        display: flex;
+        flex-wrap: wrap;
+        max-width: 6.2rem;
+    }
+
+    .bookings-table th .admin-sort-icon {
+        margin-left: 2px !important;
+    }
+}

@@ -259,90 +259,25 @@
             return false;
         }
 
-        // "fit-or-card": keep a REAL table at ANY width for as long as every
-        // column fits inside the container (wrapping allowed) — only fall back
-        // to cards when it would otherwise overflow horizontally. This is the
-        // behaviour finance/accounting tables want: a proper table on mobile
-        // whenever it fits, cards (never a sideways scroll) when it doesn't.
-        if (table.classList.contains('fit-or-card')) {
-            const availableWidth = getTableAvailableWidth(table);
-            if (availableWidth <= 0) {
-                return false;
-            }
-            const host = getMeasureHost();
-            const clone = table.cloneNode(true);
-            // Render constrained to the real available width and let cells wrap
-            // at natural word boundaries (NOT mid-word), then check whether the
-            // content still forces overflow. Measuring with word-wrapping — not
-            // character-level breaking — means a table only counts as "fits"
-            // when it's genuinely readable: a long unbreakable payment reference
-            // keeps its column wide and pushes a busy table to cards, while a
-            // compact summary table stays a real table.
-            clone.style.cssText = 'position:static;width:' + availableWidth + 'px;max-width:' + availableWidth + 'px;table-layout:auto;';
-            clone.querySelectorAll('th, td').forEach(function (cell) {
-                cell.style.whiteSpace = 'normal';
-                cell.style.overflowWrap = 'normal';
-                cell.style.wordBreak = 'normal';
-            });
-            host.appendChild(clone);
-            const overflows = clone.scrollWidth > availableWidth + 2;
-            host.removeChild(clone);
-            return overflows;
-        }
-
-        if (table.classList.contains('tablet-table')) {
-            // Always card on phones
-            if (viewportWidth <= 640) {
-                return true;
-            }
-            // Owner rule (2026-07-14, P3-05): reserve card layout for tablet/mobile.
-            // On standard laptop/desktop viewports (> 1024px) always keep a real data
-            // table — the .table-responsive wrapper supplies horizontal scroll when a
-            // wide table doesn't fit, rather than collapsing to cards.
-            if (viewportWidth > 1024) {
-                return false;
-            }
-            const availableWidth = getTableAvailableWidth(table);
-            // Clone-measure intrinsic width using a detached host (avoids triggering
-            // the MutationObserver that watches body subtree).
-            const host = getMeasureHost();
-            const clone = table.cloneNode(true);
-            clone.style.cssText = 'position:static;width:max-content;max-width:none;white-space:nowrap;table-layout:auto;';
-            host.appendChild(clone);
-            const intrinsicWidth = clone.scrollWidth || clone.offsetWidth || 0;
-            host.removeChild(clone);
-            if (intrinsicWidth === 0) {
-                // No data to measure — fall through to heuristic
-                const headerCount = table.querySelectorAll('thead th').length;
-                const firstRow = table.querySelector('tbody tr');
-                const columnCount = Math.max(headerCount, firstRow ? firstRow.querySelectorAll('td').length : 0, 1);
-                return availableWidth < (columnCount * 90) + 24;
-            }
-            return availableWidth < intrinsicWidth;
-        }
-        // Non-tablet-table: only force cards on phones/small tablets (≤768px).
-        // Larger screens use overflow detection below so tables are preserved
-        // when they actually fit the available space.
-        if (viewportWidth <= 768) {
+        // Owner rule (2026-10-25): on tablet and phone EVERY table is "fit-or-card" by default.
+        // Keep a REAL table whenever every column fits the container (words may wrap, no
+        // sideways scroll); fall back to cards only when it would overflow. Low-priority
+        // columns (th/td class col-optional / col-optional-md, hidden by CSS at narrow widths)
+        // drop out BEFORE this measurement, so they never force cards. A table that must always
+        // be cards on tablet/phone opts in with class "always-card".
+        if (table.classList.contains('always-card')) {
             return true;
         }
-
         const availableWidth = getTableAvailableWidth(table);
-        const headerCount = table.querySelectorAll('thead th').length;
-        const firstRow = table.querySelector('tbody tr');
-        const bodyColumnCount = firstRow ? firstRow.querySelectorAll('td').length : 0;
-        const columnCount = Math.max(headerCount, bodyColumnCount);
-
-        if (columnCount >= 6 && availableWidth <= 960) {
-            return true;
+        if (availableWidth <= 0) {
+            return false;
         }
-
-        const hasHorizontalOverflow = table.scrollWidth > availableWidth + 8;
-        if (hasHorizontalOverflow && availableWidth <= 1024) {
-            return true;
-        }
-
-        return false;
+        // Measure the LIVE table in plain-table state (card styles hang off .mobile-enhanced), so
+        // the page's own scoped CSS (cell padding, nowrap headers, action rows) is what is judged.
+        // A clone measured outside the page container would miss those rules. Style recalculation
+        // is synchronous, so nothing paints between this restore and the caller's decision.
+        restoreTableFromCards(table);
+        return table.scrollWidth > availableWidth + 2;
     }
 
     function enhanceMobileTables() {
@@ -353,6 +288,15 @@
                     transformTableToCards(table);
                 } else {
                     restoreTableFromCards(table);
+                    // Safety net: the clone measurement above runs outside the page's own CSS, so
+                    // confirm on the live table that nothing overflows sideways; if it does, cards.
+                    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+                    if (vw <= 1024) {
+                        const avail = getTableAvailableWidth(table);
+                        if (avail > 0 && table.scrollWidth > avail + 2) {
+                            transformTableToCards(table);
+                        }
+                    }
                 }
             });
         };

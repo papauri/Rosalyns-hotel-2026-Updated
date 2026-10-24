@@ -3767,3 +3767,50 @@ select.rh-input-invalid.rh-input-invalid {
         align-self: start;
     }
 }
+
+/* ---- Tables first on tablet/phone (owner 2026-10-25) ----
+   admin-mobile.js keeps a real table whenever it fits (no sideways scroll) and only falls
+   back to cards when it cannot. Low-priority columns drop out first so more tables fit:
+   put col-optional on a th and its td (hidden up to 640px) or col-optional-md (hidden up to
+   900px). Card mode (.mobile-enhanced) shows them again. */
+@media (max-width: 640px) {
+    table:not(.mobile-enhanced) .col-optional {
+        display: none;
+    }
+}
+
+@media (max-width: 900px) {
+    table:not(.mobile-enhanced) .col-optional-md {
+        display: none;
+    }
+}
+
+/* Slimmer section cards on tablet/phone: same look, less padding and gap. */
+@media (max-width: 1024px) {
+    :is(.admin-content, #rh-admin-page) .card {
+        padding: 14px 16px;
+        margin-bottom: 12px;
+    }
+
+    :is(.admin-content, #rh-admin-page) .card > :is(h2, h3) {
+        margin-top: 0;
+        margin-bottom: 10px;
+    }
+
+    /* Tables that stay tables on tablet/phone: tight cells, headers may wrap, so more of them fit. */
+    :is(.admin-content, #rh-admin-page) table:not(.mobile-enhanced):not(.no-card-mobile) :is(th, td) {
+        padding: 8px 3px !important;
+    }
+
+    :is(.admin-content, #rh-admin-page) table:not(.mobile-enhanced):not(.no-card-mobile) th {
+        white-space: normal !important;
+    }
+}
+
+@media (max-width: 640px) {
+    :is(.admin-content, #rh-admin-page) .card {
+        padding: 10px 12px;
+        margin-bottom: 10px;
+    }
+
+}
