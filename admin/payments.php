@@ -930,7 +930,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
         <!-- Payments Table -->
         <div class="table-container">
-            <table class="table fit-or-card rh-phone-actions" data-server-sort="1">
+            <table class="table fit-or-card rh-phone-actions rh-fold-actions" data-server-sort="1">
                 <thead>
                     <tr>
                         <?php rh_server_sort_th('Reference', 'reference', $paySortKey, $paySortDir); ?>
@@ -951,6 +951,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         <?php foreach ($payments as $payment): ?>
                             <tr id="payment-<?php echo (int)$payment['id']; ?>" data-focus="payment-<?php echo (int)$payment['id']; ?>">
                                 <td><strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong>
+                                    <span class="rh-phone-sub rh-phone-sub--dark"><?php echo htmlspecialchars($payment['booking_description']); ?></span>
                                     <span class="rh-phone-sub rh-phone-sub--md"><?php echo date('M j, Y', strtotime($payment['payment_date'])); ?></span></td>
                                 <td class="col-optional">
                                     <div><?php echo htmlspecialchars($payment['booking_description']); ?></div>

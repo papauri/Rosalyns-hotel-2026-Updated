@@ -1077,3 +1077,109 @@
         menu.classList.toggle('actions-more-menu--card', !!cardMode);
     };
 })();
+
+/**
+ * Phone action fold (tables with class rh-fold-actions, e.g. Bookings and Payments lists).
+ * Up to 640px the row's primary buttons MOVE (same nodes, same handlers) into the row's existing
+ * "More" menu, so the Actions column is one 36px button; above 640px they go back to their
+ * original place. Nothing is cloned, so every action keeps working.
+ */
+(function () {
+    'use strict';
+    if (window.rhFoldPhoneActions) return;
+    var mq = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+
+    function foldRow(row) {
+        if (row._rhFold) return false;
+        var menu = row.querySelector('.actions-more-menu');
+        if (!menu) return false;
+        var kids = Array.prototype.filter.call(row.children, function (c) {
+            return c.matches('.quick-action, .btn') && !c.classList.contains('actions-more-toggle');
+        });
+        if (!kids.length) return false;
+        var moved = [];
+        var frag = document.createDocumentFragment();
+        kids.forEach(function (btn) {
+            var marker = document.createComment('rh-fold');
+            row.insertBefore(marker, btn);
+            var label = null;
+            if (!btn.querySelector('.label')) {
+                label = document.createElement('span');
+                label.className = 'rh-fold-label';
+                label.textContent = btn.getAttribute('title') || btn.getAttribute('aria-label') || '';
+                btn.appendChild(label);
+            }
+            moved.push({ btn: btn, marker: marker, label: label });
+            frag.appendChild(btn);
+        });
+        var divider = document.createElement('hr');
+        divider.className = 'menu-divider rh-fold-divider';
+        frag.appendChild(divider);
+        menu.insertBefore(frag, menu.firstChild);
+        row._rhFold = { moved: moved, divider: divider };
+        row.classList.add('rh-folded');
+        return true;
+    }
+
+    function unfoldRow(row) {
+        var f = row._rhFold;
+        if (!f) return false;
+        f.moved.forEach(function (m) {
+            if (m.label && m.label.parentNode) m.label.parentNode.removeChild(m.label);
+            if (m.marker.parentNode) {
+                m.marker.parentNode.insertBefore(m.btn, m.marker);
+                m.marker.parentNode.removeChild(m.marker);
+            }
+        });
+        if (f.divider.parentNode) f.divider.parentNode.removeChild(f.divider);
+        row._rhFold = null;
+        row.classList.remove('rh-folded');
+        return true;
+    }
+
+    function sync() {
+        var phone = mq ? mq.matches : window.innerWidth <= 640;
+        var changed = false;
+        document.querySelectorAll('table.rh-fold-actions .actions-row').forEach(function (row) {
+            if (phone ? foldRow(row) : unfoldRow(row)) changed = true;
+        });
+        // Let admin-mobile.js re-measure the table now that the Actions column changed width.
+        if (changed) window.dispatchEvent(new Event('resize'));
+    }
+    window.rhFoldPhoneActions = sync;
+
+    // A folded button's own handler opens its modal/page; close the menu after it so the menu
+    // does not stay open on top of what the action just opened.
+    document.addEventListener('click', function (e) {
+        var item = e.target && e.target.closest ? e.target.closest('.rh-folded .actions-more-menu :is(.quick-action, .btn, a, button)') : null;
+        if (!item) return;
+        var wrap = item.closest('.actions-more');
+        setTimeout(function () {
+            if (!wrap) return;
+            wrap.classList.remove('open');
+            var m = wrap.querySelector('.actions-more-menu');
+            if (m) m.removeAttribute('style');
+        }, 0);
+    }, true); // capture: some row handlers stop propagation
+
+    if (mq && mq.addEventListener) mq.addEventListener('change', sync);
+    else window.addEventListener('resize', sync);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', sync);
+    else sync();
+    if (window.MutationObserver) {
+        var timer = null;
+        new MutationObserver(function (muts) {
+            for (var i = 0; i < muts.length; i++) {
+                var added = muts[i].addedNodes;
+                for (var j = 0; j < added.length; j++) {
+                    var n = added[j];
+                    if (n.nodeType === 1 && (n.matches('table, tbody, tr') || n.querySelector('table.rh-fold-actions'))) {
+                        clearTimeout(timer);
+                        timer = setTimeout(sync, 30);
+                        return;
+                    }
+                }
+            }
+        }).observe(document.body || document.documentElement, { childList: true, subtree: true });
+    }
+})();

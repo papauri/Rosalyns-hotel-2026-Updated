@@ -3803,6 +3803,13 @@ select.rh-input-invalid.rh-input-invalid {
     display: none;
 }
 
+/* rh-ph-hide: the full desktop value, dropped from table mode on phones (its short rh-phone-sub twin shows). */
+@media (max-width: 640px) {
+    table:not(.mobile-enhanced) .rh-ph-hide {
+        display: none;
+    }
+}
+
 /* rh-hide-md: secondary detail line (e.g. VAT note) dropped from table mode up to 900px. */
 @media (max-width: 900px) {
     table:not(.mobile-enhanced) .rh-hide-md {
@@ -3878,7 +3885,31 @@ select.rh-input-invalid.rh-input-invalid {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 120px;
+        max-width: 140px;
+    }
+
+    /* A summary line that is real data (stay dates, name), not a footnote: dark and a touch larger. */
+    table:not(.mobile-enhanced) .rh-phone-sub--dark {
+        color: #231f1c;
+        font-size: 13px;
+        white-space: normal;
+        overflow: visible;
+        max-width: none;
+        line-height: 1.3;
+    }
+
+    table:not(.mobile-enhanced) .rh-phone-sub--nw {
+        white-space: nowrap;
+    }
+
+    table:not(.mobile-enhanced) .rh-phone-sub--pill {
+        max-width: none;
+        margin-top: 4px;
+        overflow: visible;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) td :is(.actions-row, .quick-actions).rh-folded {
+        grid-template-columns: 36px;
     }
 
     :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) td :is(.actions-row, .quick-actions) {
@@ -3895,6 +3926,44 @@ select.rh-input-invalid.rh-input-invalid {
     }
 }
 
+/* Primary buttons folded into the More menu on phones (rhFoldPhoneActions, admin-components.js):
+   render as ordinary menu items, whatever colour or size they had in the row. */
+:is(.admin-content, #rh-admin-page) .actions-row .actions-more-menu :is(.quick-action, .btn) {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 40px;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    box-shadow: none;
+    font-size: 13px;
+    font-weight: 400;
+    text-align: left;
+    text-decoration: none;
+}
+
+:is(.admin-content, #rh-admin-page) .actions-row .actions-more-menu :is(.quick-action, .btn)::after {
+    display: none;
+}
+
+:is(.admin-content, #rh-admin-page) .actions-row .actions-more-menu :is(.quick-action, .btn) :is(.label, .rh-fold-label) {
+    display: inline;
+    font-size: 13px;
+    font-weight: 400;
+    color: inherit;
+}
+
+:is(.admin-content, #rh-admin-page) .actions-row .actions-more-menu :is(.quick-action, .btn):hover {
+    background: #f4efe8;
+}
+
 /* Small phones (iPhone 11 Pro and narrower): shave cell padding a little more. */
 @media (max-width: 420px) {
     :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) :is(th, td) {
@@ -3904,6 +3973,10 @@ select.rh-input-invalid.rh-input-invalid {
 
     :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) td :is(.actions-row, .quick-actions) {
         gap: 2px;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) thead th {
+        font-size: 10px !important;
     }
 }
 
