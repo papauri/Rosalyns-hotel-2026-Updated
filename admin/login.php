@@ -336,7 +336,15 @@ $site_name = getSetting('site_name');
 <body>
     <div class="login-shell">
         <aside class="login-hero" aria-hidden="true">
-            <img class="login-hero__img" src="../images/hero/slide1.jpeg" alt="" decoding="async" fetchpriority="high">
+            <?php
+            // Admin-chosen picture (Media Portal); only a file under images/managed/ that still exists is used.
+            $loginHeroSrc = '../images/hero/slide1.jpeg';
+            $loginHeroSetting = trim((string)getSetting('login_hero_image', ''));
+            if (preg_match('#^images/managed/[A-Za-z0-9._-]+$#', $loginHeroSetting) && is_file(__DIR__ . '/../' . $loginHeroSetting)) {
+                $loginHeroSrc = '../' . $loginHeroSetting;
+            }
+            ?>
+            <img class="login-hero__img" src="<?php echo htmlspecialchars($loginHeroSrc, ENT_QUOTES, 'UTF-8'); ?>" alt="" decoding="async" fetchpriority="high">
             <div class="login-hero__brand">
                 <span class="login-hero__mark"><i class="fas fa-hotel"></i></span>
                 <span class="login-hero__name"><?php echo htmlspecialchars($site_name); ?></span>

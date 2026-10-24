@@ -331,6 +331,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = trim((string)($_POST['action'] ?? ''));
 
         try {
+            if ($action === 'set_login_picture' || $action === 'reset_login_picture') {
+                if (!hasPermission($user['id'], 'media_edit')) {
+                    throw new RuntimeException('You do not have permission to change pictures.');
+                }
+                if ($action === 'reset_login_picture') {
+                    updateSetting('login_hero_image', '');
+                    $message = 'Login page picture reset to the default.';
+                } else {
+                    $lpTmp = (string)($_FILES['login_picture']['tmp_name'] ?? '');
+                    if ($lpTmp !== '' && is_uploaded_file($lpTmp)
+                        && !in_array(mime_content_type($lpTmp) ?: '', ['image/jpeg', 'image/png', 'image/webp'], true)) {
+                        throw new RuntimeException('Please choose a JPG, PNG or WebP picture.');
+                    }
+                    $lpStored = mm_store_uploaded_media($_FILES['login_picture'] ?? [], 'image');
+                    updateSetting('login_hero_image', $lpStored['media_url']);
+                    $message = 'Login page picture updated.';
+                }
+            }
+
             if ($action === 'create_item') {
                 if (!hasPermission($user['id'], 'media_create')) {
                     throw new RuntimeException('You do not have permission to create media items.');
@@ -641,6 +660,34 @@ if ($media_css_version === '' || $media_css_version === '0') {
 
         <?php if ($message): ?><?php showAlert($message, 'success'); ?><?php endif; ?>
         <?php if ($error): ?><?php showAlert($error, 'error'); ?><?php endif; ?>
+
+        <?php
+        $lpSetting = trim((string)getSetting('login_hero_image', ''));
+        $lpCustom = preg_match('#^images/managed/[A-Za-z0-9._-]+$#', $lpSetting) && is_file(__DIR__ . '/../' . $lpSetting);
+        $lpPreview = $lpCustom ? '../' . $lpSetting : '../images/hero/slide1.jpeg';
+        ?>
+        <div class="card mm-create-panel">
+            <h3 class="mm-panel-title"><i class="fas fa-image"></i> Login page picture <i class="help" aria-label="About the login page picture" data-tip="Picture shown beside the staff sign-in form. Leave on default to use the hotel's main photo.">?</i></h3>
+            <p class="text-muted">Picture shown beside the staff sign-in form. Leave on default to use the hotel's main photo. <?php echo $lpCustom ? 'Currently: your uploaded picture.' : 'Currently: the default photo.'; ?></p>
+            <p><img class="mm-login-pic" src="<?php echo htmlspecialchars($lpPreview, ENT_QUOTES, 'UTF-8'); ?>" alt="Current login page picture" loading="lazy"></p>
+            <?php if (hasPermission($user['id'], 'media_edit')): ?>
+                <div class="mm-login-pic-row">
+                    <form method="POST" enctype="multipart/form-data" id="lp-upload-form" class="mm-field">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                        <input type="hidden" name="action" value="set_login_picture">
+                        <input type="file" name="login_picture" accept="image/jpeg,image/png,image/webp" class="mm-input" aria-label="Choose a login page picture" required>
+                    </form>
+                    <button type="submit" form="lp-upload-form" class="btn-primary">Upload picture</button>
+                    <?php if ($lpCustom): ?>
+                        <form method="POST" id="lp-reset-form">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                            <input type="hidden" name="action" value="reset_login_picture">
+                            <button type="submit" class="btn-secondary">Use default</button>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+        </div>
 
         <?php if (hasPermission($user['id'], 'media_create')): ?>
             <!-- Create form — collapsed by default -->
