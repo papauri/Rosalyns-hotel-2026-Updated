@@ -247,6 +247,26 @@ try {
     $netTakings = round((float)$tot['cash'] + (float)$tot['mobile'] + (float)$tot['card'], 2);
     $grossTakings = round((float)$tot['gross_cash'] + (float)$tot['gross_mobile'] + (float)$tot['gross_card'], 2);
     check(money_eq($netTakings, $grossTakings - (float)$tot['refund_amount']), 'Net takings = takings taken - refunds and voids paid out, both with tips', json_encode([$netTakings, $grossTakings, $tot['refund_amount']]));
+
+    echo "\n--- Shift payouts: part refund in an earlier shift, rest refunded in a later one (no double payout) ---\n";
+    $d1 = '2037-06-11'; $d2 = '2037-06-12';
+    $w1 = rh_station_union_window_for_date($d1); $w2 = rh_station_union_window_for_date($d2);
+    $t1 = date('Y-m-d H:i:s', strtotime($w1['start_sql']) + 60); $t2 = date('Y-m-d H:i:s', strtotime($w2['start_sql']) + 60);
+    $pdo->prepare("INSERT INTO stock_orders (reference, order_type, customer_name, status, total_amount, subtotal, tip_amount, kitchen_status, created_by, paid_by, paid_at, payment_method, created_at)
+        VALUES (?, 'walk_in', 'REFUND VAT TEST', 'paid', 8000, 8000, 500, 'served', ?, ?, ?, 'cash', ?)")
+        ->execute(["RVS$run", $adminId, $adminId, $t1, $t1]);
+    $oS = (int)$pdo->lastInsertId();
+    $mkRefund($oS, "RVR$run-S1", 3000.0, 'completed', $t1, $t1);                 // part refund paid out in shift 1
+    $payoutFor = static function (array $rows, int $oid): float { $s = 0.0; foreach ($rows as $r) { if ((int)$r['id'] === $oid) { $s += $r['total']; } } return round($s, 2); };
+    $early = $payoutFor(rh_pos_shift_reversals($pdo, $w1['start_sql'], $w1['end_sql']), $oS);
+    check(money_eq($early, 3000.0), 'Earlier shift pays out the 3000 part refund', (string)$early);
+    $mkRefund($oS, "RVR$run-S2", 5000.0, 'completed', $t2, $t2);                 // the rest, next shift
+    $pdo->prepare("UPDATE stock_orders SET status = 'refunded', refunded_at = ?, refund_reason = 'test' WHERE id = ?")->execute([$t2, $oS]);
+    $late = $payoutFor(rh_pos_shift_reversals($pdo, $w2['start_sql'], $w2['end_sql']), $oS);
+    check(money_eq($late, 5500.0), 'Later shift pays out only the 5000 left + 500 tip, not the 3000 already paid', (string)$late);
+    check(money_eq($early + $late, 8500.0), 'Both shifts together pay out 8000 + 500 tip once', (string)($early + $late));
+    $tot2 = rh_pos_shift_totals($pdo, $adminId, $w2['start_sql'], $w2['end_sql'], $w2['start_sql']);
+    check(money_eq($tot2['refund_cash'], 5500.0), 'Shift totals (Z) refund_cash for the later window = 5500', (string)$tot2['refund_cash']);
 } catch (Throwable $e) {
     bad('Test run crashed', $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine());
 }

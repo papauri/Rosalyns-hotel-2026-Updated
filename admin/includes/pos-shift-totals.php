@@ -286,6 +286,24 @@ if (!function_exists('rh_pos_shift_reversals')) {
                     $t[$b] += (float)$r['total_amount'] + (float)$r['tip'];
                 }
             }
+            // Part refunds of this order already paid out in an EARLIER window hit their own shift (and that
+            // shift's Z is never restated): only the rest leaves the drawer now. Per tender, never below 0.
+            try {
+                $pe = $pdo->prepare("SELECT p.payment_method AS method, CASE WHEN COALESCE(p.refund_amount, 0) > 0 THEN p.refund_amount ELSE p.total_amount END AS amt
+                    FROM payments p
+                    WHERE p.booking_type = 'restaurant' AND p.booking_id = ? AND p.payment_type = 'refund'
+                      AND p.refund_status = 'completed' AND p.deleted_at IS NULL AND p.payment_reference NOT LIKE 'REF86-%'
+                      AND COALESCE(p.refund_date_processed, p.updated_at, p.created_at) < ?");
+                $pe->execute([$oid, $start]);
+                foreach ($pe->fetchAll(PDO::FETCH_ASSOC) ?: [] as $prior) {
+                    $pb = rh_pos_tender_bucket($prior['method']);
+                    if ($pb && (float)$prior['amt'] > BALANCE_TOLERANCE) {
+                        $t[$pb] = max(0.0, $t[$pb] - (float)$prior['amt']);
+                    }
+                }
+            } catch (Throwable $e) {
+                error_log('rh_pos_shift_reversals earlier part refunds: ' . $e->getMessage());
+            }
             $out[] = [
                 'id' => $oid,
                 'kind' => $r['status'] === 'refunded' ? 'refund' : 'void',
