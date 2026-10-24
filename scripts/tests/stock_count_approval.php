@@ -367,6 +367,9 @@ check($setRowAfter === $setRowBefore, 'Leak: the stock_count_second_approver set
 // --- Leak check -----------------------------------------------------------------------------------------------------
 check((int)col($pdo, "SELECT COUNT(*) FROM stock_counts WHERE reference LIKE '20991231-%'") === 0, 'Leak: no test stock counts left behind');
 check((int)col($pdo, "SELECT COUNT(*) FROM admin_users WHERE username LIKE 'zzt\_sca\_%'") === 0, 'Leak: no test users left behind');
+// The page harness logs on its own committed connection, so those marker rows survive the rollback: delete only ours.
+if ($pdo->inTransaction()) { $pdo->rollBack(); }
+$pdo->exec("DELETE FROM admin_activity_log WHERE details LIKE '%20991231-%' AND action LIKE 'stock\\_count%'");
 check((int)col($pdo, "SELECT COUNT(*) FROM admin_activity_log WHERE details LIKE '%20991231-%'") === 0, 'Leak: no test activity log rows left behind');
 check((int)col($pdo, "SELECT COUNT(*) FROM user_permissions up LEFT JOIN admin_users u ON u.id = up.user_id WHERE u.id IS NULL") === $orphanPerm, 'Leak: no stray permission rows left behind');
 $submittedAfter = $pdo->query("SELECT id, status, updated_at FROM stock_counts WHERE status = 'submitted' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
