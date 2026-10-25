@@ -35,6 +35,7 @@
       <li><a href="#screen">What is on the screens</a></li>
       <li><a href="#room-add">How to add a room type</a></li>
       <li><a href="#room-prices">How to change room prices</a></li>
+      <li><a href="#room-pictures">How to add room pictures</a></li>
       <li><a href="#child-charges">Child charges</a></li>
       <li><a href="#room-hide">How to hide, feature, reorder or delete a room</a></li>
       <li><a href="#plan-add">How to create a rate plan</a></li>
@@ -113,7 +114,7 @@
   <p>A room type is a kind of room (for example Deluxe Double) that guests book. The individual physical rooms are managed under Front Desk &rarr; Individual Rooms.</p>
   <ol class="steps">
     <li>Open <strong>Settings</strong> &rarr; <strong>Rooms</strong> and click <strong>Add New Room</strong>.</li>
-    <li>Under <strong>Room Information</strong> fill in <strong>Room Name</strong> (required), <strong>Short Description</strong>, <strong>Full Description</strong> and <strong>Featured Image URL / Path</strong> (optional; you can also upload a picture afterwards with the image button on the card).</li>
+    <li>Under <strong>Room Information</strong> fill in <strong>Room Name</strong> (required), <strong>Short Description</strong>, <strong>Full Description</strong> and <strong>Featured Image URL / Path</strong> (optional). To add pictures, see <a href="#room-pictures">How to add room pictures</a>.</li>
     <li>Under <strong>Pricing</strong> fill in <strong>Price Per Night</strong> (required). Fill in <strong>Single Occupancy Price</strong>, <strong>Double Occupancy Price</strong> and <strong>Triple Occupancy Price</strong> if the price changes with the number of guests (see the next section). Set <strong>Child Supplement (%)</strong> (it starts at 50). Tick <strong>Enable Triple Occupancy (3 guests)</strong> if the room can take three guests. Leave <strong>Allow Children for this Room Type</strong> ticked if children may stay (it is ticked to start with).</li>
     <li>Under <strong>Room Details</strong> fill in <strong>Size (sqm)</strong>, <strong>Max Guests</strong>, <strong>Bed Type</strong>, <strong>Rooms Available</strong> (starts at 1), <strong>Total Rooms</strong> (starts at 1), <strong>Display Order</strong> and <strong>Amenities (comma-separated)</strong>.</li>
     <li>Under <strong>Video (Optional)</strong> you can paste a <strong>Video URL</strong> (YouTube, Vimeo, Dailymotion or a direct video link).</li>
@@ -121,6 +122,7 @@
     <li>Click <strong>Add Room</strong>. You will see <em>"New room added successfully!"</em> inside the window and the new card appears behind it. Click <strong>Close</strong> when finished.</li>
   </ol>
   <p>Room type names must be unique. A name already in use is flagged while you type: <em>"A room type with this name already exists."</em> If the save is refused, the form stays open with what you typed and the reason shown.</p>
+  <p>Each field that is wrong shows a short message under it. For example, the price per night must be more than 0, guest and children numbers must be whole numbers, and the child percentage must be from 0 to 100.</p>
   <div class="note"><p>A new room is always created as <strong>Active</strong>. The Add window has no Active tick box. To hide it, use the active on/off icon on its card afterwards.</p></div>
 
   <h2 id="room-prices">How to change room prices</h2>
@@ -138,8 +140,22 @@
     <li>Tick or untick <strong>Enable Triple Occupancy (3 guests)</strong> and <strong>Allow Children for this Room Type</strong> as needed.</li>
     <li>Click <strong>Save Changes</strong>. You will see <em>"Room updated successfully!"</em> inside the window.</li>
   </ol>
+  <p>Prices show two decimals, for example 180000.00.</p>
   <div class="note"><p>Prices are in Malawi Kwacha (MWK). Rate plans change these prices automatically; do not edit room prices just to run a short promotion. Use a rate plan so the normal price comes back by itself.</p></div>
   <div class="note"><p><strong>Room rates are all-in.</strong> The price you type already includes VAT and the tourism levy. Nothing is added on top, whatever the VAT setting. The system works out the base rate, VAT and levy from inside the price. Example at VAT 17.5% and levy 1%: a rate of MWK 712,000 gives VAT MWK 105,147.68, levy MWK 6,008.44 and base rate MWK 600,843.88. The guest pays MWK 712,000. If VAT or the levy is switched off, that part is not taken out.</p></div>
+
+  <h2 id="room-pictures">How to add room pictures</h2>
+  <p>Pictures are managed in the <strong>Pictures</strong> section of the <strong>Edit Room</strong> window (Settings &rarr; Rooms). You need the <strong>Room Management</strong> permission.</p>
+  <ol class="steps">
+    <li>Open <strong>Settings</strong> &rarr; <strong>Rooms</strong> and click <strong>Edit Room</strong> on the room.</li>
+    <li>Go to the <strong>Pictures</strong> section. To add pictures, choose one or more files under <strong>Add pictures</strong>. They upload straight away.</li>
+    <li>To make a picture the main one guests see first, tap the star on it. The first picture you add becomes the main one.</li>
+    <li>To change the order, use the arrows to move a picture earlier or later.</li>
+    <li>To remove a picture, tap the bin icon on it.</li>
+  </ol>
+  <p>Each picture can be up to 4 MB. Use JPG, PNG or WEBP. Pictures save as soon as you add, remove or reorder them, so you do not need to press <strong>Save Changes</strong>.</p>
+  <p>When you add a new room, you can choose pictures in the <strong>Pictures (Optional)</strong> section of the <strong>Add New Room</strong> window. They upload once the room is saved, and the first one becomes the main picture.</p>
+  <div class="note"><p>If a picture is too big or the wrong type, the message under the Pictures section says why and the picture is not added.</p></div>
 
   <h2 id="child-charges">Child charges</h2>
   <p>Set how children are charged in the <strong>Children</strong> part of the <strong>Add New Room</strong> and <strong>Edit Room</strong> windows (Settings &rarr; Rooms). You need the <strong>Room Management</strong> permission. This only changes the price of new bookings. Money already booked does not move.</p>
