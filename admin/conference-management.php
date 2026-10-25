@@ -183,8 +183,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!isset($_POST['capacity']) || !ctype_digit(trim((string)$_POST['capacity'])) || (int)$_POST['capacity'] < 1 || (int)$_POST['capacity'] > 100000) {
                 throw new Exception('Capacity must be a whole number of at least 1.');
             }
-            if (!isset($_POST['daily_rate']) || !is_numeric($_POST['daily_rate']) || (float)$_POST['daily_rate'] < 0 || (float)$_POST['daily_rate'] > 99999999.99) {
-                throw new Exception('Full day rate must be a number (0 or more).');
+            if (!isset($_POST['daily_rate']) || !is_numeric($_POST['daily_rate']) || (float)$_POST['daily_rate'] <= 0 || (float)$_POST['daily_rate'] > 99999999.99) {
+                throw new Exception('Full day rate is required and must be more than 0.');
             }
             // Optional half-day rate (blank = none); only handled when the column exists (migration 061)
             $halfDayRate = null;
@@ -202,10 +202,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception(rh_duplicate_message('conference room', (string)$cfDup['value']));
             }
             if (($_POST['size_sqm'] ?? '') !== '' && (!is_numeric($_POST['size_sqm']) || (float)$_POST['size_sqm'] < 0)) {
-                throw new Exception('Size must be a positive number.');
+                throw new Exception('Size must be a number of 0 or more.');
             }
-            if (($_POST['display_order'] ?? '') === '' || !is_numeric($_POST['display_order'])) {
+            if (($_POST['display_order'] ?? '') === '' || !is_numeric($_POST['display_order']) || (int)$_POST['display_order'] < 0) {
                 $_POST['display_order'] = 0;
+            }
+        }
+
+        // A picture that cannot be used is refused with the reason (it used to be dropped silently).
+        if (in_array($action, ['add', 'update'], true) && (($_FILES['image']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK)) {
+            $cfImgExt = strtolower(pathinfo((string)$_FILES['image']['name'], PATHINFO_EXTENSION));
+            if (!in_array($cfImgExt, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                throw new Exception('Picture must be a JPG, PNG or WEBP file.');
+            }
+            if ($cfImgErr = rh_check_image_upload_size($_FILES['image'], $cfImgWarn)) {
+                throw new Exception($cfImgErr);
             }
         }
 
@@ -1262,15 +1273,16 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         <div class="form-section-title"><i class="fas fa-info-circle"></i> Room Information</div>
                         <div class="form-group">
                             <label>Name *</label>
-                            <input type="text" name="name" required>
+                            <input type="text" name="name" id="addName" maxlength="100" required>
                         </div>
                         <div class="form-group">
                             <label>Description *</label>
-                            <textarea name="description" rows="3" required></textarea>
+                            <textarea name="description" id="addDescription" rows="3" required></textarea>
                         </div>
                         <div class="form-group">
                             <label>Featured Image</label>
-                            <input type="file" name="image" accept="image/*">
+                            <input type="file" name="image" id="addImage" accept="image/jpeg,image/png,image/webp">
+                            <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">JPG, PNG or WEBP, most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?>.</small>
                         </div>
                     </div>
 
@@ -1279,27 +1291,31 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Capacity *</label>
-                                <input type="number" name="capacity" min="1" required>
+                                <input type="number" name="capacity" id="addCapacity" min="1" max="100000" step="1" required>
+                                <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Most people the room holds (a whole number).</small>
                             </div>
                             <div class="form-group">
                                 <label>Size (sqm)</label>
-                                <input type="number" step="0.01" name="size_sqm">
+                                <input type="number" step="0.01" min="0" name="size_sqm" id="addSize">
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Full Day Rate *</label>
-                                <input type="number" step="0.01" name="daily_rate" required data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                                <input type="number" step="0.01" min="0" name="daily_rate" id="addRate" required data-money placeholder="0.00" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                                <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Price for one full day. Must be more than 0.</small>
                             </div>
                             <?php if ($confHasHalfDayRate): ?>
                             <div class="form-group">
                                 <label>Half Day Rate (up to 5 hours, optional)</label>
-                                <input type="number" step="0.01" min="0" name="half_day_rate" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                                <input type="number" step="0.01" min="0" name="half_day_rate" id="addHalfDayRate" data-money placeholder="Optional" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                                <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Leave blank if you do not offer half days.</small>
                             </div>
                             <?php endif; ?>
                             <div class="form-group">
                                 <label>Display Order</label>
-                                <input type="number" name="display_order" value="0">
+                                <input type="number" name="display_order" id="addOrder" min="0" step="1" value="0">
+                                <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Lower numbers show first.</small>
                             </div>
                         </div>
                         <div class="form-group">
@@ -1346,7 +1362,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         <div class="form-section-title"><i class="fas fa-info-circle"></i> Room Information</div>
                         <div class="form-group">
                             <label>Name *</label>
-                            <input type="text" name="name" id="editName" required>
+                            <input type="text" name="name" id="editName" maxlength="100" required>
                         </div>
                         <div class="form-group">
                             <label>Description *</label>
@@ -1354,7 +1370,8 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         </div>
                         <div class="form-group">
                             <label>Replace Image</label>
-                            <input type="file" name="image" accept="image/*">
+                            <input type="file" name="image" id="editImage" accept="image/jpeg,image/png,image/webp">
+                            <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Leave empty to keep the current picture. JPG, PNG or WEBP, most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?>.</small>
                         </div>
                     </div>
 
@@ -1363,27 +1380,31 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Capacity *</label>
-                                <input type="number" name="capacity" id="editCapacity" min="1" required>
+                                <input type="number" name="capacity" id="editCapacity" min="1" max="100000" step="1" required>
+                                <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Most people the room holds (a whole number).</small>
                             </div>
                             <div class="form-group">
                                 <label>Size (sqm)</label>
-                                <input type="number" step="0.01" name="size_sqm" id="editSize">
+                                <input type="number" step="0.01" min="0" name="size_sqm" id="editSize">
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Full Day Rate *</label>
-                                <input type="number" step="0.01" name="daily_rate" id="editRate" required data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                                <input type="number" step="0.01" name="daily_rate" id="editRate" min="0" required data-money placeholder="0.00" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                                <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Price for one full day. Must be more than 0.</small>
                             </div>
                             <?php if ($confHasHalfDayRate): ?>
                             <div class="form-group">
                                 <label>Half Day Rate (up to 5 hours, optional)</label>
-                                <input type="number" step="0.01" min="0" name="half_day_rate" id="editHalfDayRate" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                                <input type="number" step="0.01" min="0" name="half_day_rate" id="editHalfDayRate" data-money placeholder="Optional" data-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES); ?>">
+                                <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Leave blank if you do not offer half days.</small>
                             </div>
                             <?php endif; ?>
                             <div class="form-group">
                                 <label>Display Order</label>
-                                <input type="number" name="display_order" id="editOrder" value="0">
+                                <input type="number" name="display_order" id="editOrder" min="0" step="1" value="0">
+                                <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Lower numbers show first.</small>
                             </div>
                         </div>
                         <div class="form-group">
@@ -1550,10 +1571,10 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             document.getElementById('editDescription').value = room.description || '';
             document.getElementById('editCapacity').value = room.capacity || '';
             document.getElementById('editSize').value = room.size_sqm || '';
-            document.getElementById('editRate').value = room.daily_rate || '';
+            document.getElementById('editRate').value = (room.daily_rate !== null && room.daily_rate !== undefined && room.daily_rate !== '') ? Number(room.daily_rate).toFixed(2) : '';
             var editHalfRate = document.getElementById('editHalfDayRate');
             if (editHalfRate) {
-                editHalfRate.value = (room.half_day_rate !== null && room.half_day_rate !== undefined) ? room.half_day_rate : '';
+                editHalfRate.value = (room.half_day_rate !== null && room.half_day_rate !== undefined && room.half_day_rate !== '') ? Number(room.half_day_rate).toFixed(2) : '';
             }
             document.getElementById('editOrder').value = room.display_order || 0;
             document.getElementById('editAmenities').value = room.amenities || '';
@@ -1626,6 +1647,23 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             });
             RHFormGuard.guardSubmit(document.getElementById('addForm'), { busy: false });
             RHFormGuard.guardSubmit(document.getElementById('editForm'), { busy: false });
+
+            // Field checks + 2-decimal money (shared helper). The server checks the same rules again on save.
+            ['add', 'edit'].forEach(function (p) {
+                var id = function (n) { return p + n; };
+                var rules = [
+                    { el: id('Name'), label: 'Room name', required: true, maxLen: 100 },
+                    { el: id('Description'), label: 'Description', required: true },
+                    { el: id('Capacity'), label: 'Capacity', required: true, int: true, min: 1, max: 100000 },
+                    { el: id('Size'), label: 'Size (sqm)', min: 0, max: 99999999.99 },
+                    { el: id('Rate'), label: 'Full day rate', required: true, gt: 0, max: 99999999.99 },
+                    { el: id('HalfDayRate'), label: 'Half day rate', min: 0, max: 99999999.99 },
+                    { el: id('Order'), label: 'Display order', int: true, min: 0 },
+                    { el: id('Image'), label: 'Picture', file: { types: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: <?php echo (int)RH_IMAGE_MAX_BYTES; ?> } }
+                ];
+                RHFormGuard.validateForm(document.getElementById(p + 'Form'), rules);
+                RHFormGuard.moneyInputs(document.getElementById(p + 'Form'));
+            });
         }
         document.getElementById('addForm').addEventListener('submit', function(e) {
             e.preventDefault();

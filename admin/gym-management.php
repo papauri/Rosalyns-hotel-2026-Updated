@@ -56,11 +56,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($action === 'update' && (int)($_POST['id'] ?? 0) <= 0) {
                 throw new Exception('Package not found.');
             }
-            if (!$gm_pkg_comp && (!is_numeric($_POST['price'] ?? '') || (float)$_POST['price'] < 0 || (float)$_POST['price'] > 99999999)) {
-                throw new Exception('Price must be a number (0 or more).');
+            // A paid package must have a price (a price of 0 would enrol members for nothing); free ones use the Complimentary box.
+            if (!$gm_pkg_comp && (!is_numeric($_POST['price'] ?? '') || (float)$_POST['price'] <= 0 || (float)$_POST['price'] > 99999999)) {
+                throw new Exception('Price is required and must be more than 0 (tick Complimentary for a free package).');
             }
-            if (($_POST['duration_days'] ?? '') !== '' && (!is_numeric($_POST['duration_days']) || (int)$_POST['duration_days'] < 0 || (int)$_POST['duration_days'] > 3650)) {
+            if (($_POST['duration_days'] ?? '') !== '' && (!ctype_digit(trim((string)$_POST['duration_days'])) || (int)$_POST['duration_days'] > 3650)) {
                 throw new Exception('Duration must be a whole number of days between 0 and 3650.');
+            }
+            if (($_POST['display_order'] ?? '') !== '' && !ctype_digit(trim((string)$_POST['display_order']))) {
+                throw new Exception('Display order must be a whole number of 0 or more.');
             }
             // A paid package with no duration would enrol members with no expiry date (they would never lapse
             // or renew), so a duration is required unless the package is complimentary.
@@ -472,28 +476,29 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label">Package Name *</label>
-                            <input type="text" name="name" class="form-control" required placeholder="e.g. Rejuvenation Retreat">
+                            <input type="text" name="name" id="addGymName" class="form-control" maxlength="150" required placeholder="e.g. Rejuvenation Retreat">
                         </div>
                         <div class="form-group">
                             <label class="form-label">Icon Class</label>
-                            <input type="text" name="icon_class" class="form-control" value="fas fa-leaf" placeholder="fas fa-dumbbell">
+                            <input type="text" name="icon_class" id="addGymIconClass" class="form-control" maxlength="100" value="fas fa-leaf" placeholder="fas fa-dumbbell">
                             <small class="form-text text-muted">Font Awesome 6 class, e.g. <code>fas fa-star</code></small>
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label">Price *</label>
-                            <input type="number" name="price" class="form-control" min="0" step="0.01" required placeholder="0.00" data-currency="MWK" data-gym-price-input>
+                            <input type="number" name="price" id="addGymPrice" class="form-control" min="0" step="0.01" required data-money placeholder="0.00" data-currency="MWK" data-gym-price-input>
+                            <small class="form-text text-muted">What a member pays for the whole package. Must be more than 0 unless it is complimentary.</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Currency Code</label>
-                            <input type="text" name="currency_code" class="form-control" value="MWK" maxlength="10" data-gym-currency-input>
+                            <input type="text" name="currency_code" id="addGymCurrency" class="form-control" value="MWK" maxlength="10" data-gym-currency-input>
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label">Duration (days)</label>
-                            <input type="number" name="duration_days" class="form-control" min="0" step="1" placeholder="e.g. 30 monthly, 365 yearly" list="gymDurationPresets">
+                            <input type="number" name="duration_days" id="addGymDurationDays" class="form-control" min="0" max="3650" step="1" placeholder="e.g. 30 monthly, 365 yearly" list="gymDurationPresets">
                             <datalist id="gymDurationPresets">
                                 <option value="1">1 Day pass</option>
                                 <option value="7">1 Week</option>
@@ -506,19 +511,20 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                         </div>
                         <div class="form-group">
                             <label class="form-label">Duration Label <small>(optional — auto-set from days)</small></label>
-                            <input type="text" name="duration_label" class="form-control" placeholder="Auto: Monthly, Yearly…">
+                            <input type="text" name="duration_label" id="addGymDuration" class="form-control" maxlength="50" placeholder="Auto: Monthly, Yearly…">
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                                <input type="checkbox" name="is_complimentary" value="1"> Complimentary (free — e.g. hotel guest)
+                                <input type="checkbox" name="is_complimentary" id="addGymComplimentary" value="1"> Complimentary (free — e.g. hotel guest)
                             </label>
                             <small class="form-text text-muted">Free packages ignore the price field and record no fee.</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Display Order</label>
-                            <input type="number" name="display_order" class="form-control" value="0" min="0">
+                            <input type="number" name="display_order" id="addGymOrder" class="form-control" value="0" min="0" step="1">
+                            <small class="form-text text-muted">Lower numbers show first.</small>
                         </div>
                     </div>
                     <div class="form-group" style="margin-bottom:14px;">
@@ -528,11 +534,11 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label">CTA Button Text</label>
-                            <input type="text" name="cta_text" class="form-control" value="Book Package">
+                            <input type="text" name="cta_text" id="addGymCtaText" class="form-control" maxlength="120" value="Book Package">
                         </div>
                         <div class="form-group">
                             <label class="form-label">CTA Link</label>
-                            <input type="text" name="cta_link" class="form-control" value="#book">
+                            <input type="text" name="cta_link" id="addGymCtaLink" class="form-control" maxlength="255" value="#book">
                         </div>
                     </div>
                     <div style="display:flex;gap:20px;">
@@ -568,18 +574,19 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label">Package Name *</label>
-                            <input type="text" name="name" id="editGymName" class="form-control" required>
+                            <input type="text" name="name" id="editGymName" class="form-control" maxlength="150" required>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Icon Class</label>
-                            <input type="text" name="icon_class" id="editGymIconClass" class="form-control">
+                            <input type="text" name="icon_class" id="editGymIconClass" class="form-control" maxlength="100">
                             <small class="form-text text-muted">Font Awesome 6 class, e.g. <code>fas fa-star</code></small>
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label">Price *</label>
-                            <input type="number" name="price" id="editGymPrice" class="form-control" min="0" step="0.01" required data-currency="MWK" data-gym-price-input>
+                            <input type="number" name="price" id="editGymPrice" class="form-control" min="0" step="0.01" required data-money placeholder="0.00" data-currency="MWK" data-gym-price-input>
+                            <small class="form-text text-muted">What a member pays for the whole package. Must be more than 0 unless it is complimentary.</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Currency Code</label>
@@ -589,12 +596,12 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label">Duration (days)</label>
-                            <input type="number" name="duration_days" id="editGymDurationDays" class="form-control" min="0" step="1" list="gymDurationPresets">
+                            <input type="number" name="duration_days" id="editGymDurationDays" class="form-control" min="0" max="3650" step="1" list="gymDurationPresets">
                             <small class="form-text text-muted">Required for paid packages (drives membership expiry). Only complimentary packages can be open-ended.</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Duration Label <small>(optional)</small></label>
-                            <input type="text" name="duration_label" id="editGymDuration" class="form-control">
+                            <input type="text" name="duration_label" id="editGymDuration" class="form-control" maxlength="50">
                         </div>
                     </div>
                     <div class="form-row" style="margin-bottom:14px;">
@@ -606,7 +613,8 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                         </div>
                         <div class="form-group">
                             <label class="form-label">Display Order</label>
-                            <input type="number" name="display_order" id="editGymOrder" class="form-control" min="0">
+                            <input type="number" name="display_order" id="editGymOrder" class="form-control" min="0" step="1">
+                            <small class="form-text text-muted">Lower numbers show first.</small>
                         </div>
                     </div>
                     <div class="form-group" style="margin-bottom:14px;">
@@ -616,11 +624,11 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                     <div class="form-row" style="margin-bottom:14px;">
                         <div class="form-group">
                             <label class="form-label">CTA Button Text</label>
-                            <input type="text" name="cta_text" id="editGymCtaText" class="form-control">
+                            <input type="text" name="cta_text" id="editGymCtaText" class="form-control" maxlength="120">
                         </div>
                         <div class="form-group">
                             <label class="form-label">CTA Link</label>
-                            <input type="text" name="cta_link" id="editGymCtaLink" class="form-control">
+                            <input type="text" name="cta_link" id="editGymCtaLink" class="form-control" maxlength="255">
                         </div>
                     </div>
                     <div style="display:flex;gap:20px;">
@@ -769,6 +777,41 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
                 });
                 RHFormGuard.guardSubmit(editForm, { busy: false });
             }
+
+            // Field checks + 2-decimal money (shared helper). The server checks the same rules again on save.
+            // A complimentary package ignores the price and may be open-ended, so those rules are read live.
+            ['add', 'edit'].forEach(function (p) {
+                var form = document.getElementById(p + 'GymPackageForm');
+                if (!form) return;
+                var id = function (n) { return p + 'Gym' + n; };
+                var comp = function () { return document.getElementById(id('Complimentary')).checked; };
+                var price = { el: id('Price'), label: 'Price' };
+                Object.defineProperty(price, 'required', { get: function () { return !comp(); } });
+                Object.defineProperty(price, 'gt', { get: function () { return comp() ? undefined : 0; } });
+                Object.defineProperty(price, 'max', { get: function () { return comp() ? undefined : 99999999; } });
+                var days = { el: id('DurationDays'), label: 'Duration (days)', int: true, max: 3650 };
+                Object.defineProperty(days, 'required', { get: function () { return !comp(); } });
+                Object.defineProperty(days, 'min', { get: function () { return comp() ? 0 : 1; } });
+                RHFormGuard.validateForm(form, [
+                    { el: id('Name'), label: 'Package name', required: true, maxLen: 150 },
+                    { el: id('IconClass'), label: 'Icon class', maxLen: 100 },
+                    price,
+                    { el: id('Currency'), label: 'Currency code', maxLen: 10 },
+                    days,
+                    { el: id('Duration'), label: 'Duration label', maxLen: 50 },
+                    { el: id('Order'), label: 'Display order', int: true, min: 0 },
+                    { el: id('CtaText'), label: 'Button text', maxLen: 120 },
+                    { el: id('CtaLink'), label: 'Button link', maxLen: 255 }
+                ]);
+                RHFormGuard.moneyInputs(form);
+                // ticking / unticking Complimentary re-checks the two fields it changes the rules for
+                document.getElementById(id('Complimentary')).addEventListener('change', function () {
+                    [id('Price'), id('DurationDays')].forEach(function (i) {
+                        var el = document.getElementById(i);
+                        if (el._rhRuleMsg || el.value !== '') el.dispatchEvent(new Event('blur'));
+                    });
+                });
+            });
         })();
 
         // ── Package data injected from PHP ──────────────────────────────────────────
@@ -1069,7 +1112,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
             document.getElementById('editGymId').value = pkg.id;
             document.getElementById('editGymName').value = pkg.name || '';
             document.getElementById('editGymIconClass').value = pkg.icon_class || 'fas fa-leaf';
-            document.getElementById('editGymPrice').value = pkg.price || 0;
+            document.getElementById('editGymPrice').value = Number(pkg.price || 0).toFixed(2);
             document.getElementById('editGymCurrency').value = pkg.currency_code || 'MWK';
             document.getElementById('editGymDurationDays').value = (pkg.duration_days === 0 || pkg.duration_days) ? pkg.duration_days : '';
             document.getElementById('editGymDuration').value = pkg.duration_label || '';
