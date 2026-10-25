@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Assistant — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
+
+  <h1>The Assistant</h1>
+  <p>The Assistant is a chat helper for staff in the <span class="g-site-name">Rosalyns Beach Hotel</span> admin. This guide covers setting it up on <strong>Assistant Settings</strong>: switching it on or off, adding a provider key, choosing models, limits, who has access and usage. It ships switched off: nothing changes for anyone until an administrator sets it up and switches it on.</p>
+  <div class="note"><p>This update adds the settings page only. The chat panel, the limits being applied and the nightly clean-up of old chats arrive in the next updates; you can prepare keys, models and limits now.</p></div>
+
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>An administrator sets it up. Staff who are given access then use it.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Assistant Settings</strong> (<code>/admin/ai-settings.php</code>)</dd>
+      <dt>Permission needed</dt><dd><strong>Assistant Settings</strong> to open the page. <strong>Assistant Usage</strong> to see the Usage table. Using the chat needs <strong>Use the Assistant</strong>; confirming the changes it suggests needs <strong>Confirm Assistant actions</strong>.</dd>
+      <dt>Only shown when</dt><dd>The settings page is always reachable for people with the permission, so it can always be switched on or off.</dd>
+    </dl>
+  </div>
+
+  <div class="toc">
+    <ol>
+      <li><a href="#screen">What is on the screen</a></li>
+      <li><a href="#keys">How to add a provider key</a></li>
+      <li><a href="#models">How to choose the models</a></li>
+      <li><a href="#switch">How to switch it on or off</a></li>
+      <li><a href="#limits">How to set budgets and limits</a></li>
+      <li><a href="#access">Who has access</a></li>
+      <li><a href="#usage">Reading the usage table</a></li>
+      <li><a href="#rules">Rules the system enforces</a></li>
+      <li><a href="#problems">Problems and fixes</a></li>
+    </ol>
+  </div>
+
+  <h2 id="screen">What is on the screen</h2>
+  <table>
+    <thead><tr><th>Assistant Settings part</th><th>What it holds</th></tr></thead>
+    <tbody>
+      <tr><td><strong>On or off</strong></td><td>One line saying whether the Assistant is on, which provider and main model it uses and how many people have access, and the button <strong>Switch on</strong> or <strong>Switch off</strong>.</td></tr>
+      <tr><td><strong>Providers</strong></td><td>One card each for Anthropic, OpenAI, Google, xAI and DeepSeek. Each shows the saved key as four dots and its last four characters, the last test result, a box to paste a key, and the buttons <strong>Save and test</strong>, <strong>Test connection</strong> and <strong>Remove key</strong>.</td></tr>
+      <tr><td><strong>Models</strong></td><td>Before any key: the models known when this version was made, with prices. After a key passes the test: that provider's own current list, where you tick up to 5 and give each a role. Buttons <strong>Save models</strong> and <strong>Check for newer models</strong>.</td></tr>
+      <tr><td><strong>Budgets and limits</strong></td><td><strong>Daily limit per person (tokens)</strong>, <strong>Monthly cost limit (US$)</strong>, <strong>Messages per person in 10 minutes</strong>, <strong>Keep chats for (days)</strong> and <strong>Save limits</strong>.</td></tr>
+      <tr><td><strong>Who has access</strong></td><td>Read-only list of the staff who may use the Assistant, and whether each may confirm its actions. The button <strong>Change on Staff &amp; Access</strong> opens the staff screen.</td></tr>
+      <tr><td><strong>Usage</strong></td><td>The estimated cost this month against the monthly limit, and the last 30 days per day, person and model.</td></tr>
+    </tbody>
+  </table>
+  <p>Every column and card has a round <strong>?</strong> that explains what it shows.</p>
+
+  <h2 id="keys">How to add a provider key</h2>
+  <p>A provider is the company whose models answer the questions. You need an account and a key from at least one. The provider bills that account directly.</p>
+  <ol class="steps">
+    <li>Get a key from the provider's website (the hint under each box says where).</li>
+    <li>Open <strong>Settings</strong> &rarr; <strong>Assistant Settings</strong>.</li>
+    <li>On that provider's card paste the key into the box and click <strong>Save and test</strong>.</li>
+    <li>The page saves the key, lists the provider's models and sends one short test message. A green message such as <em>"Key saved for Anthropic. Connected. 7 chat models found; Claude Opus 5.5 answered the test in 640 ms."</em> means it works.</li>
+  </ol>
+  <div class="note"><p>The key is saved scrambled and is never shown again: the card shows only four dots and its last four characters. To replace it, paste a new one. <strong>Test connection</strong> checks the saved key again; it costs a fraction of a cent. <strong>Remove key</strong> deletes it after you confirm, and un-chooses that provider's models.</p></div>
+  <div class="warn"><p>DeepSeek is hosted in China. Questions sent to it are processed there.</p></div>
+
+  <h2 id="models">How to choose the models</h2>
+  <ol class="steps">
+    <li>After a key passes the test, its models appear under <strong>Models</strong>, most capable first.</li>
+    <li>The five most capable are ticked as a suggestion, with roles filled in. Change the ticks if you like: up to 5.</li>
+    <li>Give each ticked model a role: <strong>Primary</strong> answers questions and plans (exactly one); <strong>Fast</strong> does short replies and routing; <strong>Fallback</strong> takes over if Primary fails; <strong>Extra</strong> is kept ready.</li>
+    <li>Check the prices. A model marked <strong>New - set price</strong> is not in the built-in list: type its prices from the provider's price page (US dollars per million tokens in and out).</li>
+    <li>Click <strong>Save models</strong>. That provider becomes the one <strong>In use</strong>. Only one provider is used at a time.</li>
+  </ol>
+  <p><strong>Check for newer models</strong> reads the provider's list again. The system also does this once a week while the Assistant is on. Your chosen models and typed prices are never changed by it. <strong>Newest</strong> marks the most recently released model in the list.</p>
+
+  <h2 id="switch">How to switch it on or off</h2>
+  <ol class="steps">
+    <li>Make sure a key passed <strong>Test connection</strong> and you saved models with one <strong>Primary</strong>.</li>
+    <li>In <strong>On or off</strong> click <strong>Switch on</strong>. The line then reads, for example, <em>"On - using Anthropic (Claude Opus 5.5), 3 people have access."</em></li>
+    <li>To stop it for everyone click <strong>Switch off</strong>.</li>
+  </ol>
+  <p>Switching off never deletes chats, keys, models or limits; switching on again carries on where it was. The Assistant can also pause itself, for example when the monthly cost limit is reached; the line then starts <em>"Paused automatically:"</em> with the reason. Clicking <strong>Switch on</strong> again lifts the pause.</p>
+
+  <h2 id="limits">How to set budgets and limits</h2>
+  <ul>
+    <li><strong>Daily limit per person (tokens)</strong>: words read plus written per person per day, counted in tokens (a token is about three quarters of a word). 1,000 to 50,000,000. Default 200,000.</li>
+    <li><strong>Monthly cost limit (US$)</strong>: when the estimated cost this month reaches it, the Assistant pauses itself. 1 to 100,000. Default 20.</li>
+    <li><strong>Messages per person in 10 minutes</strong>: 1 to 500. Default 30.</li>
+    <li><strong>Keep chats for (days)</strong>: 0 keeps chats; otherwise 7 to 3,650 days, and older chats are removed each night.</li>
+  </ul>
+  <p>Click <strong>Save limits</strong>. You will see <em>"Limits saved."</em> Costs are estimates from the prices under Models; the provider's bill is the real figure.</p>
+
+  <h2 id="access">Who has access</h2>
+  <p>By default administrators and managers may use the Assistant and confirm its actions. Nobody else has it until you give it. Only administrators open Assistant Settings by default; the Usage table is shown there to people who also hold <strong>Assistant Usage</strong>.</p>
+  <ol class="steps">
+    <li>Click <strong>Change on Staff &amp; Access</strong> (or open <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong>).</li>
+    <li>Open the person's permissions and tick or untick, under <strong>Assistant</strong>: <strong>Use the Assistant</strong>, <strong>Confirm Assistant actions</strong>, <strong>Assistant Usage</strong>. <strong>Assistant Settings</strong> is under <strong>Settings</strong>.</li>
+  </ol>
+  <p><strong>Use the Assistant</strong> and <strong>Confirm Assistant actions</strong> are offered on Staff &amp; Access while the Assistant is switched on; people who already hold them keep them. The Assistant only ever sees and does what that person could already see and do on screen.</p>
+
+  <h2 id="usage">Reading the usage table</h2>
+  <p><strong>Estimated cost this month</strong> adds up every reply since the 1st. The table lists the last 30 days: <strong>Day</strong>, <strong>Person</strong>, <strong>Model</strong>, <strong>Questions</strong> (requests sent to the provider), <strong>Tokens in</strong>, <strong>Tokens out</strong> and <strong>Est. cost</strong>.</p>
+
+  <h2 id="rules">Rules the system enforces</h2>
+  <ul>
+    <li>It is off until both the switch on this page and the Assistant module are on; if anything cannot be checked, it stays off.</li>
+    <li>Keys are never shown, logged or sent to the browser. They cannot be saved until the server has its encryption setting.</li>
+    <li>At most 5 models, exactly one Primary, at most one Fast and one Fallback.</li>
+    <li>Every change the Assistant suggests waits for the person to confirm, and runs the same screen action with the same checks. It never handles stock, recipes, till orders, payments, refunds, invoices, credit notes, end of day, prices or deals.</li>
+    <li>Every change on this page is written to the activity log.</li>
+  </ul>
+
+  <h2 id="problems">Problems and fixes</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Database update needed</strong></td><td>The update that adds the Assistant has not been run on the server.</td><td>Ask whoever installs updates to run <code>php admin/migrations/migrate.php --run</code>.</td></tr>
+      <tr><td><em>Keys cannot be saved yet: the server encryption setting (APP_ENCRYPTION_SALT) is not set.</em></td><td>The server has no encryption setting, so a key could not be stored safely.</td><td>Ask whoever hosts the system to add it, then paste the key again.</td></tr>
+      <tr><td><em>The key was refused - check it was copied in full (HTTP 401)</em></td><td>Wrong, cut-off or deleted key.</td><td>Copy the key again from the provider and click <strong>Save and test</strong>.</td></tr>
+      <tr><td><em>The provider says the limit or credit for this key is used up (HTTP 429)</em></td><td>No credit left on the provider account, or too many requests.</td><td>Add credit on the provider's website, wait a minute and test again.</td></tr>
+      <tr><td><em>Could not reach the provider</em></td><td>The server has no internet access or the provider is down.</td><td>Try again later. If it keeps failing, ask whoever hosts the system.</td></tr>
+      <tr><td><em>That key does not look right (no spaces; 20 to 300 characters).</em></td><td>Extra spaces or part of the key missing.</td><td>Copy it again.</td></tr>
+      <tr><td><em>Before switching on: save a provider key, click Test connection, then choose the models (with one Primary) and save them.</em></td><td>Nothing is set up yet.</td><td>Follow the steps above in order.</td></tr>
+      <tr><td><em>Choose at most 5 models.</em> / <em>Choose exactly one Primary model.</em></td><td>Too many ticks, or no (or two) Primary.</td><td>Fix the ticks and roles and save again.</td></tr>
+      <tr><td><strong>Not offered any more</strong> next to a chosen model</td><td>The provider withdrew that model.</td><td>Tick another model, give it the role and save.</td></tr>
+      <tr><td><em>Invalid security token.</em></td><td>The page was open too long, or your session ended.</td><td>Reload the page (F5) and try again.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="18-staff-access.html">Staff &amp; access</a></li>
+    <li><a href="16-business-presets.html">Modules &amp; business presets</a></li>
+  </ul>
+
+  <footer>Updated October 2026. Describes the system as it is set up today.</footer>
+</div>
+</body>
+</html>

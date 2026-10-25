@@ -116,7 +116,10 @@ function getAllRoles()
                 'pos_all_tabs',
                 'pos_void',
                 'pos_stations_overview',
-                'pos_shift_override'
+                'pos_shift_override',
+                'ai_assistant_use',     // Assistant: chat (ASSUMPTION 2026-10-26, owner can change per person)
+                'ai_assistant_actions', // Assistant: may confirm its action cards
+                'ai_usage_view'         // Assistant: see usage and estimated cost
             ]
         ],
         'receptionist' => [
@@ -1063,6 +1066,40 @@ function getAllPermissions()
             'group' => 'settings'
         ],
 
+        // Assistant (staff chat helper). Off until switched on in Assistant Settings.
+        'ai_assistant_use' => [
+            'label' => 'Use the Assistant',
+            'description' => 'Ask the Assistant questions in the chat panel (it only sees what this person can see)',
+            'icon' => 'fa-comments',
+            'category' => 'Assistant',
+            'page' => 'ai-chat.php',
+            'group' => 'assistant'
+        ],
+        'ai_assistant_actions' => [
+            'label' => 'Confirm Assistant actions',
+            'description' => 'Confirm the actions the Assistant suggests (each one runs the normal screen action and its checks)',
+            'icon' => 'fa-check-double',
+            'category' => 'Assistant',
+            'page' => 'ai-action.php',
+            'group' => 'assistant'
+        ],
+        'ai_settings' => [
+            'label' => 'Assistant Settings',
+            'description' => 'Switch the Assistant on or off, add provider keys, choose models, set budgets',
+            'icon' => 'fa-comments',
+            'category' => 'Settings',
+            'page' => 'ai-settings.php',
+            'group' => 'assistant'
+        ],
+        'ai_usage_view' => [
+            'label' => 'Assistant Usage',
+            'description' => 'See Assistant usage and estimated cost per person, day and model',
+            'icon' => 'fa-chart-bar',
+            'category' => 'Assistant',
+            'page' => 'ai-settings.php',
+            'group' => 'assistant'
+        ],
+
         // User Management
         'user_management' => [
             'label' => 'User Management',
@@ -1135,7 +1172,8 @@ function getPermissionGroups()
         'settings_advanced' => ['label' => 'Advanced Settings', 'description' => 'System configuration'],
         'users_management' => ['label' => 'User Management', 'description' => 'Create, edit, delete users and manage permissions'],
         'conference' => ['label' => 'Conference', 'description' => 'Conference room management'],
-        'gym' => ['label' => 'Gym', 'description' => 'Gym inquiries']
+        'gym' => ['label' => 'Gym', 'description' => 'Gym inquiries'],
+        'assistant' => ['label' => 'Assistant', 'description' => 'Staff chat helper: use it, confirm its actions, set it up, see usage']
     ];
 }
 
@@ -1566,6 +1604,9 @@ function getPermissionForPage(string $page)
         'api-keys.php' => 'api_keys',
         'whatsapp-settings.php' => 'whatsapp_settings',
         'facebook-settings.php' => 'facebook_settings',
+        'ai-settings.php' => 'ai_settings',
+        'ai-chat.php' => 'ai_assistant_use',       // admin/api/ai-chat.php (Assistant, Phase 2)
+        'ai-action.php' => 'ai_assistant_actions', // admin/api/ai-action.php (Assistant, Phase 2)
         'user-management.php' => 'user_management',
         'process-checkin.php' => 'bookings',
         // Unmapped before: reachable by any signed-in user by URL. Keys match the nav entries in admin-header.php.
@@ -1679,6 +1720,10 @@ function getModuleForPage(string $page)
         'facebook-settings.php' => 'website_cms',
         'whatsapp-settings.php' => 'website_cms',
         'visitor-analytics.php' => 'website_cms',
+        // Assistant endpoints follow the ai_assistant module. They also check rh_ai_enabled()
+        // (includes/ai/ai-core.php), which is fail-closed; moduleEnabled() alone fails open.
+        'ai-chat.php' => 'ai_assistant',
+        'ai-action.php' => 'ai_assistant',
 
         // DELIBERATELY NOT MAPPED — do not "complete" this list without a decision:
         //   booking-settings.php — looks like a 'bookings' page, but it is also the
@@ -1690,6 +1735,7 @@ function getModuleForPage(string $page)
         //     backup-management, cache-management, ajax-receipt, video-upload-handler
         //     — platform pages that must stay reachable regardless of module state
         //     (module-settings especially: it is how a disabled module gets re-enabled).
+        //   ai-settings.php — same reason: it holds the Assistant's master switch.
     ];
 
     return $map[$page] ?? null;
@@ -1835,6 +1881,7 @@ function getNavCategories()
         'Finance' => ['order' => 8, 'icon' => 'fa-dollar-sign'],
         'System' => ['order' => 9, 'icon' => 'fa-server'],
         'Settings' => ['order' => 10, 'icon' => 'fa-cog'],
+        'Assistant' => ['order' => 10, 'icon' => 'fa-comments'],
         'Administration' => ['order' => 11, 'icon' => 'fa-shield-alt']
     ];
 }

@@ -1,0 +1,50 @@
+{
+    "updated": "2026-10-26",
+    "about": "Models known when this file was written, so the settings page is useful before any key exists. Ranks compare models of the same provider (higher = more capable). Prices are US dollars per million tokens (in / out). verified=false means the id and price were not checked against the provider's own pages at build time: the live list after Test connection is the source of truth and prices stay editable.",
+    "providers": {
+        "anthropic": {
+            "label": "Anthropic",
+            "models": [
+                {"id": "claude-fable-5-1",  "label": "Claude Fable 5.1",  "rank": 100, "context_tokens": 1000000, "price_in": 10,   "price_out": 50,   "released_at": null, "verified": true},
+                {"id": "claude-opus-5-5",   "label": "Claude Opus 5.5",   "rank": 95,  "context_tokens": 1000000, "price_in": 4,    "price_out": 20,   "released_at": null, "verified": true},
+                {"id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5", "rank": 90,  "context_tokens": 1000000, "price_in": 2,    "price_out": 10,   "released_at": null, "verified": true},
+                {"id": "claude-haiku-5-5",  "label": "Claude Haiku 5.5",  "rank": 85,  "context_tokens": 1000000, "price_in": 0.10, "price_out": 0.50, "released_at": null, "verified": true, "note": "Price for prompts up to 100K tokens"},
+                {"id": "claude-opus-5",     "label": "Claude Opus 5",     "rank": 80,  "context_tokens": 1000000, "price_in": 5,    "price_out": 25,   "released_at": null, "verified": true},
+                {"id": "claude-sonnet-5",   "label": "Claude Sonnet 5",   "rank": 75,  "context_tokens": 1000000, "price_in": 2,    "price_out": 10,   "released_at": null, "verified": true},
+                {"id": "claude-haiku-4-5",  "label": "Claude Haiku 4.5",  "rank": 70,  "context_tokens": 200000,  "price_in": 1,    "price_out": 5,    "released_at": null, "verified": true}
+            ]
+        },
+        "openai": {
+            "label": "OpenAI",
+            "models": [
+                {"id": "gpt-5",       "label": "GPT-5",        "rank": 90, "context_tokens": 400000,  "price_in": 1.25, "price_out": 10,   "released_at": null, "verified": false},
+                {"id": "gpt-5-mini",  "label": "GPT-5 mini",   "rank": 80, "context_tokens": 400000,  "price_in": 0.25, "price_out": 2,    "released_at": null, "verified": false},
+                {"id": "gpt-5-nano",  "label": "GPT-5 nano",   "rank": 70, "context_tokens": 400000,  "price_in": 0.05, "price_out": 0.40, "released_at": null, "verified": false},
+                {"id": "gpt-4.1",     "label": "GPT-4.1",      "rank": 60, "context_tokens": 1047576, "price_in": 2,    "price_out": 8,    "released_at": null, "verified": false},
+                {"id": "gpt-4o-mini", "label": "GPT-4o mini",  "rank": 40, "context_tokens": 128000,  "price_in": 0.15, "price_out": 0.60, "released_at": null, "verified": false}
+            ]
+        },
+        "google": {
+            "label": "Google",
+            "models": [
+                {"id": "gemini-2.5-pro",        "label": "Gemini 2.5 Pro",        "rank": 90, "context_tokens": 1048576, "price_in": 1.25, "price_out": 10,   "released_at": null, "verified": false, "note": "Price for prompts up to 200K tokens"},
+                {"id": "gemini-2.5-flash",      "label": "Gemini 2.5 Flash",      "rank": 80, "context_tokens": 1048576, "price_in": 0.30, "price_out": 2.50, "released_at": null, "verified": false},
+                {"id": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash-Lite", "rank": 70, "context_tokens": 1048576, "price_in": 0.10, "price_out": 0.40, "released_at": null, "verified": false}
+            ]
+        },
+        "xai": {
+            "label": "xAI",
+            "models": [
+                {"id": "grok-4",      "label": "Grok 4",      "rank": 90, "context_tokens": 256000, "price_in": 3,    "price_out": 15,   "released_at": null, "verified": false},
+                {"id": "grok-3-mini", "label": "Grok 3 Mini", "rank": 60, "context_tokens": 131072, "price_in": 0.30, "price_out": 0.50, "released_at": null, "verified": false}
+            ]
+        },
+        "deepseek": {
+            "label": "DeepSeek",
+            "models": [
+                {"id": "deepseek-reasoner", "label": "DeepSeek Reasoner", "rank": 90, "context_tokens": 128000, "price_in": 0.28, "price_out": 0.42, "released_at": null, "verified": false},
+                {"id": "deepseek-chat",     "label": "DeepSeek Chat",     "rank": 80, "context_tokens": 128000, "price_in": 0.28, "price_out": 0.42, "released_at": null, "verified": false}
+            ]
+        }
+    }
+}
