@@ -263,8 +263,8 @@ try {
             }
             
             $room_id = (int)$_POST['room_id'];
-            $title = $_POST['title'] ?? '';
-            $description = $_POST['description'] ?? '';
+            $title = mb_substr(trim((string)($_POST['title'] ?? $_POST['picture_title'] ?? '')), 0, 255);
+            $description = mb_substr(trim((string)($_POST['description'] ?? $_POST['picture_description'] ?? '')), 0, 1000);
             
             // Validate room exists
             $stmt = $pdo->prepare("SELECT id FROM rooms WHERE id = ?");
@@ -288,7 +288,8 @@ try {
             }
             
             // Generate unique filename
-            $timestamp = time();
+            // time() alone gave two pictures chosen together the same name (the second overwrote the first).
+            $timestamp = time() . '_' . bin2hex(random_bytes(3));
             $filename = "room_{$room_id}_gallery_{$timestamp}.{$validation['extension']}";
             $filepath = $uploadDir . $filename;
             
@@ -462,7 +463,7 @@ try {
             
             // Get picture details before deletion
             $stmt = $pdo->prepare("
-                SELECT id, image_url
+                SELECT id, image_url, room_id
                 FROM gallery
                 WHERE id = ?
             ");
@@ -485,6 +486,15 @@ try {
             // Delete from database
             $stmt = $pdo->prepare("DELETE FROM gallery WHERE id = ?");
             $stmt->execute([$picture_id]);
+
+            // A room whose main picture was this file must not keep pointing at a deleted file.
+            if (!empty($picture['room_id'])) {
+                $clr = $pdo->prepare("UPDATE rooms SET image_url = NULL WHERE id = ? AND image_url = ?");
+                $clr->execute([(int)$picture['room_id'], $picture['image_url']]);
+                if ($clr->rowCount() > 0) {
+                    syncRoomFeaturedManagedMedia((int)$picture['room_id']);
+                }
+            }
 
             if (function_exists('upsertManagedMediaForSource')) {
                 upsertManagedMediaForSource('gallery', $picture_id, 'image_url', null, [

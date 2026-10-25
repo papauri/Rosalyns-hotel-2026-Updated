@@ -39,11 +39,12 @@ if (!function_exists('rh_child_charge_fields')) {
                 </div>
                 <div class="form-group cc-pct"<?php echo $individual ? ' style="display:none"' : ''; ?>>
                     <label for="<?php echo $p; ?>ChildPct">Percent of the room rate (%)</label>
-                    <input type="number" name="child_price_multiplier" id="<?php echo $p; ?>ChildPct" step="0.01" min="0" max="100"<?php echo $individual ? '' : ' value="50"'; ?> placeholder="<?php echo $individual ? 'Same as room type' : '50'; ?>">
+                    <input type="number" name="child_price_multiplier" id="<?php echo $p; ?>ChildPct" step="0.01" min="0" max="100" data-money<?php echo $individual ? '' : ' value="50.00"'; ?> placeholder="<?php echo $individual ? 'Same as room type' : '50.00'; ?>">
+                    <small class="helper-text"><?php echo $individual ? 'Blank follows the room type. 0 = children stay free in this room.' : '0% = children stay free.'; ?></small>
                 </div>
                 <div class="form-group cc-amt" style="display:none">
                     <label for="<?php echo $p; ?>ChildAmt">Amount per child per night (<?php echo $cur; ?>)</label>
-                    <input type="number" name="child_charge_amount" id="<?php echo $p; ?>ChildAmt" step="0.01" min="0" placeholder="0 = free">
+                    <input type="number" name="child_charge_amount" id="<?php echo $p; ?>ChildAmt" step="0.01" min="0" data-money placeholder="0.00 = free">
                 </div>
             </div>
             <div class="form-row">

@@ -145,12 +145,12 @@ function rm_validate_room_input(PDO $pdo, string $name, int $total, int $avail, 
     }
     $price = $_POST['price_per_night'] ?? '';
     $priceStr = is_string($price) ? trim(str_replace(',', '', $price)) : $price;
-    if ($priceStr !== '' && (!is_numeric($priceStr) || (float)$priceStr < 0)) {
-        return 'Price per night must be a number of 0 or more.';
+    if ($priceStr === '' || !is_numeric($priceStr) || (float)$priceStr <= 0) {
+        return 'Price per night is required and must be more than 0.';
     }
-    $guests = $_POST['max_guests'] ?? '2';
-    if (!is_numeric($guests) || (int)$guests < 1 || (int)$guests > 20) {
-        return 'Maximum guests must be between 1 and 20.';
+    $guests = trim((string)($_POST['max_guests'] ?? '2'));
+    if (!ctype_digit($guests) || (int)$guests < 1 || (int)$guests > 20) {
+        return 'Maximum guests must be a whole number between 1 and 20.';
     }
     if (mb_strlen((string)($_POST['short_description'] ?? '')) > 255) {
         return 'Short description is too long (max 255 characters).';
@@ -552,7 +552,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = 'New room added successfully!';
             if (is_ajax_request()) {
                 header('Content-Type: application/json');
-                echo json_encode(['success' => true, 'message' => $message]);
+                echo json_encode(['success' => true, 'message' => $message, 'room_id' => $newRoomId]);
                 exit;
             }
         } elseif ($action === 'update_video') {
@@ -692,16 +692,6 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
-    <script>
-        (function() {
-            var _t = '<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>';
-            var _f = window.fetch;
-            window.fetch = function(u, o) {
-                if (o && o.body instanceof FormData && !o.body.has('csrf_token')) o.body.append('csrf_token', _t);
-                return _f.apply(this, arguments);
-            };
-        })();
-    </script>
     <title>Room Management - Admin Panel</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -885,7 +875,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
         <!-- Edit Room Modal -->
         <div class="modal-overlay" id="editModal">
             <div class="modal-content">
-                <form method="POST" id="editForm">
+                <form method="POST" id="editForm" novalidate>
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                     <input type="hidden" name="action" id="editAction" value="update">
                     <input type="hidden" name="id" id="editId">
                     <div class="modal-header">
@@ -901,7 +892,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             </div>
                             <div class="form-group">
                                 <label>Short Description</label>
-                                <textarea name="short_description" id="editShortDesc" rows="2"></textarea>
+                                <textarea name="short_description" id="editShortDesc" rows="2" maxlength="255"></textarea>
                             </div>
                             <div class="form-group">
                                 <label>Full Description</label>
@@ -919,21 +910,25 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Price Per Night *</label>
-                                    <input type="number" name="price_per_night" id="editPrice" step="0.01" required data-currency="<?php echo $currency; ?>">
+                                    <input type="number" name="price_per_night" id="editPrice" step="0.01" min="0" required data-money data-currency="<?php echo $currency; ?>" placeholder="0.00">
+                                    <small class="helper-text">What one night costs. Must be more than 0.</small>
                                 </div>
                                 <div class="form-group">
                                     <label>Single Occupancy Price</label>
-                                    <input type="number" name="price_single_occupancy" id="editPriceSingle" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <input type="number" name="price_single_occupancy" id="editPriceSingle" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <small class="helper-text">Nightly price for 1 guest. Blank = use the price per night.</small>
                                 </div>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Double Occupancy Price</label>
-                                    <input type="number" name="price_double_occupancy" id="editPriceDouble" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <input type="number" name="price_double_occupancy" id="editPriceDouble" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <small class="helper-text">Nightly price for 2 guests. Blank = use the price per night.</small>
                                 </div>
                                 <div class="form-group">
                                     <label>Triple Occupancy Price</label>
-                                    <input type="number" name="price_triple_occupancy" id="editPriceTriple" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <input type="number" name="price_triple_occupancy" id="editPriceTriple" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <small class="helper-text">Nightly price for 3 guests. Blank = use the price per night.</small>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -961,35 +956,47 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             <div class="form-row-3">
                                 <div class="form-group">
                                     <label>Size (sqm)</label>
-                                    <input type="number" name="size_sqm" id="editSize" min="0">
+                                    <input type="number" name="size_sqm" id="editSize" min="0" step="0.01">
                                 </div>
                                 <div class="form-group">
                                     <label>Max Guests</label>
-                                    <input type="number" name="max_guests" id="editGuests" min="1" value="2">
+                                    <input type="number" name="max_guests" id="editGuests" min="1" max="20" step="1" value="2">
                                 </div>
                                 <div class="form-group">
                                     <label>Bed Type</label>
-                                    <input type="text" name="bed_type" id="editBedType" placeholder="e.g. King Bed">
+                                    <input type="text" name="bed_type" id="editBedType" maxlength="50" placeholder="e.g. King Bed">
                                 </div>
                             </div>
                             <div class="form-row-3">
                                 <div class="form-group">
                                     <label>Rooms Available</label>
-                                    <input type="number" name="rooms_available" id="editAvailable" min="0">
+                                    <input type="number" name="rooms_available" id="editAvailable" min="0" step="1">
                                 </div>
                                 <div class="form-group">
                                     <label>Total Rooms</label>
-                                    <input type="number" name="total_rooms" id="editTotal" min="1">
+                                    <input type="number" name="total_rooms" id="editTotal" min="1" step="1">
                                 </div>
                                 <div class="form-group">
                                     <label>Display Order</label>
-                                    <input type="number" name="display_order" id="editOrder" min="0" value="0">
+                                    <input type="number" name="display_order" id="editOrder" min="0" step="1" value="0">
                                 </div>
                             </div>
                             <div class="form-group">
                                 <label>Amenities (comma-separated)</label>
                                 <textarea name="amenities" id="editAmenities" rows="2" placeholder="WiFi, Air Conditioning, TV, Mini Bar"></textarea>
                             </div>
+                        </div>
+
+                        <div class="form-section" id="editPicturesSection">
+                            <div class="form-section-title"><i class="fas fa-images"></i> Pictures</div>
+                            <small class="helper-text" style="display:block; margin-bottom:8px;">The star picture is the main one guests see first. Pictures save as soon as you add, remove or reorder them (no need to press Save Changes). Most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?> each; JPG, PNG or WEBP.</small>
+                            <div id="editPicturesGrid" class="rm-pic-grid"></div>
+                            <div class="form-group" style="margin-top:10px;">
+                                <label for="editPictureFiles">Add pictures</label>
+                                <input type="file" id="editPictureFiles" accept="image/jpeg,image/png,image/webp" multiple>
+                                <small class="helper-text">Choose one or more pictures; they upload straight away.</small>
+                            </div>
+                            <div id="editPicturesMsg" class="rm-pic-msg" aria-live="polite"></div>
                         </div>
 
                         <div class="form-section" style="border-bottom:none;">
@@ -1019,7 +1026,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
         <!-- Add Room Modal -->
         <div class="modal-overlay" id="addModal">
             <div class="modal-content">
-                <form method="POST" enctype="multipart/form-data" id="addForm">
+                <form method="POST" enctype="multipart/form-data" id="addForm" novalidate>
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                     <input type="hidden" name="action" value="add_room">
                     <div class="modal-header">
                         <h3><i class="fas fa-plus-circle"></i> Add New Room</h3>
@@ -1034,7 +1042,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             </div>
                             <div class="form-group">
                                 <label>Short Description</label>
-                                <textarea name="short_description" rows="2"></textarea>
+                                <textarea name="short_description" id="addShortDesc" rows="2" maxlength="255"></textarea>
                             </div>
                             <div class="form-group">
                                 <label>Full Description</label>
@@ -1043,7 +1051,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             <div class="form-group">
                                 <label>Featured Image URL / Path</label>
                                 <input type="text" name="image_url" placeholder="relative/path/to/image.jpg or https://cdn.example.com/room.jpg">
-                                <small class="helper-text">Optional. You can also upload via the image modal after creating the room.</small>
+                                <small class="helper-text">Optional. Or pick pictures in the Pictures section below; the first one becomes the main picture.</small>
                             </div>
                         </div>
 
@@ -1052,21 +1060,25 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Price Per Night *</label>
-                                    <input type="number" name="price_per_night" step="0.01" required data-currency="<?php echo $currency; ?>">
+                                    <input type="number" name="price_per_night" id="addPrice" step="0.01" min="0" required data-money data-currency="<?php echo $currency; ?>" placeholder="0.00">
+                                    <small class="helper-text">What one night costs. Must be more than 0.</small>
                                 </div>
                                 <div class="form-group">
                                     <label>Single Occupancy Price</label>
-                                    <input type="number" name="price_single_occupancy" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <input type="number" name="price_single_occupancy" id="addPriceSingle" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <small class="helper-text">Nightly price for 1 guest. Blank = use the price per night.</small>
                                 </div>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Double Occupancy Price</label>
-                                    <input type="number" name="price_double_occupancy" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <input type="number" name="price_double_occupancy" id="addPriceDouble" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <small class="helper-text">Nightly price for 2 guests. Blank = use the price per night.</small>
                                 </div>
                                 <div class="form-group">
                                     <label>Triple Occupancy Price</label>
-                                    <input type="number" name="price_triple_occupancy" step="0.01" placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <input type="number" name="price_triple_occupancy" id="addPriceTriple" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
+                                    <small class="helper-text">Nightly price for 3 guests. Blank = use the price per night.</small>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -1094,35 +1106,45 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             <div class="form-row-3">
                                 <div class="form-group">
                                     <label>Size (sqm)</label>
-                                    <input type="number" name="size_sqm">
+                                    <input type="number" name="size_sqm" id="addSize" min="0" step="0.01">
                                 </div>
                                 <div class="form-group">
                                     <label>Max Guests</label>
-                                    <input type="number" name="max_guests" value="2">
+                                    <input type="number" name="max_guests" id="addGuests" min="1" max="20" step="1" value="2">
                                 </div>
                                 <div class="form-group">
                                     <label>Bed Type</label>
-                                    <input type="text" name="bed_type" value="Double">
+                                    <input type="text" name="bed_type" id="addBedType" maxlength="50" value="Double">
                                 </div>
                             </div>
                             <div class="form-row-3">
                                 <div class="form-group">
                                     <label>Rooms Available</label>
-                                    <input type="number" name="rooms_available" value="1">
+                                    <input type="number" name="rooms_available" id="addAvailable" min="0" step="1" value="1">
                                 </div>
                                 <div class="form-group">
                                     <label>Total Rooms</label>
-                                    <input type="number" name="total_rooms" value="1">
+                                    <input type="number" name="total_rooms" id="addTotal" min="1" step="1" value="1">
                                 </div>
                                 <div class="form-group">
                                     <label>Display Order</label>
-                                    <input type="number" name="display_order" value="0">
+                                    <input type="number" name="display_order" id="addOrder" min="0" step="1" value="0">
                                 </div>
                             </div>
                             <div class="form-group">
                                 <label>Amenities (comma-separated)</label>
                                 <textarea name="amenities" rows="2" placeholder="WiFi, Air Conditioning, TV, Mini Bar"></textarea>
                             </div>
+                        </div>
+
+                        <div class="form-section">
+                            <div class="form-section-title"><i class="fas fa-images"></i> Pictures (Optional)</div>
+                            <div class="form-group">
+                                <label for="addPictureFiles">Choose pictures</label>
+                                <input type="file" id="addPictureFiles" accept="image/jpeg,image/png,image/webp" multiple>
+                                <small class="helper-text">They upload right after the room is created. The first one becomes the main picture. Most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?> each; JPG, PNG or WEBP.</small>
+                            </div>
+                            <div id="addPicturesList" class="rm-pic-msg"></div>
                         </div>
 
                         <div class="form-section">
@@ -1169,13 +1191,14 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                     </div>
                     <h4 style="margin:0 0 12px; color:#666;">Upload New Image</h4>
                     <form method="POST" enctype="multipart/form-data" id="imageUploadForm">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                         <input type="hidden" name="action" value="upload_image">
                         <input type="hidden" name="room_id" id="uploadRoomId">
 
                         <div class="upload-area" onclick="document.getElementById('roomImageInput').click()">
                             <i class="fas fa-cloud-upload-alt"></i>
                             <p style="margin:8px 0; color:#666;">Click or drag an image here</p>
-                            <small style="color:#999;">JPG, PNG, WEBP (Max 20MB)</small>
+                            <small style="color:#999;">JPG, PNG, WEBP (most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?>)</small>
                         </div>
                         <div class="form-group" style="margin-top:12px;">
                             <input type="file" name="room_image" id="roomImageInput" accept="image/jpeg,image/png,image/webp" required>
@@ -1185,6 +1208,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                     <div class="image-source-divider"><span>OR</span></div>
 
                     <form method="POST" id="imageUrlForm" class="image-source-panel">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                         <input type="hidden" name="action" value="update_image_url">
                         <input type="hidden" name="room_id" id="imageUrlRoomId">
                         <label class="image-source-label" for="imageUrlInput">Set Image URL / Path</label>
@@ -1245,6 +1269,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                 </div>
                 <div class="modal-body">
                     <form method="POST" enctype="multipart/form-data" id="pictureUploadForm" style="margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid #eee;">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                         <input type="hidden" name="action" value="upload_picture">
                         <input type="hidden" name="room_id" id="pictureRoomId">
                         <div class="form-row">
@@ -1280,6 +1305,19 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
 
         <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
         <script>
+            // Every page POST carries the admin token. This sits in the page body (not <head>) because the
+            // admin in-place navigation drops head scripts, which made every save/upload here fail with
+            // "Security token invalid" after the screen was opened from the menu.
+            (function() {
+                var _t = <?php echo json_encode($csrf_token); ?>;
+                if (window.__rmCsrfToken === _t) return;
+                window.__rmCsrfToken = _t;
+                var _f = window.fetch;
+                window.fetch = function(u, o) {
+                    if (o && o.body instanceof FormData && !o.body.has('csrf_token')) o.body.append('csrf_token', _t);
+                    return _f.apply(this, arguments);
+                };
+            })();
             // ===== EDIT MODAL =====
             // ===== MORE-ACTIONS MENU (shared placement from admin-components.js) =====
             function closeRoomCardMenus() {
@@ -1318,14 +1356,14 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                 document.getElementById('editName').value = room.name || '';
                 document.getElementById('editShortDesc').value = room.short_description || '';
                 document.getElementById('editDescription').value = room.description || '';
-                document.getElementById('editPrice').value = room.price_per_night || '';
-                document.getElementById('editPriceSingle').value = room.price_single_occupancy || '';
-                document.getElementById('editPriceDouble').value = room.price_double_occupancy || '';
-                document.getElementById('editPriceTriple').value = room.price_triple_occupancy || '';
+                document.getElementById('editPrice').value = rmMoney(room.price_per_night, true);
+                document.getElementById('editPriceSingle').value = rmMoney(room.price_single_occupancy, false);
+                document.getElementById('editPriceDouble').value = rmMoney(room.price_double_occupancy, false);
+                document.getElementById('editPriceTriple').value = rmMoney(room.price_triple_occupancy, false);
                 // Child charge: percent (default) or fixed amount, free children, most children per room.
                 document.getElementById('editChildMode').value = room.child_charge_mode === 'fixed' ? 'fixed' : 'percent';
-                document.getElementById('editChildPct').value = (room.child_price_multiplier === null || room.child_price_multiplier === undefined || room.child_price_multiplier === '') ? 50 : room.child_price_multiplier;
-                document.getElementById('editChildAmt').value = (room.child_charge_amount === null || room.child_charge_amount === undefined) ? '' : room.child_charge_amount;
+                document.getElementById('editChildPct').value = (room.child_price_multiplier === null || room.child_price_multiplier === undefined || room.child_price_multiplier === '') ? '50.00' : rmMoney(room.child_price_multiplier, true);
+                document.getElementById('editChildAmt').value = (room.child_charge_amount === null || room.child_charge_amount === undefined || room.child_charge_amount === '') ? '' : rmMoney(room.child_charge_amount, true);
                 document.getElementById('editChildFree').value = room.free_children || 0;
                 document.getElementById('editChildMax').value = (room.max_children === null || room.max_children === undefined) ? '' : room.max_children;
                 document.getElementById('editChildMode').dispatchEvent(new Event('change'));
@@ -1343,6 +1381,16 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                 document.getElementById('editIsFeatured').checked = room.is_featured == 1;
                 if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('editForm'));
                 document.getElementById('editModal').style.display = 'flex';
+                rmLoadPictures();
+            }
+
+            // A stored number shown with 2 decimals (45000 -> 45000.00). Blank when the value is empty (and, for optional prices, 0).
+            function rmMoney(v, keepZero) {
+                if (v === null || v === undefined || v === '') return '';
+                var n = Number(v);
+                if (isNaN(n)) return '';
+                if (n === 0 && !keepZero) return '';
+                return n.toFixed(2);
             }
 
             function closeEditModal() {
@@ -1354,6 +1402,11 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
             // ===== ADD MODAL =====
             function openAddModal() {
                 if (window.RHFormGuard) RHFormGuard.clearErrors(document.getElementById('addForm'));
+                var _af = document.getElementById('addForm');
+                _af.reset();
+                document.getElementById('addChildMode').dispatchEvent(new Event('change'));
+                document.getElementById('addPicturesList').textContent = '';
+                document.getElementById('addPicturesList').className = 'rm-pic-msg';
                 document.getElementById('addModal').style.display = 'flex';
             }
 
@@ -1623,6 +1676,249 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                     });
             });
 
+            // ===== PICTURES INSIDE THE ADD / EDIT MODAL (uses api/room-pictures.php) =====
+            var RM_TOKEN = <?php echo json_encode($csrf_token); ?>;
+            var RM_MAX_BYTES = <?php echo (int)RH_IMAGE_MAX_BYTES; ?>;
+            var RM_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+            var rmPics = [];
+            var rmFeaturedUrl = '';
+
+            function rmPicSrc(u) { return /^https?:\/\//i.test(u) ? u : ('../' + u); }
+            function rmPicMsg(text, isError) {
+                var el = document.getElementById('editPicturesMsg');
+                el.textContent = text || '';
+                el.className = 'rm-pic-msg' + (isError ? ' is-error' : '');
+            }
+            function rmPicRequest(method, url, body) {
+                var opts = { method: method, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': RM_TOKEN } };
+                if (body instanceof FormData) { opts.body = body; }
+                else if (body) { opts.body = JSON.stringify(body); opts.headers['Content-Type'] = 'application/json'; }
+                return fetch(url, opts).then(function(r) {
+                    return r.json().catch(function() { return { success: false, message: 'The server sent an unexpected answer (HTTP ' + r.status + ').' }; });
+                });
+            }
+            function rmPicConfirm(msg) {
+                if (window.AdminConfirm && window.AdminConfirm.request) {
+                    return window.AdminConfirm.request({ title: 'Please confirm', message: msg, confirmText: 'Yes', cancelText: 'Cancel', tone: 'warning', icon: 'fa-trash' });
+                }
+                return Promise.resolve(confirm(msg));
+            }
+            function rmSetMainUrl(url) {
+                rmFeaturedUrl = url || '';
+                document.getElementById('editImageUrl').value = rmFeaturedUrl; // Save Changes must not put the old one back
+            }
+
+            function rmLoadPictures() {
+                var roomId = document.getElementById('editId').value;
+                var grid = document.getElementById('editPicturesGrid');
+                rmPicMsg('');
+                grid.innerHTML = '<div class="rm-pic-empty"><i class="fas fa-spinner fa-spin"></i> Loading pictures...</div>';
+                fetch('api/room-pictures.php?room_id=' + encodeURIComponent(roomId), { credentials: 'same-origin' })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data && data.success && data.data) {
+                            rmPics = data.data.gallery || [];
+                            rmFeaturedUrl = (data.data.room && data.data.room.image_url) || '';
+                            rmRenderPictures();
+                        } else {
+                            grid.innerHTML = '<div class="rm-pic-empty">' + escapeHtml((data && data.message) || 'Pictures could not be loaded.') + '</div>';
+                        }
+                    })
+                    .catch(function() { grid.innerHTML = '<div class="rm-pic-empty">Pictures could not be loaded.</div>'; });
+            }
+
+            function rmRenderPictures() {
+                var grid = document.getElementById('editPicturesGrid');
+                var html = '';
+                var inGallery = rmPics.some(function(p) { return p.image_url === rmFeaturedUrl; });
+                if (rmFeaturedUrl && !inGallery) {
+                    html += '<div class="rm-pic" data-main-only="1"><img src="' + escapeHtml(rmPicSrc(rmFeaturedUrl)) + '" alt="Main picture"><span class="rm-pic__main"><i class="fas fa-star"></i> Main</span>' +
+                        '<div class="rm-pic__note">Main picture (not in the gallery).</div></div>';
+                }
+                rmPics.forEach(function(p, i) {
+                    var isMain = p.image_url === rmFeaturedUrl;
+                    html += '<div class="rm-pic" data-id="' + Number(p.id) + '" data-i="' + i + '">' +
+                        '<img src="' + escapeHtml(rmPicSrc(p.image_url)) + '" alt="' + escapeHtml(p.title || 'Room picture') + '">' +
+                        (isMain ? '<span class="rm-pic__main"><i class="fas fa-star"></i> Main</span>' : '') +
+                        '<div class="rm-pic__bar">' +
+                        '<button type="button" data-act="main" title="Make this the main picture"' + (isMain ? ' disabled' : '') + '><i class="fas fa-star"></i></button>' +
+                        '<button type="button" data-act="left" title="Move earlier"' + (i === 0 ? ' disabled' : '') + '><i class="fas fa-arrow-left"></i></button>' +
+                        '<button type="button" data-act="right" title="Move later"' + (i === rmPics.length - 1 ? ' disabled' : '') + '><i class="fas fa-arrow-right"></i></button>' +
+                        '<button type="button" class="rm-pic__del" data-act="del" title="Remove this picture"><i class="fas fa-trash"></i></button>' +
+                        '</div></div>';
+                });
+                grid.innerHTML = html || '<div class="rm-pic-empty">No pictures yet. Use Add pictures below.</div>';
+            }
+
+            document.getElementById('editPicturesGrid').addEventListener('click', function(e) {
+                var btn = e.target.closest('button[data-act]');
+                if (!btn || btn.disabled) return;
+                var card = btn.closest('.rm-pic');
+                var id = Number(card.dataset.id), idx = Number(card.dataset.i), roomId = document.getElementById('editId').value;
+                var act = btn.dataset.act;
+                if (act === 'main') {
+                    btn.disabled = true;
+                    rmPicRequest('PUT', 'api/room-pictures.php?action=set_featured', { room_id: roomId, picture_id: id }).then(function(res) {
+                        if (res.success) { rmSetMainUrl(rmPics[idx].image_url); rmRenderPictures(); refreshRoomsGrid(); rmPicMsg('Main picture changed.'); }
+                        else { rmPicMsg(res.message || 'Could not change the main picture.', true); btn.disabled = false; }
+                    });
+                } else if (act === 'del') {
+                    var wasMain = rmPics[idx].image_url === rmFeaturedUrl;
+                    rmPicConfirm('Remove this picture?' + (wasMain ? ' It is the main picture, so the room will have no main picture until you star another one.' : '')).then(function(ok) {
+                        if (!ok) return;
+                        rmPicRequest('DELETE', 'api/room-pictures.php?picture_id=' + id).then(function(res) {
+                            if (res.success) { if (wasMain) rmSetMainUrl(''); rmPicMsg('Picture removed.'); rmLoadPictures(); refreshRoomsGrid(); }
+                            else rmPicMsg(res.message || 'Could not remove the picture.', true);
+                        });
+                    });
+                } else if (act === 'left' || act === 'right') {
+                    var j = act === 'left' ? idx - 1 : idx + 1;
+                    if (j < 0 || j >= rmPics.length) return;
+                    var order = rmPics.slice();
+                    var moved = order.splice(idx, 1)[0];
+                    order.splice(j, 0, moved);
+                    // Renumber 1..n, sending only the pictures whose number changes.
+                    var jobs = [];
+                    order.forEach(function(p, k) { if (Number(p.display_order) !== k + 1) jobs.push({ picture_id: p.id, display_order: k + 1 }); });
+                    rmPics = order.map(function(p, k) { p.display_order = k + 1; return p; });
+                    rmRenderPictures();
+                    jobs.reduce(function(chain, job) {
+                        return chain.then(function() { return rmPicRequest('PUT', 'api/room-pictures.php', job); });
+                    }, Promise.resolve()).then(function() { rmPicMsg('Order saved.'); }).catch(function() { rmPicMsg('Could not save the new order.', true); });
+                }
+            });
+
+            /** Upload files one after another to a room. Resolves {done, failed:[messages], firstUrl}. */
+            function rmUploadFiles(roomId, files, onProgress) {
+                var out = { done: 0, failed: [], firstUrl: '' };
+                var list = Array.prototype.slice.call(files);
+                return list.reduce(function(chain, file, i) {
+                    return chain.then(function() {
+                        if (onProgress) onProgress(i + 1, list.length);
+                        var fd = new FormData();
+                        fd.append('room_id', roomId);
+                        fd.append('image', file);
+                        fd.append('csrf_token', RM_TOKEN);
+                        return rmPicRequest('POST', 'api/room-pictures.php', fd).then(function(res) {
+                            if (res.success) { out.done++; if (!out.firstUrl && res.data) out.firstUrl = res.data.image_url; }
+                            else out.failed.push(file.name + ': ' + (res.message || 'upload failed'));
+                        }).catch(function() { out.failed.push(file.name + ': network error'); });
+                    });
+                }, Promise.resolve()).then(function() { return out; });
+            }
+
+            function rmCheckFiles(input) {
+                for (var i = 0; i < input.files.length; i++) {
+                    var f = input.files[i];
+                    if (RM_TYPES.indexOf(f.type) < 0) return f.name + ': only JPG, PNG or WEBP pictures are allowed.';
+                    if (f.size > RM_MAX_BYTES) return f.name + ' is too large (' + (f.size / 1048576).toFixed(1) + ' MB). The most allowed is ' + (RM_MAX_BYTES / 1048576).toFixed(0) + ' MB.';
+                }
+                return '';
+            }
+
+            document.getElementById('editPictureFiles').addEventListener('change', function() {
+                var input = this;
+                if (!input.files.length) return;
+                var problem = rmCheckFiles(input);
+                if (problem) { rmPicMsg(problem, true); input.value = ''; return; }
+                var roomId = document.getElementById('editId').value;
+                var hadMain = rmFeaturedUrl !== '';
+                rmUploadFiles(roomId, input.files, function(n, total) { rmPicMsg('Uploading picture ' + n + ' of ' + total + '...'); }).then(function(out) {
+                    input.value = '';
+                    var after = function() {
+                        rmPicMsg(out.done + ' picture' + (out.done === 1 ? '' : 's') + ' added.' + (out.failed.length ? ' Not added: ' + out.failed.join('; ') : ''), out.failed.length > 0);
+                        rmLoadPictures();
+                        refreshRoomsGrid();
+                    };
+                    if (!hadMain && out.firstUrl) {
+                        // no main picture yet: the first new one becomes it
+                        rmPicRequest('GET', 'api/room-pictures.php?room_id=' + encodeURIComponent(roomId)).then(function(g) {
+                            var pic = ((g.data && g.data.gallery) || []).filter(function(p) { return p.image_url === out.firstUrl; })[0];
+                            if (!pic) { after(); return; }
+                            rmPicRequest('PUT', 'api/room-pictures.php?action=set_featured', { room_id: roomId, picture_id: pic.id }).then(function(res) {
+                                if (res.success) rmSetMainUrl(out.firstUrl);
+                                after();
+                            });
+                        });
+                    } else {
+                        after();
+                    }
+                });
+            });
+
+            // Add room: the pictures chosen in the box upload once the room exists (needs its id).
+            function rmAfterAdd(res, form) {
+                var input = document.getElementById('addPictureFiles');
+                var list = document.getElementById('addPicturesList');
+                var typedMain = (form.elements['image_url'].value || '').trim();
+                var files = input.files ? Array.prototype.slice.call(input.files) : [];
+                var finish = function(extra) {
+                    form.reset();
+                    document.getElementById('addChildMode').dispatchEvent(new Event('change'));
+                    input.value = '';
+                    list.textContent = '';
+                    if (extra) { var fb = document.getElementById('addRoomFeedback'); fb.className = 'admin-modal-feedback admin-modal-feedback--error visible'; fb.innerHTML = extra; return; }
+                    setTimeout(closeAddModal, 1200);
+                };
+                if (!res.room_id || !files.length) { finish(''); return; }
+                var roomId = res.room_id;
+                rmUploadFiles(roomId, files, function(n, total) { list.textContent = 'Uploading picture ' + n + ' of ' + total + '...'; }).then(function(out) {
+                    var wrapUp = function() {
+                        refreshRoomsGrid();
+                        finish(out.failed.length ? 'Room added, but these pictures were not: ' + out.failed.map(escapeHtml).join('; ') + '. Open Edit Room to add them again.' : '');
+                    };
+                    if (!typedMain && out.firstUrl) {
+                        fetch('api/room-pictures.php?room_id=' + roomId, { credentials: 'same-origin' }).then(function(r) { return r.json(); }).then(function(g) {
+                            var pic = ((g.data && g.data.gallery) || []).filter(function(p) { return p.image_url === out.firstUrl; })[0];
+                            if (!pic) { wrapUp(); return; }
+                            rmPicRequest('PUT', 'api/room-pictures.php?action=set_featured', { room_id: roomId, picture_id: pic.id }).then(wrapUp);
+                        }).catch(wrapUp);
+                    } else {
+                        wrapUp();
+                    }
+                });
+            }
+
+            // ===== FORM CHECKS + 2-DECIMAL MONEY (shared helpers in js/admin-form-guard.js) =====
+            // The server checks the same rules again when saving; these messages just appear sooner.
+            function rmRulesFor(p) {
+                var id = function(n) { return p + n; };
+                return [
+                    { el: id('Name'), label: 'Room name', required: true, maxLen: 100 },
+                    { el: id('ShortDesc'), label: 'Short description', maxLen: 255 },
+                    { el: id('Price'), label: 'Price per night', required: true, gt: 0 },
+                    { el: id('PriceSingle'), label: 'Single occupancy price', min: 0 },
+                    { el: id('PriceDouble'), label: 'Double occupancy price', min: 0 },
+                    { el: id('PriceTriple'), label: 'Triple occupancy price', min: 0 },
+                    { el: id('ChildPct'), label: 'Child percentage', min: 0, max: 100 },
+                    { el: id('ChildAmt'), label: 'Child amount per night', required: document.getElementById(id('ChildMode')).value === 'fixed', min: 0 },
+                    { el: id('ChildFree'), label: 'Free children', int: true, min: 0, max: 20 },
+                    { el: id('ChildMax'), label: 'Most children in one room', int: true, min: 0, max: 20 },
+                    { el: id('Size'), label: 'Size (sqm)', min: 0 },
+                    { el: id('Guests'), label: 'Max guests', required: true, int: true, min: 1, max: 20 },
+                    { el: id('BedType'), label: 'Bed type', maxLen: 50 },
+                    { el: id('Total'), label: 'Total rooms', required: true, int: true, min: 1 },
+                    { el: id('Available'), label: 'Rooms available', required: true, int: true, min: 0, lte: id('Total'), lteLabel: 'total rooms' },
+                    { el: id('Order'), label: 'Display order', int: true, min: 0 }
+                ];
+            }
+            (function() {
+                if (!window.RHFormGuard) return;
+                ['edit', 'add'].forEach(function(p) {
+                    var form = document.getElementById(p + 'Form');
+                    // the child amount is only required while "fixed amount" is chosen, so its rule is read live
+                    var rules = rmRulesFor(p);
+                    rules.forEach(function(r) {
+                        if (r.el === p + 'ChildAmt') {
+                            Object.defineProperty(r, 'required', { get: function() { return document.getElementById(p + 'ChildMode').value === 'fixed'; } });
+                        }
+                    });
+                    rules.push({ el: p + 'PictureFiles', label: 'Pictures', file: { types: RM_TYPES, maxBytes: RM_MAX_BYTES } });
+                    RHFormGuard.validateForm(form, rules);
+                    RHFormGuard.moneyInputs(form);
+                });
+            })();
+
             // ===== FACEBOOK DEFAULTS =====
             window._fbDefaults = {
                 baseUrl: <?php echo json_encode(rtrim(defined('BASE_URL') ? BASE_URL : '', '/')); ?>,
@@ -1809,12 +2105,21 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
             }
 
             // ===== CLOSE MODALS ON OUTSIDE CLICK =====
+            // The click must start AND end on the dark area (admin-main.js drops a drag that began inside the
+            // box), so selecting text and letting go outside no longer closes the form. Escape closes the top one.
             document.querySelectorAll('.modal-overlay').forEach(function(modal) {
                 modal.addEventListener('click', function(e) {
                     if (e.target === this) {
                         this.style.display = 'none';
                     }
                 });
+            });
+            document.addEventListener('keydown', function(e) {
+                if (e.key !== 'Escape') return;
+                var open = Array.from(document.querySelectorAll('#roomsGrid ~ .modal-overlay, .content > .modal-overlay')).filter(function(m) {
+                    return m.style.display === 'flex';
+                });
+                if (open.length) open[open.length - 1].style.display = 'none';
             });
 
             // Upload area drag & drop for images
@@ -1870,7 +2175,10 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                         fb.style.width = '100%';
                         fb.className = 'admin-modal-feedback ' + (res.success ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
                         fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + res.message;
-                        if (res.success) refreshRoomsGrid();
+                        if (res.success) {
+                            refreshRoomsGrid();
+                            if (formId === 'addForm') rmAfterAdd(res, form);
+                        }
                     })
                     .catch(function() {
                         saveBtn.disabled = false;

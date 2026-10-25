@@ -2276,8 +2276,9 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             let mode = room.child_charge_mode || '';
             if (mode === '' && val(room.child_price_multiplier) !== '') mode = 'percent';
             document.getElementById('irChildMode').value = mode;
-            document.getElementById('irChildPct').value = val(room.child_price_multiplier);
-            document.getElementById('irChildAmt').value = val(room.child_charge_amount);
+            const two = v => (val(v) === '' || isNaN(Number(v)) ? '' : Number(v).toFixed(2)); // show 2 decimals (0 stays 0.00, blank stays blank)
+            document.getElementById('irChildPct').value = two(room.child_price_multiplier);
+            document.getElementById('irChildAmt').value = two(room.child_charge_amount);
             document.getElementById('irChildFree').value = val(room.free_children);
             document.getElementById('irChildMax').value = val(room.max_children);
             document.getElementById('irChildMode').dispatchEvent(new Event('change'));
@@ -3284,7 +3285,25 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             RHFormGuard.watch(document.getElementById('room_number'), function () {
                 return { form: 'room_number', excludeId: document.getElementById('roomId').value };
             });
+            // Inline checks (same rules the server applies on save) and 2-decimal child amounts.
+            RHFormGuard.validateForm(form, [
+                { el: 'room_type_id', label: 'Room type', required: true },
+                { el: 'room_number', label: 'Room number', required: true, maxLen: 50 },
+                { el: 'room_name', label: 'Room name', maxLen: 100 },
+                { el: 'floor', label: 'Floor', maxLen: 20 },
+                { el: 'max_guests_override', label: 'Guest capacity override', int: true, min: 1, max: 20 },
+                { el: 'display_order', label: 'Display order', int: true, min: 0 },
+                { el: 'irChildPct', label: 'Child percentage', min: 0, max: 100 },
+                { el: 'irChildAmt', label: 'Child amount per night', min: 0 },
+                { el: 'irChildFree', label: 'Free children', int: true, min: 0, max: 20 },
+                { el: 'irChildMax', label: 'Most children in one room', int: true, min: 0, max: 20 }
+            ]);
+            RHFormGuard.moneyInputs(form);
             RHFormGuard.guardSubmit(form, { busyText: 'Saving room...' });
+            // Escape closes the open room box (X and Cancel already do).
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && document.getElementById('roomModal').classList.contains('active')) closeModal();
+            });
         })();
         <?php if ($roomFormReopen): ?>
         (function () {

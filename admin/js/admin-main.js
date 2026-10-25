@@ -2183,3 +2183,34 @@
         (evt === 'visibilitychange' ? document : window).addEventListener(evt, ping, { passive: true });
     });
 })();
+
+/* ── Modals never close from a drag that ends outside them ────────────────
+   Most admin modals close when the dark area around them is clicked. A click is reported on the
+   element where the mouse button went UP, so selecting text inside a form and letting go beside
+   the box counted as "click outside" and threw the form away. One rule for every modal: the
+   click only counts when the button also went DOWN on the dark area. Runs first (capture), so
+   it needs no change in each page's own close handler; the X, Cancel and Escape still close. */
+(function () {
+    'use strict';
+    if (window.__rhModalDragGuard) { return; }
+    window.__rhModalDragGuard = true;
+    var OVERLAY = '.modal-overlay, .admin-modal-overlay, .booking-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .pkg-modal-overlay, [data-modal-overlay], [class*="-modal-overlay"], .modal-backdrop';
+    var downOnOverlay = null; // the overlay element a press started on (null = it started elsewhere)
+    function overlayOf(target) {
+        return target && target.nodeType === 1 && target.matches(OVERLAY) ? target : null;
+    }
+    ['mousedown', 'touchstart', 'pointerdown'].forEach(function (evt) {
+        document.addEventListener(evt, function (e) { downOnOverlay = overlayOf(e.target); }, true);
+    });
+    var upOnOverlay = null;
+    ['mouseup', 'touchend', 'pointerup'].forEach(function (evt) {
+        document.addEventListener(evt, function (e) { upOnOverlay = overlayOf(e.target); }, true);
+    });
+    document.addEventListener('click', function (e) {
+        var overlay = overlayOf(e.target);
+        if (!overlay) { return; }
+        if (downOnOverlay !== overlay || (upOnOverlay && upOnOverlay !== overlay)) {
+            e.stopPropagation(); // press began inside the box (text selection, drag): not an outside click
+        }
+    }, true);
+})();

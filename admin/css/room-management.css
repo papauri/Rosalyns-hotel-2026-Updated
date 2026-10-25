@@ -462,3 +462,18 @@
 .badge.badge-featured {
     color: #7a5f1a;
 }
+
+/* Pictures inside the add / edit room modal */
+.helper-text { display: block; margin-top: 4px; font-size: 12px; color: #6b6558; }
+.rm-pic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.rm-pic { position: relative; border: 1px solid #e3ddd2; border-radius: 8px; overflow: hidden; background: #fff; }
+.rm-pic img { display: block; width: 100%; height: 100px; object-fit: cover; }
+.rm-pic__main { position: absolute; top: 4px; left: 4px; background: var(--gold, #7E684B); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px; }
+.rm-pic__bar { display: flex; gap: 4px; padding: 6px; flex-wrap: wrap; }
+.rm-pic__bar button { min-width: 36px; min-height: 36px; border: 1px solid #d3cbc0; background: #f5f0e8; color: #3e3930; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.rm-pic__bar button:disabled { opacity: .4; cursor: default; }
+.rm-pic__bar .rm-pic__del { color: #a12a2a; border-color: #e1b9b9; }
+.rm-pic__note { padding: 0 6px 6px; font-size: 11px; color: #6b6558; }
+.rm-pic-empty { grid-column: 1 / -1; padding: 16px; text-align: center; color: #6b6558; border: 1px dashed #d3cbc0; border-radius: 8px; }
+.rm-pic-msg { font-size: 13px; margin-top: 6px; color: #3e3930; }
+.rm-pic-msg.is-error { color: #a12a2a; }

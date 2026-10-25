@@ -80,6 +80,23 @@ $indMax = rh_child_rule($typeFixed, ['max_children' => 1, 'child_charge_mode' =>
 ok('a room can lower the type\'s maximum children', $indMax['max'] === 1 && $indMax['mode'] === 'fixed');
 $indZero = rh_child_rule($pct50, ['child_charge_mode' => 'fixed', 'child_charge_amount' => 0, 'free_children' => null, 'max_children' => null, 'child_price_multiplier' => null]);
 ok('a room can make children free on a paying type (fixed 0)', rh_child_supplement($indZero, 4, 3, 500000) === 0.0);
+// 0% is a real value, not "blank": it must stay 0 at every layer (owner 2026-10-26).
+$indPct0 = rh_child_rule($pct50, ['child_charge_mode' => 'percent', 'child_price_multiplier' => '0.00', 'child_charge_amount' => null, 'free_children' => null, 'max_children' => null]);
+ok('a room set to 0% (stored 0.00) stays free even though the type charges 50%', $indPct0['source'] === 'room' && near($indPct0['percent'], 0) && rh_child_supplement($indPct0, 3, 2, 100000) === 0.0);
+$indPct0Legacy = rh_child_rule($pct50, ['child_charge_mode' => null, 'child_price_multiplier' => 0, 'child_charge_amount' => null, 'free_children' => null, 'max_children' => null]);
+ok('a room that kept its own 0 (no mode saved) is still a 0% override, not the room type 50%', $indPct0Legacy['source'] === 'room' && near($indPct0Legacy['percent'], 0));
+$indBlank = rh_child_rule($pct50, ['child_charge_mode' => null, 'child_price_multiplier' => null, 'child_charge_amount' => null, 'free_children' => null, 'max_children' => null]);
+ok('a room with every child box blank follows the room type (50%)', $indBlank['source'] === 'type' && near($indBlank['percent'], 50));
+$indBlankStr = rh_child_rule($pct50, ['child_charge_mode' => '', 'child_price_multiplier' => '', 'child_charge_amount' => '', 'free_children' => '', 'max_children' => '']);
+ok('empty strings from a form also mean "follow the room type"', $indBlankStr['source'] === 'type' && near($indBlankStr['percent'], 50));
+$typeZeroStr = rh_child_rule(['child_price_multiplier' => '0.00', 'child_charge_mode' => 'percent', 'child_charge_amount' => null, 'free_children' => '0', 'max_children' => null]);
+ok('a room type saved as 0.00 charges nothing (does not fall back to the 50% default)', near($typeZeroStr['percent'], 0) && rh_child_supplement($typeZeroStr, 2, 3, 100000) === 0.0);
+$postZero = rh_child_rule_post(['child_charge_mode' => 'percent', 'child_price_multiplier' => '0.00', 'free_children' => '', 'max_children' => ''], false);
+ok('room type form: 0.00 is stored as 0, not the default 50', $postZero['error'] === null && $postZero['percent'] === 0.0);
+$postIndZero = rh_child_rule_post(['child_charge_mode' => 'percent', 'child_price_multiplier' => '0.00', 'free_children' => '', 'max_children' => ''], true);
+ok('individual room form: 0.00 is stored as a real 0% override', $postIndZero['error'] === null && $postIndZero['mode'] === 'percent' && $postIndZero['percent'] === 0.0);
+$postIndBlank = rh_child_rule_post(['child_charge_mode' => '', 'child_price_multiplier' => '', 'free_children' => '', 'max_children' => ''], true);
+ok('individual room form: all blank stores nothing (follows the room type)', $postIndBlank['error'] === null && $postIndBlank['mode'] === null && $postIndBlank['percent'] === null);
 
 // ── 3. Most children in one room ────────────────────────────────────────────
 echo "== most children per room ==\n";
