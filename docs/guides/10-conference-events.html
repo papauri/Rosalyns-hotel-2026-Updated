@@ -157,19 +157,29 @@
   <ol class="steps">
     <li>Open <strong>Conference &amp; Events</strong> &rarr; <strong>Conference</strong>.</li>
     <li>Click <strong>Add New Room</strong>. The window <strong>Add New Conference Room</strong> opens.</li>
-    <li>Under Room Information fill in <strong>Name *</strong> and <strong>Description *</strong>. If the name is already used, the form warns you while you type. Optionally choose a <strong>Featured Image</strong> (JPG, PNG or WebP).</li>
-    <li>Under Room Details fill in <strong>Capacity *</strong> (a whole number, at least 1), <strong>Size (sqm)</strong> (optional), <strong>Full Day Rate *</strong> (0 or more, for example 350000) and <strong>Display Order</strong> (lowest shows first on the website, 0 if blank). In <strong>Amenities (comma separated)</strong> type for example <em>Projector, Whiteboard, WiFi, Catering</em>.</li>
-    <li>Optionally fill in <strong>Half Day Rate (up to 5 hours, optional)</strong>. A single-day event of 5 hours or less is then priced at this rate. Leave it blank if the room has no half-day price.</li>
+    <li>Under Room Information fill in <strong>Name *</strong> and <strong>Description *</strong>. If the name is already used, the form warns you while you type. Optionally choose a <strong>Featured Image</strong> (JPG, PNG or WEBP, up to 4 MB).</li>
+    <li>Under Room Details fill in <strong>Capacity *</strong> (a whole number), <strong>Size (sqm)</strong> (optional), <strong>Full Day Rate *</strong> (more than 0, for example 350000; prices show two decimals) and <strong>Display Order</strong> (lowest shows first on the website, 0 if blank). In <strong>Amenities (comma separated)</strong> type for example <em>Projector, Whiteboard, WiFi, Catering</em>.</li>
+    <li>Optionally fill in <strong>Half Day Rate (up to 5 hours, optional)</strong> (0 or more; prices show two decimals). A single-day event of 5 hours or less is then priced at this rate. Leave it blank if the room has no half-day price.</li>
     <li>Leave <strong>Active</strong> ticked if the room should show on the website now.</li>
     <li>Click <strong>Add Room</strong>. A green message <em>"Conference room added successfully!"</em> shows inside the window and the cards behind it refresh. Click <strong>Close</strong>.</li>
   </ol>
-  <div class="note"><p>If the image is not a JPG, PNG or WebP file, or is too large, the room is still saved but without a picture. Check that the card shows the picture.</p></div>
+  <p><strong>Form checks.</strong> A message appears under any wrong field, and the room is not saved until every field is right:</p>
+  <ul>
+    <li><strong>Name</strong>: needed, up to 100 characters.</li>
+    <li><strong>Description</strong>: needed.</li>
+    <li><strong>Capacity</strong>: a whole number.</li>
+    <li><strong>Full Day Rate</strong>: more than 0.</li>
+    <li><strong>Half Day Rate</strong>: 0 or more.</li>
+    <li><strong>Display Order</strong>: a whole number.</li>
+    <li><strong>Picture</strong>: JPG, PNG or WEBP, up to 4 MB.</li>
+  </ul>
+  <div class="note"><p>A wrong picture is refused with a reason, for example <em>"Picture must be a JPG, PNG or WEBP file."</em> The form stays open with what you typed. Choose another picture and click <strong>Add Room</strong> again. Nothing is saved until the picture is right.</p></div>
 
   <h2 id="edit-room">How to edit, switch off or delete a conference room</h2>
   <h3>Edit</h3>
   <ol class="steps">
     <li>On the room's card click <strong>Edit Room</strong>. The window opens with the title <strong>Edit: [room name]</strong>.</li>
-    <li>Change the fields. The image field is called <strong>Replace Image</strong>. Leave it empty to keep the current picture.</li>
+    <li>Change the fields. The same form checks as adding a room apply (see above). The image field is called <strong>Replace Image</strong>. Leave it empty to keep the current picture.</li>
     <li>Click <strong>Save Changes</strong>. You will see <em>"Conference room updated successfully!"</em>.</li>
   </ol>
   <h3>Switch a room off or on</h3>
