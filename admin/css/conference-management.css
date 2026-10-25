@@ -684,3 +684,24 @@
     }
 }
 
+
+/* UNIFORM CARD ROWS (owner 2026-10-26): same pattern as room-management.css.
+   With subgrid every card shares the row tracks (title, description, details, amenities, pills, actions);
+   space is kept when a row is empty. Other browsers keep the fixed min-heights above. */
+.conference-card-title { overflow: hidden; }
+.conference-card-details .detail-item { min-width: 0; white-space: nowrap; }
+@supports (grid-template-rows: subgrid) {
+    .conference-cards-grid { row-gap: 0; grid-auto-rows: auto; }
+    .conference-card { display: grid; grid-row: span 7; grid-template-rows: subgrid; height: auto; margin-bottom: 16px; }
+    .conference-card-body { display: grid; grid-row: 2 / span 6; grid-template-rows: subgrid; gap: 0 0; row-gap: 0; }
+    .conference-card-body > * { margin-bottom: 6px; }
+    .conference-card-body > .conference-card-actions { margin-bottom: 0; }
+    .conference-card-title { grid-row: 1; min-height: 0; }
+    .conference-card-desc { grid-row: 2; min-height: 0; }
+    .conference-card-details { grid-row: 3; min-height: 0; align-content: start; }
+    .conference-card-amenities { grid-row: 4; min-height: 0; }
+    .conference-card-meta { grid-row: 5; min-height: 0; align-content: flex-start; }
+    .conference-card-actions { grid-row: 6; align-self: end; margin-top: 0; }
+    .conference-card-image, .conference-card .no-image-placeholder { grid-row: 1; }
+}
+.conference-card-details .detail-item-price { grid-column: 1 / -1; }

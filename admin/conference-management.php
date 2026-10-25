@@ -980,7 +980,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                     <div class="detail-item detail-item-price"><i class="fas fa-tag"></i> <?php echo $currency; ?> <?php echo number_format((float)$room['half_day_rate'], 2); ?>/half day</div>
                                 <?php endif; ?>
                                 <div class="detail-item"><i class="fas fa-users"></i> <?php echo $room['capacity']; ?> guests</div>
-                                <div class="detail-item"><i class="fas fa-expand-arrows-alt"></i> <?php echo number_format($room['size_sqm'] ?? 0, 0); ?> sqm</div>
+                                <?php if ((float)($room['size_sqm'] ?? 0) > 0): ?><div class="detail-item"><i class="fas fa-expand-arrows-alt"></i> <?php echo number_format($room['size_sqm'] ?? 0, 0); ?> sqm</div><?php endif; ?>
                             </div>
 
                             <?php if (!empty($room['amenities'])): ?>

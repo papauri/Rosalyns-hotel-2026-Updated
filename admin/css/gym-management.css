@@ -452,3 +452,21 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* UNIFORM CARD ROWS (owner 2026-10-26): same pattern as room-management.css.
+   With subgrid every card shares the row tracks (title, price, duration, includes, pills, actions);
+   space is kept when a row is empty. Other browsers keep the fixed min-heights above. */
+@supports (grid-template-rows: subgrid) {
+    .gym-cards-grid { row-gap: 0; grid-auto-rows: auto; }
+    .gym-card { display: grid; grid-row: span 7; grid-template-rows: subgrid; height: auto; margin-bottom: 16px; }
+    .gym-card-icon-area { grid-row: 1; }
+    .gym-card-body { display: grid; grid-row: 2 / span 6; grid-template-rows: subgrid; row-gap: 0; }
+    .gym-card-body > * { margin-bottom: 6px; }
+    .gym-card-body > .gym-card-actions { margin-bottom: 0; }
+    .gym-card-title { grid-row: 1; min-height: 0; }
+    .gym-card-price { grid-row: 2; white-space: nowrap; }
+    .gym-card-duration { grid-row: 3; }
+    .gym-card-includes { grid-row: 4; }
+    .gym-card-meta { grid-row: 5; align-content: flex-start; }
+    .gym-card-actions { grid-row: 6; align-self: end; margin-top: 0; }
+}

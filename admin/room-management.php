@@ -764,29 +764,34 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             </div>
                             <div class="room-card-desc"><?php echo htmlspecialchars($room['short_description'] ?? $room['description'] ?? ''); ?></div>
 
+                            <div class="room-card-price"><?php echo $currency; ?> <?php echo number_format($room['price_per_night'], 0); ?><small>/night</small></div>
+
                             <div class="room-card-details">
-                                <div class="detail-item detail-item-price"><i class="fas fa-tag"></i> <?php echo $currency; ?> <?php echo number_format($room['price_per_night'], 0); ?>/night</div>
-                                <div class="detail-item"><i class="fas fa-expand-arrows-alt"></i> <?php echo $room['size_sqm'] ?? 0; ?> sqm</div>
+                                <?php if ((float)($room['size_sqm'] ?? 0) > 0): ?><div class="detail-item"><i class="fas fa-expand-arrows-alt"></i> <?php echo (float)$room['size_sqm']; ?> sqm</div><?php endif; ?>
                                 <div class="detail-item"><i class="fas fa-users"></i> Max <?php echo $room['max_guests'] ?? 2; ?> guests</div>
-                                <div class="detail-item"><i class="fas fa-bed"></i> <?php echo htmlspecialchars($room['bed_type'] ?? 'N/A'); ?></div>
+                                <?php if (trim((string)($room['bed_type'] ?? '')) !== ''): ?><div class="detail-item"><i class="fas fa-bed"></i> <span class="detail-text" title="<?php echo htmlspecialchars($room['bed_type'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($room['bed_type']); ?></span></div><?php endif; ?>
                                 <div class="detail-item">
                                     <i class="fas fa-door-open"></i>
-                                    <?php
+                                    <span class="detail-text"><?php
                                     $avail = $room['units_avail'] ?? ($room['rooms_available'] ?? 0);
                                     $total = $room['units_total'] ?? ($room['total_rooms'] ?? 0);
                                     echo $avail . '/' . $total . (isset($room['units_total']) ? ' joined rooms avail' : ' avail');
-                                    ?>
+                                    ?></span>
                                 </div>
                             </div>
 
-                            <?php if ($room['price_single_occupancy'] || $room['price_double_occupancy'] || $room['price_triple_occupancy']): ?>
-                                <div style="font-size:11px; color:#888; margin-bottom:10px;">
-                                    <?php if ($room['price_single_occupancy']): ?>Single: <?php echo $currency; ?> <?php echo number_format($room['price_single_occupancy'], 0); ?> <?php endif; ?>
-                                <?php if ($room['price_double_occupancy']): ?>| Double: <?php echo $currency; ?> <?php echo number_format($room['price_double_occupancy'], 0); ?> <?php endif; ?>
-                            <?php if ($room['price_triple_occupancy']): ?>| Triple: <?php echo $currency; ?> <?php echo number_format($room['price_triple_occupancy'], 0); ?> <?php endif; ?>
-                        | Children: <?php echo htmlspecialchars(rh_child_rule_summary(rh_child_rule($room), $currency)); ?>
-                                </div>
-                            <?php endif; ?>
+                            <?php
+                            $rateLine = '';
+                            if ($room['price_single_occupancy'] || $room['price_double_occupancy'] || $room['price_triple_occupancy']) {
+                                $rateParts = [];
+                                if ($room['price_single_occupancy']) { $rateParts[] = 'Single: ' . $currency . ' ' . number_format($room['price_single_occupancy'], 0); }
+                                if ($room['price_double_occupancy']) { $rateParts[] = 'Double: ' . $currency . ' ' . number_format($room['price_double_occupancy'], 0); }
+                                if ($room['price_triple_occupancy']) { $rateParts[] = 'Triple: ' . $currency . ' ' . number_format($room['price_triple_occupancy'], 0); }
+                                $rateParts[] = 'Children: ' . rh_child_rule_summary(rh_child_rule($room), $currency);
+                                $rateLine = implode(' | ', $rateParts);
+                            }
+                            ?>
+                            <div class="room-card-rates"<?php echo $rateLine !== '' ? ' title="' . htmlspecialchars($rateLine, ENT_QUOTES) . '"' : ''; ?>><?php echo htmlspecialchars($rateLine); ?></div>
 
                             <div class="room-card-meta">
                                 <?php if ($room['is_active']): ?>
