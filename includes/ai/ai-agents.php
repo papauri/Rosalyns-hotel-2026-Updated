@@ -19,7 +19,7 @@
  * then the unconfirmed sentence is removed (rh_ai_reply_unsupported).
  * Every outgoing request is de-identified (vault) and given a last safety pass; replies are turned back
  * into real values locally. Tokens and estimated cost are written per message (and per lead) and per day.
- * Phase 4 adds action cards.
+ * Phase 4: action tools (includes/ai/ai-actions.php) only PROPOSE cards; a person taps Confirm on each one.
  */
 
 require_once __DIR__ . '/ai-core.php';
@@ -27,6 +27,7 @@ require_once __DIR__ . '/ai-providers.php';
 require_once __DIR__ . '/ai-vault.php';
 require_once __DIR__ . '/ai-tools.php';
 require_once __DIR__ . '/ai-context.php';
+require_once __DIR__ . '/ai-actions.php';
 
 if (!defined('RH_AI_HISTORY_TURNS')) {
     define('RH_AI_HISTORY_TURNS', 12);
@@ -704,8 +705,18 @@ function rh_ai_briefing_build(PDO $db, array $user, int $conv, bool $useModel = 
     foreach ($b['findings'] as $f) {
         $p = rh_ai_vault_protect($db, $conv, array_diff_key($f, ['link' => 1]));
         $lines = array_map(static fn($it) => rh_ai_brief_line((array)$it, $cur), (array)($p['items'] ?? []));
+        // One-tap action per line where one exists (Phase 4): the tap prepares a card; Confirm is a second tap.
+        $actKey = ['missed_checkout' => 'check_out', 'due_out_today' => 'check_out', 'arrival_no_room' => 'assign_room'][(string)$f['id']] ?? '';
+        $acts = [];
+        if ($actKey !== '' && rh_ai_action_allowed($user, $actKey)) {
+            foreach ((array)($f['items'] ?? []) as $li => $it) {
+                if (!empty($it['booking_id'])) {
+                    $acts[$li] = ['key' => $actKey, 'booking_id' => (int)$it['booking_id'], 'label' => $actKey === 'check_out' ? 'Prepare check-out' : 'Assign a room'];
+                }
+            }
+        }
         $items[] = [
-            'id' => (string)$f['id'], 'kind' => (string)$f['kind'], 'title' => (string)$p['title'],
+            'id' => (string)$f['id'], 'kind' => (string)$f['kind'], 'title' => (string)$p['title'], 'acts' => $acts,
             'figure' => isset($f['amount']) ? $fmt($f['amount']) : (isset($f['count']) ? (string)(int)$f['count'] : ''),
             'detail' => (string)$p['detail'], 'lines' => $lines, 'source' => rh_ai_link_source($f['link'] ?? null), 'link' => $f['link'] ?? null,
         ];
@@ -1014,7 +1025,7 @@ function rh_ai_maybe_summarise(PDO $db, int $uid, int $conv, array $models): voi
 function rh_ai_turn(PDO $db, array $user, array $in): array
 {
     $uid = (int)$user['id'];
-    $out = ['ok' => false, 'conversation_id' => 0, 'reply' => '', 'route' => '', 'model' => '', 'links' => [], 'chips' => [], 'items' => [], 'tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0.0, 'notice' => '', 'error' => ''];
+    $out = ['ok' => false, 'conversation_id' => 0, 'reply' => '', 'route' => '', 'model' => '', 'links' => [], 'chips' => [], 'items' => [], 'cards' => [], 'tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0.0, 'notice' => '', 'error' => ''];
     if (!rh_ai_enabled($db) || !rh_ai_chat_ready($db)) {
         $out['error'] = 'The Assistant is switched off.';
         return $out;
@@ -1060,6 +1071,10 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
         if (!empty($extra['local'])) {
             $meta['local'] = $extra['local'];
         }
+        $cards = array_values(array_map('intval', (array)($extra['cards'] ?? [])));
+        if ($cards) {
+            $meta['cards'] = $cards;
+        }
         rh_ai_message_add($db, $conv, 'assistant', $tokReply, [
             'agent' => $route, 'args' => $meta,
             'provider' => $extra['provider'] ?? null, 'model' => ($extra['model'] ?? '') !== '' ? $extra['model'] : null,
@@ -1073,6 +1088,7 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
         $out['links'] = $links;
         $out['chips'] = $chips;
         $out['items'] = $items ? rh_ai_items_rehydrate($db, $conv, $items) : [];
+        $out['cards'] = $cards ? rh_ai_cards_for($db, $conv, $cards) : [];
         $out['tokens_in'] = (int)($extra['tokens_in'] ?? 0);
         $out['tokens_out'] = (int)($extra['tokens_out'] ?? 0);
         $out['cost_usd'] = (float)($extra['cost'] ?? 0);
@@ -1144,7 +1160,7 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
     $route = ($reason || !$fast) ? 'primary' : 'fast';
     $prefs = rh_ai_prefs_get($db, $uid);
     $hist = rh_ai_history($db, $conv, $userMsgId);
-    $specs = rh_ai_tool_specs($user);
+    $specs = array_merge(rh_ai_tool_specs($user), rh_ai_action_specs($user)); // action tools only propose cards
     $consultSpec = rh_ai_consult_spec(rh_ai_specialists_for_user($user));
     $frozen = rh_ai_context_frozen($db);
     $userBlock = rh_ai_context_user($db, $conv, $user, $prefs);
@@ -1154,7 +1170,7 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
     // What a reply may draw figures from: this turn's tool results, the question, the context sent, the chat so far.
     $budget = ['rounds' => RH_AI_MAX_TOOL_ROUNDS, 'tokens_cap' => rh_ai_turn_token_cap(), 'in' => 0, 'out' => 0, 'cost' => 0.0, 'ms' => 0,
         'evidence' => $frozen . "\n" . $userBlock . "\n" . $hist['summary'] . "\n" . implode("\n", array_column($hist['messages'], 'content')) . "\n" . $tok,
-        'links' => [], 'tools_used' => []];
+        'links' => [], 'tools_used' => [], 'cards' => []];
     $notice = '';
     $usedModel = '';
     $final = null;
@@ -1242,6 +1258,20 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
                         }
                     }
                     rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => 'consult_team', 'args' => (array)$c['args'], 'result' => $json, 'agent' => 'lead']);
+                } elseif (($actKey = rh_ai_action_key_for_tool($name)) !== '') {
+                    // An action tool never changes anything: it stores a proposed card the person must confirm.
+                    rh_ai_step_set($db, $uid, 'Preparing a card for you to check...');
+                    if (count($budget['cards']) >= RH_AI_CARDS_PER_TURN) {
+                        $json = '{"error":"Enough cards for one question; ask the person to confirm those first."}';
+                    } else {
+                        $pr = rh_ai_propose($db, $user, $conv, $actKey, (array)$c['args'], true);
+                        $json = $pr['json'];
+                        if ($pr['ok']) {
+                            $budget['cards'][] = (int)$pr['card']['id'];
+                        }
+                    }
+                    $budget['tools_used'][] = $name;
+                    rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $name, 'args' => rh_ai_vault_protect($db, $conv, (array)$c['args']), 'result' => $json, 'agent' => $route]);
                 } else {
                     rh_ai_step_set($db, $uid, rh_ai_tool_step($name));
                     $tr = rh_ai_run_tool($db, $user, $conv, $name, (array)$c['args']);
@@ -1289,9 +1319,9 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
     }
     $final = rh_ai_scrub_outbound($db, $conv, $final); // stored tokenised (model text should already be)
     $chips = rh_ai_followup_chips($user, array_unique($budget['tools_used']));
-    $res = $finish($final, $consulted ? 'swarm' : $route, ['links' => $budget['links'], 'chips' => $chips, 'provider' => $models['provider'], 'model' => $usedModel,
+    $res = $finish($final, $consulted ? 'swarm' : $route, ['links' => $budget['links'], 'chips' => $chips, 'cards' => $budget['cards'], 'provider' => $models['provider'], 'model' => $usedModel,
         'tokens_in' => $budget['in'], 'tokens_out' => $budget['out'], 'cost' => round($budget['cost'], 6), 'ms' => $budget['ms'], 'notice' => $notice]);
-    if (strpos($final, 'Sorry - the Assistant could not answer') !== 0) {
+    if (strpos($final, 'Sorry - the Assistant could not answer') !== 0 && !$budget['cards']) { // a reply with cards is never replayed from the cache
         rh_ai_cache_put($db, $answerKey, $uid, ['reply_tok' => $final, 'links' => $budget['links'], 'chips' => $chips], RH_AI_ANSWER_CACHE_SECONDS);
     }
     try {
@@ -1312,9 +1342,10 @@ function rh_ai_conversation_messages(PDO $db, int $conv): array
         $meta = json_decode((string)$r['tool_args_json'], true) ?: [];
         $bot = $r['role'] === 'assistant';
         $out[] = [
-            'id' => (int)$r['id'], 'role' => $r['role'], 'text' => rh_ai_vault_rehydrate($db, $conv, (string)$r['content']),
+            'id' => (int)$r['id'], 'role' => $r['role'], 'text' => rh_ai_vault_display(rh_ai_vault_rehydrate($db, $conv, (string)$r['content'])),
             'links' => $bot ? array_values((array)($meta['links'] ?? [])) : [],
             'items' => $bot && !empty($meta['items']) ? rh_ai_items_rehydrate($db, $conv, (array)$meta['items']) : [],
+            'cards' => $bot && !empty($meta['cards']) ? rh_ai_cards_for($db, $conv, (array)$meta['cards']) : [],
             'notice' => $bot ? (string)($meta['notice'] ?? '') : '',
             'at' => (string)$r['created_at'],
         ];

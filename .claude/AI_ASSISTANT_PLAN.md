@@ -467,6 +467,7 @@ quoted data; nothing it says can execute without a human tap.
 
 ## Phase 4b — Learning loop + self-healing (ship)
 
+**Owner add (2026-10-26):** model refresh must not depend on cron. On the first admin page load of the day by ANY signed-in account (whether or not they hold Assistant permissions), if the Assistant is on, a provider key exists and the last refresh is over 7 days old (or never), refresh the live model lists without slowing the page (after the response is sent / a background request), single-flight via a lock so two logins don't both run it; failures logged quietly, never shown to non-settings users. The weekly cron stays optional.
 Migration `071_ai_memory.php` (`ai_memory`, `ai_incidents`, `ai_feedback`, `ai_vault`, `ai_eval_runs` —
 additive; `ai_vault` may instead land in 070 since Phase 2 needs it). Build `ai-vault.php` in Phase 2 (local-
 first is required from the first chat), memory retrieval + feedback in this phase, then `ai-reflect.php`,

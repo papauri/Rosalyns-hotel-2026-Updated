@@ -945,7 +945,7 @@ function rh_ai_brief_front_desk(PDO $db, array $user, callable $add): void
                         WHERE b.deleted_at IS NULL AND b.status = 'checked-in' AND b.check_out_date <= CURDATE() ORDER BY b.check_out_date, ir.room_number LIMIT 50")->fetchAll(PDO::FETCH_ASSOC);
     $overdue = array_values(array_filter($rows, static fn($r) => $r['check_out_date'] < date('Y-m-d')));
     $today = array_values(array_filter($rows, static fn($r) => $r['check_out_date'] === date('Y-m-d')));
-    $line = static fn($r, string $t) => ['guest_name' => $r['guest_name'], 'reference' => $r['booking_reference'], 'room' => $r['room_number'] !== null ? (string)$r['room_number'] : null, 'text' => $t];
+    $line = static fn($r, string $t) => ['guest_name' => $r['guest_name'], 'reference' => $r['booking_reference'], 'room' => $r['room_number'] !== null ? (string)$r['room_number'] : null, 'text' => $t, 'booking_id' => (int)$r['id']];
     if ($overdue) {
         $add(['id' => 'missed_checkout', 'kind' => 'time', 'severity' => min(70, 40 + count($overdue) * 10), 'title' => 'Guests past their check-out date, still checked in', 'count' => count($overdue),
             'detail' => count($overdue) . ' booking(s) should have checked out already. Check them out or extend the stay.',

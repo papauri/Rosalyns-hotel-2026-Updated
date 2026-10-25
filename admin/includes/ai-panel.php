@@ -1,6 +1,6 @@
 <?php
 /**
- * The Assistant panel (.claude/AI_ASSISTANT_PLAN.md Phases 2-3: chat, the daily briefing, the status line). Required once from admin-header.php,
+ * The Assistant panel (.claude/AI_ASSISTANT_PLAN.md Phases 2-4: chat, the daily briefing, the status line, action cards). Required once from admin-header.php,
  * right after the help button and OUTSIDE #rh-admin-page, so the chat survives in-app navigation.
  *
  * Prints nothing at all unless the Assistant is switched on (fail-closed kill switch, migrations 070 +
@@ -37,7 +37,7 @@ define('RH_AI_PANEL_RENDERED', true);
     <i class="fas fa-comments" aria-hidden="true"></i><span>Assistant</span>
 </button>
 <aside class="rh-ai-panel" id="rhAiPanel" role="dialog" aria-modal="false" aria-labelledby="rhAiTitle" hidden
-       data-endpoint="api/ai-chat.php" data-csrf="<?php echo htmlspecialchars($csrf); ?>">
+       data-endpoint="api/ai-chat.php" data-action-endpoint="api/ai-action.php" data-csrf="<?php echo htmlspecialchars($csrf); ?>">
     <header class="rh-ai-head">
         <div class="rh-ai-head__text">
             <h2 id="rhAiTitle">Assistant</h2>
@@ -97,7 +97,7 @@ define('RH_AI_PANEL_RENDERED', true);
             <button type="submit" class="btn btn-primary rh-ai-send" aria-label="Send"><i class="fas fa-paper-plane" aria-hidden="true"></i><span>Send</span></button>
             <button type="button" class="btn btn-secondary rh-ai-stop" data-ai="stop" hidden aria-label="Stop"><i class="fas fa-stop" aria-hidden="true"></i><span>Stop</span></button>
         </form>
-        <p class="rh-ai-foot">Guest names and contact details stay on the hotel's server. Check anything important on the screen before acting on it.</p>
+        <p class="rh-ai-foot">Guest names and contact details stay on the hotel's server. A card changes nothing until you tap Confirm.</p>
     </section>
 </aside>
 <script src="js/ai-panel.js?v=<?php echo (int)$jsV; ?>" defer></script>

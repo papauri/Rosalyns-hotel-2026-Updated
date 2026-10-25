@@ -127,6 +127,7 @@ function rh_ai_setting_defaults(): array
         'ai_turn_token_cap'       => '60000',
         'ai_retention_days'       => '0',
         'ai_paused_reason'        => '',
+        'ai_actions_enabled'      => '1', // action cards (Phase 4); '0' = chat only
     ];
 }
 

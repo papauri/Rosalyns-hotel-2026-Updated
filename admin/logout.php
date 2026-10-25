@@ -32,6 +32,7 @@ if (isset($_SESSION['admin_user_id'])) {
     }
 }
 
+if (isset($_SESSION['admin_user_id'], $pdo)) { try { require_once __DIR__ . '/../includes/ai/ai-vault.php'; rh_ai_signout_purge($pdo, (int)$_SESSION['admin_user_id']); } catch (Throwable $e) { /* never blocks sign-out */ } } // Assistant: privacy vault purge
 // Clear all admin session variables
 unset($_SESSION['admin_user']);
 unset($_SESSION['admin_user_id']);

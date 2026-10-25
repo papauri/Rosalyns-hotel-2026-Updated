@@ -165,6 +165,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($turnCap !== '') {
                 $limitPairs['ai_turn_token_cap'] = (string)(int)$turnCap;
             }
+            if (isset($_POST['ai_actions_enabled'])) {
+                $limitPairs['ai_actions_enabled'] = (string)$_POST['ai_actions_enabled'] === '0' ? '0' : '1';
+            }
             rh_ai_save_settings($limitPairs, $pdo);
             logActivity($uid, 'ai_settings', 'Assistant limits saved: ' . (int)$cap . ' tokens/day, $' . round((float)$budget, 2) . '/month, ' . (int)$rate . ' messages/10 min, keep chats ' . ((int)$ret ?: 'always'));
             $aiFlash('success', 'Limits saved.', 'ai-limits');
@@ -553,6 +556,14 @@ $fmtPrice = static function ($v): string {
                         <label for="ai_turn_cap"><strong>Most tokens for one question</strong></label>
                         <input type="number" min="5000" max="1000000" step="1000" id="ai_turn_cap" name="ai_turn_token_cap" class="form-control" value="<?php echo $h((int)($settings['ai_turn_token_cap'] ?? 60000)); ?>">
                         <p class="help-text">One question may ask up to three department leads. This caps all of their work together; when it is reached the answer is given with what was found so far.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_actions_on"><strong>Action cards</strong></label>
+                        <select id="ai_actions_on" name="ai_actions_enabled" class="form-control">
+                            <option value="1"<?php echo (($settings['ai_actions_enabled'] ?? '1') !== '0') ? ' selected' : ''; ?>>On - it can prepare changes for people to confirm</option>
+                            <option value="0"<?php echo (($settings['ai_actions_enabled'] ?? '1') === '0') ? ' selected' : ''; ?>>Off - answers only, no cards</option>
+                        </select>
+                        <p class="help-text">A card (new booking, check-in, check-out, housekeeping job...) changes nothing until the person taps Confirm, and then runs through the normal screen. Only people with "Confirm Assistant actions" (Staff &amp; Access) see cards.</p>
                     </div>
                     <div class="ai-actions ai-limits-save">
                         <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Save limits</button>

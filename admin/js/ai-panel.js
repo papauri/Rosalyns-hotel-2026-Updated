@@ -5,6 +5,9 @@
  * are checked against admin screens / staff guides and built with DOM methods. The daily briefing is laid
  * out like a short document (headline figure, what it is, why, where from, one link). While it works the
  * panel shows one plain line naming the real step, read from the server (no animated dots).
+ * Action cards (Phase 4): a card is a document (old -> new, total, warnings in red) with one Confirm and one
+ * Cancel. Confirm asks api/ai-action.php for the replay, posts it to the EXISTING screen endpoint with this
+ * session's security token and the X-Requested-With header, then reports the screen's answer back.
  */
 (function () {
     'use strict';
@@ -15,6 +18,7 @@
     window.__rhAiPanelBound = true;
 
     var endpoint = panel.getAttribute('data-endpoint') || 'api/ai-chat.php';
+    var actEndpoint = panel.getAttribute('data-action-endpoint') || 'api/ai-action.php';
     var stream = document.getElementById('rhAiStream');
     var chipsBox = document.getElementById('rhAiChips');
     var form = document.getElementById('rhAiForm');
@@ -42,11 +46,11 @@
         return /^\d+$/.test(id || '') ? id : '';
     }
 
-    function post(data, signal) {
+    function post(data, signal, url) {
         var fd = new FormData();
         fd.append('csrf_token', csrf());
         Object.keys(data).forEach(function (k) { fd.append(k, data[k]); });
-        return fetch(endpoint, { method: 'POST', body: fd, credentials: 'same-origin', signal: signal, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        return fetch(url || endpoint, { method: 'POST', body: fd, credentials: 'same-origin', signal: signal, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             .then(function (r) {
                 return r.json().catch(function () { return { success: false, error: 'The Assistant sent an answer that could not be read.' }; })
                     .then(function (j) { if (r.status === 404) { j = { success: false, error: 'The Assistant is switched off.' }; } return j; });
@@ -107,6 +111,7 @@
         } else {
             b.innerHTML = formatReply(text); // escaped above, then formatted
             if (extra.items && extra.items.length) { b.appendChild(briefing(extra.items)); }
+            (extra.cards || []).forEach(function (c) { b.appendChild(card(c)); });
             (extra.links || []).forEach(function (l) {
                 var s = safeUrl(l && l.url);
                 if (!s) { return; }
@@ -185,7 +190,18 @@
             row.appendChild(el('p', 'rh-ai-brief__detail', it.detail || ''));
             if (it.lines && it.lines.length) {
                 var ul = el('ul', 'rh-ai-brief__lines');
-                it.lines.forEach(function (l) { ul.appendChild(el('li', '', l)); });
+                it.lines.forEach(function (l, i) {
+                    var li = el('li', '', l);
+                    var act = it.acts && it.acts[i];
+                    if (act && act.key && act.booking_id) {
+                        var tap = el('button', 'rh-ai-brief__act', act.label || 'Prepare');
+                        tap.type = 'button';
+                        tap.addEventListener('click', function () { prepare(act, tap, row); });
+                        li.appendChild(document.createTextNode(' '));
+                        li.appendChild(tap);
+                    }
+                    ul.appendChild(li);
+                });
                 row.appendChild(ul);
             }
             if (it.source) { row.appendChild(el('p', 'rh-ai-brief__source', it.source)); }
@@ -203,6 +219,192 @@
         });
         return box;
     }
+    // ── Action cards ─────────────────────────────────────────────────────────
+    function safePage(u) { return /^[a-z0-9\-]+\.php$/i.test(String(u || '')); }
+    // A briefing point's one-tap fix: prepares the card (no model call); Confirm on the card is the second tap.
+    function prepare(act, btn, row) {
+        btn.disabled = true;
+        post({ action: 'propose', key: act.key, booking_id: act.booking_id, conversation_id: state.conv || 0, page: currentPage() }, undefined, actEndpoint).then(function (j) {
+            btn.disabled = false;
+            if (!j || !j.success) { row.appendChild(el('p', 'rh-ai-card__warn', (j && j.error) || 'That could not be prepared.')); return; }
+            if (j.conversation_id && !state.conv) { state.conv = j.conversation_id; store(KEY_CONV, state.conv); }
+            btn.hidden = true;
+            row.appendChild(card(j.card));
+            scrollDown();
+        }).catch(function () { btn.disabled = false; });
+    }
+    function cardState(c) {
+        return {
+            executed: c.message || 'Done.',
+            failed: c.message || 'Not done.',
+            cancelled: 'Cancelled. Nothing was changed.',
+            expired: c.message || 'This card has expired. Ask again for a fresh one.',
+            confirmed: 'Sent - waiting for the screen to answer.',
+            handoff: ''
+        }[c.status] || '';
+    }
+    function card(c) {
+        var box = el('div', 'rh-ai-card');
+        box.setAttribute('data-card-id', String(c.id));
+        box.setAttribute('role', 'group');
+        box.setAttribute('aria-label', c.title || 'Action card');
+        fillCard(box, c);
+        return box;
+    }
+    function fillCard(box, c) {
+        box.textContent = '';
+        box.className = 'rh-ai-card' + (c.danger ? ' rh-ai-card--danger' : '') + ' rh-ai-card--' + c.status;
+        box.appendChild(el('p', 'rh-ai-card__title', c.title));
+        if (c.help) { box.appendChild(el('p', 'rh-ai-card__help', c.help)); }
+        var dl = el('dl', 'rh-ai-card__rows');
+        (c.rows || []).forEach(function (r) {
+            var dd = el('dd', r.tone ? 'rh-ai-card__val--' + r.tone : '');
+            if (r.old !== undefined && r.old !== null && r.old !== '') {
+                dd.appendChild(el('span', 'rh-ai-card__old', r.old));
+                dd.appendChild(el('span', 'rh-ai-card__arrow', ' to '));
+            }
+            dd.appendChild(el('span', 'rh-ai-card__new', r['new']));
+            dl.appendChild(el('dt', '', r.label));
+            dl.appendChild(dd);
+        });
+        box.appendChild(dl);
+        (c.warn || []).forEach(function (w) { var p = el('p', 'rh-ai-card__warn', w); p.setAttribute('role', 'alert'); box.appendChild(p); });
+        (c.notes || []).forEach(function (n) { box.appendChild(el('p', 'rh-ai-card__note', n)); });
+        var live = c.status === 'proposed';
+        var inputs = [];
+        if (live) {
+            (c.fields || []).forEach(function (f) {
+                var id = 'rhAiF' + c.id + '_' + f.name;
+                var lab = el('label', 'rh-ai-card__label', f.label);
+                lab.setAttribute('for', id);
+                var inp = document.createElement('input');
+                inp.id = id; inp.name = f.name; inp.type = ['email', 'tel'].indexOf(f.type) >= 0 ? f.type : 'text';
+                inp.value = f.value || ''; inp.className = 'rh-ai-card__input'; inp.maxLength = 200;
+                if (f.required) { inp.required = true; }
+                box.appendChild(lab); box.appendChild(inp);
+                inputs.push(inp);
+            });
+            (c.choices || []).forEach(function (f) {
+                var id = 'rhAiC' + c.id + '_' + f.name;
+                var lab = el('label', 'rh-ai-card__label', f.label);
+                lab.setAttribute('for', id);
+                var sel = document.createElement('select');
+                sel.id = id; sel.name = f.name; sel.className = 'rh-ai-card__input';
+                (f.options || []).forEach(function (o) {
+                    var op = document.createElement('option');
+                    op.value = String(o[0]); op.textContent = String(o[1]);
+                    if (String(o[0]) === String(f.value)) { op.selected = true; }
+                    sel.appendChild(op);
+                });
+                box.appendChild(lab); box.appendChild(sel);
+                inputs.push(sel);
+            });
+        }
+        var st = el('p', 'rh-ai-card__state', live ? '' : cardState(c));
+        st.setAttribute('role', 'status');
+        box.appendChild(st);
+        var btns = el('div', 'rh-ai-card__btns');
+        var h = c.handoff;
+        if (h && safeUrl(h.url) && !safeUrl(h.url).guide) {
+            var a = el('a', 'btn btn-secondary rh-ai-card__btn');
+            a.href = h.url;
+            var ic = el('i', 'fas fa-arrow-right'); ic.setAttribute('aria-hidden', 'true');
+            a.appendChild(ic); a.appendChild(document.createTextNode(' ' + (h.label || 'Open')));
+            if (h.prefill) {
+                a.addEventListener('click', function () { try { sessionStorage.setItem('rh_ai_prefill', JSON.stringify({ page: String(h.url).split('?')[0], fields: h.prefill })); } catch (e) { /* private mode */ } });
+            }
+            btns.appendChild(a);
+        }
+        if (live && c.confirm) {
+            var ok = el('button', 'btn ' + (c.danger ? 'btn-danger' : 'btn-primary') + ' rh-ai-card__btn', c.confirm);
+            ok.type = 'button';
+            var no = el('button', 'btn btn-secondary rh-ai-card__btn', 'Cancel');
+            no.type = 'button';
+            var check = function () { ok.disabled = inputs.some(function (i) { return i.required && !String(i.value).trim(); }); };
+            inputs.forEach(function (i) { i.addEventListener('input', check); });
+            check();
+            ok.addEventListener('click', function () { confirmCard(box, c, inputs, ok, no, st); });
+            no.addEventListener('click', function () {
+                ok.disabled = true; no.disabled = true;
+                post({ action: 'cancel', card_id: c.id }, undefined, actEndpoint).then(function (j) { if (j && j.card) { fillCard(box, j.card); } });
+            });
+            btns.appendChild(ok); btns.appendChild(no);
+        }
+        if (btns.childNodes.length) { box.appendChild(btns); }
+    }
+    function confirmCard(box, c, inputs, ok, no, st) {
+        var fields = {};
+        inputs.forEach(function (i) { fields[i.name] = i.value; });
+        ok.disabled = true; no.disabled = true;
+        st.textContent = 'Checking the card again...';
+        post({ action: 'confirm', card_id: c.id, fields: JSON.stringify(fields) }, undefined, actEndpoint).then(function (j) {
+            if (!j || !j.success) {
+                if (j && j.card) { fillCard(box, j.card); }
+                if (j && j.new_card) { box.parentNode.insertBefore(card(j.new_card), box.nextSibling); }
+                var s2 = box.querySelector('.rh-ai-card__state');
+                if (s2) { s2.textContent = (j && j.error) || 'That could not be confirmed.'; }
+                if (!j || !j.card) { ok.disabled = false; no.disabled = false; }
+                return null;
+            }
+            st.textContent = 'Saving on the screen...';
+            return replay(j.steps || []).then(function (res) {
+                return post({ action: 'report', card_id: c.id, result: JSON.stringify(res.json || null), guard_failed: res.guard ? '1' : '0' }, undefined, actEndpoint);
+            }).then(function (r) {
+                if (r && r.card) { fillCard(box, r.card); } else { st.textContent = (r && r.error) || 'The result could not be recorded. Check the screen.'; }
+                if (r && r.next_card) { box.parentNode.insertBefore(card(r.next_card), box.nextSibling); }
+                scrollDown();
+                document.dispatchEvent(new CustomEvent('rh:assistant-changed', { detail: { card: c.id } }));
+                return null;
+            });
+        }).catch(function () { st.textContent = 'Could not reach the server. Check the screen before trying again.'; });
+    }
+    // Post each step to the existing screen, as that screen's own buttons do (same session, token and header).
+    function replay(steps) {
+        var i = 0;
+        function next(last) {
+            if (i >= steps.length) { return Promise.resolve({ json: last }); }
+            var s = steps[i++];
+            if (!safePage(s.url)) { return Promise.resolve({ json: { success: false, message: 'That screen is not allowed.' } }); }
+            var fd = new FormData();
+            fd.append('csrf_token', csrf());
+            (s.fields || []).forEach(function (f) { fd.append(String(f[0]), String(f[1])); });
+            return fetch(s.url, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.text(); })
+                .then(function (t) {
+                    var j = null;
+                    try { j = JSON.parse(t); } catch (e) { j = null; }
+                    if (s.guard === 'assess_clear') {
+                        var clear = j && j.success && !(j.settlement && j.settlement.needed) && (parseFloat(j.balance_due || 0) <= 0.01);
+                        return clear ? next(j) : { json: j, guard: true };
+                    }
+                    if (!j || j.success === false) { return { json: j }; }
+                    return next(j);
+                });
+        }
+        return next(null);
+    }
+    // "Open in Create Booking": fill the form fields the card already knows (the person picks the rooms there).
+    function applyPrefill() {
+        var raw = null;
+        try { raw = sessionStorage.getItem('rh_ai_prefill'); } catch (e) { raw = null; }
+        if (!raw) { return; }
+        var p = null;
+        try { p = JSON.parse(raw); } catch (e) { p = null; }
+        if (!p || p.page !== currentPage()) { return; }
+        var probe = document.querySelector('form [name="guest_name"]');
+        var form = probe && probe.form;
+        if (!form) { return; }
+        try { sessionStorage.removeItem('rh_ai_prefill'); } catch (e) { /* ignore */ }
+        Object.keys(p.fields || {}).forEach(function (k) {
+            var f = form.querySelector('[name="' + k.replace(/[^a-z_]/gi, '') + '"]');
+            if (f) {
+                f.value = String(p.fields[k]);
+                f.dispatchEvent(new Event('input', { bubbles: true }));
+                f.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
+    }
+
     // One calm line naming the step the server is on ("Checking today's departures...").
     function status(on, text) {
         var t = document.getElementById('rhAiStatus');
@@ -294,7 +496,7 @@
             store(KEY_CONV, state.conv);
             stream.textContent = '';
             if (!j.messages.length) { welcome(); }
-            j.messages.forEach(function (m) { addBubble(m.role, m.text, { links: m.links, notice: m.notice, items: m.items }); });
+            j.messages.forEach(function (m) { addBubble(m.role, m.text, { links: m.links, notice: m.notice, items: m.items, cards: m.cards }); });
             setChips([]);
             if (!j.messages.length) { loadSuggestions(); }
         });
@@ -339,7 +541,7 @@
                 busy(false);
                 if (j && j.conversation_id) { state.conv = j.conversation_id; store(KEY_CONV, state.conv); }
                 if (!j || !j.success) { addError((j && j.error) || 'The Assistant could not answer just now.'); return; }
-                addBubble('assistant', j.reply, { links: j.links, notice: j.notice, items: j.items });
+                addBubble('assistant', j.reply, { links: j.links, notice: j.notice, items: j.items, cards: j.cards });
                 setChips(j.chips || []);
             })
             .catch(function (e) {
@@ -403,7 +605,9 @@
     // In-app navigation: the panel stays; starter chips follow the new screen when the chat is empty.
     document.addEventListener('rh:content-updated', function () {
         if (!panel.hidden && !state.conv && !state.busy) { loadSuggestions(); }
+        applyPrefill();
     });
+    applyPrefill();
 
     if (read(KEY_OPEN) === '1') { open(); }
 })();

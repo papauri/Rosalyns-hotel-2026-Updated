@@ -490,3 +490,188 @@ html.rh-ai-is-open .rh-ai-launch {
         display: none !important;
     }
 }
+
+/* Action cards (Phase 4): set out like a short document - label | old to new; one Confirm, one Cancel.
+   Solid surface, 1px dividers, the accent colour once; off-sale / cancel lines in the danger colour. */
+.rh-ai-card {
+    margin: 10px 0 2px;
+    padding: 12px 12px 10px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-left: 3px solid var(--admin-accent, #766550);
+    border-radius: var(--admin-radius, 8px);
+    background: var(--admin-surface, #fff);
+    color: var(--admin-text, #1f2a37);
+}
+
+.rh-ai-card--danger {
+    border-left-color: var(--admin-danger-text, #8B2D24);
+}
+
+.rh-ai-card--executed,
+.rh-ai-card--cancelled,
+.rh-ai-card--expired,
+.rh-ai-card--failed {
+    border-left-color: var(--admin-surface-border, #e5e7eb);
+}
+
+.rh-ai-card__title {
+    margin: 0 0 2px;
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+.rh-ai-card__help,
+.rh-ai-card__note {
+    margin: 0 0 8px;
+    font-size: 0.8rem;
+    color: var(--admin-muted, #5E554D);
+}
+
+.rh-ai-card__rows {
+    display: grid;
+    grid-template-columns: minmax(90px, 38%) 1fr;
+    margin: 0 0 8px;
+    border-top: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+.rh-ai-card__rows dt,
+.rh-ai-card__rows dd {
+    margin: 0;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--admin-surface-border, #e5e7eb);
+    font-size: 0.85rem;
+}
+
+.rh-ai-card__rows dt {
+    color: var(--admin-muted, #5E554D);
+    padding-right: 8px;
+}
+
+.rh-ai-card__old {
+    color: var(--admin-muted, #5E554D);
+    text-decoration: line-through;
+}
+
+.rh-ai-card__arrow {
+    color: var(--admin-muted, #5E554D);
+}
+
+.rh-ai-card__val--money .rh-ai-card__new {
+    font-weight: 700;
+}
+
+.rh-ai-card__val--danger .rh-ai-card__new,
+.rh-ai-card__warn {
+    color: var(--admin-danger-text, #8B2D24);
+}
+
+.rh-ai-card__warn {
+    margin: 0 0 8px;
+    padding: 6px 8px;
+    font-size: 0.82rem;
+    background: var(--admin-danger-bg, #FBEAE8);
+    border: 1px solid var(--admin-danger-border, #f5c2bd);
+    border-radius: var(--admin-radius, 8px);
+}
+
+.rh-ai-card__label {
+    display: block;
+    margin: 6px 0 2px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.rh-ai-card__input {
+    width: 100%;
+    min-height: 44px;
+    padding: 6px 10px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: var(--admin-radius, 8px);
+    background: var(--admin-surface, #fff);
+    color: var(--admin-text, #1f2a37);
+    font: inherit;
+    font-size: 0.88rem;
+}
+
+.rh-ai-card__state {
+    margin: 6px 0 0;
+    font-size: 0.85rem;
+}
+
+.rh-ai-card__state:empty {
+    display: none;
+}
+
+.rh-ai-card__btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.rh-ai-card__btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 1 1 120px;
+}
+
+.rh-ai-brief__act {
+    min-height: 44px;
+    margin: 4px 0 0;
+    padding: 0 12px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: var(--admin-radius, 8px);
+    background: var(--admin-surface, #fff);
+    color: var(--admin-text, #1f2a37);
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.rh-ai-brief__act:hover,
+.rh-ai-brief__act:focus-visible {
+    border-color: var(--admin-accent, #766550);
+}
+
+/* Card buttons are styled here (the admin .btn styles do not reach inside the panel). */
+.rh-ai-card__btn {
+    padding: 0 14px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: var(--admin-radius, 8px);
+    background: var(--admin-surface, #fff);
+    color: var(--admin-text, #1f2a37);
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.rh-ai-card__btn.btn-primary {
+    background: var(--admin-accent, #766550);
+    border-color: var(--admin-accent, #766550);
+    color: #fff;
+}
+
+.rh-ai-card__btn.btn-danger {
+    background: var(--admin-danger-text, #8B2D24);
+    border-color: var(--admin-danger-text, #8B2D24);
+    color: #fff;
+}
+
+.rh-ai-card__btn:hover,
+.rh-ai-card__btn:focus-visible {
+    filter: brightness(1.06);
+}
+
+.rh-ai-card__btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.rh-ai-card__btn i {
+    color: inherit;
+}

@@ -73,7 +73,7 @@ try {
             }
             rh_ai_api_out(200, [
                 'success' => true, 'conversation_id' => $r['conversation_id'], 'reply' => $r['reply'], 'route' => $r['route'],
-                'links' => $r['links'], 'chips' => $r['chips'], 'items' => $r['items'], 'notice' => $r['notice'],
+                'links' => $r['links'], 'chips' => $r['chips'], 'items' => $r['items'], 'cards' => $r['cards'], 'notice' => $r['notice'],
                 'usage' => ['tokens_in' => $r['tokens_in'], 'tokens_out' => $r['tokens_out'], 'cost_usd' => $r['cost_usd']],
             ]);
             break;
@@ -83,7 +83,7 @@ try {
             $st->execute([$uid]);
             $list = [];
             foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $c) {
-                $title = rh_ai_vault_rehydrate($pdo, (int)$c['id'], (string)$c['title']);
+                $title = rh_ai_vault_display(rh_ai_vault_rehydrate($pdo, (int)$c['id'], (string)$c['title']));
                 $list[] = ['id' => (int)$c['id'], 'title' => $title !== '' ? $title : 'New chat', 'updated_at' => (string)$c['updated_at']];
             }
             rh_ai_api_out(200, ['success' => true, 'conversations' => $list]);

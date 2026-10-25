@@ -18,7 +18,7 @@
 
   <h1>The Assistant</h1>
   <p>The Assistant is a chat helper for staff in the <span class="g-site-name">Rosalyns Beach Hotel</span> admin. The first part shows staff how to use it; the rest covers setting it up on <strong>Assistant Settings</strong>: switching it on or off, adding a provider key, choosing models, limits, who has access and usage. It ships switched off: nothing changes for anyone until an administrator sets it up and switches it on.</p>
-  <div class="note"><p>Today the Assistant reads and explains: it answers questions, looks things up with its team of department leads, gives each person a daily briefing and points you to the right screen. Making changes for you (with a Confirm button) and the nightly clean-up of old chats arrive in later updates.</p></div>
+  <div class="note"><p>The Assistant answers questions, looks things up with its team of department leads, gives each person a daily briefing, points you to the right screen and prepares changes as <a href="#actions">action cards</a> that you confirm with one tap. The nightly clean-up of old chats arrives in a later update.</p></div>
 
   <div class="facts">
     <dl>
@@ -32,6 +32,7 @@
   <div class="toc">
     <ol>
       <li><a href="#using">Using the Assistant</a></li>
+      <li><a href="#actions">Action cards: changes with one Confirm</a></li>
       <li><a href="#team">The team of leads behind it</a></li>
       <li><a href="#briefing">The daily briefing ("the tea")</a></li>
       <li><a href="#never-guesses">It never guesses</a></li>
@@ -86,7 +87,8 @@
 
   <h3>What it cannot do</h3>
   <ul>
-    <li>It does not change anything yet: no bookings, check-ins, payments, refunds, stock, prices, settings or users. Ask it how, and it gives the steps and a button to the screen.</li>
+    <li>It never changes anything on its own. It can prepare some changes as <a href="#actions">action cards</a>, and nothing happens until you tap <strong>Confirm</strong>.</li>
+    <li>It never takes payments or refunds, and never changes stock, recipes, till orders, invoices, credit notes, shift or end-of-day closes, prices, rates, deals, settings or users. Ask it how, and it gives the steps and a button to the screen.</li>
     <li>It only works on the hotel and this system. Anything else gets one friendly line: <em>"That one's outside the hotel, so I'll leave it there - ask me anything about guests, rooms, your shift or the portal."</em></li>
     <li>It never says the system reports to or submits anything to MRA or any tax authority: there is no such connection.</li>
   </ul>
@@ -102,6 +104,43 @@
 
   <h3>Costs</h3>
   <p>Quick lookups and their follow-ups, small talk, repeated questions within two minutes, off-topic and out-of-reach requests are answered on the hotel's server and cost nothing. The daily briefing is worked out on the server and costs one short reply. Everyday questions use the cheapest chosen model (<strong>Fast</strong>); only questions that need real thinking, such as <em>"How can we lift occupancy next month?"</em>, use the <strong>Primary</strong> model. Each person has a daily allowance and the hotel has a monthly cost limit (see <a href="#limits">budgets and limits</a>).</p>
+
+  <h2 id="actions">Action cards: changes with one Confirm</h2>
+  <p>For people who also have <strong>Confirm Assistant actions</strong>. Ask for a change in plain words, for example <em>"Check out room 12"</em>, <em>"Book the Deluxe Room 3 to 5 November for 2 adults"</em> or <em>"Add a deep clean for room 7 tomorrow"</em>. The Assistant prepares a card; nothing is changed until you tap <strong>Confirm</strong> on it.</p>
+  <h3>How to confirm a card</h3>
+  <ol class="steps">
+    <li>Read the card. Each line shows what changes: the old value (crossed out) and the new value, and for money the total. Lines in red (and a red border) mean something serious, such as a cancellation or a room going off sale.</li>
+    <li>Fill in anything the card asks for, for example the guest's name, email and phone on a new booking, or the reason for a cancellation. <strong>Confirm</strong> stays grey until they are filled in.</li>
+    <li>Tap <strong>Confirm</strong>. The change is made by the same screen action a click would use, with the same checks, permissions, emails and booking timeline. The card then says <em>"Done."</em> with the screen's own message, or <em>"Not done."</em> with the reason.</li>
+    <li>Tap <strong>Cancel</strong> if you do not want it. Nothing is changed.</li>
+  </ol>
+  <h3>What a card can do</h3>
+  <table>
+    <thead><tr><th>Card</th><th>What it does</th><th>Needs (on top of Confirm Assistant actions)</th></tr></thead>
+    <tbody>
+      <tr><td><strong>New booking</strong></td><td>One room type, one or more rooms, adults and children, Confirmed, Pending or Tentative. Priced exactly like Create Booking; rooms are assigned automatically.</td><td>Create Bookings</td></tr>
+      <tr><td><strong>Change booking</strong></td><td>Guest name, email, phone, country, dates before arrival, adults, special requests. Shows the new total.</td><td>Edit Bookings and Quick Modify Bookings</td></tr>
+      <tr><td><strong>Extend stay</strong> / <strong>Correct check-out date</strong></td><td>Later check-out for an in-house guest at the booked nightly rate; the date correction is for administrators and managers.</td><td>View Bookings (correction: Edit Bookings)</td></tr>
+      <tr><td><strong>Change room type</strong></td><td>Paid upgrade or downgrade, priced like Change room type on Bookings.</td><td>Edit Bookings</td></tr>
+      <tr><td><strong>Cancel booking</strong></td><td>Shows what the hotel's cancellation rule does with money paid, the amount paid and still owed. It never works out a refund; refunds are recorded by staff. Asks for a reason, and for a booking of several rooms whether to cancel one room or all.</td><td>Cancel Bookings</td></tr>
+      <tr><td><strong>Check in</strong> / <strong>Assign room</strong></td><td>Checks the guest in, optionally after assigning a free room. If the room is not marked clean you are asked to confirm a second time on a new card.</td><td>Check-in Guests (Assign: View Bookings)</td></tr>
+      <tr><td><strong>Check out</strong></td><td>Only when nothing is owed and the guest leaves on the booked day.</td><td>Check-out Guests</td></tr>
+      <tr><td><strong>New housekeeping job</strong> / <strong>New maintenance job</strong></td><td>Adds the job to the board. A maintenance job that takes the room off sale is shown in red.</td><td>Housekeeping / Room Maintenance</td></tr>
+      <tr><td><strong>Room status</strong></td><td>Available, cleaning, maintenance or out of order. The last two take the room off sale.</td><td>Individual Rooms (off sale: Block Rooms)</td></tr>
+      <tr><td><strong>Send guest email</strong> / <strong>Send invoice</strong></td><td>Sends the hotel's own email; the card shows the address partly hidden.</td><td>View Bookings</td></tr>
+    </tbody>
+  </table>
+  <h3>When the card opens a screen instead</h3>
+  <p>Some things are always finished on the screen, so the card has a button that opens it instead of <strong>Confirm</strong>: check-out when money is owed or the guest leaves on a different day (the settlement on Bookings), a booking with more than one room type or with a payment (<strong>Open in Create Booking</strong>, with the guest, dates and party filled in for you), joined family rooms (assigned as a pair on Bookings) and WhatsApp messages (sent from the booking screen).</p>
+  <h3>Safety rules</h3>
+  <ul>
+    <li>Only you can confirm your cards, once. A card expires after 15 minutes; ask again for a fresh one.</li>
+    <li>When you tap Confirm the card is checked again. If the price or availability changed since it was made, it is not used: a new card with the new figures appears for you to check.</li>
+    <li>Text written by guests (special requests, reviews, enquiries) is treated only as information. It can never make the Assistant change anything.</li>
+    <li>Every confirmed card is written to the activity log as <em>"... via Assistant"</em>, and the screen adds its usual booking timeline entries.</li>
+    <li>When you sign out, the names behind the privacy codes in your chats are removed from the server and unconfirmed cards expire; old chats then show <em>(guest)</em> in place of names.</li>
+  </ul>
+  <p>An administrator can turn all cards off (answers only) on Assistant Settings &rarr; <strong>Budgets and limits</strong> &rarr; <strong>Action cards</strong>, or for one person by removing <strong>Confirm Assistant actions</strong>.</p>
 
   <h2 id="team">The team of leads behind it</h2>
   <p>Behind the chat sits a small team of department leads, like the heads of department on a shift. For a simple question the Assistant answers itself. For a question that spans departments, or when you ask for the full picture, it asks up to three leads at the same time, each looks up its own figures, and one merged answer comes back. Each lead sees only what <strong>your</strong> account can see: a lead you have no permission for simply does not exist for you.</p>
@@ -193,6 +232,7 @@
     <li><strong>Messages per person in 10 minutes</strong>: 1 to 500. Default 30.</li>
     <li><strong>Keep chats for (days)</strong>: 0 keeps chats; otherwise 7 to 3,650 days, and older chats are removed each night.</li>
     <li><strong>Most tokens for one question</strong>: all the work for one question together (the Assistant, up to three leads and the merged answer). 5,000 to 1,000,000. Default 60,000. When it is reached the Assistant stops and says so.</li>
+    <li><strong>Action cards</strong>: On (it can prepare changes for people to confirm) or Off (answers only, no cards). Default On.</li>
   </ul>
   <p>Click <strong>Save limits</strong>. You will see <em>"Limits saved."</em> Costs are estimates from the prices under Models; the provider's bill is the real figure.</p>
 
@@ -240,6 +280,10 @@
       <tr><td><em>I couldn't confirm part of that from the hotel's data, so I left it out.</em></td><td>The answer had a figure that is not in the hotel's data, so it was removed rather than guessed.</td><td>Ask again more exactly (a name, a reference, the dates), or check the screen.</td></tr>
       <tr><td><em>That question needed more work than one question is allowed.</em></td><td>The <strong>Most tokens for one question</strong> limit was reached.</td><td>Ask about one part at a time, or an administrator can raise the limit.</td></tr>
       <tr><td>No briefing when you open the Assistant</td><td>It was already shown today, or <strong>Daily briefing</strong> is Off in Reply settings.</td><td>Ask <em>"Give me the tea"</em>, or switch it on in Reply settings.</td></tr>
+      <tr><td><em>This card has expired. Ask again for a fresh one.</em></td><td>More than 15 minutes passed, or you signed out.</td><td>Ask again; a fresh card appears.</td></tr>
+      <tr><td><em>The price or availability changed since this card was made.</em></td><td>Someone booked, or a rate changed, after the card was made.</td><td>Check the new card under it and confirm that one.</td></tr>
+      <tr><td><em>Not done.</em> on a card</td><td>The screen refused it (its message follows), or the change could not be seen afterwards.</td><td>Read the reason; open the screen to check or finish it there.</td></tr>
+      <tr><td>No cards, only answers</td><td>Your account does not have <strong>Confirm Assistant actions</strong>, or Action cards are Off on Assistant Settings.</td><td>Ask an administrator.</td></tr>
       <tr><td><em>Could not reach the Assistant. Check the connection and try again.</em></td><td>The device lost its connection.</td><td>Check Wi-Fi or data and send again.</td></tr>
     </tbody>
   </table>

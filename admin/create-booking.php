@@ -310,6 +310,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote('rh_idem_bk_' . md5($__idemKey)) . ', 15)')->fetchColumn() !== 1) {
                 // The first click is still being saved: never risk a second booking.
                 http_response_code(409);
+                if (($_POST['response'] ?? '') === 'json') { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => false, 'error' => 'still_saving', 'message' => 'This booking is still being saved from the first submission. Check the Bookings list before trying again.']); exit; } // Assistant replay (additive)
                 echo '<!doctype html><meta charset="utf-8"><title>Still saving</title><body style="font-family:system-ui,sans-serif;max-width:560px;margin:60px auto;padding:0 16px;line-height:1.6">'
                     . '<h1 style="font-size:1.3rem">This booking is still being saved</h1>'
                     . '<p>It was submitted twice (a double click or a retry) and the first copy is still saving. To avoid a duplicate booking, this second copy was not saved.</p>'
@@ -320,6 +321,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         if ($__existingBooking = idem_find_existing_booking($pdo, $__incomingClientUuid)) {
             $message = 'Booking already created (reference ' . htmlspecialchars((string)$__existingBooking['booking_reference']) . '). Duplicate submission ignored.';
             $_SESSION['flash_message'] = ['type' => 'success', 'text' => $message];
+            if (($_POST['response'] ?? '') === 'json') { unset($_SESSION['flash_message']); header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => true, 'booking_id' => (int)$__existingBooking['id'], 'reference' => (string)$__existingBooking['booking_reference'], 'duplicate' => true, 'message' => 'Booking already created (reference ' . (string)$__existingBooking['booking_reference'] . ').']); exit; } // Assistant replay (additive)
             header('Location: booking-details.php?id=' . (int)$__existingBooking['id']);
             exit;
         }
@@ -1366,6 +1368,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             'type' => 'success',
             'text' => 'Booking ' . $primary_ref . $rooms_suffix . ' created successfully!' . ($credit_msg ?? '') . ($overpay_msg ?? '') . $email_msg,
         ];
+        if (($_POST['response'] ?? '') === 'json') { $__jsonMsg = (string)$_SESSION['flash_message']['text']; unset($_SESSION['flash_message']); header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => true, 'booking_id' => (int)$primary_id, 'reference' => (string)$primary_ref, 'message' => $__jsonMsg]); exit; } // Assistant replay (additive)
         header('Location: booking-details.php?id=' . $primary_id);
         exit;
     } catch (\Throwable $e) {
@@ -1375,6 +1378,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             'by'        => $user['username'] ?? null,
             'exception' => get_class($e),
         ]);
+        if (($_POST['response'] ?? '') === 'json') { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['success' => false, 'error' => $error, 'message' => $error]); exit; } // Assistant replay (additive)
     }
 }
 
