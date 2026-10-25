@@ -415,15 +415,44 @@ New: `admin/migrations/070_ai_assistant.php`, `admin/ai-settings.php`, `admin/ap
 `scripts/{ai-model-refresh,ai-retention,ai-reflect,ai-health,ai-eval,ai-kill}.php`,
 `scripts/tests/ai_assistant_test.php`, `scripts/tests/fixtures/ai/*.json`, guide pages.
 Edited (additive only): `admin/includes/permissions.php`, `admin/includes/admin-header.php` (one require),
-`config/database.php` (module seed list only), `admin/create-booking.php` (JSON response branch only),
+`admin/logout.php` (one vault-purge line), `admin/create-booking.php` (JSON response branch only; no
+`config/database.php` edit — see §Map "Module check fails OPEN"),
 nav entry for AI Settings. Same files in Liwonde (`C:\Users\john-paul.chirwa\OneDrive\MSP\Liwonde_Sun_Hotel_2026`).
 
-## Team & gates (per CLAUDE.md / DEPARTMENTS.md)
+## Team & gates (owner 2026-10-26: "this is only going to be handled by the AI lead")
 
-Opus 5.5 writes the code. Reviews: `dept-rooms-lead` (booking actions, availability reads),
-`dept-accounting-lead` (cancel/checkout previews, any figure shown), `dept-patch-lead` (security review:
-key storage, permission gating, injection, masking), `ui-lead` (panel + settings), `qa-auditor` (diff gate),
-`guides-kb-lead` after each staff-visible ship. One commit per phase, both hotels, pushed to `main`.
+**`dept-ai-lead` (Opus 5.5, `.claude/agents/dept-ai-lead.md`) owns this feature alone**: builds every phase,
+reviews its own money/booking/security touch points against the other departments' rules (it reads their
+invariants; it does not hand work to them), owns the Assistant's guide pages, and runs the completion
+guardrail below. No other department lead builds or edits AI files. Kept from CLAUDE.md because they are the
+ship gate, not ownership: `qa-auditor` diff review, `php -l`, own test file, headless browser check.
+`ASSUMPTION:` the AI lead may still *ask* (read-only) `dept-accounting-lead` to check a figure if a number on
+screen and in chat disagree; it never hands them the build. One commit per phase, both hotels, pushed to `main`.
+
+## Continuous train & test + completion guardrail (owner 2026-10-26)
+
+Owner: "It will constantly train and test data. It will have a guardrail where it eventually says this
+feature is now complete and there is nothing else to patch."
+- **Constant training** (no model retraining — see Learning loop): every confirmed action, thumbs up/down,
+  correction and incident feeds `ai_memory` daily; nightly `ai-reflect.php` turns them into lessons/playbooks.
+- **Constant testing:** nightly full eval (`ai-eval.php`, all of `evals.json`) + the 15-min alerts job's tool
+  self-test; every incident that gets fixed adds a **regression question** to the eval set (`source=incident`),
+  so the test set grows with real mistakes. All runs use tokenised data only and log to `ai_eval_runs`.
+- **Completion guardrail** (`ai_feature_state` setting: `learning` → `complete`, shown on AI Settings with date
+  + evidence): the Assistant declares **"This feature is complete — there is nothing else to patch"** only when
+  ALL hold for **14 consecutive daily runs**: full eval pass rate ≥ 95 % and no question that passed before now
+  fails; 0 open "Assistant faults"; 0 new incident kinds; every read tool's self-test green; kill-switch and
+  hard-limit tests green; no budget/auto-pause events. Thresholds are settings (`ai_complete_days=14`,
+  `ai_complete_eval_pct=95`), `ASSUMPTION:` these defaults.
+- **When complete:** it stops writing new lessons/playbooks and fault write-ups (memory goes read-only except
+  per-user preferences and owner-entered facts), keeps nightly evals running as a watchdog, and the AI lead
+  treats the feature as closed — no further patches or features unless the owner asks.
+- **Reopen only on evidence:** an eval regression, a new incident kind or a failed self-test flips the state
+  back to `learning`, writes one "Assistant fault" with the evidence and notifies `ai_settings` holders. The
+  owner can also mark it complete/reopen by hand (logged).
+- Build-side guardrail for `dept-ai-lead`: Phases 0–5 + the Verification list are the whole scope. When the
+  last phase ships and the dress rehearsal passes, it reports "AI Assistant feature complete — nothing else to
+  patch" and stops; new ideas are one-line `IDEA:` notes, never built.
 
 ## Verification
 
@@ -451,3 +480,132 @@ key storage, permission gating, injection, masking), `ui-lead` (panel + settings
   `admin/bookings.php` (price, VAT, levy, timeline) → edit dates → cancel; ask it to "adjust stock" → it
   declines and points to the Stock screen; switch module off → panel gone. Then repeat the switch-on at
   Rosalyn's only when the owner says so.
+
+## §Map — Phase 0 findings (2026-10-26, Rosalyn's line numbers; re-grep Liwonde before porting)
+
+Line numbers drift: CODE_INDEX was stale for `permissions.php` (2,207 lines now) and `bookings.php` (9,034).
+Every builder re-greps the function/action name before an offset read. Liwonde's `.claude/` is an older copy
+(no patch/pwa/backup leads); orchestration docs live in Rosalyn's, code ships to both.
+
+### Shared plumbing
+- **CSRF:** `generateCsrfToken()` / `validateCsrfToken($t)` in `config/security.php:178/191`; admin pages get
+  `$csrf_token` from `admin/admin-init.php:72`; JS reads `window._rhCsrf` or `meta[name="csrf-token"]`
+  (`bookings.php:3343`). Field name is always `csrf_token`.
+- **AJAX = JSON:** screens decide JSON by header `X-Requested-With: XMLHttpRequest` (`bookings.php:29`
+  `isAjaxRequest()`, `housekeeping.php:22`, `room-maintenance.php:25` `$isAjax`). The replay bridge must send
+  that header. Shape everywhere: `{success: bool, message: string, ...}`; bookings.php answers unhandled/early
+  returns with JSON too (`bookings.php:2603–2617`); errors are HTTP 200 + `success:false`.
+- **Permissions:** `hasPermission(int $uid, string $key)` `permissions.php:1171` (unknown key → false + log);
+  `getAllPermissions()` :310 (entries `'key' => ['label','page',…]`), `getPermissionGroups()` :1113,
+  `getDefaultPermissionsForRole()` :1149, `getPermissionForPage()` :1486, `getModuleForPage()` :1589,
+  `rh_module_key_enabled()` :1707, `getPermissionsForModule()` :1773, `logActivity($uid,$action,$details)` :1413,
+  `rhBookingActionPermission($action,$status)` :2189 (checkin→`checkin_guest`; checkout/assess/settle→
+  `checkout_guest`; cancel/noshow→`cancel_booking`; payment→`payment_add`; adjust_dates/confirm/convert/folio
+  charges→`edit_booking`; anything else → null = page permission only).
+- **Page/module gate:** `admin-init.php:78–115` checks page permission, then module (admins bypass module).
+- **⚠ Module check fails OPEN:** `moduleEnabled()` (`config/database.php:1225`) returns **true** for unknown keys
+  and when the table is missing, and its seed list (:1250–1269) inserts rows with `is_enabled=1`.
+  → **Do NOT add `ai_assistant` to that seed list** (Files list said "module seed list only" — dropped). Migration
+  070 does `INSERT IGNORE … is_enabled=0`. Kill-switch helper `rh_ai_enabled()` must be **fail-closed**: true only
+  when setting `ai_enabled === '1'` AND an `enabled_modules` row `ai_assistant` exists with `is_enabled=1`
+  (direct query, not `moduleEnabled()`) AND no auto-pause flag. No edit to `config/database.php` at all.
+- **Settings:** `getSetting($key,$default)` `config/database.php:1057`. `BALANCE_TOLERANCE` (0.01) :69.
+- **Encryption pattern:** `facebookEncryptSecret()/facebookDecryptSecret()` `includes/facebook-functions.php:42/61`;
+  salt `APP_ENCRYPTION_SALT` falls back to `'DEFAULT_SALT_CHANGE_IN_ENV'` (:47) — AI Settings must warn and
+  refuse to store a key while the fallback is in use. `facebookCaBundle()` :125 for curl CA.
+- **Email:** `sendEmail($to,$toName,$subject,$html,$text='')` `config/email.php:127`.
+- **Sessions:** `includes/admin-session.php:49` `rh_admin_session_start()` (8 h idle; regenerates the id on
+  expiry :61). Logout `admin/logout.php` (presence clear :26–28, `session_destroy()` :41). Vault purge = one
+  additive line in `admin/logout.php` before :41 + nightly sweep of `ai_vault` rows whose session is gone
+  (expiry changes the id, so a hook in admin-session.php is not reliable).
+- **Migrations:** latest `069_…`; new `070_ai_assistant.php`. Format = return array with `'check'` and `'up'`
+  closures, `CREATE TABLE IF NOT EXISTS`, InnoDB utf8mb4 + COMMENT (`064_admin_presence.php:20–37`).
+- **Panel slot:** `admin/includes/admin-header.php:473–475` (help FAB `require help-tooltips.php`, outside
+  `#rh-admin-page`, which opens at :482). Panel `require` goes right after :475.
+- **Presence:** table `admin_presence` (user_id PK, last_seen_at, current_page, session_started_at, ip,
+  user_agent_short; migrations 064 + 065). `admin/includes/presence-lib.php`: `rh_presence_rows($pdo,$withIp)`
+  :347, `rh_presence_can_view($role)` :30, `rh_presence_page_title()` :67. `who_is_online` =
+  `rh_presence_rows($pdo,false)` gated by `rh_presence_can_view`, names tokenised.
+- **PIN:** no staff PIN helper exists. Risky confirms use the **account password**: `password_verify($pw,
+  admin_users.password_hash)` — same pattern as the POS manager override `admin/pos.php:2001`. Lockout counter
+  is new (small `ai_confirm_fails` table or column in `ai_user_prefs`).
+
+### Actions (replay to existing endpoints with the user's session + `csrf_token` + XHR header)
+| Action | Endpoint · action | POST fields | Permission (server) | Result / notes |
+|---|---|---|---|---|
+| Check-in | `admin/bookings.php` · `update_status` (:661) | `id`, `status=checked-in`, `checkin_note`?, `confirm_checkin_room_not_ready`? | `checkin_guest` | `validateCheckIn()` (`database.php:2757`) + `evaluateCheckInRoomReady()` (:2856). Room not ready → `{success:false, message, needs_confirm_room}` → card asks a **second** confirm, never auto-sent |
+| Assign room | `bookings.php` · `assign_individual_room` (:556) | `booking_id`, `individual_room_id`, `allow_child_policy_override`?, `child_policy_override_note`? | page `bookings` | `{success,message}`; joined rooms handled inside (~:590–610) |
+| Cancel | `bookings.php` · `update_status` | `id`, `status=cancelled`, `cancellation_reason`, `scope=single\|group` | `cancel_booking` | `cancelRoomBookingSettled()` (`database.php:9685`) / `rh_cancel_booking_group()` (:9969). **No read-only cancel preview exists**: the screen shows only `getCancellationRefundModeLabel()` (:9636). AI preview = that label + paid/owed from `getBookingFolioSummary($id)` (:9271) + group size via `rh_booking_group_ids()` (:9957); no computed refund figure. Card asks single vs whole group like the screen |
+| Check-out | `bookings.php` · `checkout_assess` (:1518) then `checkout` (:1455) | assess `id`; checkout `id` (never `confirm_checkout_with_balance`) | `checkout_guest` | assess → `{success, balance_due, can_override, settlement:{needed,type}}`. AI proposes checkout only when `settlement.needed=false` and `balance_due <= BALANCE_TOLERANCE`; else card = "Open checkout on Bookings" (settlement modal). Mirrors JS `checkoutBooking()` (~:5068) |
+| Quick edit | `bookings.php` · `modify_booking` (:1000) | `id`, any of `guest_name, guest_email, guest_phone, guest_country, check_in_date, check_out_date, number_of_guests, adult_guests, child_guests, special_requests, individual_room_id`, `note` | `edit_booking` **and** `quick_modify_booking` (inline :1004) | refuses closed statuses, child-count change, in-house date change, past check-in (~:1030–1080). Anything else → hand-off to Edit Booking |
+| Extend stay | `bookings.php` · `extend_stay` (:2335) | `booking_id`, `new_checkout` | page `bookings` | checked-in only; `conflicts` on clash |
+| Change checkout date | `bookings.php` · `admin_update_checkout_date` (:2454) | `booking_id`, `new_checkout`, `reason` | `edit_booking` + admin-only check (~:2461) | |
+| Room type change | `bookings.php` · `room_change_options` (:2317 read) / `upgrade_room_type` (:2554) | `booking_id`, `new_room_id`, `pricing`, `reason_code`, `note`, `send_email` | `edit_booking` | preview via `rh_room_change_quote()` (`includes/booking-room-change.php:100`) |
+| Resend email | `bookings.php` · `resend_email` (:192) | `booking_id`, `email_type` (booking_received, booking_confirmed, tentative_confirmed, tentative_converted, booking_cancelled, booking_reminder, invoice), `cc_emails`? | page `bookings` | type/status rules ~:231–290 |
+| Send invoice | `bookings.php` · `send_invoice_email` (:1287) | `booking_id` | page `bookings` | sender result JSON |
+| WhatsApp | `admin/booking-details.php` is the only admin page calling the booking senders (`includes/whatsapp-functions.php`: `sendBookingConfirmedWhatsApp` :711, `sendBookingInvoiceWhatsApp` :825, `sendRoomQuotationWhatsApp` :898) | Phase 4 greps its POST branch | — | if that branch cannot answer JSON → "Open booking" hand-off in v1 |
+| Housekeeping job | `admin/housekeeping.php` · `add_assignment` (:726), `update_assignment` (:879), `mark_started` (:1166), `mark_complete` (:1178) | add: `individual_room_id, assignment_type, priority, due_date, scheduled_time, assigned_to, estimated_duration, notes, status` (recurring fields never sent) | `housekeeping` (page gate :15) | `{success:true,message}` (:875, :1045) |
+| Maintenance job | `admin/room-maintenance.php` · `add_schedule` (:538), `update_schedule` (:741), `mark_started` (:1148), `mark_complete` (:1173) | add: `individual_room_id, title, description, maintenance_type, priority, due_date, start_date, end_date, block_room, linked_booking_id, assigned_to, estimated_duration, notes, status` | `room_maintenance` (:18) | `{success:true,message}` (:737, :942). `block_room=1` takes a room off sale → shown in red on the card |
+| Room status | `admin/individual-rooms.php` · `update_status` (:442) | Phase 4 greps | page perm | clean/dirty/inspecting of one room |
+| Create booking | `admin/create-booking.php` · `isset($_POST['create_booking'])` (:299) | below | page `create_booking` (`permissions.php` ~:337) | redirect only today → JSON branch |
+| (not used) | `admin/booking-details.php` `booking_action` (:81; cases checkin :485, checkout :541, cancel :697) | | | bookings.php is the single replay target for status changes |
+
+**Create booking detail.** CSRF :301; idempotency :306–324 (`idem_normalize_uuid` / `idem_find_existing_booking`
+`includes/idempotency.php:29/45`, per-uuid `GET_LOCK`). Fields read: `guest_name, guest_email, guest_phone,
+guest_country, guest_address, check_in_date, check_out_date, number_of_guests, child_guests, occupancy_type,
+booking_status, room_id, rooms_quantity, room_line_room_id[], room_line_qty[], room_line_occupancy[],
+room_line_guest_name[], individual_room_id, auto_assign_room, special_requests, admin_notes, group_reference,
+send_email, send_quotation, quotation_valid_days, quotation_notes, client_uuid, create_booking`. **AI never
+sends:** `payment_received, amount_collected, payment_method, price_override, room_line_override,
+apply_credit_note_ids, apply_credit_override, apply_credit_override_reason, confirm_overpay`. The JSON branch
+(`($_POST['response'] ?? '') === 'json'`, additive) must cover **four** exits: (1) GET_LOCK busy 409 HTML
+(:310–318) → `{success:false,error:'still_saving'}`; (2) duplicate-uuid redirect (:320–324) →
+`{success:true,booking_id,reference,duplicate:true}`; (3) success redirect (:1369) →
+`{success:true,booking_id:$primary_id,reference:$primary_ref}`; (4) catch (:1371–1377) →
+`{success:false,error:$error}` before the page renders. No other line changes.
+
+### Read sources
+- **Availability:** `checkRoomAvailability($roomId,$ci,$co,$excludeBookingId=null,$childGuests=0,$childRoomsNeeded=1)`
+  `config/database.php:4806` — what booking.php (:458), create-booking (:141, :732) and `api/availability.php`
+  (:128) use. `checkAvailability()` (`includes/booking-functions.php:484`) is an older wrapper — not used.
+  Party fit: `ga_plan($room,$totalGuests,$childGuests)` `includes/guest-allocation.php:456`.
+- **Quote — no single helper exists.** Server price is inline in `create-booking.php:600–660`: occupancy column
+  (single/double/triple; joined-room combo override) → `applyDynamicPricing($pdo,$roomId,$ci,$co,$nights,$price)`
+  (`includes/pricing.php:39`: final_price, rate_plan_id/label, discount_amount) → `× nights` +
+  `rh_child_supplement($childRule,$seatedChildren,$nights,$price)` (rule `rh_child_rule()` `pricing.php:520`) →
+  `rh_stay_totals($amount,'price')` (`pricing.php:169`: net, vat, levy, total_with_vat, rates). `quote_stay`
+  calls the same helpers in the same order (read-only). Test: its total equals a real create-booking POST inside
+  a rolled-back transaction. After each AI booking, `ai-action.php report` compares saved `total_with_vat` to the
+  card and raises an incident on a difference > `BALANCE_TOLERANCE`. `api/availability.php` pricing ignores
+  occupancy/children → not used.
+- **Booking money:** `getBookingFolioSummary($id)` `config/database.php:9271`.
+- **Search:** `admin/api/global-search.php` (GET `q`, `api-init.php`, `{success,q,groups}`; KB at :330) —
+  `search_bookings` reuses its SQL, not HTTP.
+- **KB:** `rh_kb_search($q,$limit=10,$state=null)` `includes/guide-knowledge-base.php:848`,
+  `rh_kb_allowed_guides($state)` :759, tokeniser/stemmer `rh_kb_query_terms` / `rh_kb_stem` (reused for
+  `ai_memory` BM25); `rh_kb_sys_help_for_page($page,$index,$limit)` `includes/guide-system-knowledge.php:390`.
+- **KPIs:** shared `rh_occupancy_pct($sold,$sellable)` `config/database.php:3904`, `rh_adr($roomRevInclVat,
+  $roomsSold)` :3913, `rh_cancellations_between()` :4108; the SQL around them is inline in `admin/reports.php`
+  (~500–700) and `admin/end-of-day-report.php` (~140–230). Analytics tools use the export functions in
+  `api/reports-export.php` (`exportOverviewReport` :138, `exportRevenueReport` :261, `exportBookingsReport` :519,
+  `exportOccupancyReport` :583 …) only if they can return data without streaming CSV; otherwise copy the exact
+  SQL from reports.php with a test that the AI figure equals the screen figure for the same range. Export gate:
+  `reports` OR `accounting` (`api/reports-export.php:23–25`) — `make_report` offers it only to those users.
+- **Reviews / enquiries:** `reviews` table; staff reply via `admin/api/review-responses.php` (perm `reviews` :101)
+  — draft-reply send replays that. Enquiry screens `admin/contact-inquiries.php`, `events-inquiries.php`,
+  `gym-inquiries.php` (Phase 4c greps their reply POST).
+- **Housekeeping board:** `getOccupiedRooms()` / `getCheckoutCleanupRooms()` are page-local in `housekeeping.php`
+  (:132/:192, not includable) → `room_board` runs its own read-only SQL mirroring :132–260.
+
+### Decisions taken in Phase 0 (`ASSUMPTION:`, owner can override)
+1. No edit to `config/database.php` (fail-open module seed); the kill switch is fail-closed in `ai-core.php`.
+2. Risky-confirm "PIN" = the account password (no PIN helper exists).
+3. Cancel preview = active cancellation mode + folio paid/owed, no computed refund figure (same as the screen).
+4. Check-out via the Assistant only when nothing is owed; otherwise hand-off to the settlement modal.
+5. WhatsApp send only if booking-details' branch answers JSON; else "Open booking" hand-off in v1.
+6. Vault purge on logout (one line in `admin/logout.php`) + nightly sweep for expired sessions.
+7. `bookings.php` is the only replay target for booking status changes.
+8. Owner amendments of 2026-10-26 (AI lead owns it alone; continuous train & test + completion guardrail) are
+   in the sections above **Team & gates** and **Continuous train & test**.
+
+**Phase 0: DONE 2026-10-26.** Next: Phase 1 Foundation (ships OFF) by `dept-ai-lead`.
