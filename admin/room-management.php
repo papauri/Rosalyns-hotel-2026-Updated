@@ -710,7 +710,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
         <div class="page-header-row">
             <h2 class="page-title"><i class="fas fa-bed"></i> Manage Hotel Rooms</h2>
             <div style="display:flex; gap:10px; align-items:center;">
-                <span style="font-size:12px; color:#999;"><i class="fas fa-arrows-alt"></i> Drag cards to reorder</span>
+                <span style="font-size:12px; color:#999;"><i class="fas fa-arrows-alt"></i> Drag the grip on a card to reorder (works by touch too)</span>
                 <a class="btn-action" href="individual-rooms.php?combinations=1" style="background:#f5f0e8; color:#3e3930; padding:12px 24px; font-size:14px; border-radius:8px; text-decoration:none; border:1px solid #d3cbc0;" title="Pair adjoining physical rooms into one bookable joined-room unit">
                     <i class="fas fa-link"></i> Joined Rooms
                 </a>
@@ -743,8 +743,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
         <?php if (!empty($rooms)): ?>
             <div class="room-cards-grid" id="roomsGrid">
                 <?php foreach ($rooms as $room): ?>
-                    <div class="room-card" data-id="<?php echo $room['id']; ?>" draggable="true">
-                        <div class="drag-handle"><i class="fas fa-grip-vertical"></i></div>
+                    <div class="room-card" data-id="<?php echo $room['id']; ?>">
+                        <div class="drag-handle" tabindex="0" role="button" title="Drag to reorder (or press the up/down arrow keys)" aria-label="Move <?php echo htmlspecialchars($room['name'], ENT_QUOTES); ?> in the order"><i class="fas fa-grip-vertical"></i></div>
                         <span class="order-badge">#<?php echo $room['display_order']; ?></span>
 
                         <?php if (!empty($room['image_url'])): ?>
@@ -994,7 +994,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             <div class="form-group" style="margin-top:10px;">
                                 <label for="editPictureFiles">Add pictures</label>
                                 <input type="file" id="editPictureFiles" accept="image/jpeg,image/png,image/webp" multiple>
-                                <small class="helper-text">Choose one or more pictures; they upload straight away.</small>
+                                <small class="helper-text">Choose one or more pictures, or drop them anywhere in this Pictures box; they upload straight away. Drag a picture onto another to change the order.</small>
                             </div>
                             <div id="editPicturesMsg" class="rm-pic-msg" aria-live="polite"></div>
                         </div>
@@ -1142,7 +1142,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             <div class="form-group">
                                 <label for="addPictureFiles">Choose pictures</label>
                                 <input type="file" id="addPictureFiles" accept="image/jpeg,image/png,image/webp" multiple>
-                                <small class="helper-text">They upload right after the room is created. The first one becomes the main picture. Most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?> each; JPG, PNG or WEBP.</small>
+                                <small class="helper-text">Choose them, or drop picture files in this box. They upload right after the room is created. The first one becomes the main picture. Most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?> each; JPG, PNG or WEBP.</small>
                             </div>
                             <div id="addPicturesList" class="rm-pic-msg"></div>
                         </div>
@@ -1737,8 +1737,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                 }
                 rmPics.forEach(function(p, i) {
                     var isMain = p.image_url === rmFeaturedUrl;
-                    html += '<div class="rm-pic" data-id="' + Number(p.id) + '" data-i="' + i + '">' +
-                        '<img src="' + escapeHtml(rmPicSrc(p.image_url)) + '" alt="' + escapeHtml(p.title || 'Room picture') + '">' +
+                    html += '<div class="rm-pic" draggable="true" data-id="' + Number(p.id) + '" data-i="' + i + '">' +
+                        '<img draggable="false" src="' + escapeHtml(rmPicSrc(p.image_url)) + '" alt="' + escapeHtml(p.title || 'Room picture') + '">' +
                         (isMain ? '<span class="rm-pic__main"><i class="fas fa-star"></i> Main</span>' : '') +
                         '<div class="rm-pic__bar">' +
                         '<button type="button" data-act="main" title="Make this the main picture"' + (isMain ? ' disabled' : '') + '><i class="fas fa-star"></i></button>' +
@@ -1772,21 +1772,25 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                         });
                     });
                 } else if (act === 'left' || act === 'right') {
-                    var j = act === 'left' ? idx - 1 : idx + 1;
-                    if (j < 0 || j >= rmPics.length) return;
-                    var order = rmPics.slice();
-                    var moved = order.splice(idx, 1)[0];
-                    order.splice(j, 0, moved);
-                    // Renumber 1..n, sending only the pictures whose number changes.
-                    var jobs = [];
-                    order.forEach(function(p, k) { if (Number(p.display_order) !== k + 1) jobs.push({ picture_id: p.id, display_order: k + 1 }); });
-                    rmPics = order.map(function(p, k) { p.display_order = k + 1; return p; });
-                    rmRenderPictures();
-                    jobs.reduce(function(chain, job) {
-                        return chain.then(function() { return rmPicRequest('PUT', 'api/room-pictures.php', job); });
-                    }, Promise.resolve()).then(function() { rmPicMsg('Order saved.'); }).catch(function() { rmPicMsg('Could not save the new order.', true); });
+                    rmMovePicture(idx, act === 'left' ? idx - 1 : idx + 1);
                 }
             });
+
+            /** Move the picture at index `from` to index `to`, show it now and save the new numbers. */
+            function rmMovePicture(from, to) {
+                if (from === to || from < 0 || to < 0 || from >= rmPics.length || to >= rmPics.length) return;
+                var order = rmPics.slice();
+                var moved = order.splice(from, 1)[0];
+                order.splice(to, 0, moved);
+                // Renumber 1..n, sending only the pictures whose number changes.
+                var jobs = [];
+                order.forEach(function(p, k) { if (Number(p.display_order) !== k + 1) jobs.push({ picture_id: p.id, display_order: k + 1 }); });
+                rmPics = order.map(function(p, k) { p.display_order = k + 1; return p; });
+                rmRenderPictures();
+                jobs.reduce(function(chain, job) {
+                    return chain.then(function() { return rmPicRequest('PUT', 'api/room-pictures.php', job); });
+                }, Promise.resolve()).then(function() { rmPicMsg('Order saved.'); }).catch(function() { rmPicMsg('Could not save the new order.', true); });
+            }
 
             /** Upload files one after another to a room. Resolves {done, failed:[messages], firstUrl}. */
             function rmUploadFiles(roomId, files, onProgress) {
@@ -1817,14 +1821,20 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
             }
 
             document.getElementById('editPictureFiles').addEventListener('change', function() {
-                var input = this;
-                if (!input.files.length) return;
-                var problem = rmCheckFiles(input);
-                if (problem) { rmPicMsg(problem, true); input.value = ''; return; }
+                rmEditUpload(this.files, this);
+            });
+
+            /** Upload chosen or dropped files to the room open in the edit window (input = the file box to clear, or null). */
+            function rmEditUpload(fileList, input) {
+                var files = Array.prototype.slice.call(fileList);
+                if (!files.length) return;
+                var problem = rmCheckFiles({ files: files });
+                if (problem) { rmPicMsg(problem, true); if (input) input.value = ''; return; }
                 var roomId = document.getElementById('editId').value;
+                if (!roomId) return;
                 var hadMain = rmFeaturedUrl !== '';
-                rmUploadFiles(roomId, input.files, function(n, total) { rmPicMsg('Uploading picture ' + n + ' of ' + total + '...'); }).then(function(out) {
-                    input.value = '';
+                rmUploadFiles(roomId, files, function(n, total) { rmPicMsg('Uploading picture ' + n + ' of ' + total + '...'); }).then(function(out) {
+                    if (input) input.value = '';
                     var after = function() {
                         rmPicMsg(out.done + ' picture' + (out.done === 1 ? '' : 's') + ' added.' + (out.failed.length ? ' Not added: ' + out.failed.join('; ') : ''), out.failed.length > 0);
                         rmLoadPictures();
@@ -1844,7 +1854,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                         after();
                     }
                 });
-            });
+            }
 
             // Add room: the pictures chosen in the box upload once the room exists (needs its id).
             function rmAfterAdd(res, form) {
@@ -1878,6 +1888,100 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                     }
                 });
             }
+
+            // ===== DRAG AND DROP (pictures) =====
+            // Drag a thumbnail onto another to move it (the earlier/later buttons still work for touch and keyboard).
+            // Drop picture files from the computer onto the Pictures area to upload them.
+            var rmPicDragFrom = null;
+            function rmHasFiles(e) {
+                var t = e.dataTransfer && e.dataTransfer.types;
+                return !!t && Array.prototype.indexOf.call(t, 'Files') >= 0;
+            }
+            function rmClearPicMarks() {
+                document.querySelectorAll('#editPicturesGrid .rm-pic').forEach(function(c) { c.classList.remove('rm-pic--over', 'rm-pic--dragging'); });
+            }
+            (function() {
+                var pg = document.getElementById('editPicturesGrid');
+                pg.addEventListener('dragstart', function(e) {
+                    var card = e.target.closest ? e.target.closest('.rm-pic[data-id]') : null;
+                    if (!card) { e.preventDefault(); return; }
+                    rmPicDragFrom = Number(card.dataset.i);
+                    card.classList.add('rm-pic--dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', 'rm-picture-' + card.dataset.id);
+                });
+                pg.addEventListener('dragover', function(e) {
+                    if (rmPicDragFrom === null) return; // a file drag is handled by the whole Pictures area
+                    var card = e.target.closest('.rm-pic[data-id]');
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    document.querySelectorAll('#editPicturesGrid .rm-pic--over').forEach(function(c) { c.classList.remove('rm-pic--over'); });
+                    if (card && Number(card.dataset.i) !== rmPicDragFrom) card.classList.add('rm-pic--over');
+                });
+                pg.addEventListener('drop', function(e) {
+                    if (rmPicDragFrom === null) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var card = e.target.closest('.rm-pic[data-id]');
+                    var from = rmPicDragFrom;
+                    rmPicDragFrom = null;
+                    rmClearPicMarks();
+                    if (card) rmMovePicture(from, Number(card.dataset.i));
+                });
+                pg.addEventListener('dragend', function() { rmPicDragFrom = null; rmClearPicMarks(); });
+
+                var sec = document.getElementById('editPicturesSection');
+                sec.addEventListener('dragover', function(e) {
+                    if (!rmHasFiles(e)) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                    sec.classList.add('rm-drop-on');
+                });
+                sec.addEventListener('dragleave', function(e) {
+                    if (!e.relatedTarget || !sec.contains(e.relatedTarget)) sec.classList.remove('rm-drop-on');
+                });
+                sec.addEventListener('drop', function(e) {
+                    if (!rmHasFiles(e)) return;
+                    e.preventDefault();
+                    sec.classList.remove('rm-drop-on');
+                    rmEditUpload(e.dataTransfer.files, null);
+                });
+
+                // Add room: drop pictures onto the Pictures box; they join the ones already chosen.
+                var addInput = document.getElementById('addPictureFiles');
+                var addSec = addInput.closest('.form-section');
+                addSec.addEventListener('dragover', function(e) {
+                    if (!rmHasFiles(e)) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                    addSec.classList.add('rm-drop-on');
+                });
+                addSec.addEventListener('dragleave', function(e) {
+                    if (!e.relatedTarget || !addSec.contains(e.relatedTarget)) addSec.classList.remove('rm-drop-on');
+                });
+                addSec.addEventListener('drop', function(e) {
+                    if (!rmHasFiles(e)) return;
+                    e.preventDefault();
+                    addSec.classList.remove('rm-drop-on');
+                    var list = document.getElementById('addPicturesList');
+                    var dropped = Array.prototype.slice.call(e.dataTransfer.files);
+                    var problem = rmCheckFiles({ files: dropped });
+                    if (problem) { list.textContent = problem; list.className = 'rm-pic-msg is-error'; return; }
+                    var dt = new DataTransfer();
+                    Array.prototype.slice.call(addInput.files).concat(dropped).forEach(function(f) { dt.items.add(f); });
+                    addInput.files = dt.files;
+                    list.className = 'rm-pic-msg';
+                    list.textContent = dt.files.length + ' picture' + (dt.files.length === 1 ? '' : 's') + ' ready; they upload when you add the room.';
+                });
+
+                // A file dropped anywhere else must not make the browser open it and leave this screen.
+                if (!window.__rmNoFileNav) {
+                    window.__rmNoFileNav = true;
+                    ['dragover', 'drop'].forEach(function(ev) {
+                        window.addEventListener(ev, function(e) { if (rmHasFiles(e)) e.preventDefault(); });
+                    });
+                }
+            })();
 
             // ===== FORM CHECKS + 2-DECIMAL MONEY (shared helpers in js/admin-form-guard.js) =====
             // The server checks the same rules again when saving; these messages just appear sooner.
@@ -2009,78 +2113,94 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                     });
             }
 
-            // ===== DRAG AND DROP =====
-            var dragSrcEl = null;
+            // ===== DRAG AND DROP (room cards) =====
+            // Pointer events on the grip, so it works with a mouse, a finger or a pen (HTML5 drag does not fire
+            // on touch). The arrow keys also move a focused grip. The new order saves when the card is let go.
+            var rmDrag = null;
             var grid = document.getElementById('roomsGrid');
 
+            function rmCardOrder() {
+                return Array.from(document.querySelectorAll('#roomsGrid .room-card')).map(function(c) {
+                    return c.dataset.id;
+                });
+            }
+
+            function rmShowOrder() {
+                document.querySelectorAll('#roomsGrid .room-card').forEach(function(card, idx) {
+                    var badge = card.querySelector('.order-badge');
+                    if (badge) badge.textContent = '#' + idx;
+                });
+            }
+
             if (grid) {
-                grid.addEventListener('dragstart', function(e) {
-                    if (!e.target.closest('.drag-handle')) {
-                        e.preventDefault();
-                        return;
-                    }
-                    var card = e.target.closest('.room-card');
+                grid.addEventListener('pointerdown', function(e) {
+                    var handle = e.target.closest('.drag-handle');
+                    if (!handle || (e.pointerType === 'mouse' && e.button !== 0)) return;
+                    var card = handle.closest('.room-card');
                     if (!card) return;
-                    dragSrcEl = card;
+                    e.preventDefault();
+                    rmDrag = { card: card, handle: handle, id: e.pointerId, before: rmCardOrder().join(',') };
                     card.classList.add('dragging');
-                    e.dataTransfer.effectAllowed = 'move';
-                    e.dataTransfer.setData('text/plain', card.dataset.id);
+                    document.body.classList.add('rm-dragging');
+                    // listen on the document: moving the card in the grid would drop a pointer capture on the grip
+                    document.addEventListener('pointermove', rmDragMove, { passive: false });
+                    document.addEventListener('pointerup', rmDragEnd);
+                    document.addEventListener('pointercancel', rmDragEnd);
                 });
 
-                grid.addEventListener('dragover', function(e) {
+                var rmDragMove = function(e) {
+                    if (!rmDrag || e.pointerId !== rmDrag.id) return;
                     e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                    var card = e.target.closest('.room-card');
-                    if (card && card !== dragSrcEl) {
-                        grid.querySelectorAll('.room-card').forEach(function(c) {
-                            c.classList.remove('drag-over');
-                        });
-                        card.classList.add('drag-over');
-                    }
-                });
-
-                grid.addEventListener('dragleave', function(e) {
-                    var card = e.target.closest('.room-card');
-                    if (card) card.classList.remove('drag-over');
-                });
-
-                grid.addEventListener('drop', function(e) {
-                    e.preventDefault();
-                    var targetCard = e.target.closest('.room-card');
-                    if (!targetCard || !dragSrcEl || targetCard === dragSrcEl) return;
-
+                    // scroll the page when the pointer nears the top or bottom edge
+                    if (e.clientY < 70) window.scrollBy(0, -18);
+                    else if (e.clientY > window.innerHeight - 70) window.scrollBy(0, 18);
+                    var under = document.elementFromPoint(e.clientX, e.clientY);
+                    var target = under ? under.closest('.room-card') : null;
+                    if (!target || target === rmDrag.card || target.parentNode !== grid) return;
                     var cards = Array.from(grid.querySelectorAll('.room-card'));
-                    var srcIdx = cards.indexOf(dragSrcEl);
-                    var targetIdx = cards.indexOf(targetCard);
+                    if (cards.indexOf(rmDrag.card) < cards.indexOf(target)) grid.insertBefore(rmDrag.card, target.nextSibling);
+                    else grid.insertBefore(rmDrag.card, target);
+                    rmShowOrder();
+                };
 
-                    if (srcIdx < targetIdx) {
-                        targetCard.parentNode.insertBefore(dragSrcEl, targetCard.nextSibling);
-                    } else {
-                        targetCard.parentNode.insertBefore(dragSrcEl, targetCard);
-                    }
-
+                var rmDragEnd = function(e) {
+                    if (!rmDrag || e.pointerId !== rmDrag.id) return;
+                    var d = rmDrag;
+                    rmDrag = null;
+                    d.card.classList.remove('dragging');
+                    document.body.classList.remove('rm-dragging');
+                    document.removeEventListener('pointermove', rmDragMove);
+                    document.removeEventListener('pointerup', rmDragEnd);
+                    document.removeEventListener('pointercancel', rmDragEnd);
+                    if (e.type === 'pointercancel' || rmCardOrder().join(',') === d.before) { if (e.type === 'pointercancel') refreshRoomsGrid(); return; }
                     saveOrder();
-                });
+                };
 
-                grid.addEventListener('dragend', function() {
-                    grid.querySelectorAll('.room-card').forEach(function(c) {
-                        c.classList.remove('dragging', 'drag-over');
-                    });
-                    dragSrcEl = null;
+                // Keyboard: up/left moves a card earlier, down/right later.
+                grid.addEventListener('keydown', function(e) {
+                    var handle = e.target.closest ? e.target.closest('.drag-handle') : null;
+                    if (!handle) return;
+                    var dir = (e.key === 'ArrowUp' || e.key === 'ArrowLeft') ? -1 : ((e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : 0);
+                    if (!dir) return;
+                    e.preventDefault();
+                    var card = handle.closest('.room-card');
+                    var other = dir < 0 ? card.previousElementSibling : card.nextElementSibling;
+                    if (!other) return;
+                    if (dir < 0) grid.insertBefore(card, other);
+                    else grid.insertBefore(card, other.nextSibling);
+                    handle.focus();
+                    rmShowOrder();
+                    saveOrder();
                 });
             }
 
             function saveOrder() {
-                var cards = document.querySelectorAll('.room-card');
-                var order = Array.from(cards).map(function(c) {
-                    return c.dataset.id;
-                });
-
+                var order = rmCardOrder();
                 var fd = new FormData();
                 fd.append('action', 'update_order');
                 fd.append('order', JSON.stringify(order));
 
-                fetch(window.location.href, {
+                fetch(window.location.pathname, {
                         method: 'POST',
                         body: fd,
                         credentials: 'same-origin',
@@ -2092,15 +2212,12 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                         return r.json();
                     })
                     .then(function(data) {
-                        if (data.success) {
-                            cards.forEach(function(card, idx) {
-                                var badge = card.querySelector('.order-badge');
-                                if (badge) badge.textContent = '#' + idx;
-                            });
-                        }
+                        if (data.success) rmShowOrder();
+                        else { alert(data.message || 'The new order could not be saved.'); refreshRoomsGrid(); }
                     })
-                    .catch(function(err) {
-                        console.error('Error saving order:', err);
+                    .catch(function() {
+                        alert('The new order could not be saved. Please try again.');
+                        refreshRoomsGrid();
                     });
             }
 
@@ -2138,7 +2255,17 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                     area.classList.remove('dragover');
                     var form = area.closest('form');
                     var input = form ? form.querySelector('input[type="file"]') : null;
-                    if (input && e.dataTransfer.files.length) input.files = e.dataTransfer.files;
+                    var f = e.dataTransfer.files;
+                    if (!input || !f.length) return;
+                    var label = area.querySelector('p');
+                    var bad = '';
+                    if (RM_TYPES.indexOf(f[0].type) < 0) bad = f[0].name + ': only JPG, PNG or WEBP pictures are allowed.';
+                    else if (f[0].size > RM_MAX_BYTES) bad = f[0].name + ' is too large. The most allowed is ' + (RM_MAX_BYTES / 1048576).toFixed(0) + ' MB.';
+                    if (bad) { input.value = ''; if (label) { label.textContent = bad; label.style.color = '#a12a2a'; } return; }
+                    var one = new DataTransfer();
+                    one.items.add(f[0]);
+                    input.files = one.files;
+                    if (label) { label.textContent = f[0].name + ' ready - press the button to upload'; label.style.color = '#3e3930'; }
                 });
             });
 

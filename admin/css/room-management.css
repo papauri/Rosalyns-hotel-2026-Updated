@@ -477,3 +477,14 @@
 .rm-pic-empty { grid-column: 1 / -1; padding: 16px; text-align: center; color: #6b6558; border: 1px dashed #d3cbc0; border-radius: 8px; }
 .rm-pic-msg { font-size: 13px; margin-top: 6px; color: #3e3930; }
 .rm-pic-msg.is-error { color: #a12a2a; }
+
+/* Drag and drop: room cards (grip), picture thumbnails, file drop areas */
+.drag-handle { width: 40px; height: 40px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.drag-handle:focus-visible { outline: 3px solid var(--gold, #7E684B); outline-offset: 2px; }
+.room-card.dragging { opacity: .85; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.28); outline: 2px dashed var(--gold, #7E684B); transform: none; }
+body.rm-dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.rm-pic[draggable="true"] { cursor: grab; }
+.rm-pic.rm-pic--dragging { opacity: .45; }
+.rm-pic.rm-pic--over { border-color: var(--gold, #7E684B); box-shadow: 0 0 0 3px rgba(126, 104, 75, .35); }
+.form-section.rm-drop-on { outline: 2px dashed var(--gold, #7E684B); outline-offset: 2px; background: #faf6ee; }
+.upload-area.dragover { border-color: var(--gold, #7E684B); background: #faf6ee; }
