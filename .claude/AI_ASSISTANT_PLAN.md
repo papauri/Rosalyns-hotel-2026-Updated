@@ -122,6 +122,23 @@ How every later phase applies it (`dept-ai-lead` designs to this; hard limits ab
   compact JSON (ids/tokens, no prose), only the tools the user's permissions allow; (5) history summarised,
   never resent whole; (6) per-route effort: low for chat/lookups, high/xhigh only for analysis and planning.
   Usage page shows cost per answer and the local-hit rate.
+- **A swarm of internal leads, "the brains behind the brains" of the shift** (owner, same day: "a swarm of
+  different leads within it that give us the full scoop / full tea of details in our hotel... super
+  intelligent and fully autonomous... depending on who you are logged in as"). Phase 3's specialists mirror
+  the hotel's departments: Front Desk & Rooms, Housekeeping & Maintenance, Restaurant & Bar, Money
+  (accounting reads), Stock (reads), Events/Conference/Gym, Revenue & Sales, Guest voice (reviews, enquiries,
+  concierge), System Guide. Each sees only what the logged-in user may see. They watch on their own (read
+  side is fully autonomous: scans, spots, explains, ranks) and bring the user a **role-shaped "full tea"**:
+  - Owner/admin → *where am I losing money*: unpaid/overdue balances, discounts/comps/overrides, voids and
+    refunds, wastage and stock variance, budget overspend, unsold nights vs pace, cancellations, cost of
+    no-shows — each with the amount, the cause and who/what drove it.
+  - Manager → shift health across departments and what needs a decision now.
+  - Receptionist → *where am I losing time / what did I miss*: due-outs not checked out, arrivals not checked
+    in or with no room assigned, balances to collect before departure, unconfirmed/tentative bookings expiring,
+    unanswered enquiries and emails, rooms not ready for the next arrival.
+  - Housekeeping / maintenance / restaurant staff → their own queue, blockers and slow spots.
+  Every point carries a one-tap fix (action card or deep link). "Fully autonomous" applies to watching,
+  analysing and preparing; anything that changes data is still one-tap Confirm (hard limits unchanged).
 - **High reasoning through learning, not bigger prompts.** The learning loop turns confirmed outcomes and
   corrections into compact lessons/playbooks that make later answers both smarter and cheaper (a learned
   playbook replaces a long reasoning call). Eval set tracks quality *and* tokens per answer; a change that
@@ -382,6 +399,10 @@ the Primary model. Specialists = a prompt + a tool subset; all share the same pe
 Caps per user turn: ≤3 specialists, ≤8 tool rounds, ≤N tokens (setting); every message row records agent,
 model, tokens and cost into `ai_messages` + `ai_usage_daily`. Optional "Morning briefing" prompt (pref) =
 Lead + Revenue + Front Desk summary on first open of the day.
+**Superseded in scope by "Owner direction" (top of plan):** specialists follow the department list there and
+the briefing is role-shaped ("full tea": money leaks for owner, time leaks / missed check-outs for reception).
+Briefing data is gathered by deterministic read tools first (zero tokens) and only the ranked findings go to
+the model to explain.
 
 ## Phase 4 — Actions with confirm (ship; accounting lead reviews cancel/checkout)
 
