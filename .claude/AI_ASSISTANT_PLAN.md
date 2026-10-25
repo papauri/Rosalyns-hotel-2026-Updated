@@ -139,6 +139,16 @@ How every later phase applies it (`dept-ai-lead` designs to this; hard limits ab
   - Housekeeping / maintenance / restaurant staff → their own queue, blockers and slow spots.
   Every point carries a one-tap fix (action card or deep link). "Fully autonomous" applies to watching,
   analysing and preparing; anything that changes data is still one-tap Confirm (hard limits unchanged).
+- **Knows exactly who it is talking to** (owner, same day). Each turn carries the user's role, permission
+  keys and enabled modules; the tool list is filtered to them, and every handler re-checks. When asked for
+  something the person may not see, it **declines politely in one line** ("That's outside what your account
+  can see — a manager or admin can help with that"), never hints at the figure, never leaks it through a
+  total/aggregate/comparison, and never suggests a workaround. It can always tell the user what they *can*
+  do (`my_access`).
+- **Guides & KB expert** (owner, same day). Knows every staff guide and the KB: answers "how do I…", and
+  **summarises a whole guide or section on request** (`how_to` + `summarise_guide`), limited to guides the
+  user may see (`rh_kb_allowed_guides()` + module/permission of the guide's screen), with the guide link.
+  Summaries come from the guide text only (no invented steps).
 - **High reasoning through learning, not bigger prompts.** The learning loop turns confirmed outcomes and
   corrections into compact lessons/playbooks that make later answers both smarter and cheaper (a learned
   playbook replaces a long reasoning call). Eval set tracks quality *and* tokens per answer; a change that
