@@ -715,10 +715,8 @@ $fb_share_attrs       = facebookShareButtonAttrs('Post to Facebook'); // title, 
                             </div>
 
                             <div class="event-card-body">
-                                <div class="event-card-title"><?php echo htmlspecialchars($event['title']); ?></div>
-                                <?php if (!empty($event['description'])): ?>
-                                    <div class="event-card-desc"><?php echo htmlspecialchars(substr($event['description'], 0, 100)); ?></div>
-                                <?php endif; ?>
+                                <div class="event-card-title" title="<?php echo htmlspecialchars($event['title']); ?>"><?php echo htmlspecialchars($event['title']); ?></div>
+                                <div class="event-card-desc" title="<?php echo htmlspecialchars((string)($event['description'] ?? '')); ?>"><?php echo htmlspecialchars(substr((string)($event['description'] ?? ''), 0, 100)); ?></div>
 
                                 <div class="event-card-info">
                                     <div class="event-card-info-item">

@@ -282,16 +282,28 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         .deal-card  { background:#fff; border:1.5px solid #e5e7eb; border-radius:14px; padding:18px 20px; position:relative; transition:box-shadow .2s; }
         .deal-card:hover { box-shadow:0 4px 18px rgba(0,0,0,.09); }
         .deal-card.is-inactive { opacity:.5; }
-        .deal-card.is-live  { border-color:#10b981; box-shadow:0 0 0 2px rgba(16,185,129,.2); }
+        .deal-card.is-live  { border-color:#10b981; }
         .deal-card.exclusive-card { border-style:dashed; }
 
         .dc-badge { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; letter-spacing:.04em; padding:3px 10px; border-radius:20px; color:#fff; margin-bottom:12px; text-transform:uppercase; }
-        .dc-live-dot { width:7px; height:7px; border-radius:50%; background:#10b981; display:inline-block; animation:livePulse 1.4s ease-in-out infinite; margin-left:4px; }
-        @keyframes livePulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.8)} }
+        .dc-live-dot { width:7px; height:7px; border-radius:50%; background:#10b981; display:inline-block; margin-left:4px; }
         .dc-excl-tag { font-size:9px; background:#fef3c7; color:#92400e; border-radius:4px; padding:2px 5px; font-weight:700; margin-left:4px; vertical-align:middle; }
 
         .dc-name  { font-size:17px; font-weight:600; color:#1f2937; margin-bottom:4px; }
-        .dc-desc  { font-size:13px; color:#6b7280; margin-bottom:10px; min-height:0; }
+        .dc-desc  { font-size:13px; color:#6b7280; margin-bottom:10px; line-height:1.4; min-height:2.8em; display:-webkit-box; -webkit-line-clamp:2; line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+        .dc-name  { line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .dc-actions .dc-btn { min-height:36px; display:inline-flex; align-items:center; justify-content:center; }
+        .deal-card { display:flex; flex-direction:column; }
+        .dc-actions { margin-top:auto; }
+        .dc-detail { padding-bottom:0; }
+        /* Uniform card rows (owner 2026-10-26): badge, name, description, details, actions line up across a grid row. */
+        @supports (grid-template-rows: subgrid) {
+            .deals-grid { row-gap:0; }
+            .deal-card { display:grid; grid-row:span 5; grid-template-rows:subgrid; margin-bottom:16px; }
+            .dc-actions { align-self:end; margin-top:0; }
+            .dc-detail { align-self:start; }
+        }
+        @media (max-width:600px) { .dc-desc { min-height:0; } }
         .dc-detail { font-size:12px; color:#374151; line-height:1.75; }
         .dc-detail i { width:14px; color:#9ca3af; }
         .dc-actions { display:flex; gap:8px; margin-top:14px; padding-top:12px; border-top:1px solid #f3f4f6; }
@@ -465,8 +477,8 @@ $DAY_NAMES = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
                 </span>
                 <?php if ($excl): ?><span class="dc-excl-tag">EXCLUSIVE</span><?php endif; ?>
             </div>
-            <div class="dc-name"><?php echo htmlspecialchars($d['name']); ?></div>
-            <?php if ($d['description']): ?><div class="dc-desc"><?php echo htmlspecialchars($d['description']); ?></div><?php endif; ?>
+            <div class="dc-name" title="<?php echo htmlspecialchars($d['name']); ?>"><?php echo htmlspecialchars($d['name']); ?></div>
+            <div class="dc-desc" title="<?php echo htmlspecialchars((string)$d['description']); ?>"><?php echo htmlspecialchars((string)$d['description']); ?></div>
             <div class="dc-detail"><?php echo implode('<br>', $det); ?></div>
             <div class="dc-actions">
                 <button class="dc-btn edit" onclick="openDealModal(<?php echo $d['id']; ?>)"><i class="fas fa-edit"></i> Edit</button>

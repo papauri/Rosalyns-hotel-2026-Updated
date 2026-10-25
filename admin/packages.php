@@ -250,7 +250,7 @@ $priceTypeLabels = [
             width: 52px;
             height: 52px;
             border-radius: 12px;
-            background: linear-gradient(135deg, #f3ece4 0%, #ede4d8 100%);
+            background: #f3ece4;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -260,7 +260,7 @@ $priceTypeLabels = [
         }
 
         .pkg-card__icon--complimentary {
-            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            background: #d4edda;
             color: #1f7a42;
         }
 
@@ -285,6 +285,11 @@ $priceTypeLabels = [
             margin: 0 0 8px;
         }
 
+        .pkg-card { min-height: 92px; }
+        .pkg-card__title > :first-child { min-width: 0; }
+        .pkg-card__meta { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
+        .pkg-card__actions form { margin: 0; }
+        .pkg-card__actions .btn { min-width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
         .pkg-card__actions {
             display: flex;
             gap: 8px;
@@ -681,7 +686,7 @@ $priceTypeLabels = [
                                     <?php if ($pkg['is_featured']): ?> <span class="featured-badge"><i class="fas fa-star"></i> Featured</span><?php endif; ?>
                                     <?php if ((float)$pkg['price_amount'] === 0.0): ?><span class="complimentary-badge"><i class="fas fa-gift"></i> Complimentary</span><?php endif; ?>
                                 </div>
-                                <div class="pkg-card__meta">
+                                <div class="pkg-card__meta" title="<?php echo htmlspecialchars(trim(($pkg['short_description'] ?? '') . ' ' . $scopeText)); ?>">
                                     <?php if ((float)$pkg['price_amount'] === 0.0): ?>
                                         <strong style="color:#1f7a42;">FREE</strong> &middot; Complimentary add-on
                                     <?php else: ?>
