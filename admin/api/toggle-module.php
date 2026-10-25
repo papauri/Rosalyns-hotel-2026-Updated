@@ -22,7 +22,8 @@ if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
 requireApiPermission('module_settings');
 
 $allowed = ['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms',
-            'station_kds', 'station_bds', 'station_cds', 'station_room_service'];
+            'station_kds', 'station_bds', 'station_cds', 'station_room_service',
+            'ai_assistant']; // Assistant: on here alone shows nothing - rh_ai_enabled() also needs Assistant Settings' master switch
 $locked  = ['finance']; // These modules cannot be disabled — always required
 
 // Guest-facing page flags: not rows in enabled_modules, they ride site settings.
@@ -71,7 +72,7 @@ try {
 
     if ($stmt->rowCount() === 0) {
         $stmt = $pdo->prepare("INSERT INTO enabled_modules (module_key, module_name, is_enabled) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_enabled = ?");
-        $stmt->execute([$module_key, $module_key, $is_enabled, $is_enabled]);
+        $stmt->execute([$module_key, $module_key === 'ai_assistant' ? 'Assistant' : $module_key, $is_enabled, $is_enabled]);
     }
 
     if (function_exists('rh_log_event')) {

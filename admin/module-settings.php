@@ -610,6 +610,43 @@ if ($active_preset_key !== null && !$active_preset_exact) {
             </div>
             <?php endforeach; ?>
         </div>
+
+        <?php
+        // Assistant (staff chat helper). Its own section, not part of the business presets. Off when the row
+        // is missing (never the "?? true" default above): includes/ai/ai-core.php rh_ai_enabled() is fail-closed
+        // and also needs the master switch in Assistant Settings, so turning this on alone shows nobody anything.
+        $ai_mod_on = (bool)($module_state['ai_assistant'] ?? false);
+        ?>
+        <div class="ms-section-title">Staff Tools</div>
+        <div class="ms-grid">
+            <div class="ms-card <?php echo $ai_mod_on ? '' : 'is-disabled'; ?>" id="ms-card-ai_assistant">
+                <div class="ms-card-header">
+                    <div class="ms-card-icon" style="background:#f5f2eb;color:#7E684B;">
+                        <i class="fas fa-comments"></i>
+                    </div>
+                    <div class="ms-card-title-block">
+                        <div class="ms-card-title">Assistant</div>
+                        <p class="ms-card-desc">Staff chat helper in the admin portal. It only appears when this is on <strong>and</strong> it is switched on in Assistant Settings with a provider set up. Switching off hides it at once and keeps chats and keys.</p>
+                    </div>
+                </div>
+                <div class="ms-card-footer">
+                    <span class="ms-status-label <?php echo $ai_mod_on ? 'enabled' : 'disabled'; ?>" id="ms-label-ai_assistant">
+                        <i class="fas fa-<?php echo $ai_mod_on ? 'check-circle' : 'times-circle'; ?>"></i>
+                        <?php echo $ai_mod_on ? 'Enabled' : 'Disabled'; ?>
+                    </span>
+                    <label class="ms-toggle" aria-label="Toggle Assistant">
+                        <input type="checkbox"
+                               id="ms-toggle-ai_assistant"
+                               data-module="ai_assistant"
+                               data-has-warn="0"
+                               data-warn-text=""
+                               data-label="Assistant"
+                               <?php echo $ai_mod_on ? 'checked' : ''; ?>>
+                        <span class="ms-toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Confirmation dialog for modules with warnings -->

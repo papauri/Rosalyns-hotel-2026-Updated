@@ -1,0 +1,1085 @@
+<?php
+
+/**
+ * Assistant tools (.claude/AI_ASSISTANT_PLAN.md Phase 2 + "Owner direction").
+ *
+ * Registry entries: name => {description, schema, perm (any-of; [] = anyone who may use the
+ * Assistant), module (any-of; [] = none), gate (optional extra check), cache (seconds), handler}.
+ * Phase 2 has READ tools only - there is no tool that writes anything, and no raw SQL, file, shell,
+ * settings, users, permissions or backup tool (hard limits; a test checks the list).
+ *
+ * Every call re-checks the person's permission and the module state (never trusts the list the
+ * model was given), turns privacy tokens in the arguments back into real values, validates the
+ * arguments against the schema, runs prepared statements only, caps rows and size, and passes the
+ * result through the vault so no real name/email/phone/reference leaves the hotel. Figures come
+ * from the same helpers / SQL the screens use (§Map "Read sources").
+ */
+
+require_once __DIR__ . '/ai-core.php';
+require_once __DIR__ . '/ai-vault.php';
+
+if (!defined('RH_AI_TOOL_ROWS')) {
+    define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
+}
+if (!defined('RH_AI_TOOL_BYTES')) {
+    define('RH_AI_TOOL_BYTES', 7000);   // size cap of one tool result sent to the model
+}
+
+function rh_ai_tool_registry(): array
+{
+    $date = ['type' => 'string', 'description' => 'Date as YYYY-MM-DD', 'format' => 'date'];
+    return [
+        'search_bookings' => [
+            'description' => 'Find room bookings by guest name, email, phone or booking reference (tokens like [GUEST_1] are fine). Returns up to 10 matches.',
+            'schema' => ['properties' => ['query' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Name, email, phone or reference'], 'status' => ['type' => 'string', 'enum' => ['pending', 'confirmed', 'tentative', 'checked-in', 'checked-out', 'cancelled', 'no-show']]], 'required' => ['query']],
+            'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_search_bookings',
+        ],
+        'get_booking' => [
+            'description' => 'One booking in detail: guest, room, dates, party, status, total, paid and balance (same figures as the booking screen). Give booking_id or reference.',
+            'schema' => ['properties' => ['booking_id' => ['type' => 'integer', 'minimum' => 1], 'reference' => ['type' => 'string', 'maxLength' => 40]]],
+            'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_get_booking',
+        ],
+        'check_availability' => [
+            'description' => 'Which room types are free for a stay (the same availability check the booking screens use, joined rooms included) and how many rooms of each remain.',
+            'schema' => ['properties' => ['check_in' => $date, 'check_out' => $date, 'adults' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40], 'children' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 20], 'room_type' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Optional room type name or id']], 'required' => ['check_in', 'check_out']],
+            'perm' => ['bookings', 'create_booking'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_check_availability',
+        ],
+        'quote_stay' => [
+            'description' => 'Price a stay exactly as Create Booking would (occupancy price, joined-room rate, rate plans, child charge, VAT and levy). Read only - nothing is booked.',
+            'schema' => ['properties' => ['room_type' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Room type name or id'], 'check_in' => $date, 'check_out' => $date, 'adults' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40], 'children' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 20], 'rooms' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 10], 'occupancy' => ['type' => 'string', 'enum' => ['single', 'double', 'triple']]], 'required' => ['room_type', 'check_in', 'check_out', 'adults']],
+            'perm' => ['create_booking'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_quote_stay',
+        ],
+        'arrivals_departures' => [
+            'description' => 'Arrivals and departures for a day (default today), as on the Dashboard: who is still to arrive, who has no room assigned, who is due out and what they still owe.',
+            'schema' => ['properties' => ['date' => $date]],
+            'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_arrivals_departures',
+        ],
+        'in_house' => [
+            'description' => 'Guests checked in right now, with room, departure date and balance still owed.',
+            'schema' => ['properties' => (object)[]],
+            'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_in_house',
+        ],
+        'room_board' => [
+            'description' => 'Every room with its status (available, occupied, cleaning, inspection, maintenance, out of order), housekeeping state, who is in it and whether someone arrives today.',
+            'schema' => ['properties' => ['status' => ['type' => 'string', 'enum' => ['available', 'occupied', 'cleaning', 'inspection', 'maintenance', 'out_of_order']]]],
+            'perm' => ['room_dashboard', 'housekeeping', 'individual_rooms'], 'module' => ['bookings', 'housekeeping'], 'cache' => 45, 'handler' => 'rh_ai_t_room_board',
+        ],
+        'guest_history' => [
+            'description' => 'Past and future stays of one guest (by name, email or phone; tokens are fine): how many stays and nights, first and last visit.',
+            'schema' => ['properties' => ['guest' => ['type' => 'string', 'maxLength' => 120]], 'required' => ['guest']],
+            'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 120, 'handler' => 'rh_ai_t_guest_history',
+        ],
+        'rate_plans_and_deals' => [
+            'description' => 'Active rate plans (seasonal, length-of-stay, early-bird adjustments) and, for till users, active POS deals. Read only.',
+            'schema' => ['properties' => (object)[]],
+            'perm' => ['rooms', 'create_booking', 'bookings'], 'module' => ['bookings'], 'cache' => 300, 'handler' => 'rh_ai_t_rate_plans_and_deals',
+        ],
+        'balances_due' => [
+            'description' => 'Money still owed on room bookings (folio balance, the same figure as the booking screen), largest first, with the total.',
+            'schema' => ['properties' => (object)[]],
+            'perm' => ['accounting', 'payments'], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_balances_due',
+        ],
+        'how_to' => [
+            'description' => 'Search the staff guides and knowledge base for how to do something in this system. Returns matching sections with links.',
+            'schema' => ['properties' => ['question' => ['type' => 'string', 'maxLength' => 200]], 'required' => ['question']],
+            'perm' => [], 'module' => [], 'cache' => 600, 'handler' => 'rh_ai_t_how_to',
+        ],
+        'summarise_guide' => [
+            'description' => 'The text of one staff guide (or one section of it) so you can summarise it. Summarise ONLY from the text returned; never add steps.',
+            'schema' => ['properties' => ['guide' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Guide file or title, e.g. "housekeeping" or "07-reception-bookings.html"'], 'section' => ['type' => 'string', 'maxLength' => 80]], 'required' => ['guide']],
+            'perm' => [], 'module' => [], 'cache' => 600, 'handler' => 'rh_ai_t_summarise_guide',
+        ],
+        'page_help' => [
+            'description' => 'Guide sections that explain one admin screen (e.g. "bookings.php").',
+            'schema' => ['properties' => ['page' => ['type' => 'string', 'maxLength' => 60]], 'required' => ['page']],
+            'perm' => [], 'module' => [], 'cache' => 600, 'handler' => 'rh_ai_t_page_help',
+        ],
+        'who_is_online' => [
+            'description' => 'Staff signed in and active in the last 30 minutes, and which screen they are on.',
+            'schema' => ['properties' => (object)[]],
+            'perm' => [], 'module' => [], 'gate' => 'rh_ai_gate_presence', 'cache' => 30, 'handler' => 'rh_ai_t_who_is_online',
+        ],
+        'my_access' => [
+            'description' => 'What the person asking may see and do in this system (their permissions and the modules switched on).',
+            'schema' => ['properties' => (object)[]],
+            'perm' => [], 'module' => [], 'cache' => 0, 'handler' => 'rh_ai_t_my_access',
+        ],
+        'open_page' => [
+            'description' => 'A link to an admin screen the person may open, optionally filtered (search, status, id, date). The panel shows it as a button.',
+            'schema' => ['properties' => ['page' => ['type' => 'string', 'maxLength' => 60, 'description' => 'e.g. bookings.php'], 'search' => ['type' => 'string', 'maxLength' => 60], 'status' => ['type' => 'string', 'maxLength' => 30], 'id' => ['type' => 'integer', 'minimum' => 1], 'date' => $date], 'required' => ['page']],
+            'perm' => [], 'module' => [], 'cache' => 0, 'handler' => 'rh_ai_t_open_page',
+        ],
+    ];
+}
+
+/** Who-is-online is for administrators and managers only (same rule as the dashboard panel). */
+function rh_ai_gate_presence(array $user): bool
+{
+    if (!function_exists('rh_presence_can_view')) {
+        require_once dirname(__DIR__, 2) . '/admin/includes/presence-lib.php';
+    }
+    return rh_presence_can_view((string)($user['role'] ?? ''));
+}
+
+/** May this person use this tool right now? Permission (any-of) + module (any-of) + gate. */
+function rh_ai_tool_allowed(array $user, string $name, ?array $def = null): bool
+{
+    $def = $def ?? (rh_ai_tool_registry()[$name] ?? null);
+    $uid = (int)($user['id'] ?? 0);
+    if ($def === null || $uid <= 0 || !function_exists('hasPermission') || !hasPermission($uid, 'ai_assistant_use')) {
+        return false;
+    }
+    if ($def['perm']) {
+        $ok = false;
+        foreach ($def['perm'] as $p) {
+            if (hasPermission($uid, $p)) {
+                $ok = true;
+                break;
+            }
+        }
+        if (!$ok) {
+            return false;
+        }
+    }
+    if ($def['module']) {
+        $ok = false;
+        foreach ($def['module'] as $m) {
+            if (function_exists('rh_module_key_enabled') ? rh_module_key_enabled($m) : true) {
+                $ok = true;
+                break;
+            }
+        }
+        if (!$ok) {
+            return false;
+        }
+    }
+    if (!empty($def['gate']) && !call_user_func($def['gate'], $user)) {
+        return false;
+    }
+    return true;
+}
+
+/** The tools this person may use, sorted by name (deterministic for prompt caching). */
+function rh_ai_tools_for_user(array $user): array
+{
+    $out = [];
+    foreach (rh_ai_tool_registry() as $name => $def) {
+        if (rh_ai_tool_allowed($user, $name, $def)) {
+            $out[$name] = $def;
+        }
+    }
+    ksort($out);
+    return $out;
+}
+
+/** Provider-ready tool list [{name, description, schema}] for this person. */
+function rh_ai_tool_specs(array $user): array
+{
+    $specs = [];
+    foreach (rh_ai_tools_for_user($user) as $name => $def) {
+        $schema = $def['schema'];
+        if (isset($schema['properties']) && is_object($schema['properties'])) {
+            $schema['properties'] = [];
+        }
+        $specs[] = ['name' => $name, 'description' => $def['description'], 'schema' => $schema];
+    }
+    return $specs;
+}
+
+/**
+ * Validate arguments against a tool schema: unknown keys dropped, types coerced where safe.
+ * @return array{0:bool,1:array|string} [ok, args or plain error]
+ */
+function rh_ai_tool_validate(array $schema, array $args): array
+{
+    $props = (array)($schema['properties'] ?? []);
+    $clean = [];
+    foreach ($props as $k => $p) {
+        if (!array_key_exists($k, $args) || $args[$k] === null || $args[$k] === '') {
+            continue;
+        }
+        $v = $args[$k];
+        $type = (string)($p['type'] ?? 'string');
+        if ($type === 'integer') {
+            if (!is_numeric($v) || (int)$v != $v) {
+                return [false, "$k must be a whole number"];
+            }
+            $v = (int)$v;
+            if (isset($p['minimum']) && $v < $p['minimum']) {
+                return [false, "$k is too small"];
+            }
+            if (isset($p['maximum']) && $v > $p['maximum']) {
+                return [false, "$k is too large"];
+            }
+        } elseif ($type === 'number') {
+            if (!is_numeric($v)) {
+                return [false, "$k must be a number"];
+            }
+            $v = (float)$v;
+        } elseif ($type === 'boolean') {
+            $v = (bool)$v;
+        } else {
+            if (is_array($v)) {
+                return [false, "$k must be text"];
+            }
+            $v = trim((string)$v);
+            if (isset($p['maxLength']) && mb_strlen($v) > (int)$p['maxLength']) {
+                $v = mb_substr($v, 0, (int)$p['maxLength']);
+            }
+            if (isset($p['enum']) && !in_array($v, $p['enum'], true)) {
+                return [false, "$k must be one of: " . implode(', ', $p['enum'])];
+            }
+            if (($p['format'] ?? '') === 'date') {
+                $d = DateTime::createFromFormat('!Y-m-d', $v);
+                if (!$d || $d->format('Y-m-d') !== $v) {
+                    return [false, "$k must be a date like 2026-11-03"];
+                }
+            }
+        }
+        $clean[$k] = $v;
+    }
+    foreach ((array)($schema['required'] ?? []) as $r) {
+        if (!array_key_exists($r, $clean)) {
+            return [false, "$r is needed"];
+        }
+    }
+    return [true, $clean];
+}
+
+/** JSON for the model, within the size cap (long lists are shortened and say so). */
+function rh_ai_compact_json($data, int $max = RH_AI_TOOL_BYTES): string
+{
+    $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR;
+    $j = (string)json_encode($data, $flags);
+    $guard = 0;
+    while (strlen($j) > $max && is_array($data) && $guard++ < 8) {
+        $shrunk = false;
+        foreach ($data as $k => $v) {
+            if (is_array($v) && array_keys($v) === range(0, count($v) - 1) && count($v) > 2) {
+                $data[$k] = array_slice($v, 0, max(2, (int)floor(count($v) / 2)));
+                $data['shortened'] = true;
+                $shrunk = true;
+            }
+        }
+        if (!$shrunk) {
+            break;
+        }
+        $j = (string)json_encode($data, $flags);
+    }
+    if (strlen($j) > $max) {
+        $j = (string)json_encode(['shortened' => true, 'text' => mb_strcut($j, 0, $max - 60)], $flags);
+    }
+    return $j;
+}
+
+/** Cache key per person + permission set (the tool list they hold) + tool + arguments + day. */
+function rh_ai_cache_key(array $user, string $scope, $payload): string
+{
+    $perms = implode(',', array_keys(rh_ai_tools_for_user($user)));
+    return hash('sha256', (int)$user['id'] . '|' . hash('sha256', $perms) . '|' . $scope . '|' . json_encode($payload) . '|' . date('Y-m-d'));
+}
+
+function rh_ai_cache_get(PDO $db, string $key): ?array
+{
+    try {
+        $st = $db->prepare("SELECT result_json FROM ai_tool_cache WHERE cache_key = ? AND expires_at > NOW()");
+        $st->execute([$key]);
+        $v = $st->fetchColumn();
+        if ($v === false) {
+            return null;
+        }
+        $d = json_decode((string)$v, true);
+        return is_array($d) ? $d : null;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function rh_ai_cache_put(PDO $db, string $key, int $userId, array $value, int $ttl): void
+{
+    if ($ttl <= 0) {
+        return;
+    }
+    try {
+        $db->prepare("INSERT INTO ai_tool_cache (cache_key, user_id, result_json, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))
+                      ON DUPLICATE KEY UPDATE result_json = VALUES(result_json), expires_at = VALUES(expires_at)")
+            ->execute([$key, $userId, json_encode($value, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR), $ttl]);
+        if (random_int(1, 50) === 1) {
+            $db->exec("DELETE FROM ai_tool_cache WHERE expires_at < NOW() LIMIT 200");
+        }
+    } catch (Throwable $e) {
+        // cache is optional
+    }
+}
+
+/**
+ * Run one tool for this person. Returns ['ok', 'result' (de-identified array), 'json' (what the
+ * model sees), 'raw' (real values, local use only), 'error', 'cached', 'links'].
+ */
+function rh_ai_run_tool(PDO $db, array $user, int $conv, string $name, array $args): array
+{
+    $def = rh_ai_tool_registry()[$name] ?? null;
+    $fail = static function (string $msg) use ($db, $conv): array {
+        $res = ['error' => $msg];
+        return ['ok' => false, 'result' => $res, 'json' => rh_ai_compact_json($res), 'raw' => $res, 'error' => $msg, 'cached' => false, 'links' => []];
+    };
+    if ($def === null) {
+        return $fail('There is no tool called ' . mb_substr($name, 0, 40) . '.');
+    }
+    if (!rh_ai_tool_allowed($user, $name, $def)) {
+        return $fail("That's outside what this account can see.");
+    }
+    $args = rh_ai_vault_resolve_args($db, $conv, $args);
+    [$ok, $clean] = rh_ai_tool_validate($def['schema'], $args);
+    if (!$ok) {
+        return $fail('Arguments not valid: ' . $clean);
+    }
+    $cacheKey = rh_ai_cache_key($user, 'tool:' . $name, $clean);
+    $raw = ((int)$def['cache'] > 0) ? rh_ai_cache_get($db, $cacheKey) : null;
+    $cached = $raw !== null;
+    if ($raw === null) {
+        try {
+            $raw = (array)call_user_func($def['handler'], $db, $user, $clean);
+        } catch (Throwable $e) {
+            error_log('Assistant tool ' . $name . ' failed: ' . $e->getMessage());
+            return $fail('That information could not be read just now.');
+        }
+        if (empty($raw['error'])) {
+            rh_ai_cache_put($db, $cacheKey, (int)$user['id'], $raw, (int)$def['cache']);
+        }
+    }
+    $links = [];
+    $forModel = $raw;
+    if (!empty($raw['link']) && is_string($raw['link'])) {
+        $links[] = ['label' => (string)($raw['link_label'] ?? 'Open'), 'url' => $raw['link']];
+        $forModel['link_ready'] = true; // the panel shows the button; the URL (which may hold a search term) stays here
+    }
+    unset($forModel['link'], $forModel['link_label'], $forModel['url']);
+    $safe = rh_ai_vault_protect($db, $conv, $forModel);
+    return ['ok' => empty($raw['error']), 'result' => $safe, 'json' => rh_ai_compact_json($safe), 'raw' => $raw, 'error' => (string)($raw['error'] ?? ''), 'cached' => $cached, 'links' => $links];
+}
+
+// ── Helpers shared by handlers ───────────────────────────────────────────────
+
+/** The room library behind the dashboard figures (getRoomDashboardSummary), loaded on demand. */
+function rh_ai_room_lib(): bool
+{
+    if (!function_exists('getRoomDashboardSummary')) {
+        require_once dirname(__DIR__) . '/room-management.php';
+    }
+    return function_exists('getRoomDashboardSummary');
+}
+
+function rh_ai_today(): string
+{
+    return date('Y-m-d');
+}
+
+function rh_ai_currency(): string
+{
+    return function_exists('getSetting') ? (string)getSetting('currency_symbol', getSetting('currency_code', '')) : '';
+}
+
+function rh_ai_money(float $v): float
+{
+    return round($v, 2);
+}
+
+/** Folio balance for one booking, the same helper the booking screens use. */
+function rh_ai_folio(int $bookingId): array
+{
+    if (!function_exists('getBookingFolioSummary')) {
+        return [];
+    }
+    $f = getBookingFolioSummary($bookingId);
+    if (!empty($f['error'])) {
+        return [];
+    }
+    return ['total' => rh_ai_money((float)($f['grand_total'] ?? 0)), 'paid' => rh_ai_money((float)($f['amount_paid'] ?? 0)), 'balance_due' => rh_ai_money((float)($f['balance_due'] ?? 0))];
+}
+
+/** Room type by id or (part of) its name. */
+function rh_ai_find_room_type(PDO $db, string $q): ?array
+{
+    $q = trim($q);
+    if ($q === '') {
+        return null;
+    }
+    if (ctype_digit($q)) {
+        $st = $db->prepare("SELECT * FROM rooms WHERE id = ? AND is_active = 1");
+        $st->execute([(int)$q]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        return $r ?: null;
+    }
+    $st = $db->prepare("SELECT * FROM rooms WHERE is_active = 1 AND (name = ? OR slug = ?) LIMIT 1");
+    $st->execute([$q, $q]);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    if ($r) {
+        return $r;
+    }
+    $st = $db->prepare("SELECT * FROM rooms WHERE is_active = 1 AND name LIKE ? ORDER BY display_order LIMIT 1");
+    $st->execute(['%' . $q . '%']);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    return $r ?: null;
+}
+
+function rh_ai_nights(string $ci, string $co): int
+{
+    return (int)(new DateTime($ci))->diff(new DateTime($co))->days;
+}
+
+// ── Handlers (read only) ─────────────────────────────────────────────────────
+
+function rh_ai_t_search_bookings(PDO $db, array $user, array $a): array
+{
+    $like = '%' . $a['query'] . '%';
+    $sql = "SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.check_out_date, b.status, r.name AS room_name
+            FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
+            WHERE b.deleted_at IS NULL AND (b.booking_reference LIKE ? OR b.guest_name LIKE ? OR b.room_guest_name LIKE ? OR b.guest_email LIKE ? OR b.guest_phone LIKE ?)";
+    $p = [$like, $like, $like, $like, $like];
+    if (!empty($a['status'])) {
+        $sql .= " AND b.status = ?";
+        $p[] = $a['status'];
+    }
+    $st = $db->prepare($sql . " ORDER BY b.id DESC LIMIT 10");
+    $st->execute($p);
+    $rows = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $rows[] = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'room_type' => $r['room_name'], 'check_in' => $r['check_in_date'], 'check_out' => $r['check_out_date'], 'status' => $r['status']];
+    }
+    return ['count' => count($rows), 'bookings' => $rows, 'link' => 'bookings.php?search=' . rawurlencode((string)$a['query']), 'link_label' => 'Open on Bookings'];
+}
+
+function rh_ai_t_get_booking(PDO $db, array $user, array $a): array
+{
+    if (empty($a['booking_id']) && empty($a['reference'])) {
+        return ['error' => 'Give a booking id or reference.'];
+    }
+    $st = $db->prepare("SELECT b.*, r.name AS room_name, ir.room_number, ir.room_name AS individual_room_name
+                        FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                        WHERE b.deleted_at IS NULL AND " . (!empty($a['booking_id']) ? "b.id = ?" : "b.booking_reference = ?") . " LIMIT 1");
+    $st->execute([!empty($a['booking_id']) ? (int)$a['booking_id'] : (string)$a['reference']]);
+    $b = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$b) {
+        return ['error' => 'No booking found.'];
+    }
+    $out = [
+        'booking_id' => (int)$b['id'], 'reference' => $b['booking_reference'], 'guest_name' => $b['guest_name'],
+        'guest_email' => $b['guest_email'], 'guest_phone' => $b['guest_phone'], 'guest_country' => $b['guest_country'],
+        'room_type' => $b['room_name'], 'room_number' => $b['room_number'] !== null ? (string)$b['room_number'] : null,
+        'check_in' => $b['check_in_date'], 'check_out' => $b['check_out_date'], 'nights' => (int)$b['number_of_nights'],
+        'adults' => (int)$b['adult_guests'], 'children' => (int)$b['child_guests'], 'status' => $b['status'],
+        'occupancy' => $b['occupancy_type'], 'rate_plan' => $b['rate_plan_label'] ?: null,
+        'special_requests' => (string)($b['special_requests'] ?? ''),
+        'currency' => rh_ai_currency(),
+        'money' => rh_ai_folio((int)$b['id']),
+        'link' => 'booking-details.php?id=' . (int)$b['id'], 'link_label' => 'Open booking',
+    ];
+    if ($out['special_requests'] === '') {
+        unset($out['special_requests']);
+    }
+    return $out;
+}
+
+function rh_ai_t_check_availability(PDO $db, array $user, array $a): array
+{
+    if ($a['check_out'] <= $a['check_in']) {
+        return ['error' => 'Check-out must be after check-in.'];
+    }
+    $adults = (int)($a['adults'] ?? 1);
+    $children = (int)($a['children'] ?? 0);
+    $types = [];
+    if (!empty($a['room_type'])) {
+        $t = rh_ai_find_room_type($db, (string)$a['room_type']);
+        if (!$t) {
+            return ['error' => 'No room type matches "' . $a['room_type'] . '".'];
+        }
+        $types[] = $t;
+    } else {
+        $types = $db->query("SELECT * FROM rooms WHERE is_active = 1 ORDER BY display_order, id")->fetchAll(PDO::FETCH_ASSOC);
+    }
+    $rows = [];
+    foreach ($types as $t) {
+        $av = checkRoomAvailability((int)$t['id'], $a['check_in'], $a['check_out'], null, $children, $children > 0 ? 1 : 1);
+        $rows[] = [
+            'room_type_id' => (int)$t['id'], 'room_type' => $t['name'],
+            'available' => !empty($av['available']),
+            'rooms_left' => isset($av['remaining_rooms']) ? (int)$av['remaining_rooms'] : null,
+            'max_guests' => (int)$t['max_guests'],
+            'fits_party_in_one_room' => (int)$t['max_guests'] >= ($adults + $children),
+            'reason' => empty($av['available']) ? (string)($av['error'] ?? 'Not available') : null,
+        ];
+    }
+    return ['check_in' => $a['check_in'], 'check_out' => $a['check_out'], 'nights' => rh_ai_nights($a['check_in'], $a['check_out']), 'room_types' => $rows,
+        'link' => 'create-booking.php', 'link_label' => 'Open Create Booking'];
+}
+
+/**
+ * Price a stay with the same helpers, in the same order, as admin/create-booking.php (one room line):
+ * occupancy price (joined-room combination rate when the type is a joined pair) -> applyDynamicPricing
+ * -> x nights + rh_child_supplement for the children seated in that room -> rh_stay_totals('price').
+ */
+function rh_ai_t_quote_stay(PDO $db, array $user, array $a): array
+{
+    foreach (['/includes/pricing.php', '/includes/guest-allocation.php'] as $f) {
+        require_once dirname(__DIR__, 2) . $f;
+    }
+    $ci = (string)$a['check_in'];
+    $co = (string)$a['check_out'];
+    if ($co <= $ci) {
+        return ['error' => 'Check-out must be after check-in.'];
+    }
+    $t = rh_ai_find_room_type($db, (string)$a['room_type']);
+    if (!$t) {
+        return ['error' => 'No room type matches "' . $a['room_type'] . '".'];
+    }
+    $rid = (int)$t['id'];
+    $adults = (int)$a['adults'];
+    $children = (int)($a['children'] ?? 0);
+    $qty = max(1, (int)($a['rooms'] ?? 1));
+    $nights = rh_ai_nights($ci, $co);
+
+    $st = $db->prepare("SELECT r.*, GREATEST(r.max_guests,
+                            COALESCE((SELECT MAX(ir.max_guests_override) FROM individual_rooms ir WHERE ir.room_type_id = r.id AND ir.is_active = 1), 0),
+                            COALESCE((SELECT MAX(rc.max_guests_combined) FROM room_combinations rc WHERE rc.combined_room_type_id = r.id AND rc.is_active = 1), 0)) AS max_guests
+                        FROM rooms r WHERE r.id = ? AND r.is_active = 1");
+    $st->execute([$rid]);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$r) {
+        return ['error' => 'That room type is not active.'];
+    }
+    $base_price = (float)$r['price_per_night'];
+    $queue = [];
+    $notes = [];
+    if (roomTypeHasActiveCombinations($rid)) {
+        $claimed = [];
+        foreach (getAvailableRoomCombinations($rid, $ci, $co) as $cand) {
+            if (count($queue) >= $qty) {
+                break;
+            }
+            $ids = [(int)$cand['room_a_id'], (int)$cand['room_b_id']];
+            if (array_intersect($ids, $claimed)) {
+                continue;
+            }
+            $claimed = array_merge($claimed, $ids);
+            $queue[] = $cand;
+        }
+        if (count($queue) < $qty) {
+            return ['error' => 'Only ' . count($queue) . ' joined room combination(s) are available for "' . $r['name'] . '" on those dates.', 'available' => false];
+        }
+        $rate = ($queue[0]['price_override'] !== null && $queue[0]['price_override'] !== '') ? (float)$queue[0]['price_override'] : (float)$r['price_per_night'];
+        $r['price_per_night'] = $r['price_single_occupancy'] = $r['price_double_occupancy'] = $r['price_triple_occupancy'] = $rate;
+        $r['max_guests'] = max((int)$r['max_guests'], (int)($queue[0]['max_guests_combined'] ?? 0));
+        $notes[] = 'Joined room: priced at the combination rate.';
+    }
+    $policy = resolveOccupancyPolicy($r, null);
+    $perRoom = (int)ceil(($adults + $children) / $qty);
+    $occ = (string)($a['occupancy'] ?? '');
+    if ($occ === '') {
+        $order = $perRoom <= 1 ? ['single', 'double', 'triple'] : ($perRoom === 2 ? ['double', 'triple', 'single'] : ['triple', 'double', 'single']);
+        foreach ($order as $o) {
+            if (!empty($policy[$o . '_enabled'])) {
+                $occ = $o;
+                break;
+            }
+        }
+        $occ = $occ ?: 'double';
+    }
+    if (empty($policy[$occ . '_enabled'])) {
+        return ['error' => 'Occupancy "' . $occ . '" is not enabled for ' . $r['name'] . '.'];
+    }
+    $rule = rh_child_rule_for($db, $rid, null);
+    $rows = [];
+    for ($q = 0; $q < $qty; $q++) {
+        $rows[] = ['max_children' => $rule['max'], 'capacity' => max(1, (int)$r['max_guests']), 'children_allowed' => !empty($policy['children_allowed']),
+            'name' => (string)$r['name'], 'room_id' => $rid, 'tier' => $occ, 'tier_policy' => $policy, 'tier_exempt' => !empty($queue)];
+    }
+    $split = ga_distribute_party($rows, $adults, $children);
+    if (empty($split['valid'])) {
+        return ['error' => (string)$split['message']];
+    }
+    if (empty($queue)) {
+        $labels = [];
+        $tiers = [];
+        $g = 0;
+        foreach ($rows as $i => $row) {
+            $labels[] = 'Room ' . ($i + 1);
+            $tiers[] = $occ;
+            $g += (int)$split['rows'][$i]['guests'];
+        }
+        $msg = ga_group_tier_message((string)$r['name'], $labels, $tiers, $g, (int)$rows[0]['capacity'], $policy);
+        if ($msg !== null) {
+            if (!ga_can_under_tier($user)) {
+                return ['error' => $msg];
+            }
+            $notes[] = $msg;
+        }
+    }
+    $childRooms = 0;
+    foreach ($split['rows'] as $sr) {
+        if ((int)$sr['children'] > 0) {
+            $childRooms++;
+        }
+    }
+    $av = checkRoomAvailability($rid, $ci, $co, null, $children, $childRooms);
+    $available = !empty($av['available']) && (int)($av['remaining_rooms'] ?? 0) >= $qty;
+
+    $grand = 0.0;
+    $vat = 0.0;
+    $levy = 0.0;
+    $childSup = 0.0;
+    $first = null;
+    $plan = '';
+    $discount = 0.0;
+    for ($i = 0; $i < $qty; $i++) {
+        $row = $r;
+        if (!empty($queue[$i])) {
+            $cr = ($queue[$i]['price_override'] !== null && $queue[$i]['price_override'] !== '') ? (float)$queue[$i]['price_override'] : $base_price;
+            $row['price_per_night'] = $row['price_single_occupancy'] = $row['price_double_occupancy'] = $row['price_triple_occupancy'] = $cr;
+        }
+        $price = match ($occ) {
+            'single' => !empty($row['price_single_occupancy']) ? (float)$row['price_single_occupancy'] : (float)$row['price_per_night'],
+            'double' => !empty($row['price_double_occupancy']) ? (float)$row['price_double_occupancy'] : (float)$row['price_per_night'],
+            'triple' => !empty($row['price_triple_occupancy']) ? (float)$row['price_triple_occupancy'] : (float)$row['price_per_night'],
+            default  => (float)$row['price_per_night'],
+        };
+        $dyn = applyDynamicPricing($db, $rid, $ci, $co, $nights, $price);
+        $price = $dyn['final_price'];
+        $seated = (int)($split['rows'][$i]['children'] ?? 0);
+        $sup = rh_child_supplement($rule, $seated, $nights, (float)$price);
+        $tt = rh_stay_totals($price * $nights + $sup, 'price');
+        $grand += $tt['total_with_vat'];
+        $vat += $tt['vat'];
+        $levy += $tt['levy'];
+        $childSup += round($sup, 2);
+        if ($first === null) {
+            $first = (float)$price;
+            $plan = (string)($dyn['rate_plan_label'] ?? '');
+            $discount = (float)($dyn['discount_amount'] ?? 0);
+        }
+    }
+    if (!$available) {
+        $notes[] = (string)($av['error'] ?? ('Only ' . (int)($av['remaining_rooms'] ?? 0) . ' room(s) left for those dates.'));
+    }
+    return [
+        'room_type_id' => $rid, 'room_type' => $r['name'], 'check_in' => $ci, 'check_out' => $co, 'nights' => $nights, 'rooms' => $qty,
+        'adults' => $adults, 'children' => $children, 'occupancy' => $occ,
+        'price_per_night' => rh_ai_money((float)$first), 'rate_plan' => $plan !== '' ? $plan : null, 'rate_plan_discount_per_night' => $discount > 0 ? rh_ai_money($discount) : null,
+        'child_charge' => rh_ai_money($childSup), 'vat' => rh_ai_money($vat), 'levy' => rh_ai_money($levy),
+        'total' => round($grand, 2), 'currency' => rh_ai_currency(), 'vat_mode' => function_exists('vat_mode') ? vat_mode() : '',
+        'available' => $available, 'notes' => $notes,
+        'link' => 'create-booking.php', 'link_label' => 'Open Create Booking',
+    ];
+}
+
+function rh_ai_t_arrivals_departures(PDO $db, array $user, array $a): array
+{
+    $day = (string)($a['date'] ?? rh_ai_today());
+    $st = $db->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.status, b.adult_guests, b.child_guests, b.check_out_date, b.individual_room_id, r.name AS room_name, ir.room_number
+                        FROM bookings b JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                        WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND b.status IN ('confirmed', 'pending', 'checked-in', 'checked-out')
+                        ORDER BY FIELD(b.status, 'pending', 'confirmed', 'checked-in', 'checked-out'), b.created_at ASC");
+    $st->execute([$day]);
+    $arr = $st->fetchAll(PDO::FETCH_ASSOC);
+    $toCome = 0;
+    $noRoom = 0;
+    $arrivals = [];
+    foreach ($arr as $r) {
+        $pending = in_array($r['status'], ['confirmed', 'pending'], true);
+        $toCome += $pending ? 1 : 0;
+        $noRoom += ($pending && empty($r['individual_room_id'])) ? 1 : 0;
+        if (count($arrivals) < RH_AI_TOOL_ROWS) {
+            $arrivals[] = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'room_type' => $r['room_name'],
+                'room_number' => $r['room_number'] !== null ? (string)$r['room_number'] : null, 'status' => $r['status'], 'adults' => (int)$r['adult_guests'], 'children' => (int)$r['child_guests'], 'leaves' => $r['check_out_date']];
+        }
+    }
+    $st = $db->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.status, r.name AS room_name, ir.room_number
+                        FROM bookings b JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                        WHERE b.deleted_at IS NULL AND b.check_out_date = ? AND b.status IN ('checked-in', 'checked-out')
+                        ORDER BY FIELD(b.status, 'checked-in', 'checked-out'), ir.room_number");
+    $st->execute([$day]);
+    $dep = $st->fetchAll(PDO::FETCH_ASSOC);
+    $dueOut = 0;
+    $departures = [];
+    foreach ($dep as $r) {
+        $isDue = $r['status'] === 'checked-in';
+        $dueOut += $isDue ? 1 : 0;
+        if (count($departures) < RH_AI_TOOL_ROWS) {
+            $row = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'room_type' => $r['room_name'],
+                'room_number' => $r['room_number'] !== null ? (string)$r['room_number'] : null, 'status' => $r['status']];
+            if ($isDue) {
+                $f = rh_ai_folio((int)$r['id']);
+                $row['balance_due'] = $f['balance_due'] ?? null;
+            }
+            $departures[] = $row;
+        }
+    }
+    $out = ['date' => $day, 'currency' => rh_ai_currency(),
+        'arrivals' => ['total' => count($arr), 'still_to_arrive' => $toCome, 'arrived' => count($arr) - $toCome, 'no_room_assigned' => $noRoom, 'list' => $arrivals],
+        'departures' => ['total' => count($dep), 'due_out' => $dueOut, 'checked_out' => count($dep) - $dueOut, 'list' => $departures],
+        'link' => 'dashboard.php', 'link_label' => 'Open Dashboard'];
+    if ($day === rh_ai_today()) {
+        $out['overdue_departures'] = (int)$db->query("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND status = 'checked-in' AND check_out_date < CURDATE()")->fetchColumn();
+        $out['overdue_arrivals'] = (int)$db->query("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND status IN ('confirmed', 'pending') AND check_in_date < CURDATE()")->fetchColumn();
+    }
+    return $out;
+}
+
+function rh_ai_t_in_house(PDO $db, array $user, array $a): array
+{
+    $rows = $db->query("SELECT b.id, b.booking_reference, b.guest_name, b.check_out_date, r.name AS room_name, ir.room_number
+                        FROM bookings b JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                        WHERE b.deleted_at IS NULL AND b.status = 'checked-in' ORDER BY b.check_out_date, ir.room_number")->fetchAll(PDO::FETCH_ASSOC);
+    $list = [];
+    foreach (array_slice($rows, 0, RH_AI_TOOL_ROWS) as $r) {
+        $f = rh_ai_folio((int)$r['id']);
+        $list[] = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'room_type' => $r['room_name'],
+            'room_number' => $r['room_number'] !== null ? (string)$r['room_number'] : null, 'leaves' => $r['check_out_date'], 'balance_due' => $f['balance_due'] ?? null];
+    }
+    return ['in_house' => count($rows), 'currency' => rh_ai_currency(), 'list' => $list, 'link' => 'bookings.php?status=checked-in', 'link_label' => 'Open in-house list'];
+}
+
+function rh_ai_t_room_board(PDO $db, array $user, array $a): array
+{
+    $rooms = $db->query("SELECT ir.id, ir.room_number, ir.room_name, ir.status, ir.housekeeping_status, r.name AS room_type
+                         FROM individual_rooms ir JOIN rooms r ON r.id = ir.room_type_id
+                         WHERE ir.is_active = 1 ORDER BY ir.display_order, ir.room_number")->fetchAll(PDO::FETCH_ASSOC);
+    // Who is in each room (same join as the housekeeping board: the booking's room or a booking_rooms row)
+    $occ = [];
+    foreach ($db->query("SELECT ir.id AS room_id, b.guest_name, b.check_out_date
+                         FROM individual_rooms ir
+                         INNER JOIN bookings b ON (b.individual_room_id = ir.id OR EXISTS (
+                             SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.individual_room_id = ir.id AND br.released_at IS NULL))
+                         WHERE b.status = 'checked-in' AND b.deleted_at IS NULL AND b.check_in_date <= CURDATE() AND ir.is_active = 1")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $occ[(int)$r['room_id']] = $r;
+    }
+    $arriving = [];
+    foreach ($db->query("SELECT individual_room_id FROM bookings WHERE deleted_at IS NULL AND check_in_date = CURDATE() AND status IN ('confirmed', 'pending') AND individual_room_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN) as $rid) {
+        $arriving[(int)$rid] = true;
+    }
+    $counts = [];
+    $list = [];
+    foreach ($rooms as $r) {
+        $s = (string)$r['status'];
+        $counts[$s] = ($counts[$s] ?? 0) + 1;
+        if (!empty($a['status']) && $a['status'] !== $s) {
+            continue;
+        }
+        $row = ['room' => (string)$r['room_number'], 'room_type' => $r['room_type'], 'status' => $s, 'housekeeping' => $r['housekeeping_status']];
+        if (isset($occ[(int)$r['id']])) {
+            $row['guest_name'] = $occ[(int)$r['id']]['guest_name'];
+            $row['leaves'] = $occ[(int)$r['id']]['check_out_date'];
+        }
+        if (isset($arriving[(int)$r['id']])) {
+            $row['arrival_today'] = true;
+        }
+        if (count($list) < 60) {
+            $list[] = $row;
+        }
+    }
+    $summary = rh_ai_room_lib() ? getRoomDashboardSummary() : [];
+    return ['rooms' => count($rooms), 'by_status' => $counts, 'occupancy_pct' => isset($summary['occupancy_rate']) ? round((float)$summary['occupancy_rate'], 1) : null,
+        'list' => $list, 'link' => 'room-dashboard.php', 'link_label' => 'Open Room Board'];
+}
+
+function rh_ai_t_guest_history(PDO $db, array $user, array $a): array
+{
+    $g = (string)$a['guest'];
+    $st = $db->prepare("SELECT b.booking_reference, b.guest_name, b.guest_email, b.check_in_date, b.check_out_date, b.number_of_nights, b.status, r.name AS room_name
+                        FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
+                        WHERE b.deleted_at IS NULL AND (b.guest_email = ? OR b.guest_name LIKE ? OR b.guest_phone = ?)
+                        ORDER BY b.check_in_date DESC LIMIT 200");
+    $st->execute([$g, '%' . $g . '%', $g]);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) {
+        return ['stays' => 0, 'message' => 'No bookings found for that guest.'];
+    }
+    $stays = 0;
+    $nights = 0;
+    $first = null;
+    $last = null;
+    $list = [];
+    foreach ($rows as $r) {
+        if (!in_array($r['status'], ['cancelled', 'no-show', 'expired'], true)) {
+            $stays++;
+            $nights += (int)$r['number_of_nights'];
+            $first = $first === null || $r['check_in_date'] < $first ? $r['check_in_date'] : $first;
+            $last = $last === null || $r['check_in_date'] > $last ? $r['check_in_date'] : $last;
+        }
+        if (count($list) < 10) {
+            $list[] = ['reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'check_in' => $r['check_in_date'], 'check_out' => $r['check_out_date'], 'status' => $r['status'], 'room_type' => $r['room_name']];
+        }
+    }
+    return ['bookings_found' => count($rows), 'stays' => $stays, 'nights' => $nights, 'first_stay' => $first, 'last_stay' => $last, 'recent' => $list];
+}
+
+function rh_ai_t_rate_plans_and_deals(PDO $db, array $user, array $a): array
+{
+    $plans = [];
+    try {
+        foreach ($db->query("SELECT name, description, rule_type, start_date, end_date, days_of_week, min_nights, max_nights, days_before_min, days_before_max, adjustment_type, adjustment_value, applies_to, room_type_ids
+                             FROM rate_plans WHERE is_active = 1 ORDER BY priority DESC, name LIMIT 30")->fetchAll(PDO::FETCH_ASSOC) as $p) {
+            $plans[] = array_filter($p, static fn($v) => $v !== null && $v !== '');
+        }
+    } catch (Throwable $e) {
+        $plans = [];
+    }
+    $out = ['rate_plans' => $plans, 'link' => 'rate-plans.php', 'link_label' => 'Open Rate Plans'];
+    $uid = (int)$user['id'];
+    if ((hasPermission($uid, 'pos_till') || hasPermission($uid, 'menu')) && rh_module_key_enabled('pos')) {
+        try {
+            $out['pos_deals'] = $db->query("SELECT name, deal_type, discount_percent, discount_fixed, days_of_week, start_time, end_time, valid_from, valid_to
+                                            FROM pos_deals WHERE is_active = 1 AND (valid_to IS NULL OR valid_to >= CURDATE()) ORDER BY sort_order, name LIMIT 20")->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            // no deals table
+        }
+    }
+    return $out;
+}
+
+function rh_ai_t_balances_due(PDO $db, array $user, array $a): array
+{
+    $cands = $db->query("SELECT b.id, b.booking_reference, b.guest_name, b.status, b.check_out_date
+                         FROM bookings b
+                         WHERE b.deleted_at IS NULL AND b.status IN ('pending', 'confirmed', 'checked-in', 'checked-out')
+                           AND b.check_out_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+                         ORDER BY b.check_out_date LIMIT 300")->fetchAll(PDO::FETCH_ASSOC);
+    $owing = [];
+    $total = 0.0;
+    foreach ($cands as $r) {
+        $f = rh_ai_folio((int)$r['id']);
+        $bal = (float)($f['balance_due'] ?? 0);
+        if ($bal > BALANCE_TOLERANCE) {
+            $total += $bal;
+            $owing[] = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'status' => $r['status'], 'leaves' => $r['check_out_date'], 'balance_due' => rh_ai_money($bal)];
+        }
+    }
+    usort($owing, static fn($x, $y) => $y['balance_due'] <=> $x['balance_due']);
+    return ['bookings_owing' => count($owing), 'total_owed' => rh_ai_money($total), 'currency' => rh_ai_currency(), 'scope' => 'Room bookings leaving from 90 days ago onwards',
+        'largest' => array_slice($owing, 0, RH_AI_TOOL_ROWS), 'link' => 'bookings.php', 'link_label' => 'Open Bookings'];
+}
+
+// ── Guides & knowledge base ──────────────────────────────────────────────────
+
+function rh_ai_kb_load(): void
+{
+    require_once dirname(__DIR__) . '/guide-knowledge-base.php';
+    require_once dirname(__DIR__) . '/guide-system-knowledge.php';
+}
+
+/**
+ * Which permission(s) open the screen a guide is about (any-of; [] = every signed-in person).
+ * A person sees a guide only when its module is on (rh_kb_allowed_guides) AND they hold one of these.
+ */
+function rh_ai_guide_permissions(): array
+{
+    return [
+        '01-pos-till.html' => ['pos_till'], '02-kds-kitchen.html' => ['kds_view'], '03-bds-bar.html' => ['bds_view'], '04-cds-coffee.html' => ['cds_view'],
+        '05-room-service.html' => ['room_service_view', 'room_service_manage'], '06-housekeeping.html' => ['housekeeping', 'room_maintenance'],
+        '07-reception-bookings.html' => ['bookings'], '08-stock-orders.html' => ['stock_dashboard', 'stock_management', 'stock_orders'],
+        '09-packages-rates.html' => ['rooms', 'bookings'], '10-conference-events.html' => ['conference', 'events'],
+        '11-social-facebook-sharing.html' => ['facebook_settings', 'gallery', 'media_management'], '12-email-templates.php' => ['edit_templates'],
+        '13-finance-payments.html' => ['payments', 'accounting', 'payment_add', 'receipts'], '14-reports-eod.html' => ['reports', 'accounting'],
+        '15-pwa-install-guide.html' => [], '16-business-presets.html' => ['module_settings'], '17-gym-management.html' => ['gym'],
+        '18-staff-access.html' => ['user_management', 'user_permissions'], '19-hotel-settings.html' => ['booking_settings', 'finance_settings', 'module_settings'],
+        '20-stock-loss-prevention.html' => ['stock_dashboard', 'stock_management', 'stock_reports'], '21-guest-website.html' => ['pages', 'section_headers', 'footer_management', 'gallery'],
+        '22-assistant.html' => ['ai_assistant_use', 'ai_settings'], '99-admin-dashboard-full-guide.html' => ['dashboard'],
+        'faq.html' => [], 'index.html' => [], 'system-map.php' => [], 'owner-handover.html' => ['module_settings'], 'owner-handover.php' => ['module_settings'],
+    ];
+}
+
+/** May this person read this guide? */
+function rh_ai_guide_visible(array $user, string $file): bool
+{
+    rh_ai_kb_load();
+    if (!in_array($file, rh_kb_allowed_guides(), true)) {
+        return false;
+    }
+    $map = rh_ai_guide_permissions();
+    if (!array_key_exists($file, $map)) {
+        return (string)($user['role'] ?? '') === 'admin'; // a guide nobody mapped yet: administrators only
+    }
+    foreach ($map[$file] as $p) {
+        if (hasPermission((int)$user['id'], $p)) {
+            return true;
+        }
+    }
+    return $map[$file] === [];
+}
+
+function rh_ai_t_how_to(PDO $db, array $user, array $a): array
+{
+    rh_ai_kb_load();
+    $r = rh_kb_search((string)$a['question'], 12);
+    $out = [];
+    foreach ($r['results'] as $e) {
+        if (!rh_ai_guide_visible($user, (string)$e['file'])) {
+            continue;
+        }
+        $out[] = ['title' => $e['title'], 'guide' => $e['guide'], 'type' => $e['type'], 'text' => mb_substr((string)($e['snippet'] ?? $e['text']), 0, 400), 'link' => '../docs/guides/' . $e['file'] . ((string)($e['anchor'] ?? '') !== '' ? '#' . $e['anchor'] : '')]; // no ?kb= (it would carry the question)
+        if (count($out) >= 5) {
+            break;
+        }
+    }
+    $res = ['matches' => $out, 'partial' => !empty($r['partial'])];
+    if ($out) {
+        $res['link'] = $out[0]['link'];
+        $res['link_label'] = 'Open the guide';
+    }
+    return $res;
+}
+
+/** Find a guide file from a file name or words of its title. */
+function rh_ai_find_guide(string $q): ?array
+{
+    rh_ai_kb_load();
+    $idx = rh_kb_index();
+    $q = trim(mb_strtolower($q));
+    $best = null;
+    $bestScore = 0;
+    foreach ((array)$idx['guides'] as $g) {
+        $file = (string)$g['file'];
+        if ($q === mb_strtolower($file) || $q . '.html' === mb_strtolower($file)) {
+            return $g;
+        }
+        $hay = mb_strtolower($file . ' ' . $g['title']);
+        $score = 0;
+        foreach (preg_split('/[^\p{L}\p{N}]+/u', $q) as $w) {
+            if (mb_strlen($w) >= 3 && mb_strpos($hay, $w) !== false) {
+                $score += mb_strlen($w);
+            }
+        }
+        if ($score > $bestScore) {
+            $bestScore = $score;
+            $best = $g;
+        }
+    }
+    return $best;
+}
+
+function rh_ai_t_summarise_guide(PDO $db, array $user, array $a): array
+{
+    $g = rh_ai_find_guide((string)$a['guide']);
+    if ($g === null) {
+        return ['error' => 'No guide matches "' . $a['guide'] . '".'];
+    }
+    $file = (string)$g['file'];
+    if (!rh_ai_guide_visible($user, $file)) {
+        return ['error' => "That guide is outside what this account can see."];
+    }
+    $idx = rh_kb_index();
+    $section = trim(mb_strtolower((string)($a['section'] ?? '')));
+    $parts = [];
+    $anchor = '';
+    foreach ($idx['entries'] as $e) {
+        if ($e['file'] !== $file || !in_array($e['type'], ['section', 'faq', 'problem'], true)) {
+            continue;
+        }
+        if ($section !== '') {
+            $hay = mb_strtolower($e['anchor'] . ' ' . $e['title'] . ' ' . ($e['parent'] ?? ''));
+            $hit = false;
+            foreach (preg_split('/[^\p{L}\p{N}]+/u', $section) as $w) {
+                if (mb_strlen($w) >= 3 && mb_strpos($hay, $w) !== false) {
+                    $hit = true;
+                }
+            }
+            if (!$hit) {
+                continue;
+            }
+            $anchor = $anchor ?: (string)$e['anchor'];
+        }
+        $parts[] = '## ' . $e['title'] . "\n" . trim((string)$e['text']);
+    }
+    if (!$parts) {
+        return ['error' => 'That guide has no section matching "' . ($a['section'] ?? '') . '".'];
+    }
+    $text = implode("\n\n", $parts);
+    $cut = mb_strlen($text) > 6000;
+    return ['guide' => $g['title'], 'file' => $file, 'section' => $section !== '' ? $section : null, 'guide_text' => mb_substr($text, 0, 6000), 'shortened' => $cut,
+        'link' => '../docs/guides/' . $file . ($anchor !== '' ? '#' . $anchor : ''), 'link_label' => 'Open the guide'];
+}
+
+function rh_ai_t_page_help(PDO $db, array $user, array $a): array
+{
+    rh_ai_kb_load();
+    $page = basename((string)$a['page']);
+    if (!preg_match('/^[a-z0-9\-_]+\.php$/i', $page)) {
+        $page .= '.php';
+    }
+    $out = [];
+    foreach (rh_kb_sys_help_for_page($page, rh_kb_index(), 8) as $e) {
+        if (!rh_ai_guide_visible($user, (string)$e['file'])) {
+            continue;
+        }
+        $out[] = ['title' => $e['title'], 'guide' => $e['guide'], 'text' => mb_substr((string)$e['text'], 0, 400), 'link' => '../docs/guides/' . $e['file'] . ($e['anchor'] !== '' ? '#' . $e['anchor'] : '')];
+        if (count($out) >= 4) {
+            break;
+        }
+    }
+    return ['page' => $page, 'sections' => $out];
+}
+
+function rh_ai_t_who_is_online(PDO $db, array $user, array $a): array
+{
+    if (!function_exists('rh_presence_rows')) {
+        require_once dirname(__DIR__, 2) . '/admin/includes/presence-lib.php';
+    }
+    $list = [];
+    foreach (rh_presence_rows($db, false) as $r) {
+        $list[] = ['staff_name' => $r['name'], 'role' => $r['role_label'], 'status' => $r['status_label'], 'screen' => $r['page_title'], 'since' => $r['since']];
+    }
+    return ['online' => count($list), 'list' => array_slice($list, 0, RH_AI_TOOL_ROWS)];
+}
+
+function rh_ai_t_my_access(PDO $db, array $user, array $a): array
+{
+    $uid = (int)$user['id'];
+    $groups = [];
+    foreach (getAllPermissions() as $key => $p) {
+        if (hasPermission($uid, $key)) {
+            $groups[(string)($p['category'] ?? 'Other')][] = (string)$p['label'];
+        }
+    }
+    $roles = function_exists('getAllRoles') ? getAllRoles() : [];
+    $modules = [];
+    try {
+        foreach ($db->query("SELECT module_name FROM enabled_modules WHERE is_enabled = 1 ORDER BY sort_order")->fetchAll(PDO::FETCH_COLUMN) as $m) {
+            $modules[] = (string)$m;
+        }
+    } catch (Throwable $e) {
+    }
+    return ['role' => (string)($roles[$user['role']]['label'] ?? $user['role']), 'can_see_and_do' => $groups, 'modules_on' => $modules,
+        'assistant_can_look_up' => array_keys(rh_ai_tools_for_user($user))];
+}
+
+function rh_ai_t_open_page(PDO $db, array $user, array $a): array
+{
+    $page = basename((string)$a['page']);
+    if (!preg_match('/^[a-z0-9\-_]+\.php$/i', $page)) {
+        $page .= '.php';
+    }
+    if (!preg_match('/^[a-z0-9\-_]+\.php$/i', $page) || !is_file(dirname(__DIR__, 2) . '/admin/' . $page) || in_array($page, ['logout.php', 'login.php', 'admin-init.php'], true)) {
+        return ['error' => 'There is no screen called ' . $page . '.'];
+    }
+    if (!rhCanOpenPage((int)$user['id'], $page)) {
+        return ['error' => "That screen is outside what this account can open."];
+    }
+    $q = [];
+    foreach (['search', 'status', 'date'] as $k) {
+        if (!empty($a[$k])) {
+            $q[$k] = (string)$a[$k];
+        }
+    }
+    if (!empty($a['id'])) {
+        $q['id'] = (int)$a['id'];
+    }
+    $url = $page . ($q ? '?' . http_build_query($q) : '');
+    $label = '';
+    foreach (getAllPermissions() as $p) {
+        if (($p['page'] ?? '') === $page) {
+            $label = (string)$p['label'];
+            break;
+        }
+    }
+    return ['url' => $url, 'link' => $url, 'link_label' => 'Open ' . ($label !== '' ? $label : $page)];
+}

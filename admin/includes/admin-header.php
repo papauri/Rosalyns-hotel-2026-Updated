@@ -473,6 +473,7 @@ if ($_admin_back_target !== null) {
 <?php /* Help FAB — rendered here, outside #rh-admin-page, so it survives SPA
           content swaps and position:fixed is always relative to the viewport. */ ?>
 <?php require_once __DIR__ . '/help-tooltips.php'; ?>
+<?php require_once __DIR__ . '/ai-panel.php'; /* Assistant: outside #rh-admin-page; prints nothing unless switched on + permitted */ ?>
 
 <?php /* #rh-admin-page wraps all per-page content.
           This div is intentionally left unclosed here — each admin page's </body>

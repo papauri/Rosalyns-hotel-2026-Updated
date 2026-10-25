@@ -17,13 +17,13 @@
   </nav>
 
   <h1>The Assistant</h1>
-  <p>The Assistant is a chat helper for staff in the <span class="g-site-name">Rosalyns Beach Hotel</span> admin. This guide covers setting it up on <strong>Assistant Settings</strong>: switching it on or off, adding a provider key, choosing models, limits, who has access and usage. It ships switched off: nothing changes for anyone until an administrator sets it up and switches it on.</p>
-  <div class="note"><p>This update adds the settings page only. The chat panel, the limits being applied and the nightly clean-up of old chats arrive in the next updates; you can prepare keys, models and limits now.</p></div>
+  <p>The Assistant is a chat helper for staff in the <span class="g-site-name">Rosalyns Beach Hotel</span> admin. The first part shows staff how to use it; the rest covers setting it up on <strong>Assistant Settings</strong>: switching it on or off, adding a provider key, choosing models, limits, who has access and usage. It ships switched off: nothing changes for anyone until an administrator sets it up and switches it on.</p>
+  <div class="note"><p>Today the Assistant reads and explains: it answers questions, looks things up and points you to the right screen. Making changes for you (with a Confirm button) and the nightly clean-up of old chats arrive in later updates.</p></div>
 
   <div class="facts">
     <dl>
       <dt>Who uses it</dt><dd>An administrator sets it up. Staff who are given access then use it.</dd>
-      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Assistant Settings</strong> (<code>/admin/ai-settings.php</code>)</dd>
+      <dt>Where to find it</dt><dd>The chat: the <strong>Assistant</strong> button at the bottom right of every admin screen. Setting it up: Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Assistant Settings</strong> (<code>/admin/ai-settings.php</code>)</dd>
       <dt>Permission needed</dt><dd><strong>Assistant Settings</strong> to open the page. <strong>Assistant Usage</strong> to see the Usage table. Using the chat needs <strong>Use the Assistant</strong>; confirming the changes it suggests needs <strong>Confirm Assistant actions</strong>.</dd>
       <dt>Only shown when</dt><dd>The settings page is always reachable for people with the permission, so it can always be switched on or off.</dd>
     </dl>
@@ -31,6 +31,7 @@
 
   <div class="toc">
     <ol>
+      <li><a href="#using">Using the Assistant</a></li>
       <li><a href="#screen">What is on the screen</a></li>
       <li><a href="#keys">How to add a provider key</a></li>
       <li><a href="#models">How to choose the models</a></li>
@@ -42,6 +43,60 @@
       <li><a href="#problems">Problems and fixes</a></li>
     </ol>
   </div>
+
+  <h2 id="using">Using the Assistant</h2>
+  <p>For everyone who has <strong>Use the Assistant</strong>. The button only appears once an administrator has switched the Assistant on.</p>
+
+  <h3>How to use the Assistant</h3>
+  <ol class="steps">
+    <li>Click the <strong>Assistant</strong> button (speech bubbles) at the bottom right of any admin screen. The chat opens on the right; on a phone or tablet it fills the screen.</li>
+    <li>Type your question in plain words in the box at the bottom, for example <em>"Arrivals today"</em> or <em>"Is the Deluxe Room free next Friday for 2 adults?"</em>, and press <strong>Enter</strong> or <strong>Send</strong>. <strong>Shift + Enter</strong> starts a new line.</li>
+    <li>Or tap one of the suggestion buttons above the box. They change with the screen you are on (Bookings, Housekeeping and so on).</li>
+    <li>The answer appears in the chat. When it mentions a screen or a guide, a button under the answer opens it (guides open in a new tab).</li>
+    <li>Click <strong>Stop</strong> while it is answering to cancel. Click the cross, or press <strong>Esc</strong>, to close the chat. It stays open while you move between admin screens and keeps your conversation.</li>
+  </ol>
+
+  <h3>Buttons at the top of the chat</h3>
+  <table>
+    <thead><tr><th>Button</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Your chats</strong> (list)</td><td>Your recent conversations. Only you can see them. Tap one to carry on; the box icon removes it from the list.</td></tr>
+      <tr><td><strong>New chat</strong> (plus)</td><td>Starts an empty conversation.</td></tr>
+      <tr><td><strong>Reply settings</strong> (sliders)</td><td><strong>Reply length</strong> (Short, Normal, Detailed), <strong>Tone</strong> (Plain, Friendly) and <strong>Language</strong>. Only affects your own replies.</td></tr>
+      <tr><td><strong>Close</strong> (cross)</td><td>Hides the chat. Your conversation is kept.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What it can answer</h3>
+  <ul>
+    <li>Today's arrivals and departures, who is still to arrive, who has no room yet, who is due out and what they still owe.</li>
+    <li>Who is in house, room status (ready, occupied, cleaning, out of order) and which rooms have an arrival today.</li>
+    <li>Finding a booking by name, email, phone or reference, and the details of one booking (dates, room, party, total, paid, balance).</li>
+    <li>Which room types are free for some dates, and a price for a stay worked out exactly as <strong>Create Booking</strong> would (rate plans, child charge, VAT and levy included).</li>
+    <li>A guest's past stays, the active rate plans, and (for administrators and managers) who is online.</li>
+    <li>For people with money permissions: who still owes money on room bookings.</li>
+    <li>How to do anything in the system, from the staff guides (see below).</li>
+  </ul>
+  <p>Figures come from the same places as the screens, so the chat and the screen always agree. Short lookups such as <em>"Arrivals today"</em>, <em>"Who is in house?"</em> and <em>"Room status"</em> are answered straight from the system.</p>
+
+  <h3>What it cannot do</h3>
+  <ul>
+    <li>It does not change anything yet: no bookings, check-ins, payments, refunds, stock, prices, settings or users. Ask it how, and it gives the steps and a button to the screen.</li>
+    <li>It only works on the hotel and this system. Anything else gets one line: <em>"I can only help with the hotel and this system - try asking about bookings, rooms, guests or how to do something."</em></li>
+    <li>It never says the system reports to or submits anything to MRA or any tax authority: there is no such connection.</li>
+  </ul>
+
+  <h3>It knows who you are</h3>
+  <p>The Assistant sees only what your own account can see on screen, and checks your permissions on every lookup. If you ask for something outside them, for example takings or revenue without a money permission, it answers in one line: <em>"That's outside what your account can see &mdash; a manager or admin can help with that."</em> It never gives the figure, a hint, a total or an average that would reveal it. Ask <em>"What can I do here?"</em> to see what your account can do.</p>
+
+  <h3>Guides and how-to questions</h3>
+  <p>Ask <em>"How do I check a guest in?"</em> and it answers from the staff guides, with a button to the guide. Ask <em>"Summarise the housekeeping guide"</em> (or one part of it, such as <em>"Summarise the part of the housekeeping guide about assigning cleaning"</em>) and it summarises only what the guide says. It only uses guides for screens your account can open.</p>
+
+  <h3>Privacy: what leaves the hotel</h3>
+  <p>The model that writes the answers runs at the provider chosen in Assistant Settings. Before anything is sent, guest and staff names, emails, phone numbers and booking references are swapped for codes such as [GUEST_3]; card, passport and ID numbers and addresses are removed. The answer comes back with the codes and the real names are put back on the hotel's own server, so the provider never learns who anyone is. Your chats are kept on the hotel's server.</p>
+
+  <h3>Costs</h3>
+  <p>Quick lookups, repeated questions within two minutes, off-topic and out-of-reach requests are answered on the hotel's server and cost nothing. Everyday questions use the cheapest chosen model (<strong>Fast</strong>); only questions that need real thinking, such as <em>"How can we lift occupancy next month?"</em>, use the <strong>Primary</strong> model. Each person has a daily allowance and the hotel has a monthly cost limit (see <a href="#limits">budgets and limits</a>).</p>
 
   <h2 id="screen">What is on the screen</h2>
   <table>
@@ -84,12 +139,13 @@
     <li>In <strong>On or off</strong> click <strong>Switch on</strong>. The line then reads, for example, <em>"On - using Anthropic (Claude Opus 5.5), 3 people have access."</em></li>
     <li>To stop it for everyone click <strong>Switch off</strong>.</li>
   </ol>
+  <p>The Assistant is also listed on <strong>Settings</strong> &rarr; <strong>Modules</strong> under <strong>Staff Tools</strong>. It needs both switches on; switching either off hides the button for everyone at once.</p>
   <p>Switching off never deletes chats, keys, models or limits; switching on again carries on where it was. The Assistant can also pause itself, for example when the monthly cost limit is reached; the line then starts <em>"Paused automatically:"</em> with the reason. Clicking <strong>Switch on</strong> again lifts the pause.</p>
 
   <h2 id="limits">How to set budgets and limits</h2>
   <ul>
     <li><strong>Daily limit per person (tokens)</strong>: words read plus written per person per day, counted in tokens (a token is about three quarters of a word). 1,000 to 50,000,000. Default 200,000.</li>
-    <li><strong>Monthly cost limit (US$)</strong>: when the estimated cost this month reaches it, the Assistant pauses itself. 1 to 100,000. Default 20.</li>
+    <li><strong>Monthly cost limit (US$)</strong>: when the estimated cost this month reaches it, the Assistant stops sending questions to the provider until next month or until you raise it; quick lookups still work. 1 to 100,000. Default 20.</li>
     <li><strong>Messages per person in 10 minutes</strong>: 1 to 500. Default 30.</li>
     <li><strong>Keep chats for (days)</strong>: 0 keeps chats; otherwise 7 to 3,650 days, and older chats are removed each night.</li>
   </ul>
@@ -129,6 +185,14 @@
       <tr><td><em>Choose at most 5 models.</em> / <em>Choose exactly one Primary model.</em></td><td>Too many ticks, or no (or two) Primary.</td><td>Fix the ticks and roles and save again.</td></tr>
       <tr><td><strong>Not offered any more</strong> next to a chosen model</td><td>The provider withdrew that model.</td><td>Tick another model, give it the role and save.</td></tr>
       <tr><td><em>Invalid security token.</em></td><td>The page was open too long, or your session ended.</td><td>Reload the page (F5) and try again.</td></tr>
+      <tr><td>No <strong>Assistant</strong> button</td><td>The Assistant is switched off (Assistant Settings or Settings &rarr; Modules), or your account does not have <strong>Use the Assistant</strong>.</td><td>Ask an administrator.</td></tr>
+      <tr><td><em>The Assistant is switched off.</em> in the chat</td><td>It was switched off while the chat was open.</td><td>Reload the page. Ask an administrator if you need it.</td></tr>
+      <tr><td><em>That's outside what your account can see &mdash; a manager or admin can help with that.</em></td><td>The question needs a permission your account does not have (for example money or stock figures).</td><td>Ask a manager or admin, or ask <em>"What can I do here?"</em></td></tr>
+      <tr><td><em>You have reached your daily Assistant allowance.</em></td><td>Your daily limit per person is used up.</td><td>Quick lookups still work. Everything else is back tomorrow, or an administrator can raise the limit.</td></tr>
+      <tr><td><em>The Assistant has reached this month's spending limit.</em></td><td>The monthly cost limit is reached.</td><td>Quick lookups still work. An administrator can raise the limit on Assistant Settings.</td></tr>
+      <tr><td><em>You have sent a lot of messages in the last 10 minutes.</em></td><td>The messages-per-10-minutes limit.</td><td>Wait a few minutes and try again.</td></tr>
+      <tr><td><em>Running on the backup model.</em> under an answer</td><td>The main model was busy or retired, so the Fallback model answered.</td><td>Nothing; if it keeps happening, check the models on Assistant Settings.</td></tr>
+      <tr><td><em>Could not reach the Assistant. Check the connection and try again.</em></td><td>The device lost its connection.</td><td>Check Wi-Fi or data and send again.</td></tr>
     </tbody>
   </table>
 

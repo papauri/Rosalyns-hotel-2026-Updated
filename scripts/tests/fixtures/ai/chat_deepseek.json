@@ -1,0 +1,4 @@
+{
+    "text": {"id": "d-1", "object": "chat.completion", "model": "deepseek-chat", "choices": [{"index": 0, "message": {"role": "assistant", "content": "Two arrivals today."}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 900, "completion_tokens": 9, "prompt_cache_hit_tokens": 640, "prompt_cache_miss_tokens": 260}},
+    "tool": {"id": "d-2", "object": "chat.completion", "model": "deepseek-chat", "choices": [{"index": 0, "message": {"role": "assistant", "content": "", "tool_calls": [{"id": "call_d1", "type": "function", "function": {"name": "search_bookings", "arguments": "{\"query\":\"[GUEST_1]\"}"}}]}, "finish_reason": "tool_calls"}], "usage": {"prompt_tokens": 910, "completion_tokens": 18}}
+}

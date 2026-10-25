@@ -1,0 +1,5 @@
+{
+    "text": {"candidates": [{"content": {"role": "model", "parts": [{"text": "Two arrivals today."}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 900, "candidatesTokenCount": 9, "cachedContentTokenCount": 300}},
+    "tool": {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "search_bookings", "args": {"query": "[GUEST_1]"}}}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 910, "candidatesTokenCount": 18}},
+    "refusal": {"candidates": [{"content": {"role": "model", "parts": []}, "finishReason": "SAFETY"}], "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 0}}
+}

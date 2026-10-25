@@ -392,6 +392,10 @@ Right-side drawer on laptop, full-screen sheet ≤1024 px, 44×44 px targets, ex
 format; never `innerHTML` raw model text), action cards, "Stop" button, page-aware starter prompts, prefs.
 CSRF via the existing admin token; sends current path + booking id with each message.
 
+**Phase 2: BUILT 2026-10-26 (awaiting ship).** Orchestrator `rh_ai_turn()` is in `includes/ai/ai-agents.php` (Phase 3
+builds the swarm on it). Migration `071_ai_chat.php` (ai_vault + ai_tool_cache) took the number 071, so the
+learning tables in Phase 4b are `072_ai_memory.php`. Decisions logged in BUILD_PLAN.md (Phase 2 ASSUMPTION line).
+
 ## Phase 3 — The swarm (ship)
 
 `includes/ai/ai-agents.php`. One **Lead** (orchestrator, Fast model) reads the request and either answers

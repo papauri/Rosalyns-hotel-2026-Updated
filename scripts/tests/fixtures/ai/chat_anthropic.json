@@ -1,0 +1,5 @@
+{
+    "text": {"id": "msg_01", "type": "message", "role": "assistant", "model": "claude-haiku-5-5", "content": [{"type": "text", "text": "Two arrivals today."}], "stop_reason": "end_turn", "usage": {"input_tokens": 812, "output_tokens": 9, "cache_read_input_tokens": 2048, "cache_creation_input_tokens": 0}},
+    "tool": {"id": "msg_02", "type": "message", "role": "assistant", "model": "claude-haiku-5-5", "content": [{"type": "text", "text": "Let me look."}, {"type": "tool_use", "id": "toolu_01A", "name": "search_bookings", "input": {"query": "[GUEST_1]"}}], "stop_reason": "tool_use", "usage": {"input_tokens": 820, "output_tokens": 30}},
+    "refusal": {"id": "msg_03", "type": "message", "role": "assistant", "model": "claude-haiku-5-5", "content": [{"type": "text", "text": "partial"}], "stop_reason": "refusal", "usage": {"input_tokens": 10, "output_tokens": 1}}
+}

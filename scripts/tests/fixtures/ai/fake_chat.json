@@ -1,0 +1,6 @@
+{
+    "about": "Fake provider script for the Assistant endpoint test (RH_AI_FAKE_PROVIDER=fake_chat): one normalised reply per call, in order.",
+    "replies": [
+        {"text": "The Deluxe Room is free that night.", "usage": {"in": 300, "out": 12}}
+    ]
+}

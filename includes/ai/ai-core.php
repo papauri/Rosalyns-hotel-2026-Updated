@@ -40,6 +40,28 @@ function rh_ai_schema_ready(?PDO $db = null): bool
     }
 }
 
+/** Tables the chat needs on top of 070 (migration 071: privacy vault + answer cache). */
+function rh_ai_chat_tables(): array
+{
+    return ['ai_vault', 'ai_tool_cache'];
+}
+
+/** True when migrations 070 and 071 have both run. Never throws. */
+function rh_ai_chat_ready(?PDO $db = null): bool
+{
+    $db = $db ?? ($GLOBALS['pdo'] ?? null);
+    if (!$db instanceof PDO || !rh_ai_schema_ready($db)) {
+        return false;
+    }
+    try {
+        $in = "'" . implode("','", rh_ai_chat_tables()) . "'";
+        $n = (int)$db->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ($in)")->fetchColumn();
+        return $n === count(rh_ai_chat_tables());
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 /**
  * The master kill switch, fail-closed. One query; any exception (missing table, lost connection,
  * odd value) means OFF.

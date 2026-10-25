@@ -1,0 +1,6 @@
+{
+    "text": {"id": "chatcmpl-1", "object": "chat.completion", "model": "gpt-5-mini", "choices": [{"index": 0, "message": {"role": "assistant", "content": "Two arrivals today."}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 900, "completion_tokens": 9, "prompt_tokens_details": {"cached_tokens": 512}}},
+    "tool": {"id": "chatcmpl-2", "object": "chat.completion", "model": "gpt-5-mini", "choices": [{"index": 0, "message": {"role": "assistant", "content": null, "tool_calls": [{"id": "call_abc", "type": "function", "function": {"name": "search_bookings", "arguments": "{\"query\":\"[GUEST_1]\"}"}}]}, "finish_reason": "tool_calls"}], "usage": {"prompt_tokens": 910, "completion_tokens": 18}},
+    "responses_text": {"id": "resp_1", "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Two arrivals today."}]}], "usage": {"input_tokens": 900, "output_tokens": 9}},
+    "responses_tool": {"id": "resp_2", "status": "completed", "output": [{"type": "function_call", "call_id": "call_r1", "name": "search_bookings", "arguments": "{\"query\":\"[GUEST_1]\"}"}], "usage": {"input_tokens": 910, "output_tokens": 18}}
+}
