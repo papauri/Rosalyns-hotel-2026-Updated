@@ -100,6 +100,33 @@ out of its write reach.
 
 **Guests:** staff only for now. A website/WhatsApp concierge would be a separate future plan.
 
+## Owner direction (2026-10-26, after Phase 1 shipped) — governs Phases 2–5
+
+Owner: "let AI be the main man, there should be no reason to check most things through manual clicks. It
+should be everything to the users and pretty much something they will be obsessed with while being also the
+most cheapest helpers token wise. No wastage but extra high reasoning naturally because of learning and
+intelligence."
+
+How every later phase applies it (`dept-ai-lead` designs to this; hard limits above are unchanged):
+- **Assistant-first.** Any question staff would answer by clicking through screens (arrivals, who owes, room
+  board, occupancy, revenue, guest history, what to do next) must be answerable in chat with the same figures
+  as the screen. Actions keep one-click preview → Confirm; no manual form filling. Where the chat can't act
+  (stock/POS/payments etc.) it gives the answer plus a one-tap link to the exact screen, pre-filtered.
+- **Proactive, not just reactive.** Shift-start briefing, live nudges (late arrivals, unpaid check-outs,
+  dirty rooms with arrivals due), suggested next replies as tap chips, remembers each person's habits.
+- **Cheapest per answer — no waste:** (1) answer locally first with zero tokens when possible (learned
+  playbooks, KB, deterministic read tools for exact lookups, short-TTL cache of identical read queries per
+  user/permission); (2) route: the **Fast** model (cheapest, e.g. Haiku 5.5) classifies and handles short
+  replies, the **Primary** model only for reasoning/analysis/multi-step work; (3) frozen system prompt +
+  deterministic tool list with prompt caching, volatile data after the cache breakpoint; (4) tools return
+  compact JSON (ids/tokens, no prose), only the tools the user's permissions allow; (5) history summarised,
+  never resent whole; (6) per-route effort: low for chat/lookups, high/xhigh only for analysis and planning.
+  Usage page shows cost per answer and the local-hit rate.
+- **High reasoning through learning, not bigger prompts.** The learning loop turns confirmed outcomes and
+  corrections into compact lessons/playbooks that make later answers both smarter and cheaper (a learned
+  playbook replaces a long reasoning call). Eval set tracks quality *and* tokens per answer; a change that
+  raises cost without raising the eval score is rejected.
+
 ## Local-first data (the cloud model reasons; the hotel's data stays home)
 
 The cloud model is used as a **reasoning engine only**. It plans which local tools to call; PHP runs them
