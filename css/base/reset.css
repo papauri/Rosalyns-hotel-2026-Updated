@@ -22,7 +22,7 @@ html {
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
     scroll-behavior: smooth;
-    scroll-padding-top: 100px; /* anchor jumps (footer links, #menu) stop below the fixed header */
+    scroll-padding-top: var(--header-height-mobile, 80px); /* anchor jumps (footer links, #menu) stop below the fixed header */
     font-feature-settings: "kern" 1, "liga" 1;
 }
 

@@ -472,7 +472,7 @@
     color: var(--header-nav-color-scrolled);
     background:
         linear-gradient(160deg, color-mix(in srgb, var(--color-surface, #FBF8F4) 83%, #ffffff 17%) 0%, color-mix(in srgb, var(--color-lux-clay-50, #F3ECE4) 84%, var(--color-surface, #FBF8F4) 16%) 100%);
-    box-shadow: 18px 0 38px rgba(25, 20, 16, 0.2);
+    box-shadow: none; /* shadow only when open: closed drawer sits off-canvas and its shadow bled onto the left edge */
     z-index: calc(var(--header-z-index) + 2);
     transform: translateX(-100%);
     transition: transform var(--header-transition) cubic-bezier(0.4, 0, 0.2, 1);
@@ -482,6 +482,7 @@
 
 .header__mobile--active {
     transform: translateX(0);
+    box-shadow: 18px 0 38px rgba(25, 20, 16, 0.2);
 }
 
 /* ============================================
