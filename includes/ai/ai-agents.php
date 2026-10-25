@@ -1,18 +1,25 @@
 <?php
 
 /**
- * Assistant orchestrator, Phase 2: one agent with read tools, cheapest route per answer
- * (.claude/AI_ASSISTANT_PLAN.md "Owner direction" - "Cheapest per answer - no waste").
+ * Assistant orchestrator: the Lead and its team of department leads (.claude/AI_ASSISTANT_PLAN.md
+ * Phases 2-3 + "Owner direction": cheapest per answer, swarm of leads, never guesses, real conversation).
  *
  * Order for every message:
- *   1. local, zero tokens: off-topic decline, out-of-scope decline (owner wording), the answer cache
- *      (same question, same person and permission set, within two minutes), and exact lookups answered
- *      straight from a read tool (arrivals, departures, in-house, room status, who is online, my access);
- *   2. Fast model (cheapest) with the person's read tools, effort low - it may hand over with [[ESCALATE]];
- *   3. Primary model only for reasoning / analysis / planning, effort high.
+ *   1. local, zero tokens: off-topic steer-back, out-of-scope decline (owner wording), small talk, the daily
+ *      briefing ("give me the tea": deterministic finders, one short Fast call to explain them), the answer
+ *      cache, exact lookups answered straight from a read tool (arrivals / departures for today, tomorrow or
+ *      yesterday, in-house, room status, who is online, my access) and follow-ups of those ("and tomorrow?");
+ *   2. the Lead: Fast model (cheapest) with the person's read tools, effort low - it answers directly, hands a
+ *      hard question to the Primary model with [[ESCALATE]], or asks up to 3 department leads (consult_team);
+ *   3. the department leads run in parallel (curl_multi), each with a short frozen brief and only its own
+ *      tools out of the shared permission-checked registry; the Primary model merges what they found.
+ * Caps per question: 3 leads, 8 tool rounds in all, a token cap (ai_turn_token_cap).
+ * Never guesses: every figure, reference, date or name token in a reply must be in this turn's tool
+ * results, the question or the context the model was given; otherwise the reply is regenerated once and
+ * then the unconfirmed sentence is removed (rh_ai_reply_unsupported).
  * Every outgoing request is de-identified (vault) and given a last safety pass; replies are turned back
- * into real values locally. Tokens and estimated cost are written per message and per day.
- * Phase 3 (the swarm) builds on rh_ai_turn(); Phase 4 adds action cards.
+ * into real values locally. Tokens and estimated cost are written per message (and per lead) and per day.
+ * Phase 4 adds action cards.
  */
 
 require_once __DIR__ . '/ai-core.php';
@@ -28,7 +35,10 @@ if (!defined('RH_AI_ANSWER_CACHE_SECONDS')) {
     define('RH_AI_ANSWER_CACHE_SECONDS', 120);
 }
 if (!defined('RH_AI_MAX_TOOL_ROUNDS')) {
-    define('RH_AI_MAX_TOOL_ROUNDS', 5);
+    define('RH_AI_MAX_TOOL_ROUNDS', 8);   // tool rounds per question, Lead and leads together
+}
+if (!defined('RH_AI_MAX_SPECIALISTS')) {
+    define('RH_AI_MAX_SPECIALISTS', 3);
 }
 
 // ── Routing ──────────────────────────────────────────────────────────────────
@@ -113,14 +123,30 @@ function rh_ai_needs_reasoning(string $t): bool
 function rh_ai_local_intent(string $t): ?array
 {
     $t = trim(mb_strtolower($t));
+    // today / tomorrow / yesterday are answered locally for arrivals and departures; other dates go to the model
+    $when = '';
+    if (preg_match('/\b(tomorrow|yesterday)\b/u', $t, $wm)) {
+        $when = $wm[1];
+        $t = trim(preg_replace('/\s+/u', ' ', str_replace([' for ' . $when, ' ' . $when, $when . '\'s ', $when . 's '], ['', '', '', ''], ' ' . $t . ' ')));
+    }
     if (mb_strlen($t) > 70 || rh_ai_needs_reasoning($t) || preg_match('/\b(tomorrow|yesterday|next|last|on \d|\d{4}-\d{2}-\d{2}|monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend)\b/u', $t)) {
         return null;
     }
+    $dated = static function (array $view) use ($when): array {
+        if ($when !== '') {
+            $view['date'] = date('Y-m-d', strtotime($when === 'tomorrow' ? '+1 day' : '-1 day'));
+            $view['_when'] = $when;
+        }
+        return ['arrivals_departures', $view];
+    };
     if (preg_match('/^(show |list |who are |who is |what are )?(the |today\'?s |todays )?(arrivals?|check.?ins?)( (for |due )?today)?\??$|^who(\'s| is) (arriving|checking in)( today)?\??$/u', $t)) {
-        return ['arrivals_departures', ['_view' => 'arrivals']];
+        return $dated(['_view' => 'arrivals']);
     }
     if (preg_match('/^(show |list |who are |what are )?(the |today\'?s |todays )?(departures?|check.?outs?)( (for |due )?today)?\??$|^who(\'s| is) (leaving|checking out|due out)( today)?\??$/u', $t)) {
-        return ['arrivals_departures', ['_view' => 'departures']];
+        return $dated(['_view' => 'departures']);
+    }
+    if ($when !== '') {
+        return null;
     }
     if (preg_match('/^(who(\'s| is) (in.?house|staying( with us)?( now| tonight)?)|in.?house( guests)?( now)?|(show |list )?(the )?in.?house( guests| list)?)\??$/u', $t)) {
         return ['in_house', []];
@@ -145,9 +171,10 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
     };
     $cur = (string)($r['currency'] ?? '');
     $fmt = static fn($v) => ($cur !== '' ? $cur . ' ' : '') . number_format((float)$v, 2);
+    $dayLabel = (string)($view['_when'] ?? 'today');
     if ($tool === 'arrivals_departures' && ($view['_view'] ?? '') === 'departures') {
         $d = $r['departures'];
-        $out = '**Departures today: ' . (int)$d['total'] . '** (' . (int)$d['due_out'] . ' still due out, ' . (int)$d['checked_out'] . ' checked out)';
+        $out = '**Departures ' . $dayLabel . ': ' . (int)$d['total'] . '** (' . (int)$d['due_out'] . ' still due out, ' . (int)$d['checked_out'] . ' checked out)';
         foreach ($d['list'] as $x) {
             $owe = isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? ' · owes ' . $fmt($x['balance_due']) : '';
             $out .= "\n- " . $x['guest_name'] . ' · ' . $room($x) . ' · ' . str_replace('-', ' ', (string)$x['status']) . $owe;
@@ -159,7 +186,7 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
     }
     if ($tool === 'arrivals_departures') {
         $a = $r['arrivals'];
-        $out = '**Arrivals today: ' . (int)$a['total'] . '** (' . (int)$a['still_to_arrive'] . ' still to arrive' . ((int)$a['no_room_assigned'] > 0 ? ', ' . (int)$a['no_room_assigned'] . ' with no room assigned' : '') . ')';
+        $out = '**Arrivals ' . $dayLabel . ': ' . (int)$a['total'] . '** (' . (int)$a['still_to_arrive'] . ' still to arrive' . ((int)$a['no_room_assigned'] > 0 ? ', ' . (int)$a['no_room_assigned'] . ' with no room assigned' : '') . ')';
         foreach ($a['list'] as $x) {
             $out .= "\n- " . $x['guest_name'] . ' · ' . $room($x) . ' · ' . str_replace('-', ' ', (string)$x['status']) . ' · leaves ' . $x['leaves'];
         }
@@ -220,6 +247,7 @@ function rh_ai_followup_chips(array $user, array $toolsUsed): array
     };
     foreach ($toolsUsed as $t) {
         if ($t === 'arrivals_departures') {
+            $add('arrivals_departures', 'And tomorrow?');
             $add('arrivals_departures', 'Who is due out today?');
             $add('room_board', 'Which rooms are not ready?');
         } elseif ($t === 'in_house') {
@@ -233,6 +261,549 @@ function rh_ai_followup_chips(array $user, array $toolsUsed): array
         }
     }
     return array_slice($chips, 0, 3);
+}
+
+// ── Real conversation, within the hotel's realm (zero tokens where it can be) ─
+
+/** A short friendly reply to small talk (greeting, thanks, a hard shift), or null. Zero tokens. */
+function rh_ai_small_talk(string $t): ?array
+{
+    $t = trim(mb_strtolower($t));
+    if (mb_strlen($t) > 60) {
+        return null;
+    }
+    $h = (int)date('G');
+    $part = $h < 12 ? 'morning' : ($h < 17 ? 'afternoon' : 'evening');
+    if (preg_match('/^(hi|hello|hey|hiya|good (morning|afternoon|evening|day)|morning|evening)( there| assistant| team)?[!.,\s]*$/u', $t)) {
+        return ['Good ' . $part . '. What can I help with - a guest, a booking, the rooms or how to do something?', ['Give me the tea', 'Arrivals today']];
+    }
+    if (preg_match('/^(ok(ay)?[, ]*)?(thanks|thank you|thank u|thx|cheers|great|perfect|nice|cool|brilliant|got it|noted|ok|okay)( (so much|a lot|very much|again))?[!.,\s]*$/u', $t)) {
+        return ['You\'re welcome. Ask me anytime.', []];
+    }
+    if (preg_match('/\b(so busy|busy (day|shift|night)|crazy (day|shift)|long (day|shift)|i\'?m (so )?(tired|exhausted|stressed|overwhelmed)|rough (day|shift))\b/u', $t)) {
+        return ['Busy shifts go easier one thing at a time. Want the short list of what needs you right now?', ['Give me the tea']];
+    }
+    return null;
+}
+
+/** "and tomorrow?" / "what about yesterday?" after a local lookup: the same lookup for that day. */
+function rh_ai_followup_local(string $t, ?array $last): ?array
+{
+    if (!$last || ($last['tool'] ?? '') !== 'arrivals_departures') {
+        return null;
+    }
+    $t = trim(mb_strtolower($t));
+    if (!preg_match('/^(and |what about |how about |same for |and for )?(today|tomorrow|yesterday)\??$/u', $t, $m)) {
+        return null;
+    }
+    $view = ['_view' => (string)($last['view']['_view'] ?? 'arrivals')];
+    if ($m[2] !== 'today') {
+        $view['date'] = date('Y-m-d', strtotime($m[2] === 'tomorrow' ? '+1 day' : '-1 day'));
+        $view['_when'] = $m[2];
+    }
+    return ['arrivals_departures', $view];
+}
+
+/** The last local lookup in this conversation (tool + view), from the stored message. */
+function rh_ai_last_local(PDO $db, int $conv): ?array
+{
+    $st = $db->prepare("SELECT tool_args_json FROM ai_messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1");
+    $st->execute([$conv]);
+    $m = json_decode((string)$st->fetchColumn(), true);
+    return is_array($m) && !empty($m['local']['tool']) ? (array)$m['local'] : null;
+}
+
+/** Asking for the daily briefing ("give me the tea"). */
+function rh_ai_is_briefing_request(string $t): bool
+{
+    return (bool)preg_match('/\b(give me the (full )?tea|the full tea|spill the tea|^(the )?tea\??$|full scoop|the scoop|brief me|my briefing|(daily|morning|shift|today\'?s) briefing|what did i miss|what have i missed|anything i missed|what needs (me|my attention|attention)( today| now)?|where (am i|are we) losing (money|time))\b/u', mb_strtolower(trim($t)));
+}
+
+// ── Never guesses: every figure must come from this turn's data ─────────────
+
+/**
+ * The checkable claims in a reply: name / booking tokens, ISO dates, booking-style references, and
+ * numbers that state data (money, percentages, counts of guests / bookings / rooms ...). Small advice
+ * numbers ("reply within 24 hours") are not claims. @return array<int,array{raw:string,type:string,value:?float}>
+ */
+function rh_ai_claims(string $text): array
+{
+    $out = [];
+    if (preg_match_all('/\[(?:GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', $text, $m)) {
+        foreach ($m[0] as $x) {
+            $out[] = ['raw' => $x, 'type' => 'str', 'value' => null];
+        }
+    }
+    if (preg_match_all('/\b\d{4}-\d{2}-\d{2}\b/', $text, $m)) {
+        foreach ($m[0] as $x) {
+            $out[] = ['raw' => $x, 'type' => 'str', 'value' => null];
+        }
+    }
+    if (preg_match_all('/\b[A-Z]{2,8}-?\d{5,}\b/', $text, $m)) {
+        foreach ($m[0] as $x) {
+            $out[] = ['raw' => $x, 'type' => 'str', 'value' => null];
+        }
+    }
+    $clean = preg_replace(['/\[(?:GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', '/\b\d{4}-\d{2}-\d{2}\b/', '/\b[A-Z]{2,8}-?\d{5,}\b/', '/\b\d{1,2}:\d{2}\b/'], ' ', $text);
+    if (preg_match_all('/(?<![\w.\-])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(\s*%)?/u', (string)$clean, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        $nouns = 'guests?|bookings?|rooms?|nights?|room-nights|arrivals?|departures?|people|orders?|items?|reviews?|members?|enquir\w*|tickets?|jobs?|tasks?|accounts?|payments?|refunds?|voids?|stays?|adults?|children|kids|covers|tables|batches|counts?|no-shows?|cancellations?|messages?|staff';
+        foreach ($m as $hit) {
+            $raw = $hit[1][0];
+            $pos = (int)$hit[0][1];
+            $num = (float)str_replace(',', '', $raw);
+            $before = mb_strtolower(substr((string)$clean, max(0, $pos - 8), min(8, $pos)));
+            $after = mb_strtolower(substr((string)$clean, $pos + strlen($hit[0][0]), 30));
+            $money = strpos($raw, ',') !== false || preg_match('/\.\d{2}$/', $raw) || $num >= 1000
+                || preg_match('/(mwk|usd|zar|k|\$|£|€)\s*$/u', $before) || preg_match('/^\s*(mwk|kwacha|dollars|usd)\b/u', $after);
+            $pct = !empty($hit[2][0]) && trim($hit[2][0]) === '%';
+            $count = (bool)preg_match('/^\s*(more |extra |new |other |unpaid |open |empty |unsold |free |late )?(' . $nouns . ')\b/u', $after);
+            if ($money || $pct || $count) {
+                $out[] = ['raw' => $raw . ($pct ? '%' : ''), 'type' => 'num', 'value' => $num];
+            }
+        }
+    }
+    return $out;
+}
+
+/** Every number found in the evidence, as keys (exact, and rounded to 0 and 1 decimals). */
+function rh_ai_evidence_numbers(string $evidence): array
+{
+    $keys = [];
+    if (preg_match_all('/-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?/', $evidence, $m)) {
+        foreach ($m[0] as $x) {
+            $v = abs((float)str_replace(',', '', $x));
+            foreach ([$v, round($v), round($v, 1), round($v, 2)] as $y) {
+                $keys[sprintf('%.2f', $y)] = true;
+            }
+        }
+    }
+    return $keys;
+}
+
+/** The claims in $reply that the evidence does not back (unique raw strings). Empty = the reply is grounded. */
+function rh_ai_reply_unsupported(string $reply, string $evidence): array
+{
+    $nums = null;
+    $bad = [];
+    foreach (rh_ai_claims($reply) as $c) {
+        if ($c['type'] === 'str') {
+            if (stripos($evidence, $c['raw']) === false) {
+                $bad[$c['raw']] = true;
+            }
+            continue;
+        }
+        $nums = $nums ?? rh_ai_evidence_numbers($evidence);
+        if (!isset($nums[sprintf('%.2f', abs((float)$c['value']))])) {
+            $bad[$c['raw']] = true;
+        }
+    }
+    return array_map('strval', array_keys($bad));
+}
+
+/** Remove the sentences that carry an unconfirmed figure, and say so plainly. */
+function rh_ai_strip_unsupported(string $reply, array $bad): string
+{
+    $lines = preg_split('/\r?\n/', $reply);
+    $kept = [];
+    $removed = false;
+    foreach ($lines as $line) {
+        $parts = preg_split('/(?<=[.!?])\s+/u', $line);
+        $keep = [];
+        foreach ($parts as $p) {
+            $hit = false;
+            foreach ($bad as $b) {
+                if ($b !== '' && strpos($p, $b) !== false) {
+                    $hit = true;
+                    break;
+                }
+            }
+            $hit ? $removed = true : $keep[] = $p;
+        }
+        $l = trim(implode(' ', $keep));
+        if ($l !== '' && !preg_match('/^[-*•\d.)\s]+$/u', $l)) {
+            $kept[] = $l;
+        } elseif (trim($line) === '') {
+            $kept[] = '';
+        }
+    }
+    $text = trim(preg_replace("/\n{3,}/", "\n\n", implode("\n", $kept)));
+    if (!$removed) {
+        return $reply;
+    }
+    $note = "I couldn't confirm part of that from the hotel's data, so I left it out. Ask me to look it up, or check the screen.";
+    return $text !== '' ? $text . "\n\n" . $note : "I couldn't confirm that from the hotel's data. Ask me to look it up another way, or check the screen.";
+}
+
+// ── The status line ("Checking today's departures...") ───────────────────────
+
+function rh_ai_step_key(int $uid): string
+{
+    return hash('sha256', 'assistant-step|' . $uid);
+}
+
+/** What the Assistant is doing right now for this person (the panel polls it while it waits). */
+function rh_ai_step_set(PDO $db, int $uid, string $text): void
+{
+    rh_ai_cache_put($db, rh_ai_step_key($uid), $uid, ['step' => mb_substr($text, 0, 120), 'at' => time()], 90);
+}
+
+function rh_ai_step_get(PDO $db, int $uid): string
+{
+    $r = rh_ai_cache_get($db, rh_ai_step_key($uid));
+    return is_array($r) ? (string)($r['step'] ?? '') : '';
+}
+
+// ── The team: department leads ("the brains behind the brains") ──────────────
+
+/**
+ * The department leads. core = the tools that make a lead exist for a person (they must hold at least one);
+ * tools = everything it may use (the person's own permissions still filter each one). Briefs are frozen
+ * so they cache. A lead never has a tool that writes anything (the registry has none).
+ */
+function rh_ai_specialists(): array
+{
+    return [
+        'front_desk' => ['label' => 'Front Desk & Rooms', 'brief' => 'reservations, availability, quotes, arrivals, departures, in-house guests, room assignment and guest history',
+            'core' => ['search_bookings', 'get_booking', 'arrivals_departures', 'in_house', 'check_availability'],
+            'tools' => ['search_bookings', 'get_booking', 'check_availability', 'quote_stay', 'arrivals_departures', 'in_house', 'room_board', 'guest_history', 'rate_plans_and_deals']],
+        'housekeeping' => ['label' => 'Housekeeping & Maintenance', 'brief' => 'room status, cleaning jobs, maintenance tasks, rooms off sale and rooms not ready for arrivals',
+            'core' => ['work_queues', 'room_board'], 'tools' => ['work_queues', 'room_board']],
+        'restaurant' => ['label' => 'Restaurant & Bar', 'brief' => 'till sales, top sellers, voids, refunds and slow tickets at the kitchen, bar and coffee stations',
+            'core' => ['restaurant_sales', 'kitchen_tickets'], 'tools' => ['restaurant_sales', 'kitchen_tickets']],
+        'money' => ['label' => 'Money', 'brief' => 'money owed, refunds (always in full), voids, discounts, till shortages, no-shows and cancellations; you read and explain, staff do refunds and payments on screen',
+            'core' => ['money_leaks', 'balances_due'], 'tools' => ['money_leaks', 'balances_due', 'room_performance']],
+        'stock' => ['label' => 'Stock', 'brief' => 'stock out or low, expiring batches, wastage, count variance and the stock budget; read only',
+            'core' => ['inventory_watch'], 'tools' => ['inventory_watch']],
+        'events_gym' => ['label' => 'Events, Conference & Gym', 'brief' => 'conference bookings coming up, event enquiries, gym memberships ending and gym enquiries',
+            'core' => ['events_pipeline', 'gym_watch'], 'tools' => ['events_pipeline', 'gym_watch']],
+        'revenue' => ['label' => 'Revenue & Sales', 'brief' => 'occupancy, ADR, RevPAR, pace against last year, pickup, lead time, unsold nights and where bookings come from; you recommend, you never change prices or deals',
+            'core' => ['room_performance', 'booking_pace'], 'tools' => ['room_performance', 'booking_pace', 'rate_plans_and_deals', 'events_pipeline']],
+        'guest_voice' => ['label' => 'Guest voice', 'brief' => 'reviews, guest messages and enquiries waiting, the guest experience, local tips and replies to guests in the hotel\'s voice (as drafts for staff)',
+            'core' => ['guest_voice'], 'tools' => ['guest_voice', 'get_booking', 'guest_history', 'search_bookings']],
+        'system_guide' => ['label' => 'System Guide', 'brief' => 'how to do things in this portal, from the staff guides only',
+            'core' => ['how_to', 'summarise_guide'], 'tools' => ['how_to', 'summarise_guide', 'page_help', 'open_page', 'my_access']],
+    ];
+}
+
+/** The leads this person has (holds at least one core tool), each with only the tools this person may use. */
+function rh_ai_specialists_for_user(array $user): array
+{
+    $mine = rh_ai_tools_for_user($user);
+    $out = [];
+    foreach (rh_ai_specialists() as $key => $s) {
+        if (!array_intersect($s['core'], array_keys($mine))) {
+            continue;
+        }
+        $s['tools'] = array_values(array_filter($s['tools'], static fn($t) => isset($mine[$t])));
+        sort($s['tools']);
+        $out[$key] = $s;
+    }
+    return $out;
+}
+
+/** The Lead's extra tool: ask up to 3 department leads at once. Only offered when the person has 2+ leads. */
+function rh_ai_consult_spec(array $team): ?array
+{
+    if (count($team) < 2) {
+        return null;
+    }
+    $list = [];
+    foreach ($team as $k => $s) {
+        $list[] = $k . ' (' . $s['label'] . ': ' . $s['brief'] . ')';
+    }
+    return ['name' => 'consult_team', 'description' => 'Ask up to ' . RH_AI_MAX_SPECIALISTS . ' department leads at the same time when a question needs more than one department, or a full picture. Each looks up its own figures and reports back; you then give one merged answer. Leads: ' . implode('; ', $list) . '.',
+        'schema' => ['properties' => ['leads' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => array_keys($team)], 'description' => 'Up to ' . RH_AI_MAX_SPECIALISTS . ' lead names'],
+            'question' => ['type' => 'string', 'maxLength' => 600, 'description' => 'What each lead should find out (tokens like [GUEST_1] are fine)']], 'required' => ['leads', 'question']]];
+}
+
+/** The frozen part of one lead's prompt (hotel profile + its brief), stable so providers cache it. */
+function rh_ai_specialist_frozen(PDO $db, string $key, array $s): string
+{
+    return rh_ai_context_frozen($db) . "\n\nYOUR PART IN THE TEAM\n- You are the " . $s['label'] . ' lead: ' . $s['brief'] . '.'
+        . "\n- The Assistant's Lead asked you one question for a staff member. Use your tools, then reply in at most 120 words: the facts with their figures exactly as the tools give them, the cause, who or what drove it, and the next step. No greeting."
+        . "\n- If your tools find nothing, say so plainly. Never estimate or fill a gap from general knowledge.";
+}
+
+/**
+ * Run up to 3 leads in parallel (curl_multi), each with its own tools, sharing the question's caps.
+ * $budget (by reference): rounds, tokens_cap, in, out, cost, ms, evidence, links, tools_used.
+ * @return array{findings:array,json:string}
+ */
+function rh_ai_swarm_consult(PDO $db, array $user, int $conv, array $models, array $names, string $question, array $ctx, array &$budget): array
+{
+    $team = rh_ai_specialists_for_user($user);
+    $pick = [];
+    foreach ($names as $n) {
+        $n = (string)$n;
+        if (isset($team[$n]) && !in_array($n, $pick, true)) {
+            $pick[] = $n;
+        }
+        if (count($pick) >= RH_AI_MAX_SPECIALISTS) {
+            break;
+        }
+    }
+    if (!$pick) {
+        return ['findings' => [], 'json' => '{"error":"None of those leads are available to this person."}'];
+    }
+    $uid = (int)$user['id'];
+    $model = $models['fast'] ?? ($models['primary'] ?? null);
+    $fallback = $models['fallback']['model_id'] ?? null;
+    $labels = array_map(static fn($k) => $team[$k]['label'], $pick);
+    rh_ai_step_set($db, $uid, 'Asking the ' . implode(', ', $labels) . ' lead' . (count($pick) > 1 ? 's' : '') . '...');
+    $state = [];
+    foreach ($pick as $k) {
+        $specs = [];
+        foreach (rh_ai_tool_specs($user) as $sp) {
+            if (in_array($sp['name'], $team[$k]['tools'], true)) {
+                $specs[] = $sp;
+            }
+        }
+        $state[$k] = ['messages' => [['role' => 'user', 'content' => $question]], 'specs' => $specs, 'done' => false, 'answer' => '', 'in' => 0, 'out' => 0, 'cost' => 0.0, 'ms' => 0, 'evidence' => $question, 'model' => (string)$model['model_id']];
+    }
+    for ($iter = 0; $iter < 4; $iter++) {
+        $reqs = [];
+        $over = ($budget['in'] + $budget['out']) >= $budget['tokens_cap'];
+        foreach ($state as $k => $s) {
+            if ($s['done']) {
+                continue;
+            }
+            if ($over) {
+                $state[$k]['done'] = true;
+                $state[$k]['answer'] = '(Stopped: this question reached its token limit.)';
+                continue;
+            }
+            $offer = ($iter < 3 && $budget['rounds'] > 0) ? $s['specs'] : [];
+            $reqs[$k] = rh_ai_vault_final_pass($db, $conv, [
+                'provider' => $models['provider'], 'model' => $model['model_id'],
+                'system_frozen' => rh_ai_specialist_frozen($db, $k, $team[$k]), 'system_user' => $ctx['user'],
+                'system_volatile' => $ctx['volatile'], 'messages' => $s['messages'], 'tools' => $offer, 'max_tokens' => 700, 'effort' => 'low',
+            ]);
+        }
+        if (!$reqs) {
+            break;
+        }
+        foreach (rh_ai_chat_multi($reqs, $fallback) as $k => $r) {
+            if ($r['error'] === '' || array_sum($r['usage']) > 0) {
+                [$pi, $po] = rh_ai_model_price($db, $models['provider'], (string)$r['model']);
+                $cost = rh_ai_cost_usd($pi, $po, $r['usage']);
+                rh_ai_record_usage($db, $uid, $models['provider'], (string)$r['model'], $r['usage'], $cost);
+                $in = $r['usage']['in'] + $r['usage']['cache_read'] + $r['usage']['cache_write'];
+                $state[$k]['in'] += $in;
+                $state[$k]['out'] += $r['usage']['out'];
+                $state[$k]['cost'] += $cost;
+                $budget['in'] += $in;
+                $budget['out'] += $r['usage']['out'];
+                $budget['cost'] += $cost;
+            }
+            $state[$k]['ms'] += (int)$r['ms'];
+            $state[$k]['model'] = (string)$r['model'];
+            if ($r['error'] !== '') {
+                $state[$k]['done'] = true;
+                $state[$k]['answer'] = '(This lead could not answer just now.)';
+                continue;
+            }
+            if ($r['tool_calls'] && $reqs[$k]['tools']) {
+                $budget['rounds']--;
+                $state[$k]['messages'][] = ['role' => 'assistant', 'content' => $r['text'], 'tool_calls' => $r['tool_calls']];
+                foreach ($r['tool_calls'] as $i => $c) {
+                    $name = (string)$c['name'];
+                    if ($i >= 4 || !in_array($name, $team[$k]['tools'], true)) {
+                        $json = '{"error":"That lookup is not one of your tools."}';
+                    } else {
+                        rh_ai_step_set($db, $uid, rh_ai_tool_step($name));
+                        $tr = rh_ai_run_tool($db, $user, $conv, $name, (array)$c['args']);
+                        $json = $tr['json'];
+                        $budget['tools_used'][] = $name;
+                        foreach ($tr['links'] as $l) {
+                            if (count($budget['links']) < 3 && !in_array($l, $budget['links'], true)) {
+                                $budget['links'][] = $l;
+                            }
+                        }
+                        rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $name, 'args' => rh_ai_vault_protect($db, $conv, (array)$c['args']), 'result' => $json, 'agent' => 'specialist:' . $k]);
+                    }
+                    $state[$k]['evidence'] .= "\n" . $json;
+                    $state[$k]['messages'][] = ['role' => 'tool', 'tool_call_id' => (string)$c['id'], 'name' => $name, 'content' => $json];
+                }
+                continue;
+            }
+            $state[$k]['done'] = true;
+            $ans = trim(str_replace('[[ESCALATE]]', '', (string)$r['text']));
+            $bad = rh_ai_reply_unsupported($ans, $state[$k]['evidence'] . "\n" . $ctx['frozen'] . "\n" . $ctx['volatile']);
+            $state[$k]['answer'] = $bad ? rh_ai_strip_unsupported($ans, $bad) : $ans;
+        }
+    }
+    $findings = [];
+    foreach ($state as $k => $s) {
+        $answer = $s['answer'] !== '' ? $s['answer'] : '(No answer.)';
+        $answer = rh_ai_scrub_outbound($db, $conv, $answer);
+        rh_ai_message_add($db, $conv, 'specialist', $answer, ['agent' => 'specialist:' . $k, 'args' => ['question' => mb_substr($question, 0, 600)], 'provider' => $models['provider'], 'model' => $s['model'],
+            'tokens_in' => $s['in'], 'tokens_out' => $s['out'], 'cost' => round($s['cost'], 6), 'ms' => $s['ms']]);
+        $budget['evidence'] .= "\n" . $s['evidence'] . "\n" . $answer;
+        $budget['ms'] += $s['ms'];
+        $findings[] = ['lead' => $team[$k]['label'], 'found' => $answer];
+    }
+    return ['findings' => $findings, 'json' => rh_ai_compact_json(['team' => $findings, 'note' => 'Merge these into one short answer. Quote figures exactly as given.'])];
+}
+
+// ── The daily briefing ("give me the tea") ───────────────────────────────────
+
+/** Has this person been shown the automatic briefing today? */
+function rh_ai_briefed_today(PDO $db, int $uid): bool
+{
+    try {
+        $st = $db->prepare("SELECT prefs_json FROM ai_user_prefs WHERE user_id = ?");
+        $st->execute([$uid]);
+        $j = json_decode((string)$st->fetchColumn(), true);
+        return is_array($j) && (string)($j['briefed_on'] ?? '') === date('Y-m-d');
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function rh_ai_mark_briefed(PDO $db, int $uid): void
+{
+    $p = rh_ai_prefs_get($db, $uid);
+    $p['briefed_on'] = date('Y-m-d');
+    $db->prepare("INSERT INTO ai_user_prefs (user_id, prefs_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE prefs_json = VALUES(prefs_json)")
+        ->execute([$uid, json_encode($p, JSON_UNESCAPED_UNICODE)]);
+}
+
+/** The screen a deep link opens, as a plain "source" line. */
+function rh_ai_link_source(?array $link): string
+{
+    if (!$link) {
+        return '';
+    }
+    $page = (string)strtok((string)$link['url'], '?');
+    $all = getAllPermissions();
+    foreach ($all as $p) {
+        if (($p['page'] ?? '') === $page) {
+            return 'From ' . $p['label'];
+        }
+    }
+    // A screen without its own entry (e.g. one booking): name the area whose permission opens it
+    $key = function_exists('getPermissionForPage') ? getPermissionForPage($page) : null;
+    return $key !== null && isset($all[$key]['label']) ? 'From ' . $all[$key]['label'] : '';
+}
+
+/**
+ * Build the briefing for this person in conversation $conv: deterministic findings (zero tokens), then ONE
+ * short Fast-model call to explain them (no tools), checked so it can only use the figures found; when the
+ * model is not available or over budget, a local summary. Returns ['text' (tokenised), 'items', 'links',
+ * 'chips', 'usage' ...].
+ */
+function rh_ai_briefing_build(PDO $db, array $user, int $conv, bool $useModel = true): array
+{
+    $uid = (int)$user['id'];
+    rh_ai_step_set($db, $uid, 'Going through today...');
+    $b = rh_ai_briefing_findings($db, $user);
+    $cur = (string)$b['currency'];
+    $items = [];
+    $forModel = [];
+    $fmt = static fn($v) => ($cur !== '' ? $cur . ' ' : '') . number_format((float)$v, 2);
+    foreach ($b['findings'] as $f) {
+        $p = rh_ai_vault_protect($db, $conv, array_diff_key($f, ['link' => 1]));
+        $lines = array_map(static fn($it) => rh_ai_brief_line((array)$it, $cur), (array)($p['items'] ?? []));
+        $items[] = [
+            'id' => (string)$f['id'], 'kind' => (string)$f['kind'], 'title' => (string)$p['title'],
+            'figure' => isset($f['amount']) ? $fmt($f['amount']) : (isset($f['count']) ? (string)(int)$f['count'] : ''),
+            'detail' => (string)$p['detail'], 'lines' => $lines, 'source' => rh_ai_link_source($f['link'] ?? null), 'link' => $f['link'] ?? null,
+        ];
+        $forModel[] = ['title' => $p['title'], 'detail' => $p['detail'], 'lines' => array_slice($lines, 0, 3)];
+    }
+    $n = count($items);
+    $local = $n === 0
+        ? 'Nothing needs you right now. ' . ($b['lens'] === 'front_desk' ? 'Arrivals, departures and balances are all in order.' : 'Nothing is overdue, owed or waiting on a decision in what you can see.')
+        : '**' . $b['lens_label'] . '.** ' . $n . ' thing' . ($n === 1 ? '' : 's') . ' need' . ($n === 1 ? 's' : '') . ' you today, most important first.';
+    $res = ['text' => $local, 'items' => $items, 'links' => [], 'chips' => [], 'route' => 'briefing', 'model' => '', 'provider' => null, 'tokens_in' => 0, 'tokens_out' => 0, 'cost' => 0.0, 'ms' => 0, 'lens' => $b['lens']];
+    $chips = [];
+    foreach ($items as $it) {
+        if ($it['id'] === 'missed_checkout' || $it['id'] === 'due_out_today') {
+            $chips[] = 'Who is due out today?';
+        } elseif ($it['kind'] === 'money') {
+            $chips[] = 'Explain the money leaks';
+        } elseif ($it['id'] === 'arrival_no_room' || $it['id'] === 'arrivals_to_check_in') {
+            $chips[] = 'Arrivals today';
+        }
+    }
+    $res['chips'] = array_slice(array_values(array_unique($chips)), 0, 3);
+    if (!$useModel || $n === 0 || rh_ai_budget_problem($db, $uid) !== '') {
+        return $res;
+    }
+    $models = rh_ai_role_models($db);
+    $m = $models['fast'] ?? ($models['primary'] ?? null);
+    if (!$m) {
+        return $res;
+    }
+    $data = rh_ai_compact_json(['for' => $b['lens_label'], 'currency' => $cur, 'findings' => $forModel]);
+    $volatile = rh_ai_context_volatile($db, $conv, $user, '', 0, '', 'BRIEFING: The data below lists what needs this person today, most important first. Explain it in 2 to 4 short sentences: the most important point first, with its figure, why it matters and the next step. Use ONLY the figures given; add nothing. No list and no greeting (cards with the details are shown under your text).');
+    $req = rh_ai_vault_final_pass($db, $conv, ['provider' => $models['provider'], 'model' => $m['model_id'], 'system_frozen' => rh_ai_context_frozen($db),
+        'system_user' => rh_ai_context_user($db, $conv, $user, rh_ai_prefs_get($db, $uid)), 'system_volatile' => $volatile,
+        'messages' => [['role' => 'user', 'content' => $data]], 'tools' => [], 'max_tokens' => 400, 'effort' => 'low']);
+    $r = rh_ai_chat_resilient($req, $models['fallback']['model_id'] ?? null);
+    if ($r['error'] === '' || array_sum($r['usage']) > 0) {
+        [$pi, $po] = rh_ai_model_price($db, $models['provider'], (string)$r['model']);
+        $res['cost'] = rh_ai_cost_usd($pi, $po, $r['usage']);
+        rh_ai_record_usage($db, $uid, $models['provider'], (string)$r['model'], $r['usage'], $res['cost']);
+        $res['tokens_in'] = $r['usage']['in'] + $r['usage']['cache_read'] + $r['usage']['cache_write'];
+        $res['tokens_out'] = $r['usage']['out'];
+        $res['model'] = (string)$r['model'];
+        $res['provider'] = $models['provider'];
+        $res['ms'] = (int)$r['ms'];
+    }
+    $text = trim((string)$r['text']);
+    if ($r['error'] === '' && $r['stop'] !== 'refusal' && $text !== '' && !rh_ai_reply_unsupported($text, $data . "\n" . $volatile)) {
+        $res['text'] = '**' . $b['lens_label'] . '.** ' . rh_ai_scrub_outbound($db, $conv, $text);
+    }
+    return $res;
+}
+
+/**
+ * The briefing as its own chat (endpoint action "briefing"). auto = the first panel open of the day: shown
+ * only when the person's briefing preference is on and they have not had it today.
+ */
+function rh_ai_briefing(PDO $db, array $user, bool $auto): array
+{
+    $uid = (int)$user['id'];
+    $out = ['ok' => false, 'shown' => false, 'conversation_id' => 0, 'reply' => '', 'items' => [], 'chips' => [], 'error' => ''];
+    if (!rh_ai_enabled($db) || !rh_ai_chat_ready($db) || !hasPermission($uid, 'ai_assistant_use')) {
+        $out['error'] = 'The Assistant is switched off.';
+        return $out;
+    }
+    if ($auto && (rh_ai_prefs_get($db, $uid)['briefing'] !== 'on' || rh_ai_briefed_today($db, $uid))) {
+        $out['ok'] = true;
+        return $out;
+    }
+    $conv = rh_ai_conversation_create($db, $uid, 'dashboard.php');
+    $db->prepare("UPDATE ai_conversations SET title = ? WHERE id = ?")->execute(['Briefing ' . date('j M'), $conv]);
+    if (!$auto) {
+        rh_ai_message_add($db, $conv, 'user', 'Give me the tea');
+    }
+    $b = rh_ai_briefing_build($db, $user, $conv, true);
+    rh_ai_message_add($db, $conv, 'assistant', $b['text'], ['agent' => 'briefing', 'args' => ['route' => 'briefing', 'items' => $b['items'], 'chips' => $b['chips'], 'links' => []],
+        'provider' => $b['provider'], 'model' => $b['model'] !== '' ? $b['model'] : null, 'tokens_in' => $b['tokens_in'], 'tokens_out' => $b['tokens_out'], 'cost' => $b['cost'], 'ms' => $b['ms']]);
+    if ($auto) {
+        rh_ai_mark_briefed($db, $uid);
+    }
+    rh_ai_step_set($db, $uid, '');
+    return ['ok' => true, 'shown' => true, 'conversation_id' => $conv, 'reply' => rh_ai_vault_rehydrate($db, $conv, $b['text']),
+        'items' => rh_ai_items_rehydrate($db, $conv, $b['items']), 'chips' => $b['chips'], 'route' => 'briefing',
+        'usage' => ['tokens_in' => $b['tokens_in'], 'tokens_out' => $b['tokens_out'], 'cost_usd' => $b['cost']], 'error' => ''];
+}
+
+/** Briefing cards with real names restored locally (stored tokenised). */
+function rh_ai_items_rehydrate(PDO $db, int $conv, array $items): array
+{
+    $out = [];
+    foreach ($items as $it) {
+        $it = (array)$it;
+        foreach (['title', 'detail', 'figure', 'source'] as $k) {
+            $it[$k] = rh_ai_vault_rehydrate($db, $conv, (string)($it[$k] ?? ''));
+        }
+        $it['lines'] = array_map(static fn($l) => rh_ai_vault_rehydrate($db, $conv, (string)$l), (array)($it['lines'] ?? []));
+        $out[] = $it;
+    }
+    return $out;
 }
 
 // ── Conversations, history, usage ────────────────────────────────────────────
@@ -438,12 +1009,12 @@ function rh_ai_maybe_summarise(PDO $db, int $uid, int $conv, array $models): voi
 
 /**
  * Answer one message. $in: conversation_id, message, page, booking_id.
- * @return array{ok:bool, conversation_id:int, reply:string, route:string, model:string, links:array, chips:array, tokens_in:int, tokens_out:int, cost_usd:float, notice:string, error:string}
+ * @return array{ok:bool, conversation_id:int, reply:string, route:string, model:string, links:array, chips:array, items:array, tokens_in:int, tokens_out:int, cost_usd:float, notice:string, error:string}
  */
 function rh_ai_turn(PDO $db, array $user, array $in): array
 {
     $uid = (int)$user['id'];
-    $out = ['ok' => false, 'conversation_id' => 0, 'reply' => '', 'route' => '', 'model' => '', 'links' => [], 'chips' => [], 'tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0.0, 'notice' => '', 'error' => ''];
+    $out = ['ok' => false, 'conversation_id' => 0, 'reply' => '', 'route' => '', 'model' => '', 'links' => [], 'chips' => [], 'items' => [], 'tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0.0, 'notice' => '', 'error' => ''];
     if (!rh_ai_enabled($db) || !rh_ai_chat_ready($db)) {
         $out['error'] = 'The Assistant is switched off.';
         return $out;
@@ -465,10 +1036,12 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
         return $out;
     }
     $new = $conv <= 0;
+    $lastLocal = $new ? null : rh_ai_last_local($db, $conv);
     if ($new) {
         $conv = rh_ai_conversation_create($db, $uid, $page);
     }
     $out['conversation_id'] = $conv;
+    rh_ai_step_set($db, $uid, 'Reading your question...');
 
     $tok = rh_ai_scrub_outbound($db, $conv, $message);
     $userMsgId = rh_ai_message_add($db, $conv, 'user', $tok, ['args' => ['page' => $page, 'booking_id' => $bookingId]]);
@@ -476,20 +1049,30 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
         $db->prepare("UPDATE ai_conversations SET title = ? WHERE id = ?")->execute([rh_ai_title_from($tok), $conv]);
     }
 
-    $finish = static function (string $tokReply, string $route, array $extra = []) use ($db, $conv, $user, &$out): array {
+    $finish = static function (string $tokReply, string $route, array $extra = []) use ($db, $conv, $uid, &$out): array {
         $links = (array)($extra['links'] ?? []);
         $chips = (array)($extra['chips'] ?? []);
+        $items = (array)($extra['items'] ?? []);
+        $meta = ['links' => $links, 'chips' => $chips, 'route' => $route, 'notice' => (string)($extra['notice'] ?? '')];
+        if ($items) {
+            $meta['items'] = $items;
+        }
+        if (!empty($extra['local'])) {
+            $meta['local'] = $extra['local'];
+        }
         rh_ai_message_add($db, $conv, 'assistant', $tokReply, [
-            'agent' => $route, 'args' => ['links' => $links, 'chips' => $chips, 'route' => $route, 'notice' => (string)($extra['notice'] ?? '')],
-            'provider' => $extra['provider'] ?? null, 'model' => $extra['model'] ?? null,
+            'agent' => $route, 'args' => $meta,
+            'provider' => $extra['provider'] ?? null, 'model' => ($extra['model'] ?? '') !== '' ? $extra['model'] : null,
             'tokens_in' => $extra['tokens_in'] ?? 0, 'tokens_out' => $extra['tokens_out'] ?? 0, 'cost' => $extra['cost'] ?? 0, 'ms' => $extra['ms'] ?? null,
         ]);
+        rh_ai_step_set($db, $uid, '');
         $out['ok'] = true;
         $out['reply'] = rh_ai_vault_rehydrate($db, $conv, $tokReply);
         $out['route'] = $route;
         $out['model'] = (string)($extra['model'] ?? '');
         $out['links'] = $links;
         $out['chips'] = $chips;
+        $out['items'] = $items ? rh_ai_items_rehydrate($db, $conv, $items) : [];
         $out['tokens_in'] = (int)($extra['tokens_in'] ?? 0);
         $out['tokens_out'] = (int)($extra['tokens_out'] ?? 0);
         $out['cost_usd'] = (float)($extra['cost'] ?? 0);
@@ -497,7 +1080,7 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
         return $out;
     };
 
-    // 1a. Off-topic: one line, no tokens
+    // 1a. Not about the hotel: a friendly one-line steer back, no tokens
     if (rh_ai_is_off_topic($tok)) {
         return $finish(rh_ai_off_topic_line(), 'declined');
     }
@@ -505,7 +1088,17 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
     if (rh_ai_scope_block($user, $tok) !== '') {
         return $finish(rh_ai_out_of_scope_line(), 'declined', ['chips' => ['What can I do here?']]);
     }
-    // 1c. Same question asked moments ago in this chat (same person, permission set and screen).
+    // 1c. Small talk (greeting, thanks, a hard shift): a short friendly reply, no tokens
+    if (($st = rh_ai_small_talk($tok)) !== null) {
+        return $finish($st[0], 'local', ['chips' => $st[1]]);
+    }
+    // 1d. The daily briefing on request: deterministic findings, one short explanation
+    if (rh_ai_is_briefing_request($tok)) {
+        $b = rh_ai_briefing_build($db, $user, $conv, true);
+        return $finish($b['text'], 'briefing', ['items' => $b['items'], 'chips' => $b['chips'], 'provider' => $b['provider'], 'model' => $b['model'],
+            'tokens_in' => $b['tokens_in'], 'tokens_out' => $b['tokens_out'], 'cost' => $b['cost'], 'ms' => $b['ms']]);
+    }
+    // 1e. Same question asked moments ago in this chat (same person, permission set and screen).
     // Kept per conversation so the cached reply's tokens always belong to this chat's vault.
     $norm = trim(preg_replace('/[^\p{L}\p{N} ]+/u', '', mb_strtolower($tok)));
     $answerKey = rh_ai_cache_key($user, 'answer:' . $conv . ':' . $page . ':' . $bookingId, $norm);
@@ -513,34 +1106,37 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
     if ($hit !== null && isset($hit['reply_tok'])) {
         return $finish((string)$hit['reply_tok'], 'cache', ['links' => (array)($hit['links'] ?? []), 'chips' => (array)($hit['chips'] ?? [])]);
     }
-    // 1d. Exact lookups straight from a read tool
-    $intent = rh_ai_local_intent($tok);
+    // 1f. Exact lookups straight from a read tool, and follow-ups of them ("and tomorrow?")
+    $intent = rh_ai_local_intent($tok) ?? rh_ai_followup_local($tok, $lastLocal);
     if ($intent !== null) {
         [$tool, $view] = $intent;
         if (!rh_ai_tool_allowed($user, $tool)) {
             return $finish(rh_ai_out_of_scope_line(), 'declined', ['chips' => ['What can I do here?']]);
         }
-        $r = rh_ai_run_tool($db, $user, $conv, $tool, []);
+        $args = isset($view['date']) ? ['date' => (string)$view['date']] : [];
+        rh_ai_step_set($db, $uid, rh_ai_tool_step($tool));
+        $r = rh_ai_run_tool($db, $user, $conv, $tool, $args);
         if ($r['ok']) {
             $text = rh_ai_local_format($tool, $view, $r['result']);
             if ($text !== '') {
-                rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $tool, 'args' => [], 'result' => $r['json'], 'agent' => 'local']);
+                rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $tool, 'args' => $args, 'result' => $r['json'], 'agent' => 'local']);
                 $chips = rh_ai_followup_chips($user, [$tool]);
                 rh_ai_cache_put($db, $answerKey, $uid, ['reply_tok' => $text, 'links' => $r['links'], 'chips' => $chips], RH_AI_ANSWER_CACHE_SECONDS);
-                return $finish($text, 'local', ['links' => $r['links'], 'chips' => $chips]);
+                return $finish($text, 'local', ['links' => $r['links'], 'chips' => $chips, 'local' => ['tool' => $tool, 'view' => $view]]);
             }
         }
     }
 
-    // 2/3. A model is needed
-    $budget = rh_ai_budget_problem($db, $uid);
-    if ($budget !== '') {
-        return $finish($budget, 'limit');
+    // 2/3. A model is needed: the Lead, maybe the team, maybe the Primary model
+    $budgetProblem = rh_ai_budget_problem($db, $uid);
+    if ($budgetProblem !== '') {
+        return $finish($budgetProblem, 'limit');
     }
     $models = rh_ai_role_models($db);
     $primary = $models['primary'] ?? null;
     $fast = $models['fast'] ?? null;
     if (!$primary && !$fast) {
+        rh_ai_step_set($db, $uid, '');
         $out['error'] = 'No model is chosen for the Assistant yet. Ask an administrator to finish Assistant Settings.';
         return $out;
     }
@@ -549,46 +1145,66 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
     $prefs = rh_ai_prefs_get($db, $uid);
     $hist = rh_ai_history($db, $conv, $userMsgId);
     $specs = rh_ai_tool_specs($user);
+    $consultSpec = rh_ai_consult_spec(rh_ai_specialists_for_user($user));
     $frozen = rh_ai_context_frozen($db);
     $userBlock = rh_ai_context_user($db, $conv, $user, $prefs);
 
     $messages = $hist['messages'];
     $messages[] = ['role' => 'user', 'content' => $tok];
-    $totIn = 0;
-    $totOut = 0;
-    $totCost = 0.0;
-    $totMs = 0;
-    $links = [];
-    $toolsUsed = [];
+    // What a reply may draw figures from: this turn's tool results, the question, the context sent, the chat so far.
+    $budget = ['rounds' => RH_AI_MAX_TOOL_ROUNDS, 'tokens_cap' => rh_ai_turn_token_cap(), 'in' => 0, 'out' => 0, 'cost' => 0.0, 'ms' => 0,
+        'evidence' => $frozen . "\n" . $userBlock . "\n" . $hist['summary'] . "\n" . implode("\n", array_column($hist['messages'], 'content')) . "\n" . $tok,
+        'links' => [], 'tools_used' => []];
     $notice = '';
     $usedModel = '';
     $final = null;
     $escalated = false;
+    $consulted = false;
+    $merging = false;
+    $regenerated = false;
 
-    for ($round = 0; $round <= RH_AI_MAX_TOOL_ROUNDS; $round++) {
+    for ($guard = 0; $guard < 24; $guard++) {
+        if ($budget['in'] + $budget['out'] >= $budget['tokens_cap']) {
+            $final = 'That question needed more work than one question is allowed. Try asking about one part at a time.';
+            break;
+        }
         $m = $route === 'fast' ? $fast : ($primary ?? $fast);
-        $note = $route === 'fast'
-            ? 'ROUTE: quick lookup. If answering well needs deeper analysis, planning or several steps of reasoning, reply with exactly [[ESCALATE]] and nothing else.'
-            : 'ROUTE: analysis. Think it through, use the tools for every figure, then give a short, practical answer with the reasons.';
+        if ($merging) {
+            $note = 'ROUTE: merge. The team\'s findings are in the consult_team result. Give one short, practical answer for this person: most important first, figures exactly as given, then the next step.';
+        } elseif ($route === 'fast') {
+            $note = 'ROUTE: quick lookup. If answering well needs deeper analysis, planning or several steps of reasoning, reply with exactly [[ESCALATE]] and nothing else.'
+                . ($consultSpec && !$consulted ? ' If it needs more than one department, use consult_team.' : '');
+        } else {
+            $note = 'ROUTE: analysis. Think it through, use the tools for every figure' . ($consultSpec && !$consulted ? ' (consult_team asks several departments at once)' : '') . ', then give a short, practical answer with the reasons.';
+        }
+        $offer = [];
+        if ($budget['rounds'] > 0) {
+            $offer = $specs;
+            if ($consultSpec && !$consulted) {
+                $offer[] = $consultSpec;
+            }
+        }
+        $volatile = rh_ai_context_volatile($db, $conv, $user, $page, $bookingId, $hist['summary'], $note);
         $req = [
             'provider' => $models['provider'], 'model' => $m['model_id'],
-            'system_frozen' => $frozen, 'system_user' => $userBlock,
-            'system_volatile' => rh_ai_context_volatile($db, $conv, $user, $page, $bookingId, $hist['summary'], $note),
-            'messages' => $messages, 'tools' => $round < RH_AI_MAX_TOOL_ROUNDS ? $specs : [],
+            'system_frozen' => $frozen, 'system_user' => $userBlock, 'system_volatile' => $volatile,
+            'messages' => $messages, 'tools' => $offer,
             'max_tokens' => $route === 'fast' ? 1024 : 4096, 'effort' => $route === 'fast' ? 'low' : 'high',
         ];
         $req = rh_ai_vault_final_pass($db, $conv, $req);
-        $fallback = $models['fallback']['model_id'] ?? null;
-        $r = rh_ai_chat_resilient($req, $fallback);
+        if ($guard === 0 || $merging) {
+            rh_ai_step_set($db, $uid, $merging ? 'Putting the answer together...' : 'Thinking it through...');
+        }
+        $r = rh_ai_chat_resilient($req, $models['fallback']['model_id'] ?? null);
         $usedModel = (string)$r['model'];
-        $totMs += (int)$r['ms'];
+        $budget['ms'] += (int)$r['ms'];
         if ($r['error'] === '' || array_sum($r['usage']) > 0) {
             [$pi, $po] = rh_ai_model_price($db, $models['provider'], $usedModel);
             $cost = rh_ai_cost_usd($pi, $po, $r['usage']);
             rh_ai_record_usage($db, $uid, $models['provider'], $usedModel, $r['usage'], $cost);
-            $totIn += $r['usage']['in'] + $r['usage']['cache_read'] + $r['usage']['cache_write'];
-            $totOut += $r['usage']['out'];
-            $totCost += $cost;
+            $budget['in'] += $r['usage']['in'] + $r['usage']['cache_read'] + $r['usage']['cache_write'];
+            $budget['out'] += $r['usage']['out'];
+            $budget['cost'] += $cost;
         }
         if (!empty($r['used_fallback'])) {
             $notice = 'Running on the backup model.';
@@ -601,31 +1217,67 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
             $final = "I can't help with that one.";
             break;
         }
-        if ($r['tool_calls']) {
+        if ($r['tool_calls'] && $offer) {
+            $budget['rounds']--;
             $messages[] = ['role' => 'assistant', 'content' => $r['text'], 'tool_calls' => $r['tool_calls']];
-            foreach (array_slice($r['tool_calls'], 0, 6) as $c) {
-                $tr = rh_ai_run_tool($db, $user, $conv, (string)$c['name'], (array)$c['args']);
-                $toolsUsed[] = (string)$c['name'];
-                foreach ($tr['links'] as $l) {
-                    if (count($links) < 3 && !in_array($l, $links, true)) {
-                        $links[] = $l;
-                    }
+            foreach ($r['tool_calls'] as $i => $c) {
+                $name = (string)$c['name'];
+                if ($i >= 6) { // every call needs an answer, even the ones not run
+                    $messages[] = ['role' => 'tool', 'tool_call_id' => (string)$c['id'], 'name' => $name, 'content' => '{"error":"Too many lookups at once; ask again."}'];
+                    continue;
                 }
-                rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => (string)$c['name'], 'args' => rh_ai_vault_protect($db, $conv, (array)$c['args']), 'result' => $tr['json'], 'agent' => $route]);
-                $messages[] = ['role' => 'tool', 'tool_call_id' => (string)$c['id'], 'name' => (string)$c['name'], 'content' => $tr['json']];
-            }
-            foreach (array_slice($r['tool_calls'], 6) as $c) { // every call needs an answer, even the ones not run
-                $messages[] = ['role' => 'tool', 'tool_call_id' => (string)$c['id'], 'name' => (string)$c['name'], 'content' => '{"error":"Too many lookups at once; ask again."}'];
+                if ($name === 'consult_team') {
+                    if ($consulted || !$consultSpec) {
+                        $json = '{"error":"The team has already been asked for this question."}';
+                    } else {
+                        $consulted = true;
+                        $leads = array_slice(array_values(array_filter((array)($c['args']['leads'] ?? []), 'is_string')), 0, 6);
+                        $q = rh_ai_scrub_outbound($db, $conv, mb_substr(trim((string)($c['args']['question'] ?? '')), 0, 600));
+                        $res = rh_ai_swarm_consult($db, $user, $conv, $models, $leads, $q !== '' ? $q : $tok,
+                            ['frozen' => $frozen, 'user' => $userBlock, 'volatile' => rh_ai_context_volatile($db, $conv, $user, $page, $bookingId, '', '')], $budget);
+                        $json = $res['json'];
+                        if ($res['findings']) {
+                            $merging = true;
+                            $route = $primary ? 'primary' : 'fast';
+                        }
+                    }
+                    rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => 'consult_team', 'args' => (array)$c['args'], 'result' => $json, 'agent' => 'lead']);
+                } else {
+                    rh_ai_step_set($db, $uid, rh_ai_tool_step($name));
+                    $tr = rh_ai_run_tool($db, $user, $conv, $name, (array)$c['args']);
+                    $json = $tr['json'];
+                    $budget['tools_used'][] = $name;
+                    foreach ($tr['links'] as $l) {
+                        if (count($budget['links']) < 3 && !in_array($l, $budget['links'], true)) {
+                            $budget['links'][] = $l;
+                        }
+                    }
+                    rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $name, 'args' => rh_ai_vault_protect($db, $conv, (array)$c['args']), 'result' => $json, 'agent' => $route]);
+                }
+                $budget['evidence'] .= "\n" . $json;
+                $messages[] = ['role' => 'tool', 'tool_call_id' => (string)$c['id'], 'name' => $name, 'content' => $json];
             }
             continue;
         }
-        $text = trim($r['text']);
+        $text = trim((string)$r['text']);
         if ($route === 'fast' && strpos($text, '[[ESCALATE]]') !== false && $primary && !$escalated) {
             $escalated = true;
             $route = 'primary';
             continue;
         }
         $text = trim(str_replace('[[ESCALATE]]', '', $text));
+        // Never guesses: every figure, reference, date or name token must come from this turn's data.
+        $bad = $text !== '' ? rh_ai_reply_unsupported($text, $budget['evidence'] . "\n" . $volatile) : [];
+        if ($bad && !$regenerated && ($budget['in'] + $budget['out']) < $budget['tokens_cap']) {
+            $regenerated = true;
+            $messages[] = ['role' => 'assistant', 'content' => $text];
+            $messages[] = ['role' => 'user', 'content' => 'CHECK BEFORE ANSWERING: these are not in the tool results of this question or in what I asked: ' . implode(', ', array_slice($bad, 0, 8))
+                . '. Look them up with a tool, or answer without them. If the data has nothing, say so plainly and offer the next step. Never estimate.'];
+            continue;
+        }
+        if ($bad) {
+            $text = rh_ai_strip_unsupported($text, $bad);
+        }
         if ($r['stop'] === 'max_tokens') {
             $text .= "\n\n(The answer was cut short - ask me to continue.)";
         }
@@ -636,11 +1288,11 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
         $final = 'That needed more lookups than I can do in one go. Try a narrower question.';
     }
     $final = rh_ai_scrub_outbound($db, $conv, $final); // stored tokenised (model text should already be)
-    $chips = rh_ai_followup_chips($user, array_unique($toolsUsed));
-    $res = $finish($final, $route, ['links' => $links, 'chips' => $chips, 'provider' => $models['provider'], 'model' => $usedModel,
-        'tokens_in' => $totIn, 'tokens_out' => $totOut, 'cost' => round($totCost, 6), 'ms' => $totMs, 'notice' => $notice]);
+    $chips = rh_ai_followup_chips($user, array_unique($budget['tools_used']));
+    $res = $finish($final, $consulted ? 'swarm' : $route, ['links' => $budget['links'], 'chips' => $chips, 'provider' => $models['provider'], 'model' => $usedModel,
+        'tokens_in' => $budget['in'], 'tokens_out' => $budget['out'], 'cost' => round($budget['cost'], 6), 'ms' => $budget['ms'], 'notice' => $notice]);
     if (strpos($final, 'Sorry - the Assistant could not answer') !== 0) {
-        rh_ai_cache_put($db, $answerKey, $uid, ['reply_tok' => $final, 'links' => $links, 'chips' => $chips], RH_AI_ANSWER_CACHE_SECONDS);
+        rh_ai_cache_put($db, $answerKey, $uid, ['reply_tok' => $final, 'links' => $budget['links'], 'chips' => $chips], RH_AI_ANSWER_CACHE_SECONDS);
     }
     try {
         rh_ai_maybe_summarise($db, $uid, $conv, $models);
@@ -658,10 +1310,12 @@ function rh_ai_conversation_messages(PDO $db, int $conv): array
     $out = [];
     foreach (array_reverse($st->fetchAll(PDO::FETCH_ASSOC)) as $r) {
         $meta = json_decode((string)$r['tool_args_json'], true) ?: [];
+        $bot = $r['role'] === 'assistant';
         $out[] = [
             'id' => (int)$r['id'], 'role' => $r['role'], 'text' => rh_ai_vault_rehydrate($db, $conv, (string)$r['content']),
-            'links' => $r['role'] === 'assistant' ? array_values((array)($meta['links'] ?? [])) : [],
-            'notice' => $r['role'] === 'assistant' ? (string)($meta['notice'] ?? '') : '',
+            'links' => $bot ? array_values((array)($meta['links'] ?? [])) : [],
+            'items' => $bot && !empty($meta['items']) ? rh_ai_items_rehydrate($db, $conv, (array)$meta['items']) : [],
+            'notice' => $bot ? (string)($meta['notice'] ?? '') : '',
             'at' => (string)$r['created_at'],
         ];
     }

@@ -1,7 +1,9 @@
 <?php
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // never runnable over the web
 /**
- * The staff Assistant (.claude/AI_ASSISTANT_PLAN.md). Phase 2 - chat core + read tools (fake provider,
+ * The staff Assistant (.claude/AI_ASSISTANT_PLAN.md). Phase 3 - the swarm of department leads (fan-out <= 3,
+ * caps, permissions), department reads equal to their screens, the role-shaped daily briefing, never guesses
+ * (reply-check), real conversation, the plain look. Phase 2 - chat core + read tools (fake provider,
  * vault, routing, caps, endpoint, panel, Settings > Modules row, guide). Phase 1 - Foundation (ships OFF):
  * fail-closed kill switch, key encryption, provider adapters (list models + test reply) against
  * fixtures, model catalog + ranking, ai_models sync/selection, permissions, the settings page and
@@ -901,6 +903,282 @@ if (!$chatReady) {
     }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Phase 3 - the swarm, department reads, the daily briefing, never guesses, conversation, look
+// (fake provider, no network; rolled back)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Library checks (no database writes) ──
+$reg3 = rh_ai_tool_registry();
+$newTools = ['room_performance', 'booking_pace', 'money_leaks', 'restaurant_sales', 'kitchen_tickets', 'inventory_watch', 'events_pipeline', 'gym_watch', 'guest_voice', 'work_queues', 'daily_briefing'];
+check(!array_diff($newTools, array_keys($reg3)), 'Phase 3 department reads are in the shared registry');
+$insSrc = (string)file_get_contents($root . '/includes/ai/ai-insights.php');
+preg_match_all('/\b(?:INSERT\s+INTO|(?<!KEY\s)UPDATE\s+`?\w|DELETE\s+FROM|REPLACE\s+INTO|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE|TRUNCATE)\b/i', $insSrc, $wm3);
+check(!$wm3[0], 'the department reads write nothing (no INSERT / UPDATE / DELETE / DDL)', json_encode($wm3[0]));
+$leadTools = [];
+foreach (rh_ai_specialists() as $k => $s) { $leadTools = array_merge($leadTools, $s['tools'], $s['core']); }
+check(!array_diff(array_unique($leadTools), array_keys($reg3)), 'every lead\'s tools come from the shared permission-checked registry (no tool of their own)');
+check(count(rh_ai_specialists()) === 9 && isset(rh_ai_specialists()['money'], rh_ai_specialists()['guest_voice'], rh_ai_specialists()['system_guide']), 'nine department leads, following the owner\'s list');
+// Never guesses: the reply-check itself
+$ev = '{"count":0,"bookings":[]} {"refunds":{"total":6059.57,"count":1}} occupancy_pct 0.4 [GUEST_1]';
+check(rh_ai_reply_unsupported('Found it: booking LSH2026999999 for MWK 150,000.00.', $ev) === ['LSH2026999999', '150,000.00'], 'reply-check: an invented reference and amount are caught', json_encode(rh_ai_reply_unsupported('Found it: booking LSH2026999999 for MWK 150,000.00.', $ev)));
+check(rh_ai_reply_unsupported('MWK 6,059.57 was refunded on 1 payment; occupancy is 0.4%. [GUEST_1] asked.', $ev) === [], 'reply-check: figures and tokens that are in the data pass');
+check(rh_ai_reply_unsupported('About MWK 6,060 was refunded.', $ev) === [], 'reply-check: a figure rounded from the data passes');
+check(rh_ai_reply_unsupported('Reply within 24 hours and apologise first.', $ev) === [], 'reply-check: advice numbers ("within 24 hours") are not data claims');
+check(rh_ai_reply_unsupported('[GUEST_9] owes 12 nights.', $ev) === ['[GUEST_9]', '12'], 'reply-check: an unknown guest token and an invented count are caught');
+$st3 = rh_ai_strip_unsupported("Arrivals are fine. The balance is MWK 150,000.00 for them.\nCheck the screen.", ['150,000.00']);
+check(strpos($st3, '150,000') === false && strpos($st3, 'Arrivals are fine.') !== false && strpos($st3, "couldn't confirm") !== false, 'reply-check: the unconfirmed sentence is removed and the reply says so', $st3);
+// Conversation helpers
+check(rh_ai_small_talk('thanks!') !== null && rh_ai_small_talk('good morning') !== null && rh_ai_small_talk('so busy today') !== null && rh_ai_small_talk('what is our revenue') === null, 'small talk: thanks / greeting / a busy shift get a local reply');
+check(rh_ai_local_intent('arrivals tomorrow')[1]['date'] === date('Y-m-d', strtotime('+1 day')) && rh_ai_local_intent('departures yesterday')[1]['_view'] === 'departures', 'arrivals / departures for tomorrow or yesterday are local lookups');
+check(rh_ai_followup_local('and tomorrow?', ['tool' => 'arrivals_departures', 'view' => ['_view' => 'arrivals']])[1]['date'] === date('Y-m-d', strtotime('+1 day')) && rh_ai_followup_local('and tomorrow?', ['tool' => 'in_house', 'view' => []]) === null, '"and tomorrow?" after a local lookup reuses it; other tools go to the model');
+check(rh_ai_is_briefing_request('Give me the tea') && rh_ai_is_briefing_request('what did I miss?') && !rh_ai_is_briefing_request('tea for room 4'), 'briefing requests are recognised ("give me the tea", "what did I miss")');
+check(strpos(rh_ai_off_topic_line(), "\n") === false && stripos(rh_ai_off_topic_line(), 'guests') !== false, 'off-realm: one friendly line that steers back to the hotel');
+// Parallel calls: same seam, results in order
+$GLOBALS['ai2_q'] = [['reply' => ['text' => 'first']], ['reply' => ['text' => 'second']]];
+$GLOBALS['ai2_calls'] = [];
+$mr = rh_ai_chat_multi(['a' => ['provider' => 'anthropic', 'model' => 'claude-haiku-5-5'] + $baseReq, 'b' => ['provider' => 'anthropic', 'model' => 'claude-haiku-5-5'] + $baseReq]);
+check(array_keys($mr) === ['a', 'b'] && $mr['a']['text'] === 'first' && $mr['b']['text'] === 'second' && count($GLOBALS['ai2_calls']) === 2, 'rh_ai_chat_multi: one result per request, in order (test seam, no network)');
+check(strpos((string)file_get_contents($root . '/includes/ai/ai-providers.php'), 'curl_multi_init') !== false, 'the leads are called in parallel with curl_multi');
+// Look: no AI-looking UI in the panel files
+$lookSrc = (string)file_get_contents($root . '/admin/includes/ai-panel.php') . (string)file_get_contents($root . '/admin/js/ai-panel.js') . (string)file_get_contents($root . '/admin/css/ai-panel.css');
+check(!preg_match('/sparkle|wand|magic|robot|gradient|fa-brain|fa-star|shimmer|glow|@keyframes|animation\s*:|rh-ai-typing|\bsmart\b/i', $lookSrc), 'panel: no sparkle / wand / magic / robot / brain / star, no gradients, glows, shimmer or animated typing dots');
+check(strpos($lookSrc, 'rh-ai-status') !== false && strpos($lookSrc, "action: 'status'") !== false, 'panel: a plain status line naming the real step replaces the typing dots');
+check(substr_count($lookSrc, 'min-height: 44px') >= 1 && strpos($lookSrc, 'rh-ai-brief__figure') !== false && strpos($lookSrc, 'rh-ai-brief__source') !== false, 'briefing laid out like a document (figure, cause, source, link) with 44px link targets');
+check(rh_ai_tool_step('arrivals_departures') === "Checking today's arrivals and departures..." && rh_ai_tool_step('money_leaks') !== 'Looking that up...', 'every tool has a plain status line');
+
+if (!$chatReady) {
+    skip('Phase 3 database checks (migration 071 not run here)');
+} else {
+    $userRow3 = static function (string $where) use ($pdo): ?array {
+        $r = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND $where ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        return $r ?: null;
+    };
+    $adm3 = $userRow3("role = 'admin'");
+    $rec3 = $userRow3("role = 'receptionist'");
+    $roomId3 = (int)$pdo->query("SELECT id FROM rooms WHERE is_active = 1 ORDER BY id LIMIT 1")->fetchColumn();
+    $refA = 'AIT3' . str_pad((string)random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
+    $refB = 'AIT3' . str_pad((string)random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
+    $missed = 'Quentin Marchbanks';
+    $owing = 'Ottoline Rutherford';
+    $pdo->beginTransaction();
+    try {
+        rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_provider' => 'anthropic', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000', 'ai_rate_limit_per_10min' => '500', 'ai_turn_token_cap' => '60000'], $pdo);
+        $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
+        rh_ai_store_key('anthropic', $FAKE_KEY, (int)$adm3['id'], $pdo);
+        $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL WHERE is_selected = 1");
+        $mi = $pdo->prepare("INSERT INTO ai_models (provider, model_id, label, capability_rank, source, is_selected, role, price_in_per_mtok, price_out_per_mtok) VALUES ('anthropic', ?, ?, ?, 'catalog', 1, ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE is_selected = 1, role = VALUES(role), price_in_per_mtok = VALUES(price_in_per_mtok), price_out_per_mtok = VALUES(price_out_per_mtok)");
+        $mi->execute(['claude-opus-5-5', 'Claude Opus 5.5', 95, 'primary', 4, 20]);
+        $mi->execute(['claude-haiku-5-5', 'Claude Haiku 5.5', 85, 'fast', 0.10, 0.50]);
+        $mi->execute(['claude-sonnet-5-5', 'Claude Sonnet 5.5', 90, 'fallback', 2, 10]);
+        // A guest past their check-out date, still checked in (a missed check-out)
+        $ins = $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests, total_amount, total_with_vat, amount_paid, amount_due, status)
+                              VALUES (?, ?, ?, ?, '+265 991 000 111', ?, ?, 2, 1, 1, 0, ?, ?, ?, ?, ?)");
+        $ins->execute([$refA, $roomId3, $missed, 'qm.assist.test@example.com', date('Y-m-d', strtotime('-3 days')), date('Y-m-d', strtotime('-1 day')), 0, 0, 0, 0, 'checked-in']);
+        // A guest who left owing money, and a refund paid out in full
+        $ins->execute([$refB, $roomId3, $owing, 'or.assist.test@example.com', date('Y-m-d', strtotime('-4 days')), date('Y-m-d', strtotime('-2 days')), 50000, 50000, 0, 50000, 'checked-out']);
+        $owingId = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, total_amount, payment_method, payment_type, payment_status, refund_status, refund_amount, refund_reason, recorded_by)
+                       VALUES (?, 'room', ?, ?, CURDATE(), 20000, 20000, 'cash', 'refund', 'refunded', 'completed', 20000, 'other', ?)")
+            ->execute(['AIT3R' . random_int(100000, 999999), $owingId, $refB, (int)$adm3['id']]);
+        rh_ai_vault_people_reset();
+        if ($rec3) {
+            $gp = $pdo->prepare("INSERT INTO user_permissions (user_id, permission_key, is_granted) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted)");
+            foreach (['ai_assistant_use' => 1, 'bookings' => 1, 'create_booking' => 1, 'accounting' => 0, 'payments' => 0, 'reports' => 0, 'pos_accounting' => 0, 'invoices' => 0, 'stock_dashboard' => 0, 'stock_management' => 0, 'stock_reports' => 0, 'stock_count' => 0, 'stock_wastage' => 0, 'stock_batches' => 0, 'user_management' => 0] as $k => $v) {
+                $gp->execute([(int)$rec3['id'], $k, $v]);
+            }
+        }
+        $turn3 = static function (array $u, string $msg, int $conv = 0, array $replies = []) use ($pdo): array {
+            $GLOBALS['ai2_q'] = array_map(static fn($x) => ['reply' => $x], $replies);
+            $GLOBALS['ai2_calls'] = [];
+            return rh_ai_turn($pdo, $u, ['conversation_id' => $conv, 'message' => $msg, 'page' => 'dashboard.php']);
+        };
+
+        // ── Who has which lead and tool ──
+        $teamA = rh_ai_specialists_for_user($adm3);
+        $toolsA = array_keys(rh_ai_tools_for_user($adm3));
+        check(isset($teamA['money'], $teamA['revenue'], $teamA['front_desk'], $teamA['system_guide']) && in_array('money_leaks', $toolsA, true) && in_array('room_performance', $toolsA, true), 'administrator: Money, Revenue, Front Desk and System Guide leads with their reads', implode(',', array_keys($teamA)));
+        $badLead = [];
+        foreach ($teamA as $k => $s) { foreach ($s['tools'] as $t) { if (!in_array($t, $toolsA, true)) { $badLead[] = "$k:$t"; } } }
+        check(!$badLead, 'a lead only carries tools the person may use', implode(',', $badLead));
+        if (!rh_module_key_enabled('gym')) {
+            check(!in_array('gym_watch', $toolsA, true), 'gym switched off here: the gym read is hidden even from an administrator');
+        } else {
+            check(in_array('gym_watch', $toolsA, true), 'gym on here: the gym read is offered to gym staff');
+        }
+        if ($rec3) {
+            $teamR = rh_ai_specialists_for_user($rec3);
+            $toolsR = array_keys(rh_ai_tools_for_user($rec3));
+            check(!isset($teamR['money']) && !isset($teamR['revenue']) && !isset($teamR['stock']) && isset($teamR['front_desk']), 'receptionist: no Money, Revenue or Stock lead; the Front Desk lead is there', implode(',', array_keys($teamR)));
+            check(!array_intersect(['money_leaks', 'room_performance', 'booking_pace', 'restaurant_sales', 'inventory_watch'], $toolsR), 'receptionist: no money, revenue or stock read is offered', implode(',', $toolsR));
+            $tr = rh_ai_run_tool($pdo, $rec3, 0, 'money_leaks', []);
+            check(!$tr['ok'] && strpos($tr['json'], 'refunds') === false, 'the money read re-checks permission when called directly');
+        }
+
+        // ── The swarm: at most 3 leads, in parallel, each with its own tools; Primary merges ──
+        $r = $turn3($adm3, 'Give me the full picture across money, revenue, the desk, stock and housekeeping for this week', 0, [
+            ['tool_calls' => [['id' => 'toolu_c1', 'name' => 'consult_team', 'args' => ['leads' => ['money', 'revenue', 'front_desk', 'stock', 'housekeeping'], 'question' => 'What needs attention this week?']]]],
+            ['text' => 'Money looks steady.'], ['text' => 'Revenue is on track.'], ['text' => 'The desk is clear.'],
+            ['text' => 'Money, revenue and the desk are steady this week.'],
+        ]);
+        $bodies = array_map(static fn($c) => json_decode($c['body'], true) ?: [], $GLOBALS['ai2_calls']);
+        $specRows = $pdo->prepare("SELECT agent, model_id, tokens_in, tokens_out, cost_usd FROM ai_messages WHERE conversation_id = ? AND role = 'specialist' ORDER BY id");
+        $specRows->execute([(int)$r['conversation_id']]);
+        $sr = $specRows->fetchAll(PDO::FETCH_ASSOC);
+        check($r['ok'] && $r['route'] === 'swarm' && count($GLOBALS['ai2_calls']) === 5 && count($sr) === 3, 'five leads asked for: only three run (Lead + 3 leads + merge = 5 calls)', json_encode([$r['route'], count($GLOBALS['ai2_calls']), count($sr), $r['error']]));
+        check(array_column($sr, 'agent') === ['specialist:money', 'specialist:revenue', 'specialist:front_desk'] && (int)$sr[0]['tokens_in'] > 0 && $sr[0]['model_id'] === 'claude-haiku-5-5', 'each lead\'s agent, model and tokens are recorded on its own message');
+        $moneyTools = array_column($bodies[1]['tools'] ?? [], 'name');
+        check($moneyTools && !array_diff($moneyTools, rh_ai_specialists()['money']['tools']) && strpos((string)($bodies[1]['system'][0]['text'] ?? ''), 'You are the Money lead') !== false, 'the Money lead gets its own brief and only its own tools', implode(',', $moneyTools));
+        check(($bodies[4]['model'] ?? '') === 'claude-opus-5-5' && strpos(json_encode($bodies[4]['messages'] ?? []), 'Revenue is on track') !== false && $r['reply'] === 'Money, revenue and the desk are steady this week.', 'the Primary model merges what the leads found');
+        check(!in_array('consult_team', array_column($bodies[4]['tools'] ?? [], 'name'), true), 'the team is asked once per question');
+        // Caps: 8 tool rounds in all, then one last answer without tools
+        $loop = array_fill(0, 12, ['tool_calls' => [['id' => 'toolu_l', 'name' => 'in_house', 'args' => []]]]);
+        $r = $turn3($adm3, 'Keep checking who is in house', 0, $loop);
+        $withTools = 0;
+        foreach ($GLOBALS['ai2_calls'] as $c) { if (!empty(json_decode($c['body'], true)['tools'])) { $withTools++; } }
+        $lastBody = json_decode(end($GLOBALS['ai2_calls'])['body'], true);
+        check($r['ok'] && $withTools === RH_AI_MAX_TOOL_ROUNDS && count($GLOBALS['ai2_calls']) === RH_AI_MAX_TOOL_ROUNDS + 1 && empty($lastBody['tools']), 'tool rounds stop at 8; the last call has no tools', json_encode([$withTools, count($GLOBALS['ai2_calls'])]));
+        // Token cap per question
+        rh_ai_save_settings(['ai_turn_token_cap' => '5000'], $pdo);
+        $r = $turn3($adm3, 'Who is in house and what do they owe in detail', 0, [['tool_calls' => [['id' => 'toolu_t', 'name' => 'in_house', 'args' => []]], 'usage' => ['in' => 6000, 'out' => 10]], ['text' => 'SHOULD NOT BE USED']]);
+        check($r['ok'] && count($GLOBALS['ai2_calls']) === 1 && stripos($r['reply'], 'more work than one question') !== false, 'the per-question token cap stops further calls', json_encode([count($GLOBALS['ai2_calls']), $r['reply']]));
+        rh_ai_save_settings(['ai_turn_token_cap' => '60000'], $pdo);
+
+        // ── Never guesses ──
+        $r = $turn3($adm3, 'Find the booking for Xyzzy Nobody', 0, [
+            ['tool_calls' => [['id' => 'toolu_e1', 'name' => 'search_bookings', 'args' => ['query' => 'Xyzzy Nobody']]]],
+            ['text' => 'Found it: booking LSH2026999999 for MWK 150,000.00.'],
+            ['text' => 'It is LSH2026999999.'],
+        ]);
+        check($r['ok'] && count($GLOBALS['ai2_calls']) === 3 && strpos($r['reply'], 'LSH2026999999') === false && strpos($r['reply'], '150,000') === false && stripos($r['reply'], "couldn't confirm") !== false, 'empty booking lookup: an invented reference and amount are caught, regenerated once, then removed', $r['reply']);
+        $regen = json_encode(json_decode($GLOBALS['ai2_calls'][2]['body'] ?? '{}', true)['messages'] ?? []);
+        check(strpos($regen, 'CHECK BEFORE ANSWERING') !== false && strpos($regen, 'LSH2026999999') !== false, 'the regenerate request names the figures that were not in the data');
+        $r = $turn3($adm3, 'How much does booking NOPE-ZZ still have to pay?', 0, [
+            ['tool_calls' => [['id' => 'toolu_e2', 'name' => 'get_booking', 'args' => ['reference' => 'NOPE-ZZ']]]],
+            ['text' => 'They still owe MWK 45,000.'],
+            ['text' => 'I can\'t find a booking with that reference - check it and try again?'],
+        ]);
+        check($r['ok'] && strpos($r['reply'], '45') === false && stripos($r['reply'], "can't find") !== false, 'amount question with nothing found: no invented figure, a plain "can\'t find" and the next step', $r['reply']);
+
+        // ── Real conversation ──
+        $r1 = $turn3($adm3, 'Arrivals today');
+        $r2 = $turn3($adm3, 'and tomorrow?', $r1['conversation_id']);
+        check($r2['route'] === 'local' && count($GLOBALS['ai2_calls']) === 0 && strpos($r2['reply'], 'Arrivals tomorrow') !== false, '"and tomorrow?" reuses the last lookup locally, no model call', $r2['reply']);
+        $r = $turn3($adm3, 'Thanks!');
+        check($r['route'] === 'local' && count($GLOBALS['ai2_calls']) === 0 && $r['reply'] !== '', 'small talk answered kindly with no model call');
+        $r = $turn3($adm3, 'How should I calm down an angry guest at the desk?', 0, [['text' => 'Listen first, apologise, then offer a clear fix within 24 hours.']]);
+        check($r['ok'] && $r['route'] !== 'declined' && strpos($r['reply'], '24 hours') !== false, 'hospitality advice is in the realm (and its advice numbers are not stripped)');
+
+        // ── The daily briefing ──
+        if ($rec3) {
+            $GLOBALS['ai2_calls'] = [];
+            $bR = rh_ai_briefing_findings($pdo, $rec3);
+            $ids = array_column($bR['findings'], 'id');
+            check(count($GLOBALS['ai2_calls']) === 0, 'briefing finders spend zero model tokens');
+            $mc = array_values(array_filter($bR['findings'], static fn($f) => $f['id'] === 'missed_checkout'))[0] ?? null;
+            check($bR['lens'] === 'front_desk' && $mc && in_array($missed, array_column((array)$mc['items'], 'guest_name'), true), 'receptionist briefing lists the seeded missed check-out', json_encode($ids));
+            check(!array_filter($bR['findings'], static fn($f) => $f['kind'] === 'money' || isset($f['amount'])) && stripos(json_encode($bR['findings']), 'total') === false, 'receptionist briefing has no money findings and no money totals');
+            $linksOk = true;
+            foreach ($bR['findings'] as $f) {
+                if (!empty($f['link']) && (!preg_match('/^[a-z0-9\-_]+\.php(\?[A-Za-z0-9\-_.=&%+]*)?$/i', $f['link']['url']) || !rhCanOpenPage((int)$rec3['id'], (string)strtok($f['link']['url'], '?')))) { $linksOk = false; }
+            }
+            check($linksOk && !empty($mc['link']), 'every briefing point has a deep link to a screen the person may open');
+            // Asked for in chat: one short explanation call, no tools; an invented figure falls back to the local text
+            $r = $turn3($rec3, 'Give me the tea', 0, [['text' => 'You lost MWK 999,999.00 today.']]);
+            $b0 = json_decode($GLOBALS['ai2_calls'][0]['body'] ?? '{}', true) ?: [];
+            check($r['route'] === 'briefing' && count($GLOBALS['ai2_calls']) === 1 && empty($b0['tools']) && ($b0['model'] ?? '') === 'claude-haiku-5-5', '"give me the tea": one Fast call to explain the findings, no tools');
+            check(strpos($r['reply'], '999,999') === false && strpos($r['reply'], 'What needs you at the desk') !== false, 'a briefing explanation with an invented figure is replaced by the local summary', $r['reply']);
+            $itemText = json_encode($r['items']);
+            check(strpos($itemText, $missed) !== false && strpos($allBodies(), 'Marchbanks') === false && strpos($allBodies(), 'Quentin') === false, 'briefing cards show the real name; the model only saw tokens');
+            $GLOBALS['ai2_calls'] = [];
+            rh_ai_prefs_set($pdo, (int)$rec3['id'], ['briefing' => 'off']);
+            $ab = rh_ai_briefing($pdo, $rec3, true);
+            check($ab['ok'] && !$ab['shown'] && count($GLOBALS['ai2_calls']) === 0, 'briefing preference off: nothing on first open');
+        } else {
+            skip('receptionist briefing checks: no receptionist user on this install');
+        }
+        $GLOBALS['ai2_calls'] = [];
+        $bA = rh_ai_briefing_findings($pdo, $adm3);
+        $byId = [];
+        foreach ($bA['findings'] as $f) { $byId[$f['id']] = $f; }
+        check($bA['lens'] === 'owner' && count($GLOBALS['ai2_calls']) === 0, 'owner briefing: the money view, zero model tokens');
+        check(isset($byId['left_owing']) && (float)$byId['left_owing']['amount'] >= 50000 - BALANCE_TOLERANCE && in_array($owing, array_column((array)$byId['left_owing']['items'], 'guest_name'), true), 'owner briefing lists the seeded guest who left owing, with the amount', json_encode(array_keys($byId)));
+        check(isset($byId['refunds']) && (float)$byId['refunds']['amount'] >= 20000 - BALANCE_TOLERANCE && stripos($byId['refunds']['detail'], 'in full') !== false, 'owner briefing lists the refund paid out, in full');
+        check(($bA['findings'][0]['kind'] ?? '') === 'money', 'owner briefing puts money first');
+        $GLOBALS['ai2_q'] = [['reply' => ['text' => 'Money is owed by a guest who has left.']]];
+        $GLOBALS['ai2_calls'] = [];
+        $pdo->prepare("DELETE FROM ai_user_prefs WHERE user_id = ?")->execute([(int)$adm3['id']]);
+        $ab1 = rh_ai_briefing($pdo, $adm3, true);
+        $ab2 = rh_ai_briefing($pdo, $adm3, true);
+        check($ab1['shown'] && $ab1['items'] && !$ab2['shown'] && count($GLOBALS['ai2_calls']) === 1, 'first open of the day shows the briefing (preference on by default); the second open does not');
+        rh_ai_prefs_set($pdo, (int)$adm3['id'], ['length' => 'normal']);
+        check(rh_ai_briefed_today($pdo, (int)$adm3['id']) && rh_ai_prefs_get($pdo, (int)$adm3['id'])['briefing'] === 'on', 'saving reply settings keeps the briefing switch and today\'s "already shown"');
+        // Status line
+        rh_ai_step_set($pdo, (int)$adm3['id'], 'Checking today\'s departures...');
+        check(rh_ai_step_get($pdo, (int)$adm3['id']) === 'Checking today\'s departures...', 'the status line is stored for the panel to read');
+        // Department reads equal their screens' own helpers
+        $ml = rh_ai_t_money_leaks($pdo, $adm3, []);
+        rh_ai_admin_lib('receivables.php');
+        check(abs((float)$ml['still_owed']['total'] - (float)rh_receivable_summary($pdo, rh_receivable_mods())['total']) <= BALANCE_TOLERANCE, 'money owed equals the receivables rule the money screens use');
+        if (rh_module_key_enabled('stock')) {
+            $iw = rh_ai_t_inventory_watch($pdo, $adm3, []);
+            $sa = rh_stock_alert_summary($pdo, 8);
+            check($iw['alerts']['out'] === $sa['out'] && $iw['alerts']['low'] === $sa['low'], 'stock alerts equal the stock dashboard rule');
+        }
+    } finally {
+        $pdo->rollBack();
+        rh_ai_vault_forget();
+        rh_ai_vault_people_reset();
+        rh_ai_settings($pdo, true);
+    }
+    check((int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE booking_reference IN (" . $pdo->quote($refA) . ', ' . $pdo->quote($refB) . ")")->fetchColumn() === 0 && !rh_ai_enabled($pdo), 'Phase 3 checks rolled back (no booking or refund left, Assistant still off)');
+}
+
+// ── Analytics: the AI figure equals the Reports screen for the same range (live data, read only) ──
+$adm4 = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if ($adm4 && rh_module_key_enabled('bookings') && rh_module_key_enabled('finance')) {
+    foreach ([[date('Y-m-01'), date('Y-m-t')], [date('Y-m-d', strtotime('-60 days')), date('Y-m-d', strtotime('-1 day'))]] as [$fromR, $toR]) {
+        $ai = rh_ai_t_room_performance($pdo, $adm4, ['from' => $fromR, 'to' => $toR]);
+        $tmpRep = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'ai_reports_' . bin2hex(random_bytes(4)) . '.html';
+        // The harness refuses any statement with a ';' after it (a second statement could commit), and one Reports
+        // query has a ';' inside an SQL comment. So the screen runs from a throw-away copy of admin/reports.php
+        // whose only change is that comment character; the copy is deleted straight after.
+        $repCopy = 'admin/_ai_check_reports_' . bin2hex(random_bytes(4)) . '.php';
+        $repSrc = (string)file_get_contents($root . '/admin/reports.php');
+        $repSrc = (string)preg_replace_callback('/(?<=\s)-- [^\n]*/', static fn($m) => str_replace(';', ',', $m[0]), $repSrc);
+        file_put_contents($root . '/' . $repCopy, $repSrc);
+        try {
+            $rr = run_page($repCopy, ['method' => 'GET', 'get' => ['start_date' => $fromR, 'end_date' => $toR, 'tab' => 'overview'], 'dump_html' => $tmpRep]);
+        } finally {
+            @unlink($root . '/' . $repCopy);
+        }
+        $hh = (string)@file_get_contents($tmpRep);
+        @unlink($tmpRep);
+        $grab = static function (string $label) use ($hh): ?string {
+            return preg_match('/' . $label . '<\/td>\s*<td[^>]*>([^<]*)<\/td>/u', $hh, $m) ? trim(html_entity_decode($m[1])) : null;
+        };
+        $occS = $grab('Occupancy Rate');
+        $adrS = $grab('ADR incl\. VAT \(Avg Daily Rate\)');
+        $rvS = $grab('RevPAR');
+        $cxS = $grab('Cancellation Rate');
+        $num = static fn(?string $s) => $s === null ? null : (float)preg_replace('/[^\d.\-]/', '', str_replace(',', '', $s));
+        check($occS !== null && abs($num($occS) - (float)$ai['occupancy_pct']) < 0.05, "room_performance occupancy equals Reports ($fromR to $toR)", "screen $occS vs " . $ai['occupancy_pct']);
+        check($adrS !== null && abs($num($adrS) - (float)$ai['adr_incl_vat']) < 0.5 && $rvS !== null && abs($num($rvS) - (float)$ai['revpar']) < 0.5, "room_performance ADR and RevPAR equal Reports ($fromR to $toR)", "screen $adrS / $rvS vs " . $ai['adr_incl_vat'] . ' / ' . $ai['revpar']);
+        check($cxS !== null && abs($num($cxS) - (float)$ai['cancellation_rate_pct']) < 0.05, "room_performance cancellation rate equals Reports ($fromR to $toR)", "screen $cxS vs " . $ai['cancellation_rate_pct']);
+        check($clean($rr), 'reports comparison run rolled back');
+    }
+} else {
+    skip('Reports comparison: bookings or finance switched off here');
+}
+
+// ── Settings: the per-question token cap saves ──
+if ($schemaReady) {
+    $r = run_page('admin/ai-settings.php', ['post' => ['action' => 'save_limits', 'ai_user_daily_token_cap' => '150000', 'ai_monthly_budget_usd' => '20', 'ai_rate_limit_per_10min' => '30', 'ai_retention_days' => '0', 'ai_turn_token_cap' => '80000'],
+        'verify' => ["SELECT setting_value FROM site_settings WHERE setting_key = 'ai_turn_token_cap'"]]);
+    check(($r['verify'][0][0]['setting_value'] ?? '') === '80000' && $clean($r), 'Assistant Settings saves "Most tokens for one question"', json_encode($r['verify'] ?? $r));
+}
+
 // ════ Settings > Modules lists the Assistant (off stays off) ════
 $r = run_page('admin/module-settings.php', ['method' => 'GET', 'grep' => ['id="ms-toggle-ai_assistant"', 'id="ms-card-ai_assistant"']]);
 check(($r['found']['id="ms-toggle-ai_assistant"'] ?? false), 'Settings > Modules shows the Assistant row');
@@ -916,6 +1194,10 @@ $kb1 = rh_kb_search('how do I use the assistant', 3)['results'];
 $kb2 = rh_kb_search('what leaves the hotel assistant privacy', 3)['results'];
 check(($kb1[0]['file'] ?? '') === '22-assistant.html' && ($kb1[0]['anchor'] ?? '') === 'using', 'KB: "how do I use the assistant" finds the Using the Assistant part', json_encode(array_column($kb1, 'title')));
 check(($kb2[0]['file'] ?? '') === '22-assistant.html' && stripos((string)($kb2[0]['title'] ?? ''), 'privacy') !== false, 'KB: the privacy section is findable', json_encode(array_column($kb2, 'title')));
+foreach (['give me the tea daily briefing' => 'briefing', 'assistant team of department leads' => 'team', 'does the assistant guess figures' => 'never-guesses'] as $q => $anchor) {
+    $kb3 = rh_kb_search($q, 3)['results'];
+    check(($kb3[0]['file'] ?? '') === '22-assistant.html' && ($kb3[0]['anchor'] ?? '') === $anchor, "KB: \"$q\" finds the $anchor section", json_encode(array_column($kb3, 'title')));
+}
 
 rh_ai_set_transport(null);
 if ($origEnv === null) { unset($_ENV['APP_ENCRYPTION_SALT']); } else { $_ENV['APP_ENCRYPTION_SALT'] = $origEnv; }

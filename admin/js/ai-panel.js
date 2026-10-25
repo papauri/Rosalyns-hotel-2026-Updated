@@ -2,7 +2,9 @@
  * The Assistant panel (admin/includes/ai-panel.php). Lives outside #rh-admin-page, so it survives
  * in-app navigation; binds once. Replies are ESCAPED first, then a small markdown subset is applied
  * (bold, code, lists, paragraphs) - model text is never put into the page raw. Links from the server
- * are checked against admin screens / staff guides and built with DOM methods.
+ * are checked against admin screens / staff guides and built with DOM methods. The daily briefing is laid
+ * out like a short document (headline figure, what it is, why, where from, one link). While it works the
+ * panel shows one plain line naming the real step, read from the server (no animated dots).
  */
 (function () {
     'use strict';
@@ -21,7 +23,7 @@
     var stopBtn = form.querySelector('.rh-ai-stop');
     var KEY_OPEN = 'rh_ai_open';
     var KEY_CONV = 'rh_ai_conv';
-    var state = { conv: 0, busy: false, ctrl: null, loaded: false };
+    var state = { conv: 0, busy: false, ctrl: null, loaded: false, poll: null };
 
     function csrf() {
         return panel.getAttribute('data-csrf') || window._rhCsrf || ((document.querySelector('meta[name="csrf-token"]') || {}).content) || '';
@@ -104,6 +106,7 @@
             b.textContent = text;
         } else {
             b.innerHTML = formatReply(text); // escaped above, then formatted
+            if (extra.items && extra.items.length) { b.appendChild(briefing(extra.items)); }
             (extra.links || []).forEach(function (l) {
                 var s = safeUrl(l && l.url);
                 if (!s) { return; }
@@ -164,26 +167,72 @@
             if (j && j.success) { setChips(j.chips); }
         }).catch(function () { /* chips are optional */ });
     }
-    function typing(on) {
-        var t = document.getElementById('rhAiTyping');
+    function el(tag, cls, text) {
+        var e = document.createElement(tag);
+        if (cls) { e.className = cls; }
+        if (text !== undefined && text !== null && text !== '') { e.textContent = String(text); }
+        return e;
+    }
+    // The briefing as a document: one row per point (figure | title, cause, lines, source, link). Text only, no HTML.
+    function briefing(items) {
+        var box = el('div', 'rh-ai-brief');
+        box.setAttribute('role', 'list');
+        items.forEach(function (it) {
+            var row = el('div', 'rh-ai-brief__item' + (it.kind === 'money' ? ' rh-ai-brief__item--money' : ''));
+            row.setAttribute('role', 'listitem');
+            row.appendChild(el('div', 'rh-ai-brief__figure', it.figure || ''));
+            row.appendChild(el('p', 'rh-ai-brief__title', it.title || ''));
+            row.appendChild(el('p', 'rh-ai-brief__detail', it.detail || ''));
+            if (it.lines && it.lines.length) {
+                var ul = el('ul', 'rh-ai-brief__lines');
+                it.lines.forEach(function (l) { ul.appendChild(el('li', '', l)); });
+                row.appendChild(ul);
+            }
+            if (it.source) { row.appendChild(el('p', 'rh-ai-brief__source', it.source)); }
+            var s = it.link && safeUrl(it.link.url);
+            if (s && !s.guide) {
+                var a = el('a', 'btn btn-secondary btn-sm rh-ai-brief__link');
+                a.href = s.url;
+                var i = el('i', 'fas fa-arrow-right');
+                i.setAttribute('aria-hidden', 'true');
+                a.appendChild(i);
+                a.appendChild(document.createTextNode(' ' + String(it.link.label || 'Open')));
+                row.appendChild(a);
+            }
+            box.appendChild(row);
+        });
+        return box;
+    }
+    // One calm line naming the step the server is on ("Checking today's departures...").
+    function status(on, text) {
+        var t = document.getElementById('rhAiStatus');
         if (on && !t) {
-            t = document.createElement('div');
-            t.id = 'rhAiTyping';
-            t.className = 'rh-ai-msg rh-ai-msg--bot rh-ai-typing';
-            t.setAttribute('aria-label', 'The Assistant is answering');
-            t.innerHTML = '<span></span><span></span><span></span>';
+            t = el('p', 'rh-ai-status');
+            t.id = 'rhAiStatus';
+            t.setAttribute('role', 'status');
             stream.appendChild(t);
+        }
+        if (on) {
+            t.textContent = text || 'Reading your question...';
             scrollDown();
-        } else if (!on && t) {
+        } else if (t) {
             t.remove();
         }
     }
-    function busy(on) {
+    function pollStatus() {
+        if (!state.busy) { return; }
+        post({ action: 'status' }).then(function (j) {
+            if (state.busy && j && j.success && j.step) { status(true, j.step); }
+        }).catch(function () { /* the status line is optional */ });
+    }
+    function busy(on, first) {
         state.busy = on;
         sendBtn.hidden = on;
         stopBtn.hidden = !on;
         input.disabled = on;
-        typing(on);
+        status(on, first);
+        if (state.poll) { clearInterval(state.poll); state.poll = null; }
+        if (on) { state.poll = setInterval(pollStatus, 1200); }
     }
 
     // ── Views ────────────────────────────────────────────────────────────────
@@ -235,6 +284,7 @@
             document.getElementById('rhAiPrefLength').value = j.prefs.length;
             document.getElementById('rhAiPrefTone').value = j.prefs.tone;
             document.getElementById('rhAiPrefLang').value = j.prefs.language;
+            document.getElementById('rhAiPrefBrief').value = j.prefs.briefing || 'on';
         });
     }
     function openConversation(id) {
@@ -244,10 +294,25 @@
             store(KEY_CONV, state.conv);
             stream.textContent = '';
             if (!j.messages.length) { welcome(); }
-            j.messages.forEach(function (m) { addBubble(m.role, m.text, { links: m.links, notice: m.notice }); });
+            j.messages.forEach(function (m) { addBubble(m.role, m.text, { links: m.links, notice: m.notice, items: m.items }); });
             setChips([]);
             if (!j.messages.length) { loadSuggestions(); }
         });
+    }
+    // First open of the day: the server shows the briefing only when the person's preference is on and it
+    // has not been shown today; otherwise it answers shown:false and nothing changes.
+    function autoBriefing() {
+        if (state.busy) { return; }
+        busy(true, 'Going through today...');
+        post({ action: 'briefing', auto: '1' }).then(function (j) {
+            busy(false);
+            if (!j || !j.success || !j.shown) { return; }
+            state.conv = j.conversation_id;
+            store(KEY_CONV, state.conv);
+            stream.textContent = '';
+            addBubble('assistant', j.reply, { items: j.items });
+            setChips(j.chips || []);
+        }).catch(function () { busy(false); });
     }
     function newChat() {
         state.conv = 0;
@@ -274,7 +339,7 @@
                 busy(false);
                 if (j && j.conversation_id) { state.conv = j.conversation_id; store(KEY_CONV, state.conv); }
                 if (!j || !j.success) { addError((j && j.error) || 'The Assistant could not answer just now.'); return; }
-                addBubble('assistant', j.reply, { links: j.links, notice: j.notice });
+                addBubble('assistant', j.reply, { links: j.links, notice: j.notice, items: j.items });
                 setChips(j.chips || []);
             })
             .catch(function (e) {
@@ -298,6 +363,7 @@
             state.loaded = true;
             var saved = parseInt(read(KEY_CONV) || '0', 10);
             if (saved > 0) { openConversation(saved); } else { welcome(); loadSuggestions(); }
+            autoBriefing();
         }
         show('chat');
     }
@@ -329,7 +395,7 @@
     document.getElementById('rhAiPrefs').addEventListener('submit', function (e) {
         e.preventDefault();
         var val = function (id) { return document.getElementById(id).value; }; // (form.length is the control count, not the field)
-        post({ action: 'prefs_set', length: val('rhAiPrefLength'), tone: val('rhAiPrefTone'), language: val('rhAiPrefLang') }).then(function () { show('chat'); });
+        post({ action: 'prefs_set', length: val('rhAiPrefLength'), tone: val('rhAiPrefTone'), language: val('rhAiPrefLang'), briefing: val('rhAiPrefBrief') }).then(function () { show('chat'); });
     });
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && !panel.hidden) { close(); }

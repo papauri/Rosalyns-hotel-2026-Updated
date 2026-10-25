@@ -72,10 +72,21 @@ function rh_ai_http(string $method, string $url, array $headers, ?string $body =
     if (!function_exists('curl_init')) {
         return ['http' => 0, 'body' => '', 'error' => 'This server cannot make web requests (PHP cURL is missing).', 'ms' => 0];
     }
+    $ch = curl_init($url);
+    curl_setopt_array($ch, rh_ai_curl_opts($method, $headers, $body, $timeout));
+    $resp = curl_exec($ch);
+    $http = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $err  = $resp === false ? (string)curl_error($ch) : '';
+    curl_close($ch);
+    return ['http' => $http, 'body' => $resp === false ? '' : (string)$resp, 'error' => $err, 'ms' => (int)round((microtime(true) - $t0) * 1000)];
+}
+
+/** cURL options for one provider request (shared by the single and the parallel call). */
+function rh_ai_curl_opts(string $method, array $headers, ?string $body, int $timeout): array
+{
     if (!function_exists('facebookCaBundle')) {
         require_once dirname(__DIR__) . '/facebook-functions.php';
     }
-    $ch = curl_init($url);
     $opts = [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_CUSTOMREQUEST  => $method,
@@ -94,12 +105,7 @@ function rh_ai_http(string $method, string $url, array $headers, ?string $body =
     if ($body !== null) {
         $opts[CURLOPT_POSTFIELDS] = $body;
     }
-    curl_setopt_array($ch, $opts);
-    $resp = curl_exec($ch);
-    $http = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    $err  = $resp === false ? (string)curl_error($ch) : '';
-    curl_close($ch);
-    return ['http' => $http, 'body' => $resp === false ? '' : (string)$resp, 'error' => $err, 'ms' => (int)round((microtime(true) - $t0) * 1000)];
+    return $opts;
 }
 
 /** Remove the key, and anything shaped like a key, from text that may be shown or stored. */
@@ -898,6 +904,70 @@ function rh_ai_chat_resilient(array $req, ?string $fallbackModel = null): array
         return rh_ai_chat($req) + ['used_fallback' => true];
     }
     return $r + ['used_fallback' => false];
+}
+
+/**
+ * Several chat calls at once (the swarm's specialists), one cURL multi handle, so three specialists cost
+ * the time of the slowest one, not of all three. Results come back keyed like $reqs. A call that does not
+ * succeed first time is re-run on its own through rh_ai_chat_resilient (effort retry, Responses API,
+ * retry once, Fallback model). With a test transport or the fake provider the calls run one after another
+ * through the same seam, so nothing ever goes on the network in tests.
+ */
+function rh_ai_chat_multi(array $reqs, ?string $fallbackModel = null): array
+{
+    $out = [];
+    $sequential = count($reqs) < 2 || is_callable($GLOBALS['__rh_ai_transport'] ?? null) || rh_ai_fake_name() !== ''
+        || !function_exists('curl_multi_init');
+    if ($sequential) {
+        foreach ($reqs as $k => $req) {
+            $out[$k] = rh_ai_chat_resilient($req, $fallbackModel);
+        }
+        return $out;
+    }
+    $mh = curl_multi_init();
+    $handles = [];
+    foreach ($reqs as $k => $req) {
+        $provider = (string)($req['provider'] ?? '');
+        $key = (string)($req['key'] ?? '');
+        if ($key === '' && rh_ai_is_provider($provider)) {
+            $key = rh_ai_get_key($provider);
+        }
+        if (!rh_ai_is_provider($provider) || (string)($req['model'] ?? '') === '' || $key === '') {
+            continue; // handled one by one below (plain error)
+        }
+        $req['key'] = $key;
+        $built = rh_ai_build_request($req, false);
+        $timeout = max(10, min(60, (int)($req['timeout'] ?? 60)));
+        $ch = curl_init($built['url']);
+        curl_setopt_array($ch, rh_ai_curl_opts('POST', $built['headers'], json_encode($built['body']), $timeout));
+        curl_multi_add_handle($mh, $ch);
+        $handles[$k] = [$ch, $req];
+    }
+    $t0 = microtime(true);
+    do {
+        $st = curl_multi_exec($mh, $running);
+        if ($running) {
+            curl_multi_select($mh, 1.0);
+        }
+    } while ($running && $st === CURLM_OK);
+    $ms = (int)round((microtime(true) - $t0) * 1000);
+    foreach ($handles as $k => [$ch, $req]) {
+        $http = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $body = (string)curl_multi_getcontent($ch);
+        curl_multi_remove_handle($mh, $ch);
+        curl_close($ch);
+        $j = ($http >= 200 && $http < 300) ? json_decode($body, true) : null;
+        if (is_array($j)) {
+            $out[$k] = ['http' => $http, 'ms' => $ms, 'retryable' => false, 'model_missing' => false, 'provider' => (string)$req['provider'], 'model' => (string)$req['model'], 'used_fallback' => false]
+                + rh_ai_parse_response((string)$req['provider'], $j, false);
+        }
+    }
+    curl_multi_close($mh);
+    $ordered = [];
+    foreach ($reqs as $k => $req) {
+        $ordered[$k] = $out[$k] ?? rh_ai_chat_resilient($req, $fallbackModel);
+    }
+    return $ordered;
 }
 
 /** Estimated cost in US dollars (cache reads at 10%, cache writes at 125% of the input price). */

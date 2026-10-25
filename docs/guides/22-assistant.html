@@ -18,7 +18,7 @@
 
   <h1>The Assistant</h1>
   <p>The Assistant is a chat helper for staff in the <span class="g-site-name">Rosalyns Beach Hotel</span> admin. The first part shows staff how to use it; the rest covers setting it up on <strong>Assistant Settings</strong>: switching it on or off, adding a provider key, choosing models, limits, who has access and usage. It ships switched off: nothing changes for anyone until an administrator sets it up and switches it on.</p>
-  <div class="note"><p>Today the Assistant reads and explains: it answers questions, looks things up and points you to the right screen. Making changes for you (with a Confirm button) and the nightly clean-up of old chats arrive in later updates.</p></div>
+  <div class="note"><p>Today the Assistant reads and explains: it answers questions, looks things up with its team of department leads, gives each person a daily briefing and points you to the right screen. Making changes for you (with a Confirm button) and the nightly clean-up of old chats arrive in later updates.</p></div>
 
   <div class="facts">
     <dl>
@@ -32,6 +32,10 @@
   <div class="toc">
     <ol>
       <li><a href="#using">Using the Assistant</a></li>
+      <li><a href="#team">The team of leads behind it</a></li>
+      <li><a href="#briefing">The daily briefing ("the tea")</a></li>
+      <li><a href="#never-guesses">It never guesses</a></li>
+      <li><a href="#conversation">Talking to it</a></li>
       <li><a href="#screen">What is on the screen</a></li>
       <li><a href="#keys">How to add a provider key</a></li>
       <li><a href="#models">How to choose the models</a></li>
@@ -62,7 +66,7 @@
     <tbody>
       <tr><td><strong>Your chats</strong> (list)</td><td>Your recent conversations. Only you can see them. Tap one to carry on; the box icon removes it from the list.</td></tr>
       <tr><td><strong>New chat</strong> (plus)</td><td>Starts an empty conversation.</td></tr>
-      <tr><td><strong>Reply settings</strong> (sliders)</td><td><strong>Reply length</strong> (Short, Normal, Detailed), <strong>Tone</strong> (Plain, Friendly) and <strong>Language</strong>. Only affects your own replies.</td></tr>
+      <tr><td><strong>Reply settings</strong> (sliders)</td><td><strong>Reply length</strong> (Short, Normal, Detailed), <strong>Tone</strong> (Plain, Friendly), <strong>Language</strong> and <strong>Daily briefing</strong> (On or Off). Only affects your own replies.</td></tr>
       <tr><td><strong>Close</strong> (cross)</td><td>Hides the chat. Your conversation is kept.</td></tr>
     </tbody>
   </table>
@@ -74,15 +78,16 @@
     <li>Finding a booking by name, email, phone or reference, and the details of one booking (dates, room, party, total, paid, balance).</li>
     <li>Which room types are free for some dates, and a price for a stay worked out exactly as <strong>Create Booking</strong> would (rate plans, child charge, VAT and levy included).</li>
     <li>A guest's past stays, the active rate plans, and (for administrators and managers) who is online.</li>
-    <li>For people with money permissions: who still owes money on room bookings.</li>
+    <li>For people with money permissions: who still owes money, and where money is being lost (see <a href="#briefing">the daily briefing</a>).</li>
+    <li>For the departments your account can see: occupancy, ADR and RevPAR, pace and pickup, till sales and slow tickets, stock alerts, conference and gym, reviews and enquiries, housekeeping and maintenance jobs (see <a href="#team">the team of leads</a>).</li>
     <li>How to do anything in the system, from the staff guides (see below).</li>
   </ul>
-  <p>Figures come from the same places as the screens, so the chat and the screen always agree. Short lookups such as <em>"Arrivals today"</em>, <em>"Who is in house?"</em> and <em>"Room status"</em> are answered straight from the system.</p>
+  <p>Figures come from the same places as the screens, so the chat and the screen always agree. Short lookups such as <em>"Arrivals today"</em>, <em>"Departures tomorrow"</em>, <em>"Who is in house?"</em> and <em>"Room status"</em> are answered straight from the system.</p>
 
   <h3>What it cannot do</h3>
   <ul>
     <li>It does not change anything yet: no bookings, check-ins, payments, refunds, stock, prices, settings or users. Ask it how, and it gives the steps and a button to the screen.</li>
-    <li>It only works on the hotel and this system. Anything else gets one line: <em>"I can only help with the hotel and this system - try asking about bookings, rooms, guests or how to do something."</em></li>
+    <li>It only works on the hotel and this system. Anything else gets one friendly line: <em>"That one's outside the hotel, so I'll leave it there - ask me anything about guests, rooms, your shift or the portal."</em></li>
     <li>It never says the system reports to or submits anything to MRA or any tax authority: there is no such connection.</li>
   </ul>
 
@@ -96,8 +101,47 @@
   <p>The model that writes the answers runs at the provider chosen in Assistant Settings. Before anything is sent, guest and staff names, emails, phone numbers and booking references are swapped for codes such as [GUEST_3]; card, passport and ID numbers and addresses are removed. The answer comes back with the codes and the real names are put back on the hotel's own server, so the provider never learns who anyone is. Your chats are kept on the hotel's server.</p>
 
   <h3>Costs</h3>
-  <p>Quick lookups, repeated questions within two minutes, off-topic and out-of-reach requests are answered on the hotel's server and cost nothing. Everyday questions use the cheapest chosen model (<strong>Fast</strong>); only questions that need real thinking, such as <em>"How can we lift occupancy next month?"</em>, use the <strong>Primary</strong> model. Each person has a daily allowance and the hotel has a monthly cost limit (see <a href="#limits">budgets and limits</a>).</p>
+  <p>Quick lookups and their follow-ups, small talk, repeated questions within two minutes, off-topic and out-of-reach requests are answered on the hotel's server and cost nothing. The daily briefing is worked out on the server and costs one short reply. Everyday questions use the cheapest chosen model (<strong>Fast</strong>); only questions that need real thinking, such as <em>"How can we lift occupancy next month?"</em>, use the <strong>Primary</strong> model. Each person has a daily allowance and the hotel has a monthly cost limit (see <a href="#limits">budgets and limits</a>).</p>
 
+  <h2 id="team">The team of leads behind it</h2>
+  <p>Behind the chat sits a small team of department leads, like the heads of department on a shift. For a simple question the Assistant answers itself. For a question that spans departments, or when you ask for the full picture, it asks up to three leads at the same time, each looks up its own figures, and one merged answer comes back. Each lead sees only what <strong>your</strong> account can see: a lead you have no permission for simply does not exist for you.</p>
+  <table>
+    <thead><tr><th>Lead</th><th>What it looks at</th><th>You get it when you have</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Front Desk &amp; Rooms</strong></td><td>Bookings, availability, quotes, arrivals, departures, in-house guests, room assignment, guest history.</td><td>Bookings</td></tr>
+      <tr><td><strong>Housekeeping &amp; Maintenance</strong></td><td>Room status, cleaning jobs, maintenance tasks, rooms off sale, rooms not ready for an arrival.</td><td>Housekeeping, Room Maintenance or the room board</td></tr>
+      <tr><td><strong>Restaurant &amp; Bar</strong></td><td>Till sales, top sellers, voids and refunds (End of Day figures), tickets waiting and slow at the kitchen, bar and coffee stations.</td><td>POS Accounting, Reports or a station screen</td></tr>
+      <tr><td><strong>Money</strong></td><td>Money still owed after departure, refunds (always in full), voids, discounts, tills closed short, no-shows, cancellations.</td><td>Accounting or Reports (balances owed also with Payments)</td></tr>
+      <tr><td><strong>Stock</strong></td><td>Stock out or low, batches expiring, wastage, stock missing at count, counts waiting for approval, the stock budget. Read only.</td><td>A Stock permission</td></tr>
+      <tr><td><strong>Events, Conference &amp; Gym</strong></td><td>Conference bookings coming up and not confirmed, event enquiries, gym memberships ending (only where the gym is switched on).</td><td>Conference, Events or Gym</td></tr>
+      <tr><td><strong>Revenue &amp; Sales</strong></td><td>Occupancy, ADR, RevPAR, cancellations and no-shows (the same figures as Reports for the same dates), pace against last year, pickup, unsold nights, lead time and where bookings come from. It recommends; it never changes prices or deals.</td><td>Reports or Accounting</td></tr>
+      <tr><td><strong>Guest voice</strong></td><td>Reviews waiting for approval or a reply, low ratings, website messages and enquiries waiting, guest replies in the hotel's voice.</td><td>Reviews, Contact messages or an enquiry screen</td></tr>
+      <tr><td><strong>System Guide</strong></td><td>How to do things in this portal, from the staff guides only.</td><td>Everyone who uses the Assistant</td></tr>
+    </tbody>
+  </table>
+  <p>Limits on every question: at most three leads, at most eight lookups in all, and the <strong>Most tokens for one question</strong> limit on Assistant Settings. None of the leads can change anything.</p>
+
+  <h2 id="briefing">The daily briefing ("the tea")</h2>
+  <p>The first time you open the Assistant each day it gives you a short briefing: what needs you today, most important first. Ask for it any time with <em>"Give me the tea"</em>, <em>"What did I miss?"</em> or <em>"Brief me"</em>. It is worked out from the hotel's data on the hotel's own server; only the short list of findings goes to the model, to be explained in two to four sentences.</p>
+  <p>Each point is set out like a line in a report: the headline figure, what it is, why it matters, which screen it comes from, and one button that opens that screen already filtered (for example today's check-outs, or reviews needing a reply).</p>
+  <table>
+    <thead><tr><th>Who you are (by your permissions)</th><th>What the briefing looks for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Owner or administrator</strong> (money permissions)</td><td>Where money is being lost: money still owed after departure, refunds paid out (in full), till voids and discounts, tills closed short, bill charges removed, wastage and stock missing at count, no-shows, cancellations, unsold nights in the next 7 days, stock buying over budget. Each with the amount, the cause and who or what drove it.</td></tr>
+      <tr><td><strong>Manager</strong></td><td>Shift health across the departments you can see, and what needs a decision now: bookings waiting to be confirmed, earlier arrivals never checked in, refunds waiting, stock counts waiting for approval, maintenance keeping a room off sale, reviews to approve.</td></tr>
+      <tr><td><strong>Receptionist</strong></td><td>Where you are losing time or what you missed: guests past their check-out date still checked in, due-outs not checked out, arrivals not checked in or with no room, balances to collect before departure (each guest's own balance, never a total), tentative holds about to lapse, rooms not ready for the next arrival, enquiries waiting for an answer.</td></tr>
+      <tr><td><strong>Housekeeping, maintenance, restaurant and bar staff</strong></td><td>Your own queue and blockers: jobs overdue or blocked, urgent tasks, slow tickets at your station, stock running low.</td></tr>
+    </tbody>
+  </table>
+  <p>Turn the automatic briefing off (or on again) under <strong>Reply settings</strong> &rarr; <strong>Daily briefing</strong>. You can still ask for it whenever you like.</p>
+
+  <h2 id="never-guesses">It never guesses</h2>
+  <p>Every amount, booking, reference, date, count or name in an answer comes from the hotel's data, looked up for that question. If nothing is found it says so plainly, for example <em>"I can't find a booking with that reference - check it and try again?"</em>, and offers the next step. It never gives an estimate as if it were a fact.</p>
+  <p>The system checks every answer before you see it. A figure that is not in the data is sent back to be looked up; if it still cannot be confirmed, that sentence is removed and the answer ends with <em>"I couldn't confirm part of that from the hotel's data, so I left it out."</em></p>
+
+  <h2 id="conversation">Talking to it</h2>
+  <p>Talk to it like a colleague. Follow-ups work: after <em>"Arrivals today"</em> ask <em>"And tomorrow?"</em> and it repeats the same lookup for tomorrow straight from the system, without asking the model again. A greeting, a thank-you or a word about a hard shift gets a short friendly reply, and it gives practical hospitality advice (handling a complaint, welcoming a guest). It stays on the hotel, its guests, your shift and this portal; anything else gets one friendly line steering back.</p>
+  <p>While it works, one plain line under your question names the step it is on, for example <em>"Checking today's arrivals and departures..."</em> or <em>"Asking the Money, Front Desk lead..."</em>.</p>
   <h2 id="screen">What is on the screen</h2>
   <table>
     <thead><tr><th>Assistant Settings part</th><th>What it holds</th></tr></thead>
@@ -105,7 +149,7 @@
       <tr><td><strong>On or off</strong></td><td>One line saying whether the Assistant is on, which provider and main model it uses and how many people have access, and the button <strong>Switch on</strong> or <strong>Switch off</strong>.</td></tr>
       <tr><td><strong>Providers</strong></td><td>One card each for Anthropic, OpenAI, Google, xAI and DeepSeek. Each shows the saved key as four dots and its last four characters, the last test result, a box to paste a key, and the buttons <strong>Save and test</strong>, <strong>Test connection</strong> and <strong>Remove key</strong>.</td></tr>
       <tr><td><strong>Models</strong></td><td>Before any key: the models known when this version was made, with prices. After a key passes the test: that provider's own current list, where you tick up to 5 and give each a role. Buttons <strong>Save models</strong> and <strong>Check for newer models</strong>.</td></tr>
-      <tr><td><strong>Budgets and limits</strong></td><td><strong>Daily limit per person (tokens)</strong>, <strong>Monthly cost limit (US$)</strong>, <strong>Messages per person in 10 minutes</strong>, <strong>Keep chats for (days)</strong> and <strong>Save limits</strong>.</td></tr>
+      <tr><td><strong>Budgets and limits</strong></td><td><strong>Daily limit per person (tokens)</strong>, <strong>Monthly cost limit (US$)</strong>, <strong>Messages per person in 10 minutes</strong>, <strong>Keep chats for (days)</strong>, <strong>Most tokens for one question</strong> and <strong>Save limits</strong>.</td></tr>
       <tr><td><strong>Who has access</strong></td><td>Read-only list of the staff who may use the Assistant, and whether each may confirm its actions. The button <strong>Change on Staff &amp; Access</strong> opens the staff screen.</td></tr>
       <tr><td><strong>Usage</strong></td><td>The estimated cost this month against the monthly limit, and the last 30 days per day, person and model.</td></tr>
     </tbody>
@@ -148,6 +192,7 @@
     <li><strong>Monthly cost limit (US$)</strong>: when the estimated cost this month reaches it, the Assistant stops sending questions to the provider until next month or until you raise it; quick lookups still work. 1 to 100,000. Default 20.</li>
     <li><strong>Messages per person in 10 minutes</strong>: 1 to 500. Default 30.</li>
     <li><strong>Keep chats for (days)</strong>: 0 keeps chats; otherwise 7 to 3,650 days, and older chats are removed each night.</li>
+    <li><strong>Most tokens for one question</strong>: all the work for one question together (the Assistant, up to three leads and the merged answer). 5,000 to 1,000,000. Default 60,000. When it is reached the Assistant stops and says so.</li>
   </ul>
   <p>Click <strong>Save limits</strong>. You will see <em>"Limits saved."</em> Costs are estimates from the prices under Models; the provider's bill is the real figure.</p>
 
@@ -192,6 +237,9 @@
       <tr><td><em>The Assistant has reached this month's spending limit.</em></td><td>The monthly cost limit is reached.</td><td>Quick lookups still work. An administrator can raise the limit on Assistant Settings.</td></tr>
       <tr><td><em>You have sent a lot of messages in the last 10 minutes.</em></td><td>The messages-per-10-minutes limit.</td><td>Wait a few minutes and try again.</td></tr>
       <tr><td><em>Running on the backup model.</em> under an answer</td><td>The main model was busy or retired, so the Fallback model answered.</td><td>Nothing; if it keeps happening, check the models on Assistant Settings.</td></tr>
+      <tr><td><em>I couldn't confirm part of that from the hotel's data, so I left it out.</em></td><td>The answer had a figure that is not in the hotel's data, so it was removed rather than guessed.</td><td>Ask again more exactly (a name, a reference, the dates), or check the screen.</td></tr>
+      <tr><td><em>That question needed more work than one question is allowed.</em></td><td>The <strong>Most tokens for one question</strong> limit was reached.</td><td>Ask about one part at a time, or an administrator can raise the limit.</td></tr>
+      <tr><td>No briefing when you open the Assistant</td><td>It was already shown today, or <strong>Daily briefing</strong> is Off in Reply settings.</td><td>Ask <em>"Give me the tea"</em>, or switch it on in Reply settings.</td></tr>
       <tr><td><em>Could not reach the Assistant. Check the connection and try again.</em></td><td>The device lost its connection.</td><td>Check Wi-Fi or data and send again.</td></tr>
     </tbody>
   </table>

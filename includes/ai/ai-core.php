@@ -124,6 +124,7 @@ function rh_ai_setting_defaults(): array
         'ai_user_daily_token_cap' => '200000',
         'ai_monthly_budget_usd'   => '20',
         'ai_rate_limit_per_10min' => '30',
+        'ai_turn_token_cap'       => '60000',
         'ai_retention_days'       => '0',
         'ai_paused_reason'        => '',
     ];
@@ -170,6 +171,12 @@ function rh_ai_daily_token_cap(): int
 function rh_ai_monthly_budget_usd(): float
 {
     return max(0.0, (float)rh_ai_setting('ai_monthly_budget_usd', '20'));
+}
+
+/** Most tokens (in + out, every model call: lead, specialists, merge) one question may use. */
+function rh_ai_turn_token_cap(): int
+{
+    return max(5000, (int)rh_ai_setting('ai_turn_token_cap', '60000'));
 }
 
 /** Messages a person may send in 10 minutes. */

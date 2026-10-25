@@ -200,37 +200,121 @@ html.rh-ai-is-open .rh-ai-launch {
     margin: 8px 8px 0 0;
 }
 
+/* Links to screens: a solid, quiet button (the admin .btn styles do not reach inside the panel). */
+.rh-ai-link,
+.rh-ai-brief__link {
+    padding: 0 14px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: var(--admin-radius, 8px);
+    background: var(--admin-surface, #fff);
+    color: var(--admin-text, #1f2a37);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.rh-ai-link:hover,
+.rh-ai-brief__link:hover,
+.rh-ai-link:focus-visible,
+.rh-ai-brief__link:focus-visible {
+    border-color: var(--admin-accent, #766550);
+    background: var(--admin-hover-bg, rgba(0, 0, 0, 0.05));
+    color: var(--admin-text, #1f2a37);
+}
+
+.rh-ai-link i,
+.rh-ai-brief__link i {
+    color: var(--admin-accent, #766550);
+}
+
 .rh-ai-notice {
     margin: 6px 0 0;
     font-size: 0.78rem;
     color: var(--admin-muted, #5E554D);
 }
 
-.rh-ai-typing {
+/* While it works: one calm line naming the real step (no animated dots). */
+.rh-ai-status {
+    align-self: flex-start;
+    margin: 2px 0;
+    padding: 8px 0 8px 12px;
+    border-left: 2px solid var(--admin-accent, #766550);
+    font-size: 0.85rem;
+    color: var(--admin-muted, #5E554D);
+}
+
+/* The briefing: set out like a short document - headline figure, what it is, why, where from, one link. */
+.rh-ai-brief {
+    display: flex;
+    flex-direction: column;
+    margin-top: 12px;
+    border-top: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+.rh-ai-brief__item {
+    display: grid;
+    grid-template-columns: minmax(84px, auto) 1fr;
+    column-gap: 14px;
+    row-gap: 4px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+.rh-ai-brief__figure {
+    grid-row: span 2;
+    font-size: 1.15rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--admin-text, #1f2a37);
+    font-variant-numeric: tabular-nums;
+    word-break: break-word;
+}
+
+.rh-ai-brief__item--money .rh-ai-brief__figure {
+    color: var(--admin-accent, #766550);
+}
+
+.rh-ai-brief__title {
+    margin: 0;
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--admin-text, #1f2a37);
+}
+
+.rh-ai-brief__detail,
+.rh-ai-brief__source {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--admin-muted, #5E554D);
+}
+
+.rh-ai-brief__lines {
+    grid-column: 2;
+    margin: 4px 0 0;
+    padding-left: 16px;
+    font-size: 0.85rem;
+    color: var(--admin-text, #1f2a37);
+}
+
+.rh-ai-brief__source {
+    grid-column: 2;
+    font-size: 0.78rem;
+}
+
+.rh-ai-brief__link {
+    grid-column: 2;
+    justify-self: start;
+    min-height: 44px;
     display: inline-flex;
-    gap: 4px;
-    padding: 12px 14px;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
 }
 
-.rh-ai-typing span {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--admin-muted, #5E554D);
-    opacity: 0.4;
-    animation: rh-ai-dot 1.2s infinite ease-in-out;
-}
-
-.rh-ai-typing span:nth-child(2) { animation-delay: 0.15s; }
-.rh-ai-typing span:nth-child(3) { animation-delay: 0.3s; }
-
-@keyframes rh-ai-dot {
-    0%, 80%, 100% { opacity: 0.25; }
-    40% { opacity: 0.9; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .rh-ai-typing span { animation: none; opacity: 0.6; }
+@media (max-width: 480px) {
+    .rh-ai-brief__item { grid-template-columns: 1fr; }
+    .rh-ai-brief__figure { grid-row: auto; }
+    .rh-ai-brief__lines, .rh-ai-brief__source, .rh-ai-brief__link { grid-column: 1; }
 }
 
 .rh-ai-chips {

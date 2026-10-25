@@ -7,7 +7,9 @@
  * permission ai_assistant_use (403) -> rate limit (429) -> action. The session is closed before any
  * provider call so the rest of the portal never waits on the Assistant.
  *
- * Actions: send, list, load, rename, archive (own conversations only), prefs_get, prefs_set, suggestions.
+ * Actions: send, list, load, rename, archive (own conversations only), prefs_get, prefs_set, suggestions,
+ * briefing (the daily "full tea"; auto=1 only on the first open of the day when the person's preference is on)
+ * and status (the plain line naming the step the Assistant is on, polled while it answers).
  * Nothing here writes to bookings, money, stock or settings; the provider key never appears in output.
  */
 declare(strict_types=1);
@@ -71,7 +73,7 @@ try {
             }
             rh_ai_api_out(200, [
                 'success' => true, 'conversation_id' => $r['conversation_id'], 'reply' => $r['reply'], 'route' => $r['route'],
-                'links' => $r['links'], 'chips' => $r['chips'], 'notice' => $r['notice'],
+                'links' => $r['links'], 'chips' => $r['chips'], 'items' => $r['items'], 'notice' => $r['notice'],
                 'usage' => ['tokens_in' => $r['tokens_in'], 'tokens_out' => $r['tokens_out'], 'cost_usd' => $r['cost_usd']],
             ]);
             break;
@@ -123,7 +125,30 @@ try {
             rh_ai_api_out(200, ['success' => true, 'prefs' => rh_ai_prefs_set($pdo, $uid, [
                 'length' => (string)($in['length'] ?? ''), 'tone' => (string)($in['tone'] ?? ''),
                 'language' => (string)($in['language'] ?? ''), 'nickname' => (string)($in['nickname'] ?? ''),
+                'briefing' => isset($in['briefing']) ? (string)$in['briefing'] : null,
             ])]);
+            break;
+
+        case 'briefing':
+            $auto = (string)($in['auto'] ?? '') === '1';
+            if (!$auto) {
+                $problem = rh_ai_rate_problem($pdo, $uid);
+                if ($problem !== '') {
+                    rh_ai_api_out(429, ['success' => false, 'error' => $problem]);
+                }
+            }
+            session_write_close();
+            @set_time_limit(120);
+            $b = rh_ai_briefing($pdo, $me, $auto);
+            if (!$b['ok']) {
+                rh_ai_api_out(200, ['success' => false, 'error' => $b['error']]);
+            }
+            rh_ai_api_out(200, ['success' => true, 'shown' => $b['shown'], 'conversation_id' => $b['conversation_id'], 'reply' => $b['reply'], 'items' => $b['items'], 'chips' => $b['chips'], 'route' => 'briefing']);
+            break;
+
+        case 'status':
+            session_write_close();
+            rh_ai_api_out(200, ['success' => true, 'step' => rh_ai_step_get($pdo, $uid)]);
             break;
 
         case 'suggestions':

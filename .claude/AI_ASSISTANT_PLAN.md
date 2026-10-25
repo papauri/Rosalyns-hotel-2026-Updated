@@ -149,6 +149,23 @@ How every later phase applies it (`dept-ai-lead` designs to this; hard limits ab
   **summarises a whole guide or section on request** (`how_to` + `summarise_guide`), limited to guides the
   user may see (`rh_kb_allowed_guides()` + module/permission of the guide's screen), with the guide link.
   Summaries come from the guide text only (no invented steps).
+- **Never guesses** (owner, same day: "never guess answers just to get out of a sticky situation, if it's
+  not in the database like an amount or booking etc don't make things up"). Every amount, booking,
+  reference, date, count, name or status in a reply must come from a tool result in this turn; if the tool
+  finds nothing it says so plainly ("I can't find a booking for that name — check the spelling or the
+  dates?") and offers the next step. No estimates dressed as facts, no "probably", no filling gaps from
+  general knowledge. Enforced in code: a reply-check flags numbers/references not present in this turn's
+  tool results and the reply is regenerated or the figure removed; tested with empty-result fixtures.
+- **Real conversation, within the hotel's realm** (owner, same day). It chats naturally — follow-ups,
+  "and yesterday?", small talk, encouragement during a busy shift, hospitality advice — staying on the
+  hotel, guests, the shift and the portal; anything else gets a friendly one-line steer back.
+- **Look: knowledge and strength, minimalist, powerful in stature** (owner, same day: no sparkles or
+  magic-wand icons "like a typical AI UI"). No sparkle/wand/robot/star/brain icons, no gradients, glows,
+  shimmer, emoji or bouncing "typing" dots; no "AI"/"smart"/"magic" wording. Instead: the portal's own
+  design tokens, solid surfaces, strong clear type hierarchy, generous spacing, one accent colour, crisp
+  1px dividers; findings set out like a briefing document (headline figure, cause, source, one-tap link);
+  a calm plain status line while it works ("Checking today's departures…") naming the real step; quiet,
+  confident wording. Launcher stays the plain "Assistant" button (`fa-comments`).
 - **High reasoning through learning, not bigger prompts.** The learning loop turns confirmed outcomes and
   corrections into compact lessons/playbooks that make later answers both smarter and cheaper (a learned
   playbook replaces a long reasoning call). Eval set tracks quality *and* tokens per answer; a change that
@@ -417,6 +434,11 @@ Lead + Revenue + Front Desk summary on first open of the day.
 the briefing is role-shaped ("full tea": money leaks for owner, time leaks / missed check-outs for reception).
 Briefing data is gathered by deterministic read tools first (zero tokens) and only the ranked findings go to
 the model to explain.
+
+**Phase 3: BUILT 2026-10-26 (awaiting ship).** Leads + consult_team in `includes/ai/ai-agents.php`; department reads and
+the zero-token briefing finders in `includes/ai/ai-insights.php` (registered in `ai-tools.php`); `rh_ai_chat_multi()`
+(curl_multi) in `ai-providers.php`; reply-check (`rh_ai_reply_unsupported`) enforces "Never guesses"; status line
+replaces the typing dots. Decisions in BUILD_PLAN.md (Phase 3 ASSUMPTION line). No migration (072 stays for Phase 4b).
 
 ## Phase 4 — Actions with confirm (ship; accounting lead reviews cancel/checkout)
 

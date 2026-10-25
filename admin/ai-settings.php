@@ -152,12 +152,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!ctype_digit($ret) || ((int)$ret !== 0 && ((int)$ret < 7 || (int)$ret > 3650))) {
                 throw new RuntimeException('Keep chats for: 0 (keep) or a number of days from 7 to 3650.');
             }
-            rh_ai_save_settings([
+            $turnCap = trim((string)($_POST['ai_turn_token_cap'] ?? ''));
+            if ($turnCap !== '' && (!ctype_digit($turnCap) || (int)$turnCap < 5000 || (int)$turnCap > 1000000)) {
+                throw new RuntimeException('Most tokens for one question: a whole number from 5,000 to 1,000,000.');
+            }
+            $limitPairs = [
                 'ai_user_daily_token_cap' => (string)(int)$cap,
                 'ai_monthly_budget_usd'   => (string)round((float)$budget, 2),
                 'ai_rate_limit_per_10min' => (string)(int)$rate,
                 'ai_retention_days'       => (string)(int)$ret,
-            ], $pdo);
+            ];
+            if ($turnCap !== '') {
+                $limitPairs['ai_turn_token_cap'] = (string)(int)$turnCap;
+            }
+            rh_ai_save_settings($limitPairs, $pdo);
             logActivity($uid, 'ai_settings', 'Assistant limits saved: ' . (int)$cap . ' tokens/day, $' . round((float)$budget, 2) . '/month, ' . (int)$rate . ' messages/10 min, keep chats ' . ((int)$ret ?: 'always'));
             $aiFlash('success', 'Limits saved.', 'ai-limits');
         }
@@ -540,6 +548,11 @@ $fmtPrice = static function ($v): string {
                         <label for="ai_ret"><strong>Keep chats for (days)</strong></label>
                         <input type="number" min="0" max="3650" step="1" id="ai_ret" name="ai_retention_days" class="form-control" value="<?php echo $h((int)$settings['ai_retention_days']); ?>">
                         <p class="help-text">0 keeps chats until someone deletes them. Otherwise chats older than this are removed each night.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_turn_cap"><strong>Most tokens for one question</strong></label>
+                        <input type="number" min="5000" max="1000000" step="1000" id="ai_turn_cap" name="ai_turn_token_cap" class="form-control" value="<?php echo $h((int)($settings['ai_turn_token_cap'] ?? 60000)); ?>">
+                        <p class="help-text">One question may ask up to three department leads. This caps all of their work together; when it is reached the answer is given with what was found so far.</p>
                     </div>
                     <div class="ai-actions ai-limits-save">
                         <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Save limits</button>

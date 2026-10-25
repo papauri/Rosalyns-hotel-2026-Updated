@@ -1,6 +1,6 @@
 <?php
 /**
- * The Assistant panel (.claude/AI_ASSISTANT_PLAN.md Phase 2). Required once from admin-header.php,
+ * The Assistant panel (.claude/AI_ASSISTANT_PLAN.md Phases 2-3: chat, the daily briefing, the status line). Required once from admin-header.php,
  * right after the help button and OUTSIDE #rh-admin-page, so the chat survives in-app navigation.
  *
  * Prints nothing at all unless the Assistant is switched on (fail-closed kill switch, migrations 070 +
@@ -75,6 +75,12 @@ define('RH_AI_PANEL_RENDERED', true);
             <label for="rhAiPrefLang">Language</label>
             <input type="text" id="rhAiPrefLang" name="language" maxlength="30" placeholder="English">
             <p class="rh-ai-help">Replies come back in this language.</p>
+            <label for="rhAiPrefBrief">Daily briefing</label>
+            <select id="rhAiPrefBrief" name="briefing">
+                <option value="on">On - show it the first time I open the Assistant each day</option>
+                <option value="off">Off - only when I ask</option>
+            </select>
+            <p class="rh-ai-help">A short list of what needs you today, worked out from what your account can see. Ask "give me the tea" any time.</p>
             <div class="rh-ai-prefs__btns">
                 <button type="submit" class="btn btn-primary">Save</button>
                 <button type="button" class="btn btn-secondary" data-ai="back">Cancel</button>

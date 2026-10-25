@@ -5,7 +5,7 @@
  *
  * Registry entries: name => {description, schema, perm (any-of; [] = anyone who may use the
  * Assistant), module (any-of; [] = none), gate (optional extra check), cache (seconds), handler}.
- * Phase 2 has READ tools only - there is no tool that writes anything, and no raw SQL, file, shell,
+ * READ tools only (Phase 2 + the Phase 3 department reads) - there is no tool that writes anything, and no raw SQL, file, shell,
  * settings, users, permissions or backup tool (hard limits; a test checks the list).
  *
  * Every call re-checks the person's permission and the module state (never trusts the list the
@@ -17,6 +17,7 @@
 
 require_once __DIR__ . '/ai-core.php';
 require_once __DIR__ . '/ai-vault.php';
+require_once __DIR__ . '/ai-insights.php'; // Phase 3 department reads + the daily briefing (read only)
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
@@ -109,7 +110,77 @@ function rh_ai_tool_registry(): array
             'schema' => ['properties' => ['page' => ['type' => 'string', 'maxLength' => 60, 'description' => 'e.g. bookings.php'], 'search' => ['type' => 'string', 'maxLength' => 60], 'status' => ['type' => 'string', 'maxLength' => 30], 'id' => ['type' => 'integer', 'minimum' => 1], 'date' => $date], 'required' => ['page']],
             'perm' => [], 'module' => [], 'cache' => 0, 'handler' => 'rh_ai_t_open_page',
         ],
+        // ── Phase 3: department reads (includes/ai/ai-insights.php) ──
+        'room_performance' => [
+            'description' => 'Occupancy %, ADR, RevPAR, room-nights sold, cancellations and no-shows for a date range (default this month) - the same figures as Reports for the same dates.',
+            'schema' => ['properties' => ['from' => $date, 'to' => $date]],
+            'perm' => ['reports', 'accounting'], 'module' => ['finance'], 'cache' => 120, 'handler' => 'rh_ai_t_room_performance', 'step' => 'Working out occupancy and room revenue',
+        ],
+        'booking_pace' => [
+            'description' => 'Pace for coming nights (default next 30): room-nights on the books vs the same nights last year, pickup in the last 7 days, unsold nights, lead time, where bookings come from.',
+            'schema' => ['properties' => ['from' => $date, 'to' => $date]],
+            'perm' => ['reports', 'accounting'], 'module' => ['finance'], 'cache' => 120, 'handler' => 'rh_ai_t_booking_pace', 'step' => 'Checking bookings on the books against last year',
+        ],
+        'money_leaks' => [
+            'description' => 'Where money is being lost in a date range (default last 7 days): money still owed after departure, refunds paid (in full), till voids, discounts, till shortages, removed bill charges, wastage, stock missing at count, no-shows, cancellations, stock budget - each with amount, cause and who.',
+            'schema' => ['properties' => ['from' => $date, 'to' => $date]],
+            'perm' => ['accounting', 'reports'], 'module' => ['finance'], 'cache' => 120, 'handler' => 'rh_ai_t_money_leaks', 'step' => 'Checking money owed, refunds and voids',
+        ],
+        'restaurant_sales' => [
+            'description' => 'Till sales for a date range (default today, at most 31 days): orders, sales, voids, refunds, top sellers and void reasons - the End of Day till figures.',
+            'schema' => ['properties' => ['from' => $date, 'to' => $date]],
+            'perm' => ['pos_accounting', 'reports', 'accounting'], 'module' => ['pos'], 'cache' => 120, 'handler' => 'rh_ai_t_restaurant_sales', 'step' => 'Adding up till sales and voids',
+        ],
+        'kitchen_tickets' => [
+            'description' => 'Items waiting at the kitchen, bar and coffee stations right now, which ones are slow, and today\'s average order-to-ready time.',
+            'schema' => ['properties' => (object)[]],
+            'perm' => ['kds_view', 'bds_view', 'cds_view', 'kds_reports', 'pos_till', 'room_service_view'], 'module' => ['pos'], 'cache' => 30, 'handler' => 'rh_ai_t_kitchen_tickets', 'step' => 'Checking tickets at the stations',
+        ],
+        'inventory_watch' => [
+            'description' => 'Stock out, low or negative (the stock dashboard rule), batches expiring this week, wastage in a date range (default last 7 days), the last count\'s variance and counts waiting for approval. Read only.',
+            'schema' => ['properties' => ['from' => $date, 'to' => $date]],
+            'perm' => ['stock_dashboard', 'stock_management', 'stock_reports', 'stock_count', 'stock_wastage', 'stock_batches'], 'module' => ['stock'], 'cache' => 120, 'handler' => 'rh_ai_t_inventory_watch', 'step' => 'Checking stock levels',
+        ],
+        'events_pipeline' => [
+            'description' => 'Conference bookings coming up (default next 30 days) by status with value and money still owed, enquiries not confirmed, and event enquiries waiting.',
+            'schema' => ['properties' => ['days' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 180]]],
+            'perm' => ['conference', 'events_bookings', 'events'], 'module' => ['conference', 'events'], 'cache' => 120, 'handler' => 'rh_ai_t_events_pipeline', 'step' => 'Checking conference and event bookings',
+        ],
+        'gym_watch' => [
+            'description' => 'Gym members (the Members screen counts), memberships ending in the next 30 days and gym enquiries waiting.',
+            'schema' => ['properties' => (object)[]],
+            'perm' => ['gym'], 'module' => ['gym'], 'cache' => 120, 'handler' => 'rh_ai_t_gym_watch', 'step' => 'Checking gym memberships',
+        ],
+        'guest_voice' => [
+            'description' => 'Reviews waiting for approval or a reply, low ratings, and website / event / gym / conference enquiries waiting for an answer.',
+            'schema' => ['properties' => (object)[]],
+            'perm' => ['reviews', 'contact', 'events_bookings', 'gym', 'conference'], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_guest_voice', 'step' => 'Checking reviews and enquiries',
+        ],
+        'work_queues' => [
+            'description' => 'Open housekeeping jobs and maintenance tasks: overdue, due today, urgent, blocked or keeping a room off sale, and who has them.',
+            'schema' => ['properties' => (object)[]],
+            'perm' => ['housekeeping', 'room_maintenance'], 'module' => ['housekeeping', 'bookings'], 'cache' => 45, 'handler' => 'rh_ai_t_work_queues', 'step' => 'Checking housekeeping and maintenance jobs',
+        ],
+        'daily_briefing' => [
+            'description' => 'This person\'s ranked list of what needs attention today (misses, money leaks, queues, decisions), worked out from the hotel\'s data.',
+            'schema' => ['properties' => (object)[]],
+            'perm' => [], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_daily_briefing', 'step' => 'Going through today',
+        ],
     ];
+}
+
+/** The plain status line shown while a tool runs ("Checking today's departures..."). */
+function rh_ai_tool_step(string $name): string
+{
+    $steps = [
+        'search_bookings' => 'Looking up bookings', 'get_booking' => 'Opening the booking', 'check_availability' => 'Checking which rooms are free',
+        'quote_stay' => 'Pricing the stay', 'arrivals_departures' => 'Checking today\'s arrivals and departures', 'in_house' => 'Checking who is in house',
+        'room_board' => 'Checking room status', 'guest_history' => 'Looking up past stays', 'rate_plans_and_deals' => 'Reading rate plans',
+        'balances_due' => 'Checking balances owed', 'how_to' => 'Searching the staff guides', 'summarise_guide' => 'Reading the guide',
+        'page_help' => 'Reading the screen guide', 'who_is_online' => 'Checking who is online', 'my_access' => 'Checking your access', 'open_page' => 'Finding the screen',
+    ];
+    $def = rh_ai_tool_registry()[$name] ?? [];
+    return ($steps[$name] ?? (string)($def['step'] ?? 'Looking that up')) . '...';
 }
 
 /** Who-is-online is for administrators and managers only (same rule as the dashboard panel). */
