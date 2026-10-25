@@ -470,3 +470,12 @@
     .gym-card-meta { grid-row: 5; align-content: flex-start; }
     .gym-card-actions { grid-row: 6; align-self: end; margin-top: 0; }
 }
+
+/* Drag and drop: card grip (44px target) */
+.gym-card .drag-handle { position: absolute; top: 10px; left: 10px; z-index: 3; width: 44px; height: 44px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.7); background: rgba(17, 24, 39, 0.55); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.gym-card .drag-handle > i { color: #fff; font-size: 16px; margin: 0; }
+.gym-card .drag-handle:focus-visible { outline: 3px solid var(--gold, #7E684B); outline-offset: 2px; }
+.gym-card .gym-card-featured-badge { left: 62px; }
+.gym-card.dragging { opacity: .85; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.28); outline: 2px dashed var(--gold, #7E684B); transform: none; }
+.gym-card.dragging .drag-handle { cursor: grabbing; }
+body.gm-dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }

@@ -705,3 +705,15 @@
     .conference-card-image, .conference-card .no-image-placeholder { grid-row: 1; }
 }
 .conference-card-details .detail-item-price { grid-column: 1 / -1; }
+
+/* Drag and drop: card grip (44px target), picture drop box */
+.conference-card .drag-handle { position: absolute; top: 10px; left: 10px; z-index: 3; width: 44px; height: 44px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.7); background: rgba(17, 24, 39, 0.55); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.conference-card .drag-handle:focus-visible { outline: 3px solid var(--gold, #7E684B); outline-offset: 2px; }
+.conference-card.dragging { opacity: .85; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.28); outline: 2px dashed var(--gold, #7E684B); transform: none; }
+.conference-card.dragging .drag-handle { cursor: grabbing; }
+body.cf-dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.order-badge[hidden] { display: none; }
+.form-group.cf-drop-on { outline: 2px dashed var(--gold, #7E684B); outline-offset: 4px; background: #faf6ee; }
+.cf-drop-note { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 13px; color: #3e3930; }
+.cf-drop-note[hidden] { display: none; }
+.cf-drop-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; border: 1px solid #d3cbc0; }

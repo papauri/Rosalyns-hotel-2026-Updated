@@ -180,6 +180,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        if ($action === 'update_order') {
+            // Drag-to-reorder: package ids in their new order; numbered 0..n in that order.
+            $gm_ids = json_decode((string)($_POST['order'] ?? ''), true);
+            if (!is_array($gm_ids) || !$gm_ids) {
+                throw new Exception('The new order was not understood. Refresh the page and try again.');
+            }
+            $gm_ids = array_values(array_unique(array_filter(array_map('intval', $gm_ids), function ($v) { return $v > 0; })));
+            $gm_existing = array_map('intval', $pdo->query("SELECT id FROM gym_packages")->fetchAll(PDO::FETCH_COLUMN));
+            $pdo->beginTransaction();
+            try {
+                $gm_ord = $pdo->prepare("UPDATE gym_packages SET display_order = ? WHERE id = ?");
+                $gm_pos = 0;
+                foreach ($gm_ids as $gm_oid) {
+                    if (!in_array($gm_oid, $gm_existing, true)) {
+                        continue;
+                    }
+                    $gm_ord->execute([$gm_pos, $gm_oid]);
+                    $gm_pos++;
+                }
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+            if ($is_ajax) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => true]);
+                exit;
+            }
+        }
+
         if ($action === 'toggle_featured') {
             $stmt = $pdo->prepare("UPDATE gym_packages SET is_featured = NOT is_featured WHERE id = ?");
             $stmt->execute([(int)$_POST['id']]);
@@ -288,6 +321,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
             <div class="page-header-row" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
                 <h1 class="page-title"><i class="fas fa-dumbbell" style="color:var(--gold,#7E684B);margin-right:8px;"></i>Gym Package Management</h1>
                 <div style="display:flex;gap:10px;align-items:center;">
+                    <span style="font-size:12px; color:#999;"><i class="fas fa-arrows-alt"></i> Drag the grip on a card to reorder (works by touch too)</span>
                     <a href="gym-inquiries.php" class="btn btn-secondary" style="font-size:13px;">
                         <i class="fas fa-inbox"></i> View Inquiries
                     </a>
@@ -312,7 +346,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
             <?php else: ?>
 
                 <!-- Package cards grid -->
-                <div class="gym-cards-grid">
+                <div class="gym-cards-grid" id="gymGrid">
                     <?php foreach ($gym_packages as $pkg): ?>
                         <?php
                         $isActive   = (bool)$pkg['is_active'];
@@ -345,6 +379,7 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
 
                             <!-- Icon hero area -->
                             <div class="gym-card-icon-area">
+                                <div class="drag-handle" tabindex="0" role="button" title="Drag to reorder (or press the up/down arrow keys)" aria-label="Move <?php echo $pkgName; ?> in the order"><i class="fas fa-grip-vertical"></i></div>
                                 <i class="<?php echo $iconClass; ?>"></i>
                                 <?php if ($isFeatured): ?>
                                     <span class="gym-card-featured-badge"><i class="fas fa-star"></i> Featured</span>
@@ -1175,6 +1210,93 @@ if ($gym_css_version === '' || $gym_css_version === '0') {
             handleGymForm('addGymPackageForm', 'addGymFeedback', closeAddGymPackageModal);
             handleGymForm('editGymPackageForm', 'editGymFeedback', closeEditGymPackageModal);
         });
+
+        // ── Drag and drop (package cards) ─────────────────────────────────────────
+        // Pointer events on the grip (mouse, finger, pen); arrow keys move a focused grip. Saves when released.
+        var gmDrag = null;
+        function gmGrid() { return document.getElementById('gymGrid'); }
+        function gmCardOrder() {
+            return Array.from(document.querySelectorAll('#gymGrid .gym-card')).map(function(c) { return c.id.replace('gym-card-', ''); });
+        }
+        function gmShowOrder() {
+            document.querySelectorAll('#gymGrid .gym-card').forEach(function(card, idx) {
+                var b = card.querySelector('.gym-card-order-badge');
+                if (b) b.textContent = '#' + idx;
+            });
+        }
+        function gmSaveOrder() {
+            // the meta tag is not present when the page was opened from the menu, so the token is also written in here
+            var csrf = <?php echo json_encode($csrf_token); ?>;
+            var fd = new FormData();
+            fd.append('action', 'update_order');
+            fd.append('order', JSON.stringify(gmCardOrder()));
+            fd.append('csrf_token', csrf);
+            fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function(r) { if (!r.ok) throw new Error('failed'); return r.json(); })
+                .then(function(d) {
+                    if (d.success) gmShowOrder();
+                    else { alert(d.message || 'The new order could not be saved.'); window.location.reload(); }
+                })
+                .catch(function() { alert('The new order could not be saved. Please try again.'); window.location.reload(); });
+        }
+        function gmDragMove(e) {
+            if (!gmDrag || e.pointerId !== gmDrag.id) return;
+            e.preventDefault();
+            if (e.clientY < 70) window.scrollBy(0, -18);
+            else if (e.clientY > window.innerHeight - 70) window.scrollBy(0, 18);
+            var grid = gmGrid();
+            var under = document.elementFromPoint(e.clientX, e.clientY);
+            var target = under ? under.closest('.gym-card') : null;
+            if (!grid || !target || target === gmDrag.card || target.parentNode !== grid) return;
+            var cards = Array.from(grid.querySelectorAll('.gym-card'));
+            if (cards.indexOf(gmDrag.card) < cards.indexOf(target)) grid.insertBefore(gmDrag.card, target.nextSibling);
+            else grid.insertBefore(gmDrag.card, target);
+            gmShowOrder();
+        }
+        function gmDragEnd(e) {
+            if (!gmDrag || e.pointerId !== gmDrag.id) return;
+            var d = gmDrag;
+            gmDrag = null;
+            d.card.classList.remove('dragging');
+            document.body.classList.remove('gm-dragging');
+            document.removeEventListener('pointermove', gmDragMove);
+            document.removeEventListener('pointerup', gmDragEnd);
+            document.removeEventListener('pointercancel', gmDragEnd);
+            if (e.type === 'pointercancel') { window.location.reload(); return; }
+            if (gmCardOrder().join(',') !== d.before) gmSaveOrder();
+        }
+        (function() {
+            var grid = gmGrid();
+            if (!grid) return;
+            grid.addEventListener('pointerdown', function(e) {
+                var handle = e.target.closest('.drag-handle');
+                if (!handle || (e.pointerType === 'mouse' && e.button !== 0)) return;
+                var card = handle.closest('.gym-card');
+                if (!card) return;
+                e.preventDefault();
+                gmDrag = { card: card, id: e.pointerId, before: gmCardOrder().join(',') };
+                card.classList.add('dragging');
+                document.body.classList.add('gm-dragging');
+                document.addEventListener('pointermove', gmDragMove, { passive: false });
+                document.addEventListener('pointerup', gmDragEnd);
+                document.addEventListener('pointercancel', gmDragEnd);
+            });
+            grid.addEventListener('keydown', function(e) {
+                var handle = e.target.closest ? e.target.closest('.drag-handle') : null;
+                if (!handle) return;
+                var dir = (e.key === 'ArrowUp' || e.key === 'ArrowLeft') ? -1 : ((e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : 0);
+                if (!dir) return;
+                e.preventDefault();
+                var card = handle.closest('.gym-card');
+                var other = dir < 0 ? card.previousElementSibling : card.nextElementSibling;
+                if (!other) return;
+                if (dir < 0) grid.insertBefore(card, other);
+                else grid.insertBefore(card, other.nextSibling);
+                handle.focus();
+                gmShowOrder();
+                gmSaveOrder();
+            });
+        })();
 
         // ── Toggle active / featured / delete ─────────────────────────────────────
         function _gmcPost(payload, onSuccess) {

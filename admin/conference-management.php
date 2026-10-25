@@ -164,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $action = $_POST['action'] ?? '';
 
-        if (in_array($action, ['add', 'update', 'delete', 'toggle_active'], true) && !hasPermission((int)($user['id'] ?? 0), 'conference_rooms')) {
+        if (in_array($action, ['add', 'update', 'delete', 'toggle_active', 'update_order'], true) && !hasPermission((int)($user['id'] ?? 0), 'conference_rooms')) {
             throw new Exception('You do not have permission to manage conference room facilities.');
         }
 
@@ -360,6 +360,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 echo json_encode(['success' => true, 'message' => $message]);
                 exit;
             }
+        }
+
+        if ($action === 'update_order') {
+            // Drag-to-reorder: the cards' ids in their new order; numbered 0..n in that order.
+            $orderIds = json_decode((string)($_POST['order'] ?? ''), true);
+            if (!is_array($orderIds) || !$orderIds) {
+                throw new Exception('The new order was not understood. Refresh the page and try again.');
+            }
+            $orderIds = array_values(array_unique(array_filter(array_map('intval', $orderIds), function ($v) { return $v > 0; })));
+            $existingIds = array_map('intval', $pdo->query("SELECT id FROM conference_rooms")->fetchAll(PDO::FETCH_COLUMN));
+            $pdo->beginTransaction();
+            try {
+                $ordStmt = $pdo->prepare("UPDATE conference_rooms SET display_order = ? WHERE id = ?");
+                $pos = 0;
+                foreach ($orderIds as $oid) {
+                    if (!in_array($oid, $existingIds, true)) {
+                        continue;
+                    }
+                    $ordStmt->execute([$pos, $oid]);
+                    $pos++;
+                }
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+            if ($is_ajax) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => true]);
+                exit;
+            }
+            $message = 'Order saved.';
         }
 
         if ($action === 'toggle_active') {
@@ -920,6 +954,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         <div class="page-header-row">
             <h2 class="page-title"><i class="fas fa-users"></i> Conference Rooms Management</h2>
             <div style="display:flex; gap:10px; align-items:center;">
+                <span style="font-size:12px; color:#999;"><i class="fas fa-arrows-alt"></i> Drag the grip on a card to reorder (works by touch too)</span>
                 <button class="btn-action" type="button" style="background:var(--gold,#7E684B); color:#fff; padding:12px 24px; font-size:14px; border-radius:8px;" onclick="openAddModal()">
                     <i class="fas fa-plus"></i> Add New Room
                 </button>
@@ -953,9 +988,8 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             <div class="conference-cards-grid" id="conferenceGrid">
                 <?php foreach ($conference_rooms as $room): ?>
                     <div class="conference-card" data-id="<?php echo $room['id']; ?>">
-                        <?php if ($room['display_order'] > 0): ?>
-                            <span class="order-badge">#<?php echo $room['display_order']; ?></span>
-                        <?php endif; ?>
+                        <div class="drag-handle" tabindex="0" role="button" title="Drag to reorder (or press the up/down arrow keys)" aria-label="Move <?php echo htmlspecialchars($room['name'], ENT_QUOTES); ?> in the order"><i class="fas fa-grip-vertical"></i></div>
+                        <span class="order-badge"<?php echo $room['display_order'] > 0 ? '' : ' hidden'; ?>>#<?php echo (int)$room['display_order']; ?></span>
 
                         <?php if (!empty($room['image_path'])): ?>
                             <?php $imgSrc = preg_match('#^https?://#i', $room['image_path']) ? $room['image_path'] : '../' . $room['image_path']; ?>
@@ -1282,7 +1316,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         <div class="form-group">
                             <label>Featured Image</label>
                             <input type="file" name="image" id="addImage" accept="image/jpeg,image/png,image/webp">
-                            <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">JPG, PNG or WEBP, most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?>.</small>
+                            <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Choose a picture, or drop one here. JPG, PNG or WEBP, most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?>.</small>
                         </div>
                     </div>
 
@@ -1371,7 +1405,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                         <div class="form-group">
                             <label>Replace Image</label>
                             <input type="file" name="image" id="editImage" accept="image/jpeg,image/png,image/webp">
-                            <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Leave empty to keep the current picture. JPG, PNG or WEBP, most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?>.</small>
+                            <small class="cf-help" style="display:block;margin-top:4px;font-size:12px;color:#6b6558">Drop a picture here or choose one. Leave empty to keep the current picture. JPG, PNG or WEBP, most <?php echo htmlspecialchars(rh_format_bytes_short(RH_IMAGE_MAX_BYTES)); ?>.</small>
                         </div>
                     </div>
 
@@ -1673,6 +1707,154 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
             e.preventDefault();
             handleConferenceFormSubmit('editForm', 'editFormSaveBtn', 'editModalFeedback');
         });
+
+        // ===== DRAG AND DROP (cards + picture files) =====
+        // Pointer events on the grip (mouse, finger, pen); arrow keys move a focused grip. Saves when released.
+        var cfDrag = null;
+        function cfGrid() { return document.getElementById('conferenceGrid'); }
+        function cfCardOrder() {
+            return Array.from(document.querySelectorAll('#conferenceGrid .conference-card')).map(function(c) { return c.dataset.id; });
+        }
+        function cfShowOrder() {
+            document.querySelectorAll('#conferenceGrid .conference-card').forEach(function(card, idx) {
+                var badge = card.querySelector('.order-badge');
+                if (badge) { badge.textContent = '#' + idx; badge.hidden = idx <= 0; }
+            });
+        }
+        function cfSaveOrder() {
+            var fd = new FormData();
+            fd.append('action', 'update_order');
+            fd.append('order', JSON.stringify(cfCardOrder()));
+            fd.append('csrf_token', CONFERENCE_CSRF_TOKEN || '');
+            fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function(r) { if (!r.ok) throw new Error('failed'); return r.json(); })
+                .then(function(data) {
+                    if (data.success) cfShowOrder();
+                    else { alert(data.message || 'The new order could not be saved.'); refreshConferenceGrid(); }
+                })
+                .catch(function() { alert('The new order could not be saved. Please try again.'); refreshConferenceGrid(); });
+        }
+        function cfDragMove(e) {
+            if (!cfDrag || e.pointerId !== cfDrag.id) return;
+            e.preventDefault();
+            if (e.clientY < 70) window.scrollBy(0, -18);
+            else if (e.clientY > window.innerHeight - 70) window.scrollBy(0, 18);
+            var grid = cfGrid();
+            var under = document.elementFromPoint(e.clientX, e.clientY);
+            var target = under ? under.closest('.conference-card') : null;
+            if (!grid || !target || target === cfDrag.card || target.parentNode !== grid) return;
+            var cards = Array.from(grid.querySelectorAll('.conference-card'));
+            if (cards.indexOf(cfDrag.card) < cards.indexOf(target)) grid.insertBefore(cfDrag.card, target.nextSibling);
+            else grid.insertBefore(cfDrag.card, target);
+            cfShowOrder();
+        }
+        function cfDragEnd(e) {
+            if (!cfDrag || e.pointerId !== cfDrag.id) return;
+            var d = cfDrag;
+            cfDrag = null;
+            d.card.classList.remove('dragging');
+            document.body.classList.remove('cf-dragging');
+            document.removeEventListener('pointermove', cfDragMove);
+            document.removeEventListener('pointerup', cfDragEnd);
+            document.removeEventListener('pointercancel', cfDragEnd);
+            if (e.type === 'pointercancel') { refreshConferenceGrid(); return; }
+            if (cfCardOrder().join(',') !== d.before) cfSaveOrder();
+        }
+        (function() {
+            var grid = cfGrid();
+            if (grid) {
+                // refreshConferenceGrid replaces the grid's innerHTML only, so these listeners stay valid
+                grid.addEventListener('pointerdown', function(e) {
+                    var handle = e.target.closest('.drag-handle');
+                    if (!handle || (e.pointerType === 'mouse' && e.button !== 0)) return;
+                    var card = handle.closest('.conference-card');
+                    if (!card) return;
+                    e.preventDefault();
+                    cfDrag = { card: card, id: e.pointerId, before: cfCardOrder().join(',') };
+                    card.classList.add('dragging');
+                    document.body.classList.add('cf-dragging');
+                    document.addEventListener('pointermove', cfDragMove, { passive: false });
+                    document.addEventListener('pointerup', cfDragEnd);
+                    document.addEventListener('pointercancel', cfDragEnd);
+                });
+                grid.addEventListener('keydown', function(e) {
+                    var handle = e.target.closest ? e.target.closest('.drag-handle') : null;
+                    if (!handle) return;
+                    var dir = (e.key === 'ArrowUp' || e.key === 'ArrowLeft') ? -1 : ((e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : 0);
+                    if (!dir) return;
+                    e.preventDefault();
+                    var card = handle.closest('.conference-card');
+                    var other = dir < 0 ? card.previousElementSibling : card.nextElementSibling;
+                    if (!other) return;
+                    if (dir < 0) grid.insertBefore(card, other);
+                    else grid.insertBefore(card, other.nextSibling);
+                    handle.focus();
+                    cfShowOrder();
+                    cfSaveOrder();
+                });
+            }
+
+            // Drop a picture file on the add/edit picture box.
+            function hasFiles(e) {
+                var t = e.dataTransfer && e.dataTransfer.types;
+                return !!t && Array.prototype.indexOf.call(t, 'Files') >= 0;
+            }
+            ['addImage', 'editImage'].forEach(function(inputId) {
+                var input = document.getElementById(inputId);
+                if (!input) return;
+                var box = input.closest('.form-group');
+                var note = document.createElement('div');
+                note.className = 'cf-drop-note';
+                note.hidden = true;
+                note.innerHTML = '<img alt="" class="cf-drop-thumb"><span class="cf-drop-name"></span>';
+                input.insertAdjacentElement('afterend', note);
+                var thumbUrl = '';
+                function showChosen() {
+                    if (thumbUrl) { URL.revokeObjectURL(thumbUrl); thumbUrl = ''; }
+                    var f = input.files && input.files[0];
+                    var img = note.querySelector('img');
+                    if (!f) { note.hidden = true; return; }
+                    if (/^image\//.test(f.type)) { thumbUrl = URL.createObjectURL(f); img.src = thumbUrl; img.hidden = false; }
+                    else img.hidden = true;
+                    note.querySelector('.cf-drop-name').textContent = f.name;
+                    note.hidden = false;
+                }
+                input.addEventListener('change', showChosen);
+                if (input.form) input.form.addEventListener('reset', function() { setTimeout(showChosen, 0); });
+                box.addEventListener('dragover', function(e) {
+                    if (!hasFiles(e)) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                    box.classList.add('cf-drop-on');
+                });
+                box.addEventListener('dragleave', function(e) {
+                    if (!e.relatedTarget || !box.contains(e.relatedTarget)) box.classList.remove('cf-drop-on');
+                });
+                box.addEventListener('drop', function(e) {
+                    if (!hasFiles(e)) return;
+                    e.preventDefault();
+                    box.classList.remove('cf-drop-on');
+                    var f = e.dataTransfer.files[0];
+                    if (!f) return;
+                    var one = new DataTransfer();
+                    one.items.add(f);
+                    input.files = one.files;
+                    // same file rule as choosing it (the type/size message appears under the box)
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+            });
+
+            // A file dropped anywhere else must not make the browser open it and leave this screen.
+            if (!window.__cfNoFileNav) {
+                window.__cfNoFileNav = true;
+                ['dragover', 'drop'].forEach(function(ev) {
+                    window.addEventListener(ev, function(e) {
+                        var t = e.dataTransfer && e.dataTransfer.types;
+                        if (t && Array.prototype.indexOf.call(t, 'Files') >= 0) e.preventDefault();
+                    });
+                });
+            }
+        })();
 
         function refreshConferenceGrid() {
             fetch(window.location.href)
