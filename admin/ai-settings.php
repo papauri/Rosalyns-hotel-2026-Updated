@@ -10,6 +10,11 @@
  *  4. Budgets and limits, chat retention
  *  5. Who has access (read-only; changed on Staff & Access)
  *  6. Usage per person, day and model (also needs ai_usage_view)
+ *  7. Learning and daily checks (Phase 4b): learning / cloud switches, the completion guardrail (learning -> complete,
+ *     with date and evidence), the daily checks (no cron needed), question-set runs, model change + undo, notices
+ * Tabs (Phase 4b, after migration 072): "Assistant memory" (view, add, edit, pin, retire notes; Reset learning
+ * archives, never deletes) and "Assistant faults" (problems written up for a code fix + recent incidents; marking
+ * one Fixed adds a regression question to the nightly check).
  *
  * Every POST: CSRF check, prepared statements, logActivity, then redirect (a refresh never repeats it).
  * Before migration 070 has run the page only shows a "run the database update" notice.
@@ -21,6 +26,7 @@ require_once 'admin-init.php';
 /** @var PDO $pdo */
 
 require_once __DIR__ . '/../includes/ai/ai-catalog.php';
+require_once __DIR__ . '/../includes/ai/ai-selfheal.php'; // Phase 4b: memory, faults, daily checks, guardrail
 
 $csrf_token = $csrf_token ?? generateCsrfToken();
 $h = static function ($v): string {
@@ -30,11 +36,13 @@ $uid = (int)$user['id'];
 $providers = rh_ai_provider_list();
 $schemaReady = rh_ai_schema_ready($pdo);
 $canUsage = hasPermission($uid, 'ai_usage_view');
+$memReady = $schemaReady && rh_ai_memory_ready($pdo);
+$tab = in_array((string)($_GET['tab'] ?? ''), ['memory', 'faults'], true) && $memReady ? (string)$_GET['tab'] : 'setup';
 
-/** Queue a message for the next render and reload the page. */
-$aiFlash = static function (string $type, string $msg, string $anchor = ''): void {
+/** Queue a message for the next render and reload the page (on a tab when given). */
+$aiFlash = static function (string $type, string $msg, string $anchor = '', string $toTab = ''): void {
     $_SESSION['ai_flash'] = ['type' => $type, 'msg' => $msg];
-    header('Location: ai-settings.php' . ($anchor !== '' ? '#' . $anchor : ''));
+    header('Location: ai-settings.php' . (in_array($toTab, ['memory', 'faults'], true) ? '?tab=' . $toTab : '') . ($anchor !== '' ? '#' . $anchor : ''));
     exit;
 };
 
@@ -173,12 +181,134 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $aiFlash('success', 'Limits saved.', 'ai-limits');
         }
 
+        // ── Phase 4b: learning, daily checks, memory, faults ──
+        if ($action === 'save_learning') {
+            $days = trim((string)($_POST['ai_complete_days'] ?? ''));
+            $pct = trim((string)($_POST['ai_complete_eval_pct'] ?? ''));
+            $smoke = trim((string)($_POST['ai_eval_smoke_min_pct'] ?? ''));
+            if (!ctype_digit($days) || (int)$days < 3 || (int)$days > 60) {
+                throw new RuntimeException('Clean days in a row: a whole number from 3 to 60.');
+            }
+            if (!is_numeric($pct) || (float)$pct < 50 || (float)$pct > 100) {
+                throw new RuntimeException('Pass rate needed: a number from 50 to 100.');
+            }
+            if (!is_numeric($smoke) || (float)$smoke < 0 || (float)$smoke > 100) {
+                throw new RuntimeException('Pause below: a number from 0 to 100.');
+            }
+            $pairs = [
+                'ai_learning_enabled'   => (string)($_POST['ai_learning_enabled'] ?? '1') === '0' ? '0' : '1',
+                'ai_cloud_enabled'      => (string)($_POST['ai_cloud_enabled'] ?? '1') === '0' ? '0' : '1',
+                'ai_complete_days'      => (string)(int)$days,
+                'ai_complete_eval_pct'  => (string)round((float)$pct, 1),
+                'ai_eval_smoke_min_pct' => (string)round((float)$smoke, 1),
+            ];
+            rh_ai_save_settings($pairs, $pdo);
+            logActivity($uid, 'ai_settings', 'Assistant learning settings saved: learning ' . ($pairs['ai_learning_enabled'] === '1' ? 'on' : 'frozen') . ', cloud providers ' . ($pairs['ai_cloud_enabled'] === '1' ? 'on' : 'off') . ', complete after ' . $pairs['ai_complete_days'] . ' clean days at ' . $pairs['ai_complete_eval_pct'] . '%');
+            $aiFlash('success', 'Learning settings saved.', 'ai-learning');
+        }
+
+        if ($action === 'feature_state') {
+            $to = (string)($_POST['state'] ?? '') === 'complete' ? 'complete' : 'learning';
+            $who = trim((string)($user['full_name'] ?? '')) !== '' ? (string)$user['full_name'] : (string)$user['username'];
+            rh_ai_feature_state_set($pdo, $to, ($to === 'complete' ? 'Marked complete by hand by ' : 'Reopened by hand by ') . $who . '.');
+            logActivity($uid, 'ai_settings', 'Assistant feature state set by hand: ' . $to);
+            $aiFlash('success', $to === 'complete' ? 'Marked complete. The nightly check keeps watching and reopens it on evidence.' : 'Back to learning.', 'ai-learning');
+        }
+
+        if ($action === 'run_checks') {
+            @set_time_limit(300);
+            session_write_close();
+            $run = rh_ai_daily_run($pdo, true);
+            logActivity($uid, 'ai_settings', 'Assistant daily checks run by hand');
+            if ($run['status'] !== 'ran') {
+                $why = ['locked' => 'The checks are already running. Try again in a minute.', 'off' => 'The Assistant is off, so the checks did not run.'][$run['status']] ?? 'The checks could not run just now.';
+                session_start();
+                $aiFlash('warning', $why, 'ai-learning');
+            }
+            $notes = [];
+            foreach ($run['jobs'] as $job => $r) {
+                $notes[] = ucfirst($job) . ': ' . (string)($r['note'] ?? '');
+            }
+            session_start();
+            $aiFlash('success', 'Checks finished. ' . implode(' ', $notes), 'ai-learning');
+        }
+
+        if ($action === 'upgrade_undo') {
+            $r = rh_ai_model_upgrade_undo($pdo);
+            if (!$r['ok']) {
+                throw new RuntimeException($r['error']);
+            }
+            logActivity($uid, 'ai_settings', 'Assistant automatic model change undone');
+            $aiFlash('success', 'The model change was undone.', 'ai-learning');
+        }
+
+        if (in_array($action, ['memory_add', 'memory_edit', 'memory_set', 'memory_reset', 'fault_set'], true) && !$memReady) {
+            throw new RuntimeException('The database update for the Assistant\'s learning (072) has not been run yet.');
+        }
+
+        if ($action === 'memory_add') {
+            $kind = in_array((string)($_POST['kind'] ?? ''), ['fact', 'glossary', 'lesson'], true) ? (string)$_POST['kind'] : 'fact';
+            $r = rh_ai_memory_add($pdo, ['kind' => $kind, 'scope' => 'hotel', 'text' => (string)($_POST['text'] ?? ''), 'source' => 'owner', 'created_by' => $uid]);
+            if (!$r['ok']) {
+                throw new RuntimeException($r['error']);
+            }
+            logActivity($uid, 'ai_settings', 'Assistant note added (#' . $r['id'] . ')');
+            $aiFlash('success', $r['dup'] ? 'That note was already there.' : 'Note saved. The Assistant uses it from the next question.', 'ai-mem-add', 'memory');
+        }
+
+        if ($action === 'memory_edit') {
+            $id = (int)($_POST['id'] ?? 0);
+            $st = $pdo->prepare("SELECT kind FROM ai_memory WHERE id = ?");
+            $st->execute([$id]);
+            $kind = (string)$st->fetchColumn();
+            if ($kind === '') {
+                throw new RuntimeException('That note was not found.');
+            }
+            $text = trim(preg_replace('/\s+/u', ' ', (string)($_POST['text'] ?? '')));
+            $problem = rh_ai_memory_problem($text, $kind, $kind === 'playbook' ? 'reflect' : 'owner');
+            if ($problem !== '') {
+                throw new RuntimeException($problem);
+            }
+            $pdo->prepare("UPDATE ai_memory SET text = ?, terms = ?, source = IF(source = 'reflect' AND kind = 'playbook', source, 'owner'), status = IF(status = 'archived', status, 'active') WHERE id = ?")
+                ->execute([$text, mb_substr(implode(' ', array_unique(rh_ai_memory_terms($text))), 0, 1000), $id]);
+            logActivity($uid, 'ai_settings', 'Assistant note #' . $id . ' edited');
+            $aiFlash('success', 'Note updated.', 'ai-mem-' . $id, 'memory');
+        }
+
+        if ($action === 'memory_set') {
+            $id = (int)($_POST['id'] ?? 0);
+            $op = (string)($_POST['op'] ?? '');
+            $sql = ['pin' => "pinned = 1", 'unpin' => "pinned = 0", 'retire' => "status = 'retired'", 'restore' => "status = 'active', losses = 0"][$op] ?? '';
+            if ($sql === '') {
+                throw new RuntimeException('Unknown request.');
+            }
+            $pdo->prepare("UPDATE ai_memory SET $sql WHERE id = ?")->execute([$id]);
+            logActivity($uid, 'ai_settings', 'Assistant note #' . $id . ': ' . $op);
+            $aiFlash('success', ['pin' => 'Pinned: it is preferred when it fits and is never retired automatically.', 'unpin' => 'Unpinned.', 'retire' => 'Retired: it is no longer used.', 'restore' => 'Restored: it is used again.'][$op], 'ai-mem-' . $id, 'memory');
+        }
+
+        if ($action === 'memory_reset') {
+            $st = $pdo->prepare("UPDATE ai_memory SET status = 'archived' WHERE source <> 'owner' AND status <> 'archived'");
+            $st->execute();
+            logActivity($uid, 'ai_settings', 'Assistant learning reset: ' . $st->rowCount() . ' learned notes archived');
+            $aiFlash('success', $st->rowCount() . ' learned note(s) archived. Notes you typed yourself are kept. Nothing was deleted.', '', 'memory');
+        }
+
+        if ($action === 'fault_set') {
+            $r = rh_ai_fault_set($pdo, (int)($_POST['id'] ?? 0), (string)($_POST['status'] ?? ''), $uid);
+            if (!$r['ok']) {
+                throw new RuntimeException($r['error']);
+            }
+            logActivity($uid, 'ai_settings', 'Assistant fault #' . (int)$_POST['id'] . ' marked ' . (string)$_POST['status']);
+            $aiFlash('success', $r['message'], 'ai-fault-' . (int)$_POST['id'], 'faults');
+        }
+
         throw new RuntimeException('Unknown request.');
     } catch (RuntimeException $e) {
-        $aiFlash('error', $e->getMessage());
+        $aiFlash('error', $e->getMessage(), '', (string)($_POST['return_tab'] ?? ''));
     } catch (Throwable $e) {
         error_log('ai-settings: ' . get_class($e) . ' ' . $e->getMessage());
-        $aiFlash('error', 'Something went wrong while saving. Nothing secret was shown; please try again.');
+        $aiFlash('error', 'Something went wrong while saving. Nothing secret was shown; please try again.', '', (string)($_POST['return_tab'] ?? ''));
     }
 }
 
@@ -249,6 +379,59 @@ if ($schemaReady && $canUsage) {
         $usage = [];
     }
 }
+
+// Phase 4b: learning, daily checks, memory, faults
+$jobs = $schemaReady ? rh_ai_jobs() : [];
+$health = $schemaReady ? rh_ai_health_last() : [];
+$featureState = (string)($settings['ai_feature_state'] ?? 'learning');
+$streak = $memReady ? rh_ai_guardrail_streak($pdo) : 0;
+$upgrade = json_decode((string)($settings['ai_model_upgrade_json'] ?? ''), true);
+$notices = $schemaReady ? rh_ai_notices() : [];
+$evalRuns = [];
+$openFaults = 0;
+$memRows = $faultRows = $incRows = [];
+$memKind = (string)($_GET['kind'] ?? '');
+$memStatus = (string)($_GET['status'] ?? 'in_use');
+if ($memReady) {
+    try {
+        $evalRuns = $pdo->query("SELECT run_date, kind, run, passed, failed, skipped, pass_pct, tokens_per_answer, clean_day, finished_at FROM ai_eval_runs ORDER BY id DESC LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
+        $openFaults = rh_ai_open_faults($pdo);
+        if ($tab === 'memory') {
+            $where = ["1 = 1"];
+            $args = [];
+            if (isset(rh_ai_memory_kinds()[$memKind])) {
+                $where[] = 'kind = ?';
+                $args[] = $memKind;
+            }
+            $where[] = ['in_use' => "status IN ('active', 'probation')", 'retired' => "status = 'retired'", 'archived' => "status = 'archived'", 'all' => '1 = 1'][$memStatus] ?? "status IN ('active', 'probation')";
+            $st = $pdo->prepare("SELECT m.*, COALESCE(NULLIF(u.full_name, ''), u.username) AS person FROM ai_memory m LEFT JOIN admin_users u ON m.scope = 'user' AND u.id = m.scope_ref
+                                 WHERE " . implode(' AND ', $where) . " ORDER BY m.pinned DESC, FIELD(m.status, 'active', 'probation', 'retired', 'archived'), m.wins DESC, m.id DESC LIMIT 200");
+            $st->execute($args);
+            $memRows = $st->fetchAll(PDO::FETCH_ASSOC);
+        }
+        if ($tab === 'faults') {
+            $faultRows = $pdo->query("SELECT * FROM ai_faults ORDER BY FIELD(status, 'open', 'forwarded', 'fixed', 'dismissed'), id DESC LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
+            $incRows = $pdo->query("SELECT id, kind, severity, tool_name, summary, status, created_at FROM ai_incidents ORDER BY id DESC LIMIT 50")->fetchAll(PDO::FETCH_ASSOC);
+        }
+    } catch (Throwable $e) {
+        error_log('ai-settings learning data: ' . $e->getMessage());
+    }
+}
+if ($schemaReady) {
+    rh_ai_notices_mark_seen($pdo, $uid); // opening this page counts as seeing the notices
+}
+$jobLabels = ['vault' => 'Privacy vault sweep', 'models' => 'Model list refresh', 'reflect' => 'Nightly review (lessons)', 'health' => 'Health check', 'eval' => 'Question set'];
+$jobHelp = [
+    'vault' => 'Removes the real names kept for chats of people whose session has ended (like signing out).',
+    'models' => 'Checks each provider for newer models every 7 days and tries a newer one on the question set before using it.',
+    'reflect' => 'Turns the day\'s mistakes and thumbs-up answers into short lessons and playbooks; scores notes.',
+    'health' => 'A test call to the provider, every lookup run once with safe sample values, and the monthly budget.',
+    'eval' => 'The fixed questions with answers worked out from your own data; feeds the "complete" check.',
+];
+$kindLabels = rh_ai_memory_kinds();
+$incLabels = ['reply_not_right' => 'Reply marked Not right', 'action_failed' => 'Card not done', 'action_cancelled' => 'Card cancelled', 'price_mismatch' => 'Card total differed',
+    'tool_breaker' => 'Lookup switched off for an hour', 'tool_selftest' => 'Lookup failed its self-test', 'auto_pause' => 'Paused itself', 'key_rejected' => 'Key refused',
+    'model_retired' => 'Model retired', 'provider_check_failed' => 'Provider check failed'];
 
 // Status line
 if (!$schemaReady) {
@@ -328,6 +511,16 @@ $fmtPrice = static function ($v): string {
             <div class="alert alert-warning"><i class="fas fa-lock"></i><div>Keys cannot be saved yet: the server encryption setting (APP_ENCRYPTION_SALT) is not set. Ask whoever hosts the system to add it, then come back.</div></div>
         <?php endif; ?>
 
+        <?php if ($memReady): ?>
+        <nav class="report-tabs ai-tabs" aria-label="Assistant Settings sections">
+            <a class="report-tab<?php echo $tab === 'setup' ? ' active' : ''; ?>" href="ai-settings.php"<?php echo $tab === 'setup' ? ' aria-current="page"' : ''; ?>><i class="fas fa-sliders" aria-hidden="true"></i> Setup</a>
+            <a class="report-tab<?php echo $tab === 'memory' ? ' active' : ''; ?>" href="ai-settings.php?tab=memory"<?php echo $tab === 'memory' ? ' aria-current="page"' : ''; ?>><i class="fas fa-book" aria-hidden="true"></i> Assistant memory</a>
+            <a class="report-tab<?php echo $tab === 'faults' ? ' active' : ''; ?>" href="ai-settings.php?tab=faults"<?php echo $tab === 'faults' ? ' aria-current="page"' : ''; ?>><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> Assistant faults<?php if ($openFaults > 0): ?> <span class="tab-count"><?php echo (int)$openFaults; ?></span><?php endif; ?></a>
+        </nav>
+        <p class="help-text ai-tabs-help">Setup: switches, providers, models, limits and the daily checks. Assistant memory: what it has learned and what you have taught it. Assistant faults: problems it has written up for a fix.</p>
+        <?php endif; ?>
+
+        <?php if ($tab === 'setup'): ?>
         <!-- 1. Master switch -->
         <div class="rh-panel ai-card" id="ai-master">
             <div class="rh-panel__head"><h2 class="rh-panel__title">On or off <i class="help" data-tip="One switch for everyone. When off, nobody sees the Assistant and nothing is sent to any provider. Chats, keys and settings are kept.">?</i></h2></div>
@@ -572,6 +765,163 @@ $fmtPrice = static function ($v): string {
             </div>
         </div>
 
+        <!-- 4b. Learning and daily checks -->
+        <div class="rh-panel ai-card" id="ai-learning">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Learning and daily checks <i class="help" data-tip="The Assistant learns from corrections, Helpful / Not right and its own mistakes, and checks itself every day. It never changes its own code or what it is allowed to do.">?</i></h2></div>
+            <div class="rh-panel__body">
+                <?php if ($memReady): ?>
+                <div class="ai-status ai-status--<?php echo $featureState === 'complete' ? 'on' : 'off'; ?>">
+                    <i class="fas <?php echo $featureState === 'complete' ? 'fa-circle-check' : 'fa-clipboard-list'; ?>" aria-hidden="true"></i>
+                    <span>
+                        <?php if ($featureState === 'complete'): ?>
+                            Complete since <?php echo $h($settings['ai_feature_state_at'] ?? ''); ?>: this feature is complete - there is nothing else to patch. The nightly check keeps watching and reopens it if a problem shows up.
+                        <?php else: ?>
+                            Learning: <?php echo (int)$streak; ?> of <?php echo (int)($settings['ai_complete_days'] ?? 14); ?> clean days in a row needed before it declares itself complete.
+                        <?php endif; ?>
+                    </span>
+                </div>
+                <?php if (trim((string)($settings['ai_feature_state_note'] ?? '')) !== ''): ?>
+                    <p class="help-text"><strong>Evidence:</strong> <?php echo $h($settings['ai_feature_state_note']); ?></p>
+                <?php endif; ?>
+                <p class="help-text">A clean day: the question set passes at the rate below, nothing that passed before fails, no open faults, no new kind of problem, every lookup's self-test passes, and it did not pause itself.</p>
+                <form method="POST" action="ai-settings.php" class="ai-actions">
+                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                    <input type="hidden" name="action" value="feature_state">
+                    <?php if ($featureState === 'complete'): ?>
+                        <button type="submit" name="state" value="learning" class="btn btn-secondary btn-sm"><i class="fas fa-rotate-left"></i> Reopen (back to learning)</button>
+                    <?php else: ?>
+                        <button type="submit" name="state" value="complete" class="btn btn-secondary btn-sm" onclick="return confirm('Mark the Assistant complete by hand? It stops writing new lessons; the nightly check still watches it.');"><i class="fas fa-flag-checkered"></i> Mark complete by hand</button>
+                    <?php endif; ?>
+                </form>
+                <?php else: ?>
+                    <p class="help-text">Learning, the fault list and the daily question set need one more database update (072). Until it is run, the Assistant answers as before and the checks below that do not need it still run.</p>
+                <?php endif; ?>
+
+                <form method="POST" action="ai-settings.php" class="ai-limits-grid ai-learning-grid">
+                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                    <input type="hidden" name="action" value="save_learning">
+                    <div class="form-group">
+                        <label for="ai_learn_on"><strong>Learning</strong></label>
+                        <select id="ai_learn_on" name="ai_learning_enabled" class="form-control">
+                            <option value="1"<?php echo ($settings['ai_learning_enabled'] ?? '1') !== '0' ? ' selected' : ''; ?>>On - it keeps notes from corrections and its mistakes</option>
+                            <option value="0"<?php echo ($settings['ai_learning_enabled'] ?? '1') === '0' ? ' selected' : ''; ?>>Frozen - it uses what it knows but keeps nothing new</option>
+                        </select>
+                        <p class="help-text">Notes only ever change what it knows and how it words things - never what it may see or do.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_cloud_on"><strong>Cloud providers</strong></label>
+                        <select id="ai_cloud_on" name="ai_cloud_enabled" class="form-control">
+                            <option value="1"<?php echo ($settings['ai_cloud_enabled'] ?? '1') !== '0' ? ' selected' : ''; ?>>On - questions that need a model go to the provider</option>
+                            <option value="0"<?php echo ($settings['ai_cloud_enabled'] ?? '1') === '0' ? ' selected' : ''; ?>>Off - nothing leaves the hotel; quick local answers only</option>
+                        </select>
+                        <p class="help-text">Off stops every call to a provider at once. Arrivals, departures, in house, room status and how-to answers still work.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_c_days"><strong>Clean days in a row to be complete</strong></label>
+                        <input type="number" min="3" max="60" step="1" id="ai_c_days" name="ai_complete_days" class="form-control" value="<?php echo $h((int)($settings['ai_complete_days'] ?? 14)); ?>">
+                        <p class="help-text">How many clean daily checks in a row before it says it is complete. 14 by default.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_c_pct"><strong>Pass rate needed (%)</strong></label>
+                        <input type="number" min="50" max="100" step="0.1" id="ai_c_pct" name="ai_complete_eval_pct" class="form-control" value="<?php echo $h($settings['ai_complete_eval_pct'] ?? '95'); ?>">
+                        <p class="help-text">Share of the questions that must pass for a day to count as clean.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_s_pct"><strong>Pause below (%) on the 5 key questions</strong></label>
+                        <input type="number" min="0" max="100" step="0.1" id="ai_s_pct" name="ai_eval_smoke_min_pct" class="form-control" value="<?php echo $h($settings['ai_eval_smoke_min_pct'] ?? '80'); ?>">
+                        <p class="help-text">If the five key questions score below this in a daily check, it pauses itself and tells you.</p>
+                    </div>
+                    <div class="ai-actions ai-limits-save">
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Save learning settings</button>
+                    </div>
+                </form>
+
+                <h3 class="ai-subhead">Daily checks</h3>
+                <p class="help-text">These run by themselves after the first page load of each day by anyone signed in - no scheduled task is needed. Nobody waits for them.</p>
+                <div class="table-container"><div class="table-responsive">
+                <table class="table ai-table">
+                    <thead><tr>
+                        <th>Check <i class="help" data-tip="What runs each day, in this order.">?</i></th>
+                        <th>Last run <i class="help" data-tip="When this check last finished, by the daily run, a scheduled script or Run the checks now.">?</i></th>
+                        <th>Result <i class="help" data-tip="What it found, in a line. Failures are also in the system log.">?</i></th>
+                    </tr></thead>
+                    <tbody>
+                    <?php foreach ($jobLabels as $jk => $jl): $j = $jobs[$jk] ?? null; ?>
+                        <tr>
+                            <td><strong><?php echo $h($jl); ?></strong><br><span class="ai-muted"><?php echo $h($jobHelp[$jk]); ?></span></td>
+                            <td><?php echo $j ? $h($j['at']) : 'Not yet'; ?></td>
+                            <td><?php echo $j ? (empty($j['ok']) ? '<span class="ai-bad">Needs a look:</span> ' : '') . $h($j['note']) : '—'; ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div></div>
+                <form method="POST" action="ai-settings.php" class="ai-actions">
+                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                    <input type="hidden" name="action" value="run_checks">
+                    <button type="submit" class="btn btn-secondary btn-sm"<?php echo $isOn ? '' : ' disabled'; ?>><i class="fas fa-play"></i> Run the checks now</button>
+                    <span class="help-text">Takes up to a minute. The model questions use a few tokens.<?php echo $isOn ? '' : ' Switch the Assistant on first.'; ?></span>
+                </form>
+
+                <?php if ($memReady): ?>
+                <h3 class="ai-subhead">Question set runs</h3>
+                <?php if (!$evalRuns): ?>
+                    <p class="help-text">No runs yet. The first one happens with the daily checks.</p>
+                <?php else: ?>
+                <div class="table-container"><div class="table-responsive">
+                <table class="table ai-table">
+                    <thead><tr>
+                        <th>Date</th>
+                        <th>Run <i class="help" data-tip="Full = every question (daily). Smoke = the 5 key questions. Upgrade = the model questions, run to test a newer model before using it.">?</i></th>
+                        <th>Passed <i class="help" data-tip="Questions answered as expected, out of those asked. Skipped ones (no model can be used) are not counted.">?</i></th>
+                        <th>Pass rate <i class="help" data-tip="Passed divided by asked, as a percentage.">?</i></th>
+                        <th>Tokens per answer <i class="help" data-tip="Average tokens a question used. Local answers use none; a lower figure at the same pass rate means cheaper answers.">?</i></th>
+                        <th>Clean day <i class="help" data-tip="Whether that day counted towards the clean days needed to be complete (daily full runs only).">?</i></th>
+                    </tr></thead>
+                    <tbody>
+                    <?php foreach ($evalRuns as $er): ?>
+                        <tr>
+                            <td><?php echo $h(date('j M Y', strtotime((string)$er['run_date']))); ?></td>
+                            <td><?php echo $h(ucfirst((string)$er['kind'])); ?></td>
+                            <td><?php echo (int)$er['passed']; ?> of <?php echo (int)$er['run']; ?><?php echo (int)$er['skipped'] ? ' (' . (int)$er['skipped'] . ' skipped)' : ''; ?></td>
+                            <td><?php echo $er['pass_pct'] !== null ? $h(rtrim(rtrim(number_format((float)$er['pass_pct'], 1), '0'), '.')) . '%' : '—'; ?></td>
+                            <td><?php echo $h(number_format((int)$er['tokens_per_answer'])); ?></td>
+                            <td><?php echo $er['clean_day'] === null ? '—' : ((int)$er['clean_day'] === 1 ? 'Yes' : 'No'); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div></div>
+                <?php endif; ?>
+                <?php endif; ?>
+
+                <?php if (is_array($upgrade) && !empty($upgrade['to'])): ?>
+                <h3 class="ai-subhead">Last model check</h3>
+                <p class="help-text">
+                    <?php echo $h($upgrade['at'] ?? ''); ?>: a newer <?php echo $h($upgrade['role']); ?> model (<code class="ai-id"><?php echo $h($upgrade['to']); ?></code>) was tried against <code class="ai-id"><?php echo $h($upgrade['from']); ?></code> -
+                    <?php echo $h(($upgrade['to_pct'] ?? '?') . '% against ' . ($upgrade['from_pct'] ?? '?') . '%'); ?>.
+                    <?php echo ($upgrade['decision'] ?? '') === 'switched' ? (!empty($upgrade['undone']) ? 'It was switched, then undone on ' . $h($upgrade['undone']) . '.' : 'It now does that job.') : 'It did not do better, so nothing changed.'; ?>
+                </p>
+                <?php if (($upgrade['decision'] ?? '') === 'switched' && empty($upgrade['undone'])): ?>
+                <form method="POST" action="ai-settings.php" class="ai-actions">
+                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                    <input type="hidden" name="action" value="upgrade_undo">
+                    <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-rotate-left"></i> Undo this model change</button>
+                </form>
+                <?php endif; ?>
+                <?php endif; ?>
+
+                <?php if ($notices): ?>
+                <h3 class="ai-subhead">Notices</h3>
+                <ul class="ai-notices">
+                    <?php foreach (array_slice($notices, 0, 8) as $n): ?>
+                        <li><span class="ai-muted"><?php echo $h($n['at'] ?? ''); ?></span> <?php echo $h($n['text'] ?? ''); ?></li>
+                    <?php endforeach; ?>
+                </ul>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <!-- 5. Who has access -->
         <div class="rh-panel ai-card" id="ai-access">
             <div class="rh-panel__head">
@@ -647,6 +997,211 @@ $fmtPrice = static function ($v): string {
             </div>
         </div>
         <?php endif; ?>
+
+        <?php endif; /* setup tab */ ?>
+
+        <?php if ($tab === 'memory'): ?>
+        <!-- Assistant memory -->
+        <div class="rh-panel ai-card" id="ai-mem-add">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Teach it something <i class="help" data-tip="A fact or a house word the Assistant should know, for example breakfast times or what staff call a room. Notes you type are used straight away.">?</i></h2></div>
+            <div class="rh-panel__body">
+                <form method="POST" action="ai-settings.php" class="ai-mem-form">
+                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                    <input type="hidden" name="action" value="memory_add">
+                    <input type="hidden" name="return_tab" value="memory">
+                    <div class="form-group">
+                        <label for="ai_mem_kind"><strong>Kind</strong></label>
+                        <select id="ai_mem_kind" name="kind" class="form-control">
+                            <option value="fact">Fact - something true about the hotel</option>
+                            <option value="glossary">Word meaning - a house word and what it means</option>
+                            <option value="lesson">Lesson - a habit that avoids a mistake</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_mem_text"><strong>Note</strong></label>
+                        <textarea id="ai_mem_text" name="text" class="form-control" rows="2" maxlength="500" required placeholder="Breakfast is served from 6:30 to 10:00 in the garden restaurant."></textarea>
+                        <p class="help-text">Facts and wording only. Contact details, prices and amounts (they always come from the system) and rules about what the Assistant may do are refused.</p>
+                    </div>
+                    <div class="ai-actions"><button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Save note</button></div>
+                </form>
+            </div>
+        </div>
+
+        <div class="rh-panel ai-card" id="ai-mem-list">
+            <div class="rh-panel__head">
+                <h2 class="rh-panel__title">Assistant memory <i class="help" data-tip="Everything it has learned or been taught. Up to 8 notes that fit a question go with it; new learned notes start on trial and are used fully after a few helpful replies.">?</i></h2>
+            </div>
+            <div class="rh-panel__body">
+                <form method="GET" action="ai-settings.php" class="ai-actions ai-mem-filter">
+                    <input type="hidden" name="tab" value="memory">
+                    <label for="ai_mf_kind" class="ai-muted">Kind</label>
+                    <select id="ai_mf_kind" name="kind" class="form-control">
+                        <option value="">All kinds</option>
+                        <?php foreach ($kindLabels as $kk => $kl): ?>
+                            <option value="<?php echo $h($kk); ?>"<?php echo $memKind === $kk ? ' selected' : ''; ?>><?php echo $h($kl); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <label for="ai_mf_status" class="ai-muted">Showing</label>
+                    <select id="ai_mf_status" name="status" class="form-control">
+                        <?php foreach (['in_use' => 'In use (active and on trial)', 'retired' => 'Retired', 'archived' => 'Archived', 'all' => 'All'] as $sk => $sl): ?>
+                            <option value="<?php echo $h($sk); ?>"<?php echo $memStatus === $sk ? ' selected' : ''; ?>><?php echo $h($sl); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <button type="submit" class="btn btn-secondary btn-sm">Show</button>
+                </form>
+                <?php if (!$memRows): ?>
+                    <p class="help-text">No notes here yet. Corrections staff type, Helpful / Not right taps and the nightly review fill this in over time.</p>
+                <?php else: ?>
+                <div class="table-container"><div class="table-responsive">
+                <table class="table ai-table">
+                    <thead><tr>
+                        <th>Kind <i class="help" data-tip="Fact, reply style (one person's), lesson (from a mistake), playbook (which lookups answered a kind of question - lets the cheaper model answer) or word meaning.">?</i></th>
+                        <th>Note <i class="help" data-tip="The note exactly as the Assistant reads it.">?</i></th>
+                        <th>Applies to <i class="help" data-tip="Everyone (the hotel), or one person's replies only.">?</i></th>
+                        <th>From <i class="help" data-tip="You (typed here), a staff correction, a Helpful / Not right tap, or the nightly review.">?</i></th>
+                        <th>Used <i class="help" data-tip="How many replies used this note.">?</i></th>
+                        <th>Helped / not <i class="help" data-tip="Replies that used it and were marked Helpful, against Not right. Three more Not right than Helpful retires it (unless pinned).">?</i></th>
+                        <th>Status <i class="help" data-tip="Active = used. On trial = new, used now and then until it has helped a few times. Retired = no longer used. Archived = put away by Reset learning.">?</i></th>
+                        <th>Actions</th>
+                    </tr></thead>
+                    <tbody>
+                    <?php foreach ($memRows as $m): $mid = (int)$m['id']; ?>
+                        <tr id="ai-mem-<?php echo $mid; ?>">
+                            <td><?php echo $h($kindLabels[$m['kind']] ?? $m['kind']); ?></td>
+                            <td class="ai-mem-text"><?php echo $h($m['text']); ?><?php echo (int)$m['pinned'] ? ' <span class="ai-tag">Pinned</span>' : ''; ?></td>
+                            <td><?php echo $m['scope'] === 'user' ? $h($m['person'] ?: 'One person') : 'Everyone'; ?></td>
+                            <td><?php echo $h(['owner' => 'You', 'staff' => 'Staff', 'feedback' => 'A correction', 'chat' => 'A correction in chat', 'reflect' => 'Nightly review'][$m['source']] ?? $m['source']); ?></td>
+                            <td><?php echo (int)$m['uses']; ?></td>
+                            <td><?php echo (int)$m['wins']; ?> / <?php echo (int)$m['losses']; ?></td>
+                            <td><?php echo $h(['active' => 'Active', 'probation' => 'On trial', 'retired' => 'Retired', 'archived' => 'Archived'][$m['status']] ?? $m['status']); ?></td>
+                            <td class="ai-mem-actions">
+                                <details>
+                                    <summary class="btn btn-secondary btn-sm">Edit</summary>
+                                    <form method="POST" action="ai-settings.php">
+                                        <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                                        <input type="hidden" name="action" value="memory_edit">
+                                        <input type="hidden" name="return_tab" value="memory">
+                                        <input type="hidden" name="id" value="<?php echo $mid; ?>">
+                                        <label class="sr-only" for="ai_me_<?php echo $mid; ?>">Note text</label>
+                                        <textarea id="ai_me_<?php echo $mid; ?>" name="text" class="form-control" rows="3" maxlength="500"><?php echo $h($m['text']); ?></textarea>
+                                        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                                    </form>
+                                </details>
+                                <form method="POST" action="ai-settings.php">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                                    <input type="hidden" name="action" value="memory_set">
+                                    <input type="hidden" name="return_tab" value="memory">
+                                    <input type="hidden" name="id" value="<?php echo $mid; ?>">
+                                    <button type="submit" name="op" value="<?php echo (int)$m['pinned'] ? 'unpin' : 'pin'; ?>" class="btn btn-secondary btn-sm"><?php echo (int)$m['pinned'] ? 'Unpin' : 'Pin'; ?></button>
+                                    <?php if (in_array($m['status'], ['active', 'probation'], true)): ?>
+                                        <button type="submit" name="op" value="retire" class="btn btn-secondary btn-sm">Retire</button>
+                                    <?php else: ?>
+                                        <button type="submit" name="op" value="restore" class="btn btn-secondary btn-sm">Restore</button>
+                                    <?php endif; ?>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div></div>
+                <?php endif; ?>
+                <form method="POST" action="ai-settings.php" class="ai-actions ai-mem-reset">
+                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                    <input type="hidden" name="action" value="memory_reset">
+                    <input type="hidden" name="return_tab" value="memory">
+                    <button type="submit" class="btn btn-secondary btn-sm" onclick="return confirm('Archive everything the Assistant has learned? Notes you typed yourself are kept. Nothing is deleted.');"><i class="fas fa-box-archive"></i> Reset learning</button>
+                    <span class="help-text">Archives every learned note (nothing is deleted). Notes you typed here are kept.</span>
+                </form>
+            </div>
+        </div>
+        <?php endif; /* memory tab */ ?>
+
+        <?php if ($tab === 'faults'): ?>
+        <!-- Assistant faults -->
+        <div class="rh-panel ai-card" id="ai-faults">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Assistant faults <i class="help" data-tip="Problems the Assistant cannot fix by itself - it never changes its own code. Each one is written up in plain words with the evidence, ready to forward as a PATCH request.">?</i></h2></div>
+            <div class="rh-panel__body">
+                <p class="help-text">Copy a fault into a PATCH request for the developer and mark it Forwarded. When the fix is in, mark it Fixed: a question is added to the nightly check so the problem cannot quietly come back.</p>
+                <?php if (!$faultRows): ?>
+                    <p class="help-text">No faults written up.</p>
+                <?php else: ?>
+                <div class="table-container"><div class="table-responsive">
+                <table class="table ai-table">
+                    <thead><tr>
+                        <th>Raised <i class="help" data-tip="When it was first written up (it is updated if the same problem happens again).">?</i></th>
+                        <th>Fault <i class="help" data-tip="The problem in plain words, and the evidence to forward.">?</i></th>
+                        <th>Status <i class="help" data-tip="Open = needs forwarding. Forwarded = sent for a fix. Fixed = fixed, with a question added to the nightly check. Dismissed = not a real problem.">?</i></th>
+                        <th>Actions</th>
+                    </tr></thead>
+                    <tbody>
+                    <?php foreach ($faultRows as $f): $fid = (int)$f['id']; ?>
+                        <tr id="ai-fault-<?php echo $fid; ?>">
+                            <td><?php echo $h(date('j M Y H:i', strtotime((string)$f['created_at']))); ?></td>
+                            <td>
+                                <strong><?php echo $h($f['title']); ?></strong>
+                                <p class="ai-muted"><?php echo $h($f['detail']); ?></p>
+                                <details>
+                                    <summary class="ai-muted">Copy for a PATCH request</summary>
+                                    <label class="sr-only" for="ai_fc_<?php echo $fid; ?>">Fault write-up</label>
+                                    <textarea id="ai_fc_<?php echo $fid; ?>" class="form-control ai-fault-copy" rows="5" readonly><?php echo $h("PATCH (Assistant fault #" . $fid . "): " . $f['title'] . "\n" . $f['detail'] . "\nEvidence: " . $f['evidence_json']); ?></textarea>
+                                </details>
+                            </td>
+                            <td><?php echo $h(['open' => 'Open', 'forwarded' => 'Forwarded', 'fixed' => 'Fixed', 'dismissed' => 'Dismissed'][$f['status']] ?? $f['status']); ?><?php echo (int)$f['regression_case_id'] ? '<br><span class="ai-muted">checked nightly</span>' : ''; ?></td>
+                            <td class="ai-mem-actions">
+                                <form method="POST" action="ai-settings.php">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                                    <input type="hidden" name="action" value="fault_set">
+                                    <input type="hidden" name="return_tab" value="faults">
+                                    <input type="hidden" name="id" value="<?php echo $fid; ?>">
+                                    <?php if (in_array($f['status'], ['open', 'forwarded'], true)): ?>
+                                        <?php if ($f['status'] === 'open'): ?><button type="submit" name="status" value="forwarded" class="btn btn-secondary btn-sm">Forwarded</button><?php endif; ?>
+                                        <button type="submit" name="status" value="fixed" class="btn btn-primary btn-sm">Fixed</button>
+                                        <button type="submit" name="status" value="dismissed" class="btn btn-secondary btn-sm">Dismiss</button>
+                                    <?php else: ?>
+                                        <button type="submit" name="status" value="open" class="btn btn-secondary btn-sm">Reopen</button>
+                                    <?php endif; ?>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div></div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <div class="rh-panel ai-card" id="ai-incidents">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Recent problems <i class="help" data-tip="The last 50 things that went wrong or were corrected. The nightly review learns from these; most never need a fix.">?</i></h2></div>
+            <div class="rh-panel__body">
+                <?php if (!$incRows): ?>
+                    <p class="help-text">Nothing has gone wrong yet.</p>
+                <?php else: ?>
+                <div class="table-container"><div class="table-responsive">
+                <table class="table ai-table">
+                    <thead><tr>
+                        <th>When</th>
+                        <th>What <i class="help" data-tip="The kind of problem: a reply marked Not right, a card not done or cancelled, a lookup that failed, an automatic pause ...">?</i></th>
+                        <th>Details <i class="help" data-tip="What happened, without guest or staff names.">?</i></th>
+                        <th>Reviewed <i class="help" data-tip="Yes once the nightly review has looked at it.">?</i></th>
+                    </tr></thead>
+                    <tbody>
+                    <?php foreach ($incRows as $i): ?>
+                        <tr>
+                            <td><?php echo $h(date('j M H:i', strtotime((string)$i['created_at']))); ?></td>
+                            <td><?php echo $h($incLabels[$i['kind']] ?? str_replace('_', ' ', (string)$i['kind'])); ?></td>
+                            <td><?php echo $h($i['summary']); ?><?php echo $i['tool_name'] ? ' <span class="ai-muted">(' . $h($i['tool_name']) . ')</span>' : ''; ?></td>
+                            <td><?php echo $i['status'] === 'open' ? 'Not yet' : 'Yes'; ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div></div>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endif; /* faults tab */ ?>
 
         <?php endif; /* schemaReady */ ?>
     </div>

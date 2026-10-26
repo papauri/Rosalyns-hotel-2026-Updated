@@ -41,6 +41,20 @@ function rh_ai_is_provider(string $p): bool
     return isset(rh_ai_provider_list()[$p]);
 }
 
+/**
+ * Kill switch layer 4 "Cloud providers" (Phase 4b). All five supported providers are cloud services (there is
+ * no on-site model yet), so off means no model call leaves the hotel: only the quick local answers work.
+ */
+function rh_ai_cloud_on(): bool
+{
+    return rh_ai_setting('ai_cloud_enabled', '1') !== '0';
+}
+
+function rh_ai_cloud_off_message(): string
+{
+    return 'Cloud providers are switched off in Assistant Settings, so only quick local answers work.';
+}
+
 // ── HTTP layer (injectable) ───────────────────────────────────────────────────
 
 /**
@@ -59,6 +73,9 @@ function rh_ai_set_transport(?callable $fn): void
  */
 function rh_ai_http(string $method, string $url, array $headers, ?string $body = null, int $timeout = 20): array
 {
+    if (!rh_ai_cloud_on()) { // kill switch layer 4: nothing is sent to a cloud provider
+        return ['http' => 0, 'body' => '', 'error' => rh_ai_cloud_off_message(), 'ms' => 0];
+    }
     $t0 = microtime(true);
     $fake = $GLOBALS['__rh_ai_transport'] ?? null;
     if (is_callable($fake)) {
@@ -834,6 +851,9 @@ function rh_ai_chat(array $req): array
     if (!rh_ai_is_provider($provider) || $model === '') {
         return ['error' => 'No model is chosen for the Assistant yet. Ask an administrator to finish Assistant Settings.'] + $base;
     }
+    if (!rh_ai_cloud_on()) {
+        return ['error' => rh_ai_cloud_off_message()] + $base;
+    }
     $key = (string)($req['key'] ?? '');
     if ($key === '') {
         $key = rh_ai_get_key($provider);
@@ -900,8 +920,9 @@ function rh_ai_chat_resilient(array $req, ?string $fallbackModel = null): array
         }
     }
     if ($fallbackModel !== null && $fallbackModel !== '' && $fallbackModel !== ($req['model'] ?? '') && ($r['retryable'] || $r['model_missing'])) {
+        $missing = !empty($r['model_missing']);
         $req['model'] = $fallbackModel;
-        return rh_ai_chat($req) + ['used_fallback' => true];
+        return rh_ai_chat($req) + ['used_fallback' => true, 'first_model_missing' => $missing]; // a retired model is replaced afterwards (self-healing)
     }
     return $r + ['used_fallback' => false];
 }
@@ -917,7 +938,7 @@ function rh_ai_chat_multi(array $reqs, ?string $fallbackModel = null): array
 {
     $out = [];
     $sequential = count($reqs) < 2 || is_callable($GLOBALS['__rh_ai_transport'] ?? null) || rh_ai_fake_name() !== ''
-        || !function_exists('curl_multi_init');
+        || !function_exists('curl_multi_init') || !rh_ai_cloud_on();
     if ($sequential) {
         foreach ($reqs as $k => $req) {
             $out[$k] = rh_ai_chat_resilient($req, $fallbackModel);

@@ -1,0 +1,7 @@
+# Rules for Cline in this repo
+
+- Follow `CLAUDE.md` (project conventions, safety rails, ship gate) — it applies to every tool, not only Claude.
+- If you are continuing the AI Assistant build, start with `.claude/CLINE_HANDOFF.md` and do exactly what it says.
+- Never read large files whole: use search + line ranges. `config/database.php` (~9.5k lines),
+  `admin/bookings.php` (~9k), `.claude/BUILD_PLAN.md`, `.claude/SYSTEM_MAP.md`, `.claude/CODE_INDEX.md` are lookup-only.
+- Every change goes to both hotels (Rosalyn's here, Liwonde at `C:\Users\john-paul.chirwa\OneDrive\MSP\Liwonde_Sun_Hotel_2026`).

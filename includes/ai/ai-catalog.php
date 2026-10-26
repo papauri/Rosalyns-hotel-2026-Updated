@@ -356,7 +356,8 @@ function rh_ai_refresh_provider(PDO $db, string $provider): array
 }
 
 /**
- * The weekly refresh (scripts/ai-model-refresh.php). Does nothing at all when the Assistant is off.
+ * The weekly refresh (scripts/ai-model-refresh.php, or the daily check on the first admin page load of the day
+ * when the last refresh is over 7 days old). Does nothing at all when the Assistant is off.
  * @return array{ran:bool,results:array<string,array>}
  */
 function rh_ai_model_refresh_run(PDO $db): array
@@ -370,6 +371,12 @@ function rh_ai_model_refresh_run(PDO $db): array
             continue;
         }
         $results[$p] = rh_ai_refresh_provider($db, $p);
+    }
+    if ($results) {
+        try { // when the lists were last checked (the daily check refreshes again after 7 days; cron is optional)
+            rh_ai_save_settings(['ai_models_refreshed_at' => date('Y-m-d H:i:s')], $db);
+        } catch (Throwable $e) {
+        }
     }
     return ['ran' => true, 'results' => $results];
 }

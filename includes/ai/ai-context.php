@@ -65,7 +65,7 @@ function rh_ai_prefs_clean(array $p): array
     return $out;
 }
 
-/** Save preferences. Keys not given keep their saved value (the briefing switch, the day the briefing was shown). */
+/** Save preferences. Keys not given keep their saved value (the briefing switch, the day the briefing was shown, notices seen). */
 function rh_ai_prefs_set(PDO $db, int $uid, array $p): array
 {
     $cur = rh_ai_prefs_get($db, $uid);
@@ -80,8 +80,12 @@ function rh_ai_prefs_set(PDO $db, int $uid, array $p): array
         $st = $db->prepare("SELECT prefs_json FROM ai_user_prefs WHERE user_id = ?");
         $st->execute([$uid]);
         $old = json_decode((string)$st->fetchColumn(), true);
-        if (is_array($old) && isset($old['briefed_on']) && is_string($old['briefed_on'])) {
-            $store['briefed_on'] = $old['briefed_on'];
+        if (is_array($old)) { // keep what is not a reply setting (the day the briefing was shown, notices seen)
+            foreach ($old as $k => $v) {
+                if (!array_key_exists($k, $store) && is_scalar($v)) {
+                    $store[$k] = $v;
+                }
+            }
         }
     } catch (Throwable $e) {
     }

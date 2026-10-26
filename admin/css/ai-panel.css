@@ -675,3 +675,152 @@ html.rh-ai-is-open .rh-ai-launch {
 .rh-ai-card__btn i {
     color: inherit;
 }
+
+/* Phase 4b - "Was this right?" under each reply: two quiet buttons, an optional correction box. */
+.rh-ai-fb {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+.rh-ai-fb__line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.rh-ai-fb__label {
+    font-size: 0.8rem;
+    color: var(--admin-muted, #5E554D);
+    margin-right: 4px;
+}
+
+.rh-ai-fb__btn {
+    min-height: 44px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: var(--admin-radius, 8px);
+    background: var(--admin-surface, #fff);
+    color: var(--admin-text, #1f2a37);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.rh-ai-fb__btn:hover,
+.rh-ai-fb__btn:focus-visible {
+    border-color: var(--admin-accent, #766550);
+}
+
+.rh-ai-fb__btn[aria-pressed="true"] {
+    background: var(--admin-accent, #766550);
+    border-color: var(--admin-accent, #766550);
+    color: #fff;
+}
+
+.rh-ai-fb__box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.rh-ai-fb__box[hidden] {
+    display: none;
+}
+
+.rh-ai-fb__boxlabel {
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.rh-ai-fb__box textarea {
+    min-height: 44px;
+    padding: 8px 10px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: var(--admin-radius, 8px);
+    background: var(--admin-surface, #fff);
+    color: var(--admin-text, #1f2a37);
+    font: inherit;
+    resize: vertical;
+}
+
+.rh-ai-fb__send {
+    align-self: flex-start;
+    flex: 0 0 auto;
+}
+
+.rh-ai-fb__note {
+    margin: 6px 0 0;
+    font-size: 0.78rem;
+    color: var(--admin-muted, #5E554D);
+}
+
+.rh-ai-fb__note:empty {
+    display: none;
+}
+
+.rh-ai-prefs__reset {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+/* Notice for the people who manage Assistant Settings (it paused itself, a lookup was switched off ...). */
+.rh-ai-notice-card {
+    position: fixed;
+    right: 14px;
+    bottom: 120px;
+    z-index: 9997;
+    width: min(360px, calc(100vw - 28px));
+    padding: 12px 14px;
+    border: 1px solid var(--admin-warning-border, #9a7c53);
+    border-radius: var(--admin-radius, 8px);
+    background: var(--admin-surface, #fff);
+    color: var(--admin-text, #1f2a37);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+.rh-ai-notice-card[hidden] {
+    display: none;
+}
+
+.rh-ai-notice-card__title {
+    margin: 0 0 4px;
+    font-weight: 700;
+    font-size: 0.9rem;
+}
+
+.rh-ai-notice-card__title i {
+    color: var(--admin-warning-border, #9a7c53);
+}
+
+.rh-ai-notice-card__text {
+    margin: 0;
+    font-size: 0.86rem;
+    line-height: 1.45;
+}
+
+.rh-ai-notice-card__help {
+    margin: 6px 0 0;
+    font-size: 0.76rem;
+    color: var(--admin-muted, #5E554D);
+}
+
+.rh-ai-notice-card__btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.rh-ai-notice-card__btns .btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+}

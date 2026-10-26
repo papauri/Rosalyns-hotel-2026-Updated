@@ -564,6 +564,7 @@ function rh_ai_swarm_consult(PDO $db, array $user, int $conv, array $models, arr
     for ($iter = 0; $iter < 4; $iter++) {
         $reqs = [];
         $over = ($budget['in'] + $budget['out']) >= $budget['tokens_cap'];
+        $roundsLeft = max(0, (int)$budget['rounds']); // shared between the leads of this pass: never overshoot the cap
         foreach ($state as $k => $s) {
             if ($s['done']) {
                 continue;
@@ -573,7 +574,10 @@ function rh_ai_swarm_consult(PDO $db, array $user, int $conv, array $models, arr
                 $state[$k]['answer'] = '(Stopped: this question reached its token limit.)';
                 continue;
             }
-            $offer = ($iter < 3 && $budget['rounds'] > 0) ? $s['specs'] : [];
+            $offer = ($iter < 3 && $roundsLeft > 0 && $s['specs']) ? $s['specs'] : [];
+            if ($offer) {
+                $roundsLeft--; // this lead may spend one round now; a lead offered no tools must answer
+            }
             $reqs[$k] = rh_ai_vault_final_pass($db, $conv, [
                 'provider' => $models['provider'], 'model' => $model['model_id'],
                 'system_frozen' => rh_ai_specialist_frozen($db, $k, $team[$k]), 'system_user' => $ctx['user'],
@@ -791,13 +795,13 @@ function rh_ai_briefing(PDO $db, array $user, bool $auto): array
         rh_ai_message_add($db, $conv, 'user', 'Give me the tea');
     }
     $b = rh_ai_briefing_build($db, $user, $conv, true);
-    rh_ai_message_add($db, $conv, 'assistant', $b['text'], ['agent' => 'briefing', 'args' => ['route' => 'briefing', 'items' => $b['items'], 'chips' => $b['chips'], 'links' => []],
+    $msgId = rh_ai_message_add($db, $conv, 'assistant', $b['text'], ['agent' => 'briefing', 'args' => ['route' => 'briefing', 'items' => $b['items'], 'chips' => $b['chips'], 'links' => []],
         'provider' => $b['provider'], 'model' => $b['model'] !== '' ? $b['model'] : null, 'tokens_in' => $b['tokens_in'], 'tokens_out' => $b['tokens_out'], 'cost' => $b['cost'], 'ms' => $b['ms']]);
     if ($auto) {
         rh_ai_mark_briefed($db, $uid);
     }
     rh_ai_step_set($db, $uid, '');
-    return ['ok' => true, 'shown' => true, 'conversation_id' => $conv, 'reply' => rh_ai_vault_rehydrate($db, $conv, $b['text']),
+    return ['ok' => true, 'shown' => true, 'conversation_id' => $conv, 'message_id' => $msgId, 'reply' => rh_ai_vault_rehydrate($db, $conv, $b['text']),
         'items' => rh_ai_items_rehydrate($db, $conv, $b['items']), 'chips' => $b['chips'], 'route' => 'briefing',
         'usage' => ['tokens_in' => $b['tokens_in'], 'tokens_out' => $b['tokens_out'], 'cost_usd' => $b['cost']], 'error' => ''];
 }
@@ -848,8 +852,9 @@ function rh_ai_message_add(PDO $db, int $conv, string $role, string $content, ar
             $extra['provider'] ?? null, $extra['model'] ?? null,
             (int)($extra['tokens_in'] ?? 0), (int)($extra['tokens_out'] ?? 0), (float)($extra['cost'] ?? 0), $extra['ms'] ?? null,
         ]);
+    $id = (int)$db->lastInsertId(); // read it first: the driver resets it once the next statement runs
     $db->prepare("UPDATE ai_conversations SET updated_at = NOW() WHERE id = ?")->execute([$conv]);
-    return (int)$db->lastInsertId();
+    return $id;
 }
 
 /** Last turns (tokenised) after the latest summary, plus that summary. */
@@ -896,6 +901,11 @@ function rh_ai_role_models(PDO $db): array
         }
     } catch (Throwable $e) {
     }
+    foreach ((array)($GLOBALS['__rh_ai_role_override'] ?? []) as $role => $m) { // a model upgrade check tries a model in a role first
+        if (is_array($m) && !empty($m['model_id'])) {
+            $out[(string)$role] = $m;
+        }
+    }
     return $out;
 }
 
@@ -916,6 +926,9 @@ function rh_ai_model_price(PDO $db, string $provider, string $model): array
 
 function rh_ai_record_usage(PDO $db, int $uid, string $provider, string $model, array $usage, float $cost): void
 {
+    if (function_exists('rh_ai_eval_mode') && rh_ai_eval_mode()) {
+        $uid = 0; // nightly checks count against the monthly limit, never against a person's daily allowance
+    }
     $in = (int)($usage['in'] ?? 0) + (int)($usage['cache_read'] ?? 0) + (int)($usage['cache_write'] ?? 0);
     try {
         $db->prepare("INSERT INTO ai_usage_daily (day, user_id, provider, model_id, requests, tokens_in, tokens_out, cost_usd) VALUES (CURDATE(), ?, ?, ?, 1, ?, ?, ?)
@@ -958,7 +971,10 @@ function rh_ai_budget_problem(PDO $db, int $uid): string
         if ($budget > 0) {
             $spent = (float)$db->query("SELECT COALESCE(SUM(cost_usd), 0) FROM ai_usage_daily WHERE day >= DATE_FORMAT(CURDATE(), '%Y-%m-01')")->fetchColumn();
             if ($spent >= $budget) {
-                return 'The Assistant has reached this month\'s spending limit. Quick lookups still work; ask an administrator to raise the limit in Assistant Settings.';
+                if (function_exists('rh_ai_check_budget_pause')) {
+                    rh_ai_check_budget_pause($db); // pauses itself and tells the people who manage Assistant Settings
+                }
+                return 'The Assistant has reached this month\'s spending limit and has paused itself. Someone who manages Assistant Settings has been told.';
             }
         }
     } catch (Throwable $e) {
@@ -1025,7 +1041,7 @@ function rh_ai_maybe_summarise(PDO $db, int $uid, int $conv, array $models): voi
 function rh_ai_turn(PDO $db, array $user, array $in): array
 {
     $uid = (int)$user['id'];
-    $out = ['ok' => false, 'conversation_id' => 0, 'reply' => '', 'route' => '', 'model' => '', 'links' => [], 'chips' => [], 'items' => [], 'cards' => [], 'tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0.0, 'notice' => '', 'error' => ''];
+    $out = ['ok' => false, 'conversation_id' => 0, 'message_id' => 0, 'reply' => '', 'route' => '', 'model' => '', 'links' => [], 'chips' => [], 'items' => [], 'cards' => [], 'tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0.0, 'notice' => '', 'error' => ''];
     if (!rh_ai_enabled($db) || !rh_ai_chat_ready($db)) {
         $out['error'] = 'The Assistant is switched off.';
         return $out;
@@ -1059,11 +1075,24 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
     if ($new) {
         $db->prepare("UPDATE ai_conversations SET title = ? WHERE id = ?")->execute([rh_ai_title_from($tok), $conv]);
     }
+    $GLOBALS['__rh_ai_current_q'] = mb_substr($tok, 0, 400); // tokenised: kept with any incident this question raises
+    // Learning from staff: "no, breakfast starts at 6:30" becomes a fact candidate (probation, never a rule).
+    $learned = '';
+    if (!rh_ai_eval_mode() && rh_ai_memory_ready($db) && ($fact = rh_ai_chat_correction($tok)) !== '') {
+        try {
+            $learned = rh_ai_learn_correction($db, $user, $fact, 'message:' . $userMsgId, 'chat');
+        } catch (Throwable $e) {
+            $learned = '';
+        }
+    }
 
-    $finish = static function (string $tokReply, string $route, array $extra = []) use ($db, $conv, $uid, &$out): array {
+    $finish = static function (string $tokReply, string $route, array $extra = []) use ($db, $conv, $uid, &$out, $learned): array {
         $links = (array)($extra['links'] ?? []);
         $chips = (array)($extra['chips'] ?? []);
         $items = (array)($extra['items'] ?? []);
+        if ($learned !== '' && strpos((string)($extra['notice'] ?? ''), $learned) === false) {
+            $extra['notice'] = trim((string)($extra['notice'] ?? '') . ' ' . $learned); // the correction was noted
+        }
         $meta = ['links' => $links, 'chips' => $chips, 'route' => $route, 'notice' => (string)($extra['notice'] ?? '')];
         if ($items) {
             $meta['items'] = $items;
@@ -1075,7 +1104,13 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
         if ($cards) {
             $meta['cards'] = $cards;
         }
-        rh_ai_message_add($db, $conv, 'assistant', $tokReply, [
+        if (!empty($extra['memory'])) {
+            $meta['memory'] = array_values(array_map('intval', (array)$extra['memory'])); // notes used: they win or lose with this reply's feedback
+        }
+        if (!empty($extra['playbook'])) {
+            $meta['playbook'] = (int)$extra['playbook'];
+        }
+        $out['message_id'] = rh_ai_message_add($db, $conv, 'assistant', $tokReply, [
             'agent' => $route, 'args' => $meta,
             'provider' => $extra['provider'] ?? null, 'model' => ($extra['model'] ?? '') !== '' ? $extra['model'] : null,
             'tokens_in' => $extra['tokens_in'] ?? 0, 'tokens_out' => $extra['tokens_out'] ?? 0, 'cost' => $extra['cost'] ?? 0, 'ms' => $extra['ms'] ?? null,
@@ -1158,6 +1193,15 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
     }
     $reason = rh_ai_needs_reasoning($tok);
     $route = ($reason || !$fast) ? 'primary' : 'fast';
+    // What the hotel has taught it: up to 8 notes (local BM25), quoted, after the cache breakpoint. Notes never
+    // reach the tool list, permissions, limits or the confirm step (decided above and below, in code).
+    $mem = rh_ai_memory_retrieve($db, $user, $tok, $page);
+    $memBlock = rh_ai_memory_block($mem);
+    $playbook = rh_ai_memory_playbook($mem);
+    if ($playbook && $route === 'primary' && $fast && $primary) {
+        $route = 'fast'; // a learned playbook replaces a long reasoning call (cheaper; the Fast model can still escalate)
+    }
+    rh_ai_memory_mark_used($db, array_column($mem, 'id'));
     $prefs = rh_ai_prefs_get($db, $uid);
     $hist = rh_ai_history($db, $conv, $userMsgId);
     $specs = array_merge(rh_ai_tool_specs($user), rh_ai_action_specs($user)); // action tools only propose cards
@@ -1189,7 +1233,8 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
             $note = 'ROUTE: merge. The team\'s findings are in the consult_team result. Give one short, practical answer for this person: most important first, figures exactly as given, then the next step.';
         } elseif ($route === 'fast') {
             $note = 'ROUTE: quick lookup. If answering well needs deeper analysis, planning or several steps of reasoning, reply with exactly [[ESCALATE]] and nothing else.'
-                . ($consultSpec && !$consulted ? ' If it needs more than one department, use consult_team.' : '');
+                . ($consultSpec && !$consulted ? ' If it needs more than one department, use consult_team.' : '')
+                . ($playbook ? ' A playbook note above fits this question: follow it.' : '');
         } else {
             $note = 'ROUTE: analysis. Think it through, use the tools for every figure' . ($consultSpec && !$consulted ? ' (consult_team asks several departments at once)' : '') . ', then give a short, practical answer with the reasons.';
         }
@@ -1200,7 +1245,7 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
                 $offer[] = $consultSpec;
             }
         }
-        $volatile = rh_ai_context_volatile($db, $conv, $user, $page, $bookingId, $hist['summary'], $note);
+        $volatile = rh_ai_context_volatile($db, $conv, $user, $page, $bookingId, $hist['summary'], $memBlock !== '' ? $memBlock . "\n\n" . $note : $note);
         $req = [
             'provider' => $models['provider'], 'model' => $m['model_id'],
             'system_frozen' => $frozen, 'system_user' => $userBlock, 'system_volatile' => $volatile,
@@ -1224,8 +1269,12 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
         }
         if (!empty($r['used_fallback'])) {
             $notice = 'Running on the backup model.';
+            if (!empty($r['first_model_missing'])) {
+                rh_ai_model_missing($db, (string)$models['provider'], (string)$m['model_id']); // retired: pick the next model for that role
+            }
         }
         if ($r['error'] !== '') {
+            rh_ai_provider_trouble($db, (string)$models['provider'], (string)$m['model_id'], $r);
             $final = 'Sorry - the Assistant could not answer just now. ' . $r['error'];
             break;
         }
@@ -1320,7 +1369,11 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
     $final = rh_ai_scrub_outbound($db, $conv, $final); // stored tokenised (model text should already be)
     $chips = rh_ai_followup_chips($user, array_unique($budget['tools_used']));
     $res = $finish($final, $consulted ? 'swarm' : $route, ['links' => $budget['links'], 'chips' => $chips, 'cards' => $budget['cards'], 'provider' => $models['provider'], 'model' => $usedModel,
-        'tokens_in' => $budget['in'], 'tokens_out' => $budget['out'], 'cost' => round($budget['cost'], 6), 'ms' => $budget['ms'], 'notice' => $notice]);
+        'tokens_in' => $budget['in'], 'tokens_out' => $budget['out'], 'cost' => round($budget['cost'], 6), 'ms' => $budget['ms'], 'notice' => $notice,
+        'memory' => array_column($mem, 'id'), 'playbook' => $playbook ? (int)$playbook['id'] : 0]);
+    if ($budget['cost'] > 0) {
+        rh_ai_check_budget_pause($db); // this answer reached the monthly limit: pause and tell the managers
+    }
     if (strpos($final, 'Sorry - the Assistant could not answer') !== 0 && !$budget['cards']) { // a reply with cards is never replayed from the cache
         rh_ai_cache_put($db, $answerKey, $uid, ['reply_tok' => $final, 'links' => $budget['links'], 'chips' => $chips], RH_AI_ANSWER_CACHE_SECONDS);
     }
@@ -1338,6 +1391,9 @@ function rh_ai_conversation_messages(PDO $db, int $conv): array
     $st = $db->prepare("SELECT id, role, content, tool_args_json, created_at FROM ai_messages WHERE conversation_id = ? AND role IN ('user', 'assistant') ORDER BY id DESC LIMIT 60");
     $st->execute([$conv]);
     $out = [];
+    $owner = $db->prepare("SELECT user_id FROM ai_conversations WHERE id = ?");
+    $owner->execute([$conv]);
+    $rated = rh_ai_feedback_for($db, (int)$owner->fetchColumn(), $conv);
     foreach (array_reverse($st->fetchAll(PDO::FETCH_ASSOC)) as $r) {
         $meta = json_decode((string)$r['tool_args_json'], true) ?: [];
         $bot = $r['role'] === 'assistant';
@@ -1347,6 +1403,7 @@ function rh_ai_conversation_messages(PDO $db, int $conv): array
             'items' => $bot && !empty($meta['items']) ? rh_ai_items_rehydrate($db, $conv, (array)$meta['items']) : [],
             'cards' => $bot && !empty($meta['cards']) ? rh_ai_cards_for($db, $conv, (array)$meta['cards']) : [],
             'notice' => $bot ? (string)($meta['notice'] ?? '') : '',
+            'rated' => $bot ? (int)($rated[(int)$r['id']] ?? 0) : 0,
             'at' => (string)$r['created_at'],
         ];
     }

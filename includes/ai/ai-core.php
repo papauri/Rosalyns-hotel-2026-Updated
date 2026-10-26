@@ -77,6 +77,8 @@ function rh_ai_enabled(?PDO $db = null): bool
             "SELECT
                 (SELECT setting_value FROM site_settings WHERE setting_key = 'ai_enabled') AS en,
                 (SELECT setting_value FROM site_settings WHERE setting_key = 'ai_paused_reason') AS paused,
+                (SELECT setting_value FROM site_settings WHERE setting_key = 'ai_paused_kind') AS paused_kind,
+                (SELECT setting_value FROM site_settings WHERE setting_key = 'ai_paused_month') AS paused_month,
                 (SELECT is_enabled FROM enabled_modules WHERE module_key = 'ai_assistant') AS module_on,
                 (SELECT COUNT(*) FROM ai_providers WHERE 1 = 0) AS schema_probe"
         )->fetch(PDO::FETCH_ASSOC);
@@ -93,6 +95,17 @@ function rh_ai_enabled(?PDO $db = null): bool
         return false;
     }
     if (trim((string)($row['paused'] ?? '')) !== '') {
+        // A pause for this month's spending limit lifts itself when the month changes (the limit counts
+        // from the 1st). Every other automatic pause waits for a person (master switch on, or ai-kill.php on).
+        if ((string)($row['paused_kind'] ?? '') === 'budget' && (string)($row['paused_month'] ?? '') !== '' && (string)$row['paused_month'] !== date('Y-m')) {
+            try {
+                $db->prepare("UPDATE site_settings SET setting_value = '' WHERE setting_key IN ('ai_paused_reason', 'ai_paused_kind', 'ai_paused_month')")->execute();
+                rh_ai_settings($db, true);
+                return true;
+            } catch (Throwable $e) {
+                return false;
+            }
+        }
         return false;
     }
     return true;
@@ -128,6 +141,25 @@ function rh_ai_setting_defaults(): array
         'ai_retention_days'       => '0',
         'ai_paused_reason'        => '',
         'ai_actions_enabled'      => '1', // action cards (Phase 4); '0' = chat only
+        // Phase 4b - learning loop + self-healing (kill-switch layer 4: learning frozen / cloud providers off)
+        'ai_learning_enabled'     => '1',
+        'ai_cloud_enabled'        => '1',
+        'ai_paused_kind'          => '',  // budget | actions | eval | cli (who paused it)
+        'ai_paused_month'         => '',  // Y-m of a budget pause (it lifts itself next month)
+        'ai_feature_state'        => 'learning', // learning -> complete (completion guardrail)
+        'ai_feature_state_at'     => '',
+        'ai_feature_state_note'   => '',
+        'ai_complete_days'        => '14',
+        'ai_complete_eval_pct'    => '95',
+        'ai_eval_smoke_min_pct'   => '80',
+        'ai_memory_promote_wins'  => '3',
+        'ai_models_refreshed_at'  => '',
+        'ai_daily_ran_on'         => '',
+        'ai_jobs_json'            => '',
+        'ai_health_json'          => '',
+        'ai_notices_json'         => '',
+        'ai_model_upgrade_json'   => '',
+        'ai_daily_token'          => '',
     ];
 }
 
@@ -240,6 +272,8 @@ function rh_ai_set_master(bool $on, ?PDO $db = null): void
     $pairs = ['ai_enabled' => $on ? '1' : '0'];
     if ($on) {
         $pairs['ai_paused_reason'] = ''; // a person switching it on again lifts an automatic pause
+        $pairs['ai_paused_kind'] = '';
+        $pairs['ai_paused_month'] = '';
     }
     rh_ai_save_settings($pairs, $db);
 }

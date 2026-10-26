@@ -184,3 +184,113 @@
         flex: 1 1 auto;
     }
 }
+
+/* Phase 4b - tabs (Setup / Assistant memory / Assistant faults), learning and daily checks, memory and fault lists */
+.ai-settings .ai-tabs {
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: var(--admin-radius, 8px);
+    padding: 10px;
+    margin-bottom: 6px;
+}
+
+.ai-settings .ai-tabs .report-tab {
+    min-height: 44px;
+}
+
+.ai-tabs-help {
+    margin: 0 0 14px;
+}
+
+.ai-learning-grid {
+    margin-top: 12px;
+}
+
+.ai-bad {
+    color: var(--admin-danger-text, #4b352d);
+    font-weight: 600;
+}
+
+.ai-tag {
+    display: inline-block;
+    padding: 1px 8px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: 999px;
+    font-size: 11.5px;
+    color: var(--admin-muted, #6b7280);
+}
+
+.ai-notices {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 13px;
+}
+
+.ai-notices li {
+    margin: 4px 0;
+}
+
+.ai-mem-form {
+    display: grid;
+    gap: 4px;
+    max-width: 720px;
+}
+
+.ai-mem-filter .form-control {
+    width: auto;
+    min-height: 40px;
+}
+
+.ai-mem-text {
+    min-width: 220px;
+    overflow-wrap: anywhere;
+}
+
+.ai-mem-actions {
+    white-space: nowrap;
+}
+
+.ai-mem-actions form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0;
+}
+
+.ai-mem-actions details > form {
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 240px;
+    white-space: normal;
+}
+
+.ai-mem-actions summary {
+    list-style: none;
+    cursor: pointer;
+}
+
+.ai-mem-actions summary::-webkit-details-marker {
+    display: none;
+}
+
+.ai-mem-reset {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+
+.ai-fault-copy {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    margin-top: 6px;
+}
+
+.ai-settings .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}

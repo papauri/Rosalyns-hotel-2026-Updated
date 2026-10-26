@@ -7,9 +7,12 @@
  * permission ai_assistant_use (403) -> rate limit (429) -> action. The session is closed before any
  * provider call so the rest of the portal never waits on the Assistant.
  *
- * Actions: send, list, load, rename, archive (own conversations only), prefs_get, prefs_set, suggestions,
- * briefing (the daily "full tea"; auto=1 only on the first open of the day when the person's preference is on)
- * and status (the plain line naming the step the Assistant is on, polled while it answers).
+ * Actions: send, list, load, rename, archive (own conversations only), prefs_get, prefs_set, prefs_reset, suggestions,
+ * briefing (the daily "full tea"; auto=1 only on the first open of the day when the person's preference is on),
+ * status (the plain line naming the step the Assistant is on, polled while it answers) and feedback (Helpful /
+ * Not right on one of the person's own replies, with an optional correction - Phase 4b; it changes the
+ * Assistant's notes only, never its tools, permissions, limits or the confirm step).
+ * While the Assistant has paused itself (kill switch 6) the endpoint answers 503 with the plain reason.
  * Nothing here writes to bookings, money, stock or settings; the provider key never appears in output.
  */
 declare(strict_types=1);
@@ -30,6 +33,10 @@ function rh_ai_api_out(int $code, array $body): void
 }
 
 if (!rh_ai_enabled($pdo) || !rh_ai_chat_ready($pdo)) {
+    $aiS = rh_ai_settings($pdo, true);
+    if (($aiS['ai_enabled'] ?? '') === '1' && trim((string)($aiS['ai_paused_reason'] ?? '')) !== '' && rh_ai_chat_ready($pdo)) {
+        rh_ai_api_out(503, ['success' => false, 'paused' => true, 'error' => 'The Assistant has paused itself: ' . $aiS['ai_paused_reason'] . ' Someone who manages Assistant Settings has been told.']);
+    }
     rh_ai_api_out(404, ['success' => false, 'error' => 'Not found']);
 }
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
@@ -72,7 +79,7 @@ try {
                 rh_ai_api_out(200, ['success' => false, 'error' => $r['error'], 'conversation_id' => $r['conversation_id']]);
             }
             rh_ai_api_out(200, [
-                'success' => true, 'conversation_id' => $r['conversation_id'], 'reply' => $r['reply'], 'route' => $r['route'],
+                'success' => true, 'conversation_id' => $r['conversation_id'], 'message_id' => $r['message_id'], 'reply' => $r['reply'], 'route' => $r['route'],
                 'links' => $r['links'], 'chips' => $r['chips'], 'items' => $r['items'], 'cards' => $r['cards'], 'notice' => $r['notice'],
                 'usage' => ['tokens_in' => $r['tokens_in'], 'tokens_out' => $r['tokens_out'], 'cost_usd' => $r['cost_usd']],
             ]);
@@ -129,6 +136,15 @@ try {
             ])]);
             break;
 
+        case 'prefs_reset':
+            rh_ai_api_out(200, ['success' => true, 'prefs' => rh_ai_prefs_reset($pdo, $uid)]);
+            break;
+
+        case 'feedback':
+            $r = rh_ai_feedback_save($pdo, $me, (int)($in['message_id'] ?? 0), (int)($in['rating'] ?? 0), (string)($in['correction'] ?? ''));
+            rh_ai_api_out(200, $r);
+            break;
+
         case 'briefing':
             $auto = (string)($in['auto'] ?? '') === '1';
             if (!$auto) {
@@ -143,7 +159,7 @@ try {
             if (!$b['ok']) {
                 rh_ai_api_out(200, ['success' => false, 'error' => $b['error']]);
             }
-            rh_ai_api_out(200, ['success' => true, 'shown' => $b['shown'], 'conversation_id' => $b['conversation_id'], 'reply' => $b['reply'], 'items' => $b['items'], 'chips' => $b['chips'], 'route' => 'briefing']);
+            rh_ai_api_out(200, ['success' => true, 'shown' => $b['shown'], 'conversation_id' => $b['conversation_id'], 'message_id' => (int)($b['message_id'] ?? 0), 'reply' => $b['reply'], 'items' => $b['items'], 'chips' => $b['chips'], 'route' => 'briefing']);
             break;
 
         case 'status':

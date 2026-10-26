@@ -18,6 +18,7 @@
 require_once __DIR__ . '/ai-core.php';
 require_once __DIR__ . '/ai-vault.php';
 require_once __DIR__ . '/ai-insights.php'; // Phase 3 department reads + the daily briefing (read only)
+require_once __DIR__ . '/ai-memory.php';   // Phase 4b: the circuit breaker (a tool that keeps failing is switched off for an hour)
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
@@ -409,12 +410,19 @@ function rh_ai_run_tool(PDO $db, array $user, int $conv, string $name, array $ar
     $raw = ((int)$def['cache'] > 0) ? rh_ai_cache_get($db, $cacheKey) : null;
     $cached = $raw !== null;
     if ($raw === null) {
+        // Circuit breaker: after repeated errors this lookup is off for an hour (then it gets one try).
+        if (rh_ai_breaker_is_open($db, $name)) {
+            return $fail('That information cannot be reached just now (this lookup is paused after repeated errors and the team has been told). Offer the screen instead.');
+        }
+        $handler = $GLOBALS['__rh_ai_tool_override'][$name] ?? $def['handler']; // tests only: force an error
         try {
-            $raw = (array)call_user_func($def['handler'], $db, $user, $clean);
+            $raw = (array)call_user_func($handler, $db, $user, $clean);
         } catch (Throwable $e) {
             error_log('Assistant tool ' . $name . ' failed: ' . $e->getMessage());
+            rh_ai_breaker_fail($db, $name, $e->getMessage(), ['question' => (string)($GLOBALS['__rh_ai_current_q'] ?? '')]);
             return $fail('That information could not be read just now.');
         }
+        rh_ai_breaker_ok($db, $name);
         if (empty($raw['error'])) {
             rh_ai_cache_put($db, $cacheKey, (int)$user['id'], $raw, (int)$def['cache']);
         }

@@ -8,6 +8,9 @@
  * Action cards (Phase 4): a card is a document (old -> new, total, warnings in red) with one Confirm and one
  * Cancel. Confirm asks api/ai-action.php for the replay, posts it to the EXISTING screen endpoint with this
  * session's security token and the X-Requested-With header, then reports the screen's answer back.
+ * Feedback (Phase 4b): under each reply "Was this right?" with Helpful / Not right; Not right opens a short box
+ * for what it should have said. It only changes the Assistant's notes (facts and wording), never what it may do.
+ * The check-out guard uses the server's money tolerance (data-tolerance), not a number of its own.
  */
 (function () {
     'use strict';
@@ -28,6 +31,9 @@
     var KEY_OPEN = 'rh_ai_open';
     var KEY_CONV = 'rh_ai_conv';
     var state = { conv: 0, busy: false, ctrl: null, loaded: false, poll: null };
+    var feedbackOn = panel.getAttribute('data-feedback') === '1';
+    var tolerance = parseFloat(panel.getAttribute('data-tolerance'));
+    if (!(tolerance >= 0)) { tolerance = 0.01; }
 
     function csrf() {
         return panel.getAttribute('data-csrf') || window._rhCsrf || ((document.querySelector('meta[name="csrf-token"]') || {}).content) || '';
@@ -132,10 +138,73 @@
                 n.textContent = extra.notice;
                 b.appendChild(n);
             }
+            if (feedbackOn && extra.messageId) { b.appendChild(feedbackRow(extra.messageId, extra.rated || 0)); }
         }
         stream.appendChild(b);
         scrollDown();
         return b;
+    }
+    // "Was this right?" - Helpful / Not right, and an optional correction (facts and wording only).
+    function feedbackRow(id, rated) {
+        var row = el('div', 'rh-ai-fb');
+        var line = el('div', 'rh-ai-fb__line');
+        line.appendChild(el('span', 'rh-ai-fb__label', 'Was this right?'));
+        function btn(icon, text) {
+            var x = el('button', 'rh-ai-fb__btn');
+            x.type = 'button';
+            var i = document.createElement('i');
+            i.className = 'fas ' + icon;
+            i.setAttribute('aria-hidden', 'true');
+            x.appendChild(i);
+            x.appendChild(document.createTextNode(' ' + text));
+            return x;
+        }
+        var up = btn('fa-thumbs-up', 'Helpful');
+        var down = btn('fa-thumbs-down', 'Not right');
+        line.appendChild(up);
+        line.appendChild(down);
+        row.appendChild(line);
+        var box = el('div', 'rh-ai-fb__box');
+        box.hidden = true;
+        var tid = 'rhAiFix' + id;
+        var lab = el('label', 'rh-ai-fb__boxlabel', 'What should it have said? (optional)');
+        lab.setAttribute('for', tid);
+        var ta = document.createElement('textarea');
+        ta.id = tid;
+        ta.rows = 2;
+        ta.maxLength = 1000;
+        var send = el('button', 'rh-ai-card__btn btn-primary rh-ai-fb__send', 'Send');
+        send.type = 'button';
+        box.appendChild(lab);
+        box.appendChild(ta);
+        box.appendChild(el('p', 'rh-ai-help', 'Facts and wording only, for example "breakfast starts at 6:30". It never changes what the Assistant may see or do.'));
+        box.appendChild(send);
+        row.appendChild(box);
+        var note = el('p', 'rh-ai-fb__note');
+        note.setAttribute('role', 'status');
+        row.appendChild(note);
+        function mark(r) {
+            up.setAttribute('aria-pressed', r > 0 ? 'true' : 'false');
+            down.setAttribute('aria-pressed', r < 0 ? 'true' : 'false');
+        }
+        function rate(r, correction) {
+            up.disabled = down.disabled = send.disabled = true;
+            post({ action: 'feedback', message_id: id, rating: r, correction: correction || '' }).then(function (j) {
+                up.disabled = down.disabled = send.disabled = false;
+                if (!j || !j.success) { note.textContent = (j && j.error) || 'That could not be saved.'; return; }
+                mark(j.rating);
+                note.textContent = j.note || 'Thanks.';
+                if (correction) { box.hidden = true; ta.value = ''; }
+            }).catch(function () {
+                up.disabled = down.disabled = send.disabled = false;
+                note.textContent = 'Could not reach the server.';
+            });
+        }
+        mark(rated);
+        up.addEventListener('click', function () { box.hidden = true; rate(1, ''); });
+        down.addEventListener('click', function () { box.hidden = false; rate(-1, ''); setTimeout(function () { ta.focus(); }, 0); });
+        send.addEventListener('click', function () { if (String(ta.value).trim()) { rate(-1, String(ta.value).trim()); } });
+        return row;
     }
     function addError(text) {
         var b = document.createElement('div');
@@ -374,7 +443,7 @@
                     var j = null;
                     try { j = JSON.parse(t); } catch (e) { j = null; }
                     if (s.guard === 'assess_clear') {
-                        var clear = j && j.success && !(j.settlement && j.settlement.needed) && (parseFloat(j.balance_due || 0) <= 0.01);
+                        var clear = j && j.success && !(j.settlement && j.settlement.needed) && (parseFloat(j.balance_due || 0) <= tolerance);
                         return clear ? next(j) : { json: j, guard: true };
                     }
                     if (!j || j.success === false) { return { json: j }; }
@@ -496,7 +565,7 @@
             store(KEY_CONV, state.conv);
             stream.textContent = '';
             if (!j.messages.length) { welcome(); }
-            j.messages.forEach(function (m) { addBubble(m.role, m.text, { links: m.links, notice: m.notice, items: m.items, cards: m.cards }); });
+            j.messages.forEach(function (m) { addBubble(m.role, m.text, { links: m.links, notice: m.notice, items: m.items, cards: m.cards, messageId: m.id, rated: m.rated }); });
             setChips([]);
             if (!j.messages.length) { loadSuggestions(); }
         });
@@ -512,7 +581,7 @@
             state.conv = j.conversation_id;
             store(KEY_CONV, state.conv);
             stream.textContent = '';
-            addBubble('assistant', j.reply, { items: j.items });
+            addBubble('assistant', j.reply, { items: j.items, messageId: j.message_id });
             setChips(j.chips || []);
         }).catch(function () { busy(false); });
     }
@@ -541,7 +610,7 @@
                 busy(false);
                 if (j && j.conversation_id) { state.conv = j.conversation_id; store(KEY_CONV, state.conv); }
                 if (!j || !j.success) { addError((j && j.error) || 'The Assistant could not answer just now.'); return; }
-                addBubble('assistant', j.reply, { links: j.links, notice: j.notice, items: j.items, cards: j.cards });
+                addBubble('assistant', j.reply, { links: j.links, notice: j.notice, items: j.items, cards: j.cards, messageId: j.message_id });
                 setChips(j.chips || []);
             })
             .catch(function (e) {
@@ -588,6 +657,11 @@
         else if (what === 'prefs') { show('prefs'); }
         else if (what === 'back') { show('chat'); }
         else if (what === 'stop' && state.ctrl) { state.ctrl.abort(); }
+        else if (what === 'prefs-reset') {
+            b.disabled = true;
+            post({ action: 'prefs_reset' }).then(function () { b.disabled = false; loadPrefs(); show('chat'); addBubble('assistant', 'Your reply settings are back to normal.', {}); })
+                .catch(function () { b.disabled = false; });
+        }
     });
     form.addEventListener('submit', function (e) { e.preventDefault(); send(input.value); });
     input.addEventListener('keydown', function (e) {

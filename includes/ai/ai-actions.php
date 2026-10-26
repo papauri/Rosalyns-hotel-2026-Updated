@@ -1342,6 +1342,18 @@ function rh_ai_report(PDO $db, array $user, int $id, ?array $result, array $info
     if (function_exists('logActivity')) {
         logActivity($uid, 'ai_action', mb_substr($summary . '. ' . $res['message'], 0, 480));
     }
+    // Phase 4b: learn from it (incidents hold the card type and the screen's words, never names) and pause
+    // the Assistant after a burst of failed or cancelled cards (kill switch 6).
+    if (!$ok) {
+        rh_ai_incident_add($db, 'action_failed', $def['label'] . ' card was not done', ['action' => $key, 'screen_message' => mb_substr($msg, 0, 200), 'guard' => !empty($info['guard_failed'])],
+            ['user_id' => $uid, 'conversation_id' => (int)$row['conversation_id'], 'action_id' => $id]);
+        rh_ai_check_action_burst($db);
+    }
+    if (!empty($res['incident'])) {
+        rh_ai_incident_add($db, 'price_mismatch', 'A booking made from a card saved a different total from the card', $res['incident'] + ['action' => $key], ['severity' => 'warning', 'user_id' => $uid, 'action_id' => $id]);
+        rh_ai_fault_add($db, 'price_mismatch', 'A booking made by the Assistant saved a different total from its card',
+            'The card showed ' . $res['incident']['card_total'] . ' but the booking saved ' . $res['incident']['saved_total'] . ' (card ' . $id . '). The card price and the Create Booking price should come from the same rule.', $res['incident'] + ['card_id' => $id]);
+    }
     try { // the outcome joins the chat so the Assistant knows what happened (stored with privacy tokens)
         rh_ai_message_store_outcome($db, (int)$row['conversation_id'], $def['label'] . ': ' . $res['message']);
     } catch (Throwable $e) {
@@ -1365,5 +1377,8 @@ function rh_ai_cancel_card(PDO $db, array $user, int $id): array
         $own = rh_ai_card_row($db, (int)$user['id'], $id); // only the owner ever sees a card's contents
         return $own ? ['success' => false, 'error' => 'That card cannot be cancelled now.', 'card' => rh_ai_card_public($db, $id, $own)] : ['success' => false, 'error' => 'That card was not found.'];
     }
-    return ['success' => true, 'card' => rh_ai_card_public($db, $id)];
+    $card = rh_ai_card_public($db, $id);
+    rh_ai_incident_add($db, 'action_cancelled', 'A card was cancelled by the person', ['action' => (string)($card['key'] ?? '')], ['user_id' => (int)$user['id'], 'action_id' => $id]);
+    rh_ai_check_action_burst($db);
+    return ['success' => true, 'card' => $card];
 }
