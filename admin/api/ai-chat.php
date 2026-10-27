@@ -59,6 +59,11 @@ if ($uid <= 0 || !hasPermission($uid, 'ai_assistant_use')) {
 }
 $me = ['id' => $uid, 'role' => (string)($user['role'] ?? ''), 'username' => (string)($user['username'] ?? ''), 'full_name' => (string)($user['full_name'] ?? '')];
 $action = (string)($in['action'] ?? '');
+// Phase 4c: idle lock - after a quiet spell the panel asks for the person's own password. Background checks
+// (alerts, the status line) do not count as use and do not unlock it.
+if ($action !== 'unlock' && rh_ai_idle_locked(!in_array($action, ['alerts', 'status'], true))) {
+    rh_ai_api_out(423, ['success' => false, 'locked' => true, 'error' => 'The Assistant locked after a quiet spell. Type your password to carry on.']);
+}
 
 try {
     switch ($action) {
@@ -133,6 +138,7 @@ try {
                 'length' => (string)($in['length'] ?? ''), 'tone' => (string)($in['tone'] ?? ''),
                 'language' => (string)($in['language'] ?? ''), 'nickname' => (string)($in['nickname'] ?? ''),
                 'briefing' => isset($in['briefing']) ? (string)$in['briefing'] : null,
+                'digest' => isset($in['digest']) ? (string)$in['digest'] : null,
             ])]);
             break;
 
@@ -165,6 +171,21 @@ try {
         case 'status':
             session_write_close();
             rh_ai_api_out(200, ['success' => true, 'step' => rh_ai_step_get($pdo, $uid)]);
+            break;
+
+        case 'unlock':
+            $r = rh_ai_idle_unlock($pdo, $me, (string)($in['password'] ?? ''));
+            rh_ai_api_out(200, $r['ok'] ? ['success' => true] : ['success' => false, 'error' => $r['error'], 'locked' => true]);
+            break;
+
+        case 'alerts': // Phase 4c: this person's open alerts (from what their own account can see)
+            $list = rh_ai_alerts_for($pdo, $me, (string)($in['refresh'] ?? '1') !== '0');
+            session_write_close();
+            rh_ai_api_out(200, ['success' => true, 'alerts' => $list]);
+            break;
+
+        case 'alert_dismiss':
+            rh_ai_api_out(200, ['success' => rh_ai_alert_dismiss($pdo, $uid, (int)($in['alert_id'] ?? 0))]);
             break;
 
         case 'suggestions':

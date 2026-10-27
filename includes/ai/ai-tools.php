@@ -19,6 +19,7 @@ require_once __DIR__ . '/ai-core.php';
 require_once __DIR__ . '/ai-vault.php';
 require_once __DIR__ . '/ai-insights.php'; // Phase 3 department reads + the daily briefing (read only)
 require_once __DIR__ . '/ai-memory.php';   // Phase 4b: the circuit breaker (a tool that keeps failing is switched off for an hour)
+require_once __DIR__ . '/ai-extras.php';   // Phases 4c + 5: password on risky cards, idle lock, audit chain, alerts, extra reads
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
@@ -30,7 +31,7 @@ if (!defined('RH_AI_TOOL_BYTES')) {
 function rh_ai_tool_registry(): array
 {
     $date = ['type' => 'string', 'description' => 'Date as YYYY-MM-DD', 'format' => 'date'];
-    return [
+    $reg = [
         'search_bookings' => [
             'description' => 'Find room bookings by guest name, email, phone or booking reference (tokens like [GUEST_1] are fine). Returns up to 10 matches.',
             'schema' => ['properties' => ['query' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Name, email, phone or reference'], 'status' => ['type' => 'string', 'enum' => ['pending', 'confirmed', 'tentative', 'checked-in', 'checked-out', 'cancelled', 'no-show']]], 'required' => ['query']],
@@ -168,6 +169,7 @@ function rh_ai_tool_registry(): array
             'perm' => [], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_daily_briefing', 'step' => 'Going through today',
         ],
     ];
+    return array_merge($reg, rh_ai_extra_tools()); // Phases 4c + 5: reports, reply queue, review insights, upsell, lost demand, rate suggestions (read only)
 }
 
 /** The plain status line shown while a tool runs ("Checking today's departures..."). */
@@ -962,7 +964,7 @@ function rh_ai_guide_permissions(): array
         '15-pwa-install-guide.html' => [], '16-business-presets.html' => ['module_settings'], '17-gym-management.html' => ['gym'],
         '18-staff-access.html' => ['user_management', 'user_permissions'], '19-hotel-settings.html' => ['booking_settings', 'finance_settings', 'module_settings'],
         '20-stock-loss-prevention.html' => ['stock_dashboard', 'stock_management', 'stock_reports'], '21-guest-website.html' => ['pages', 'section_headers', 'footer_management', 'gallery'],
-        '22-assistant.html' => ['ai_assistant_use', 'ai_settings'], '99-admin-dashboard-full-guide.html' => ['dashboard'],
+        '22-assistant.html' => ['ai_assistant_use', 'ai_settings', 'ai_usage_view'], '99-admin-dashboard-full-guide.html' => ['dashboard'],
         'faq.html' => [], 'index.html' => [], 'system-map.php' => [], 'owner-handover.html' => ['module_settings'], 'owner-handover.php' => ['module_settings'],
     ];
 }

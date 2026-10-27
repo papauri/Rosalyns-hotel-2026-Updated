@@ -1096,7 +1096,7 @@ function getAllPermissions()
             'description' => 'See Assistant usage and estimated cost per person, day and model',
             'icon' => 'fa-chart-bar',
             'category' => 'Assistant',
-            'page' => 'ai-settings.php',
+            'page' => 'ai-usage.php',
             'group' => 'assistant'
         ],
 
@@ -1605,6 +1605,7 @@ function getPermissionForPage(string $page)
         'whatsapp-settings.php' => 'whatsapp_settings',
         'facebook-settings.php' => 'facebook_settings',
         'ai-settings.php' => 'ai_settings',
+        'ai-usage.php' => 'ai_usage_view',          // Assistant usage dashboard (Phase 5)
         'ai-chat.php' => 'ai_assistant_use',       // admin/api/ai-chat.php (Assistant, Phase 2)
         'ai-action.php' => 'ai_assistant_actions', // admin/api/ai-action.php (Assistant, Phase 2)
         'user-management.php' => 'user_management',

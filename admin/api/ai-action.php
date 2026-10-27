@@ -49,6 +49,9 @@ $uid = (int)($user['id'] ?? 0);
 if ($uid <= 0 || !hasPermission($uid, 'ai_assistant_use') || !hasPermission($uid, 'ai_assistant_actions')) {
     rh_ai_act_out(403, ['success' => false, 'error' => 'Your account cannot confirm Assistant actions.']);
 }
+if (rh_ai_idle_locked(true)) { // Phase 4c: idle lock (unlock is on api/ai-chat.php)
+    rh_ai_act_out(423, ['success' => false, 'locked' => true, 'error' => 'The Assistant locked after a quiet spell. Type your password to carry on.']);
+}
 if (!rh_ai_actions_enabled()) {
     rh_ai_act_out(200, ['success' => false, 'error' => 'Assistant action cards are switched off.']);
 }
@@ -79,7 +82,7 @@ try {
             break;
 
         case 'confirm':
-            $r = rh_ai_confirm($pdo, $me, $cardId, $jsonArg('fields') ?? []);
+            $r = rh_ai_confirm($pdo, $me, $cardId, $jsonArg('fields') ?? [], (string)($in['password'] ?? '')); // risky cards check the password
             rh_ai_act_out(200, $r);
             break;
 

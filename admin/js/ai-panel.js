@@ -59,7 +59,13 @@
         return fetch(url || endpoint, { method: 'POST', body: fd, credentials: 'same-origin', signal: signal, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             .then(function (r) {
                 return r.json().catch(function () { return { success: false, error: 'The Assistant sent an answer that could not be read.' }; })
-                    .then(function (j) { if (r.status === 404) { j = { success: false, error: 'The Assistant is switched off.' }; } return j; });
+                    .then(function (j) {
+                        if (r.status === 404) { j = { success: false, error: 'The Assistant is switched off.' }; }
+                        // Idle responses, including quiet alert/status polls, wipe the visible chat. A password
+                        // lockout only stops risky confirms; it must not look like an idle lock or hide the chat.
+                        if (j && j.locked && !j.password_locked && data.action !== 'unlock') { lockPanel(); }
+                        return j;
+                    });
             });
     }
 
@@ -289,7 +295,7 @@
         return box;
     }
     // ── Action cards ─────────────────────────────────────────────────────────
-    function safePage(u) { return /^[a-z0-9\-]+\.php$/i.test(String(u || '')); }
+    function safePage(u) { return /^(api\/)?[a-z0-9\-]+\.php$/i.test(String(u || '')); }
     // A briefing point's one-tap fix: prepares the card (no model call); Confirm on the card is the second tap.
     function prepare(act, btn, row) {
         btn.disabled = true;
@@ -346,9 +352,18 @@
                 var id = 'rhAiF' + c.id + '_' + f.name;
                 var lab = el('label', 'rh-ai-card__label', f.label);
                 lab.setAttribute('for', id);
-                var inp = document.createElement('input');
-                inp.id = id; inp.name = f.name; inp.type = ['email', 'tel'].indexOf(f.type) >= 0 ? f.type : 'text';
-                inp.value = f.value || ''; inp.className = 'rh-ai-card__input'; inp.maxLength = 200;
+                var inp;
+                if (f.type === 'textarea') {
+                    inp = document.createElement('textarea');
+                    inp.rows = 6;
+                    inp.maxLength = parseInt(f.max, 10) || 2000;
+                } else {
+                    inp = document.createElement('input');
+                    inp.type = ['email', 'tel'].indexOf(f.type) >= 0 ? f.type : 'text';
+                    inp.maxLength = parseInt(f.max, 10) || 200;
+                }
+                inp.id = id; inp.name = f.name;
+                inp.value = f.value || ''; inp.className = 'rh-ai-card__input';
                 if (f.required) { inp.required = true; }
                 box.appendChild(lab); box.appendChild(inp);
                 inputs.push(inp);
@@ -368,6 +383,20 @@
                 box.appendChild(lab); box.appendChild(sel);
                 inputs.push(sel);
             });
+        }
+        var pw = null;
+        if (live && c.confirm) { // risky card: the person's own password (checked on the server). Hidden until needed:
+            // a choice on the card (e.g. "Email it to the guest too") can make the server ask for it at Confirm.
+            var pid = 'rhAiP' + c.id;
+            var pbox = el('div', 'rh-ai-card__pwbox');
+            var plab = el('label', 'rh-ai-card__label', 'Your password');
+            plab.setAttribute('for', pid);
+            pw = document.createElement('input');
+            pw.type = 'password'; pw.id = pid; pw.className = 'rh-ai-card__input rh-ai-card__pw'; pw.autocomplete = 'current-password';
+            pbox.appendChild(plab); pbox.appendChild(pw);
+            pbox.appendChild(el('p', 'rh-ai-card__help', 'This cannot be undone from the chat (it changes a booking or room, or sends to a guest), so it asks for your own account password.'));
+            pbox.hidden = !c.password;
+            box.appendChild(pbox);
         }
         var st = el('p', 'rh-ai-card__state', live ? '' : cardState(c));
         st.setAttribute('role', 'status');
@@ -389,10 +418,11 @@
             ok.type = 'button';
             var no = el('button', 'btn btn-secondary rh-ai-card__btn', 'Cancel');
             no.type = 'button';
-            var check = function () { ok.disabled = inputs.some(function (i) { return i.required && !String(i.value).trim(); }); };
+            var check = function () { ok.disabled = inputs.some(function (i) { return i.required && !String(i.value).trim(); }) || (pw !== null && !pw.parentNode.hidden && !pw.value); };
             inputs.forEach(function (i) { i.addEventListener('input', check); });
+            if (pw) { pw.addEventListener('input', check); }
             check();
-            ok.addEventListener('click', function () { confirmCard(box, c, inputs, ok, no, st); });
+            ok.addEventListener('click', function () { confirmCard(box, c, inputs, ok, no, st, pw); });
             no.addEventListener('click', function () {
                 ok.disabled = true; no.disabled = true;
                 post({ action: 'cancel', card_id: c.id }, undefined, actEndpoint).then(function (j) { if (j && j.card) { fillCard(box, j.card); } });
@@ -401,18 +431,22 @@
         }
         if (btns.childNodes.length) { box.appendChild(btns); }
     }
-    function confirmCard(box, c, inputs, ok, no, st) {
+    function confirmCard(box, c, inputs, ok, no, st, pw) {
         var fields = {};
         inputs.forEach(function (i) { fields[i.name] = i.value; });
         ok.disabled = true; no.disabled = true;
         st.textContent = 'Checking the card again...';
-        post({ action: 'confirm', card_id: c.id, fields: JSON.stringify(fields) }, undefined, actEndpoint).then(function (j) {
+        var body = { action: 'confirm', card_id: c.id, fields: JSON.stringify(fields) };
+        if (pw && !pw.parentNode.hidden) { body.password = pw.value; pw.value = ''; }
+        post(body, undefined, actEndpoint).then(function (j) {
             if (!j || !j.success) {
                 if (j && j.card) { fillCard(box, j.card); }
                 if (j && j.new_card) { box.parentNode.insertBefore(card(j.new_card), box.nextSibling); }
                 var s2 = box.querySelector('.rh-ai-card__state');
                 if (s2) { s2.textContent = (j && j.error) || 'That could not be confirmed.'; }
-                if (!j || !j.card) { ok.disabled = false; no.disabled = false; }
+                if (pw && j && j.need_password) { pw.parentNode.hidden = false; } // the server decided this one needs the password
+                var pwOn = !!pw && !pw.parentNode.hidden;
+                if (!j || !j.card) { ok.disabled = pwOn; no.disabled = false; if (pwOn && !(j && j.locked)) { pw.focus(); } }
                 return null;
             }
             st.textContent = 'Saving on the screen...';
@@ -437,7 +471,7 @@
             var fd = new FormData();
             fd.append('csrf_token', csrf());
             (s.fields || []).forEach(function (f) { fd.append(String(f[0]), String(f[1])); });
-            return fetch(s.url, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            return fetch(s.url, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': csrf() } })
                 .then(function (r) { return r.text(); })
                 .then(function (t) {
                     var j = null;
@@ -511,6 +545,7 @@
         panel.querySelectorAll('.rh-ai-view').forEach(function (v) { v.hidden = v.getAttribute('data-view') !== view; });
         if (view === 'chats') { loadChats(); }
         if (view === 'prefs') { loadPrefs(); }
+        if (view === 'alerts') { loadAlerts(true); }
         if (view === 'chat') { setTimeout(function () { input.focus(); }, 0); }
     }
     function loadChats() {
@@ -556,6 +591,8 @@
             document.getElementById('rhAiPrefTone').value = j.prefs.tone;
             document.getElementById('rhAiPrefLang').value = j.prefs.language;
             document.getElementById('rhAiPrefBrief').value = j.prefs.briefing || 'on';
+            var dg = document.getElementById('rhAiPrefDigest');
+            if (dg) { dg.value = j.prefs.digest || 'on'; }
         });
     }
     function openConversation(id) {
@@ -630,6 +667,7 @@
         launch.setAttribute('aria-expanded', 'true');
         document.documentElement.classList.add('rh-ai-is-open');
         store(KEY_OPEN, '1');
+        if (panel.getAttribute('data-locked') === '1') { lockPanel(); return; }
         if (!state.loaded) {
             state.loaded = true;
             var saved = parseInt(read(KEY_CONV) || '0', 10);
@@ -654,6 +692,7 @@
         if (what === 'close') { close(); }
         else if (what === 'new') { newChat(); }
         else if (what === 'chats') { show('chats'); }
+        else if (what === 'alerts') { show('alerts'); }
         else if (what === 'prefs') { show('prefs'); }
         else if (what === 'back') { show('chat'); }
         else if (what === 'stop' && state.ctrl) { state.ctrl.abort(); }
@@ -671,7 +710,9 @@
     document.getElementById('rhAiPrefs').addEventListener('submit', function (e) {
         e.preventDefault();
         var val = function (id) { return document.getElementById(id).value; }; // (form.length is the control count, not the field)
-        post({ action: 'prefs_set', length: val('rhAiPrefLength'), tone: val('rhAiPrefTone'), language: val('rhAiPrefLang'), briefing: val('rhAiPrefBrief') }).then(function () { show('chat'); });
+        var pdata = { action: 'prefs_set', length: val('rhAiPrefLength'), tone: val('rhAiPrefTone'), language: val('rhAiPrefLang'), briefing: val('rhAiPrefBrief') };
+        if (document.getElementById('rhAiPrefDigest')) { pdata.digest = val('rhAiPrefDigest'); }
+        post(pdata).then(function () { show('chat'); });
     });
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && !panel.hidden) { close(); }
@@ -682,6 +723,93 @@
         applyPrefill();
     });
     applyPrefill();
+
+    // ── Idle lock (Phase 4c): the chat is wiped from the screen until the person's own password is typed ──
+    function lockPanel() {
+        panel.setAttribute('data-locked', '1');
+        if (state.ctrl) { try { state.ctrl.abort(); } catch (e) { /* already done */ } }
+        busy(false);
+        stream.textContent = '';
+        chipsBox.textContent = '';
+        var cl = document.getElementById('rhAiChatList');
+        if (cl) { cl.textContent = ''; }
+        state.loaded = false;
+        show('lock');
+        var p = document.getElementById('rhAiUnlockPw');
+        if (p && !panel.hidden) { setTimeout(function () { p.focus(); }, 0); }
+    }
+    var unlockForm = document.getElementById('rhAiUnlock');
+    if (unlockForm) {
+        unlockForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var p = document.getElementById('rhAiUnlockPw');
+            var msg = document.getElementById('rhAiUnlockMsg');
+            var btn = unlockForm.querySelector('button');
+            btn.disabled = true;
+            post({ action: 'unlock', password: p.value }).then(function (j) {
+                btn.disabled = false;
+                p.value = '';
+                if (!j || !j.success) { msg.textContent = (j && j.error) || 'That did not work.'; msg.hidden = false; p.focus(); return; }
+                msg.hidden = true;
+                panel.setAttribute('data-locked', '0');
+                open();
+            }).catch(function () { btn.disabled = false; });
+        });
+    }
+
+    // ── Alerts (Phase 4c): a plain count on the button, the list in the panel ──
+    var alertsOn = panel.getAttribute('data-alerts') === '1';
+    function setAlertCount(n) {
+        [document.getElementById('rhAiLaunchCount'), document.getElementById('rhAiAlertCount')].forEach(function (b) {
+            if (!b) { return; }
+            b.textContent = n > 0 ? String(n) : '';
+            b.hidden = !(n > 0);
+        });
+        launch.setAttribute('aria-label', n > 0 ? 'Assistant, ' + n + ' alert' + (n === 1 ? '' : 's') : 'Assistant');
+    }
+    function renderAlerts(list) {
+        var ul = document.getElementById('rhAiAlertList');
+        if (!ul) { return; }
+        ul.textContent = '';
+        if (!list.length) { ul.appendChild(el('li', 'rh-ai-alert rh-ai-alert--none', 'Nothing needs you right now.')); }
+        list.forEach(function (a) {
+            var li = el('li', 'rh-ai-alert rh-ai-alert--' + (a.kind || 'time'));
+            li.appendChild(el('p', 'rh-ai-alert__title', a.title));
+            if (a.detail) { li.appendChild(el('p', 'rh-ai-alert__detail', a.detail)); }
+            var row = el('div', 'rh-ai-alert__btns');
+            if (a.link && safeUrl(a.link.url) && !safeUrl(a.link.url).guide) {
+                var go = el('a', 'btn btn-secondary btn-sm', a.link.label || 'Open');
+                go.href = a.link.url;
+                row.appendChild(go);
+            }
+            var dis = el('button', 'btn btn-secondary btn-sm', 'Dismiss');
+            dis.type = 'button';
+            dis.addEventListener('click', function () {
+                dis.disabled = true;
+                post({ action: 'alert_dismiss', alert_id: a.id }).then(function () {
+                    li.remove();
+                    setAlertCount(document.querySelectorAll('#rhAiAlertList .rh-ai-alert:not(.rh-ai-alert--none)').length);
+                });
+            });
+            row.appendChild(dis);
+            li.appendChild(row);
+            ul.appendChild(li);
+        });
+    }
+    function loadAlerts(render) {
+        if (!alertsOn || panel.getAttribute('data-locked') === '1') { return; }
+        post({ action: 'alerts' }).then(function (j) {
+            if (!j || !j.success) { return; }
+            setAlertCount(j.alerts.length);
+            if (render) { renderAlerts(j.alerts); }
+        }).catch(function () { /* alerts are optional */ });
+    }
+    if (alertsOn) {
+        setTimeout(function () { loadAlerts(false); }, 4000);
+        setInterval(function () {
+            if (!document.hidden) { loadAlerts(!panel.hidden && !panel.querySelector('[data-view="alerts"]').hidden); }
+        }, 600000);
+    }
 
     if (read(KEY_OPEN) === '1') { open(); }
 })();

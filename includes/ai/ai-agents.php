@@ -44,6 +44,62 @@ if (!defined('RH_AI_MAX_SPECIALISTS')) {
 
 // ── Routing ──────────────────────────────────────────────────────────────────
 
+/**
+ * A request to CHANGE something the Assistant never changes for anyone (stock, till orders, payments, refunds,
+ * invoices, prices/rates/deals, shift or day close). Answered locally in one line with the screen, for every
+ * role (not the permission line), with no tokens. How-to questions and messages that also ask for a change the
+ * Assistant can prepare (check-in, booking, cancel...) go on to the model as before.
+ * @return array{0:string,1:array}|null [line, links]
+ */
+function rh_ai_no_write_area(array $user, string $t): ?array
+{
+    $t = mb_strtolower($t);
+    // Questions and reads ("how do I...", "what is...", "did we...", "add up...") are not change requests
+    if (preg_match('/\bhow (do|can|should|would|to|much|many)\b|\bwhere (do|can|is)\b|\bsteps?\b|\bguide\b|\bwhat(\'s| is| are| was| were| did| do| does| have| has)\b|\bwhy\b|\badd(ed)? up\b|\blog ?(in|out)\b|\blogin\b|^\s*(did|does|do|is|are|was|were|has|have|show|list|who|which|when)\b/u', $t)) {
+        return null;
+    }
+    if (preg_match('/\b(check(ed|ing)? ?(in|out)|book(ing)? (a|an|the)? ?room|new booking|cancel|extend|assign|room status|housekeeping|maintenance|email|whatsapp|reply)\b/u', $t)) {
+        return null;
+    }
+    $v = '(adjust|change|set|update|edit|add|remove|deduct|subtract|reduce|increase|decrease|top up|write off|record|log|enter|transfer|delete|void|refund|reverse|post|take|receive|close|apply|raise|lower|put|mark|cut|bump|correct|fix)';
+    $stockLine = "I can't change stock - record it on Stock > Wastage (waste or spoilage) or Stock > Stock count (a correction).";
+    $stockPages = [['stock-wastage.php', 'Open Wastage'], ['stock-count.php', 'Open Stock count']];
+    $moneyLine = "I can't take payments or refunds or change invoices - use Payments, Invoices or the booking's own screen.";
+    $areas = [ // the first area that matches answers
+        'close' => ['/\b(shift|end of day|eod|cash.?up|day close)\b/u',
+            "I can't close a shift or the day - use End of Day or Shift close.", [['end-of-day-report.php', 'Open End of Day'], ['shift-close-report.php', 'Open Shift close']]],
+        'stock' => ['/\b(stock|inventory|ingredients?|wastage|waste|spoil\w*|recipes?|purchase orders?|suppliers?)\b/u', $stockLine, $stockPages],
+        'money' => ['/\b(payments?|deposits?|refunds?|invoices?|credit notes?|receipts?|balance|charges?|bill)\b/u',
+            $moneyLine, [['payments.php', 'Open Payments'], ['invoices.php', 'Open Invoices'], ['credit-notes.php', 'Open Credit notes']]],
+        'pos' => ['/\b(till|pos|bar tab|tab|tickets?|table \d+|menu items?|bar orders?|restaurant orders?|food orders?|drinks? orders?|sales?)\b/u',
+            "I can't change till orders or sales - use the POS screen.", [['pos.php', 'Open POS']]],
+        'prices' => ['/\b(prices?|rates?|rate plans?|tariffs?|deals?|discounts?|packages?|room rates?)\b/u',
+            "I can't change prices, rates or deals - use Rate Plans or Deals.", [['rate-plans.php', 'Open Rate Plans'], ['deals.php', 'Open Deals']]],
+        'stock_qty' => ['/(?<![\w.])-?\d+(\.\d+)?\s?(kg|kgs|grams?|litres?|liters?|ml|bottles?|crates?|cases?|packets?|bags?)\b/u', $stockLine, $stockPages],
+    ];
+    $direct = preg_match('/\b(refund|void|charge|bill)\s+(the|this|that|a|an|his|her|their|it|him|them|guest|booking|order|ticket|item|payment|room)\b|\b(refund|void|charge|bill)\s+\[(guest|bk)_\d+\]/u', $t);
+    foreach ($areas as $area => [$re, $line, $pages]) {
+        if (!preg_match($re, $t, $m, PREG_OFFSET_CAPTURE)) {
+            continue;
+        }
+        $pos = $m[0][1];
+        $before = substr($t, max(0, $pos - 60), min(60, $pos));
+        if (!preg_match('/\b' . $v . '\b/u', $before) && !($direct && in_array($area, ['money', 'pos'], true))) {
+            continue;
+        }
+        $links = [];
+        $uid = (int)($user['id'] ?? 0);
+        foreach ($pages as [$page, $label]) {
+            $k = function_exists('getPermissionForPage') ? getPermissionForPage($page) : null;
+            if ($k !== null && hasPermission($uid, $k)) {
+                $links[] = ['label' => $label, 'url' => $page];
+            }
+        }
+        return [$line, array_slice($links, 0, 2)];
+    }
+    return $direct ? [$moneyLine, []] : null;
+}
+
 /** Plainly not about the hotel or this system. */
 function rh_ai_is_off_topic(string $t): bool
 {
@@ -472,15 +528,15 @@ function rh_ai_specialists(): array
         'restaurant' => ['label' => 'Restaurant & Bar', 'brief' => 'till sales, top sellers, voids, refunds and slow tickets at the kitchen, bar and coffee stations',
             'core' => ['restaurant_sales', 'kitchen_tickets'], 'tools' => ['restaurant_sales', 'kitchen_tickets']],
         'money' => ['label' => 'Money', 'brief' => 'money owed, refunds (always in full), voids, discounts, till shortages, no-shows and cancellations; you read and explain, staff do refunds and payments on screen',
-            'core' => ['money_leaks', 'balances_due'], 'tools' => ['money_leaks', 'balances_due', 'room_performance']],
+            'core' => ['money_leaks', 'balances_due'], 'tools' => ['money_leaks', 'balances_due', 'room_performance', 'hotel_report']],
         'stock' => ['label' => 'Stock', 'brief' => 'stock out or low, expiring batches, wastage, count variance and the stock budget; read only',
             'core' => ['inventory_watch'], 'tools' => ['inventory_watch']],
         'events_gym' => ['label' => 'Events, Conference & Gym', 'brief' => 'conference bookings coming up, event enquiries, gym memberships ending and gym enquiries',
             'core' => ['events_pipeline', 'gym_watch'], 'tools' => ['events_pipeline', 'gym_watch']],
         'revenue' => ['label' => 'Revenue & Sales', 'brief' => 'occupancy, ADR, RevPAR, pace against last year, pickup, lead time, unsold nights and where bookings come from; you recommend, you never change prices or deals',
-            'core' => ['room_performance', 'booking_pace'], 'tools' => ['room_performance', 'booking_pace', 'rate_plans_and_deals', 'events_pipeline']],
+            'core' => ['room_performance', 'booking_pace'], 'tools' => ['room_performance', 'booking_pace', 'rate_plans_and_deals', 'events_pipeline', 'rate_suggestions', 'lost_demand', 'upsell_finder', 'hotel_report']],
         'guest_voice' => ['label' => 'Guest voice', 'brief' => 'reviews, guest messages and enquiries waiting, the guest experience, local tips and replies to guests in the hotel\'s voice (as drafts for staff)',
-            'core' => ['guest_voice'], 'tools' => ['guest_voice', 'get_booking', 'guest_history', 'search_bookings']],
+            'core' => ['guest_voice'], 'tools' => ['guest_voice', 'get_booking', 'guest_history', 'search_bookings', 'reply_queue', 'review_insights']],
         'system_guide' => ['label' => 'System Guide', 'brief' => 'how to do things in this portal, from the staff guides only',
             'core' => ['how_to', 'summarise_guide'], 'tools' => ['how_to', 'summarise_guide', 'page_help', 'open_page', 'my_access']],
     ];
@@ -1134,6 +1190,10 @@ function rh_ai_turn(PDO $db, array $user, array $in): array
     // 1a. Not about the hotel: a friendly one-line steer back, no tokens
     if (rh_ai_is_off_topic($tok)) {
         return $finish(rh_ai_off_topic_line(), 'declined');
+    }
+    // 1a+. A change nobody can make here (stock, till, payments, prices, closes): one line and the screen, any role
+    if (($nw = rh_ai_no_write_area($user, $tok)) !== null) {
+        return $finish($nw[0], 'declined', ['links' => $nw[1]]);
     }
     // 1b. Outside this person's permissions: owner's one line, no figure, no tokens
     if (rh_ai_scope_block($user, $tok) !== '') {

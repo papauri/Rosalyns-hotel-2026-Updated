@@ -102,27 +102,52 @@ define('RH_AI_PANEL_RENDERED', true);
     $jsV = @filemtime(__DIR__ . '/../js/ai-panel.js');
     require_once __DIR__ . '/../../includes/ai/ai-memory.php';
     $feedback = rh_ai_memory_ready($db); // Helpful / Not right buttons only once migration 072 has run
+    require_once __DIR__ . '/../../includes/ai/ai-extras.php';
+    $locked = rh_ai_idle_locked(true); // Phase 4c: a page load counts as use; a quiet spell locks the panel
+    $alertsOn = rh_ai_extras_ready($db);
+    $digestOk = rh_ai_extras_ready($db) && hasPermission($uid, 'ai_settings'); // digest goes to Assistant Settings holders only
     $tolerance = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
     ?>
 <?php if (!$cssPrinted): ?><link rel="stylesheet" href="css/ai-panel.css?v=<?php echo (int)$cssV; ?>"><?php endif; ?>
 <button type="button" class="rh-ai-launch" id="rhAiLaunch" aria-controls="rhAiPanel" aria-expanded="false" data-help="Assistant|Ask about bookings, rooms, guests or how to do something. It only sees what your account can see.">
-    <i class="fas fa-comments" aria-hidden="true"></i><span>Assistant</span>
+    <i class="fas fa-comments" aria-hidden="true"></i><span>Assistant</span><span class="rh-ai-launch__count" id="rhAiLaunchCount" hidden></span>
 </button>
 <aside class="rh-ai-panel" id="rhAiPanel" role="dialog" aria-modal="false" aria-labelledby="rhAiTitle" hidden
        data-endpoint="api/ai-chat.php" data-action-endpoint="api/ai-action.php" data-csrf="<?php echo htmlspecialchars($csrf); ?>"
-       data-feedback="<?php echo $feedback ? '1' : '0'; ?>" data-tolerance="<?php echo htmlspecialchars((string)$tolerance); ?>">
+       data-feedback="<?php echo $feedback ? '1' : '0'; ?>" data-tolerance="<?php echo htmlspecialchars((string)$tolerance); ?>"
+       data-locked="<?php echo $locked ? '1' : '0'; ?>" data-alerts="<?php echo $alertsOn ? '1' : '0'; ?>">
     <header class="rh-ai-head">
         <div class="rh-ai-head__text">
             <h2 id="rhAiTitle">Assistant</h2>
             <p class="rh-ai-help">Ask about bookings, rooms, guests or how to do something. It only sees what your account can see.</p>
         </div>
         <div class="rh-ai-head__btns">
+            <?php if ($alertsOn): ?><button type="button" class="rh-ai-icon rh-ai-icon--alerts" data-ai="alerts" aria-label="Alerts" title="Alerts"><i class="fas fa-bell" aria-hidden="true"></i><span class="rh-ai-icon__count" id="rhAiAlertCount" hidden></span></button><?php endif; ?>
             <button type="button" class="rh-ai-icon" data-ai="chats" aria-label="Your chats" title="Your chats"><i class="fas fa-list" aria-hidden="true"></i></button>
             <button type="button" class="rh-ai-icon" data-ai="new" aria-label="New chat" title="New chat"><i class="fas fa-plus" aria-hidden="true"></i></button>
             <button type="button" class="rh-ai-icon" data-ai="prefs" aria-label="Reply settings" title="Reply settings"><i class="fas fa-sliders" aria-hidden="true"></i></button>
             <button type="button" class="rh-ai-icon" data-ai="close" aria-label="Close the Assistant" title="Close"><i class="fas fa-xmark" aria-hidden="true"></i></button>
         </div>
     </header>
+
+    <section class="rh-ai-view" data-view="lock" hidden aria-label="Locked">
+        <p class="rh-ai-lock__title"><i class="fas fa-lock" aria-hidden="true"></i> Locked</p>
+        <p class="rh-ai-help">The Assistant locked after a quiet spell, so nobody else can read your chat on this screen. Type your own account password to carry on.</p>
+        <form class="rh-ai-lock" id="rhAiUnlock">
+            <label for="rhAiUnlockPw">Your password</label>
+            <input type="password" id="rhAiUnlockPw" class="rh-ai-card__input" autocomplete="current-password" required>
+            <button type="submit" class="btn btn-primary">Unlock</button>
+            <p class="rh-ai-card__warn" id="rhAiUnlockMsg" role="alert" hidden></p>
+        </form>
+    </section>
+
+    <?php if ($alertsOn): ?>
+    <section class="rh-ai-view" data-view="alerts" hidden aria-label="Alerts">
+        <p class="rh-ai-help">What needs you now, worked out from what your account can see. Each alert clears itself once it is dealt with; Dismiss hides it for today.</p>
+        <ul class="rh-ai-alerts" id="rhAiAlertList"></ul>
+        <button type="button" class="btn btn-secondary rh-ai-back" data-ai="back"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back to the chat</button>
+    </section>
+    <?php endif; ?>
 
     <section class="rh-ai-view" data-view="chats" hidden aria-label="Your chats">
         <p class="rh-ai-help">Your recent chats. Only you can see them. Tap one to carry on.</p>
@@ -154,6 +179,14 @@ define('RH_AI_PANEL_RENDERED', true);
                 <option value="off">Off - only when I ask</option>
             </select>
             <p class="rh-ai-help">A short list of what needs you today, worked out from what your account can see. Ask "give me the tea" any time.</p>
+            <?php if ($digestOk): ?>
+            <label for="rhAiPrefDigest">Weekly digest email</label>
+            <select id="rhAiPrefDigest" name="digest">
+                <option value="on">On - a short email once a week</option>
+                <option value="off">Off - no digest email</option>
+            </select>
+            <p class="rh-ai-help">What needs attention and last week's room figures, sent to your account email.</p>
+            <?php endif; ?>
             <div class="rh-ai-prefs__btns">
                 <button type="submit" class="btn btn-primary">Save</button>
                 <button type="button" class="btn btn-secondary" data-ai="back">Cancel</button>

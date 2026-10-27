@@ -294,3 +294,34 @@
     clip: rect(0, 0, 0, 0);
     border: 0;
 }
+
+/* ── Assistant Usage dashboard (Phase 5) ── */
+.ai-usage-range {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    margin: 0 0 16px;
+}
+.ai-usage-range .form-control { width: auto; min-height: 44px; }
+.ai-usage-range .btn { min-height: 44px; }
+.ai-usage-range .help-text { flex-basis: 100%; margin: 0; }
+.ai-usage-cards {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0 0 16px;
+}
+.ai-usage-cards .ai-stat {
+    margin: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--admin-surface-border, #e5e7eb);
+    border-radius: var(--admin-radius, 8px);
+    background: var(--admin-surface, #fff);
+}
+@media (max-width: 1024px) {
+    .ai-usage-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+    .ai-usage-cards { grid-template-columns: 1fr; }
+}

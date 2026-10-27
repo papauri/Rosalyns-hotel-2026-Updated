@@ -9,6 +9,7 @@
 require_once 'config/database.php';
 require_once 'includes/pricing.php';
 require_once 'includes/guest-allocation.php';
+require_once __DIR__ . '/includes/demand-log.php'; // lost-demand log (never affects the answer)
 
 header('Content-Type: application/json');
 
@@ -381,6 +382,12 @@ try {
             'batch' => true,
             'rooms' => $responses,
         ]);
+        // Lost demand (Assistant rate suggestions): logged after the answer is sent; errors never reach the guest.
+        $demandRows = [];
+        foreach ($responses as $demandRoomId => $demandResp) {
+            $demandRows[] = ['room_type_id' => (int)$demandRoomId, 'check_in' => $check_in, 'check_out' => $check_out, 'guests' => $total_guests, 'available' => !empty($demandResp['available']), 'reason' => (string)($demandResp['reason'] ?? 'unavailable')];
+        }
+        rh_demand_log($pdo, $demandRows);
         exit;
     }
 
@@ -410,7 +417,7 @@ try {
         exit;
     }
 
-    echo json_encode(availabilityBuildResponse(
+    $availabilityResponse = availabilityBuildResponse(
         $pdo,
         $room,
         $check_in,
@@ -420,7 +427,10 @@ try {
         $child_guests,
         $total_guests,
         $requested_rooms_needed
-    ));
+    );
+    echo json_encode($availabilityResponse);
+    // Lost demand (Assistant rate suggestions): logged after the answer is sent; errors never reach the guest.
+    rh_demand_log($pdo, [['room_type_id' => (int)$room['id'], 'check_in' => $check_in, 'check_out' => $check_out, 'guests' => $total_guests, 'available' => !empty($availabilityResponse['available']), 'reason' => (string)($availabilityResponse['reason'] ?? 'unavailable')]]);
 } catch (Exception $e) {
     error_log("Availability check error: " . $e->getMessage());
     echo json_encode([

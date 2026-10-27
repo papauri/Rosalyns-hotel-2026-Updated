@@ -12,7 +12,7 @@
  * never reaches the page. The scripts in scripts/ai-*.php run the same steps from cron when wanted.
  *
  * Daily steps: privacy vault sweep (chats of signed-out people), model list refresh when a key is saved and
- * the last refresh is over 7 days old (then a model upgrade check with the question set as the gate),
+ * the last refresh was before today (once per calendar day; then a model upgrade check with the question set as the gate),
  * the nightly review (lessons, playbooks, scores, fault write-ups), the health check (provider test, every
  * read tool's self-test, budget) and the full question set, which feeds the completion guardrail.
  * Code is never changed here: problems that need a code fix are written up for the owner (ai_faults).
@@ -234,6 +234,11 @@ function rh_ai_daily_run(PDO $db, bool $force = false): array
             'reflect' => static fn() => rh_ai_reflect_run($db),
             'health'  => static fn() => rh_ai_health_run($db),
             'eval'    => static fn() => rh_ai_daily_eval($db),
+            // Phases 4c + 5 (no cron needed): tamper check of confirmed cards, budget notices, weekly digest, retention
+            'audit'     => static fn() => rh_ai_audit_report($db),
+            'budget'    => static fn() => ['ok' => true, 'note' => ($lvl = rh_ai_budget_warn($db)) !== '' ? $lvl . '% of the monthly limit used' : 'under 80% of the monthly limit'],
+            'digest'    => static fn() => rh_ai_digest_run($db, false),
+            'retention' => static fn() => rh_ai_retention_run($db),
         ];
         foreach ($steps as $job => $fn) {
             if (!$force && in_array($job, ['reflect', 'health', 'eval'], true) && !rh_ai_job_due($job)) {
@@ -306,7 +311,7 @@ function rh_ai_vault_sweep(PDO $db): array
 
 // ── Model list refresh + upgrade (eval-gated) ────────────────────────────────
 
-/** Refresh the model lists when a key is saved and the last refresh is over 7 days old (or never). */
+/** Refresh the model lists once per calendar day when a key is saved (last refresh before today, or never). */
 function rh_ai_daily_models(PDO $db, bool $force = false): array
 {
     $has = false;
@@ -322,8 +327,8 @@ function rh_ai_daily_models(PDO $db, bool $force = false): array
         return ['ok' => true, 'note' => 'Cloud providers are switched off: not refreshed.'];
     }
     $last = strtotime(rh_ai_setting('ai_models_refreshed_at', '')) ?: 0;
-    if (!$force && $last > 0 && time() - $last < 7 * 86400) {
-        return ['ok' => true, 'note' => 'Model lists were checked on ' . date('j M Y', $last) . '.'];
+    if (!$force && $last > 0 && date('Y-m-d', $last) === date('Y-m-d')) {
+        return ['ok' => true, 'note' => 'Model lists were already checked today (' . date('H:i', $last) . ').'];
     }
     $run = rh_ai_model_refresh_run($db);
     $bad = [];
@@ -679,7 +684,7 @@ function rh_ai_hard_limit_problems(): array
             $p[] = 'read tool ' . $n;
         }
     }
-    $want = ['create_booking', 'edit_booking', 'extend_stay', 'change_checkout', 'room_type_change', 'cancel_booking', 'check_in', 'assign_room', 'check_out', 'housekeeping_job', 'maintenance_job', 'room_status', 'send_email', 'send_invoice', 'whatsapp'];
+    $want = ['create_booking', 'edit_booking', 'extend_stay', 'change_checkout', 'room_type_change', 'cancel_booking', 'check_in', 'assign_room', 'check_out', 'housekeeping_job', 'maintenance_job', 'room_status', 'send_email', 'send_invoice', 'whatsapp', 'reply_review', 'reply_enquiry'];
     if (array_keys(rh_ai_action_registry()) !== $want) {
         $p[] = 'the card list changed';
     }

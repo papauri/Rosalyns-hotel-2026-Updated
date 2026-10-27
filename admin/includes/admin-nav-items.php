@@ -97,6 +97,7 @@ function rh_admin_nav_groups(): array
             ['automated-emails.php',  'fas fa-paper-plane',        'Automated Emails',  'booking_settings',  '', null],
             ['whatsapp-settings.php', 'fab fa-whatsapp',           'WhatsApp Settings', 'whatsapp_settings', 'color:#25D366;', 'website_cms'],
             ['ai-settings.php',       'fas fa-comments',           'Assistant Settings', 'ai_settings',      '', null], // not module-gated: it holds the Assistant's master switch
+            ['ai-usage.php',          'fas fa-chart-bar',          'Assistant Usage',    'ai_usage_view',    '', null], // usage and estimated cost (Phase 5)
             ['user-management.php',   'fas fa-users-cog',          'Staff & Access',    'user_management',   '', null],
             ['module-settings.php',   'fas fa-puzzle-piece',       'Modules',           'module_settings',   '', null],
             ['backup-management.php', 'fas fa-database',           'Backups',           'backup_management', '', null],

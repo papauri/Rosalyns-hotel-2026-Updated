@@ -144,6 +144,19 @@ function rh_ai_action_registry(): array
             'schema' => ['properties' => $bk],
             'preview' => 'rh_ai_pv_whatsapp', 'verify' => 'rh_ai_vf_json',
         ],
+        // Phase 4c: draft replies. The card holds the draft (the person edits it); Confirm posts it through the screen.
+        'reply_review' => [
+            'tool' => 'propose_reply_review', 'label' => 'Reply to review', 'page' => 'reviews.php', 'perm' => ['reviews'],
+            'description' => 'Prepare a reply to a guest review (review_id from reply_queue). Write the draft in reply (warm, specific, short; tokens like [GUEST_1] are fine) or leave it out for a plain template. The person edits it on the card; Confirm posts it on the Reviews screen and can email it to the guest.',
+            'schema' => ['properties' => ['review_id' => ['type' => 'integer', 'minimum' => 1], 'reply' => ['type' => 'string', 'maxLength' => 2000], 'email_guest' => ['type' => 'boolean']], 'required' => ['review_id']],
+            'preview' => 'rh_ai_pv_reply_review', 'verify' => 'rh_ai_vf_reply_review',
+        ],
+        'reply_enquiry' => [
+            'tool' => 'propose_reply_enquiry', 'label' => 'Reply to enquiry', 'page' => 'contact-inquiries.php', 'perm' => ['contact'],
+            'description' => 'Prepare an email reply to a website enquiry (inquiry_id from reply_queue). Write the draft in reply or leave it out for a plain template. The person edits it on the card; Confirm sends it from the Enquiries screen.',
+            'schema' => ['properties' => ['inquiry_id' => ['type' => 'integer', 'minimum' => 1], 'subject' => ['type' => 'string', 'maxLength' => 200], 'reply' => ['type' => 'string', 'maxLength' => 3000]], 'required' => ['inquiry_id']],
+            'preview' => 'rh_ai_pv_reply_enquiry', 'verify' => 'rh_ai_vf_reply_enquiry',
+        ],
     ];
 }
 
@@ -978,6 +991,100 @@ function rh_ai_pv_whatsapp(PDO $db, array $user, array $a): array
 
 // ── Cards: store, show ───────────────────────────────────────────────────────
 
+// ── Phase 4c: draft replies (reviews, website enquiries) ─────────────────────
+
+/** First name for a greeting (local only: the card, never the model). */
+function rh_ai_first_name(string $name): string
+{
+    $n = trim((string)preg_replace('/\s+/', ' ', $name));
+    $first = $n === '' ? '' : explode(' ', $n)[0];
+    return $first !== '' ? $first : 'there';
+}
+
+function rh_ai_pv_reply_review(PDO $db, array $user, array $a): array
+{
+    $st = $db->prepare("SELECT id, guest_name, guest_email, rating, title, comment, status FROM reviews WHERE id = ?");
+    $st->execute([(int)$a['review_id']]);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$r) {
+        return ['error' => 'I can\'t find that review.'];
+    }
+    $hotel = function_exists('getSetting') ? (string)getSetting('site_name', 'Hotel') : 'Hotel';
+    $first = rh_ai_first_name((string)$r['guest_name']);
+    $rating = (int)$r['rating'];
+    $draft = trim((string)($a['reply'] ?? ''));
+    if ($draft === '') {
+        $draft = $rating >= 4
+            ? "Dear $first, thank you for staying with us and for your kind review. We are glad you enjoyed your time at $hotel and we look forward to welcoming you back."
+            : "Dear $first, thank you for your review and for telling us honestly about your stay. We are sorry it fell short and we are looking into what you raised. We would be glad to welcome you back to $hotel.";
+    }
+    $n = mb_strlen($draft);
+    $hasEmail = filter_var((string)$r['guest_email'], FILTER_VALIDATE_EMAIL) !== false;
+    $ev = $a['email_guest'] ?? false;
+    $email = $hasEmail && ($ev === true || $ev === 1 || $ev === '1' || $ev === 'true');
+    $cnt = $db->prepare("SELECT COUNT(*) FROM review_responses WHERE review_id = ?");
+    $cnt->execute([(int)$r['id']]);
+    $replies = (int)$cnt->fetchColumn();
+    $rows = [['label' => 'Guest', 'new' => (string)$r['guest_name']], ['label' => 'Rating', 'new' => $rating . ' / 5'],
+        ['label' => 'Their review', 'new' => mb_substr(trim((string)$r['title'] . '. ' . (string)$r['comment']), 0, 220)],
+        ['label' => 'Shown', 'new' => (string)$r['status'] === 'approved' ? 'Under the review on the website' : 'Under the review once it is published']];
+    $opt = ['fields' => [['name' => 'reply', 'label' => 'Your reply (edit before confirming)', 'type' => 'textarea', 'value' => $draft, 'required' => true, 'max' => 5000]]];
+    if ($hasEmail) {
+        $opt['choices'] = [['name' => 'email_guest', 'label' => 'Email it to the guest too', 'value' => $email ? '1' : '0', 'options' => [['0', 'No - website only'], ['1', 'Yes - also email the guest']]]];
+    }
+    if ($replies > 0) {
+        $opt['warn'] = ['This review already has ' . $replies . ' reply(ies). This adds another.'];
+    }
+    $card = rh_ai_card_base('Reply to review', 'A draft written for you. Read and edit it; Confirm posts it the same way as Reply on the Reviews screen.', $rows, 'Post reply', $opt);
+    $fp = ['review' => (int)$r['id'], 'replies' => $replies];
+    if ($n < 10) {
+        $card['notes'][] = 'A reply needs at least 10 characters.';
+        return ['card' => $card, 'steps' => [], 'incomplete' => true, 'fp' => $fp, 'facts' => ['review_id' => (int)$r['id'], 'rating' => $rating]];
+    }
+    if ($n > 5000) {
+        return ['error' => 'The reply is longer than 5,000 characters.'];
+    }
+    return ['card' => $card, 'steps' => [rh_ai_step('api/review-responses.php', [['review_id', (string)(int)$r['id']], ['response', $draft], ['notify_guest', $email ? '1' : '0']])],
+        'fp' => $fp, 'facts' => ['review_id' => (int)$r['id'], 'rating' => $rating, 'draft_ready' => true]];
+}
+
+function rh_ai_pv_reply_enquiry(PDO $db, array $user, array $a): array
+{
+    try {
+        $st = $db->prepare("SELECT id, reference_number, name, email, subject, message, status FROM contact_inquiries WHERE id = ?");
+        $st->execute([(int)$a['inquiry_id']]);
+        $q = $st->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $q = null;
+    }
+    if (!$q) {
+        return ['error' => 'I can\'t find that enquiry.'];
+    }
+    if (!filter_var((string)$q['email'], FILTER_VALIDATE_EMAIL)) {
+        return ['error' => 'This enquiry has no valid email address, so it cannot be answered by email.'];
+    }
+    $hotel = function_exists('getSetting') ? (string)getSetting('site_name', 'Hotel') : 'Hotel';
+    $first = rh_ai_first_name((string)$q['name']);
+    $subject = trim((string)($a['subject'] ?? '')) ?: mb_substr('Re: ' . (string)$q['subject'], 0, 200);
+    $draft = trim((string)($a['reply'] ?? ''));
+    if ($draft === '') {
+        $draft = "Dear $first,\n\nThank you for contacting $hotel.\n\nKind regards,\n" . (trim((string)($user['full_name'] ?? '')) ?: $hotel);
+    }
+    $rows = [['label' => 'From', 'new' => (string)$q['name']], ['label' => 'To', 'new' => rh_ai_mask_email((string)$q['email'])],
+        ['label' => 'They wrote', 'new' => mb_substr(trim((string)$q['subject'] . ': ' . (string)$q['message']), 0, 220)]];
+    $opt = ['fields' => [['name' => 'subject', 'label' => 'Subject', 'type' => 'text', 'value' => $subject, 'required' => true, 'max' => 255],
+        ['name' => 'reply', 'label' => 'Your reply (edit before confirming)', 'type' => 'textarea', 'value' => $draft, 'required' => true, 'max' => 5000]]];
+    if ((string)$q['status'] === 'replied') {
+        $opt['warn'] = ['This enquiry was already answered. This sends another email.'];
+    }
+    $card = rh_ai_card_base('Reply to enquiry', 'A draft written for you. Read and edit it; Confirm sends it from the hotel email the same way as Reply on the Enquiries screen.', $rows, 'Send reply', $opt);
+    if (mb_strlen($draft) > 5000 || mb_strlen($subject) > 255) {
+        return ['error' => 'The subject must be under 255 characters and the reply under 5,000.'];
+    }
+    return ['card' => $card, 'steps' => [rh_ai_step('contact-inquiries.php', [['inquiry_action', 'reply_email'], ['inquiry_id', (string)(int)$q['id']], ['reply_subject', $subject], ['reply_message', $draft]])],
+        'fp' => ['inquiry' => (int)$q['id']], 'facts' => ['inquiry_id' => (int)$q['id'], 'draft_ready' => true]];
+}
+
 /** Run an action's preview with validated args. */
 function rh_ai_action_preview(PDO $db, array $user, string $key, array $args): array
 {
@@ -1063,6 +1170,7 @@ function rh_ai_card_public(PDO $db, int $id, ?array $row = null): ?array
         'notes' => (array)($c['notes'] ?? []), 'confirm' => (string)($c['confirm'] ?? ''), 'danger' => !empty($c['danger']), 'handoff' => $c['handoff'] ?? ($res['handoff'] ?? null),
         'fields' => (array)($c['fields'] ?? []), 'choices' => (array)($c['choices'] ?? []), 'incomplete' => !empty($pv['incomplete']),
         'message' => (string)($res['message'] ?? ''), 'expires_at' => (string)$row['expires_at'],
+        'password' => rh_ai_card_risky((string)$row['action_key'], (array)(json_decode((string)$row['params_json'], true)['args'] ?? [])),
     ];
 }
 
@@ -1097,7 +1205,7 @@ function rh_ai_card_row(PDO $db, int $uid, int $id, bool $lock = false): ?array
  * re-run with the person's edits; a changed price / availability gives a NEW card. Returns the replay steps.
  * @return array{success:bool, error?:string, changed?:bool, card?:array, steps?:array, card_id?:int}
  */
-function rh_ai_confirm(PDO $db, array $user, int $id, array $edits = []): array
+function rh_ai_confirm(PDO $db, array $user, int $id, array $edits = [], string $password = ''): array
 {
     $uid = (int)$user['id'];
     $own = !$db->inTransaction();
@@ -1138,17 +1246,27 @@ function rh_ai_confirm(PDO $db, array $user, int $id, array $edits = []): array
         }
         foreach ($edits as $k => $v) {
             if (isset($editable[$k]) && is_scalar($v)) {
-                $v = mb_substr(trim((string)$v), 0, 500);
+                $v = mb_substr(trim((string)$v), 0, max(1, min(5000, (int)($editable[$k]['max'] ?? 500))));
                 if (!empty($editable[$k]['options']) && !in_array($v, array_map(static fn($o) => (string)$o[0], $editable[$k]['options']), true)) {
                     continue;
                 }
                 $args[$k] = $v;
             }
         }
+        // Phase 4c: cancel, check-out, date correction, room off sale, anything sent to a guest. Checked after the
+        // card's own choices are applied, so switching "Email it to the guest too" to Yes still needs the password.
+        if (rh_ai_card_risky($key, $args)) {
+            $pw = rh_ai_password_check($db, $user, $password);
+            if (!$pw['ok']) {
+                return $done(['success' => false, 'error' => $pw['error'], 'need_password' => true, 'locked' => $pw['locked'], 'password_locked' => $pw['locked']]);
+            }
+        }
         $new = rh_ai_action_preview($db, $user, $key, $args);
         if (!empty($new['error'])) {
             $db->prepare("UPDATE ai_actions SET status = 'failed', result_json = ? WHERE id = ?")->execute([json_encode(['message' => 'Not done: ' . $new['error']]), $id]);
-            return $done(['success' => false, 'error' => 'Not done: ' . $new['error'], 'card' => rh_ai_card_public($db, $id)]);
+            $r = $done(['success' => false, 'error' => 'Not done: ' . $new['error'], 'card' => rh_ai_card_public($db, $id)]);
+            rh_ai_audit_seal($db, $id);
+            return $r;
         }
         if (!empty($new['incomplete']) || !$new['steps']) {
             return $done(['success' => false, 'error' => trim(implode(' ', (array)($new['card']['notes'] ?? []))) ?: 'Fill in the card first.']);
@@ -1175,7 +1293,9 @@ function rh_ai_confirm(PDO $db, array $user, int $id, array $edits = []): array
         $new['args'] = $args;
         $db->prepare("UPDATE ai_actions SET status = 'confirmed', params_json = ?, preview_json = ? WHERE id = ? AND status = 'proposed'")
             ->execute([json_encode(['args' => $args, 'steps' => $steps], JSON_UNESCAPED_UNICODE), json_encode($new, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR), $id]);
-        return $done(['success' => true, 'card_id' => $id, 'steps' => $steps]);
+        $r = $done(['success' => true, 'card_id' => $id, 'steps' => $steps]);
+        rh_ai_audit_seal($db, $id); // Phase 4c: tamper-evident record of what was confirmed
+        return $r;
     } catch (Throwable $e) {
         if ($own && $db->inTransaction()) {
             $db->rollBack();
@@ -1262,6 +1382,20 @@ function rh_ai_vf_create_booking(PDO $db, array $row, array $pv): ?bool
  * NEW card for a second, explicit confirm (never sent on its own).
  * @param array|null $result the endpoint's JSON (null when it answered with a page instead)
  */
+function rh_ai_vf_reply_review(PDO $db, array $row, array $pv): ?bool
+{
+    $st = $db->prepare("SELECT COUNT(*) FROM review_responses WHERE review_id = ? AND created_at >= ?");
+    $st->execute([(int)($pv['fp']['review'] ?? 0), (string)$row['created_at']]);
+    return (int)$st->fetchColumn() > 0;
+}
+
+function rh_ai_vf_reply_enquiry(PDO $db, array $row, array $pv): ?bool
+{
+    $st = $db->prepare("SELECT status = 'replied' AND updated_at >= ? FROM contact_inquiries WHERE id = ?");
+    $st->execute([(string)$row['created_at'], (int)($pv['fp']['inquiry'] ?? 0)]);
+    return (bool)$st->fetchColumn();
+}
+
 function rh_ai_report(PDO $db, array $user, int $id, ?array $result, array $info = []): array
 {
     $uid = (int)$user['id'];
@@ -1331,6 +1465,7 @@ function rh_ai_report(PDO $db, array $user, int $id, ?array $result, array $info
         if ($own) {
             $db->commit();
         }
+        rh_ai_audit_seal($db, $id);
     } catch (Throwable $e) {
         if ($own && $db->inTransaction()) {
             $db->rollBack();
@@ -1377,6 +1512,7 @@ function rh_ai_cancel_card(PDO $db, array $user, int $id): array
         $own = rh_ai_card_row($db, (int)$user['id'], $id); // only the owner ever sees a card's contents
         return $own ? ['success' => false, 'error' => 'That card cannot be cancelled now.', 'card' => rh_ai_card_public($db, $id, $own)] : ['success' => false, 'error' => 'That card was not found.'];
     }
+    rh_ai_audit_seal($db, $id);
     $card = rh_ai_card_public($db, $id);
     rh_ai_incident_add($db, 'action_cancelled', 'A card was cancelled by the person', ['action' => (string)($card['key'] ?? '')], ['user_id' => (int)$user['id'], 'action_id' => $id]);
     rh_ai_check_action_burst($db);

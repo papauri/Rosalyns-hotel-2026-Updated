@@ -185,10 +185,10 @@ function rh_ai_http_problem(array $r, string $key): string
     return $lead . ' (HTTP ' . $r['http'] . ')' . ($msg !== '' ? ': ' . rh_ai_scrub($msg, $key) : '.');
 }
 
-/** Ids of models that are not for chat (embeddings, speech, images, moderation, realtime...). */
+/** Ids of models that are not for chat (embeddings, speech, images, music, moderation, realtime/Live, robotics...). */
 function rh_ai_is_chat_model(string $id): bool
 {
-    return !preg_match('/(embed|tts|whisper|dall-e|gpt-image|imagen|image|audio|moderation|realtime|transcribe|speech|veo|\baqa\b|babbage|davinci|sora)/i', $id);
+    return !preg_match('/(embed|tts|whisper|dall-e|gpt-image|imagen|image|audio|moderation|realtime|transcribe|speech|veo|\baqa\b|babbage|davinci|sora|\blive\b|robotics|lyria|nano-banana|customtools|\bomni\b)/i', $id);
 }
 
 /**
@@ -460,7 +460,11 @@ function rh_ai_fake_body(string $provider, array $r, string $model = '', bool $r
             $parts[] = ['text' => $text];
         }
         foreach ($calls as $c) {
-            $parts[] = ['functionCall' => ['name' => (string)$c['name'], 'args' => (object)($c['args'] ?? [])]];
+            $fc = ['functionCall' => ['name' => (string)$c['name'], 'args' => (object)($c['args'] ?? [])]];
+            if (!empty($c['sig'])) { // Gemini 3: the thought signature rides on the (first) functionCall part
+                $fc['thoughtSignature'] = (string)$c['sig'];
+            }
+            $parts[] = $fc;
         }
         $fr = ['end' => 'STOP', 'tool' => 'STOP', 'max_tokens' => 'MAX_TOKENS', 'refusal' => 'SAFETY'][$stop] ?? 'STOP';
         return ['candidates' => [['content' => ['role' => 'model', 'parts' => $parts], 'finishReason' => $fr]], 'usageMetadata' => ['promptTokenCount' => $in, 'candidatesTokenCount' => $out]];
@@ -640,7 +644,11 @@ function rh_ai_build_request(array $req, bool $responsesApi = false): array
                     $parts[] = ['text' => (string)$m['content']];
                 }
                 foreach ((array)($m['tool_calls'] ?? []) as $c) {
-                    $parts[] = ['functionCall' => ['name' => (string)$c['name'], 'args' => rh_ai_obj((array)($c['args'] ?? []))]];
+                    $fc = ['functionCall' => ['name' => (string)$c['name'], 'args' => rh_ai_obj((array)($c['args'] ?? []))]];
+                    if (!empty($c['sig'])) { // Gemini 3 rejects a replayed call without its thought signature (HTTP 400)
+                        $fc['thoughtSignature'] = (string)$c['sig'];
+                    }
+                    $parts[] = $fc;
                 }
                 if ($parts) {
                     $contents[] = ['role' => 'model', 'parts' => $parts];
@@ -792,7 +800,11 @@ function rh_ai_parse_response(string $provider, array $j, bool $responsesApi = f
                 $res['text'] .= (string)$p['text'];
             } elseif (isset($p['functionCall'])) {
                 $args = $p['functionCall']['args'] ?? [];
-                $res['tool_calls'][] = ['id' => 'g' . $i, 'name' => (string)($p['functionCall']['name'] ?? ''), 'args' => is_array($args) ? $args : []];
+                $call = ['id' => 'g' . $i, 'name' => (string)($p['functionCall']['name'] ?? ''), 'args' => is_array($args) ? $args : []];
+                if (isset($p['thoughtSignature']) && is_string($p['thoughtSignature']) && $p['thoughtSignature'] !== '') {
+                    $call['sig'] = $p['thoughtSignature']; // sent back unchanged on the same part (parallel calls: only the first has one)
+                }
+                $res['tool_calls'][] = $call;
             }
         }
         $res['stop'] = $fr === 'MAX_TOKENS' ? 'max_tokens' : ($res['tool_calls'] ? 'tool' : 'end');

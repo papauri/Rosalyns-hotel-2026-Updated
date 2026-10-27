@@ -466,7 +466,7 @@ html.rh-ai-is-open .rh-ai-launch {
 
 @media (max-width: 1024px) {
     .rh-ai-panel {
-        width: 100vw;
+        width: 100%;
         border-left: 0;
     }
 }
@@ -824,3 +824,78 @@ html.rh-ai-is-open .rh-ai-launch {
     display: inline-flex;
     align-items: center;
 }
+
+/* ── Phases 4c + 5: alert count, alerts list, idle lock, password on risky cards, draft text ── */
+.rh-ai-launch__count,
+.rh-ai-icon__count {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background: var(--admin-danger-text, #b42318);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 20px;
+    text-align: center;
+}
+.rh-ai-launch__count { margin-left: 6px; }
+.rh-ai-icon--alerts { position: relative; }
+.rh-ai-icon__count {
+    position: absolute;
+    top: 4px;
+    right: 2px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 11px;
+    line-height: 16px;
+}
+.rh-ai-launch__count[hidden],
+.rh-ai-icon__count[hidden] { display: none; }
+.rh-ai-alerts {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+}
+.rh-ai-alert {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--admin-surface-border, #e5e7eb);
+}
+.rh-ai-alert--money { border-left: 3px solid var(--admin-danger-border, #fda29b); padding-left: 10px; }
+.rh-ai-alert--none { color: var(--admin-muted, #6b7280); }
+.rh-ai-alert__title {
+    margin: 0 0 4px;
+    font-weight: 700;
+    color: var(--admin-text, #1f2a37);
+}
+.rh-ai-alert__detail {
+    margin: 0 0 8px;
+    color: var(--admin-muted, #6b7280);
+}
+.rh-ai-alert__btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.rh-ai-alert__btns .btn { min-height: 44px; }
+.rh-ai-lock__title {
+    margin: 0 0 6px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--admin-text, #1f2a37);
+}
+.rh-ai-lock {
+    display: grid;
+    gap: 8px;
+    max-width: 360px;
+}
+.rh-ai-lock .btn { min-height: 44px; }
+.rh-ai-lock .rh-ai-card__warn[hidden] { display: none; }
+textarea.rh-ai-card__input {
+    min-height: 120px;
+    resize: vertical;
+    line-height: 1.45;
+}
+.rh-ai-card__pw { max-width: 320px; }
+.rh-ai-card__pwbox[hidden] { display: none; }

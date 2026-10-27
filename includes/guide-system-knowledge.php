@@ -364,6 +364,7 @@ function rh_kb_sys_page_guides(): array
 {
     return [
         'conference-management.php' => ['10-conference-events.html', 'screen'],
+        'ai-usage.php' => ['22-assistant.html', 'usage'],
         'payments.php' => ['13-finance-payments.html', 'screen'],
         'payment-details.php' => ['13-finance-payments.html', 'find'],
         'room-management.php' => ['09-packages-rates.html', 'screen'],

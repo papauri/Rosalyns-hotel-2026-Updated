@@ -88,6 +88,7 @@ function rh_kb_synonym_groups(): array
         ['quotation', 'quote', 'estimate', 'proforma'],
         ['deal', 'promo', 'promotion', 'coupon', 'offer'],
         ['ingredient', 'stock', 'inventory'], ['supplier', 'vendor'],
+        ['assistant', 'chatbot', 'bot', 'copilot'], ['digest', 'roundup', 'newsletter'], ['alert', 'alerts', 'nudge', 'nudges'], // the staff Assistant
         ['approve', 'approver', 'approvers', 'approval', 'approved', 'authorise', 'authorize', 'signoff'],
         ['theft', 'steal', 'stealing', 'stole', 'stolen', 'thief', 'pilferage', 'pilfer', 'shrinkage', 'shortage', 'shortages', 'variance', 'loss', 'losses'],
         ['wastage', 'waste', 'spoil', 'spoilage', 'spoiled', 'expired'],
@@ -138,6 +139,8 @@ function rh_kb_expand_phrases(string $q): string
         '/\b(home screen|install (the )?app|add to home)\b/i' => ' install admin app ',
         '/\bblock\w*\s+(a\s+)?(room|dates?)\b|\b(close dates|stop selling|stop sales)\b/i' => ' blocked dates individual rooms ',
         '/\bwrong time|time is wrong|time ?zone\b/i' => ' time zone ',
+        '/\b(ai|chat ?gpt|chat ?bot)\b/i' => ' assistant ',
+        '/\b(lost|turned away|missed) (demand|bookings?|guests?)\b/i' => ' assistant searches found no room demand rate suggestions ',
         '/\b(food|meal|order)\b.{0,30}\b(kept|keep|eaten|already started)\b|\b(kept|keep|eaten)\b.{0,20}\b(food|meal)\b/i' => ' room service started stays on the bill ',
     ];
     foreach ($map as $re => $add) {

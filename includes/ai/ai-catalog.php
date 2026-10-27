@@ -159,27 +159,82 @@ function rh_ai_suggest_top5(array $ranked): array
 }
 
 /**
- * Suggested roles for the top 5: best = Primary, second = Fallback, cheapest of the rest = Fast,
- * the others Extra. @return array<string,string> model_id => role
+ * A big (flagship) model: never suggested for chat (owner 2026-10-28: "never use big models like Opus 5.5 just
+ * for chat"). Big = an Opus / Fable / Argon / Pro / Ultra family, or a price out of US$15+ per million tokens.
+ */
+function rh_ai_model_is_big(array $m): bool
+{
+    $fam = '-' . rh_ai_model_family((string)($m['model_id'] ?? '')) . '-';
+    if (preg_match('/-(opus|fable|argon|pro|ultra)-/', $fam)) {
+        return true;
+    }
+    return isset($m['price_out']) && $m['price_out'] !== null && (float)$m['price_out'] + 0.0001 >= 15;
+}
+
+/**
+ * Suggested roles: the cheapest models that still perform, never a big model. The bar is the best priced model's
+ * rank (big ones included); among priced models that are not big and rank within 15 of that bar, take the 3
+ * cheapest (price in + price out), topped up with the next best non-big priced models if fewer than 3 clear it.
+ * Of those the highest rank is Primary, the next Fallback, the cheapest Fast. Up to 5 are ticked: the rest are the
+ * cheapest other non-big priced models as Extra. A model with no price is never suggested (it waits for a price).
+ * No priced model at all: rank order without big models (best Primary, second Fallback, cheapest of the rest Fast).
+ * @return array<string,string> model_id => role
  */
 function rh_ai_suggest_roles(array $ranked): array
 {
-    $top = array_slice($ranked, 0, 5);
+    $cost = static fn(array $m): float => (float)$m['price_in'] + (float)$m['price_out'];
+    $priced = array_values(array_filter($ranked, static fn($m) => isset($m['price_in'], $m['price_out']) && $m['price_in'] !== null && $m['price_out'] !== null));
+    $small = array_values(array_filter($priced, static fn($m) => !rh_ai_model_is_big($m)));
+    if (!$small) {
+        $pool = array_values(array_filter($ranked, static fn($m) => !rh_ai_model_is_big($m))) ?: $ranked;
+        $top = array_slice($pool, 0, 5);
+        $roles = [];
+        foreach ($top as $i => $m) {
+            $roles[$m['model_id']] = $i === 0 ? 'primary' : ($i === 1 ? 'fallback' : 'extra');
+        }
+        $rest = array_slice($top, 2) ?: (count($top) === 2 ? [$top[1]] : []);
+        if ($rest) {
+            usort($rest, static fn($a, $b) => (($a['price_in'] ?? PHP_FLOAT_MAX) <=> ($b['price_in'] ?? PHP_FLOAT_MAX)) ?: $a['rank'] <=> $b['rank']);
+            $roles[$rest[0]['model_id']] = 'fast';
+        }
+        return $roles;
+    }
+    $bar = max(array_map(static fn($m) => (float)$m['rank'], $priced));
+    $perform = array_values(array_filter($small, static fn($m) => (float)$m['rank'] + 0.0001 >= $bar - 15));
+    // Cheapest first; on a tie the lower rank counts as the cheaper pick (keeps the better one for Primary/Fallback).
+    usort($perform, static fn($a, $b) => ($cost($a) <=> $cost($b)) ?: ((float)$a['rank'] <=> (float)$b['rank']));
+    $pick = array_slice($perform, 0, 3);
+    foreach ($small as $m) { // fewer than 3 clear the bar: the next best non-big priced models (already best first)
+        if (count($pick) >= 3) {
+            break;
+        }
+        if (!in_array($m['model_id'], array_column($pick, 'model_id'), true)) {
+            $pick[] = $m;
+        }
+    }
+    usort($pick, static fn($a, $b) => ($cost($a) <=> $cost($b)) ?: ((float)$a['rank'] <=> (float)$b['rank']));
     $roles = [];
-    foreach ($top as $i => $m) {
-        $roles[$m['model_id']] = $i === 0 ? 'primary' : ($i === 1 ? 'fallback' : 'extra');
+    if (count($pick) === 1) {
+        $roles[$pick[0]['model_id']] = 'primary';
+    } else {
+        $fast = $pick[0];
+        $others = array_slice($pick, 1);
+        usort($others, static fn($a, $b) => (float)$b['rank'] <=> (float)$a['rank']);
+        $roles[$others[0]['model_id']] = 'primary';
+        if (isset($others[1])) {
+            $roles[$others[1]['model_id']] = 'fallback';
+        }
+        $roles[$fast['model_id']] = 'fast';
     }
-    $rest = array_slice($top, 2);
-    if (!$rest && count($top) === 2) {
-        $rest = [$top[1]];
-    }
-    if ($rest) {
-        usort($rest, static function ($a, $b) {
-            $pa = $a['price_in'] ?? PHP_FLOAT_MAX;
-            $pb = $b['price_in'] ?? PHP_FLOAT_MAX;
-            return $pa <=> $pb ?: $a['rank'] <=> $b['rank'];
-        });
-        $roles[$rest[0]['model_id']] = 'fast';
+    $restP = $small;
+    usort($restP, static fn($a, $b) => ($cost($a) <=> $cost($b)) ?: ((float)$b['rank'] <=> (float)$a['rank'])); // Extras: cheapest first
+    foreach ($restP as $m) {
+        if (count($roles) >= 5) {
+            break;
+        }
+        if (!isset($roles[$m['model_id']])) {
+            $roles[$m['model_id']] = 'extra';
+        }
     }
     return $roles;
 }
@@ -310,7 +365,8 @@ function rh_ai_save_selection(PDO $db, string $provider, array $roles, array $pr
 // ── Connection test and refresh ───────────────────────────────────────────────
 
 /**
- * Test a key: list the models, then send a 5-token "Reply OK" to the best one.
+ * Test a key: list the models, then send a 5-token "Reply OK" to the cheapest priced chat model (fast; the best
+ * ranked one if none has a price).
  * @return array{ok:bool,ms:int,message:string,ranked:array,ping_model:string}
  * The message never contains the key.
  */
@@ -324,13 +380,19 @@ function rh_ai_test_connection(string $provider, string $key): array
     if (!$ranked) {
         return ['ok' => false, 'ms' => $list['ms'], 'message' => 'The key works, but the provider offers no chat models to it.', 'ranked' => [], 'ping_model' => ''];
     }
-    $model = $ranked[0]['model_id'];
+    $pingRow = $ranked[0];
+    foreach ($ranked as $r) {
+        if (isset($r['price_in'], $r['price_out']) && (!isset($pingRow['price_in'], $pingRow['price_out']) || (float)$r['price_in'] + (float)$r['price_out'] < (float)$pingRow['price_in'] + (float)$pingRow['price_out'])) {
+            $pingRow = $r;
+        }
+    }
+    $model = (string)$pingRow['model_id'];
     $ping = rh_ai_ping($provider, $key, $model);
     $n = count($ranked);
     if (!$ping['ok']) {
         return ['ok' => false, 'ms' => $ping['ms'], 'message' => $n . ' chat models found, but the test reply failed. ' . $ping['message'], 'ranked' => $ranked, 'ping_model' => $model];
     }
-    $msg = 'Connected. ' . $n . ' chat model' . ($n === 1 ? '' : 's') . ' found; ' . $ranked[0]['label'] . ' answered the test in ' . $ping['ms'] . ' ms.';
+    $msg = 'Connected. ' . $n . ' chat model' . ($n === 1 ? '' : 's') . ' found; ' . $pingRow['label'] . ' answered the test in ' . $ping['ms'] . ' ms.';
     return ['ok' => true, 'ms' => $ping['ms'], 'message' => $msg, 'ranked' => $ranked, 'ping_model' => $model];
 }
 
@@ -351,13 +413,21 @@ function rh_ai_refresh_provider(PDO $db, string $provider): array
     $ranked = rh_ai_rank_models($provider, $list['models']);
     $before = array_column(rh_ai_models_for($db, $provider), 'model_id');
     rh_ai_sync_models($db, $provider, $ranked);
-    $new = count(array_diff(array_column($ranked, 'model_id'), $before));
+    $newIds = array_diff(array_column($ranked, 'model_id'), $before);
+    $new = count($newIds);
+    // A newly listed model with no price is never used or suggested; tell the people who manage the settings.
+    $unpriced = array_values(array_filter($ranked, static fn($m) => in_array($m['model_id'], $newIds, true) && ($m['price_in'] === null || $m['price_out'] === null)));
+    if ($unpriced && function_exists('rh_ai_notify_settings')) {
+        rh_ai_notify_settings($db, 'model_new_price', 'New ' . (rh_ai_provider_list()[$provider]['label'] ?? $provider) . ' model(s) with no price yet: '
+            . implode(', ', array_slice(array_column($unpriced, 'model_id'), 0, 6)) . (count($unpriced) > 6 ? ' and more' : '')
+            . '. They are not used until a price is typed in Assistant Settings > Models (New - set price).');
+    }
     return ['ok' => true, 'count' => count($ranked), 'new' => $new, 'message' => count($ranked) . ' chat models listed' . ($new ? ', ' . $new . ' new since the last check.' : '; nothing new.')];
 }
 
 /**
- * The weekly refresh (scripts/ai-model-refresh.php, or the daily check on the first admin page load of the day
- * when the last refresh is over 7 days old). Does nothing at all when the Assistant is off.
+ * The daily refresh (scripts/ai-model-refresh.php, or the daily check on the first admin page load of the day
+ * when the last refresh was before today). Does nothing at all when the Assistant is off.
  * @return array{ran:bool,results:array<string,array>}
  */
 function rh_ai_model_refresh_run(PDO $db): array
@@ -373,7 +443,7 @@ function rh_ai_model_refresh_run(PDO $db): array
         $results[$p] = rh_ai_refresh_provider($db, $p);
     }
     if ($results) {
-        try { // when the lists were last checked (the daily check refreshes again after 7 days; cron is optional)
+        try { // when the lists were last checked (the daily check refreshes once per calendar day; cron is optional)
             rh_ai_save_settings(['ai_models_refreshed_at' => date('Y-m-d H:i:s')], $db);
         } catch (Throwable $e) {
         }

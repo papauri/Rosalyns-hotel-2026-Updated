@@ -1,5 +1,5 @@
 {
-    "updated": "2026-10-26",
+    "updated": "2026-10-28",
     "about": "Models known when this file was written, so the settings page is useful before any key exists. Ranks compare models of the same provider (higher = more capable). Prices are US dollars per million tokens (in / out). verified=false means the id and price were not checked against the provider's own pages at build time: the live list after Test connection is the source of truth and prices stay editable.",
     "providers": {
         "anthropic": {
@@ -27,8 +27,14 @@
         "google": {
             "label": "Google",
             "models": [
-                {"id": "gemini-2.5-pro",        "label": "Gemini 2.5 Pro",        "rank": 90, "context_tokens": 1048576, "price_in": 1.25, "price_out": 10,   "released_at": null, "verified": false, "note": "Price for prompts up to 200K tokens"},
-                {"id": "gemini-2.5-flash",      "label": "Gemini 2.5 Flash",      "rank": 80, "context_tokens": 1048576, "price_in": 0.30, "price_out": 2.50, "released_at": null, "verified": false},
+                {"id": "gemini-4-argon",         "label": "Gemini 4 Argon",          "rank": 100, "context_tokens": 1048576, "price_in": 2.00, "price_out": 10.00, "released_at": null, "verified": true, "note": "Rises to 4.00 / 20.00 on 1 Dec 2026"},
+                {"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro (preview)", "rank": 95, "context_tokens": 1048576, "price_in": 2.00, "price_out": 12.00, "released_at": null, "verified": true, "note": "4.00 / 18.00 above 200K tokens"},
+                {"id": "gemini-3.8-flash",       "label": "Gemini 3.8 Flash",        "rank": 92,  "context_tokens": 1048576, "price_in": 0.75, "price_out": 3.75,  "released_at": null, "verified": true, "note": "Rises to 1.50 / 7.50 on 1 Jan 2027"},
+                {"id": "gemini-3.6-flash",       "label": "Gemini 3.6 Flash",        "rank": 90,  "context_tokens": 1048576, "price_in": 0.75, "price_out": 3.75,  "released_at": null, "verified": true, "note": "Rises to 1.50 / 7.50 on 1 Jan 2027"},
+                {"id": "gemini-3.5-flash-lite",  "label": "Gemini 3.5 Flash-Lite",   "rank": 86,  "context_tokens": 1048576, "price_in": 0.30, "price_out": 2.50,  "released_at": null, "verified": true},
+                {"id": "gemini-3.1-flash-lite",  "label": "Gemini 3.1 Flash-Lite",   "rank": 84,  "context_tokens": 1048576, "price_in": 0.25, "price_out": 1.50,  "released_at": null, "verified": true},
+                {"id": "gemini-2.5-pro",        "label": "Gemini 2.5 Pro",        "rank": 80, "context_tokens": 1048576, "price_in": 1.25, "price_out": 10,   "released_at": null, "verified": false, "note": "Price for prompts up to 200K tokens"},
+                {"id": "gemini-2.5-flash",      "label": "Gemini 2.5 Flash",      "rank": 75, "context_tokens": 1048576, "price_in": 0.30, "price_out": 2.50, "released_at": null, "verified": false},
                 {"id": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash-Lite", "rank": 70, "context_tokens": 1048576, "price_in": 0.10, "price_out": 0.40, "released_at": null, "verified": false}
             ]
         },

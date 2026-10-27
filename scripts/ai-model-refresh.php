@@ -1,12 +1,13 @@
 <?php
 /**
- * Weekly: refresh the Assistant's model lists from each provider that has a saved key, so newer
+ * Daily: refresh the Assistant's model lists from each provider that has a saved key, so newer
  * models show up in Assistant Settings ("new - set price"). Chosen models are never changed.
  *
  * Exits straight away, without any network call, when the Assistant is off
  * (rh_ai_enabled() is fail-closed: setting, module row and migration must all be in place).
  *
- * Cron (weekly, e.g. Monday 04:30):  30 4 * * 1  php /path/to/scripts/ai-model-refresh.php
+ * Cron (optional, daily, e.g. 04:30):  30 4 * * *  php /path/to/scripts/ai-model-refresh.php
+ * (Without cron the daily check on the first admin page load of the day does the same, once per day.)
  */
 if (PHP_SAPI !== 'cli') {
     http_response_code(403);

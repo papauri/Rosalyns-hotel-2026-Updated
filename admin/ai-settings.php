@@ -176,6 +176,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (isset($_POST['ai_actions_enabled'])) {
                 $limitPairs['ai_actions_enabled'] = (string)$_POST['ai_actions_enabled'] === '0' ? '0' : '1';
             }
+            if (isset($_POST['ai_idle_lock_minutes'])) { // Phase 4c
+                $idle = trim((string)$_POST['ai_idle_lock_minutes']);
+                if (!ctype_digit($idle) || ((int)$idle !== 0 && ((int)$idle < 5 || (int)$idle > 240))) {
+                    throw new RuntimeException('Lock the Assistant after: 0 (never) or 5 to 240 minutes.');
+                }
+                $limitPairs['ai_idle_lock_minutes'] = (string)(int)$idle;
+            }
+            if (isset($_POST['ai_digest_enabled'])) {
+                $limitPairs['ai_digest_enabled'] = (string)$_POST['ai_digest_enabled'] === '0' ? '0' : '1';
+            }
             rh_ai_save_settings($limitPairs, $pdo);
             logActivity($uid, 'ai_settings', 'Assistant limits saved: ' . (int)$cap . ' tokens/day, $' . round((float)$budget, 2) . '/month, ' . (int)$rate . ' messages/10 min, keep chats ' . ((int)$ret ?: 'always'));
             $aiFlash('success', 'Limits saved.', 'ai-limits');
@@ -410,6 +420,7 @@ if ($memReady) {
             $memRows = $st->fetchAll(PDO::FETCH_ASSOC);
         }
         if ($tab === 'faults') {
+            rh_ai_audit_report($pdo); // Phase 4c: a hand-edited card shows up here straight away (no-op before migration 073)
             $faultRows = $pdo->query("SELECT * FROM ai_faults ORDER BY FIELD(status, 'open', 'forwarded', 'fixed', 'dismissed'), id DESC LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
             $incRows = $pdo->query("SELECT id, kind, severity, tool_name, summary, status, created_at FROM ai_incidents ORDER BY id DESC LIMIT 50")->fetchAll(PDO::FETCH_ASSOC);
         }
@@ -420,18 +431,23 @@ if ($memReady) {
 if ($schemaReady) {
     rh_ai_notices_mark_seen($pdo, $uid); // opening this page counts as seeing the notices
 }
-$jobLabels = ['vault' => 'Privacy vault sweep', 'models' => 'Model list refresh', 'reflect' => 'Nightly review (lessons)', 'health' => 'Health check', 'eval' => 'Question set'];
+$jobLabels = ['vault' => 'Privacy vault sweep', 'models' => 'Model list refresh', 'reflect' => 'Nightly review (lessons)', 'health' => 'Health check', 'eval' => 'Question set',
+    'audit' => 'Card record check', 'budget' => 'Budget notice', 'digest' => 'Weekly digest', 'retention' => 'Old chats removed'];
 $jobHelp = [
     'vault' => 'Removes the real names kept for chats of people whose session has ended (like signing out).',
-    'models' => 'Checks each provider for newer models every 7 days and tries a newer one on the question set before using it.',
+    'models' => 'Checks each provider for newer models once a day and tries a newer one on the question set before using it.',
     'reflect' => 'Turns the day\'s mistakes and thumbs-up answers into short lessons and playbooks; scores notes.',
     'health' => 'A test call to the provider, every lookup run once with safe sample values, and the monthly budget.',
     'eval' => 'The fixed questions with answers worked out from your own data; feeds the "complete" check.',
+    'audit' => 'Checks that no confirmed Assistant card was edited or deleted by hand since it was recorded.',
+    'budget' => 'Tells the people who manage these settings at 80% and 100% of the monthly limit.',
+    'digest' => 'Once a week: a short email to people who manage Assistant Settings (each can switch it off).',
+    'retention' => 'Removes Assistant chats, cards and logs older than "Keep chats for" (only when it is above 0).',
 ];
 $kindLabels = rh_ai_memory_kinds();
 $incLabels = ['reply_not_right' => 'Reply marked Not right', 'action_failed' => 'Card not done', 'action_cancelled' => 'Card cancelled', 'price_mismatch' => 'Card total differed',
     'tool_breaker' => 'Lookup switched off for an hour', 'tool_selftest' => 'Lookup failed its self-test', 'auto_pause' => 'Paused itself', 'key_rejected' => 'Key refused',
-    'model_retired' => 'Model retired', 'provider_check_failed' => 'Provider check failed'];
+    'model_retired' => 'Model retired', 'provider_check_failed' => 'Provider check failed', 'password_lockout' => 'Wrong password 5 times'];
 
 // Status line
 if (!$schemaReady) {
@@ -648,10 +664,10 @@ $fmtPrice = static function ($v): string {
                     </div></div>
                 <?php endforeach; ?>
             <?php else: ?>
-                <p class="help-text">Ticked rows are the suggestion (the five most capable) until you save your own choice. Primary answers questions; Fast handles short replies; Fallback takes over if Primary fails; Extra is kept ready.</p>
+                <p class="help-text">Ticked rows are the suggestion until you save your own choice: the three cheapest models that still perform (within 15 of the best priced model's rank) as Primary, Fallback and Fast, and the next cheapest priced models as Extra. Big models (Opus, Fable, Pro, Argon, or US$15+ per million out) and models with no price are never suggested for chat. Primary answers questions; Fast handles short replies; Fallback takes over if Primary fails; Extra is kept ready.</p>
                 <?php foreach ($modelsBy as $p => $rows): if (!$rows) { continue; }
                     $hasSel = (bool)array_filter($rows, static fn($r) => (int)$r['is_selected'] === 1);
-                    $rankedForSuggest = array_map(static fn($r) => ['model_id' => $r['model_id'], 'rank' => (float)$r['capability_rank'], 'price_in' => $r['price_in_per_mtok'] !== null ? (float)$r['price_in_per_mtok'] : null], $rows);
+                    $rankedForSuggest = array_map(static fn($r) => ['model_id' => $r['model_id'], 'rank' => (float)$r['capability_rank'], 'price_in' => $r['price_in_per_mtok'] !== null ? (float)$r['price_in_per_mtok'] : null, 'price_out' => $r['price_out_per_mtok'] !== null ? (float)$r['price_out_per_mtok'] : null], $rows);
                     $suggest = $hasSel ? [] : rh_ai_suggest_roles($rankedForSuggest);
                     $newestDate = max(array_map(static fn($r) => (string)($r['released_at'] ?? ''), $rows));
                     $hasKeyP = !empty($states[$p]['has_key']);
@@ -757,6 +773,19 @@ $fmtPrice = static function ($v): string {
                             <option value="0"<?php echo (($settings['ai_actions_enabled'] ?? '1') === '0') ? ' selected' : ''; ?>>Off - answers only, no cards</option>
                         </select>
                         <p class="help-text">A card (new booking, check-in, check-out, housekeeping job...) changes nothing until the person taps Confirm, and then runs through the normal screen. Only people with "Confirm Assistant actions" (Staff &amp; Access) see cards.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_idle"><strong>Lock the Assistant after (minutes without use)</strong></label>
+                        <input type="number" min="0" max="240" step="1" id="ai_idle" name="ai_idle_lock_minutes" class="form-control" value="<?php echo $h((int)($settings['ai_idle_lock_minutes'] ?? 15)); ?>">
+                        <p class="help-text">After this long with no use of the portal the chat hides and asks for the person's own password. 0 never locks. Cancelling, checking out, correcting a check-out date, taking a room off sale and sending to a guest (booking email, invoice, enquiry reply, or a review reply that is also emailed) always ask for the password. WhatsApp cards only open the booking screen.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_digest"><strong>Weekly digest email</strong></label>
+                        <select id="ai_digest" name="ai_digest_enabled" class="form-control">
+                            <option value="1"<?php echo (($settings['ai_digest_enabled'] ?? '1') !== '0') ? ' selected' : ''; ?>>On - once a week to people who manage Assistant Settings</option>
+                            <option value="0"<?php echo (($settings['ai_digest_enabled'] ?? '1') === '0') ? ' selected' : ''; ?>>Off - no digest emails</option>
+                        </select>
+                        <p class="help-text">A short email with what needs attention and last week's room figures, worked out from what each person's account can see. Each person can switch it off in the Assistant's Reply settings.</p>
                     </div>
                     <div class="ai-actions ai-limits-save">
                         <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Save limits</button>
@@ -964,6 +993,7 @@ $fmtPrice = static function ($v): string {
                     <span class="ai-stat__value">$<?php echo $h(number_format($monthCost, 2)); ?></span>
                     <span class="ai-stat__sub">of $<?php echo $h(number_format((float)$settings['ai_monthly_budget_usd'], 2)); ?> monthly limit</span>
                 </div>
+                <p class="help-text"><a href="ai-usage.php"><i class="fas fa-chart-bar" aria-hidden="true"></i> Open the usage dashboard</a> - cost per answer, answers given without a model call, and totals by person, day and model.</p>
                 <?php if (!$usage): ?>
                     <p class="help-text">No questions asked in the last 30 days.</p>
                 <?php else: ?>

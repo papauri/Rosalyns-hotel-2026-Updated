@@ -4,10 +4,11 @@ Use this only if Claude Code runs out of usage. Read this file first, then only 
 below (offset reads — never read big files whole). Keep `.claude/TASKS.md` "Open" up to date as you go.
 
 ## Where things stand (update this block after every ship)
-- Phases 0, 1, 2, 3, 4, 4b shipped to both hotels (4b = learning loop + self-healing, QA passed,
-  full suites green). Check `git log --oneline -3` in both repos: if the top commit is "AI Assistant Phase 4b",
-  4b is done and you start at **Phase 4c + 5 (one combined phase)**.
-- Rosalyn's: migrations 070, 071 applied; 072 applied at the 4b ship. Assistant is **ON** at Rosalyn's
+- Phases 0–5 shipped to both hotels (2026-10-28, commit "AI Assistant Phase 4c+5"). AI Assistant feature complete —
+  nothing else to patch. Only reported faults or owner-asked features from here.
+- Liwonde: 073 applied; owner's Gemini key saved encrypted (live tests only, Assistant OFF; models 3.8 Flash /
+  3.6 Flash / 3.5 Flash-Lite). Owner left: live-key dress rehearsal (plan "Verification", last bullet).
+- Rosalyn's: migrations 070–073 applied (073 on 2026-10-28, owner said no backup needed). Assistant is **ON** at Rosalyn's
   (owner order); Liwonde is the test hotel, Assistant OFF there except during browser checks.
 - Two repos, same code (only the guide's hotel name differs):
   - Rosalyn's `C:\Users\john-paul.chirwa\OneDrive\MSP\Rosalyns-hotel-2026` (orchestration docs live here)

@@ -40,6 +40,25 @@ function rh_ai_schema_ready(?PDO $db = null): bool
     }
 }
 
+/** True when migration 073 (alerts, audit chain, lost-demand log) has run. Never throws; memoised per request. */
+function rh_ai_extras_ready(?PDO $db = null, bool $fresh = false): bool
+{
+    static $memo = null;
+    if ($memo !== null && !$fresh) {
+        return $memo;
+    }
+    $db = $db ?? ($GLOBALS['pdo'] ?? null);
+    if (!$db instanceof PDO) {
+        return false;
+    }
+    try {
+        $n = (int)$db->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('ai_alerts', 'ai_audit', 'demand_log')")->fetchColumn();
+        return $memo = ($n === 3);
+    } catch (Throwable $e) {
+        return $memo = false;
+    }
+}
+
 /** Tables the chat needs on top of 070 (migration 071: privacy vault + answer cache). */
 function rh_ai_chat_tables(): array
 {
@@ -160,6 +179,11 @@ function rh_ai_setting_defaults(): array
         'ai_notices_json'         => '',
         'ai_model_upgrade_json'   => '',
         'ai_daily_token'          => '',
+        // Phases 4c + 5 - owner extras and polish (migration 073 seeds the same values)
+        'ai_idle_lock_minutes'    => '15', // the panel locks after this many minutes without portal use (0 = never)
+        'ai_digest_enabled'       => '1',  // weekly digest email (each person can opt out in their reply settings)
+        'ai_digest_sent_week'     => '',   // ISO week (o-W) of the last digest sent
+        'ai_budget_warned'        => '',   // Y-m:80 / Y-m:100 - the budget notice already given this month
     ];
 }
 

@@ -33,6 +33,11 @@
     <ol>
       <li><a href="#using">Using the Assistant</a></li>
       <li><a href="#actions">Action cards: changes with one Confirm</a></li>
+      <li><a href="#security">Password, lock and the card record</a></li>
+      <li><a href="#alerts">Alerts and reports on request</a></li>
+      <li><a href="#drafts">Draft replies, upgrades and what guests say</a></li>
+      <li><a href="#demand">Searches that found no room and rate suggestions</a></li>
+      <li><a href="#digest">The weekly digest email</a></li>
       <li><a href="#team">The team of leads behind it</a></li>
       <li><a href="#briefing">The daily briefing ("the tea")</a></li>
       <li><a href="#never-guesses">It never guesses</a></li>
@@ -44,7 +49,7 @@
       <li><a href="#switch">How to switch it on or off</a></li>
       <li><a href="#limits">How to set budgets and limits</a></li>
       <li><a href="#access">Who has access</a></li>
-      <li><a href="#usage">Reading the usage table</a></li>
+      <li><a href="#usage">The usage dashboard and the monthly limit</a></li>
       <li><a href="#rules">Rules the system enforces</a></li>
       <li><a href="#problems">Problems and fixes</a></li>
     </ol>
@@ -143,6 +148,38 @@
   </ul>
   <p>An administrator can turn all cards off (answers only) on Assistant Settings &rarr; <strong>Budgets and limits</strong> &rarr; <strong>Action cards</strong>, or for one person by removing <strong>Confirm Assistant actions</strong>.</p>
 
+  <h2 id="security">Password, lock and the card record</h2>
+  <h3>Cards that ask for your password</h3>
+  <p>Some cards cannot be undone from the chat, so they ask for <strong>your own account password</strong> (the one you sign in with) before <strong>Confirm</strong> works: cancelling a booking, checking a guest out, correcting a check-out date, taking a room off sale (room status Maintenance or Out of order, or a maintenance job that blocks the room), and anything sent to a guest: <strong>Send guest email</strong>, <strong>Send invoice</strong>, <strong>Reply to enquiry</strong>, and <strong>Reply to review</strong> when <strong>Email it to the guest too</strong> is set to Yes. If you switch that choice to Yes on the card, the password box appears when you tap the button. <strong>WhatsApp the guest</strong> only opens the booking screen; the message is sent there as usual.</p>
+  <ol class="steps">
+    <li>Check the card.</li>
+    <li>Type your password in <strong>Your password</strong> on the card.</li>
+    <li>Tap the card's button (for example <strong>Cancel booking</strong>).</li>
+  </ol>
+  <p>A wrong password says <em>"Wrong password. 4 tries left..."</em>. After <strong>5 wrong passwords</strong> confirming is locked for that account for <strong>15 minutes</strong> and the people who manage Assistant Settings get a notice. Wait 15 minutes, or ask a manager if you have forgotten your password.</p>
+  <h3>The Assistant locks after a quiet spell</h3>
+  <p>When the portal has not been used for the time set in <strong>Lock the Assistant after</strong> (default 15 minutes), the chat is cleared from the screen and the panel shows <strong>Locked</strong>. Type your own password and tap <strong>Unlock</strong>; your chat comes back. Wrong passwords here count towards the same 5-try lock. Signing out always removes the names behind the privacy codes from the server.</p>
+  <h3>The record of confirmed cards</h3>
+  <p>Every card that is confirmed, finished or cancelled is added to a sealed record (each entry is locked to the one before it). Each night, and whenever someone opens <strong>Assistant faults</strong>, the record is checked against the cards. If a card was edited or deleted by hand afterwards, an Assistant fault titled <em>"The Assistant card record does not match"</em> appears with the card numbers. The check changes nothing; compare the card with the booking timeline and forward the fault to the developer.</p>
+
+  <h2 id="alerts">Alerts and reports on request</h2>
+  <p>The <strong>Assistant</strong> button shows a small number when something needs you now: a guest past check-out, a balance to collect before departure, an arrival with no room or a room not ready, a tentative hold about to lapse, an earlier arrival who never checked in. Tap the bell in the panel to see them; each has a button to the right screen and <strong>Dismiss</strong> (hidden for today). An alert clears itself once it is dealt with. Alerts come from your own briefing, so you only get what your account can see (for example, money alerts only with Accounting or Reports).</p>
+  <p><strong>Reports on request:</strong> ask <em>"Give me the occupancy report for last month"</em> or <em>"Revenue report 1 to 15 October"</em>. You get the headline figures (the same as Reports for the same dates) and a button that opens that Reports section; <strong>Export CSV</strong> is on that screen. Needs <strong>Reports</strong> or <strong>Accounting</strong>.</p>
+
+  <h2 id="drafts">Draft replies, upgrades and what guests say</h2>
+  <ul>
+    <li><strong>Draft replies</strong>: ask <em>"Which reviews need a reply?"</em> or <em>"Draft a reply to the enquiry from [name]"</em>. The Assistant writes a draft on a card: <strong>Reply to review</strong> (posted under the review, and emailed to the guest if you choose) or <strong>Reply to enquiry</strong> (sent from the hotel email). Read and edit the text in the card, then tap <strong>Post reply</strong> or <strong>Send reply</strong>. Nothing is posted or sent until you do. Needs <strong>Reviews</strong> or <strong>Contact messages</strong>. Booking emails (confirmation, reminder, invoice) use the <strong>Send guest email</strong> card.</li>
+    <li><strong>Upgrade chances</strong>: ask <em>"Who could we upgrade this week?"</em>. You get arrivals in the next 14 days whose better room type is free for their dates, with the rack-rate difference. Ask for a room type change card to price it exactly; joined family rooms and multi-room bookings are left alone.</li>
+    <li><strong>What guests say</strong>: ask <em>"What are guests saying about us?"</em>. You get average ratings (overall, service, cleanliness, location, value), the spread of stars, how many reviews were replied to, and the themes most praised and most complained about. Counts only; no guest text leaves the hotel.</li>
+  </ul>
+
+  <h2 id="demand">Searches that found no room and rate suggestions</h2>
+  <p>When a guest searches the website and no room of a type is free for their dates, the search is noted (room type, dates and party size only - no name, email or address). Ask <em>"Where are we turning guests away?"</em> to see these lost searches by room type and week.</p>
+  <p>Ask <em>"Should we change our rates next month?"</em> for <strong>rate suggestions</strong>: for each room type, occupancy on the books, searches that found no room and the current rate, with a plain suggestion - hold, raise (busy and turning guests away) or add a deal (quiet). <strong>These are suggestions only.</strong> The Assistant never changes a price, rate plan or deal; a person makes any change on <strong>Rate Plans</strong> or <strong>Rooms</strong>. Needs <strong>Hotel Settings</strong>, <strong>Reports</strong> or <strong>Accounting</strong>.</p>
+
+  <h2 id="digest">The weekly digest email</h2>
+  <p>Once a week (the first daily check of the week, usually Monday) only the people who manage Assistant Settings (the <strong>Assistant Settings</strong> permission) get a short email: what needs attention and last week's room figures, worked out from what their own account can see, with no guest names. To stop it for yourself: open the Assistant, tap <strong>Reply settings</strong>, set <strong>Weekly digest email</strong> to <strong>Off</strong> and tap <strong>Save</strong>. An administrator can turn it off for everyone on Assistant Settings &rarr; <strong>Budgets and limits</strong> &rarr; <strong>Weekly digest email</strong>.</p>
+
   <h2 id="team">The team of leads behind it</h2>
   <p>Behind the chat sits a small team of department leads, like the heads of department on a shift. For a simple question the Assistant answers itself. For a question that spans departments, or when you ask for the full picture, it asks up to three leads at the same time, each looks up its own figures, and one merged answer comes back. Each lead sees only what <strong>your</strong> account can see: a lead you have no permission for simply does not exist for you.</p>
   <table>
@@ -210,7 +247,7 @@
   <p>While paused nobody can use it and nothing is sent to a provider. To resume, switch it on again on Assistant Settings. A lookup that keeps failing is switched off for one hour on its own (the rest keeps working) and is tried again after the hour.</p>
 
   <h3>Daily checks - no scheduled task needed</h3>
-  <p>After the first admin page load of each day by anyone signed in, the Assistant runs its checks in the background - nobody waits for them: it removes the real names kept for chats of people whose session has ended, checks for newer models every 7 days (a newer one is used only if it answers the question set at least as well and costs no more; <strong>Undo this model change</strong> puts the old one back), reviews the day's mistakes into short lessons, tests the provider and every lookup, and asks itself a fixed set of about 40 questions whose answers come from your own data. The results are on <strong>Assistant Settings &rarr; Learning and daily checks</strong>; <strong>Run the checks now</strong> runs them at once. The scripts in <code>scripts/ai-*.php</code> can also run from a scheduled task, but do not have to.</p>
+  <p>After the first admin page load of each day by anyone signed in, the Assistant runs its checks in the background - nobody waits for them: it removes the real names kept for chats of people whose session has ended, checks for newer models once a day (a newer one is used only if it answers the question set at least as well and costs no more; <strong>Undo this model change</strong> puts the old one back), reviews the day's mistakes into short lessons, tests the provider and every lookup, and asks itself a fixed set of about 40 questions whose answers come from your own data. It also checks the sealed card record, sends the 80% or 100% monthly-limit notice, sends the weekly digest when due, and removes old Assistant records when <strong>Keep chats for</strong> is above 0. The results are on <strong>Assistant Settings &rarr; Learning and daily checks</strong>; <strong>Run the checks now</strong> runs them at once. The scripts in <code>scripts/ai-*.php</code> can also run from a scheduled task, but do not have to.</p>
 
   <h3>Switches</h3>
   <ul>
@@ -250,12 +287,13 @@
   <h2 id="models">How to choose the models</h2>
   <ol class="steps">
     <li>After a key passes the test, its models appear under <strong>Models</strong>, most capable first.</li>
-    <li>The five most capable are ticked as a suggestion, with roles filled in. Change the ticks if you like: up to 5.</li>
+    <li>A suggestion is ticked with roles filled in: the three cheapest models that still perform (never a big model such as Opus) as <strong>Primary</strong>, <strong>Fallback</strong> and <strong>Fast</strong>, plus the next best as <strong>Extra</strong>. Change the ticks if you like: up to 5.</li>
     <li>Give each ticked model a role: <strong>Primary</strong> answers questions and plans (exactly one); <strong>Fast</strong> does short replies and routing; <strong>Fallback</strong> takes over if Primary fails; <strong>Extra</strong> is kept ready.</li>
     <li>Check the prices. A model marked <strong>New - set price</strong> is not in the built-in list: type its prices from the provider's price page (US dollars per million tokens in and out).</li>
     <li>Click <strong>Save models</strong>. That provider becomes the one <strong>In use</strong>. Only one provider is used at a time.</li>
   </ol>
-  <p><strong>Check for newer models</strong> reads the provider's list again. The system also does this once a week while the Assistant is on. Your chosen models and typed prices are never changed by it. <strong>Newest</strong> marks the most recently released model in the list.</p>
+  <p><strong>Check for newer models</strong> reads the provider's list again. The system also does this once a day while the Assistant is on. Your chosen models and typed prices are never changed by it. <strong>Newest</strong> marks the most recently released model in the list.</p>
+  <p><strong>Cheapest models that still perform:</strong> once a day the Assistant checks each provider for newer models. Of the models that perform close to the best one (within 15 points of its rank), it suggests the three cheapest. Big models (such as Opus, Fable, Gemini Pro or Argon) are never suggested for chat. Prices come from each provider's own price page. A new model with no price is never used. It waits until someone types its price, and the people who manage Assistant Settings get a notice.</p>
 
   <h2 id="switch">How to switch it on or off</h2>
   <ol class="steps">
@@ -269,24 +307,35 @@
   <h2 id="limits">How to set budgets and limits</h2>
   <ul>
     <li><strong>Daily limit per person (tokens)</strong>: words read plus written per person per day, counted in tokens (a token is about three quarters of a word). 1,000 to 50,000,000. Default 200,000.</li>
-    <li><strong>Monthly cost limit (US$)</strong>: when the estimated cost this month reaches it, the Assistant stops sending questions to the provider until next month or until you raise it; quick lookups still work. 1 to 100,000. Default 20.</li>
+    <li><strong>Monthly cost limit (US$)</strong>: at 80% the people who manage Assistant Settings get a notice. At 100% they get another notice and the chat pauses until next month, or until you raise the limit and switch it back on. 1 to 100,000. Default 20.</li>
     <li><strong>Messages per person in 10 minutes</strong>: 1 to 500. Default 30.</li>
     <li><strong>Keep chats for (days)</strong>: 0 keeps chats; otherwise 7 to 3,650 days, and older chats are removed each night.</li>
     <li><strong>Most tokens for one question</strong>: all the work for one question together (the Assistant, up to three leads and the merged answer). 5,000 to 1,000,000. Default 60,000. When it is reached the Assistant stops and says so.</li>
     <li><strong>Action cards</strong>: On (it can prepare changes for people to confirm) or Off (answers only, no cards). Default On.</li>
+    <li><strong>Lock the Assistant after (minutes without use)</strong>: 0 never locks; otherwise 5 to 240. Default 15. See <a href="#security">Password, lock and the card record</a>.</li>
+    <li><strong>Weekly digest email</strong>: On or Off for everyone. Default On. See <a href="#digest">The weekly digest email</a>.</li>
   </ul>
+  <p><strong>Keep chats for</strong> above 0 also removes old Assistant cards, alerts, feedback, problem notes and usage rows older than that (this month's usage always stays, so the monthly limit stays right). It only ever touches the Assistant's own records - never bookings, money, stock or settings - and nothing at all while it is 0. What the Assistant has learned and the fault list are kept.</p>
   <p>Click <strong>Save limits</strong>. You will see <em>"Limits saved."</em> Costs are estimates from the prices under Models; the provider's bill is the real figure.</p>
 
   <h2 id="access">Who has access</h2>
-  <p>By default administrators and managers may use the Assistant and confirm its actions. Nobody else has it until you give it. Only administrators open Assistant Settings by default; the Usage table is shown there to people who also hold <strong>Assistant Usage</strong>.</p>
+  <p>By default administrators and managers may use the Assistant and confirm its actions. Nobody else has it until you give it. Only administrators open Assistant Settings by default; <strong>Assistant Usage</strong> opens the usage dashboard (administrators and managers by default).</p>
   <ol class="steps">
     <li>Click <strong>Change on Staff &amp; Access</strong> (or open <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong>).</li>
     <li>Open the person's permissions and tick or untick, under <strong>Assistant</strong>: <strong>Use the Assistant</strong>, <strong>Confirm Assistant actions</strong>, <strong>Assistant Usage</strong>. <strong>Assistant Settings</strong> is under <strong>Settings</strong>.</li>
   </ol>
   <p><strong>Use the Assistant</strong> and <strong>Confirm Assistant actions</strong> are offered on Staff &amp; Access while the Assistant is switched on; people who already hold them keep them. The Assistant only ever sees and does what that person could already see and do on screen.</p>
 
-  <h2 id="usage">Reading the usage table</h2>
-  <p><strong>Estimated cost this month</strong> adds up every reply since the 1st. The table lists the last 30 days: <strong>Day</strong>, <strong>Person</strong>, <strong>Model</strong>, <strong>Questions</strong> (requests sent to the provider), <strong>Tokens in</strong>, <strong>Tokens out</strong> and <strong>Est. cost</strong>.</p>
+  <h2 id="usage">The usage dashboard and the monthly limit</h2>
+  <p>Open <strong>Settings</strong> &rarr; <strong>Assistant Usage</strong> (needs the <strong>Assistant Usage</strong> permission), pick <strong>From</strong> and <strong>To</strong> and tap <strong>Show</strong>.</p>
+  <ul>
+    <li><strong>This month's estimated cost</strong>: every reply since the 1st, against the monthly limit, with the percentage used.</li>
+    <li><strong>Answers</strong>: replies in the chosen days, and how many needed a model.</li>
+    <li><strong>Cost per answer</strong>: estimated cost divided by all answers.</li>
+    <li><strong>Answered without a model</strong>: the share answered straight from the hotel's data (quick lookups, the briefing, repeated questions) at no cost. Higher is cheaper.</li>
+    <li>Tables <strong>By person</strong>, <strong>By day</strong> and <strong>By model</strong>. <em>Nightly checks</em> is the Assistant testing itself.</li>
+  </ul>
+  <p><strong>Monthly limit notices:</strong> at <strong>80%</strong> of the monthly limit the people who manage Assistant Settings get a notice in the portal. At <strong>100%</strong> they get another, and the chat pauses with the plain message <em>"The Assistant has paused itself: this month's spending limit ... was reached"</em> until the 1st, or until the limit is raised and the Assistant is switched back on. Assistant Settings also keeps a short usage table for the last 30 days.</p>
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>

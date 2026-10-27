@@ -871,6 +871,9 @@ function rh_ai_month_spent(PDO $db): float
 /** Pause when this month's spending limit is reached. Returns true when it paused now. */
 function rh_ai_check_budget_pause(PDO $db): bool
 {
+    if (function_exists('rh_ai_budget_warn')) {
+        rh_ai_budget_warn($db); // Phase 5: notices to the ai_settings holders at 80 % and 100 % (once a month each)
+    }
     $budget = rh_ai_monthly_budget_usd();
     if ($budget <= 0 || rh_ai_month_spent($db) + 0.000001 < $budget) {
         return false;
