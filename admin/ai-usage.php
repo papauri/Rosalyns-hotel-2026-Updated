@@ -76,19 +76,19 @@ $canSettings = hasPermission((int)$user['id'], 'ai_settings');
             <label for="au-to">To</label>
             <input type="date" id="au-to" name="to" class="form-control" value="<?php echo $h($to); ?>">
             <button type="submit" class="btn btn-primary btn-sm">Show</button>
-            <p class="help-text">Pick the days to count. Up to one year. The monthly limit card always shows this month.</p>
+            <p class="help-text">Pick the days to count. Up to one year. The first card always shows this month.</p>
         </form>
 
         <div class="ai-usage-cards" id="ai-usage-cards">
             <div class="ai-stat">
-                <span class="ai-stat__label">This month's estimated cost <i class="help" data-tip="Every Assistant reply since the 1st of this month, priced with the model prices on Assistant Settings. At 80% the managers get a notice; at 100% chat pauses until the 1st.">?</i></span>
+                <span class="ai-stat__label">This month's estimated cost <i class="help" data-tip="Every Assistant reply since the 1st of this month, priced with the model prices on Assistant Settings, next to the monthly aim. Information only: nothing pauses or warns when the aim is passed.">?</i></span>
                 <span class="ai-stat__value"><?php echo $h($money($u['month_cost'])); ?></span>
-                <span class="ai-stat__sub"><?php echo $u['budget'] > 0 ? $h('of ' . $money($u['budget']) . ' monthly limit (' . number_format((float)$u['budget_pct'], 1) . '%)') : 'No monthly limit set'; ?></span>
+                <span class="ai-stat__sub"><?php echo $u['budget'] > 0 ? $h('monthly aim ' . $money($u['budget']) . ' (' . number_format((float)$u['budget_pct'], 1) . '% of it)') : 'No monthly aim set'; ?></span>
             </div>
             <div class="ai-stat">
-                <span class="ai-stat__label">Answers <i class="help" data-tip="Replies the Assistant gave in the chosen days, including quick lookups and the daily briefing.">?</i></span>
+                <span class="ai-stat__label">Answers <i class="help" data-tip="Replies the Assistant gave in the chosen days, including quick lookups and the daily briefing. Heavy answers used more than 8,000 input tokens: they are not stopped, only counted, so you can see if the Assistant is getting less efficient.">?</i></span>
                 <span class="ai-stat__value"><?php echo $h(number_format($u['answers'])); ?></span>
-                <span class="ai-stat__sub"><?php echo $h(number_format($u['model_answers'])); ?> needed a model</span>
+                <span class="ai-stat__sub"><?php echo $h(number_format($u['model_answers'])); ?> needed a model; <?php echo $h(number_format((int)$u['heavy'])); ?> heavy (over 8,000 tokens)</span>
             </div>
             <div class="ai-stat">
                 <span class="ai-stat__label">Cost per answer <i class="help" data-tip="Estimated cost in the chosen days divided by all answers in those days (answers given without a model cost nothing).">?</i></span>
@@ -99,6 +99,11 @@ $canSettings = hasPermission((int)$user['id'], 'ai_settings');
                 <span class="ai-stat__label">Answered without a model <i class="help" data-tip="Share of answers given straight from the hotel's own data with no model call: quick lookups, the daily briefing and repeated questions. Higher is cheaper.">?</i></span>
                 <span class="ai-stat__value"><?php echo $u['local_pct'] === null ? '-' : $h(number_format((float)$u['local_pct'], 1) . '%'); ?></span>
                 <span class="ai-stat__sub"><?php echo $h(number_format($u['local'])); ?> of <?php echo $h(number_format($u['answers'])); ?> answers</span>
+            </div>
+            <div class="ai-stat">
+                <span class="ai-stat__label">Automatic checks a month <i class="help" data-tip="Expected monthly cost of what the Assistant runs on its own: the 5 key questions each day and the full question set once a week (both on the Fast model), plus lessons and model checks. Worked out from what they cost in the last 4 weeks, scaled to 30 days.">?</i></span>
+                <span class="ai-stat__value"><?php echo $u['auto_month'] === null ? '-' : $h($money($u['auto_month'])); ?></span>
+                <span class="ai-stat__sub"><?php echo $u['auto_month'] === null ? 'No automatic checks have run yet' : $h('based on the last ' . (int)$u['auto_days'] . ' days'); ?></span>
             </div>
         </div>
 

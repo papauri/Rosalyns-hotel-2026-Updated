@@ -179,7 +179,7 @@ function rh_ai_action_problem(array $user, string $key): string
     if ($def === null) {
         return 'There is no such action.';
     }
-    if ($uid <= 0 || !function_exists('hasPermission') || !hasPermission($uid, 'ai_assistant_use') || !hasPermission($uid, 'ai_assistant_actions')) {
+    if ($uid <= 0 || !function_exists('hasPermission') || !rh_ai_has_perm($uid, 'ai_assistant_use') || !rh_ai_has_perm($uid, 'ai_assistant_actions')) {
         return 'Your account cannot confirm Assistant actions.';
     }
     if (!rh_ai_actions_enabled()) {
@@ -192,12 +192,12 @@ function rh_ai_action_problem(array $user, string $key): string
         $need[] = $pagePerm;
     }
     foreach (array_unique($need) as $p) {
-        if (!hasPermission($uid, $p)) {
+        if (!rh_ai_has_perm($uid, $p)) {
             return "That's outside what your account can do.";
         }
     }
     $mod = function_exists('getModuleForPage') ? getModuleForPage($page) : null;
-    if ($mod !== null && function_exists('rh_module_key_enabled') && !rh_module_key_enabled($mod)) {
+    if ($mod !== null && function_exists('rh_module_key_enabled') && !rh_ai_module_on($mod)) {
         return 'That part of the system is switched off.';
     }
     if (!empty($def['gate']) && !call_user_func($def['gate'], $user)) {

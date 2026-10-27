@@ -9,7 +9,7 @@
  *    time (figure_from runs the same read tool), so the set never goes stale.
  *  - A run asks each question as the system's first active administrator through the normal chat path
  *    (rh_ai_turn: same routing, tools, vault and reply-check), with "eval mode" on: the tokens count
- *    against the monthly limit (user 0), never against a person's daily allowance, and nothing is learned
+ *    in the hotel's monthly cost (user 0), never against a person's daily allowance, and nothing is learned
  *    from it. Cards a question prepares are expired at once; the run's chats are archived and their
  *    privacy vault removed. Questions that need a model are skipped when none can be used.
  *  - Every run is logged to ai_eval_runs with the pass rate and tokens per answer. Without migration 072
@@ -99,7 +99,7 @@ function rh_ai_system_user(PDO $db): ?array
     }
 }
 
-/** Can model questions run now? (a chosen model, cloud providers on, a key, monthly limit not reached) */
+/** Can model questions run now? (a chosen model, cloud providers on, a key) */
 function rh_ai_eval_model_ready(PDO $db): bool
 {
     $m = rh_ai_role_models($db);
@@ -112,8 +112,7 @@ function rh_ai_eval_model_ready(PDO $db): bool
     if (rh_ai_get_key((string)$m['provider'], $db) === '' && rh_ai_fake_name() === '' && !is_callable($GLOBALS['__rh_ai_transport'] ?? null)) {
         return false;
     }
-    $budget = rh_ai_monthly_budget_usd();
-    return $budget <= 0 || rh_ai_month_spent($db) < $budget;
+    return true; // the monthly figure is an aim, never a stop
 }
 
 /** A value inside a nested array by dotted path ("arrivals.total"). */
@@ -239,6 +238,13 @@ function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
     $prevOverride = $GLOBALS['__rh_ai_role_override'] ?? null;
     if (!empty($opt['role_override'])) {
         $GLOBALS['__rh_ai_role_override'] = (array)$opt['role_override'];
+    } elseif ($kind !== 'upgrade') {
+        // Owner 2026-10-28 ($5 a month): the daily and weekly checks run on the Fast model only. The model-upgrade
+        // check is the one exception (it compares the role's own models).
+        $m0 = rh_ai_role_models($db);
+        if (!empty($m0['fast'])) {
+            $GLOBALS['__rh_ai_role_override'] = ['primary' => $m0['fast']];
+        }
     }
     $models = rh_ai_role_models($db);
     $out['model'] = (string)(($models['primary']['model_id'] ?? '') ?: ($models['fast']['model_id'] ?? ''));

@@ -153,8 +153,8 @@ return [
         foreach ([
             'ai_enabled'              => '0',
             'ai_provider'             => '',
-            'ai_user_daily_token_cap' => '200000',
-            'ai_monthly_budget_usd'   => '20',
+            'ai_user_daily_token_cap' => '2000000',
+            'ai_monthly_budget_usd'   => '5', // the monthly aim (owner 2026-10-28), never a stop
             'ai_rate_limit_per_10min' => '30',
             'ai_retention_days'       => '0',
         ] as $k => $v) {

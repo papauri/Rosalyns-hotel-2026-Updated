@@ -4,7 +4,7 @@ Use this only if Claude Code runs out of usage. Read this file first, then only 
 below (offset reads — never read big files whole). Keep `.claude/TASKS.md` "Open" up to date as you go.
 
 ## Where things stand (update this block after every ship)
-- Phases 0–5 shipped to both hotels (2026-10-28, commit "AI Assistant Phase 4c+5"). AI Assistant feature complete —
+- Phases 0–5 + speed/cost patch shipped to both hotels (2026-10-28; Liwonde 0ce288a). AI Assistant feature complete —
   nothing else to patch. Only reported faults or owner-asked features from here.
 - Liwonde: 073 applied; owner's Gemini key saved encrypted (live tests only, Assistant OFF; models 3.8 Flash /
   3.6 Flash / 3.5 Flash-Lite). Owner left: live-key dress rehearsal (plan "Verification", last bullet).

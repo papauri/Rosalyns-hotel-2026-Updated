@@ -114,9 +114,9 @@ function rh_ai_enabled(?PDO $db = null): bool
         return false;
     }
     if (trim((string)($row['paused'] ?? '')) !== '') {
-        // A pause for this month's spending limit lifts itself when the month changes (the limit counts
-        // from the 1st). Every other automatic pause waits for a person (master switch on, or ai-kill.php on).
-        if ((string)($row['paused_kind'] ?? '') === 'budget' && (string)($row['paused_month'] ?? '') !== '' && (string)$row['paused_month'] !== date('Y-m')) {
+        // Spending never pauses the Assistant any more (owner 2026-10-28: the monthly figure is an aim). A pause left
+        // by the old monthly limit lifts itself at once. Every other automatic pause waits for a person.
+        if ((string)($row['paused_kind'] ?? '') === 'budget') {
             try {
                 $db->prepare("UPDATE site_settings SET setting_value = '' WHERE setting_key IN ('ai_paused_reason', 'ai_paused_kind', 'ai_paused_month')")->execute();
                 rh_ai_settings($db, true);
@@ -153,8 +153,8 @@ function rh_ai_setting_defaults(): array
     return [
         'ai_enabled'              => '0',
         'ai_provider'             => '',
-        'ai_user_daily_token_cap' => '200000',
-        'ai_monthly_budget_usd'   => '20',
+        'ai_user_daily_token_cap' => '2000000', // a runaway-loop guard only; normal heavy use never reaches it
+        'ai_monthly_budget_usd'   => '5', // the monthly AIM in US$ (owner 2026-10-28): shown as information, never a stop
         'ai_rate_limit_per_10min' => '30',
         'ai_turn_token_cap'       => '60000',
         'ai_retention_days'       => '0',
@@ -163,8 +163,8 @@ function rh_ai_setting_defaults(): array
         // Phase 4b - learning loop + self-healing (kill-switch layer 4: learning frozen / cloud providers off)
         'ai_learning_enabled'     => '1',
         'ai_cloud_enabled'        => '1',
-        'ai_paused_kind'          => '',  // budget | actions | eval | cli (who paused it)
-        'ai_paused_month'         => '',  // Y-m of a budget pause (it lifts itself next month)
+        'ai_paused_kind'          => '',  // actions | eval | cli (who paused it); spending never pauses it
+        'ai_paused_month'         => '',  // no longer used (spending never pauses it)
         'ai_feature_state'        => 'learning', // learning -> complete (completion guardrail)
         'ai_feature_state_at'     => '',
         'ai_feature_state_note'   => '',
@@ -183,7 +183,7 @@ function rh_ai_setting_defaults(): array
         'ai_idle_lock_minutes'    => '15', // the panel locks after this many minutes without portal use (0 = never)
         'ai_digest_enabled'       => '1',  // weekly digest email (each person can opt out in their reply settings)
         'ai_digest_sent_week'     => '',   // ISO week (o-W) of the last digest sent
-        'ai_budget_warned'        => '',   // Y-m:80 / Y-m:100 - the budget notice already given this month
+        'ai_swarm_models'         => '0',  // '1' = department leads answer with their own model calls (several calls a question; off to keep to the monthly aim)
     ];
 }
 
@@ -221,13 +221,13 @@ function rh_ai_setting(string $key, string $default = ''): string
 /** Daily token cap per person (tokens in + out). */
 function rh_ai_daily_token_cap(): int
 {
-    return max(0, (int)rh_ai_setting('ai_user_daily_token_cap', '200000'));
+    return max(0, (int)rh_ai_setting('ai_user_daily_token_cap', '2000000'));
 }
 
 /** Monthly estimated-cost cap in US dollars. */
 function rh_ai_monthly_budget_usd(): float
 {
-    return max(0.0, (float)rh_ai_setting('ai_monthly_budget_usd', '20'));
+    return max(0.0, (float)rh_ai_setting('ai_monthly_budget_usd', '5'));
 }
 
 /** Most tokens (in + out, every model call: lead, specialists, merge) one question may use. */

@@ -32,10 +32,7 @@
                 {"id": "gemini-3.8-flash",       "label": "Gemini 3.8 Flash",        "rank": 92,  "context_tokens": 1048576, "price_in": 0.75, "price_out": 3.75,  "released_at": null, "verified": true, "note": "Rises to 1.50 / 7.50 on 1 Jan 2027"},
                 {"id": "gemini-3.6-flash",       "label": "Gemini 3.6 Flash",        "rank": 90,  "context_tokens": 1048576, "price_in": 0.75, "price_out": 3.75,  "released_at": null, "verified": true, "note": "Rises to 1.50 / 7.50 on 1 Jan 2027"},
                 {"id": "gemini-3.5-flash-lite",  "label": "Gemini 3.5 Flash-Lite",   "rank": 86,  "context_tokens": 1048576, "price_in": 0.30, "price_out": 2.50,  "released_at": null, "verified": true},
-                {"id": "gemini-3.1-flash-lite",  "label": "Gemini 3.1 Flash-Lite",   "rank": 84,  "context_tokens": 1048576, "price_in": 0.25, "price_out": 1.50,  "released_at": null, "verified": true},
-                {"id": "gemini-2.5-pro",        "label": "Gemini 2.5 Pro",        "rank": 80, "context_tokens": 1048576, "price_in": 1.25, "price_out": 10,   "released_at": null, "verified": false, "note": "Price for prompts up to 200K tokens"},
-                {"id": "gemini-2.5-flash",      "label": "Gemini 2.5 Flash",      "rank": 75, "context_tokens": 1048576, "price_in": 0.30, "price_out": 2.50, "released_at": null, "verified": false},
-                {"id": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash-Lite", "rank": 70, "context_tokens": 1048576, "price_in": 0.10, "price_out": 0.40, "released_at": null, "verified": false}
+                {"id": "gemini-3.1-flash-lite",  "label": "Gemini 3.1 Flash-Lite",   "rank": 84,  "context_tokens": 1048576, "price_in": 0.25, "price_out": 1.50,  "released_at": null, "verified": true}
             ]
         },
         "xai": {

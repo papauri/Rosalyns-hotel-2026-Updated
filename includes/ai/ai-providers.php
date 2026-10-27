@@ -331,7 +331,10 @@ function rh_ai_ping(string $provider, string $key, string $modelId): array
             break;
         case 'google':
             $url  = $req['base'] . '/models/' . rawurlencode($modelId) . ':generateContent';
-            $body = ['contents' => [['role' => 'user', 'parts' => [['text' => $prompt]]]], 'generationConfig' => ['maxOutputTokens' => 5]];
+            $body = ['contents' => [['role' => 'user', 'parts' => [['text' => $prompt]]]], 'generationConfig' => ['maxOutputTokens' => 16]];
+            if (($tc = rh_ai_gemini_thinking($modelId, 'minimal')) !== null) {
+                $body['generationConfig']['thinkingConfig'] = $tc; // a ping never thinks (owner 2026-10-28: a 16 s test was too slow)
+            }
             break;
         case 'openai':
             $url  = $req['base'] . '/chat/completions';
@@ -342,8 +345,14 @@ function rh_ai_ping(string $provider, string $key, string $modelId): array
             $body = ['model' => $modelId, 'max_tokens' => 5, 'messages' => [['role' => 'user', 'content' => $prompt]]];
     }
     $r = rh_ai_http('POST', $url, $req['headers'], json_encode($body), 30);
+    if ($provider === 'google' && $r['http'] === 400 && isset($body['generationConfig']['thinkingConfig']) && stripos($r['body'], 'thinking') !== false) {
+        unset($body['generationConfig']['thinkingConfig']); // a model that does not take this thinking setting: once more without it
+        $r2 = rh_ai_http('POST', $url, $req['headers'], json_encode($body), 30);
+        $r2['ms'] += $r['ms'];
+        $r = $r2;
+    }
     if ($r['http'] < 200 || $r['http'] >= 300) {
-        return ['ok' => false, 'ms' => $r['ms'], 'message' => rh_ai_http_problem($r, $key), 'reply' => ''];
+        return ['ok' => false, 'ms' => $r['ms'], 'message' => rh_ai_http_problem($r, $key), 'reply' => '', 'http' => $r['http']];
     }
     $j = json_decode($r['body'], true);
     $reply = '';
@@ -534,10 +543,12 @@ function rh_ai_gemini_schema(array $s): array
 /**
  * Build the provider request. $req (normalised):
  *   provider, model, key, system_frozen, system_user (cached too), system_volatile, messages[], tools[],
- *   max_tokens, effort (low|medium|high), drop_optional (leave out effort settings after a 400).
+ *   max_tokens, effort (minimal|low|medium|high), drop_optional (leave out effort / thinking settings after a 400).
  * messages: {role:user, content} | {role:assistant, content, tool_calls[{id,name,args}]} |
  *           {role:tool, tool_call_id, name, content (JSON string)}
- * Nothing here ever adds temperature/top_p/top_k, a "thinking" block, budget_tokens or a forced tool_choice.
+ * Nothing here ever adds temperature/top_p/top_k, an Anthropic "thinking" block, budget_tokens or a forced tool_choice.
+ * Gemini gets generationConfig.thinkingConfig for its family (rh_ai_gemini_thinking): the lowest level on the Fast
+ * role and short replies, low on Primary (owner 2026-10-28: "super swift").
  * @return array{url:string, headers:array, body:array}
  */
 function rh_ai_build_request(array $req, bool $responsesApi = false): array
@@ -551,7 +562,8 @@ function rh_ai_build_request(array $req, bool $responsesApi = false): array
     $tools = array_values((array)($req['tools'] ?? []));
     usort($tools, static fn($a, $b) => strcmp((string)$a['name'], (string)$b['name'])); // deterministic = cacheable
     $max = max(16, (int)($req['max_tokens'] ?? 1024));
-    $effort = in_array(($req['effort'] ?? ''), ['low', 'medium', 'high'], true) ? (string)$req['effort'] : 'low';
+    $effort = in_array(($req['effort'] ?? ''), ['minimal', 'low', 'medium', 'high'], true) ? (string)$req['effort'] : 'low';
+    $effortStd = $effort === 'minimal' ? 'low' : $effort; // providers without a "minimal" level get their lowest
     $optional = empty($req['drop_optional']);
     $msgs = (array)($req['messages'] ?? []);
     $adapter = rh_ai_adapter($provider);
@@ -611,14 +623,14 @@ function rh_ai_build_request(array $req, bool $responsesApi = false): array
             $body['tool_choice'] = ['type' => 'auto'];
         }
         if ($optional) {
-            $body['output_config'] = ['effort' => $effort];
+            $body['output_config'] = ['effort' => $effortStd];
         }
         return ['url' => $conn['base'] . '/messages', 'headers' => $conn['headers'], 'body' => $body];
     }
 
     if ($adapter === 'gemini') {
         $sys = [];
-        foreach ([$frozen, $userBlock, $volatile] as $s) {
+        foreach ([$frozen, $userBlock] as $s) { // the stable prefix, identical every call (Gemini implicit caching)
             if ($s !== '') {
                 $sys[] = ['text' => $s];
             }
@@ -657,9 +669,28 @@ function rh_ai_build_request(array $req, bool $responsesApi = false): array
             }
             $contents[] = ['role' => 'user', 'parts' => [['text' => (string)$m['content']]]];
         }
-        $body = ['contents' => $contents, 'generationConfig' => ['maxOutputTokens' => $max]];
+        if ($volatile !== '') { // date, screen and route note: after the cached prefix, in front of this turn's question
+            $vi = -1;
+            for ($i = count($contents) - 1; $i >= 0; $i--) {
+                if ($contents[$i]['role'] === 'user' && isset($contents[$i]['parts'][0]['text'])) {
+                    $vi = $i;
+                    break;
+                }
+            }
+            if ($vi >= 0) {
+                array_unshift($contents[$vi]['parts'], ['text' => $volatile]);
+            } else {
+                array_unshift($contents, ['role' => 'user', 'parts' => [['text' => $volatile]]]);
+            }
+        }
+        $body = [];
         if ($sys) {
             $body['systemInstruction'] = ['parts' => $sys];
+        }
+        $body['contents'] = $contents;
+        $body['generationConfig'] = ['maxOutputTokens' => $max];
+        if ($optional && ($tc = rh_ai_gemini_thinking($model, $effort)) !== null) {
+            $body['generationConfig']['thinkingConfig'] = $tc;
         }
         if ($tools) {
             $decl = [];
@@ -702,7 +733,7 @@ function rh_ai_build_request(array $req, bool $responsesApi = false): array
             }
         }
         if ($optional) {
-            $body['reasoning'] = ['effort' => $effort];
+            $body['reasoning'] = ['effort' => $effortStd];
         }
         return ['url' => $conn['base'] . '/responses', 'headers' => $conn['headers'], 'body' => $body];
     }
@@ -741,7 +772,7 @@ function rh_ai_build_request(array $req, bool $responsesApi = false): array
         $body['tool_choice'] = 'auto';
     }
     if ($optional && $provider === 'openai' && preg_match('/^(gpt-5|o\d)/', $model)) {
-        $body['reasoning_effort'] = $effort;
+        $body['reasoning_effort'] = $effortStd;
     }
     return ['url' => $conn['base'] . '/chat/completions', 'headers' => $conn['headers'], 'body' => $body];
 }
@@ -893,8 +924,13 @@ function rh_ai_chat(array $req): array
             return ['http' => $r['http'], 'ms' => $ms, 'retryable' => false, 'model_missing' => false, 'provider' => $provider, 'model' => $model] + $p;
         }
         $lower = strtolower($r['body']);
-        // A 400 about an optional setting (effort): send once more without it.
-        if ($r['http'] === 400 && empty($req['drop_optional']) && preg_match('/output_config|effort|reasoning/', $lower)) {
+        // A Gemini model that does not take the lowest thinking level: once more at "low" (never back to its slow default).
+        if ($r['http'] === 400 && empty($req['drop_optional']) && ($req['effort'] ?? '') === 'minimal' && strpos($lower, 'thinking') !== false) {
+            $req['effort'] = 'low';
+            continue;
+        }
+        // A 400 about an optional setting (effort / thinking): send once more without it.
+        if ($r['http'] === 400 && empty($req['drop_optional']) && preg_match('/output_config|effort|reasoning|thinking/', $lower)) {
             $req['drop_optional'] = true;
             continue;
         }
@@ -1001,6 +1037,49 @@ function rh_ai_chat_multi(array $reqs, ?string $fallbackModel = null): array
         $ordered[$k] = $out[$k] ?? rh_ai_chat_resilient($req, $fallbackModel);
     }
     return $ordered;
+}
+
+/**
+ * Gemini thinking setting for one model and effort (null = send none). Gemini 3 and later take thinkingLevel
+ * (minimal | low | medium | high; Pro models start at low); Gemini 2.5 takes thinkingBudget in tokens (0 = off on
+ * Flash / Flash-Lite, 128 is the least a Pro model accepts). Older models and Gemma take nothing.
+ */
+function rh_ai_gemini_thinking(string $model, string $effort): ?array
+{
+    $id = strtolower((string)preg_replace('#^models/#', '', $model));
+    if (!preg_match('/^gemini-(\d+(?:\.\d+)?)/', $id, $m)) {
+        return null;
+    }
+    $ver = (float)$m[1];
+    $pro = strpos($id, '-pro') !== false;
+    $effort = in_array($effort, ['minimal', 'low', 'medium', 'high'], true) ? $effort : 'low';
+    if ($ver >= 3) {
+        if ($pro && $effort === 'minimal') {
+            $effort = 'low';
+        } elseif ($pro && $effort === 'medium') {
+            $effort = 'high';
+        }
+        return ['thinkingLevel' => $effort];
+    }
+    if ($ver >= 2.5) {
+        return ['thinkingBudget' => ['minimal' => $pro ? 128 : 0, 'low' => 512, 'medium' => 2048, 'high' => 8192][$effort]];
+    }
+    return null;
+}
+
+/**
+ * Input tokens a normalised request will cost, estimated from the body that would be sent (about 3.7 bytes a
+ * token for this JSON, measured on Gemini). Used to keep each answer inside its token budget before it is sent.
+ */
+function rh_ai_estimate_tokens(array $req): int
+{
+    $req['key'] = (string)($req['key'] ?? '') !== '' ? $req['key'] : 'x';
+    try {
+        $built = rh_ai_build_request($req, !empty($req['responses_api']));
+    } catch (Throwable $e) {
+        return 0;
+    }
+    return (int)ceil(strlen((string)json_encode($built['body'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) / 3.7);
 }
 
 /** Estimated cost in US dollars (cache reads at 10%, cache writes at 125% of the input price). */

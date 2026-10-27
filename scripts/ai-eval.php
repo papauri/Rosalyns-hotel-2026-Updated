@@ -3,12 +3,13 @@
  * Nightly: the Assistant's fixed question set (.claude/AI_ASSISTANT_PLAN.md "Local eval set",
  * "Continuous train & test + completion guardrail", Phase 4b).
  *
- *   php scripts/ai-eval.php           the full set (includes/ai/evals.json + regression questions added from
- *                                     fixed faults); counts as the day's run for the completion guardrail
+ *   php scripts/ai-eval.php           the day's check: the 5 key questions, or the full set (includes/ai/evals.json +
+ *                                     regression questions from fixed faults) when it has not run for 7 days;
+ *                                     on the Fast model; counts as the day's run for the completion guardrail
  *   php scripts/ai-eval.php --smoke   only the 5 key questions (below the threshold the Assistant pauses itself)
  *
  * Answers come from the hotel's own data at run time; every run is logged to ai_eval_runs with the pass rate
- * and tokens per answer. Optional: the full set runs on the first admin page load of the day when it has not
+ * and tokens per answer. Optional: the day's check runs on the first admin page load of the day when it has not
  * run for 24 hours, so cron is not needed. Exits straight away, without any network call, when the Assistant
  * is off.
  *

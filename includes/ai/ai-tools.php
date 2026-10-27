@@ -24,8 +24,60 @@ require_once __DIR__ . '/ai-extras.php';   // Phases 4c + 5: password on risky c
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
 }
+if (!defined('RH_AI_LIST_TOP')) {
+    define('RH_AI_LIST_TOP', 10);       // rows of any one list the model sees per page ("and N more"; page 2 for the next 10)
+}
+if (!defined('RH_AI_TEXT_CHARS')) {
+    define('RH_AI_TEXT_CHARS', 1000);   // one free-text field (a guest note, a review) the model sees; guide text excepted
+}
 if (!defined('RH_AI_TOOL_BYTES')) {
-    define('RH_AI_TOOL_BYTES', 7000);   // size cap of one tool result sent to the model
+    define('RH_AI_TOOL_BYTES', 7000);   // size cap of one tool result kept as evidence
+}
+
+// ── Per-answer memo (owner 2026-10-28: "super swift") ─────────────────────────
+// One answer checks the same permission keys and tool list dozens of times (about 60 database reads each
+// time). Inside rh_ai_turn() they are read once; permissions cannot change in the middle of one answer.
+// Outside a turn (confirming a card, the settings page, tests between steps) every check reads the database.
+
+function rh_ai_memo_begin(): void
+{
+    $GLOBALS['__rh_ai_memo'] = ['perm' => [], 'mod' => [], 'tools' => []];
+}
+
+function rh_ai_memo_end(): void
+{
+    unset($GLOBALS['__rh_ai_memo']);
+}
+
+/** hasPermission(), read once per answer inside a turn. */
+function rh_ai_has_perm(int $uid, string $key): bool
+{
+    if (!function_exists('hasPermission')) {
+        return false;
+    }
+    if (!isset($GLOBALS['__rh_ai_memo']['perm'])) {
+        return (bool)hasPermission($uid, $key);
+    }
+    $k = $uid . '|' . $key;
+    if (!array_key_exists($k, $GLOBALS['__rh_ai_memo']['perm'])) {
+        $GLOBALS['__rh_ai_memo']['perm'][$k] = (bool)hasPermission($uid, $key);
+    }
+    return $GLOBALS['__rh_ai_memo']['perm'][$k];
+}
+
+/** rh_module_key_enabled(), read once per answer inside a turn. */
+function rh_ai_module_on(string $m): bool
+{
+    if (!function_exists('rh_module_key_enabled')) {
+        return true;
+    }
+    if (!isset($GLOBALS['__rh_ai_memo']['mod'])) {
+        return (bool)rh_module_key_enabled($m);
+    }
+    if (!array_key_exists($m, $GLOBALS['__rh_ai_memo']['mod'])) {
+        $GLOBALS['__rh_ai_memo']['mod'][$m] = (bool)rh_module_key_enabled($m);
+    }
+    return $GLOBALS['__rh_ai_memo']['mod'][$m];
 }
 
 function rh_ai_tool_registry(): array
@@ -200,13 +252,13 @@ function rh_ai_tool_allowed(array $user, string $name, ?array $def = null): bool
 {
     $def = $def ?? (rh_ai_tool_registry()[$name] ?? null);
     $uid = (int)($user['id'] ?? 0);
-    if ($def === null || $uid <= 0 || !function_exists('hasPermission') || !hasPermission($uid, 'ai_assistant_use')) {
+    if ($def === null || $uid <= 0 || !function_exists('hasPermission') || !rh_ai_has_perm($uid, 'ai_assistant_use')) {
         return false;
     }
     if ($def['perm']) {
         $ok = false;
         foreach ($def['perm'] as $p) {
-            if (hasPermission($uid, $p)) {
+            if (rh_ai_has_perm($uid, $p)) {
                 $ok = true;
                 break;
             }
@@ -218,7 +270,7 @@ function rh_ai_tool_allowed(array $user, string $name, ?array $def = null): bool
     if ($def['module']) {
         $ok = false;
         foreach ($def['module'] as $m) {
-            if (function_exists('rh_module_key_enabled') ? rh_module_key_enabled($m) : true) {
+            if (rh_ai_module_on($m)) {
                 $ok = true;
                 break;
             }
@@ -236,6 +288,10 @@ function rh_ai_tool_allowed(array $user, string $name, ?array $def = null): bool
 /** The tools this person may use, sorted by name (deterministic for prompt caching). */
 function rh_ai_tools_for_user(array $user): array
 {
+    $uid = (int)($user['id'] ?? 0);
+    if (isset($GLOBALS['__rh_ai_memo']['tools'][$uid])) {
+        return $GLOBALS['__rh_ai_memo']['tools'][$uid];
+    }
     $out = [];
     foreach (rh_ai_tool_registry() as $name => $def) {
         if (rh_ai_tool_allowed($user, $name, $def)) {
@@ -243,7 +299,110 @@ function rh_ai_tools_for_user(array $user): array
         }
     }
     ksort($out);
+    if (isset($GLOBALS['__rh_ai_memo']['tools'])) {
+        $GLOBALS['__rh_ai_memo']['tools'][$uid] = $out;
+    }
     return $out;
+}
+
+/**
+ * A tool spec as sent to the model in a chat turn: the first sentence of its description (an action card keeps
+ * two) and short argument notes. The rules behind the long wording live once in the system prompt.
+ */
+function rh_ai_spec_compact(array $sp): array
+{
+    $d = trim((string)($sp['description'] ?? ''));
+    $isCard = strpos((string)($sp['name'] ?? ''), 'propose_') === 0;
+    if (preg_match($isCard ? '/^(.{20,}?[.!?](?:\s.{10,}?[.!?])?)(\s|$)/us' : '/^(.{20,}?[.!?])(\s|$)/us', $d, $m)) {
+        $d = $m[1];
+    }
+    $cap = $isCard ? 220 : 130;
+    if (mb_strlen($d) > $cap) {
+        $d = mb_substr($d, 0, $cap - 3) . '...';
+    }
+    $sp['description'] = $d;
+    $sp['schema'] = rh_ai_schema_compact((array)($sp['schema'] ?? []));
+    return $sp;
+}
+
+/** Argument notes in a schema cut to 60 characters (types, enums and limits stay). */
+function rh_ai_schema_compact(array $s): array
+{
+    foreach ($s as $k => $v) {
+        if ($k === 'description' && is_string($v) && mb_strlen($v) > 60) {
+            $s[$k] = mb_substr($v, 0, 57) . '...';
+        } elseif (is_array($v)) {
+            $s[$k] = rh_ai_schema_compact($v);
+        }
+    }
+    return $s;
+}
+
+/**
+ * What one tool result sends to the model (owner 2026-10-28: compact facts, nothing the answer needs is cut): empty
+ * values (null, "", []) are left out and figures rounded to 2 places; every row and every word stays. The full
+ * result also stays local as the evidence the reply-check uses.
+ */
+function rh_ai_model_view($data, string $tool = ''): string
+{
+    $trim = static function ($v) use (&$trim) {
+        if (is_array($v)) {
+            $isList = $v === [] || array_keys($v) === range(0, count($v) - 1);
+            $out = [];
+            foreach ($v as $k => $x) {
+                $x = $trim($x);
+                if (!$isList && ($x === null || $x === '' || $x === [])) {
+                    continue;
+                }
+                $out[$k] = $x;
+            }
+            return $isList ? array_values($out) : $out;
+        }
+        if (is_float($v)) {
+            return round($v, 2);
+        }
+        return $v;
+    };
+    return rh_ai_compact_json(is_array($data) ? $trim($data) : $data);
+}
+
+/**
+ * Owner 2026-10-28: "$5 or less a month regardless of hotel db size". What a lookup sends the model must not grow with
+ * the number of bookings, guests, rooms or stock items: every list is the top RH_AI_LIST_TOP rows of the page asked for,
+ * followed by "and N more" (the model can ask for the next page or a narrower filter), and one free-text field is at
+ * most RH_AI_TEXT_CHARS characters. Counts and totals are untouched. Guide text is fixed-size already and is left whole.
+ */
+function rh_ai_bound_result($data, string $tool = '', int $page = 1)
+{
+    $guide = in_array($tool, ['summarise_guide', 'how_to', 'page_help'], true);
+    $page = max(1, $page);
+    $walk = static function ($v) use (&$walk, $guide, $page) {
+        if (is_array($v)) {
+            $isList = $v !== [] && array_keys($v) === range(0, count($v) - 1);
+            if ($isList && count($v) > RH_AI_LIST_TOP) {
+                $all = count($v);
+                $from = ($page - 1) * RH_AI_LIST_TOP;
+                $v = array_slice($v, $from, RH_AI_LIST_TOP);
+                $after = max(0, $all - $from - count($v));
+                $v = array_map($walk, $v);
+                $v[] = $after > 0 ? 'and ' . $after . ' more (ask for page ' . ($page + 1) . ' or a narrower filter)' : 'end of list (' . $all . ' in all)';
+                return $v;
+            }
+            return array_map($walk, $v);
+        }
+        if (!$guide && is_string($v) && mb_strlen($v) > RH_AI_TEXT_CHARS) {
+            return mb_substr($v, 0, RH_AI_TEXT_CHARS - 3) . '...';
+        }
+        return $v;
+    };
+    return $walk($data);
+}
+
+/** Lookups whose answer is a list long enough to page through ("page": 2 gives the next RH_AI_LIST_TOP rows). */
+function rh_ai_paged_tools(): array
+{
+    return ['search_bookings', 'arrivals_departures', 'in_house', 'room_board', 'balances_due', 'guest_history', 'money_leaks', 'inventory_watch',
+        'work_queues', 'events_pipeline', 'guest_voice', 'reply_queue', 'kitchen_tickets', 'restaurant_sales', 'upsell_finder', 'who_is_online', 'check_availability'];
 }
 
 /** Provider-ready tool list [{name, description, schema}] for this person. */
@@ -254,6 +413,9 @@ function rh_ai_tool_specs(array $user): array
         $schema = $def['schema'];
         if (isset($schema['properties']) && is_object($schema['properties'])) {
             $schema['properties'] = [];
+        }
+        if (in_array($name, rh_ai_paged_tools(), true)) {
+            $schema['properties']['page'] = ['type' => 'integer', 'minimum' => 1, 'maximum' => 20, 'description' => 'Next 10 of a long list'];
         }
         $specs[] = ['name' => $name, 'description' => $def['description'], 'schema' => $schema];
     }
@@ -395,7 +557,7 @@ function rh_ai_run_tool(PDO $db, array $user, int $conv, string $name, array $ar
     $def = rh_ai_tool_registry()[$name] ?? null;
     $fail = static function (string $msg) use ($db, $conv): array {
         $res = ['error' => $msg];
-        return ['ok' => false, 'result' => $res, 'json' => rh_ai_compact_json($res), 'raw' => $res, 'error' => $msg, 'cached' => false, 'links' => []];
+        return ['ok' => false, 'result' => $res, 'json' => rh_ai_compact_json($res), 'view' => rh_ai_compact_json($res), 'raw' => $res, 'error' => $msg, 'cached' => false, 'links' => []];
     };
     if ($def === null) {
         return $fail('There is no tool called ' . mb_substr($name, 0, 40) . '.');
@@ -403,6 +565,8 @@ function rh_ai_run_tool(PDO $db, array $user, int $conv, string $name, array $ar
     if (!rh_ai_tool_allowed($user, $name, $def)) {
         return $fail("That's outside what this account can see.");
     }
+    $page = max(1, min(20, (int)($args['page'] ?? 1))); // which 10 rows of a long list the model sees (not part of the lookup)
+    unset($args['page']);
     $args = rh_ai_vault_resolve_args($db, $conv, $args);
     [$ok, $clean] = rh_ai_tool_validate($def['schema'], $args);
     if (!$ok) {
@@ -437,7 +601,8 @@ function rh_ai_run_tool(PDO $db, array $user, int $conv, string $name, array $ar
     }
     unset($forModel['link'], $forModel['link_label'], $forModel['url']);
     $safe = rh_ai_vault_protect($db, $conv, $forModel);
-    return ['ok' => empty($raw['error']), 'result' => $safe, 'json' => rh_ai_compact_json($safe), 'raw' => $raw, 'error' => (string)($raw['error'] ?? ''), 'cached' => $cached, 'links' => $links];
+    $bounded = rh_ai_bound_result($safe, $name, $page); // fixed size whatever the size of the hotel's data
+    return ['ok' => empty($raw['error']), 'result' => $safe, 'json' => rh_ai_compact_json($bounded), 'view' => rh_ai_model_view($bounded, $name), 'raw' => $raw, 'error' => (string)($raw['error'] ?? ''), 'cached' => $cached, 'links' => $links];
 }
 
 // ── Helpers shared by handlers ───────────────────────────────────────────────

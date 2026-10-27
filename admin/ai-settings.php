@@ -152,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Daily limit per person: a whole number of tokens from 1,000 to 50,000,000.');
             }
             if (!is_numeric($budget) || (float)$budget < 1 || (float)$budget > 100000) {
-                throw new RuntimeException('Monthly cost limit: a number of US dollars from 1 to 100,000.');
+                throw new RuntimeException('Monthly aim: a number of US dollars from 1 to 100,000.');
             }
             if (!ctype_digit($rate) || (int)$rate < 1 || (int)$rate > 500) {
                 throw new RuntimeException('Messages per person in 10 minutes: a whole number from 1 to 500.');
@@ -432,15 +432,14 @@ if ($schemaReady) {
     rh_ai_notices_mark_seen($pdo, $uid); // opening this page counts as seeing the notices
 }
 $jobLabels = ['vault' => 'Privacy vault sweep', 'models' => 'Model list refresh', 'reflect' => 'Nightly review (lessons)', 'health' => 'Health check', 'eval' => 'Question set',
-    'audit' => 'Card record check', 'budget' => 'Budget notice', 'digest' => 'Weekly digest', 'retention' => 'Old chats removed'];
+    'audit' => 'Card record check', 'digest' => 'Weekly digest', 'retention' => 'Old chats removed'];
 $jobHelp = [
     'vault' => 'Removes the real names kept for chats of people whose session has ended (like signing out).',
     'models' => 'Checks each provider for newer models once a day and tries a newer one on the question set before using it.',
     'reflect' => 'Turns the day\'s mistakes and thumbs-up answers into short lessons and playbooks; scores notes.',
     'health' => 'A test call to the provider, every lookup run once with safe sample values, and the monthly budget.',
-    'eval' => 'The fixed questions with answers worked out from your own data; feeds the "complete" check.',
+    'eval' => 'Each day the 5 key questions, once a week the whole set (both on the Fast model, to keep cost low); answers worked out from your own data; feeds the "complete" check.',
     'audit' => 'Checks that no confirmed Assistant card was edited or deleted by hand since it was recorded.',
-    'budget' => 'Tells the people who manage these settings at 80% and 100% of the monthly limit.',
     'digest' => 'Once a week: a short email to people who manage Assistant Settings (each can switch it off).',
     'retention' => 'Removes Assistant chats, cards and logs older than "Keep chats for" (only when it is above 0).',
 ];
@@ -687,8 +686,8 @@ $fmtPrice = static function ($v): string {
                                 <th>Model</th>
                                 <th>Role <i class="help" data-tip="Primary answers questions and plans. Fast does short replies and routing. Fallback is used when Primary fails. Extra is kept ready.">?</i></th>
                                 <th>Context <i class="help" data-tip="How much text the model can read at once, in tokens (1 token is about 3/4 of a word). 1M = one million.">?</i></th>
-                                <th>Price in <i class="help" data-tip="US dollars per million tokens sent to the model. Used only to estimate cost on this page and for the monthly limit. Leave blank if unknown.">?</i></th>
-                                <th>Price out <i class="help" data-tip="US dollars per million tokens the model writes back. Used only for cost estimates and the monthly limit.">?</i></th>
+                                <th>Price in <i class="help" data-tip="US dollars per million tokens sent to the model. Used only to estimate cost on this page and against the monthly aim. Leave blank if unknown.">?</i></th>
+                                <th>Price out <i class="help" data-tip="US dollars per million tokens the model writes back. Used only for cost estimates and the monthly aim.">?</i></th>
                                 <th>Notes <i class="help" data-tip="Newest = most recently released in this list. New - set price = not in the built-in list; type its price from the provider's price page.">?</i></th>
                             </tr></thead>
                             <tbody>
@@ -744,12 +743,12 @@ $fmtPrice = static function ($v): string {
                     <div class="form-group">
                         <label for="ai_cap"><strong>Daily limit per person (tokens)</strong></label>
                         <input type="number" min="1000" max="50000000" step="1000" id="ai_cap" name="ai_user_daily_token_cap" class="form-control" value="<?php echo $h((int)$settings['ai_user_daily_token_cap']); ?>">
-                        <p class="help-text">Tokens read plus written per person per day. 200,000 is roughly a busy day of questions.</p>
+                        <p class="help-text">Tokens read plus written per person per day. Only a guard against a runaway loop: 2,000,000 is many times a very busy day, so normal use never reaches it.</p>
                     </div>
                     <div class="form-group">
-                        <label for="ai_budget"><strong>Monthly cost limit (US$)</strong></label>
+                        <label for="ai_budget"><strong>Monthly aim (US$)</strong></label>
                         <input type="number" min="1" max="100000" step="0.01" id="ai_budget" name="ai_monthly_budget_usd" class="form-control" value="<?php echo $h($settings['ai_monthly_budget_usd']); ?>">
-                        <p class="help-text">When the estimated cost this month reaches this, the Assistant pauses itself and tells the people who manage these settings.</p>
+                        <p class="help-text">What the Assistant aims to cost a month. It is shown next to this month's cost as information only: chat never pauses and nobody is warned when it is passed.</p>
                     </div>
                     <div class="form-group">
                         <label for="ai_rate"><strong>Messages per person in 10 minutes</strong></label>
@@ -991,7 +990,7 @@ $fmtPrice = static function ($v): string {
                 <div class="ai-stat">
                     <span class="ai-stat__label">Estimated cost this month <i class="help" data-tip="Sum of the estimated cost of every Assistant reply since the 1st of this month, from the prices in Models. Your provider's bill is the real figure.">?</i></span>
                     <span class="ai-stat__value">$<?php echo $h(number_format($monthCost, 2)); ?></span>
-                    <span class="ai-stat__sub">of $<?php echo $h(number_format((float)$settings['ai_monthly_budget_usd'], 2)); ?> monthly limit</span>
+                    <span class="ai-stat__sub">monthly aim $<?php echo $h(number_format((float)$settings['ai_monthly_budget_usd'], 2)); ?></span>
                 </div>
                 <p class="help-text"><a href="ai-usage.php"><i class="fas fa-chart-bar" aria-hidden="true"></i> Open the usage dashboard</a> - cost per answer, answers given without a model call, and totals by person, day and model.</p>
                 <?php if (!$usage): ?>

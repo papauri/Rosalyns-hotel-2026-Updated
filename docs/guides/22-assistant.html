@@ -49,7 +49,7 @@
       <li><a href="#switch">How to switch it on or off</a></li>
       <li><a href="#limits">How to set budgets and limits</a></li>
       <li><a href="#access">Who has access</a></li>
-      <li><a href="#usage">The usage dashboard and the monthly limit</a></li>
+      <li><a href="#usage">The usage dashboard and the monthly aim</a></li>
       <li><a href="#rules">Rules the system enforces</a></li>
       <li><a href="#problems">Problems and fixes</a></li>
     </ol>
@@ -109,7 +109,7 @@
   <p>The model that writes the answers runs at the provider chosen in Assistant Settings. Before anything is sent, guest and staff names, emails, phone numbers and booking references are swapped for codes such as [GUEST_3]; card, passport and ID numbers and addresses are removed. The answer comes back with the codes and the real names are put back on the hotel's own server, so the provider never learns who anyone is. Your chats are kept on the hotel's server.</p>
 
   <h3>Costs</h3>
-  <p>Quick lookups and their follow-ups, small talk, repeated questions within two minutes, off-topic and out-of-reach requests are answered on the hotel's server and cost nothing. The daily briefing is worked out on the server and costs one short reply. Everyday questions use the cheapest chosen model (<strong>Fast</strong>); only questions that need real thinking, such as <em>"How can we lift occupancy next month?"</em>, use the <strong>Primary</strong> model. Each person has a daily allowance and the hotel has a monthly cost limit (see <a href="#limits">budgets and limits</a>).</p>
+  <p>Quick lookups and their follow-ups, small talk, repeated questions within two minutes, off-topic and out-of-reach requests are answered on the hotel's server and cost nothing. The daily briefing is worked out on the server and costs one short reply. Everyday questions use the cheapest chosen model (<strong>Fast</strong>); only questions that need real thinking, such as <em>"How can we lift occupancy next month?"</em>, use the <strong>Primary</strong> model. Each person has a high daily allowance that only guards against a runaway loop, and the hotel has a monthly aim that is shown, never enforced (see <a href="#limits">budgets and limits</a>).</p>
 
   <h2 id="actions">Action cards: changes with one Confirm</h2>
   <p>For people who also have <strong>Confirm Assistant actions</strong>. Ask for a change in plain words, for example <em>"Check out room 12"</em>, <em>"Book the Deluxe Room 3 to 5 November for 2 adults"</em> or <em>"Add a deep clean for room 7 tomorrow"</em>. The Assistant prepares a card; nothing is changed until you tap <strong>Confirm</strong> on it.</p>
@@ -240,14 +240,13 @@
   <h3>When it pauses itself</h3>
   <p>It pauses itself, and tells the people who manage Assistant Settings with a small notice on any admin page, when:</p>
   <ul>
-    <li>this month's spending limit is reached (it starts again by itself on the 1st, or raise the limit and switch it back on);</li>
     <li>5 or more cards failed or were cancelled within one hour;</li>
     <li>its five key questions score below the <strong>Pause below</strong> setting in a daily check.</li>
   </ul>
   <p>While paused nobody can use it and nothing is sent to a provider. To resume, switch it on again on Assistant Settings. A lookup that keeps failing is switched off for one hour on its own (the rest keeps working) and is tried again after the hour.</p>
 
   <h3>Daily checks - no scheduled task needed</h3>
-  <p>After the first admin page load of each day by anyone signed in, the Assistant runs its checks in the background - nobody waits for them: it removes the real names kept for chats of people whose session has ended, checks for newer models once a day (a newer one is used only if it answers the question set at least as well and costs no more; <strong>Undo this model change</strong> puts the old one back), reviews the day's mistakes into short lessons, tests the provider and every lookup, and asks itself a fixed set of about 40 questions whose answers come from your own data. It also checks the sealed card record, sends the 80% or 100% monthly-limit notice, sends the weekly digest when due, and removes old Assistant records when <strong>Keep chats for</strong> is above 0. The results are on <strong>Assistant Settings &rarr; Learning and daily checks</strong>; <strong>Run the checks now</strong> runs them at once. The scripts in <code>scripts/ai-*.php</code> can also run from a scheduled task, but do not have to.</p>
+  <p>After the first admin page load of each day by anyone signed in, the Assistant runs its checks in the background - nobody waits for them: it removes the real names kept for chats of people whose session has ended, checks for newer models once a day (a newer one is used only if it answers the question set at least as well and costs no more; <strong>Undo this model change</strong> puts the old one back), reviews the day's mistakes into short lessons, tests the provider and every lookup, and asks itself a fixed set of about 40 questions whose answers come from your own data. It also checks the sealed card record, sends the weekly digest when due, and removes old Assistant records when <strong>Keep chats for</strong> is above 0. The results are on <strong>Assistant Settings &rarr; Learning and daily checks</strong>; <strong>Run the checks now</strong> runs them at once. The scripts in <code>scripts/ai-*.php</code> can also run from a scheduled task, but do not have to.</p>
 
   <h3>Switches</h3>
   <ul>
@@ -257,7 +256,7 @@
   </ul>
 
   <h3>When it says the feature is complete</h3>
-  <p>The status under <strong>Learning and daily checks</strong> counts clean days in a row. A clean day: the question set passes at the <strong>Pass rate needed</strong>, nothing that passed before now fails, no open faults, no new kind of problem, every lookup passes its self-test and it did not pause itself. After the set number of clean days (14 by default) it shows <em>"This feature is complete - there is nothing else to patch"</em> with the date and the evidence, stops writing new lessons, and keeps checking every night. If a check later finds a problem it goes back to learning by itself, writes up the fault and tells you. An administrator can also <strong>Mark complete by hand</strong> or <strong>Reopen</strong>.</p>
+  <p>The status under <strong>Learning and daily checks</strong> counts clean days in a row. Each day it asks its 5 key questions, and once a week the whole question set (both on the Fast model, so the checks cost very little). A clean day: the day's questions pass at the <strong>Pass rate needed</strong> (and the latest weekly run passed too), nothing that passed before now fails, no open faults, no new kind of problem, every lookup passes its self-test and it did not pause itself. After the set number of clean days (14 by default) it shows <em>"This feature is complete - there is nothing else to patch"</em> with the date and the evidence, stops writing new lessons, and keeps checking every day. If a check later finds a problem it goes back to learning by itself, writes up the fault and tells you. An administrator can also <strong>Mark complete by hand</strong> or <strong>Reopen</strong>.</p>
 
   <h2 id="screen">What is on the screen</h2>
   <table>
@@ -268,7 +267,7 @@
       <tr><td><strong>Models</strong></td><td>Before any key: the models known when this version was made, with prices. After a key passes the test: that provider's own current list, where you tick up to 5 and give each a role. Buttons <strong>Save models</strong> and <strong>Check for newer models</strong>.</td></tr>
       <tr><td><strong>Budgets and limits</strong></td><td><strong>Daily limit per person (tokens)</strong>, <strong>Monthly cost limit (US$)</strong>, <strong>Messages per person in 10 minutes</strong>, <strong>Keep chats for (days)</strong>, <strong>Most tokens for one question</strong> and <strong>Save limits</strong>.</td></tr>
       <tr><td><strong>Who has access</strong></td><td>Read-only list of the staff who may use the Assistant, and whether each may confirm its actions. The button <strong>Change on Staff &amp; Access</strong> opens the staff screen.</td></tr>
-      <tr><td><strong>Usage</strong></td><td>The estimated cost this month against the monthly limit, and the last 30 days per day, person and model.</td></tr>
+      <tr><td><strong>Usage</strong></td><td>The estimated cost this month next to the monthly aim, and the last 30 days per day, person and model.</td></tr>
     </tbody>
   </table>
   <p>Every column and card has a round <strong>?</strong> that explains what it shows.</p>
@@ -293,7 +292,7 @@
     <li>Click <strong>Save models</strong>. That provider becomes the one <strong>In use</strong>. Only one provider is used at a time.</li>
   </ol>
   <p><strong>Check for newer models</strong> reads the provider's list again. The system also does this once a day while the Assistant is on. Your chosen models and typed prices are never changed by it. <strong>Newest</strong> marks the most recently released model in the list.</p>
-  <p><strong>Cheapest models that still perform:</strong> once a day the Assistant checks each provider for newer models. Of the models that perform close to the best one (within 15 points of its rank), it suggests the three cheapest. Big models (such as Opus, Fable, Gemini Pro or Argon) are never suggested for chat. Prices come from each provider's own price page. A new model with no price is never used. It waits until someone types its price, and the people who manage Assistant Settings get a notice.</p>
+  <p><strong>Cheapest models that still perform:</strong> once a day the Assistant checks each provider for newer models. Of the models that perform close to the best one (within 15 points of its rank), it suggests the three cheapest. Big models (such as Opus, Fable, Gemini Pro or Argon) are never suggested for chat. Gemini 4 models are never listed, suggested, chosen or switched to (owner rule); use a Gemini 3 model such as Gemini 3.8 Flash. Prices come from each provider's own price page. A new model with no price is never used. It waits until someone types its price, and the people who manage Assistant Settings get a notice.</p>
 
   <h2 id="switch">How to switch it on or off</h2>
   <ol class="steps">
@@ -302,12 +301,12 @@
     <li>To stop it for everyone click <strong>Switch off</strong>.</li>
   </ol>
   <p>The Assistant is also listed on <strong>Settings</strong> &rarr; <strong>Modules</strong> under <strong>Staff Tools</strong>. It needs both switches on; switching either off hides the button for everyone at once.</p>
-  <p>Switching off never deletes chats, keys, models or limits; switching on again carries on where it was. The Assistant can also pause itself, for example when the monthly cost limit is reached; the line then starts <em>"Paused automatically:"</em> with the reason. Clicking <strong>Switch on</strong> again lifts the pause.</p>
+  <p>Switching off never deletes chats, keys, models or limits; switching on again carries on where it was. The Assistant can also pause itself, for example after 5 failed or cancelled cards in an hour (spending never pauses it); the line then starts <em>"Paused automatically:"</em> with the reason. Clicking <strong>Switch on</strong> again lifts the pause.</p>
 
   <h2 id="limits">How to set budgets and limits</h2>
   <ul>
-    <li><strong>Daily limit per person (tokens)</strong>: words read plus written per person per day, counted in tokens (a token is about three quarters of a word). 1,000 to 50,000,000. Default 200,000.</li>
-    <li><strong>Monthly cost limit (US$)</strong>: at 80% the people who manage Assistant Settings get a notice. At 100% they get another notice and the chat pauses until next month, or until you raise the limit and switch it back on. 1 to 100,000. Default 20.</li>
+    <li><strong>Daily limit per person (tokens)</strong>: words read plus written per person per day, counted in tokens (a token is about three quarters of a word). Only a guard against a runaway loop: normal heavy use never reaches it. If it is reached the person is told plainly; quick lookups still work. 1,000 to 50,000,000. Default 2,000,000.</li>
+    <li><strong>Monthly aim (US$)</strong>: what the Assistant aims to cost a month, whatever the size of the hotel's data. Shown next to this month's cost as information only: chat never pauses and nobody is warned. 1 to 100,000. Default 5.</li>
     <li><strong>Messages per person in 10 minutes</strong>: 1 to 500. Default 30.</li>
     <li><strong>Keep chats for (days)</strong>: 0 keeps chats; otherwise 7 to 3,650 days, and older chats are removed each night.</li>
     <li><strong>Most tokens for one question</strong>: all the work for one question together (the Assistant, up to three leads and the merged answer). 5,000 to 1,000,000. Default 60,000. When it is reached the Assistant stops and says so.</li>
@@ -315,7 +314,7 @@
     <li><strong>Lock the Assistant after (minutes without use)</strong>: 0 never locks; otherwise 5 to 240. Default 15. See <a href="#security">Password, lock and the card record</a>.</li>
     <li><strong>Weekly digest email</strong>: On or Off for everyone. Default On. See <a href="#digest">The weekly digest email</a>.</li>
   </ul>
-  <p><strong>Keep chats for</strong> above 0 also removes old Assistant cards, alerts, feedback, problem notes and usage rows older than that (this month's usage always stays, so the monthly limit stays right). It only ever touches the Assistant's own records - never bookings, money, stock or settings - and nothing at all while it is 0. What the Assistant has learned and the fault list are kept.</p>
+  <p><strong>Keep chats for</strong> above 0 also removes old Assistant cards, alerts, feedback, problem notes and usage rows older than that (this month's usage always stays, so this month's cost stays right). It only ever touches the Assistant's own records - never bookings, money, stock or settings - and nothing at all while it is 0. What the Assistant has learned and the fault list are kept.</p>
   <p>Click <strong>Save limits</strong>. You will see <em>"Limits saved."</em> Costs are estimates from the prices under Models; the provider's bill is the real figure.</p>
 
   <h2 id="access">Who has access</h2>
@@ -326,16 +325,18 @@
   </ol>
   <p><strong>Use the Assistant</strong> and <strong>Confirm Assistant actions</strong> are offered on Staff &amp; Access while the Assistant is switched on; people who already hold them keep them. The Assistant only ever sees and does what that person could already see and do on screen.</p>
 
-  <h2 id="usage">The usage dashboard and the monthly limit</h2>
+  <h2 id="usage">The usage dashboard and the monthly aim</h2>
   <p>Open <strong>Settings</strong> &rarr; <strong>Assistant Usage</strong> (needs the <strong>Assistant Usage</strong> permission), pick <strong>From</strong> and <strong>To</strong> and tap <strong>Show</strong>.</p>
   <ul>
-    <li><strong>This month's estimated cost</strong>: every reply since the 1st, against the monthly limit, with the percentage used.</li>
+    <li><strong>This month's estimated cost</strong>: every reply since the 1st, next to the monthly aim, with the percentage of it (information only).</li>
     <li><strong>Answers</strong>: replies in the chosen days, and how many needed a model.</li>
     <li><strong>Cost per answer</strong>: estimated cost divided by all answers.</li>
     <li><strong>Answered without a model</strong>: the share answered straight from the hotel's data (quick lookups, the briefing, repeated questions) at no cost. Higher is cheaper.</li>
+    <li><strong>Automatic checks a month</strong>: what the Assistant's own checks are expected to cost in a month (the 5 key questions each day, the whole set once a week, lessons and model checks), worked out from the last 4 weeks.</li>
     <li>Tables <strong>By person</strong>, <strong>By day</strong> and <strong>By model</strong>. <em>Nightly checks</em> is the Assistant testing itself.</li>
   </ul>
-  <p><strong>Monthly limit notices:</strong> at <strong>80%</strong> of the monthly limit the people who manage Assistant Settings get a notice in the portal. At <strong>100%</strong> they get another, and the chat pauses with the plain message <em>"The Assistant has paused itself: this month's spending limit ... was reached"</em> until the 1st, or until the limit is raised and the Assistant is switched back on. Assistant Settings also keeps a short usage table for the last 30 days.</p>
+  <p><strong>Keeping it cheap and quick:</strong> the monthly aim is <strong>US$5</strong> or less, whatever the size of the hotel's data: every lookup sends a fixed-size summary (counts, totals and the top 10 with "and N more"), never a list that grows with the bookings, guests or stock. Arrivals, departures, in house, room status, your access, the briefing and questions that are not about the hotel are answered straight from the hotel's data at no cost. Other questions go to the <strong>Fast</strong> model with only the lookups for that department; advice questions (such as lifting next month's occupancy) have their figures looked up first and get one <strong>Primary</strong> answer. Answers are never cut short to save tokens: an answer that uses more than 8,000 input tokens is only counted as <em>heavy</em> on the <strong>Answers</strong> card and noted in the system log. The Assistant looks things up at most 4 times for one question, and stops sooner when it would only repeat a lookup it has already made.</p>
+  <p><strong>The monthly aim is not a limit:</strong> passing it never pauses the chat and sends no notice. Assistant Settings also keeps a short usage table for the last 30 days.</p>
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>
@@ -365,8 +366,8 @@
       <tr><td><em>The Assistant is switched off.</em> in the chat</td><td>It was switched off while the chat was open.</td><td>Reload the page. Ask an administrator if you need it.</td></tr>
       <tr><td><em>That's outside what your account can see &mdash; a manager or admin can help with that.</em></td><td>The question needs a permission your account does not have (for example money or stock figures).</td><td>Ask a manager or admin, or ask <em>"What can I do here?"</em></td></tr>
       <tr><td><em>You have reached your daily Assistant allowance.</em></td><td>Your daily limit per person is used up.</td><td>Quick lookups still work. Everything else is back tomorrow, or an administrator can raise the limit.</td></tr>
-      <tr><td><em>The Assistant has reached this month's spending limit and has paused itself.</em></td><td>The monthly cost limit is reached.</td><td>It starts again on the 1st. Or an administrator raises the limit and switches it back on on Assistant Settings.</td></tr>
-      <tr><td><em>The Assistant has paused itself: ...</em> in the chat, or a notice card on admin pages</td><td>The monthly limit, 5 failed or cancelled cards in an hour, or a low score in the daily check (the reason is shown).</td><td>Read the reason on Assistant Settings, fix it, then switch it back on.</td></tr>
+      <tr><td><em>You have used today's Assistant allowance ...</em></td><td>The person's daily allowance (a runaway-loop guard) is used up.</td><td>Quick lookups still work; the rest is back tomorrow, or a manager raises the daily allowance on Assistant Settings.</td></tr>
+      <tr><td><em>The Assistant has paused itself: ...</em> in the chat, or a notice card on admin pages</td><td>5 failed or cancelled cards in an hour, or a low score in the daily check (the reason is shown).</td><td>Read the reason on Assistant Settings, fix it, then switch it back on.</td></tr>
       <tr><td><em>That information cannot be reached just now (this lookup is paused after repeated errors ...)</em></td><td>A lookup failed three times and was switched off for an hour.</td><td>Use the screen meanwhile. Check Assistant faults and forward the write-up as a PATCH.</td></tr>
       <tr><td><em>Cloud providers are switched off in Assistant Settings, so only quick local answers work.</em></td><td><strong>Cloud providers</strong> is Off under Learning and daily checks.</td><td>Switch it On if questions may go to the provider.</td></tr>
       <tr><td>No <strong>Was this right?</strong> buttons under answers</td><td>The database update for learning has not been run yet.</td><td>Ask whoever installs updates to run <code>php admin/migrations/migrate.php --run</code>.</td></tr>

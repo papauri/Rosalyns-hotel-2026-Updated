@@ -696,35 +696,7 @@ function rh_ai_t_rate_suggestions(PDO $db, array $user, array $a): array
     return $res;
 }
 
-// ══ 6. Budget notices (80 % / 100 %) ═════════════════════════════════════════════════════════════════════════
-
-/** Tell the ai_settings holders once a month at 80 % and at 100 % of the monthly limit. Returns '80', '100' or ''. */
-function rh_ai_budget_warn(PDO $db): string
-{
-    $budget = rh_ai_monthly_budget_usd();
-    if ($budget <= 0 || !function_exists('rh_ai_month_spent') || !function_exists('rh_ai_notify_settings')) {
-        return '';
-    }
-    $spent = rh_ai_month_spent($db);
-    $pct = $spent * 100 / $budget;
-    $month = date('Y-m');
-    $warned = (string)(rh_ai_settings($db, true)['ai_budget_warned'] ?? '');
-    if ($pct + 0.0001 >= 100) {
-        if ($warned !== $month . ':100') {
-            rh_ai_save_settings(['ai_budget_warned' => $month . ':100'], $db);
-            rh_ai_notify_settings($db, 'budget_100', 'The Assistant has used 100% of this month\'s limit (US$' . number_format($spent, 2) . ' of US$' . number_format($budget, 2) . '). Chat is paused until the 1st or until the limit is raised.');
-        }
-        return '100';
-    }
-    if ($pct + 0.0001 >= 80) {
-        if (strpos($warned, $month . ':') !== 0) {
-            rh_ai_save_settings(['ai_budget_warned' => $month . ':80'], $db);
-            rh_ai_notify_settings($db, 'budget_80', 'The Assistant has used 80% of this month\'s limit (US$' . number_format($spent, 2) . ' of US$' . number_format($budget, 2) . '). At 100% chat pauses until the 1st.');
-        }
-        return '80';
-    }
-    return '';
-}
+// ══ 6. (Budget notices removed: owner 2026-10-28, the monthly figure is an aim shown on the usage page) ══════
 
 // ══ 7. Weekly digest email ═══════════════════════════════════════════════════════════════════════════════════
 
@@ -868,7 +840,7 @@ function rh_ai_retention_run(PDO $db): array
             continue;
         }
         try {
-            if ($t === 'ai_usage_daily') { // this month's spending always stays (the monthly limit counts it)
+            if ($t === 'ai_usage_daily') { // this month's spending always stays (this month's cost counts it)
                 $st = $db->prepare("DELETE FROM `ai_usage_daily` WHERE `day` < LEAST(?, ?)");
                 $st->execute([substr($cut, 0, 10), $monthStart]);
             } elseif ($t === 'ai_messages' || $t === 'ai_vault') { // messages and names of removed chats go with them
@@ -898,7 +870,7 @@ function rh_ai_retention_run(PDO $db): array
 function rh_ai_usage_summary(PDO $db, string $from, string $to): array
 {
     $out = ['from' => $from, 'to' => $to, 'answers' => 0, 'local' => 0, 'model_answers' => 0, 'cost' => 0.0, 'tokens' => 0, 'requests' => 0,
-        'month_cost' => 0.0, 'budget' => rh_ai_monthly_budget_usd(), 'people' => [], 'days' => [], 'models' => []];
+        'month_cost' => 0.0, 'budget' => rh_ai_monthly_budget_usd(), 'people' => [], 'days' => [], 'models' => [], 'auto_month' => null, 'auto_days' => 0, 'heavy' => 0];
     try {
         $st = $db->prepare("SELECT COUNT(*) AS n, SUM(m.tokens_in + m.tokens_out = 0 AND m.agent IN ('local', 'cache', 'briefing')) AS local_n,
                                    SUM(m.tokens_in + m.tokens_out > 0) AS model_n
@@ -908,6 +880,10 @@ function rh_ai_usage_summary(PDO $db, string $from, string $to): array
         $out['answers'] = (int)($a['n'] ?? 0);
         $out['local'] = (int)($a['local_n'] ?? 0);
         $out['model_answers'] = (int)($a['model_n'] ?? 0);
+        // Efficiency (owner 2026-10-28: measured, never capped): answers that used more than 8,000 input tokens.
+        $st = $db->prepare("SELECT COUNT(*) FROM ai_messages WHERE role = 'assistant' AND tokens_in > ? AND created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)");
+        $st->execute([defined('RH_AI_EFFICIENCY_WARN_TOKENS') ? RH_AI_EFFICIENCY_WARN_TOKENS : 8000, $from, $to]);
+        $out['heavy'] = (int)$st->fetchColumn();
         $st = $db->prepare("SELECT COALESCE(SUM(cost_usd), 0), COALESCE(SUM(tokens_in + tokens_out), 0), COALESCE(SUM(requests), 0) FROM ai_usage_daily WHERE day BETWEEN ? AND ?");
         $st->execute([$from, $to]);
         [$c, $tk, $rq] = $st->fetch(PDO::FETCH_NUM) ?: [0, 0, 0];
@@ -915,6 +891,13 @@ function rh_ai_usage_summary(PDO $db, string $from, string $to): array
         $out['tokens'] = (int)$tk;
         $out['requests'] = (int)$rq;
         $out['month_cost'] = function_exists('rh_ai_month_spent') ? rh_ai_month_spent($db) : 0.0;
+        // Expected monthly cost of the automatic checks (daily key questions, weekly full set, lessons, model checks):
+        // what they cost in the last 4 weeks (at least a week counted), scaled to 30 days.
+        $ar = $db->query("SELECT COALESCE(SUM(cost_usd), 0) AS c, MIN(day) AS first_day FROM ai_usage_daily WHERE user_id = 0 AND day >= DATE_SUB(CURDATE(), INTERVAL 27 DAY)")->fetch(PDO::FETCH_ASSOC) ?: [];
+        if (!empty($ar['first_day'])) {
+            $out['auto_days'] = min(28, max(7, (int)floor((strtotime(date('Y-m-d')) - strtotime((string)$ar['first_day'])) / 86400) + 1));
+            $out['auto_month'] = (float)$ar['c'] * 30 / $out['auto_days'];
+        }
         $st = $db->prepare("SELECT d.user_id, COALESCE(NULLIF(u.full_name, ''), u.username, IF(d.user_id = 0, 'Nightly checks', CONCAT('User #', d.user_id))) AS person,
                                    SUM(d.requests) AS requests, SUM(d.tokens_in + d.tokens_out) AS tokens, SUM(d.cost_usd) AS cost
                             FROM ai_usage_daily d LEFT JOIN admin_users u ON u.id = d.user_id WHERE d.day BETWEEN ? AND ? GROUP BY d.user_id, person ORDER BY cost DESC LIMIT 100");

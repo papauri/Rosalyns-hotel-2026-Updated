@@ -236,7 +236,6 @@ function rh_ai_daily_run(PDO $db, bool $force = false): array
             'eval'    => static fn() => rh_ai_daily_eval($db),
             // Phases 4c + 5 (no cron needed): tamper check of confirmed cards, budget notices, weekly digest, retention
             'audit'     => static fn() => rh_ai_audit_report($db),
-            'budget'    => static fn() => ['ok' => true, 'note' => ($lvl = rh_ai_budget_warn($db)) !== '' ? $lvl . '% of the monthly limit used' : 'under 80% of the monthly limit'],
             'digest'    => static fn() => rh_ai_digest_run($db, false),
             'retention' => static fn() => rh_ai_retention_run($db),
         ];
@@ -375,7 +374,7 @@ function rh_ai_model_upgrade_check(PDO $db): array
         $fam = rh_ai_model_family((string)$cur['model_id']);
         $cand = null;
         foreach ($models as $m) {
-            if ((int)$m['is_selected'] === 0 && rh_ai_model_family((string)$m['model_id']) === $fam && (float)$m['capability_rank'] > (float)$curRow['capability_rank']
+            if ((int)$m['is_selected'] === 0 && !rh_ai_model_banned((string)$m['model_id']) && rh_ai_model_family((string)$m['model_id']) === $fam && (float)$m['capability_rank'] > (float)$curRow['capability_rank']
                 && $m['price_in_per_mtok'] !== null && $m['price_out_per_mtok'] !== null && (!$cand || (float)$m['capability_rank'] > (float)$cand['capability_rank'])) {
                 $cand = $m;
             }
@@ -488,7 +487,7 @@ function rh_ai_reflect_run(PDO $db): array
             break;
         }
     }
-    if ($lines && rh_ai_eval_model_ready($db)) { // includes the monthly limit check
+    if ($lines && rh_ai_eval_model_ready($db)) {
         $models = rh_ai_role_models($db);
         $m = $models['fast'] ?? ($models['primary'] ?? null);
         if ($m) {
@@ -652,8 +651,7 @@ function rh_ai_health_run(PDO $db): array
         rh_ai_incident_add($db, 'tool_selftest', 'The daily self-test of "' . $name . '" failed', ['tool' => $name, 'error' => $err], ['severity' => 'warning', 'tool_name' => $name]);
         rh_ai_fault_add($db, 'tool:' . $name, 'The Assistant lookup "' . $name . '" fails its daily self-test', 'The read tool "' . $name . '" threw an error with safe sample arguments: ' . $err, ['tool' => $name, 'error' => $err]);
     }
-    $h['budget'] = ['spent' => round(rh_ai_month_spent($db), 4), 'limit' => rh_ai_monthly_budget_usd()];
-    rh_ai_check_budget_pause($db);
+    $h['budget'] = ['spent' => round(rh_ai_month_spent($db), 4), 'aim' => rh_ai_monthly_budget_usd()]; // information only
     rh_ai_save_settings(['ai_health_json' => json_encode($h, JSON_UNESCAPED_UNICODE)], $db);
     return ['ok' => $h['ok'], 'note' => $h['tools']['ok'] . ' lookup(s) passed' . ($h['tools']['failed'] ? ', failed: ' . implode(', ', array_keys($h['tools']['failed'])) : '') . ($h['providers'] ? ($h['providers'][$prov]['ok'] ? '; provider answered' : '; provider check failed') : '')];
 }
@@ -666,13 +664,27 @@ function rh_ai_daily_eval(PDO $db): array
     if (!rh_ai_memory_ready($db)) {
         return ['ok' => true, 'note' => 'Needs the learning database update (072).'];
     }
-    $run = rh_ai_eval_run($db, 'full', ['daily' => true]);
+    // Owner 2026-10-28 ($5 a month a hotel): each day asks only the 5 key questions; the whole set runs once a
+    // week. Both run on the Fast model (rh_ai_eval_run); only the model-upgrade check uses other models.
+    $kind = rh_ai_full_eval_due($db) ? 'full' : 'smoke';
+    $run = rh_ai_eval_run($db, $kind, ['daily' => true]);
     if (!$run['ran']) {
         return ['ok' => true, 'note' => $run['why']];
     }
     $g = rh_ai_guardrail_day($db, $run, rh_ai_health_last());
     return ['ok' => $run['failed'] === 0, 'note' => $run['passed'] . ' of ' . $run['run'] . ' questions passed (' . $run['skipped'] . ' skipped), ' . $run['tokens_per_answer'] . ' tokens per answer; '
         . ($g['clean'] ? 'a clean day' : 'not a clean day') . ' (' . $g['streak'] . ' in a row).'];
+}
+
+/** Is the weekly run of the whole question set due (none in the last 7 days)? */
+function rh_ai_full_eval_due(PDO $db): bool
+{
+    try {
+        $last = (string)$db->query("SELECT MAX(run_date) FROM ai_eval_runs WHERE kind = 'full'")->fetchColumn();
+    } catch (Throwable $e) {
+        return false;
+    }
+    return $last === '' || $last <= date('Y-m-d', strtotime('-7 days'));
 }
 
 /** Built-in hard limits still hold (no forbidden tool or card exists; the kill switches are wired). [] = fine. */
@@ -704,7 +716,7 @@ function rh_ai_hard_limit_problems(): array
 function rh_ai_guardrail_streak(PDO $db): int
 {
     try {
-        $rows = $db->query("SELECT run_date, clean_day FROM ai_eval_runs WHERE kind = 'full' AND is_daily = 1 AND clean_day IS NOT NULL ORDER BY run_date DESC, id DESC LIMIT 400")->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $db->query("SELECT run_date, clean_day FROM ai_eval_runs WHERE kind IN ('full', 'smoke') AND is_daily = 1 AND clean_day IS NOT NULL ORDER BY run_date DESC, id DESC LIMIT 400")->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         return 0;
     }
@@ -753,10 +765,13 @@ function rh_ai_guardrail_day(PDO $db, array $run, array $health): array
         'new_incident_kinds' => [], 'selftest_failed' => array_keys((array)($health['tools']['failed'] ?? [])), 'selftest_ran' => ($health['date'] ?? '') === date('Y-m-d'),
         'hard_limit_problems' => rh_ai_hard_limit_problems(), 'pause_events' => 0];
     try {
-        $st = $db->prepare("SELECT passed_ids FROM ai_eval_runs WHERE kind = 'full' AND is_daily = 1 AND id < ? AND run_date < CURDATE() ORDER BY id DESC LIMIT 1");
-        $st->execute([(int)$run['id']]);
+        $st = $db->prepare("SELECT passed_ids FROM ai_eval_runs WHERE kind = ? AND is_daily = 1 AND id < ? AND run_date < CURDATE() ORDER BY id DESC LIMIT 1");
+        $st->execute([(string)($run['kind'] ?? 'full'), (int)$run['id']]);
         $before = array_filter(explode(',', (string)$st->fetchColumn()));
         $ev['regressions'] = array_values(array_intersect($before, (array)$run['failed_ids']));
+        // A key-questions day also needs the latest weekly run of the whole set (within 8 days) at the bar.
+        $fp = $db->query("SELECT pass_pct FROM ai_eval_runs WHERE kind = 'full' AND run_date >= DATE_SUB(CURDATE(), INTERVAL 8 DAY) ORDER BY id DESC LIMIT 1")->fetchColumn();
+        $ev['full_pass_pct'] = $fp === false || $fp === null ? null : (float)$fp;
         $ev['new_incident_kinds'] = array_values(array_diff($db->query("SELECT DISTINCT kind FROM ai_incidents WHERE created_at >= CURDATE() AND kind NOT IN (SELECT DISTINCT kind FROM ai_incidents WHERE created_at < CURDATE())")->fetchAll(PDO::FETCH_COLUMN), ['auto_pause']));
         $ev['pause_events'] = (int)$db->query("SELECT COUNT(*) FROM ai_incidents WHERE kind = 'auto_pause' AND created_at >= CURDATE()")->fetchColumn()
             + (trim(rh_ai_settings($db, true)['ai_paused_reason'] ?? '') !== '' ? 1 : 0);
@@ -765,6 +780,7 @@ function rh_ai_guardrail_day(PDO $db, array $run, array $health): array
     }
     $min = (float)rh_ai_setting('ai_complete_eval_pct', '95');
     $clean = $run['run'] > 0 && $run['pass_pct'] !== null && $run['pass_pct'] >= $min && !$ev['regressions'] && $ev['open_faults'] === 0
+        && (($run['kind'] ?? 'full') === 'full' || (isset($ev['full_pass_pct']) && $ev['full_pass_pct'] >= $min))
         && !$ev['new_incident_kinds'] && $ev['selftest_ran'] && !$ev['selftest_failed'] && !$ev['hard_limit_problems'] && $ev['pause_events'] === 0 && empty($ev['error']);
     try {
         $db->prepare("UPDATE ai_eval_runs SET clean_day = ?, evidence_json = ? WHERE id = ?")->execute([$clean ? 1 : 0, json_encode($ev, JSON_UNESCAPED_UNICODE), (int)$run['id']]);

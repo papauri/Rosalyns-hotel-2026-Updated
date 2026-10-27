@@ -1,0 +1,15 @@
+{
+    "about": "A Google model list where the Fast model has been closed to new keys: its test reply answers 404 (owner 2026-10-28). Used by ai_assistant_test.php.",
+    "models": {
+        "models": [
+            {"name": "models/gemini-4-argon", "displayName": "Gemini 4 Argon", "inputTokenLimit": 1048576, "outputTokenLimit": 65536, "supportedGenerationMethods": ["generateContent"]},
+            {"name": "models/gemini-3.8-flash", "displayName": "Gemini 3.8 Flash", "inputTokenLimit": 1048576, "outputTokenLimit": 65536, "supportedGenerationMethods": ["generateContent"]},
+            {"name": "models/gemini-3.6-flash", "displayName": "Gemini 3.6 Flash", "inputTokenLimit": 1048576, "outputTokenLimit": 65536, "supportedGenerationMethods": ["generateContent"]},
+            {"name": "models/gemini-3.5-flash-lite", "displayName": "Gemini 3.5 Flash-Lite", "inputTokenLimit": 1048576, "outputTokenLimit": 65536, "supportedGenerationMethods": ["generateContent"]},
+            {"name": "models/gemini-3.1-flash-lite", "displayName": "Gemini 3.1 Flash-Lite", "inputTokenLimit": 1048576, "outputTokenLimit": 65536, "supportedGenerationMethods": ["generateContent"]},
+            {"name": "models/gemini-2.5-flash-lite", "displayName": "Gemini 2.5 Flash-Lite", "inputTokenLimit": 1048576, "outputTokenLimit": 65536, "supportedGenerationMethods": ["generateContent"]}
+        ]
+    },
+    "closed_model": "gemini-3.5-flash-lite",
+    "ping_404": {"error": {"code": 404, "message": "This model models/gemini-3.5-flash-lite is no longer available to new users. Please update your code to use a newer model.", "status": "NOT_FOUND"}}
+}

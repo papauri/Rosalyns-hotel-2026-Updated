@@ -842,7 +842,7 @@ function rh_ai_breaker_ok(PDO $db, string $tool): void
 
 /**
  * The Assistant pauses itself: rh_ai_enabled() is false until a person switches it back on (master switch,
- * or php scripts/ai-kill.php on). A budget pause lifts itself when the month changes. Nothing is deleted.
+ * or php scripts/ai-kill.php on). Spending never pauses it (the monthly figure is an aim). Nothing is deleted.
  */
 function rh_ai_pause(PDO $db, string $kind, string $reason): void
 {
@@ -850,7 +850,7 @@ function rh_ai_pause(PDO $db, string $kind, string $reason): void
         if (trim(rh_ai_settings($db, true)['ai_paused_reason'] ?? '') !== '') {
             return; // already paused
         }
-        rh_ai_save_settings(['ai_paused_reason' => mb_substr($reason, 0, 250), 'ai_paused_kind' => $kind, 'ai_paused_month' => $kind === 'budget' ? date('Y-m') : ''], $db);
+        rh_ai_save_settings(['ai_paused_reason' => mb_substr($reason, 0, 250), 'ai_paused_kind' => $kind, 'ai_paused_month' => ''], $db);
         rh_ai_incident_add($db, 'auto_pause', 'The Assistant paused itself: ' . $reason, ['kind' => $kind], ['severity' => 'warning']);
         rh_ai_notify_settings($db, 'paused', 'The Assistant has paused itself: ' . $reason . ' Switch it back on in Assistant Settings when ready.');
     } catch (Throwable $e) {
@@ -866,23 +866,6 @@ function rh_ai_month_spent(PDO $db): float
     } catch (Throwable $e) {
         return 0.0;
     }
-}
-
-/** Pause when this month's spending limit is reached. Returns true when it paused now. */
-function rh_ai_check_budget_pause(PDO $db): bool
-{
-    if (function_exists('rh_ai_budget_warn')) {
-        rh_ai_budget_warn($db); // Phase 5: notices to the ai_settings holders at 80 % and 100 % (once a month each)
-    }
-    $budget = rh_ai_monthly_budget_usd();
-    if ($budget <= 0 || rh_ai_month_spent($db) + 0.000001 < $budget) {
-        return false;
-    }
-    if (trim(rh_ai_settings($db, true)['ai_paused_reason'] ?? '') !== '') {
-        return false;
-    }
-    rh_ai_pause($db, 'budget', 'this month\'s spending limit of US$' . number_format($budget, 2) . ' was reached. It starts again on the 1st, or raise the limit and switch it back on.');
-    return true;
 }
 
 /** Pause after RH_AI_BURST_ACTIONS failed or cancelled cards in one hour. Returns true when it paused now. */
@@ -938,6 +921,7 @@ function rh_ai_model_missing(PDO $db, string $provider, string $model): string
 {
     try {
         require_once __DIR__ . '/ai-catalog.php';
+        rh_ai_model_mark_gone($db, $provider, $model); // closed by the provider: never suggested or adopted again
         $st = $db->prepare("SELECT model_id, role FROM ai_models WHERE provider = ? AND is_selected = 1");
         $st->execute([$provider]);
         $roles = [];
@@ -949,9 +933,9 @@ function rh_ai_model_missing(PDO $db, string $provider, string $model): string
             return '';
         }
         $st = $db->prepare("SELECT model_id, capability_rank, price_in_per_mtok FROM ai_models WHERE provider = ? AND is_selected = 0 AND model_id <> ?
-                            AND price_in_per_mtok IS NOT NULL AND price_out_per_mtok IS NOT NULL ORDER BY capability_rank DESC, model_id");
+                            AND source <> 'gone' AND price_in_per_mtok IS NOT NULL AND price_out_per_mtok IS NOT NULL ORDER BY capability_rank DESC, model_id");
         $st->execute([$provider, $model]);
-        $cands = $st->fetchAll(PDO::FETCH_ASSOC);
+        $cands = array_values(array_filter($st->fetchAll(PDO::FETCH_ASSOC), static fn($c) => !function_exists('rh_ai_model_banned') || !rh_ai_model_banned((string)$c['model_id']))); // never a Gemini 4 model (owner rule)
         if (!$cands) {
             rh_ai_incident_add($db, 'model_retired', 'A chosen model was retired and no priced model can take its place', ['provider' => $provider, 'model' => $model, 'role' => $role], ['severity' => 'warning']);
             rh_ai_notify_settings($db, 'model_retired', 'The provider has retired ' . $model . ' (' . $role . ') and no other model with a price is listed. Choose a model in Assistant Settings.');

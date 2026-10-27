@@ -26,6 +26,59 @@ function rh_ai_catalog(): array
     return $cat;
 }
 
+/**
+ * A model this hotel never uses (owner 2026-10-28: "not ever Gemini 4"): never listed, suggested, saved or adopted.
+ * Kept here, beside the big-model rule, as a provider rule.
+ */
+function rh_ai_model_banned(string $id): bool
+{
+    return (bool)preg_match('#(^|/)gemini-?4#i', trim($id)); // gemini-4..., gemini4..., models/gemini-4...
+}
+
+/** The plain refusal when someone picks a banned model. */
+function rh_ai_model_banned_message(): string
+{
+    return 'Gemini 4 models are not used by this Assistant (owner rule). Choose a Gemini 3 model such as Gemini 3.8 Flash.';
+}
+
+/**
+ * A model the provider has closed (a test reply or a chat got 404 / "no longer available"): marked source = 'gone' in
+ * ai_models so it is never suggested, chosen, adopted or pinged again (a model-list refresh keeps the mark).
+ */
+function rh_ai_model_mark_gone(?PDO $db, string $provider, string $model): void
+{
+    if (!$db || $model === '') {
+        return;
+    }
+    try {
+        $db->prepare("INSERT INTO ai_models (provider, model_id, label, source, is_new) VALUES (?, ?, ?, 'gone', 0) ON DUPLICATE KEY UPDATE source = 'gone'")
+            ->execute([$provider, mb_substr($model, 0, 120), mb_substr($model, 0, 160)]);
+    } catch (Throwable $e) {
+        error_log('Assistant: could not mark a closed model: ' . $e->getMessage());
+    }
+}
+
+/** Ids of a provider's models marked closed. */
+function rh_ai_models_gone(?PDO $db, string $provider): array
+{
+    if (!$db) {
+        return [];
+    }
+    try {
+        $st = $db->prepare("SELECT model_id FROM ai_models WHERE provider = ? AND source = 'gone'");
+        $st->execute([$provider]);
+        return array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN));
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+/** A provider's answer that means "this model is closed to you" (404, or the words "no longer available"). */
+function rh_ai_model_closed_reply(int $http, string $message): bool
+{
+    return $http === 404 || stripos($message, 'no longer available') !== false;
+}
+
 /** Catalog entries for one provider, normalised and sorted best first. */
 function rh_ai_catalog_models(string $provider): array
 {
@@ -155,7 +208,7 @@ function rh_ai_rank_models(string $provider, array $live): array
 /** The five best model ids (pre-ticked suggestions). */
 function rh_ai_suggest_top5(array $ranked): array
 {
-    return array_slice(array_column($ranked, 'model_id'), 0, 5);
+    return array_slice(array_values(array_filter(array_column($ranked, 'model_id'), static fn($id) => !rh_ai_model_banned((string)$id))), 0, 5);
 }
 
 /**
@@ -182,11 +235,13 @@ function rh_ai_model_is_big(array $m): bool
  */
 function rh_ai_suggest_roles(array $ranked): array
 {
+    // The bar may come from any priced model on offer; a banned (Gemini 4) or big model is never picked.
     $cost = static fn(array $m): float => (float)$m['price_in'] + (float)$m['price_out'];
     $priced = array_values(array_filter($ranked, static fn($m) => isset($m['price_in'], $m['price_out']) && $m['price_in'] !== null && $m['price_out'] !== null));
-    $small = array_values(array_filter($priced, static fn($m) => !rh_ai_model_is_big($m)));
+    $small = array_values(array_filter($priced, static fn($m) => !rh_ai_model_is_big($m) && !rh_ai_model_banned((string)$m['model_id'])));
     if (!$small) {
-        $pool = array_values(array_filter($ranked, static fn($m) => !rh_ai_model_is_big($m))) ?: $ranked;
+        $notBanned = array_values(array_filter($ranked, static fn($m) => !rh_ai_model_banned((string)($m['model_id'] ?? ''))));
+        $pool = array_values(array_filter($notBanned, static fn($m) => !rh_ai_model_is_big($m))) ?: $notBanned;
         $top = array_slice($pool, 0, 5);
         $roles = [];
         foreach ($top as $i => $m) {
@@ -262,10 +317,11 @@ function rh_ai_sync_models(PDO $db, string $provider, array $ranked): void
          ON DUPLICATE KEY UPDATE label = VALUES(label), released_at = VALUES(released_at), context_tokens = VALUES(context_tokens),
              price_in_per_mtok = IF(price_edited = 1, price_in_per_mtok, VALUES(price_in_per_mtok)),
              price_out_per_mtok = IF(price_edited = 1, price_out_per_mtok, VALUES(price_out_per_mtok)),
-             capability_rank = VALUES(capability_rank), source = VALUES(source),
+             capability_rank = VALUES(capability_rank), source = IF(source = 'gone', 'gone', VALUES(source)),
              is_new = IF(price_edited = 1, 0, VALUES(is_new)), sort = VALUES(sort), last_seen_at = NOW()"
     );
     $ids = [];
+    $ranked = array_values(array_filter($ranked, static fn($m) => !rh_ai_model_banned((string)($m['model_id'] ?? '')))); // never stored, so never listed or chosen
     foreach (array_values($ranked) as $i => $m) {
         $ids[] = $m['model_id'];
         $up->execute([
@@ -288,7 +344,7 @@ function rh_ai_models_for(PDO $db, string $provider): array
     try {
         $st = $db->prepare("SELECT * FROM ai_models WHERE provider = ? ORDER BY capability_rank DESC, sort ASC, model_id ASC");
         $st->execute([$provider]);
-        return $st->fetchAll(PDO::FETCH_ASSOC);
+        return array_values(array_filter($st->fetchAll(PDO::FETCH_ASSOC), static fn($m) => !rh_ai_model_banned((string)$m['model_id']) && (string)($m['source'] ?? '') !== 'gone'));
     } catch (Throwable $e) {
         return [];
     }
@@ -309,6 +365,11 @@ function rh_ai_save_selection(PDO $db, string $provider, array $roles, array $pr
     $allowed = array_keys(rh_ai_model_roles());
     if (count($roles) > 5) {
         throw new RuntimeException('Choose at most 5 models.');
+    }
+    foreach (array_keys($roles) as $id) {
+        if (rh_ai_model_banned((string)$id)) {
+            throw new RuntimeException(rh_ai_model_banned_message());
+        }
     }
     $counts = array_count_values(array_values($roles));
     foreach ($roles as $id => $role) {
@@ -370,8 +431,9 @@ function rh_ai_save_selection(PDO $db, string $provider, array $roles, array $pr
  * @return array{ok:bool,ms:int,message:string,ranked:array,ping_model:string}
  * The message never contains the key.
  */
-function rh_ai_test_connection(string $provider, string $key): array
+function rh_ai_test_connection(string $provider, string $key, ?PDO $db = null): array
 {
+    $db = $db ?? (($GLOBALS['pdo'] ?? null) instanceof PDO ? $GLOBALS['pdo'] : null);
     $list = rh_ai_list_models($provider, $key);
     if (!$list['ok']) {
         return ['ok' => false, 'ms' => $list['ms'], 'message' => $list['message'], 'ranked' => [], 'ping_model' => ''];
@@ -380,14 +442,61 @@ function rh_ai_test_connection(string $provider, string $key): array
     if (!$ranked) {
         return ['ok' => false, 'ms' => $list['ms'], 'message' => 'The key works, but the provider offers no chat models to it.', 'ranked' => [], 'ping_model' => ''];
     }
-    $pingRow = $ranked[0];
-    foreach ($ranked as $r) {
-        if (isset($r['price_in'], $r['price_out']) && (!isset($pingRow['price_in'], $pingRow['price_out']) || (float)$r['price_in'] + (float)$r['price_out'] < (float)$pingRow['price_in'] + (float)$pingRow['price_out'])) {
-            $pingRow = $r;
+    // Which model answers the test (owner 2026-10-28): the chosen Fast model when the provider still lists it, else the
+    // suggested Fast model, then the cheapest other suggested one. Never a model outside that, never Gemini 4, never one marked closed.
+    $gone = rh_ai_models_gone($db, $provider);
+    $usable = array_values(array_filter($ranked, static fn($m) => !rh_ai_model_banned((string)$m['model_id']) && !in_array((string)$m['model_id'], $gone, true)));
+    if (!$usable) {
+        return ['ok' => false, 'ms' => $list['ms'], 'message' => 'The key works, but none of the chat models offered to it can be used here. ' . rh_ai_model_banned_message(), 'ranked' => $ranked, 'ping_model' => ''];
+    }
+    $byId = array_column($usable, null, 'model_id');
+    $cands = [];
+    if ($db) {
+        try {
+            $st = $db->prepare("SELECT model_id FROM ai_models WHERE provider = ? AND is_selected = 1 AND role = 'fast' AND source <> 'gone' LIMIT 1");
+            $st->execute([$provider]);
+            $fastId = (string)$st->fetchColumn();
+            if ($fastId !== '' && isset($byId[$fastId])) {
+                $cands[] = $byId[$fastId];
+            }
+        } catch (Throwable $e) {
+        }
+    }
+    $roles = rh_ai_suggest_roles($usable);
+    $sugg = array_values(array_filter(array_map(static fn($id) => $byId[$id] ?? null, array_keys($roles))));
+    usort($sugg, static function ($a, $b) use ($roles) { // the suggested Fast model first, then the cheapest
+        $fa = ($roles[$a['model_id']] ?? '') === 'fast' ? 0 : 1;
+        $fb = ($roles[$b['model_id']] ?? '') === 'fast' ? 0 : 1;
+        if ($fa !== $fb) {
+            return $fa <=> $fb;
+        }
+        $pa = isset($a['price_in'], $a['price_out']) ? (float)$a['price_in'] + (float)$a['price_out'] : PHP_FLOAT_MAX;
+        $pb = isset($b['price_in'], $b['price_out']) ? (float)$b['price_in'] + (float)$b['price_out'] : PHP_FLOAT_MAX;
+        return ($pa <=> $pb) ?: ((float)$b['rank'] <=> (float)$a['rank']);
+    });
+    foreach ($sugg as $m) {
+        if (!in_array($m['model_id'], array_column($cands, 'model_id'), true)) {
+            $cands[] = $m;
+        }
+    }
+    if (!$cands) {
+        return ['ok' => false, 'ms' => $list['ms'], 'message' => count($ranked) . ' chat models found, but none can be suggested yet (no prices known). Type a price for one, then test again.', 'ranked' => $ranked, 'ping_model' => ''];
+    }
+    $ping = ['ok' => false, 'ms' => 0, 'message' => '', 'reply' => ''];
+    $pingRow = $cands[0];
+    foreach (array_slice($cands, 0, 2) as $cand) { // one retry, on the next suggested model
+        $pingRow = $cand;
+        $ping = rh_ai_ping($provider, $key, (string)$cand['model_id']);
+        if ($ping['ok'] || !rh_ai_model_closed_reply((int)($ping['http'] ?? 0), (string)$ping['message'])) {
+            break;
+        }
+        // Closed to this key: never suggested or adopted again; a chosen one hands its role to the next model.
+        rh_ai_model_mark_gone($db, $provider, (string)$cand['model_id']);
+        if ($db && function_exists('rh_ai_model_missing')) {
+            rh_ai_model_missing($db, $provider, (string)$cand['model_id']);
         }
     }
     $model = (string)$pingRow['model_id'];
-    $ping = rh_ai_ping($provider, $key, $model);
     $n = count($ranked);
     if (!$ping['ok']) {
         return ['ok' => false, 'ms' => $ping['ms'], 'message' => $n . ' chat models found, but the test reply failed. ' . $ping['message'], 'ranked' => $ranked, 'ping_model' => $model];
