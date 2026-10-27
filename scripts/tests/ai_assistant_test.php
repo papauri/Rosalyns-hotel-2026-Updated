@@ -48,6 +48,22 @@ class RhAiRewritePdo extends PDO
     public function exec($statement) { return parent::exec($this->rw($statement)); }
 }
 
+/** A second connection that counts every statement (bounded-work checks). */
+class RhAiCountPdo extends PDO
+{
+    public $n = 0;
+    #[\ReturnTypeWillChange]
+    public function query($statement, $mode = null, ...$args)
+    {
+        $this->n++;
+        return $mode === null ? parent::query($statement) : parent::query($statement, $mode, ...$args);
+    }
+    #[\ReturnTypeWillChange]
+    public function prepare($statement, $options = []) { $this->n++; return parent::prepare($statement, $options); }
+    #[\ReturnTypeWillChange]
+    public function exec($statement) { $this->n++; return parent::exec($statement); }
+}
+
 $fx = static function (string $name) use ($root): string {
     return (string)file_get_contents($root . '/scripts/tests/fixtures/ai/' . $name . '_models.json');
 };
@@ -766,7 +782,8 @@ if (!$chatReady) {
             check(!$tr['ok'] && strpos($tr['json'], 'total_owed') === false, 'the tool itself re-checks: a receptionist calling the finance read gets no figure');
             foreach (['What was our revenue last month?' => 'revenue question', 'Add up the amounts paid by all guests this week and tell me the total' => 'aggregate leak attempt', 'Compare how much money we took this month with last month' => 'comparison leak attempt', 'How many refunds did we give?' => 'refunds question'] as $q => $label) {
                 $r = $turn($recepU, $q);
-                check($r['reply'] === rh_ai_out_of_scope_line() && count($GLOBALS['ai2_calls']) === 0 && !preg_match('/\d/', $r['reply']), "receptionist $label: polite one-line decline, no figure, no provider call", $r['reply']);
+                check(strpos($r['reply'], rh_ai_out_of_scope_line()) === 0 && strpos($r['reply'], 'I can help with: ') !== false && count($GLOBALS['ai2_calls']) === 0 && !preg_match('/\d/', $r['reply']),
+                    "receptionist $label: polite one-line decline, then what they can do; no figure, no provider call", $r['reply']);
             }
             $r = $turn($recepU, 'What is the balance on booking 42?', 0, [['text' => 'Let me check booking 42.']]);
             check($r['route'] !== 'declined', 'one booking\'s own balance (visible on the booking screen) is not treated as an aggregate');
@@ -2431,7 +2448,7 @@ unset($GLOBALS['__rh_ai_tool_override']['my_access']);
 $v50 = json_decode($big50['view'], true);
 $v50p2 = json_decode($big50p2['view'], true);
 check(strlen($big50['view']) <= 12000 && abs(strlen($big50['view']) - strlen($big5['view'])) <= 4 && strlen($big50['json']) <= 12000 && (int)($v50['total'] ?? 0) === 10000
-    && count($v50['list']) === RH_AI_LIST_TOP + 1 && strpos((string)end($v50['list']), 'and 9990 more') === 0 && ($v50p2['list'][0]['booking_id'] ?? 0) === 11 && mb_strlen((string)$v50['list'][0]['note']) <= RH_AI_TEXT_CHARS,
+    && count($v50['list']) === rh_ai_num('ai_list_page_rows') + 1 && strpos((string)end($v50['list']), 'and 9990 more') === 0 && ($v50p2['list'][0]['booking_id'] ?? 0) === 11 && mb_strlen((string)$v50['list'][0]['note']) <= RH_AI_TEXT_CHARS,
     'a lookup over 1,000 or 10,000 rows sends the same fixed-size answer (total, top 10, "and N more", page 2 for the next 10)', json_encode([strlen($big5['view']), strlen($big50['view'])]));
 // The team of leads still runs in parallel when switched on
 $swSrc = (string)file_get_contents($root . '/includes/ai/ai-agents.php');
@@ -2629,10 +2646,25 @@ check(rh_ai_hours_line('10:00', '10:00') === 'open and close times are the same 
     && rh_ai_hours_line('11:00', '03:00') === '11:00 AM – 3:00 AM (next day)' && strpos(rh_ai_hours_line('11:00', ''), 'closing time not set in Hotel Settings') !== false, 'hours: same open/close time and an unset time give the plain "check Hotel Settings" line, never a guess');
 require_once $root . '/includes/station-hours.php';
 $bDef = rh_station_definitions()['bar'];
-check(rh_ai_station_hours_line('bar', '', '') === rh_ai_hours_line($bDef['default_open'], $bDef['default_close']) . ' (the default; not set in Hotel Settings)'
-    && rh_ai_station_hours_line('bar', '10:00', '10:00') === 'open and close times are the same (10:00 AM) — check Hotel Settings'
-    && rh_ai_station_hours_line('bar', '12:00', '') === rh_ai_hours_line('12:00', $bDef['default_close']) . ' (closing time is the default; not set in Hotel Settings)'
-    && rh_ai_station_hours_line('kitchen', '07:00', '22:00') === '7:00 AM – 10:00 PM', 'station hours: stored times as stored; a time not saved gives the default the station screens use, marked as the default; same open/close keeps the check-Hotel-Settings line', rh_ai_station_hours_line('bar', '', ''));
+check(rh_ai_station_hours_line('bar', '', '') === 'not set in Settings → Station Hours' && strpos(rh_ai_station_hours_line('bar', '', ''), rh_ai_clock($bDef['default_open'])) === false
+    && rh_ai_station_hours_line('bar', '10:00', '10:00') === 'open and close times are the same (10:00 AM) — check Settings → Station Hours'
+    && rh_ai_station_hours_line('bar', '12:00', '') === 'opens 12:00 PM; closing time not set in Settings → Station Hours'
+    && rh_ai_station_hours_line('kitchen', '07:00', '22:00') === '7:00 AM – 10:00 PM' && rh_ai_station_state('bar', '', '') === null,
+    'station hours: only the saved times; a time not saved says "not set in Settings → Station Hours" and never quotes a default written in code', rh_ai_station_hours_line('bar', '', ''));
+// Owner 2026-10-28 ("not hard coded"): no clock time written as text in the Assistant's code (times come from settings)
+$hhmm = [];
+foreach (['ai-tools.php', 'ai-agents.php', 'ai-context.php', 'ai-core.php'] as $f) {
+    foreach (token_get_all((string)file_get_contents($root . '/includes/ai/' . $f)) as $tk) {
+        if (is_array($tk) && in_array($tk[0], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], true) && preg_match('/(?<![\d{,])\d{1,2}:\d{2}(?![\d}])/', $tk[1])) {
+            $hhmm[] = $f . ':' . $tk[2];
+        }
+    }
+}
+check($hhmm === [] && strpos((string)file_get_contents($root . '/admin/migrations/074_station_hours_settings.php'), 'rh_station_definitions()') !== false,
+    'no literal HH:MM time in the Assistant\'s code (station hours are seeded once from the station definitions by migration 074)', implode(', ', $hhmm));
+foreach (['ai_list_page_rows', 'ai_alt_days', 'ai_alt_max', 'ai_alt_menu_max', 'ai_alt_tries'] as $k) {
+    check(isset(rh_ai_setting_defaults()[$k]) && rh_ai_num($k) >= 1 && strpos((string)file_get_contents($root . '/includes/ai/ai-tools.php'), "rh_ai_num('$k')") !== false, "$k is a setting (default in the registry) read by the lookups");
+}
 $hiQ = static fn(string $q) => rh_ai_local_intent($q);
 check(($hiQ('what time does the bar open?')[1]['_ask'] ?? '') === 'bar' && ($hiQ("what's check-out time?")[1]['_ask'] ?? '') === 'check_out' && ($hiQ('when does the restaurant open?')[1]['_ask'] ?? '') === 'kitchen'
     && ($hiQ('gym hours')[1]['_ask'] ?? '') === 'gym' && ($hiQ('what is the hotel phone number?')[1]['topic'] ?? '') === 'contact' && ($hiQ('what is our address?')[1]['_ask'] ?? '') === 'address',
@@ -2684,14 +2716,21 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
             return rh_ai_turn($pdo, $admH, ['conversation_id' => 0, 'message' => $msg, 'page' => 'dashboard.php']);
         };
         $r = $turnH('what time does the bar open?');
-        check($r['ok'] && $r['route'] === 'local' && !$GLOBALS['ai2_calls'] && $r['tokens_in'] === 0 && strpos($r['reply'], 'open and close times are the same (10:00 AM) — check Hotel Settings') !== false,
+        check($r['ok'] && $r['route'] === 'local' && !$GLOBALS['ai2_calls'] && $r['tokens_in'] === 0 && strpos($r['reply'], 'open and close times are the same (10:00 AM) — check Settings → Station Hours') !== false,
             'bar hours: answered locally (0 tokens); open = close gives the plain "check Hotel Settings" line', $r['reply'] . ' ' . $r['error']);
         $r = $turnH("what's check-out time?");
         check($r['ok'] && $r['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r['reply'], 'Check-out:** by 10:30 AM') !== false && strpos($r['reply'], 'from 2:00 PM') !== false, 'check-out time: the stored value, locally, in 12-hour form (check-in shown too)', $r['reply']);
         $r = $turnH('what time does the kitchen close?');
         $kDef = rh_station_definitions()['kitchen'];
-        $kWant = rh_ai_clock($kDef['default_open']) . ' – ' . rh_ai_clock($kDef['default_close']) . ' (the default; not set in Hotel Settings)';
-        check($r['route'] === 'local' && strpos($r['reply'], $kWant) !== false, 'kitchen hours not saved: the default hours the station screens run on, marked as the default', $r['reply'] . ' / want ' . $kWant);
+        check($r['route'] === 'local' && strpos($r['reply'], 'not set in Settings → Station Hours') !== false && strpos($r['reply'], rh_ai_clock($kDef['default_close'])) === false,
+            'kitchen hours not saved: "not set in Settings → Station Hours", never a default written in code', $r['reply']);
+        // A changed setting changes the answer (nothing hard coded)
+        $setS->execute(['station_bar_opens_at', '12:15']);
+        $setS->execute(['station_bar_closes_at', '21:45']);
+        $r = $turnH('what time does the bar open?');
+        check($r['route'] === 'local' && strpos($r['reply'], '12:15 PM – 9:45 PM') !== false, 'bar hours changed in settings: the local answer shows the new times', $r['reply']);
+        $setS->execute(['station_bar_opens_at', '10:00']);
+        $setS->execute(['station_bar_closes_at', '10:00']);
         $r = $turnH('is the coffee bar open?');
         check($r['route'] === 'local' && strpos($r['reply'], '6:30 AM – 10:00 PM') !== false, 'coffee bar hours: the stored times', $r['reply']);
         $r = $turnH('what is the hotel phone number?');
@@ -2707,14 +2746,14 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         $ov = rh_ai_t_hotel_info($pdo, $admH, ['topic' => 'overview']);
         $gy = rh_ai_t_hotel_info($pdo, $admH, ['topic' => 'gym']);
         $fac = implode(' ', (array)rh_ai_t_hotel_info($pdo, $admH, ['topic' => 'facilities'])['facilities']);
-        check($r['route'] === 'local' && strpos($r['reply'], 'switched off') !== false && !preg_match('/\d{1,2}:\d{2}/', $r['reply']) && !isset($hrs['hours']['gym']) && !isset($ov['hours']['gym'])
-            && !in_array('gym', $ov['switched_on'], true) && strpos($ov['more'], 'gym') === false && !isset($gy['gym_hours']) && !preg_match('/\b(gym|fitness)\b/i', $fac),
-            'gym switched off: no gym hours, no gym facility, not in the overview', json_encode([$r['reply'], $ov['switched_on'], $fac]));
+        check($r['route'] === 'local' && strpos($r['reply'], "We don't offer a gym here.") !== false && strpos($r['reply'], 'switched off') === false && !preg_match('/\d{1,2}:\d{2}/', $r['reply']) && !isset($hrs['hours']['gym']) && !isset($ov['hours']['gym'])
+            && !in_array('gym', $ov['offered_here'], true) && strpos($ov['more'], 'gym') === false && !isset($gy['gym_hours']) && !preg_match('/\b(gym|fitness)\b/i', $fac),
+            'gym not offered: one plain line (the module system never named), no gym hours, no gym facility, not in the overview', json_encode([$r['reply'], $ov['offered_here'], $fac]));
         $GLOBALS['__rh_ai_module_override']['gym'] = true;
         // Bar station switched off: its hours are not offered
         $GLOBALS['__rh_ai_module_override']['station_bds'] = false;
         $r = $turnH('what time does the bar open?');
-        check($r['route'] === 'local' && strpos($r['reply'], 'switched off') !== false && !isset(rh_ai_t_hotel_info($pdo, $admH, ['topic' => 'hours'])['hours']['bar']), 'bar switched off: no bar hours offered', $r['reply']);
+        check($r['route'] === 'local' && strpos($r['reply'], 'There are no bar hours set up here.') !== false && strpos($r['reply'], 'switched off') === false && !isset(rh_ai_t_hotel_info($pdo, $admH, ['topic' => 'hours'])['hours']['bar']), 'bar station off: no bar hours offered, in plain words', $r['reply']);
         $GLOBALS['__rh_ai_module_override']['station_bds'] = true;
         // Menu: fixed size (10 a page, "and N more"), whatever the size of the menu
         $catId = (int)$pdo->query('SELECT id FROM menu_categories WHERE is_active = 1 ORDER BY id LIMIT 1')->fetchColumn();
@@ -2755,6 +2794,256 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
     }
     rh_ai_set_transport($queueTransport);
     check(rh_ai_enabled($pdo) === $wasOnH && (int)$pdo->query("SELECT COUNT(*) FROM menu_items WHERE item_name LIKE 'AITest dish %'")->fetchColumn() === 0, 'hotel facts checks rolled back (no test rows, on/off state unchanged)');
+}
+
+// ── When something is not available: real alternatives, worked out locally (owner 2026-10-28) ──
+echo "-- alternatives --\n";
+check(strpos(rh_ai_context_frozen($pdo), 'When something is unavailable, offer the alternatives the tools returned; never invent any.') !== false, 'the prompt says: offer the alternatives the tools returned, never invent any');
+check(isset(rh_ai_tool_registry()['hotel_info']['schema']['properties']['item']), 'hotel_info takes an optional menu item');
+if (!$chatReady || !rh_ai_memory_ready($pdo)) {
+    skip('alternatives database checks (Assistant migrations not run here)');
+} else {
+    $admX = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $wasOnX = rh_ai_enabled($pdo);
+    $pdo->beginTransaction();
+    try {
+        rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000',
+            'ai_rate_limit_per_10min' => '500', 'ai_turn_token_cap' => '60000', 'ai_swarm_models' => '0'], $pdo);
+        $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
+        rh_ai_store_key('google', 'AIzaFAKEKEYFORTESTSONLY0123456789abcd', (int)$admX['id'], $pdo);
+        $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL WHERE is_selected = 1");
+        $mi = $pdo->prepare("INSERT INTO ai_models (provider, model_id, label, capability_rank, source, is_selected, role, price_in_per_mtok, price_out_per_mtok) VALUES ('google', ?, ?, ?, 'catalog', 1, ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE is_selected = 1, role = VALUES(role), price_in_per_mtok = VALUES(price_in_per_mtok), price_out_per_mtok = VALUES(price_out_per_mtok)");
+        $mi->execute(['gemini-3.8-flash', 'Gemini 3.8 Flash', 92, 'primary', 0.75, 3.75]);
+        $mi->execute(['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 86, 'fast', 0.30, 2.50]);
+        rh_ai_set_transport(static function ($method, $url, $headers, $body, $timeout) {
+            $GLOBALS['ai2_calls'][] = ['url' => $url, 'headers' => $headers, 'body' => (string)$body];
+            $next = array_shift($GLOBALS['ai2_q']) ?? ['reply' => ['text' => 'OK']];
+            $reply = $next['reply'];
+            $reply['usage'] = ($reply['usage'] ?? []) + ['in' => 100, 'out' => 20];
+            return ['http' => 200, 'body' => json_encode(rh_ai_fake_body(ai2_prov($url), $reply, ''))];
+        });
+        $GLOBALS['__rh_ai_module_override'] = ['bookings' => true, 'pos' => true, 'station_kds' => true, 'station_bds' => true, 'station_cds' => true, 'gym' => true, 'restaurant_page' => true];
+        $turnX = static function (string $msg, array $replies = [], ?array $who = null) use ($pdo, $admX): array {
+            $pdo->exec('DELETE FROM ai_tool_cache');
+            $GLOBALS['ai2_q'] = array_map(static fn($x) => ['reply' => $x], $replies);
+            $GLOBALS['ai2_calls'] = [];
+            return rh_ai_turn($pdo, $who ?? $admX, ['conversation_id' => 0, 'message' => $msg, 'page' => 'dashboard.php']);
+        };
+        $altMax = rh_ai_num('ai_alt_max');
+        $altDays = rh_ai_num('ai_alt_days');
+
+        // Rooms: a type that is sold out on the day asked (a type-wide block, as the Blocked Dates screen saves it)
+        $types = $pdo->query("SELECT r.id, r.name FROM rooms r WHERE r.is_active = 1 AND r.max_guests >= 2
+                              AND NOT EXISTS (SELECT 1 FROM room_combinations rc WHERE rc.combined_room_type_id = r.id AND rc.is_active = 1) ORDER BY r.display_order, r.id")->fetchAll(PDO::FETCH_ASSOC);
+        $d0 = date('Y-m-d', strtotime('+200 days'));
+        $d1 = date('Y-m-d', strtotime($d0 . ' +1 day'));
+        if (count($types) >= 2) {
+            $tA = $types[0];
+            $pdo->prepare("INSERT INTO blocked_dates (room_id, block_date, block_type, reason) VALUES (?, ?, 'full', 'AITest sold out')")->execute([(int)$tA['id'], $d0]);
+            $q = rh_ai_t_quote_stay($pdo, $admX, ['room_type' => (string)$tA['id'], 'check_in' => $d0, 'check_out' => $d1, 'adults' => 2]);
+            $alt = (array)($q['alternatives'] ?? []);
+            $altTypes = array_column((array)($alt['other_room_types'] ?? []), 'room_type');
+            $altDates = (array)($alt['other_dates'] ?? []);
+            check(empty($q['available']) && $altTypes && !in_array($tA['name'], $altTypes, true) && isset($alt['other_room_types'][0]['price_per_night']) && isset($alt['other_room_types'][0]['total']),
+                'sold-out room type: other room types that take the party on the same dates, each priced by quote_stay', json_encode($alt));
+            $ok = $altDates && ($altDates[0]['check_in'] ?? '') === $d1 && ($altDates[0]['room_type'] ?? '') === $tA['name'];
+            foreach ($altDates as $od) {
+                $ok = $ok && abs((strtotime($od['check_in']) - strtotime($d0)) / 86400) <= $altDays && rh_ai_nights($od['check_in'], $od['check_out']) === 1;
+            }
+            check($ok, 'sold-out room type: the nearest dates with that type free, same length of stay, nearest first', json_encode($altDates));
+            check(count($altTypes) <= $altMax && count($altDates) <= $altMax, "alternatives are bounded (at most $altMax types and $altMax date options)");
+            // The same priced figure as quote_stay for that type and date (no new pricing maths)
+            $direct = rh_ai_t_quote_stay($pdo, $admX, ['room_type' => $alt['other_room_types'][0]['room_type'] ?? '', 'check_in' => $d0, 'check_out' => $d1, 'adults' => 2]);
+            check(abs((float)($direct['total'] ?? -1) - (float)($alt['other_room_types'][0]['total'] ?? -2)) <= BALANCE_TOLERANCE, 'an alternative\'s price equals quote_stay for the same room type and dates');
+            $ca = rh_ai_t_check_availability($pdo, $admX, ['room_type' => (string)$tA['id'], 'check_in' => $d0, 'check_out' => $d1, 'adults' => 2]);
+            check(!empty($ca['alternatives']['other_room_types']) && !empty($ca['alternatives']['other_dates']), 'check_availability on a sold-out type gives the same kinds of alternatives', json_encode($ca['alternatives'] ?? null));
+            $un = rh_ai_t_check_availability($pdo, $admX, ['room_type' => 'AITest no such suite', 'check_in' => $d1, 'check_out' => date('Y-m-d', strtotime($d1 . ' +1 day')), 'adults' => 2]);
+            check(!empty($un['error']) && !empty($un['alternatives']['other_room_types']), 'an unknown room type: the types that are free instead', json_encode($un));
+            // A changed setting changes the search (nothing hard coded)
+            rh_ai_save_settings(['ai_alt_max' => '1'], $pdo);
+            rh_ai_settings($pdo, true);
+            $q1 = rh_ai_t_quote_stay($pdo, $admX, ['room_type' => (string)$tA['id'], 'check_in' => $d0, 'check_out' => $d1, 'adults' => 2]);
+            rh_ai_save_settings(['ai_alt_max' => (string)$altMax], $pdo);
+            rh_ai_settings($pdo, true);
+            check(count((array)($q1['alternatives']['other_room_types'] ?? [])) === 1 && count((array)($q1['alternatives']['other_dates'] ?? [])) === 1, 'ai_alt_max set to 1: one room type and one date offered', json_encode($q1['alternatives'] ?? null));
+            // Nothing free anywhere nearby: one plain line, nothing invented
+            $blk = $pdo->prepare("INSERT INTO blocked_dates (room_id, block_date, block_type, reason) VALUES (NULL, ?, 'full', 'AITest all full')");
+            for ($i = -$altDays; $i <= $altDays + 1; $i++) {
+                $blk->execute([date('Y-m-d', strtotime($d0 . ' ' . ($i >= 0 ? '+' : '') . $i . ' day'))]);
+            }
+            $none = rh_ai_t_quote_stay($pdo, $admX, ['room_type' => (string)$tA['id'], 'check_in' => $d0, 'check_out' => $d1, 'adults' => 2]);
+            check(array_keys((array)($none['alternatives'] ?? [])) === ['none'] && strpos((string)$none['alternatives']['none'], 'within ' . $altDays . ' day') !== false,
+                'nothing free within the days either side: a plain "nothing free" line and no invented option', json_encode($none['alternatives'] ?? null));
+        } else {
+            skip('room alternatives (fewer than two ordinary room types here)');
+        }
+        // An oversized party: joined (family) rooms when they exist
+        $irs = $pdo->query("SELECT id FROM individual_rooms WHERE is_active = 1 ORDER BY id LIMIT 2")->fetchAll(PDO::FETCH_COLUMN);
+        if ($types && count($irs) === 2) {
+            $tB = $types[0];
+            $big = (int)$pdo->query("SELECT GREATEST(COALESCE(MAX(r.max_guests), 0), COALESCE((SELECT MAX(max_guests_override) FROM individual_rooms WHERE is_active = 1), 0)) FROM rooms r WHERE r.is_active = 1")->fetchColumn() + 2;
+            $pdo->prepare("INSERT INTO rooms (name, slug, description, price_per_night, max_guests, total_rooms, rooms_available, display_order, is_active) VALUES ('AITest Joined Family', 'aitest-joined-family', 'AITest', 300000, ?, 1, 1, 999, 1)")->execute([$big]);
+            $jid = (int)$pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO room_combinations (combined_name, combined_room_type_id, room_a_id, room_b_id, price_override, max_guests_combined, is_active) VALUES ('AITest pair', ?, ?, ?, 300000, ?, 1)")->execute([$jid, (int)$irs[0], (int)$irs[1], $big]);
+            $e0 = date('Y-m-d', strtotime('+260 days'));
+            $e1 = date('Y-m-d', strtotime($e0 . ' +1 day'));
+            $qj = rh_ai_t_quote_stay($pdo, $admX, ['room_type' => (string)$tB['id'], 'check_in' => $e0, 'check_out' => $e1, 'adults' => $big]);
+            $jr = array_column((array)($qj['alternatives']['joined_rooms'] ?? []), 'room_type');
+            check(!empty($qj['error']) && in_array('AITest Joined Family', $jr, true), 'a party too big for one room: the joined family room is offered (joined-room rules unchanged)', json_encode($qj['alternatives'] ?? $qj));
+            $q2 = rh_ai_t_quote_stay($pdo, $admX, ['room_type' => (string)$tB['id'], 'check_in' => $e0, 'check_out' => $e1, 'adults' => 1]);
+            check(!isset($q2['alternatives']) || !in_array('AITest Joined Family', array_column((array)($q2['alternatives']['joined_rooms'] ?? []), 'room_type'), true), 'a party that fits an ordinary room is not offered the joined family room');
+        } else {
+            skip('joined-room alternative (no individual rooms here)');
+        }
+
+        // Menu: an item that is not available gets items from the same category
+        $catId = (int)$pdo->query('SELECT id FROM menu_categories WHERE is_active = 1 ORDER BY id LIMIT 1')->fetchColumn();
+        if ($catId > 0) {
+            $mins = $pdo->prepare('INSERT INTO menu_items (category_id, item_name, price, is_available) VALUES (?, ?, ?, ?)');
+            $mins->execute([$catId, 'AITest Zebra Stew', 4321, 0]);
+            for ($i = 1; $i <= 7; $i++) {
+                $mins->execute([$catId, 'AITest side ' . $i, 1000 + $i, 1]);
+            }
+            $mi1 = rh_ai_t_hotel_info($pdo, $admX, ['item' => 'zebra stew']);
+            $sameCat = (string)$pdo->query('SELECT name FROM menu_categories WHERE id = ' . $catId)->fetchColumn();
+            $alts = (array)($mi1['alternatives'] ?? []);
+            $allSame = $alts !== [];
+            foreach ($alts as $x) {
+                $allSame = $allSame && strpos($x, '(' . rh_ai_plain($sameCat, 40) . ')') !== false && strpos($x, 'Zebra') === false;
+            }
+            check(($mi1['status'] ?? '') === 'Not available right now.' && $allSame && count($alts) <= rh_ai_num('ai_alt_menu_max') && ($mi1['alternatives_are'] ?? '') === 'available items from the same category',
+                'an unavailable menu item: up to ' . rh_ai_num('ai_alt_menu_max') . ' available items from the same category, with prices', json_encode($mi1));
+            $mi2 = rh_ai_t_hotel_info($pdo, $admX, ['topic' => 'menu', 'item' => 'AITest unicorn tart']);
+            check(($mi2['status'] ?? '') === 'Not on the menu.' && is_array($mi2['alternatives'] ?? null) && count($mi2['alternatives']) <= rh_ai_num('ai_alt_menu_max'), 'an item not on the menu: featured (or other) available items instead, bounded', json_encode($mi2));
+            $mi3 = rh_ai_t_hotel_info($pdo, $admX, ['item' => 'AITest side 3']);
+            check(($mi3['status'] ?? '') === 'available' && strpos(json_encode($mi3['items'] ?? [], JSON_UNESCAPED_UNICODE), '1,003.00') !== false, 'an available item: shown with its stored price');
+        } else {
+            skip('menu alternatives (no active menu category here)');
+        }
+
+        // Hours: a closed station gives the next opening and what is open now
+        $setX = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
+        foreach (['station_kitchen_opens_at' => '07:00', 'station_kitchen_closes_at' => '22:00', 'station_bar_opens_at' => '11:00', 'station_bar_closes_at' => '01:30', 'station_coffee_bar_opens_at' => '06:30', 'station_coffee_bar_closes_at' => '20:00'] as $k => $v) {
+            $setX->execute([$k, $v]);
+        }
+        require_once $root . '/includes/station-hours.php';
+        $GLOBALS['__rh_ai_now'] = new DateTimeImmutable(date('Y-m-d') . ' 23:30:00', rh_site_timezone());
+        $r = $turnX('when does the kitchen open?');
+        check($r['route'] === 'local' && strpos($r['reply'], 'closed now; opens 7:00 AM tomorrow') !== false && strpos($r['reply'], 'Open now: Bar.') !== false && !$GLOBALS['ai2_calls'],
+            'kitchen closed now: the next opening and which station is open now, locally (0 tokens)', $r['reply']);
+        $GLOBALS['__rh_ai_now'] = new DateTimeImmutable(date('Y-m-d') . ' 04:00:00', rh_site_timezone());
+        $r = $turnX('when does the bar open?');
+        check(strpos($r['reply'], 'closed now; opens 11:00 AM today') !== false && strpos($r['reply'], 'Nothing else is open right now.') !== false, 'bar closed at 4 AM: opens later today; nothing else open', $r['reply']);
+        $GLOBALS['__rh_ai_now'] = new DateTimeImmutable(date('Y-m-d') . ' 12:00:00', rh_site_timezone());
+        $hx = rh_ai_t_hotel_info($pdo, $admX, ['topic' => 'hours']);
+        check(($hx['now']['kitchen'] ?? '') === 'open now, until 10:00 PM' && $hx['open_now'] === ['Kitchen', 'Bar', 'Coffee bar'], 'at noon every station is open, with its closing time', json_encode($hx['now'] ?? null));
+        $pdo->prepare("DELETE FROM site_settings WHERE setting_key IN ('station_bar_opens_at', 'station_bar_closes_at')")->execute();
+        $r = $turnX('when does the bar open?');
+        check(strpos($r['reply'], 'not set in Settings → Station Hours') !== false && !preg_match('/\b(11:00 AM|3:00 AM)\b/', $r['reply']), 'bar hours not saved: "not set", never a time from code', $r['reply']);
+        unset($GLOBALS['__rh_ai_now']);
+
+        // Not offered here: one plain line and the facilities the hotel does have
+        $GLOBALS['__rh_ai_module_override']['gym'] = false;
+        $r = $turnX('do we have a gym?');
+        $fn = rh_ai_facility_names($pdo);
+        check($r['route'] === 'local' && strpos($r['reply'], "We don't offer a gym here.") !== false && !preg_match('/switched|module/i', $r['reply']) && !$GLOBALS['ai2_calls']
+            && ($fn === [] || strpos($r['reply'], 'What we do have: ' . implode(', ', $fn) . '.') !== false) && count($fn) <= rh_ai_num('ai_alt_menu_max') && !preg_match('/\b(gym|fitness)\b/i', implode(' ', $fn)),
+            'gym not offered: "We don\'t offer a gym here." and the facilities it does have (bounded), locally, the module system never named', $r['reply']);
+        $GLOBALS['__rh_ai_module_override']['gym'] = true;
+        $r = $turnX('do we have a gym?');
+        check($r['route'] === 'local' && strpos($r['reply'], 'Yes') === 0 && strpos($r['reply'], 'Gym:**') !== false, 'gym offered: yes, with its hours, locally', $r['reply']);
+
+        // A change nobody can make: the line, the screen, the best guide section and what this person CAN do
+        $r = $turnX('adjust stock of rice');
+        $guideLinks = array_values(array_filter((array)$r['links'], static fn($l) => strpos((string)$l['label'], 'Guide: ') === 0));
+        check($r['route'] === 'declined' && strpos($r['reply'], "can't change stock") !== false && strpos($r['reply'], 'I can help with: ') !== false && $guideLinks && strpos((string)$guideLinks[0]['url'], '../docs/guides/') === 0
+            && count($guideLinks) <= 2 && (int)$r['tokens_in'] === 0 && !$GLOBALS['ai2_calls'], 'write-area decline: the screen, a guide link and "I can help with", no tokens', json_encode([$r['reply'], $r['links']]));
+        $toolsX = rh_ai_tools_for_user($admX);
+        preg_match('/I can help with: (.+)\.$/u', $r['reply'], $hm);
+        $named = preg_split('/, | and /u', (string)($hm[1] ?? ''));
+        $fromTools = $named !== [];
+        foreach ($named as $phrase) {
+            $hit = false;
+            foreach (array_keys($toolsX) as $tn) {
+                if (strcasecmp(rtrim(rh_ai_tool_step($tn), '.'), $phrase) === 0) {
+                    $hit = true;
+                }
+            }
+            $fromTools = $fromTools && $hit;
+        }
+        check($fromTools && count($named) <= $altMax && stripos($r['reply'], 'checking stock levels') !== false, '"I can help with" is built from this person\'s own tools (the stock read first after a stock decline)', (string)($hm[1] ?? ''));
+
+        // No data: the best guide sections and starter questions for this screen
+        $r = $turnX('what is the late checkout fee for the honeymoon package?', [['text' => "I can't find a late checkout fee in the data - check the rate plan or ask a manager."]]);
+        $sug = rh_ai_suggestions($admX, 'dashboard.php');
+        $chipsOk = $r['chips'] && count($r['chips']) <= 3;
+        foreach ((array)$r['chips'] as $c) {
+            $chipsOk = $chipsOk && (in_array($c, $sug, true) || in_array($c, rh_ai_followup_chips($admX, []), true));
+        }
+        $kbWant = rh_ai_guide_links($pdo, $admX, rh_ai_scrub_outbound($pdo, (int)$r['conversation_id'], 'what is the late checkout fee for the honeymoon package?'));
+        check($r['ok'] && $chipsOk && !in_array('Give me the tea', (array)$r['chips'], true) && (!$kbWant || array_intersect(array_column($kbWant, 'url'), array_column((array)$r['links'], 'url'))),
+            '"I can\'t find...": starter questions for this screen as chips and the best guide sections as links', json_encode([$r['chips'], $r['links']]));
+    } catch (Throwable $e) {
+        bad('alternatives checks threw', $e->getMessage() . ' @' . $e->getLine());
+    } finally {
+        unset($GLOBALS['__rh_ai_module_override'], $GLOBALS['__rh_ai_now']);
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        rh_ai_settings($pdo, true);
+        rh_ai_vault_forget();
+    }
+    rh_ai_set_transport($queueTransport);
+    check(rh_ai_enabled($pdo) === $wasOnX && (int)$pdo->query("SELECT COUNT(*) FROM menu_items WHERE item_name LIKE 'AITest %'")->fetchColumn() === 0
+        && (int)$pdo->query("SELECT COUNT(*) FROM blocked_dates WHERE reason LIKE 'AITest%'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM rooms WHERE slug = 'aitest-joined-family'")->fetchColumn() === 0,
+        'alternatives checks rolled back (no test rows, on/off state unchanged)');
+}
+
+// Bounded work (QA 2026-10-28): the alternatives search costs a fixed number of database queries, whatever the hotel's size
+if ($chatReady && rh_ai_memory_ready($pdo)) {
+    $admQ = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $cq = new RhAiCountPdo('mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET, DB_USER, DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    rh_ai_tools_for_user($admQ);
+    $pdoKeep = $GLOBALS['pdo'];
+    $GLOBALS['pdo'] = $cq; // the booking helpers read the global connection: count theirs too
+    $cq->beginTransaction();
+    try {
+        for ($i = 1; $i <= 4; $i++) { // at least 6 room types in all
+            $cq->prepare("INSERT INTO rooms (name, slug, description, price_per_night, max_guests, total_rooms, rooms_available, display_order, is_active) VALUES (?, ?, 'AITest', 1000, 2, 2, 2, 900, 1)")->execute(['AITest count ' . $i, 'aitest-count-' . $i]);
+        }
+        $nTypes = (int)$cq->query('SELECT COUNT(*) FROM rooms WHERE is_active = 1')->fetchColumn();
+        $tries = rh_ai_num('ai_alt_tries');
+        $days = rh_ai_num('ai_alt_days');
+        $q0 = date('Y-m-d', strtotime('+230 days'));
+        $q1 = date('Y-m-d', strtotime($q0 . ' +1 day'));
+        $firstType = (int)$cq->query('SELECT id FROM rooms WHERE is_active = 1 ORDER BY display_order, id LIMIT 1')->fetchColumn();
+        $cq->prepare("INSERT INTO blocked_dates (room_id, block_date, block_type, reason) VALUES (?, ?, 'full', 'AITest count')")->execute([$firstType, $q0]);
+        $GLOBALS['__rh_ai_alt_quotes'] = 0;
+        $cq->n = 0;
+        $ra = rh_ai_room_alternatives($cq, $admQ, $firstType, $q0, $q1, 2, 0);
+        $capA = 10 * $nTypes + 40 * $tries; // one window pass per type (about 7 queries) + quote_stay (about 35) per priced option
+        check($GLOBALS['__rh_ai_alt_quotes'] <= $tries && $cq->n <= $capA && !isset($ra['none']), "type asked, sold out ($nTypes types): at most $tries options priced, {$cq->n} queries (cap $capA)", json_encode([$GLOBALS['__rh_ai_alt_quotes'], $cq->n]));
+        $blkQ = $cq->prepare("INSERT INTO blocked_dates (room_id, block_date, block_type, reason) VALUES (NULL, ?, 'full', 'AITest count')");
+        for ($i = -$days - 1; $i <= $days + 1; $i++) {
+            $blkQ->execute([date('Y-m-d', strtotime($q0 . ' ' . ($i >= 0 ? '+' : '') . $i . ' day'))]);
+        }
+        $GLOBALS['__rh_ai_alt_quotes'] = 0;
+        $cq->n = 0;
+        $rb = rh_ai_room_alternatives($cq, $admQ, null, $q0, $q1, 2, 0);
+        $capB = 10 * $nTypes + 40 * $tries;
+        check(isset($rb['none']) && $GLOBALS['__rh_ai_alt_quotes'] <= $tries && $cq->n <= $capB,
+            "worst case (no type asked, $nTypes types, the whole ±$days-day window full): {$GLOBALS['__rh_ai_alt_quotes']} priced tries, {$cq->n} queries (cap $capB)", json_encode([$GLOBALS['__rh_ai_alt_quotes'], $cq->n, $rb]));
+    } catch (Throwable $e) {
+        bad('alternatives query-count checks threw', $e->getMessage() . ' @' . $e->getLine());
+    } finally {
+        if ($cq->inTransaction()) {
+            $cq->rollBack();
+        }
+        $GLOBALS['pdo'] = $pdoKeep;
+        unset($GLOBALS['__rh_ai_alt_quotes']);
+    }
+    check((int)$pdo->query("SELECT COUNT(*) FROM rooms WHERE slug LIKE 'aitest-count-%'")->fetchColumn() === 0, 'query-count checks rolled back');
 }
 
 rh_ai_set_transport(null);

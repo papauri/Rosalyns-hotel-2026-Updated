@@ -184,6 +184,12 @@ function rh_ai_setting_defaults(): array
         'ai_digest_enabled'       => '1',  // weekly digest email (each person can opt out in their reply settings)
         'ai_digest_sent_week'     => '',   // ISO week (o-W) of the last digest sent
         'ai_swarm_models'         => '0',  // '1' = department leads answer with their own model calls (several calls a question; off to keep to the monthly aim)
+        // Owner 2026-10-28 ("not hard coded"): the sizes below live here only; code reads them with rh_ai_num()
+        'ai_list_page_rows'       => '10', // rows of any one list a lookup sends per page ("and N more"; page 2 for the next ones)
+        'ai_alt_days'             => '3',  // when a room is not free: nearest dates looked for, this many days either side
+        'ai_alt_max'              => '3',  // when a room is not free: other room types offered, and date options offered (each)
+        'ai_alt_tries'            => '4',  // when a room is not free: options priced and confirmed by quote_stay at most (bounded work)
+        'ai_alt_menu_max'         => '5',  // other menu items, and facilities, offered when something is not available
     ];
 }
 
@@ -216,6 +222,12 @@ function rh_ai_setting(string $key, string $default = ''): string
 {
     $s = rh_ai_settings();
     return array_key_exists($key, $s) ? (string)$s[$key] : $default;
+}
+
+/** A whole-number Assistant setting (at least 1); the settings registry above holds its default. */
+function rh_ai_num(string $key): int
+{
+    return max(1, (int)rh_ai_setting($key, (string)(rh_ai_setting_defaults()[$key] ?? '1')));
 }
 
 /** Daily token cap per person (tokens in + out). */

@@ -24,9 +24,6 @@ require_once __DIR__ . '/ai-extras.php';   // Phases 4c + 5: password on risky c
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
 }
-if (!defined('RH_AI_LIST_TOP')) {
-    define('RH_AI_LIST_TOP', 10);       // rows of any one list the model sees per page ("and N more"; page 2 for the next 10)
-}
 if (!defined('RH_AI_TEXT_CHARS')) {
     define('RH_AI_TEXT_CHARS', 1000);   // one free-text field (a guest note, a review) the model sees; guide text excepted
 }
@@ -168,9 +165,10 @@ function rh_ai_tool_registry(): array
             'perm' => [], 'module' => [], 'cache' => 0, 'handler' => 'rh_ai_t_open_page',
         ],
         'hotel_info' => [
-            'description' => 'The hotel\'s own facts: check-in/out and opening hours (restaurant kitchen, bar, coffee bar, gym), restaurant and bar, menu, facilities, policies, contact details, conference rooms and upcoming events. Parts switched off in this system are left out; a time that is not set is said to be not set.',
-            'schema' => ['properties' => ['topic' => ['type' => 'string', 'enum' => ['overview', 'hours', 'restaurant_bar', 'menu', 'facilities', 'policies', 'contact', 'gym', 'conference_events'], 'description' => 'Default overview']]],
-            'perm' => [], 'module' => [], 'cache' => 300, 'handler' => 'rh_ai_t_hotel_info', 'step' => 'Reading the hotel\'s details',
+            'description' => 'The hotel\'s own facts: check-in/out and opening hours (restaurant kitchen, bar, coffee bar, gym) and what is open now, restaurant and bar, menu (or one item: is it available, what else to offer), facilities, policies, contact details, conference rooms and upcoming events. Parts the hotel does not offer are left out; a time that is not set is said to be not set.',
+            'schema' => ['properties' => ['topic' => ['type' => 'string', 'enum' => ['overview', 'hours', 'restaurant_bar', 'menu', 'facilities', 'policies', 'contact', 'gym', 'conference_events'], 'description' => 'Default overview'],
+                'item' => ['type' => 'string', 'maxLength' => 60, 'description' => 'Menu: one dish or drink to check, or vegetarian / vegan']]],
+            'perm' => [], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_hotel_info', 'step' => 'Reading the hotel\'s details',
         ],
         // ── Phase 3: department reads (includes/ai/ai-insights.php) ──
         'room_performance' => [
@@ -376,7 +374,7 @@ function rh_ai_model_view($data, string $tool = ''): string
 
 /**
  * Owner 2026-10-28: "$5 or less a month regardless of hotel db size". What a lookup sends the model must not grow with
- * the number of bookings, guests, rooms or stock items: every list is the top RH_AI_LIST_TOP rows of the page asked for,
+ * the number of bookings, guests, rooms or stock items: every list is the top ai_list_page_rows rows of the page asked for,
  * followed by "and N more" (the model can ask for the next page or a narrower filter), and one free-text field is at
  * most RH_AI_TEXT_CHARS characters. Counts and totals are untouched. Guide text is fixed-size already and is left whole.
  */
@@ -384,13 +382,14 @@ function rh_ai_bound_result($data, string $tool = '', int $page = 1)
 {
     $guide = in_array($tool, ['summarise_guide', 'how_to', 'page_help'], true);
     $page = max(1, $page);
-    $walk = static function ($v) use (&$walk, $guide, $page) {
+    $top = rh_ai_num('ai_list_page_rows'); // rows per page (a setting; never a number written here)
+    $walk = static function ($v) use (&$walk, $guide, $page, $top) {
         if (is_array($v)) {
             $isList = $v !== [] && array_keys($v) === range(0, count($v) - 1);
-            if ($isList && count($v) > RH_AI_LIST_TOP) {
+            if ($isList && count($v) > $top) {
                 $all = count($v);
-                $from = ($page - 1) * RH_AI_LIST_TOP;
-                $v = array_slice($v, $from, RH_AI_LIST_TOP);
+                $from = ($page - 1) * $top;
+                $v = array_slice($v, $from, $top);
                 $after = max(0, $all - $from - count($v));
                 $v = array_map($walk, $v);
                 $v[] = $after > 0 ? 'and ' . $after . ' more (ask for page ' . ($page + 1) . ' or a narrower filter)' : 'end of list (' . $all . ' in all)';
@@ -406,7 +405,7 @@ function rh_ai_bound_result($data, string $tool = '', int $page = 1)
     return $walk($data);
 }
 
-/** Lookups whose answer is a list long enough to page through ("page": 2 gives the next RH_AI_LIST_TOP rows). */
+/** Lookups whose answer is a list long enough to page through ("page": 2 gives the next ai_list_page_rows rows). */
 function rh_ai_paged_tools(): array
 {
     return ['search_bookings', 'arrivals_departures', 'in_house', 'room_board', 'balances_due', 'guest_history', 'money_leaks', 'inventory_watch',
@@ -423,7 +422,7 @@ function rh_ai_tool_specs(array $user): array
             $schema['properties'] = [];
         }
         if (in_array($name, rh_ai_paged_tools(), true)) {
-            $schema['properties']['page'] = ['type' => 'integer', 'minimum' => 1, 'maximum' => 20, 'description' => 'Next 10 of a long list'];
+            $schema['properties']['page'] = ['type' => 'integer', 'minimum' => 1, 'maximum' => 20, 'description' => 'Next ' . rh_ai_num('ai_list_page_rows') . ' of a long list'];
         }
         $specs[] = ['name' => $name, 'description' => $def['description'], 'schema' => $schema];
     }
@@ -746,26 +745,204 @@ function rh_ai_t_check_availability(PDO $db, array $user, array $a): array
     if (!empty($a['room_type'])) {
         $t = rh_ai_find_room_type($db, (string)$a['room_type']);
         if (!$t) {
-            return ['error' => 'No room type matches "' . $a['room_type'] . '".'];
+            return ['error' => 'No room type matches "' . $a['room_type'] . '".',
+                'alternatives' => rh_ai_room_alternatives($db, $user, null, (string)$a['check_in'], (string)$a['check_out'], $adults, $children, 1)];
         }
         $types[] = $t;
     } else {
         $types = $db->query("SELECT * FROM rooms WHERE is_active = 1 ORDER BY display_order, id")->fetchAll(PDO::FETCH_ASSOC);
     }
     $rows = [];
+    $anyFree = false;
     foreach ($types as $t) {
-        $av = checkRoomAvailability((int)$t['id'], $a['check_in'], $a['check_out'], null, $children, $children > 0 ? 1 : 1);
+        $av = checkRoomAvailability((int)$t['id'], $a['check_in'], $a['check_out'], null, $children, 1); // one room per type checked
+        $fits = (int)$t['max_guests'] >= ($adults + $children);
+        $anyFree = $anyFree || (!empty($av['available']) && $fits);
         $rows[] = [
             'room_type_id' => (int)$t['id'], 'room_type' => $t['name'],
             'available' => !empty($av['available']),
             'rooms_left' => isset($av['remaining_rooms']) ? (int)$av['remaining_rooms'] : null,
             'max_guests' => (int)$t['max_guests'],
-            'fits_party_in_one_room' => (int)$t['max_guests'] >= ($adults + $children),
+            'fits_party_in_one_room' => $fits,
             'reason' => empty($av['available']) ? (string)($av['error'] ?? 'Not available') : null,
         ];
     }
-    return ['check_in' => $a['check_in'], 'check_out' => $a['check_out'], 'nights' => rh_ai_nights($a['check_in'], $a['check_out']), 'room_types' => $rows,
+    $out = ['check_in' => $a['check_in'], 'check_out' => $a['check_out'], 'nights' => rh_ai_nights($a['check_in'], $a['check_out']), 'room_types' => $rows,
         'link' => 'create-booking.php', 'link_label' => 'Open Create Booking'];
+    if (!$anyFree && $rows) { // the type asked (or every type) has nothing for this party: what is free instead
+        $out['alternatives'] = rh_ai_room_alternatives($db, $user, !empty($a['room_type']) ? (int)$types[0]['id'] : null, (string)$a['check_in'], (string)$a['check_out'], $adults, $children, 1);
+    }
+    return $out;
+}
+
+/**
+ * Owner 2026-10-28 ("offer suggestions on what actually is available"): when the room type or dates asked have nothing,
+ * what IS free, worked out here with no extra model call - (a) other room types that take the party on the same dates,
+ * (b) the nearest dates, ai_alt_days either side, same length of stay, for the type asked (no type asked: the first type
+ * that takes the party, per date), (c) joined (family) rooms when the party is too big for one ordinary room.
+ * Bounded work, whatever the size of the hotel: candidates are found with one pass per room type over the whole date
+ * window (getBookedDatesForRoom - the public calendar's per-night count - and getRoomTypeBlockedDatesOnly, the rules
+ * checkRoomAvailability uses); only the options shown are then priced and confirmed by quote_stay itself (the Create
+ * Booking helpers: checkRoomAvailability, the party split, joined-room combinations, rate plans, VAT, levy), at most
+ * ai_alt_tries of them, so nothing here is new pricing or availability maths. At most ai_alt_max per kind. Prices only for
+ * people who may price a stay. Nothing free: one plain line, never an invented option.
+ */
+function rh_ai_room_alternatives(PDO $db, array $user, ?int $askedTypeId, string $ci, string $co, int $adults, int $children, int $rooms = 1): array
+{
+    $adults = max(1, $adults);
+    $party = $adults + max(0, $children);
+    $rooms = max(1, $rooms);
+    $nights = max(1, rh_ai_nights($ci, $co));
+    $priced = rh_ai_tool_allowed($user, 'quote_stay');
+    $max = rh_ai_num('ai_alt_max');
+    $days = rh_ai_num('ai_alt_days');
+    $tries = rh_ai_num('ai_alt_tries');
+    $none = ['none' => 'Nothing is free for this party on these dates or within ' . $days . ' day' . ($days === 1 ? '' : 's') . ' either side.'];
+    try {
+        $types = $db->query("SELECT r.id, r.name, GREATEST(r.max_guests,
+                                 COALESCE((SELECT MAX(ir.max_guests_override) FROM individual_rooms ir WHERE ir.room_type_id = r.id AND ir.is_active = 1), 0),
+                                 COALESCE((SELECT MAX(rc.max_guests_combined) FROM room_combinations rc WHERE rc.combined_room_type_id = r.id AND rc.is_active = 1), 0)) AS cap,
+                                 (SELECT COUNT(*) FROM room_combinations rc2 WHERE rc2.combined_room_type_id = r.id AND rc2.is_active = 1) AS joined
+                             FROM rooms r WHERE r.is_active = 1 ORDER BY r.display_order, r.id")->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return ['none' => 'Other options could not be checked just now.'];
+    }
+    $maxOrdinary = 0;
+    $hasOrdinary = false;
+    foreach ($types as $t) {
+        if ((int)$t['joined'] === 0) {
+            $hasOrdinary = true;
+            $maxOrdinary = max($maxOrdinary, (int)$t['cap']);
+        }
+    }
+    // No ordinary room (or rooms) takes this party - or the hotel sells only joined rooms - so joined rooms are offered.
+    $tooBig = !$hasOrdinary || $party > $maxOrdinary * $rooms;
+    $takes = static fn(array $t): bool => (int)$t['joined'] > 0 ? ($tooBig && (int)$t['cap'] >= $party) : (int)$t['cap'] * $rooms >= $party;
+
+    // One pass per room type over the whole window: the nights it cannot sell (fully booked, or blocked for the type / all rooms).
+    $today = rh_ai_today();
+    $winFrom = max($today, date('Y-m-d', strtotime($ci . ' -' . $days . ' day')));
+    $winTo = date('Y-m-d', strtotime($co . ' +' . $days . ' day'));
+    $closed = [];
+    $freeFor = static function (array $t, string $from, string $to) use (&$closed, $winFrom, $winTo): bool {
+        if ((int)$t['joined'] > 0) {
+            return true; // joined pairs span other types' rooms: quote_stay (checkRoomAvailability) decides
+        }
+        $id = (int)$t['id'];
+        if (!isset($closed[$id])) {
+            $closed[$id] = [];
+            try {
+                foreach (getBookedDatesForRoom($id, $winFrom, $winTo) as $n) {
+                    $closed[$id][substr((string)$n, 0, 10)] = true;
+                }
+                foreach (getRoomTypeBlockedDatesOnly($id, $winFrom, $winTo) as $b) {
+                    $closed[$id][substr((string)$b['block_date'], 0, 10)] = true;
+                }
+            } catch (Throwable $e) {
+                // the priced check below still decides
+            }
+        }
+        for ($d = $from; $d < $to; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
+            if (isset($closed[$id][$d])) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // (a) + (c): other types on the same dates
+    $typeCands = [];
+    foreach ($types as $t) {
+        if ((int)$t['id'] !== $askedTypeId && $takes($t) && $freeFor($t, $ci, $co)) {
+            $typeCands[] = $t;
+        }
+    }
+    // (b): the nearest dates, nearest first (+1, -1, +2, -2 ...); one type per date
+    $dateTypes = [];
+    foreach ($types as $t) {
+        $fitsAsked = (int)$t['cap'] * ((int)$t['joined'] > 0 ? 1 : $rooms) >= $party;
+        if ($askedTypeId !== null ? ((int)$t['id'] === $askedTypeId && $fitsAsked) : (!$typeCands && $takes($t))) {
+            $dateTypes[] = $t;
+        }
+    }
+    $dateCands = [];
+    for ($d = 1; $d <= $days && $dateTypes; $d++) {
+        foreach ([$d, -$d] as $shift) {
+            $from = date('Y-m-d', strtotime($ci . ' ' . ($shift > 0 ? '+' : '') . $shift . ' day'));
+            if ($from < $today) {
+                continue;
+            }
+            $to = date('Y-m-d', strtotime($from . ' +' . $nights . ' day'));
+            foreach ($dateTypes as $t) {
+                if ($freeFor($t, $from, $to)) {
+                    $dateCands[] = [$t, $from, $to];
+                    break; // the first type that is free that date
+                }
+            }
+        }
+    }
+    if (!$typeCands && !$dateCands) {
+        return $none;
+    }
+
+    // Price and confirm only what will be shown: types and dates in turn, at most ai_alt_tries quote_stay runs.
+    $row = static function (array $q, bool $withDates) use ($priced): array {
+        $r = ['room_type' => (string)$q['room_type']];
+        if ($withDates) {
+            $r['check_in'] = (string)$q['check_in'];
+            $r['check_out'] = (string)$q['check_out'];
+        }
+        if ($priced) {
+            $r['price_per_night'] = $q['price_per_night'];
+            $r['total'] = $q['total'];
+            $r['currency'] = $q['currency'];
+        }
+        return $r;
+    };
+    $other = [];
+    $joined = [];
+    $dates = [];
+    $used = 0;
+    $ti = 0;
+    $di = 0;
+    while ($used < $tries && ($ti < count($typeCands) || $di < count($dateCands))) {
+        $wantType = $ti < count($typeCands) && count($other) + count($joined) < $max;
+        $wantDate = $di < count($dateCands) && count($dates) < $max;
+        if (!$wantType && !$wantDate) {
+            break;
+        }
+        $isType = $wantType && (!$wantDate || $used % 2 === 0);
+        if ($isType) {
+            $t = $typeCands[$ti++];
+            [$from, $to] = [$ci, $co];
+        } else {
+            [$t, $from, $to] = $dateCands[$di++];
+        }
+        $used++;
+        $GLOBALS['__rh_ai_alt_quotes'] = ($GLOBALS['__rh_ai_alt_quotes'] ?? 0) + 1; // counted by the tests
+        $q = rh_ai_t_quote_stay($db, $user, ['room_type' => (string)$t['id'], 'check_in' => $from, 'check_out' => $to, 'adults' => $adults, 'children' => $children, 'rooms' => $rooms, '_alt' => false]);
+        if (!empty($q['error']) || empty($q['available'])) {
+            continue;
+        }
+        if (!$isType) {
+            $dates[] = $row($q, true);
+        } elseif ((int)$t['joined'] > 0) {
+            $joined[] = $row($q, false) + ['note' => 'two joined rooms sold as one family room, up to ' . (int)$t['cap'] . ' guests'];
+        } else {
+            $other[] = $row($q, false);
+        }
+    }
+    $out = [];
+    if ($other) {
+        $out['other_room_types'] = $other;
+    }
+    if ($joined) {
+        $out['joined_rooms'] = $joined;
+    }
+    if ($dates) {
+        $out['other_dates'] = $dates;
+    }
+    return $out ?: $none;
 }
 
 /**
@@ -774,6 +951,25 @@ function rh_ai_t_check_availability(PDO $db, array $user, array $a): array
  * -> x nights + rh_child_supplement for the children seated in that room -> rh_stay_totals('price').
  */
 function rh_ai_t_quote_stay(PDO $db, array $user, array $a): array
+{
+    $q = rh_ai_quote_stay_run($db, $user, $a);
+    $why = $q['_alt'] ?? null;
+    unset($q['_alt']);
+    if (($a['_alt'] ?? true) === false) {
+        return $q; // an alternative being priced: never a search inside a search
+    }
+    if ($why === null && empty($q['error']) && isset($q['available']) && !$q['available']) {
+        $why = (int)$q['room_type_id'];
+    }
+    if ($why !== null) {
+        $q['alternatives'] = rh_ai_room_alternatives($db, $user, $why > 0 ? $why : null, (string)$a['check_in'], (string)$a['check_out'],
+            (int)$a['adults'], (int)($a['children'] ?? 0), max(1, (int)($a['rooms'] ?? 1)));
+    }
+    return $q;
+}
+
+/** quote_stay itself. A result it cannot give for the type asked carries '_alt' => the type id (0 = no such type) so alternatives are looked for. */
+function rh_ai_quote_stay_run(PDO $db, array $user, array $a): array
 {
     foreach (['/includes/pricing.php', '/includes/guest-allocation.php'] as $f) {
         require_once dirname(__DIR__, 2) . $f;
@@ -785,7 +981,7 @@ function rh_ai_t_quote_stay(PDO $db, array $user, array $a): array
     }
     $t = rh_ai_find_room_type($db, (string)$a['room_type']);
     if (!$t) {
-        return ['error' => 'No room type matches "' . $a['room_type'] . '".'];
+        return ['error' => 'No room type matches "' . $a['room_type'] . '".', '_alt' => 0];
     }
     $rid = (int)$t['id'];
     $adults = (int)$a['adults'];
@@ -819,7 +1015,7 @@ function rh_ai_t_quote_stay(PDO $db, array $user, array $a): array
             $queue[] = $cand;
         }
         if (count($queue) < $qty) {
-            return ['error' => 'Only ' . count($queue) . ' joined room combination(s) are available for "' . $r['name'] . '" on those dates.', 'available' => false];
+            return ['error' => 'Only ' . count($queue) . ' joined room combination(s) are available for "' . $r['name'] . '" on those dates.', 'available' => false, '_alt' => $rid];
         }
         $rate = ($queue[0]['price_override'] !== null && $queue[0]['price_override'] !== '') ? (float)$queue[0]['price_override'] : (float)$r['price_per_night'];
         $r['price_per_night'] = $r['price_single_occupancy'] = $r['price_double_occupancy'] = $r['price_triple_occupancy'] = $rate;
@@ -850,7 +1046,7 @@ function rh_ai_t_quote_stay(PDO $db, array $user, array $a): array
     }
     $split = ga_distribute_party($rows, $adults, $children);
     if (empty($split['valid'])) {
-        return ['error' => (string)$split['message']];
+        return ['error' => (string)$split['message'], '_alt' => $rid]; // the party does not fit: other types, joined rooms
     }
     if (empty($queue)) {
         $labels = [];
@@ -1370,22 +1566,22 @@ function rh_ai_clock(string $raw): string
     return $v;
 }
 
-/** One opening window from two stored times. Never fills in a time that is not set. */
-function rh_ai_hours_line(string $open, string $close): string
+/** One opening window from two stored times. Never fills in a time that is not set ($where: the screen it is set on). */
+function rh_ai_hours_line(string $open, string $close, string $where = 'Hotel Settings'): string
 {
     $o = trim($open);
     $c = trim($close);
     if ($o === '' && $c === '') {
-        return 'not set in Hotel Settings';
+        return 'not set in ' . $where;
     }
     if ($o === '') {
-        return 'closes ' . rh_ai_clock($c) . '; opening time not set in Hotel Settings';
+        return 'closes ' . rh_ai_clock($c) . '; opening time not set in ' . $where;
     }
     if ($c === '') {
-        return 'opens ' . rh_ai_clock($o) . '; closing time not set in Hotel Settings';
+        return 'opens ' . rh_ai_clock($o) . '; closing time not set in ' . $where;
     }
     if (rh_ai_clock($o) === rh_ai_clock($c)) {
-        return 'open and close times are the same (' . rh_ai_clock($o) . ') — check Hotel Settings';
+        return 'open and close times are the same (' . rh_ai_clock($o) . ') — check ' . $where;
     }
     $next = '';
     if (preg_match('/^(\d{1,2}):(\d{2})/', $o, $a) && preg_match('/^(\d{1,2}):(\d{2})/', $c, $b) && !preg_match('/[ap]\.?m/i', $o . $c)
@@ -1395,28 +1591,21 @@ function rh_ai_hours_line(string $open, string $close): string
     return rh_ai_clock($o) . ' – ' . rh_ai_clock($c) . $next;
 }
 
+/** Where station hours are set (the Station Hours screen, admin/station-settings.php). */
+function rh_ai_station_hours_where(): string
+{
+    return 'Settings → Station Hours';
+}
+
 /**
- * A station's effective hours: the stored times, or, where a time is not saved (or not a valid time), the default the
- * station screens run on (rh_station_definitions() in includes/station-hours.php), marked as the default.
+ * A station's hours: only the times saved on Station Hours (owner 2026-10-28, "not hard coded": migration 074 saved each
+ * hotel's running hours as settings). A time not saved, or not a valid time, is said to be not set; a default written
+ * in code is never quoted.
  */
 function rh_ai_station_hours_line(string $station, string $openRaw, string $closeRaw): string
 {
     require_once dirname(__DIR__) . '/station-hours.php';
-    $def = rh_station_definitions()[$station] ?? null;
-    if ($def === null) {
-        return rh_ai_hours_line($openRaw, $closeRaw);
-    }
-    $o = rh_station_normalize_time($openRaw, '');
-    $c = rh_station_normalize_time($closeRaw, '');
-    $note = '';
-    if ($o === '' && $c === '') {
-        $note = ' (the default; not set in Hotel Settings)';
-    } elseif ($o === '') {
-        $note = ' (opening time is the default; not set in Hotel Settings)';
-    } elseif ($c === '') {
-        $note = ' (closing time is the default; not set in Hotel Settings)';
-    }
-    return rh_ai_hours_line($o !== '' ? $o : (string)$def['default_open'], $c !== '' ? $c : (string)$def['default_close']) . $note;
+    return rh_ai_hours_line(rh_station_normalize_time($openRaw, ''), rh_station_normalize_time($closeRaw, ''), rh_ai_station_hours_where());
 }
 
 /** Station -> its module switch (same map as includes/station-hours.php); a station also needs the till (pos) on. */
@@ -1615,18 +1804,190 @@ function rh_ai_hotel_menu(PDO $db): array
     return ['categories_count' => count($cats), 'items_available' => $total, 'categories' => $cats, 'items' => $items];
 }
 
+/** Names of the facilities the hotel offers (parts it does not offer already left out), at most ai_alt_menu_max. */
+function rh_ai_facility_names(PDO $db, ?int $n = null): array
+{
+    return array_slice(array_map(static fn($f) => explode(' — ', $f)[0], rh_ai_hotel_facilities($db)), 0, $n ?? rh_ai_num('ai_alt_menu_max'));
+}
+
+/**
+ * Is a station open right now (owner 2026-10-28)? The saved Station Hours only, in the site timezone, with the station
+ * screens' rule that a close at or before the open runs past midnight (includes/station-hours.php). A time not saved, or
+ * the same open and close time: null (the hours line already says so; nothing is claimed).
+ * @return array{open:bool,line:string}|null
+ */
+function rh_ai_station_state(string $station, string $openRaw, string $closeRaw, ?DateTimeImmutable $now = null): ?array
+{
+    require_once dirname(__DIR__) . '/station-hours.php';
+    $o = rh_station_normalize_time($openRaw, '');
+    $c = rh_station_normalize_time($closeRaw, '');
+    if ($o === '' || $c === '' || $o === $c) {
+        return null;
+    }
+    $tz = rh_site_timezone();
+    $now = $now ? $now->setTimezone($tz) : new DateTimeImmutable('now', $tz);
+    $cross = rh_station_minutes($c) <= rh_station_minutes($o);
+    $next = null;
+    foreach ([-1, 0, 1] as $d) {
+        $day = $now->modify(($d < 0 ? '' : '+') . $d . ' day')->format('Y-m-d');
+        $start = new DateTimeImmutable($day . ' ' . $o . ':00', $tz);
+        $end = new DateTimeImmutable(($cross ? date('Y-m-d', strtotime($day . ' +1 day')) : $day) . ' ' . $c . ':00', $tz);
+        if ($now >= $start && $now < $end) {
+            return ['open' => true, 'line' => 'open now, until ' . rh_ai_clock($c)];
+        }
+        if ($next === null && $start > $now) {
+            $next = $start;
+        }
+    }
+    $when = $next !== null && $next->format('Y-m-d') === $now->format('Y-m-d') ? ' today' : ' tomorrow';
+    return ['open' => false, 'line' => 'closed now; opens ' . rh_ai_clock($o) . $when];
+}
+
+/** Open or closed right now for each station the hotel runs, and which are open now. */
+function rh_ai_station_now(array $s): array
+{
+    $now = $GLOBALS['__rh_ai_now'] ?? null; // tests only: a fixed moment
+    $labels = ['kitchen' => 'Kitchen', 'bar' => 'Bar', 'coffee_bar' => 'Coffee bar'];
+    $state = [];
+    $open = [];
+    foreach ($labels as $st => $label) {
+        if (!rh_ai_station_on($st)) {
+            continue;
+        }
+        $x = rh_ai_station_state($st, (string)($s['station_' . $st . '_opens_at'] ?? ''), (string)($s['station_' . $st . '_closes_at'] ?? ''), $now instanceof DateTimeImmutable ? $now : null);
+        if ($x !== null) {
+            $state[$st] = $x['line'];
+            if ($x['open']) {
+                $open[] = $label;
+            }
+        }
+    }
+    return $state ? ['now' => $state, 'open_now' => $open ?: 'nothing is open right now'] : [];
+}
+
+/** Every menu item with price, category and its available / featured / vegetarian / vegan flags (newest table shape first). */
+function rh_ai_menu_rows(PDO $db): ?array
+{
+    $sqls = [
+        'SELECT i.item_name AS n, i.price AS p, c.name AS c, i.is_available AS a, i.is_featured AS f, i.is_vegetarian AS veg, i.is_vegan AS vegan, i.tags AS tags
+         FROM menu_items i JOIN menu_categories c ON c.id = i.category_id AND c.is_active = 1 ORDER BY i.is_featured DESC, c.display_order, i.display_order, i.item_name LIMIT 500',
+        "SELECT i.item_name AS n, i.price AS p, c.name AS c, i.is_available AS a, i.is_featured AS f, 0 AS veg, 0 AS vegan, '' AS tags
+         FROM menu_items i JOIN menu_categories c ON c.id = i.category_id AND c.is_active = 1 ORDER BY i.is_featured DESC, c.display_order, i.display_order, i.item_name LIMIT 500",
+    ];
+    foreach ($sqls as $sql) {
+        try {
+            return $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            // try the next shape
+        }
+    }
+    try { // older menu tables (food_menu / drink_menu, as the public restaurant page reads them)
+        $rows = [];
+        foreach (['food_menu', 'drink_menu'] as $t) {
+            $rows = array_merge($rows, $db->query("SELECT item_name AS n, price AS p, category AS c, is_available AS a, is_featured AS f, 0 AS veg, 0 AS vegan, '' AS tags FROM $t ORDER BY is_featured DESC, display_order, item_name LIMIT 300")->fetchAll(PDO::FETCH_ASSOC));
+        }
+        return $rows;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * One menu item (owner 2026-10-28): available or not, and then up to ai_alt_menu_max available items from the same category (featured
+ * items when there are none, or when nothing matches). "vegetarian" / "vegan" lists the items marked so. Prices as stored.
+ */
+function rh_ai_menu_item(PDO $db, string $item): array
+{
+    $rows = rh_ai_menu_rows($db);
+    if (!$rows) {
+        return ['asked' => $item, 'menu' => 'no menu found'];
+    }
+    $cur = rh_ai_currency();
+    $fmt = static fn(array $r): string => rh_ai_plain((string)$r['n'], 60) . ' — ' . ($cur !== '' ? $cur . ' ' : '') . number_format((float)$r['p'], 2) . ' (' . rh_ai_plain((string)$r['c'], 40) . ')';
+    $avail = array_values(array_filter($rows, static fn($r) => !empty($r['a'])));
+    $feat = array_values(array_filter($avail, static fn($r) => !empty($r['f'])));
+    $n = rh_ai_num('ai_alt_menu_max');
+    $fallback = $avail ? ['alternatives' => array_map($fmt, array_slice($feat ?: $avail, 0, $n)), 'alternatives_are' => $feat ? 'featured items' : 'items on the menu']
+        : ['alternatives' => 'nothing on the menu is available right now'];
+    $q = mb_strtolower(trim($item));
+    $out = ['asked' => $item];
+    $diet = preg_match('/\bvegan\b/u', $q) ? 'vegan' : (preg_match('/\b(vegetarian|veggie|meat.?free|plant.?based)\b/u', $q) ? 'veg' : '');
+    if ($diet !== '') {
+        $word = $diet === 'vegan' ? 'vegan' : 'vegetarian';
+        $hits = array_values(array_filter($avail, static fn($r) => !empty($r[$diet]) || ($diet === 'veg' && !empty($r['vegan'])) || stripos((string)$r['tags'], $word) !== false));
+        if ($hits) {
+            return $out + ['status' => count($hits) . ' available item(s) marked ' . $word, 'items' => array_map($fmt, $hits)];
+        }
+        // None marked: the categories to look through (never a guess at which dishes are meat-free)
+        $cats = [];
+        foreach ($avail as $r) {
+            $c = rh_ai_plain((string)$r['c'], 40);
+            $cats[$c] = ($cats[$c] ?? 0) + 1;
+        }
+        $list = [];
+        foreach ($cats as $c => $n) {
+            $list[] = $c . ': ' . $n;
+        }
+        return $out + ['status' => 'No available item on the menu is marked ' . $word . ' (staff can mark items on the menu screen).', 'categories' => $list ?: 'nothing on the menu is available right now'];
+    }
+    $words = [];
+    foreach (preg_split('/[^\p{L}\p{N}]+/u', $q) as $w) {
+        if (mb_strlen($w) >= 3) {
+            $words[] = mb_strlen($w) > 3 ? (string)preg_replace('/(es|s)$/u', '', $w) : $w; // "chips" finds "chip"
+        }
+    }
+    $match = static function (string $hay) use ($words): bool {
+        $hay = mb_strtolower($hay);
+        foreach ($words as $w) {
+            if (mb_strpos($hay, $w) === false) {
+                return false;
+            }
+        }
+        return $words !== [];
+    };
+    $hits = array_values(array_filter($rows, static fn($r) => $match((string)$r['n'])));
+    if (!$hits) {
+        $cat = array_values(array_filter($avail, static fn($r) => $match((string)$r['c'])));
+        if ($cat) {
+            return $out + ['status' => 'a menu category', 'items' => array_map($fmt, $cat)];
+        }
+        return $out + ['status' => 'Not on the menu.'] + $fallback;
+    }
+    $ok = array_values(array_filter($hits, static fn($r) => !empty($r['a'])));
+    if ($ok) {
+        return $out + ['status' => 'available', 'items' => array_map($fmt, array_slice($ok, 0, $n))];
+    }
+    $names = array_map(static fn($r) => (string)$r['n'], $hits);
+    $cats = array_unique(array_map(static fn($r) => (string)$r['c'], $hits));
+    $same = array_values(array_filter($avail, static fn($r) => in_array((string)$r['c'], $cats, true) && !in_array((string)$r['n'], $names, true)));
+    $out += ['status' => 'Not available right now.', 'unavailable' => array_map(static fn($n) => rh_ai_plain($n, 60), array_slice($names, 0, 3))];
+    if ($same) {
+        return $out + ['alternatives' => array_map($fmt, array_slice($same, 0, $n)), 'alternatives_are' => 'available items from the same category'];
+    }
+    return $out + $fallback;
+}
+
 function rh_ai_t_hotel_info(PDO $db, array $user, array $a): array
 {
-    $topic = (string)($a['topic'] ?? 'overview');
+    $item = trim((string)($a['item'] ?? ''));
+    $topic = (string)($a['topic'] ?? ($item !== '' ? 'menu' : 'overview'));
     $s = rh_ai_hotel_settings($db, ['site_name', 'check_in_time', 'check_out_time',
         'station_kitchen_opens_at', 'station_kitchen_closes_at', 'station_bar_opens_at', 'station_bar_closes_at', 'station_coffee_bar_opens_at', 'station_coffee_bar_closes_at',
         'phone_main', 'phone_reception', 'phone_reservations', 'whatsapp_number', 'email_main', 'email_reservations', 'email_info',
         'hotel_address', 'address', 'address_line1', 'address_line2', 'address_city', 'address_region', 'address_country']);
     $out = ['hotel' => $s['site_name'] !== '' ? $s['site_name'] : 'not set in Hotel Settings', 'topic' => $topic];
-    $off = static fn(string $what) => $what . ' is switched off in this system, so there is nothing to show.';
+    // A part the hotel does not offer: one plain line and what it does offer (the module system is never mentioned).
+    $off = static function (string $line) use ($db, &$out): string {
+        $out['we_offer'] = $out['we_offer'] ?? (rh_ai_facility_names($db) ?: 'no facilities set up');
+        return $line;
+    };
 
     if ($topic === 'hours') {
         $out['hours'] = rh_ai_hotel_hours($db, $s);
+        $out += rh_ai_station_now($s);
+        if (!rh_ai_module_on('gym') || !rh_ai_restaurant_on()) {
+            $out['we_offer'] = rh_ai_facility_names($db) ?: 'no facilities set up';
+        }
         return $out;
     }
     if ($topic === 'contact') {
@@ -1642,7 +2003,7 @@ function rh_ai_t_hotel_info(PDO $db, array $user, array $a): array
     }
     if ($topic === 'gym') {
         if (!rh_ai_module_on('gym')) {
-            $out['gym'] = $off('The gym');
+            $out['gym'] = $off("We don't offer a gym here.");
             return $out;
         }
         $out['gym_hours'] = rh_ai_gym_hours($db);
@@ -1656,17 +2017,21 @@ function rh_ai_t_hotel_info(PDO $db, array $user, array $a): array
     }
     if ($topic === 'menu') {
         if (!rh_ai_restaurant_on()) {
-            $out['menu'] = $off('The restaurant');
+            $out['menu'] = $off("We don't have a restaurant here.");
             return $out;
+        }
+        if ($item !== '') {
+            return $out + rh_ai_menu_item($db, $item); // one item: available or not, and what else to offer
         }
         return $out + rh_ai_hotel_menu($db);
     }
     if ($topic === 'restaurant_bar') {
         if (!rh_ai_restaurant_on()) {
-            $out['restaurant'] = $off('The restaurant');
+            $out['restaurant'] = $off("We don't have a restaurant here.");
             return $out;
         }
-        $out['hours'] = array_intersect_key(rh_ai_hotel_hours($db, $s), array_flip(['kitchen', 'bar', 'coffee_bar'])) ?: 'no kitchen, bar or coffee bar station is switched on';
+        $out['hours'] = array_intersect_key(rh_ai_hotel_hours($db, $s), array_flip(['kitchen', 'bar', 'coffee_bar'])) ?: 'no kitchen, bar or coffee bar hours are set up here';
+        $out += rh_ai_station_now($s);
         foreach (rh_ai_hotel_facilities($db) as $f) {
             if (preg_match('/\b(restaurant|bar|dining|caf[eé]|coffee)\b/iu', $f)) {
                 $out['facility'][] = $f;
@@ -1704,7 +2069,7 @@ function rh_ai_t_hotel_info(PDO $db, array $user, array $a): array
             }
             $out['conference_rooms'] = $out['conference_rooms'] ?? 'none set up';
         } else {
-            $out['conference_rooms'] = $off('Conference');
+            $out['conference_rooms'] = $off("We don't offer conference rooms here.");
         }
         if (rh_ai_module_on('events')) {
             try {
@@ -1720,7 +2085,7 @@ function rh_ai_t_hotel_info(PDO $db, array $user, array $a): array
             }
             $out['upcoming_events'] = $out['upcoming_events'] ?? 'none coming up';
         } else {
-            $out['upcoming_events'] = $off('Events');
+            $out['upcoming_events'] = $off("We don't run events here.");
         }
         return $out;
     }
@@ -1745,7 +2110,7 @@ function rh_ai_t_hotel_info(PDO $db, array $user, array $a): array
             $parts[] = $p;
         }
     }
-    $out['switched_on'] = $parts;
+    $out['offered_here'] = $parts;
     $out['more'] = 'topics: hours, restaurant_bar, menu, facilities, policies, contact' . (rh_ai_module_on('gym') ? ', gym' : '') . ', conference_events';
     return $out;
 }

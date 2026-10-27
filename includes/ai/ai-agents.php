@@ -58,7 +58,7 @@ if (!defined('RH_AI_EFFICIENCY_WARN_TOKENS')) {
  * invoices, prices/rates/deals, shift or day close). Answered locally in one line with the screen, for every
  * role (not the permission line), with no tokens. How-to questions and messages that also ask for a change the
  * Assistant can prepare (check-in, booking, cancel...) go on to the model as before.
- * @return array{0:string,1:array}|null [line, links]
+ * @return array{0:string,1:array,2:string}|null [line, links, area]
  */
 function rh_ai_no_write_area(array $user, string $t): ?array
 {
@@ -99,14 +99,94 @@ function rh_ai_no_write_area(array $user, string $t): ?array
         $links = [];
         $uid = (int)($user['id'] ?? 0);
         foreach ($pages as [$page, $label]) {
-            $k = function_exists('getPermissionForPage') ? getPermissionForPage($page) : null;
-            if ($k !== null && hasPermission($uid, $k)) {
+            if (function_exists('rhCanOpenPage') && rhCanOpenPage($uid, $page)) { // their permission and the module state
                 $links[] = ['label' => $label, 'url' => $page];
             }
         }
-        return [$line, array_slice($links, 0, 2)];
+        return [$line, array_slice($links, 0, 2), array_column($pages, 0)];
     }
-    return $direct ? [$moneyLine, []] : null;
+    return $direct ? [$moneyLine, [], ['payments.php', 'invoices.php']] : null;
+}
+
+/**
+ * Owner 2026-10-28 ("offer suggestions on what actually is available"; "not hard coded"): after a "can't" line,
+ * "I can help with: ..." built from this person's own tool list (their permissions and the modules switched on) - one
+ * tool per permission area, in registry order, worded with the tool's own status line. A tool that reads the declined
+ * screen's area (same permission key as the screen, from the page map) comes first; tools everyone has come last.
+ * Local, no tokens, no figures. $pages: the screens of the declined area.
+ */
+function rh_ai_can_help_line(array $user, array $pages = []): string
+{
+    $tools = rh_ai_tools_for_user($user);
+    $areaPerms = [];
+    foreach ($pages as $page) {
+        $k = function_exists('getPermissionForPage') ? getPermissionForPage((string)$page) : null;
+        if ($k !== null) {
+            $areaPerms[] = $k;
+        }
+    }
+    $first = [];
+    $rest = [];
+    $open = [];
+    $seen = [];
+    foreach (array_keys(rh_ai_tool_registry()) as $name) {
+        if (!isset($tools[$name])) {
+            continue;
+        }
+        $perm = (array)$tools[$name]['perm'];
+        $key = implode(',', $perm);
+        if (isset($seen[$key]) || rh_ai_tool_step($name) === rh_ai_tool_step('')) {
+            continue; // one tool per permission area; a tool with no plain status line is not offered here
+        }
+        $seen[$key] = true;
+        if ($perm && array_intersect($perm, $areaPerms)) {
+            $first[] = $name;
+        } elseif ($perm) {
+            $rest[] = $name;
+        } else {
+            $open[] = $name;
+        }
+    }
+    $can = [];
+    foreach (array_slice(array_merge($first, $rest, $open), 0, rh_ai_num('ai_alt_max')) as $name) {
+        $step = rtrim(rh_ai_tool_step($name), '.');
+        $can[] = mb_strtolower(mb_substr($step, 0, 1)) . mb_substr($step, 1);
+    }
+    if (!$can) {
+        return '';
+    }
+    $last = array_pop($can);
+    return 'I can help with: ' . ($can ? implode(', ', $can) . ' and ' : '') . $last . '.';
+}
+
+/** The best 1-2 staff guide sections for a question (local KB, only guides this person may read) as panel links. */
+function rh_ai_guide_links(PDO $db, array $user, string $q, int $n = 2): array
+{
+    if (trim($q) === '' || !rh_ai_tool_allowed($user, 'how_to')) {
+        return [];
+    }
+    try {
+        $r = rh_ai_t_how_to($db, $user, ['question' => mb_substr($q, 0, 200)]);
+    } catch (Throwable $e) {
+        return [];
+    }
+    $links = [];
+    foreach ((array)($r['matches'] ?? []) as $m) { // one link per guide, at the best section
+        $l = ['label' => 'Guide: ' . rh_ai_plain((string)(($m['guide'] ?? '') !== '' ? $m['guide'] : $m['title']), 50), 'url' => (string)$m['link']];
+        if (!in_array($l['label'], array_column($links, 'label'), true)) {
+            $links[] = $l;
+        }
+        if (count($links) >= $n) {
+            break;
+        }
+    }
+    return $links;
+}
+
+/** The reply says the data has nothing ("I can't find...", "I don't have that"). */
+function rh_ai_is_no_data_reply(string $t): bool
+{
+    return (bool)preg_match("/\b(i (don't|do not|can't|cannot|couldn't|could not) (have|find|see|get)|i have no (data|record|information|details)|no (data|records?|information|details|results?) (found|for|on|about)|(isn't|is not|aren't|are not) (in|on) (the|my|our) (data|records|system)|nothing (found|came up|on record))\b/iu", $t);
 }
 
 /** Plainly not about the hotel or this system. */
@@ -249,6 +329,10 @@ function rh_ai_hotel_fact_intent(string $t): ?array
         || preg_match('/\b(bookings?|late|early|sales|sold|tickets?|orders?|voids?|revenue|takings|menu|breakfast|lunch|dinner|average|slow|wait\w*|how long|change|set|update|move|extend|should|why|tabs?|shift|till|staff|suppliers?|room \d+)\b/u', $t)) {
         return null;
     }
+    // "Do we have a gym?": yes with the hours, or one plain line and what the hotel does have
+    if (preg_match('/^(do|does) (we|you|the hotel|this hotel) (have|offer|run|got) (a |an |any )?(gym|fitness( centre| center| room)?)( here| at the hotel)?\??$|^(is there|have we got) (a |an )?(gym|fitness( centre| center| room)?)( here| at the hotel)?\??$/u', $t)) {
+        return ['hotel_info', ['topic' => 'gym', '_ask' => 'gym']];
+    }
     $timeWords = '/\b(times?|when|hours?|open|opens|opening|close|closes|closing)\b/u';
     if (preg_match('/\bcheck.?(in|out)\b/u', $t)) {
         // Only the hotel's own check-in/out time, asked in the generic shape. A question naming a person, a room, a
@@ -322,9 +406,10 @@ function rh_ai_hotel_local_text(array $view, array $r): string
     if (($r['topic'] ?? '') === 'hours') {
         $h = (array)($r['hours'] ?? []);
         $labels = ['check_in' => 'Check-in', 'check_out' => 'Check-out', 'kitchen' => 'Kitchen (restaurant food)', 'bar' => 'Bar', 'coffee_bar' => 'Coffee bar', 'gym' => 'Gym'];
-        $off = ['check_in' => 'Room bookings are switched off in this system, so there is no check-in time.', 'check_out' => 'Room bookings are switched off in this system, so there is no check-out time.',
-            'kitchen' => 'The restaurant kitchen is switched off in this system, so there are no kitchen hours to show.', 'bar' => 'The bar is switched off in this system, so there are no bar hours to show.',
-            'coffee_bar' => 'The coffee bar is switched off in this system, so there are no coffee bar hours to show.', 'gym' => 'The gym is switched off at this hotel, so there are no gym hours.'];
+        // A part the hotel does not offer: one plain line (the module system is never mentioned), then what it does offer.
+        $off = ['check_in' => "Room bookings aren't taken here, so there is no check-in time.", 'check_out' => "Room bookings aren't taken here, so there is no check-out time.",
+            'kitchen' => 'There are no kitchen hours set up here.', 'bar' => 'There are no bar hours set up here.',
+            'coffee_bar' => 'There are no coffee bar hours set up here.', 'gym' => "We don't offer a gym here."];
         if ($asks === ['all']) {
             $asks = array_keys($h);
         } elseif ($asks === ['check_in'] && isset($h['check_out'])) {
@@ -332,11 +417,42 @@ function rh_ai_hotel_local_text(array $view, array $r): string
         } elseif ($asks === ['check_out'] && isset($h['check_in'])) {
             $asks[] = 'check_in';
         }
+        $now = (array)($r['now'] ?? []);
+        $closedAsked = [];
+        $notOffered = false;
         foreach ($asks as $k) {
             if (isset($labels[$k])) {
-                $lines[] = isset($h[$k]) ? '**' . $labels[$k] . ':** ' . $h[$k] : $off[$k];
+                if (!isset($h[$k])) {
+                    $lines[] = $off[$k];
+                    $notOffered = $notOffered || $k === 'gym' || $k === 'kitchen';
+                    continue;
+                }
+                $lines[] = '**' . $labels[$k] . ':** ' . $h[$k] . (isset($now[$k]) ? ' — ' . $now[$k] : '');
+                if (isset($now[$k]) && strpos((string)$now[$k], 'closed now') === 0) {
+                    $closedAsked[] = $k;
+                }
             }
         }
+        if ($closedAsked && count($asks) <= 2) { // the station asked is closed: what is open instead
+            $openNow = is_array($r['open_now'] ?? null) ? array_values(array_filter($r['open_now'], static fn($l) => !in_array(array_search($l, $labels, true), $closedAsked, true))) : [];
+            $lines[] = $openNow ? 'Open now: ' . implode(', ', $openNow) . '.' : 'Nothing else is open right now.';
+        }
+        if ($notOffered && is_array($r['we_offer'] ?? null) && $r['we_offer']) {
+            $lines[] = 'What we do have: ' . implode(', ', $r['we_offer']) . '.';
+        }
+    } elseif (($r['topic'] ?? '') === 'gym') {
+        if (isset($r['gym_hours']) || (isset($r['gym']) && !isset($r['we_offer']))) {
+            $lines[] = 'Yes' . (isset($r['gym']) ? ' — ' . $r['gym'] : ', we have a gym') . '.';
+            if (isset($r['gym_hours'])) {
+                $lines[] = '**Gym:** ' . $r['gym_hours'];
+            }
+        } else {
+            $lines[] = (string)($r['gym'] ?? "We don't offer a gym here.");
+            if (is_array($r['we_offer'] ?? null) && $r['we_offer']) {
+                $lines[] = 'What we do have: ' . implode(', ', $r['we_offer']) . '.';
+            }
+        }
+        return implode("\n\n", $lines);
     } elseif (($r['topic'] ?? '') === 'contact') {
         $want = $asks ?: ['phone', 'email', 'address'];
         if (in_array('phone', $want, true)) {
@@ -1665,12 +1781,15 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         return $finish(rh_ai_off_topic_line(), 'declined');
     }
     // 1a+. A change nobody can make here (stock, till, payments, prices, closes): one line and the screen, any role
+    // Owner 2026-10-28: the same line, the screen, the best guide section and what this person CAN do (still no tokens).
     if (($nw = rh_ai_no_write_area($user, $tok)) !== null) {
-        return $finish($nw[0], 'declined', ['links' => $nw[1]]);
+        $help = rh_ai_can_help_line($user, (array)($nw[2] ?? []));
+        return $finish($nw[0] . ($help !== '' ? "\n\n" . $help : ''), 'declined', ['links' => array_merge($nw[1], rh_ai_guide_links($db, $user, $tok))]);
     }
-    // 1b. Outside this person's permissions: owner's one line, no figure, no tokens
+    // 1b. Outside this person's permissions: owner's one line, no figure, no tokens; then what they CAN do
     if (rh_ai_scope_block($user, $tok) !== '') {
-        return $finish(rh_ai_out_of_scope_line(), 'declined', ['chips' => ['What can I do here?']]);
+        $help = rh_ai_can_help_line($user);
+        return $finish(rh_ai_out_of_scope_line() . ($help !== '' ? "\n\n" . $help : ''), 'declined', ['chips' => ['What can I do here?'], 'links' => rh_ai_guide_links($db, $user, $tok, 1)]);
     }
     // 1c. Small talk (greeting, thanks, a hard shift): a short friendly reply, no tokens
     if (($st = rh_ai_small_talk($tok)) !== null) {
@@ -1695,7 +1814,8 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     if ($intent !== null) {
         [$tool, $view] = $intent;
         if (!rh_ai_tool_allowed($user, $tool)) {
-            return $finish(rh_ai_out_of_scope_line(), 'declined', ['chips' => ['What can I do here?']]);
+            $help = rh_ai_can_help_line($user);
+            return $finish(rh_ai_out_of_scope_line() . ($help !== '' ? "\n\n" . $help : ''), 'declined', ['chips' => ['What can I do here?']]);
         }
         $args = isset($view['date']) ? ['date' => (string)$view['date']] : [];
         if (isset($view['topic'])) {
@@ -1997,6 +2117,16 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     }
     $final = rh_ai_scrub_outbound($db, $conv, $final); // stored tokenised (model text should already be)
     $chips = rh_ai_followup_chips($user, array_unique($budget['tools_used']));
+    // Nothing found (owner 2026-10-28): the best 2 guide sections and 2-3 starter questions for this screen (local, no tokens)
+    if (!$budget['cards'] && rh_ai_is_no_data_reply($final)) {
+        foreach (rh_ai_guide_links($db, $user, $tok) as $l) {
+            if (count($budget['links']) < 4 && !in_array($l, $budget['links'], true)) {
+                $budget['links'][] = $l;
+            }
+        }
+        $sugs = array_values(array_filter(rh_ai_suggestions($user, $page), static fn($x) => $x !== 'Give me the tea' && strcasecmp($x, $message) !== 0));
+        $chips = array_slice(array_values(array_unique(array_merge(array_slice($sugs, 0, 3), $chips))), 0, 3);
+    }
     $res = $finish($final, $consulted ? 'swarm' : $route, ['links' => $budget['links'], 'chips' => $chips, 'cards' => $budget['cards'], 'provider' => $models['provider'], 'model' => $usedModel,
         'tokens_in' => $budget['in'], 'tokens_out' => $budget['out'], 'cost' => round($budget['cost'], 6), 'ms' => $budget['ms'], 'notice' => $notice,
         'memory' => array_column($mem, 'id'), 'playbook' => $playbook ? (int)$playbook['id'] : 0]);
