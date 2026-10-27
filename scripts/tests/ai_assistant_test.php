@@ -858,6 +858,18 @@ if (!$chatReady) {
         check($r['route'] !== 'limit' && count($GLOBALS['ai2_calls']) >= 1 && $r['reply'] === 'Yes, it is free.' && rh_ai_enabled($pdo), 'monthly aim passed: chat keeps answering (the aim is information, never a stop)');
         rh_ai_save_settings(['ai_monthly_budget_usd' => '20', 'ai_user_daily_token_cap' => '200000', 'ai_rate_limit_per_10min' => '1'], $pdo);
         check(rh_ai_rate_problem($pdo, (int)$adminU['id']) !== '', 'rate limit: a person over the limit is told to wait');
+        // The automatic question set runs under the first admin: its archived "Assistant check" chats never count
+        $rl = $pdo->prepare("SELECT id, title, archived FROM ai_conversations WHERE user_id = ? AND updated_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)");
+        $rl->execute([(int)$adminU['id']]);
+        $rlRows = $rl->fetchAll(PDO::FETCH_ASSOC);
+        $rlSet = $pdo->prepare("UPDATE ai_conversations SET title = ?, archived = ? WHERE id = ?");
+        foreach ($rlRows as $x) {
+            $rlSet->execute(['Assistant check', 1, (int)$x['id']]);
+        }
+        check($rlRows && rh_ai_rate_problem($pdo, (int)$adminU['id']) === '', 'rate limit: the automatic checks run under the admin account never use up their limit');
+        foreach ($rlRows as $x) {
+            $rlSet->execute([$x['title'], (int)$x['archived'], (int)$x['id']]);
+        }
         rh_ai_save_settings(['ai_rate_limit_per_10min' => '500'], $pdo);
         check(rh_ai_rate_problem($pdo, (int)$adminU['id']) === '', 'rate limit: under the limit sends normally');
         // Rolling summary + history trimming

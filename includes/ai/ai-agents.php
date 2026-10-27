@@ -1051,8 +1051,10 @@ function rh_ai_record_usage(PDO $db, int $uid, string $provider, string $model, 
 function rh_ai_rate_problem(PDO $db, int $uid): string
 {
     try {
+        // The automatic question set runs under the first admin's account ("Assistant check" chats): never count it
         $st = $db->prepare("SELECT COUNT(*) FROM ai_messages m JOIN ai_conversations c ON c.id = m.conversation_id
-                            WHERE c.user_id = ? AND m.role = 'user' AND m.created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)");
+                            WHERE c.user_id = ? AND m.role = 'user' AND m.created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)
+                              AND NOT (c.archived = 1 AND c.title = 'Assistant check')");
         $st->execute([$uid]);
         if ((int)$st->fetchColumn() >= rh_ai_rate_limit_per_10min()) {
             return 'You have sent a lot of messages in the last 10 minutes. Please wait a few minutes and try again.';
