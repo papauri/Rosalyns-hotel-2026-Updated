@@ -39,6 +39,9 @@ if (!defined('RH_AI_ANSWER_CACHE_SECONDS')) {
 if (!defined('RH_AI_MAX_TOOL_ROUNDS')) {
     define('RH_AI_MAX_TOOL_ROUNDS', 4);   // tool rounds per question at most; it stops sooner when a round adds nothing new
 }
+if (!defined('RH_AI_CHECK_PAGE')) {
+    define('RH_AI_CHECK_PAGE', ':assistant-check'); // page marker of the automatic question set's chats (never a real page)
+}
 if (!defined('RH_AI_MAX_SPECIALISTS')) {
     define('RH_AI_MAX_SPECIALISTS', 3);
 }
@@ -910,7 +913,12 @@ function rh_ai_conversation(PDO $db, int $uid, int $conv): ?array
 
 function rh_ai_conversation_create(PDO $db, int $uid, string $page): int
 {
-    $db->prepare("INSERT INTO ai_conversations (user_id, title, page_path) VALUES (?, '', ?)")->execute([$uid, mb_substr(basename($page), 0, 120)]);
+    // Plain page names only: the ':' marker of the automatic checks (RH_AI_CHECK_PAGE) can never come from a person.
+    // A chat made by a run of the question set is marked from its first message, so it never counts towards a limit.
+    $path = function_exists('rh_ai_eval_mode') && rh_ai_eval_mode()
+        ? RH_AI_CHECK_PAGE
+        : mb_substr(preg_replace('/[^A-Za-z0-9_.\-]/', '', basename($page)), 0, 120);
+    $db->prepare("INSERT INTO ai_conversations (user_id, title, page_path) VALUES (?, '', ?)")->execute([$uid, $path]);
     return (int)$db->lastInsertId();
 }
 
@@ -1051,11 +1059,12 @@ function rh_ai_record_usage(PDO $db, int $uid, string $provider, string $model, 
 function rh_ai_rate_problem(PDO $db, int $uid): string
 {
     try {
-        // The automatic question set runs under the first admin's account ("Assistant check" chats): never count it
+        // The automatic question set runs under the first admin's account: its chats carry a page marker no person can
+        // set (renaming or archiving a chat never takes it out of the count)
         $st = $db->prepare("SELECT COUNT(*) FROM ai_messages m JOIN ai_conversations c ON c.id = m.conversation_id
                             WHERE c.user_id = ? AND m.role = 'user' AND m.created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)
-                              AND NOT (c.archived = 1 AND c.title = 'Assistant check')");
-        $st->execute([$uid]);
+                              AND c.page_path <> ?");
+        $st->execute([$uid, RH_AI_CHECK_PAGE]);
         if ((int)$st->fetchColumn() >= rh_ai_rate_limit_per_10min()) {
             return 'You have sent a lot of messages in the last 10 minutes. Please wait a few minutes and try again.';
         }

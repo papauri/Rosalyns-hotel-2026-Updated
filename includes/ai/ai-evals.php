@@ -317,7 +317,7 @@ function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
         if ($convs) { // the run's chats are hidden and their privacy vault removed (like a sign-out)
             $in = implode(',', array_fill(0, count($convs), '?'));
             try {
-                $db->prepare("UPDATE ai_conversations SET archived = 1, title = 'Assistant check' WHERE id IN ($in)")->execute($convs);
+                $db->prepare("UPDATE ai_conversations SET archived = 1, title = 'Assistant check', page_path = ? WHERE id IN ($in)")->execute(array_merge([RH_AI_CHECK_PAGE], $convs));
                 $db->prepare("DELETE FROM ai_vault WHERE conversation_id IN ($in)")->execute($convs);
             } catch (Throwable $e) {
             }

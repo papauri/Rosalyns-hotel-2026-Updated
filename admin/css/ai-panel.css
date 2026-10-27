@@ -119,7 +119,9 @@ html.rh-ai-is-open .rh-ai-launch {
 }
 
 .rh-ai-view[data-view="chats"],
-.rh-ai-view[data-view="prefs"] {
+.rh-ai-view[data-view="prefs"],
+.rh-ai-view[data-view="alerts"],
+.rh-ai-view[data-view="lock"] {
     padding: 12px 16px;
     overflow-y: auto;
     gap: 10px;
@@ -888,8 +890,10 @@ html.rh-ai-is-open .rh-ai-launch {
 .rh-ai-lock {
     display: grid;
     gap: 8px;
+    width: 100%;
     max-width: 360px;
 }
+.rh-ai-lock input { width: 100%; box-sizing: border-box; }
 .rh-ai-lock .btn { min-height: 44px; }
 .rh-ai-lock .rh-ai-card__warn[hidden] { display: none; }
 textarea.rh-ai-card__input {

@@ -858,17 +858,30 @@ if (!$chatReady) {
         check($r['route'] !== 'limit' && count($GLOBALS['ai2_calls']) >= 1 && $r['reply'] === 'Yes, it is free.' && rh_ai_enabled($pdo), 'monthly aim passed: chat keeps answering (the aim is information, never a stop)');
         rh_ai_save_settings(['ai_monthly_budget_usd' => '20', 'ai_user_daily_token_cap' => '200000', 'ai_rate_limit_per_10min' => '1'], $pdo);
         check(rh_ai_rate_problem($pdo, (int)$adminU['id']) !== '', 'rate limit: a person over the limit is told to wait');
-        // The automatic question set runs under the first admin: its archived "Assistant check" chats never count
-        $rl = $pdo->prepare("SELECT id, title, archived FROM ai_conversations WHERE user_id = ? AND updated_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)");
+        // The automatic question set runs under the first admin: its chats carry a page marker no person can set
+        $rl = $pdo->prepare("SELECT id, title, archived, page_path FROM ai_conversations WHERE user_id = ? AND updated_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)");
         $rl->execute([(int)$adminU['id']]);
         $rlRows = $rl->fetchAll(PDO::FETCH_ASSOC);
-        $rlSet = $pdo->prepare("UPDATE ai_conversations SET title = ?, archived = ? WHERE id = ?");
-        foreach ($rlRows as $x) {
-            $rlSet->execute(['Assistant check', 1, (int)$x['id']]);
+        $rlSet = $pdo->prepare("UPDATE ai_conversations SET title = ?, archived = ?, page_path = ? WHERE id = ?");
+        foreach ($rlRows as $x) { // what a person can do: rename to the check title and archive
+            $rlSet->execute(['Assistant check', 1, (string)$x['page_path'], (int)$x['id']]);
+        }
+        check($rlRows && rh_ai_rate_problem($pdo, (int)$adminU['id']) !== '', 'rate limit: renaming and archiving your own chats does not take them out of the limit');
+        $cx = rh_ai_conversation_create($pdo, (int)$adminU['id'], RH_AI_CHECK_PAGE);
+        $px = $pdo->prepare("SELECT page_path FROM ai_conversations WHERE id = ?");
+        $px->execute([$cx]);
+        check($px->fetchColumn() !== RH_AI_CHECK_PAGE, 'rate limit: a person cannot give a chat the automatic-check marker');
+        $GLOBALS['__rh_ai_eval_mode'] = true;
+        $cy = rh_ai_conversation_create($pdo, (int)$adminU['id'], 'dashboard.php');
+        unset($GLOBALS['__rh_ai_eval_mode']);
+        $px->execute([$cy]);
+        check($px->fetchColumn() === RH_AI_CHECK_PAGE, 'rate limit: a question-set chat is marked from its first message (it never counts, even mid-run)');
+        foreach ($rlRows as $x) { // what the automatic checks do
+            $rlSet->execute(['Assistant check', 1, RH_AI_CHECK_PAGE, (int)$x['id']]);
         }
         check($rlRows && rh_ai_rate_problem($pdo, (int)$adminU['id']) === '', 'rate limit: the automatic checks run under the admin account never use up their limit');
         foreach ($rlRows as $x) {
-            $rlSet->execute([$x['title'], (int)$x['archived'], (int)$x['id']]);
+            $rlSet->execute([$x['title'], (int)$x['archived'], (string)$x['page_path'], (int)$x['id']]);
         }
         rh_ai_save_settings(['ai_rate_limit_per_10min' => '500'], $pdo);
         check(rh_ai_rate_problem($pdo, (int)$adminU['id']) === '', 'rate limit: under the limit sends normally');
