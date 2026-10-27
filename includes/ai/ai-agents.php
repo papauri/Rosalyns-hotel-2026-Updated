@@ -219,6 +219,9 @@ function rh_ai_local_intent(string $t): ?array
     if ($when !== '') {
         return null;
     }
+    if (($fact = rh_ai_hotel_fact_intent($t)) !== null) {
+        return $fact;
+    }
     if (preg_match('/^(who(\'s| is| are) (in.?house|staying( with us)?( now| tonight)?)|(guests )?in.?house( guests)?( now| tonight)?|(show |list )?(the )?in.?house( guests| list)?)\??$/u', $t)) {
         return ['in_house', []];
     }
@@ -234,9 +237,142 @@ function rh_ai_local_intent(string $t): ?array
     return null;
 }
 
+/**
+ * Hotel facts answered locally (owner 2026-10-28): check-in/out time, kitchen / restaurant / bar / coffee bar / gym
+ * hours, and the hotel's phone, email and address. Broader questions ("tell me about the restaurant", "what's on the
+ * menu?") go to the Fast model with hotel_info. $t is already lower-case with polite wording removed.
+ * @return array{0:string,1:array}|null ['hotel_info', ['topic' => ..., '_ask' => comma list]]
+ */
+function rh_ai_hotel_fact_intent(string $t): ?array
+{
+    if (mb_strlen($t) > 60 || strpos($t, '[') !== false
+        || preg_match('/\b(bookings?|late|early|sales|sold|tickets?|orders?|voids?|revenue|takings|menu|breakfast|lunch|dinner|average|slow|wait\w*|how long|change|set|update|move|extend|should|why|tabs?|shift|till|staff|suppliers?|room \d+)\b/u', $t)) {
+        return null;
+    }
+    $timeWords = '/\b(times?|when|hours?|open|opens|opening|close|closes|closing)\b/u';
+    if (preg_match('/\bcheck.?(in|out)\b/u', $t)) {
+        // Only the hotel's own check-in/out time, asked in the generic shape. A question naming a person, a room, a
+        // booking or a reference ("when does Mr Banda check out?") goes to the booking path, never to this answer.
+        $co = 'check.?(?:in|out)(?: and check.?(?:in|out))?';
+        if (!preg_match('/^(?:what(?:\'?s)?|when)(?: is| are| do| does)?(?: the| our)?(?: hotel\'?s?)?(?: guests?)? ' . $co . '(?: times?)?\??$/u', $t)
+            && !preg_match('/^what time (?:is|are|do|does|can) (?:the |our )?(?:guests? |we )?' . $co . '\??$/u', $t)
+            && !preg_match('/^(?:the |our )?(?:hotel\'?s? )?' . $co . ' times?\??$/u', $t)) {
+            return null;
+        }
+        $in = (bool)preg_match('/\bcheck.?in\b/u', $t);
+        $out = (bool)preg_match('/\bcheck.?out\b/u', $t);
+        return ['hotel_info', ['topic' => 'hours', '_ask' => $in && $out ? 'check_in,check_out' : ($in ? 'check_in' : 'check_out')]];
+    }
+    if (preg_match($timeWords, $t)) {
+        $asks = [];
+        $rest = (string)preg_replace('/\bcoffee.?(bar|shop)\b/u', ' ', $t);
+        if ($rest !== $t || preg_match('/\b(caf[eé]|coffee)\b/u', $t)) {
+            $asks[] = 'coffee_bar';
+        }
+        if (preg_match('/\b(bar|pub|lounge)\b/u', $rest)) {
+            $asks[] = 'bar';
+        }
+        if (preg_match('/\b(restaurant|kitchen|dining)\b/u', $t)) {
+            $asks[] = 'kitchen';
+        }
+        if (preg_match('/\b(gym|fitness)\b/u', $t)) {
+            $asks[] = 'gym';
+        }
+        if ($asks) {
+            return ['hotel_info', ['topic' => 'hours', '_ask' => implode(',', $asks)]];
+        }
+        if (preg_match('/^(what are |what\'?s |whats )?(the |our )?(hotel\'?s? )?(opening (hours|times)|hours)( here| of the hotel)?\??$/u', $t)) {
+            return ['hotel_info', ['topic' => 'hours', '_ask' => 'all']];
+        }
+        return null;
+    }
+    // Contact details: a contact word about the hotel ("our number of guests" is not one: "number" counts only as a phone number).
+    if (preg_match('/\bnumber of\b/u', $t)) {
+        return null;
+    }
+    $asks = [];
+    if (preg_match('/\bcontact (details|info\w*)\b/u', $t)) {
+        $asks = ['phone', 'email', 'address'];
+    } elseif (preg_match('/\b(phone|telephone|call|reach|whatsapp)\b|\b(hotel\'?s?|reception|reservations?|front desk|main|contact|phone|our) number\b/u', $t)) {
+        $asks[] = 'phone';
+    }
+    if (preg_match('/\b(e-?mail)\b/u', $t)) {
+        $asks[] = 'email';
+    }
+    if (preg_match('/\b(address|located|location|where are we)\b/u', $t)) {
+        $asks[] = 'address';
+    }
+    if ($asks && preg_match('/\b(hotel\'?s?|our|we|reception|reservations?|front desk|main)\b/u', $t) && !preg_match('/\b(guests?\'?s?|room|account|card|reference|my)\b/u', $t)) {
+        return ['hotel_info', ['topic' => 'contact', '_ask' => implode(',', $asks)]];
+    }
+    return null;
+}
+
+/** A question about the hotel's own facts: hotel_info is offered with the question's other tools (and a short reply becomes a look-up). */
+function rh_ai_hotel_fact_question(string $tok): bool
+{
+    return (bool)preg_match('/\b(opening|closing|open(s)? (at|from|until|till|for|on|now|today)|clos(e|es) at|hours|what time|menu|dish(es)?|facilit\w*|amenit\w*|polic(y|ies)|address|phone number|contact (details|number)|wi-?fi|pool|spa|parking|restaurant|bar|coffee (bar|shop)|caf[eé]|gym|fitness|conference rooms?|meeting rooms?|venues?|upcoming events|about (the|this|our) hotel|check.?(in|out) times?)\b/u', mb_strtolower($tok));
+}
+
+/** The local answer for a hotel fact (from the de-identified hotel_info result; phone numbers and emails stay tokens until shown). */
+function rh_ai_hotel_local_text(array $view, array $r): string
+{
+    $asks = array_values(array_filter(explode(',', (string)($view['_ask'] ?? ''))));
+    $lines = [];
+    if (($r['topic'] ?? '') === 'hours') {
+        $h = (array)($r['hours'] ?? []);
+        $labels = ['check_in' => 'Check-in', 'check_out' => 'Check-out', 'kitchen' => 'Kitchen (restaurant food)', 'bar' => 'Bar', 'coffee_bar' => 'Coffee bar', 'gym' => 'Gym'];
+        $off = ['check_in' => 'Room bookings are switched off in this system, so there is no check-in time.', 'check_out' => 'Room bookings are switched off in this system, so there is no check-out time.',
+            'kitchen' => 'The restaurant kitchen is switched off in this system, so there are no kitchen hours to show.', 'bar' => 'The bar is switched off in this system, so there are no bar hours to show.',
+            'coffee_bar' => 'The coffee bar is switched off in this system, so there are no coffee bar hours to show.', 'gym' => 'The gym is switched off at this hotel, so there are no gym hours.'];
+        if ($asks === ['all']) {
+            $asks = array_keys($h);
+        } elseif ($asks === ['check_in'] && isset($h['check_out'])) {
+            $asks[] = 'check_out';
+        } elseif ($asks === ['check_out'] && isset($h['check_in'])) {
+            $asks[] = 'check_in';
+        }
+        foreach ($asks as $k) {
+            if (isset($labels[$k])) {
+                $lines[] = isset($h[$k]) ? '**' . $labels[$k] . ':** ' . $h[$k] : $off[$k];
+            }
+        }
+    } elseif (($r['topic'] ?? '') === 'contact') {
+        $want = $asks ?: ['phone', 'email', 'address'];
+        if (in_array('phone', $want, true)) {
+            if (is_array($r['phones'] ?? null) && $r['phones']) {
+                foreach ($r['phones'] as $label => $num) {
+                    $lines[] = '**' . $label . ' phone:** ' . $num;
+                }
+            } else {
+                $lines[] = '**Phone:** not set in Hotel Settings';
+            }
+        }
+        if (in_array('email', $want, true)) {
+            if (!empty($r['emails']) && is_array($r['emails'])) {
+                foreach ($r['emails'] as $label => $em) {
+                    $lines[] = '**' . $label . ' email:** ' . $em;
+                }
+            } else {
+                $lines[] = '**Email:** not set in Hotel Settings';
+            }
+        }
+        if (in_array('address', $want, true)) {
+            $lines[] = '**Address:** ' . (string)($r['hotel_address'] ?? 'not set in Hotel Settings');
+        }
+    }
+    if (!$lines) {
+        return '';
+    }
+    return count($lines) === 1 ? $lines[0] : '- ' . implode("\n- ", $lines);
+}
+
 /** Format a local lookup (from the de-identified result, so the stored text holds tokens only). */
 function rh_ai_local_format(string $tool, array $view, array $r): string
 {
+    if ($tool === 'hotel_info') {
+        return rh_ai_hotel_local_text($view, $r);
+    }
     $room = static function (array $x): string {
         return ($x['room_type'] ?? '') . (!empty($x['room_number']) ? ' · room ' . $x['room_number'] : ' · no room yet');
     };
@@ -536,11 +672,11 @@ function rh_ai_specialists(): array
     return [
         'front_desk' => ['label' => 'Front Desk & Rooms', 'brief' => 'reservations, availability, quotes, arrivals, departures, in-house guests, room assignment and guest history',
             'core' => ['search_bookings', 'get_booking', 'arrivals_departures', 'in_house', 'check_availability'],
-            'tools' => ['search_bookings', 'get_booking', 'check_availability', 'quote_stay', 'arrivals_departures', 'in_house', 'room_board', 'guest_history', 'rate_plans_and_deals']],
+            'tools' => ['search_bookings', 'get_booking', 'check_availability', 'quote_stay', 'arrivals_departures', 'in_house', 'room_board', 'guest_history', 'rate_plans_and_deals', 'hotel_info']],
         'housekeeping' => ['label' => 'Housekeeping & Maintenance', 'brief' => 'room status, cleaning jobs, maintenance tasks, rooms off sale and rooms not ready for arrivals',
             'core' => ['work_queues', 'room_board'], 'tools' => ['work_queues', 'room_board']],
         'restaurant' => ['label' => 'Restaurant & Bar', 'brief' => 'till sales, top sellers, voids, refunds and slow tickets at the kitchen, bar and coffee stations',
-            'core' => ['restaurant_sales', 'kitchen_tickets'], 'tools' => ['restaurant_sales', 'kitchen_tickets']],
+            'core' => ['restaurant_sales', 'kitchen_tickets'], 'tools' => ['restaurant_sales', 'kitchen_tickets', 'hotel_info']],
         'money' => ['label' => 'Money', 'brief' => 'money owed, refunds (always in full), voids, discounts, till shortages, no-shows and cancellations; you read and explain, staff do refunds and payments on screen',
             'core' => ['money_leaks', 'balances_due'], 'tools' => ['money_leaks', 'balances_due', 'room_performance', 'hotel_report']],
         'stock' => ['label' => 'Stock', 'brief' => 'stock out or low, expiring batches, wastage, count variance and the stock budget; read only',
@@ -550,7 +686,7 @@ function rh_ai_specialists(): array
         'revenue' => ['label' => 'Revenue & Sales', 'brief' => 'occupancy, ADR, RevPAR, pace against last year, pickup, lead time, unsold nights and where bookings come from; you recommend, you never change prices or deals',
             'core' => ['room_performance', 'booking_pace'], 'tools' => ['room_performance', 'booking_pace', 'rate_plans_and_deals', 'events_pipeline', 'rate_suggestions', 'lost_demand', 'upsell_finder', 'hotel_report']],
         'guest_voice' => ['label' => 'Guest voice', 'brief' => 'reviews, guest messages and enquiries waiting, the guest experience, local tips and replies to guests in the hotel\'s voice (as drafts for staff)',
-            'core' => ['guest_voice'], 'tools' => ['guest_voice', 'get_booking', 'guest_history', 'search_bookings', 'reply_queue', 'review_insights']],
+            'core' => ['guest_voice'], 'tools' => ['guest_voice', 'get_booking', 'guest_history', 'search_bookings', 'reply_queue', 'review_insights', 'hotel_info']],
         'system_guide' => ['label' => 'System Guide', 'brief' => 'how to do things in this portal, from the staff guides only',
             'core' => ['how_to', 'summarise_guide'], 'tools' => ['how_to', 'summarise_guide', 'page_help', 'open_page', 'my_access']],
     ];
@@ -1225,9 +1361,9 @@ function rh_ai_change_cards(string $tok): array
 }
 
 /** Compact tool list for the chosen departments: their read tools, plus the cards the question asks for. */
-function rh_ai_lane_specs(array $user, array $team, array $lanes, array $cards): array
+function rh_ai_lane_specs(array $user, array $team, array $lanes, array $cards, array $extra = []): array
 {
-    $names = [];
+    $names = array_fill_keys($extra, true); // e.g. hotel_info for a question about the hotel's own facts
     foreach ($lanes as $k) {
         foreach ((array)($team[$k]['tools'] ?? []) as $t) {
             $names[$t] = true;
@@ -1562,6 +1698,9 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
             return $finish(rh_ai_out_of_scope_line(), 'declined', ['chips' => ['What can I do here?']]);
         }
         $args = isset($view['date']) ? ['date' => (string)$view['date']] : [];
+        if (isset($view['topic'])) {
+            $args['topic'] = (string)$view['topic']; // hotel_info
+        }
         rh_ai_step_set($db, $uid, rh_ai_tool_step($tool));
         $r = rh_ai_run_tool($db, $user, $conv, $tool, $args);
         if ($r['ok']) {
@@ -1615,7 +1754,11 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         $lanes = ['front_desk']; // a change that names no department is a booking change
         $kind = $kind === 'short' ? 'lookup' : $kind;
     }
-    $specs = rh_ai_lane_specs($user, $team, $lanes, $cardsAsked); // action tools only propose cards
+    $factTools = rh_ai_hotel_fact_question($tok) ? ['hotel_info'] : []; // hours, menu, facilities...: the hotel's own facts
+    if ($factTools && $kind === 'short') {
+        $kind = 'lookup'; // a fact is looked up, never answered from general knowledge (Fast model)
+    }
+    $specs = rh_ai_lane_specs($user, $team, $lanes, $cardsAsked, $factTools); // action tools only propose cards
     // The model-run team of leads costs several calls per question: off unless the owner switches it on.
     $consultSpec = rh_ai_setting('ai_swarm_models', '0') === '1' ? rh_ai_consult_spec($team) : null;
     $frozen = rh_ai_context_frozen($db);
@@ -1805,7 +1948,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
             }
             $lanes = [$nm[1]];
             $kind = 'lookup';
-            $specs = rh_ai_lane_specs($user, $team, $lanes, $cardsAsked);
+            $specs = rh_ai_lane_specs($user, $team, $lanes, $cardsAsked, $factTools);
             $route = $fast ? 'fast' : 'primary';
             continue;
         }
@@ -1815,7 +1958,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
             $kind = 'advice';
             if (!$lanes) {
                 $lanes = rh_ai_advice_default_lanes($team);
-                $specs = rh_ai_lane_specs($user, $team, $lanes, $cardsAsked);
+                $specs = rh_ai_lane_specs($user, $team, $lanes, $cardsAsked, $factTools);
             }
             if (!$prefetched) {
                 $prefetched = true;

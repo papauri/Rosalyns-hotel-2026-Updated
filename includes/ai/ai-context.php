@@ -145,6 +145,7 @@ function rh_ai_context_frozen(PDO $db): string
         '- How-to questions: answer from how_to / summarise_guide text only, never add steps. There is no link to MRA or any tax authority; never say anything is reported or submitted.',
         'HOTEL',
         "- $hotel. $vatText $levyText Check-in from " . ($ci !== '' ? $ci : 'the set time') . ', check-out by ' . ($co !== '' ? $co : 'the set time') . '.',
+        '- Opening hours, restaurant and bar, menu, facilities, policies, contact, gym, conference rooms and events: hotel_info. A time it says is not set is not set.',
         $cancel !== '' ? '- A cancelled booking: ' . $cancel . '. Refunds are done by staff on screen.' : null,
         '- Room types: ' . ($rooms ? implode('; ', $rooms) : 'none set up') . '.',
         $joined > 0 ? "- $joined pair(s) of joined rooms sell as one family room; availability and prices already allow for them." : null,

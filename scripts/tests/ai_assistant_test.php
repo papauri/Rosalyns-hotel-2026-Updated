@@ -2619,6 +2619,144 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
     check(rh_ai_enabled($pdo) === $wasOnS && (int)$pdo->query("SELECT COUNT(*) FROM ai_models WHERE model_id = 'gemini-4-flash'")->fetchColumn() === 0, 'speed and cost checks rolled back (no test rows, on/off state unchanged)');
 }
 
+// ── Hotel facts (owner 2026-10-28: "How come it doesn't know about the restaurant and bar and opening times etc.") ──
+echo "-- hotel facts --\n";
+$hiDef = rh_ai_tool_registry()['hotel_info'] ?? null;
+check($hiDef !== null && $hiDef['perm'] === [] && $hiDef['module'] === [] && $hiDef['handler'] === 'rh_ai_t_hotel_info', 'hotel_info: a read tool that needs no special permission (each part checks its own module)');
+check(in_array('hotel_info', rh_ai_specialists()['front_desk']['tools'], true) && in_array('hotel_info', rh_ai_specialists()['restaurant']['tools'], true) && in_array('hotel_info', rh_ai_specialists()['guest_voice']['tools'], true), 'hotel_info is in the Front Desk, Restaurant & Bar and Guest voice (concierge) leads\' tools');
+check(rh_ai_clock('14:00') === '2:00 PM' && rh_ai_clock('06:00:00') === '6:00 AM' && rh_ai_clock('00:30') === '12:30 AM' && rh_ai_clock('2:00 PM') === '2:00 PM' && rh_ai_clock('24/7') === '24/7', 'times are shown in plain 12-hour form, or exactly as stored');
+check(rh_ai_hours_line('10:00', '10:00') === 'open and close times are the same (10:00 AM) — check Hotel Settings' && rh_ai_hours_line('', '') === 'not set in Hotel Settings'
+    && rh_ai_hours_line('11:00', '03:00') === '11:00 AM – 3:00 AM (next day)' && strpos(rh_ai_hours_line('11:00', ''), 'closing time not set in Hotel Settings') !== false, 'hours: same open/close time and an unset time give the plain "check Hotel Settings" line, never a guess');
+require_once $root . '/includes/station-hours.php';
+$bDef = rh_station_definitions()['bar'];
+check(rh_ai_station_hours_line('bar', '', '') === rh_ai_hours_line($bDef['default_open'], $bDef['default_close']) . ' (the default; not set in Hotel Settings)'
+    && rh_ai_station_hours_line('bar', '10:00', '10:00') === 'open and close times are the same (10:00 AM) — check Hotel Settings'
+    && rh_ai_station_hours_line('bar', '12:00', '') === rh_ai_hours_line('12:00', $bDef['default_close']) . ' (closing time is the default; not set in Hotel Settings)'
+    && rh_ai_station_hours_line('kitchen', '07:00', '22:00') === '7:00 AM – 10:00 PM', 'station hours: stored times as stored; a time not saved gives the default the station screens use, marked as the default; same open/close keeps the check-Hotel-Settings line', rh_ai_station_hours_line('bar', '', ''));
+$hiQ = static fn(string $q) => rh_ai_local_intent($q);
+check(($hiQ('what time does the bar open?')[1]['_ask'] ?? '') === 'bar' && ($hiQ("what's check-out time?")[1]['_ask'] ?? '') === 'check_out' && ($hiQ('when does the restaurant open?')[1]['_ask'] ?? '') === 'kitchen'
+    && ($hiQ('gym hours')[1]['_ask'] ?? '') === 'gym' && ($hiQ('what is the hotel phone number?')[1]['topic'] ?? '') === 'contact' && ($hiQ('what is our address?')[1]['_ask'] ?? '') === 'address',
+    'hotel facts asked in plain words are answered locally (hours, check-in/out, phone, address)');
+check($hiQ("what's on the menu?") === null && $hiQ('tell me about the restaurant') === null && $hiQ('average kitchen time today') === null && $hiQ('what time did [GUEST_1] check out') === null && $hiQ('check outs today')[0] === 'arrivals_departures',
+    'broader questions (menu, "tell me about") go to the model; ticket times, a guest\'s own check-out and the departures list are not taken as hotel facts');
+check($hiQ('when does Mr Banda check out?') === null && $hiQ('what time does John check in?') === null && $hiQ("what's our number of arrivals") === null,
+    'a check-in/out question naming a person goes to the booking path; "our number of arrivals" is not a phone question');
+check(($hiQ('what time is check-out?')[1]['_ask'] ?? '') === 'check_out' && ($hiQ('check-in time?')[1]['_ask'] ?? '') === 'check_in' && ($hiQ('hotel contact details')[1]['_ask'] ?? '') === 'phone,email,address',
+    'the hotel\'s own check-in/out time and contact details asked in the generic shape are answered locally');
+check(rh_ai_hotel_fact_question("what's on the menu?") && rh_ai_hotel_fact_question('tell me about the restaurant') && !rh_ai_hotel_fact_question('who still owes money?'), 'questions about the hotel\'s own facts are offered hotel_info');
+if ($recep) {
+    check(rh_ai_tool_allowed($recep, 'hotel_info') === hasPermission((int)$recep['id'], 'ai_assistant_use'), 'hotel_info: anyone who may use the Assistant may look up the hotel\'s facts, nobody else');
+}
+
+if (!$chatReady || !rh_ai_memory_ready($pdo)) {
+    skip('hotel facts database checks (Assistant migrations not run here)');
+} else {
+    $admH = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $wasOnH = rh_ai_enabled($pdo);
+    $pdo->beginTransaction();
+    try {
+        rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000',
+            'ai_rate_limit_per_10min' => '500', 'ai_turn_token_cap' => '60000', 'ai_swarm_models' => '0'], $pdo);
+        $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
+        rh_ai_store_key('google', 'AIzaFAKEKEYFORTESTSONLY0123456789abcd', (int)$admH['id'], $pdo);
+        $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL WHERE is_selected = 1");
+        $mi = $pdo->prepare("INSERT INTO ai_models (provider, model_id, label, capability_rank, source, is_selected, role, price_in_per_mtok, price_out_per_mtok) VALUES ('google', ?, ?, ?, 'catalog', 1, ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE is_selected = 1, role = VALUES(role), price_in_per_mtok = VALUES(price_in_per_mtok), price_out_per_mtok = VALUES(price_out_per_mtok)");
+        $mi->execute(['gemini-3.8-flash', 'Gemini 3.8 Flash', 92, 'primary', 0.75, 3.75]);
+        $mi->execute(['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 86, 'fast', 0.30, 2.50]);
+        rh_ai_set_transport(static function ($method, $url, $headers, $body, $timeout) {
+            $GLOBALS['ai2_calls'][] = ['url' => $url, 'headers' => $headers, 'body' => (string)$body];
+            $next = array_shift($GLOBALS['ai2_q']) ?? ['reply' => ['text' => 'OK']];
+            $reply = $next['reply'];
+            $reply['usage'] = ($reply['usage'] ?? []) + ['in' => 100, 'out' => 20];
+            return ['http' => 200, 'body' => json_encode(rh_ai_fake_body(ai2_prov($url), $reply, ''))];
+        });
+        $setS = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES (?, ?, 'general') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
+        foreach (['station_bar_opens_at' => '10:00', 'station_bar_closes_at' => '10:00', 'station_kitchen_opens_at' => '', 'station_kitchen_closes_at' => '', 'station_coffee_bar_opens_at' => '06:30', 'station_coffee_bar_closes_at' => '22:00',
+            'check_in_time' => '2:00 PM', 'check_out_time' => '10:30', 'phone_main' => '+265 111 222 333', 'phone_reception' => '', 'phone_reservations' => '', 'whatsapp_number' => '', 'hotel_address' => '1 AITest Road, Testville'] as $k => $v) {
+            $setS->execute([$k, $v]);
+        }
+        $GLOBALS['__rh_ai_module_override'] = ['bookings' => true, 'pos' => true, 'station_kds' => true, 'station_bds' => true, 'station_cds' => true, 'gym' => true, 'restaurant_page' => true];
+        $turnH = static function (string $msg, array $replies = []) use ($pdo, $admH): array {
+            $pdo->exec('DELETE FROM ai_tool_cache'); // fresh lookups after each settings change (rolled back)
+            $GLOBALS['ai2_q'] = array_map(static fn($x) => ['reply' => $x], $replies);
+            $GLOBALS['ai2_calls'] = [];
+            return rh_ai_turn($pdo, $admH, ['conversation_id' => 0, 'message' => $msg, 'page' => 'dashboard.php']);
+        };
+        $r = $turnH('what time does the bar open?');
+        check($r['ok'] && $r['route'] === 'local' && !$GLOBALS['ai2_calls'] && $r['tokens_in'] === 0 && strpos($r['reply'], 'open and close times are the same (10:00 AM) — check Hotel Settings') !== false,
+            'bar hours: answered locally (0 tokens); open = close gives the plain "check Hotel Settings" line', $r['reply'] . ' ' . $r['error']);
+        $r = $turnH("what's check-out time?");
+        check($r['ok'] && $r['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r['reply'], 'Check-out:** by 10:30 AM') !== false && strpos($r['reply'], 'from 2:00 PM') !== false, 'check-out time: the stored value, locally, in 12-hour form (check-in shown too)', $r['reply']);
+        $r = $turnH('what time does the kitchen close?');
+        $kDef = rh_station_definitions()['kitchen'];
+        $kWant = rh_ai_clock($kDef['default_open']) . ' – ' . rh_ai_clock($kDef['default_close']) . ' (the default; not set in Hotel Settings)';
+        check($r['route'] === 'local' && strpos($r['reply'], $kWant) !== false, 'kitchen hours not saved: the default hours the station screens run on, marked as the default', $r['reply'] . ' / want ' . $kWant);
+        $r = $turnH('is the coffee bar open?');
+        check($r['route'] === 'local' && strpos($r['reply'], '6:30 AM – 10:00 PM') !== false, 'coffee bar hours: the stored times', $r['reply']);
+        $r = $turnH('what is the hotel phone number?');
+        check($r['route'] === 'local' && strpos($r['reply'], '+265 111 222 333') !== false && !$GLOBALS['ai2_calls'], 'hotel phone: the stored number, locally (shown in full, nothing sent out)', $r['reply']);
+        $r = $turnH('what is our address?');
+        check($r['route'] === 'local' && strpos($r['reply'], '1 AITest Road, Testville') !== false, 'hotel address: the stored address, locally', $r['reply']);
+        $r = $turnH('gym hours');
+        check($r['route'] === 'local' && strpos($r['reply'], 'Gym:**') !== false, 'gym hours with the gym on: answered locally', $r['reply']);
+        // Gym switched off: never offered
+        $GLOBALS['__rh_ai_module_override']['gym'] = false;
+        $r = $turnH('gym hours');
+        $hrs = rh_ai_t_hotel_info($pdo, $admH, ['topic' => 'hours']);
+        $ov = rh_ai_t_hotel_info($pdo, $admH, ['topic' => 'overview']);
+        $gy = rh_ai_t_hotel_info($pdo, $admH, ['topic' => 'gym']);
+        $fac = implode(' ', (array)rh_ai_t_hotel_info($pdo, $admH, ['topic' => 'facilities'])['facilities']);
+        check($r['route'] === 'local' && strpos($r['reply'], 'switched off') !== false && !preg_match('/\d{1,2}:\d{2}/', $r['reply']) && !isset($hrs['hours']['gym']) && !isset($ov['hours']['gym'])
+            && !in_array('gym', $ov['switched_on'], true) && strpos($ov['more'], 'gym') === false && !isset($gy['gym_hours']) && !preg_match('/\b(gym|fitness)\b/i', $fac),
+            'gym switched off: no gym hours, no gym facility, not in the overview', json_encode([$r['reply'], $ov['switched_on'], $fac]));
+        $GLOBALS['__rh_ai_module_override']['gym'] = true;
+        // Bar station switched off: its hours are not offered
+        $GLOBALS['__rh_ai_module_override']['station_bds'] = false;
+        $r = $turnH('what time does the bar open?');
+        check($r['route'] === 'local' && strpos($r['reply'], 'switched off') !== false && !isset(rh_ai_t_hotel_info($pdo, $admH, ['topic' => 'hours'])['hours']['bar']), 'bar switched off: no bar hours offered', $r['reply']);
+        $GLOBALS['__rh_ai_module_override']['station_bds'] = true;
+        // Menu: fixed size (10 a page, "and N more"), whatever the size of the menu
+        $catId = (int)$pdo->query('SELECT id FROM menu_categories WHERE is_active = 1 ORDER BY id LIMIT 1')->fetchColumn();
+        if ($catId > 0) {
+            $mins = $pdo->prepare('INSERT INTO menu_items (category_id, item_name, price, is_available) VALUES (?, ?, ?, 1)');
+            for ($i = 1; $i <= 12; $i++) {
+                $mins->execute([$catId, 'AITest dish ' . $i, 1000 + $i]);
+            }
+            $pdo->exec('DELETE FROM ai_tool_cache');
+            $mr = rh_ai_run_tool($pdo, $admH, 0, 'hotel_info', ['topic' => 'menu']);
+            $mv = json_decode($mr['view'], true) ?: [];
+            $items = (array)($mv['items'] ?? []);
+            $lastItem = (string)end($items);
+            check($mr['ok'] && count($items) === 11 && preg_match('/^and \d+ more/', $lastItem) && (int)$mv['items_available'] >= 12 && strlen($mr['view']) < 4000,
+                'menu: categories with counts and 10 items with price, then "and N more" (' . strlen($mr['view']) . ' bytes)', $lastItem);
+            check(strpos($mr['view'], ' — ') !== false && preg_match('/\d+\.\d{2}/', $mr['view']), 'menu items carry their price');
+        } else {
+            skip('menu size check (no active menu category here)');
+        }
+        // Wider question: the Fast model with hotel_info, the result bounded
+        $r = $turnH("what's on the menu?", [['tool_calls' => [['id' => 'm1', 'name' => 'hotel_info', 'args' => ['topic' => 'menu']]]], ['text' => 'Here is a short look at the menu.']]);
+        $b0 = json_decode((string)($GLOBALS['ai2_calls'][0]['body'] ?? ''), true) ?: [];
+        $names0 = array_column($b0['tools'][0]['functionDeclarations'] ?? [], 'name');
+        check($r['ok'] && in_array('hotel_info', $names0, true) && strpos($GLOBALS['ai2_calls'][0]['url'] ?? '', 'gemini-3.5-flash-lite') !== false && strpos((string)($GLOBALS['ai2_calls'][1]['body'] ?? ''), 'more (ask for page 2') !== false,
+            '"what\'s on the menu?": the Fast model is offered hotel_info and gets a bounded menu', json_encode([$names0, $r['error']]));
+        $r = $turnH('tell me about the restaurant', [['text' => 'The restaurant serves breakfast to dinner.']]);
+        $b0 = json_decode((string)($GLOBALS['ai2_calls'][0]['body'] ?? ''), true) ?: [];
+        check($r['ok'] && in_array('hotel_info', array_column($b0['tools'][0]['functionDeclarations'] ?? [], 'name'), true), '"tell me about the restaurant": hotel_info is offered');
+    } catch (Throwable $e) {
+        bad('hotel facts checks threw', $e->getMessage() . ' @' . $e->getLine());
+    } finally {
+        unset($GLOBALS['__rh_ai_module_override']);
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        rh_ai_settings($pdo, true);
+        rh_ai_vault_forget();
+    }
+    rh_ai_set_transport($queueTransport);
+    check(rh_ai_enabled($pdo) === $wasOnH && (int)$pdo->query("SELECT COUNT(*) FROM menu_items WHERE item_name LIKE 'AITest dish %'")->fetchColumn() === 0, 'hotel facts checks rolled back (no test rows, on/off state unchanged)');
+}
+
 rh_ai_set_transport(null);
 if ($origEnv === null) { unset($_ENV['APP_ENCRYPTION_SALT']); } else { $_ENV['APP_ENCRYPTION_SALT'] = $origEnv; }
 

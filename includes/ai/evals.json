@@ -41,6 +41,9 @@
         {"id": "stock_low", "q": "what stock is running low?", "model": true, "expect": {"no_card": true}},
         {"id": "kitchen_slow", "q": "were any kitchen tickets slow today?", "model": true, "expect": {"no_card": true}},
         {"id": "prepare_tomorrow", "q": "what should I prepare for tomorrow's arrivals?", "model": true, "expect": {"no_card": true}},
-        {"id": "guest_voice", "q": "any unanswered enquiries or bad reviews this week?", "model": true, "expect": {"no_card": true}}
+        {"id": "guest_voice", "q": "any unanswered enquiries or bad reviews this week?", "model": true, "expect": {"no_card": true}},
+        {"id": "bar_hours", "q": "what time does the bar open?", "expect": {"route": ["local"], "contains_any": ["Bar", "bar"]}},
+        {"id": "checkout_time", "q": "what's check-out time?", "expect": {"route": ["local"], "contains_any": ["Check-out", "check-out"]}},
+        {"id": "menu", "q": "what's on the menu?", "model": true, "expect": {"route_not": ["declined"], "no_card": true}}
     ]
 }

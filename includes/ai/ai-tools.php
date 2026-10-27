@@ -68,6 +68,9 @@ function rh_ai_has_perm(int $uid, string $key): bool
 /** rh_module_key_enabled(), read once per answer inside a turn. */
 function rh_ai_module_on(string $m): bool
 {
+    if (isset($GLOBALS['__rh_ai_module_override'][$m])) {
+        return (bool)$GLOBALS['__rh_ai_module_override'][$m]; // tests only: a module seen as switched off / on
+    }
     if (!function_exists('rh_module_key_enabled')) {
         return true;
     }
@@ -163,6 +166,11 @@ function rh_ai_tool_registry(): array
             'description' => 'A link to an admin screen the person may open, optionally filtered (search, status, id, date). The panel shows it as a button.',
             'schema' => ['properties' => ['page' => ['type' => 'string', 'maxLength' => 60, 'description' => 'e.g. bookings.php'], 'search' => ['type' => 'string', 'maxLength' => 60], 'status' => ['type' => 'string', 'maxLength' => 30], 'id' => ['type' => 'integer', 'minimum' => 1], 'date' => $date], 'required' => ['page']],
             'perm' => [], 'module' => [], 'cache' => 0, 'handler' => 'rh_ai_t_open_page',
+        ],
+        'hotel_info' => [
+            'description' => 'The hotel\'s own facts: check-in/out and opening hours (restaurant kitchen, bar, coffee bar, gym), restaurant and bar, menu, facilities, policies, contact details, conference rooms and upcoming events. Parts switched off in this system are left out; a time that is not set is said to be not set.',
+            'schema' => ['properties' => ['topic' => ['type' => 'string', 'enum' => ['overview', 'hours', 'restaurant_bar', 'menu', 'facilities', 'policies', 'contact', 'gym', 'conference_events'], 'description' => 'Default overview']]],
+            'perm' => [], 'module' => [], 'cache' => 300, 'handler' => 'rh_ai_t_hotel_info', 'step' => 'Reading the hotel\'s details',
         ],
         // ── Phase 3: department reads (includes/ai/ai-insights.php) ──
         'room_performance' => [
@@ -402,7 +410,7 @@ function rh_ai_bound_result($data, string $tool = '', int $page = 1)
 function rh_ai_paged_tools(): array
 {
     return ['search_bookings', 'arrivals_departures', 'in_house', 'room_board', 'balances_due', 'guest_history', 'money_leaks', 'inventory_watch',
-        'work_queues', 'events_pipeline', 'guest_voice', 'reply_queue', 'kitchen_tickets', 'restaurant_sales', 'upsell_finder', 'who_is_online', 'check_availability'];
+        'work_queues', 'events_pipeline', 'guest_voice', 'reply_queue', 'kitchen_tickets', 'restaurant_sales', 'upsell_finder', 'who_is_online', 'check_availability', 'hotel_info'];
 }
 
 /** Provider-ready tool list [{name, description, schema}] for this person. */
@@ -1328,4 +1336,416 @@ function rh_ai_t_open_page(PDO $db, array $user, array $a): array
         }
     }
     return ['url' => $url, 'link' => $url, 'link_label' => 'Open ' . ($label !== '' ? $label : $page)];
+}
+
+// ── Hotel facts (owner 2026-10-28: "How come it doesn't know about the restaurant and bar and opening times etc.") ──
+// The hotel's public-facing details every staff member may see. Each part follows its module switch, so a part that is
+// switched off is never offered. Times are shown as stored, in plain 12-hour form; a time that is not set is said to be
+// not set (never a default or a guess). Lists follow the 10-a-page rule (rh_ai_bound_result), so the size is fixed.
+
+/** Settings read fresh in one query (no file cache): key => trimmed value ('' when the row is missing or blank). */
+function rh_ai_hotel_settings(PDO $db, array $keys): array
+{
+    $out = array_fill_keys($keys, '');
+    try {
+        $st = $db->prepare('SELECT setting_key, setting_value FROM site_settings WHERE setting_key IN (' . implode(',', array_fill(0, count($keys), '?')) . ')');
+        $st->execute(array_values($keys));
+        foreach ($st->fetchAll(PDO::FETCH_KEY_PAIR) as $k => $v) {
+            $out[(string)$k] = trim((string)$v);
+        }
+    } catch (Throwable $e) {
+        // no settings table: every value reads as not set
+    }
+    return $out;
+}
+
+/** A stored time in plain 12-hour form ("14:00" -> "2:00 PM"); a 12-hour or free-text value ("2:00 PM", "24/7") as stored. */
+function rh_ai_clock(string $raw): string
+{
+    $v = trim($raw);
+    if (preg_match('/^(\d{1,2}):(\d{2})(?::\d{2})?$/', $v, $m) && (int)$m[1] < 24 && (int)$m[2] < 60) {
+        $h = (int)$m[1];
+        return ($h % 12 === 0 ? 12 : $h % 12) . ':' . $m[2] . ($h < 12 ? ' AM' : ' PM');
+    }
+    return $v;
+}
+
+/** One opening window from two stored times. Never fills in a time that is not set. */
+function rh_ai_hours_line(string $open, string $close): string
+{
+    $o = trim($open);
+    $c = trim($close);
+    if ($o === '' && $c === '') {
+        return 'not set in Hotel Settings';
+    }
+    if ($o === '') {
+        return 'closes ' . rh_ai_clock($c) . '; opening time not set in Hotel Settings';
+    }
+    if ($c === '') {
+        return 'opens ' . rh_ai_clock($o) . '; closing time not set in Hotel Settings';
+    }
+    if (rh_ai_clock($o) === rh_ai_clock($c)) {
+        return 'open and close times are the same (' . rh_ai_clock($o) . ') — check Hotel Settings';
+    }
+    $next = '';
+    if (preg_match('/^(\d{1,2}):(\d{2})/', $o, $a) && preg_match('/^(\d{1,2}):(\d{2})/', $c, $b) && !preg_match('/[ap]\.?m/i', $o . $c)
+        && ((int)$b[1] * 60 + (int)$b[2]) < ((int)$a[1] * 60 + (int)$a[2])) {
+        $next = ' (next day)';
+    }
+    return rh_ai_clock($o) . ' – ' . rh_ai_clock($c) . $next;
+}
+
+/**
+ * A station's effective hours: the stored times, or, where a time is not saved (or not a valid time), the default the
+ * station screens run on (rh_station_definitions() in includes/station-hours.php), marked as the default.
+ */
+function rh_ai_station_hours_line(string $station, string $openRaw, string $closeRaw): string
+{
+    require_once dirname(__DIR__) . '/station-hours.php';
+    $def = rh_station_definitions()[$station] ?? null;
+    if ($def === null) {
+        return rh_ai_hours_line($openRaw, $closeRaw);
+    }
+    $o = rh_station_normalize_time($openRaw, '');
+    $c = rh_station_normalize_time($closeRaw, '');
+    $note = '';
+    if ($o === '' && $c === '') {
+        $note = ' (the default; not set in Hotel Settings)';
+    } elseif ($o === '') {
+        $note = ' (opening time is the default; not set in Hotel Settings)';
+    } elseif ($c === '') {
+        $note = ' (closing time is the default; not set in Hotel Settings)';
+    }
+    return rh_ai_hours_line($o !== '' ? $o : (string)$def['default_open'], $c !== '' ? $c : (string)$def['default_close']) . $note;
+}
+
+/** Station -> its module switch (same map as includes/station-hours.php); a station also needs the till (pos) on. */
+function rh_ai_station_on(string $station): bool
+{
+    $mod = ['kitchen' => 'station_kds', 'bar' => 'station_bds', 'coffee_bar' => 'station_cds'][$station] ?? '';
+    return $mod !== '' && rh_ai_module_on('pos') && rh_ai_module_on($mod);
+}
+
+/** The restaurant is offered when its public page or the till is on. */
+function rh_ai_restaurant_on(): bool
+{
+    return rh_ai_module_on('restaurant_page') || rh_ai_module_on('pos');
+}
+
+/** Gym hours per weekday (gym_hours, 0 = Sunday), grouped: "Mon–Fri 6:00 AM – 9:00 PM; Sat–Sun closed". */
+function rh_ai_gym_hours(PDO $db): string
+{
+    try {
+        $rows = $db->query('SELECT day_of_week, is_open, open_time, close_time FROM gym_hours ORDER BY day_of_week')->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $rows = [];
+    }
+    $names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    $per = [];
+    foreach ($rows as $r) {
+        $d = (int)$r['day_of_week'];
+        if ($d >= 0 && $d <= 6) {
+            $per[$d] = !empty($r['is_open']) ? rh_ai_hours_line((string)$r['open_time'], (string)$r['close_time']) : 'closed';
+        }
+    }
+    if (!$per) {
+        return 'not set in Hotel Settings';
+    }
+    $groups = [];
+    foreach ([1, 2, 3, 4, 5, 6, 0] as $d) {
+        $v = $per[$d] ?? 'not set in Hotel Settings';
+        $last = count($groups) - 1;
+        if ($last >= 0 && $groups[$last]['v'] === $v) {
+            $groups[$last]['to'] = $d;
+        } else {
+            $groups[] = ['from' => $d, 'to' => $d, 'v' => $v];
+        }
+    }
+    if (count($groups) === 1) {
+        return 'every day ' . $groups[0]['v'];
+    }
+    $parts = [];
+    foreach ($groups as $g) {
+        $parts[] = $names[$g['from']] . ($g['to'] !== $g['from'] ? '–' . $names[$g['to']] : '') . ' ' . $g['v'];
+    }
+    return implode('; ', $parts);
+}
+
+/** Check-in/out and the opening hours of every part that is switched on (keys: check_in, check_out, kitchen, bar, coffee_bar, gym). */
+function rh_ai_hotel_hours(PDO $db, array $s): array
+{
+    $h = [];
+    if (rh_ai_module_on('bookings')) {
+        $h['check_in'] = $s['check_in_time'] !== '' ? 'from ' . rh_ai_clock($s['check_in_time']) : 'not set in Hotel Settings';
+        $h['check_out'] = $s['check_out_time'] !== '' ? 'by ' . rh_ai_clock($s['check_out_time']) : 'not set in Hotel Settings';
+    }
+    foreach (['kitchen', 'bar', 'coffee_bar'] as $st) {
+        if (rh_ai_station_on($st)) {
+            $h[$st] = rh_ai_station_hours_line($st, $s['station_' . $st . '_opens_at'], $s['station_' . $st . '_closes_at']);
+        }
+    }
+    if (rh_ai_module_on('gym')) {
+        $h['gym'] = rh_ai_gym_hours($db);
+    }
+    return $h;
+}
+
+/** Plain text, cut to $max characters (no markup). */
+function rh_ai_plain(string $v, int $max): string
+{
+    $v = trim((string)preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($v), ENT_QUOTES, 'UTF-8')));
+    return mb_strlen($v) > $max ? mb_substr($v, 0, $max - 3) . '...' : $v;
+}
+
+/** Facilities that are switched on: "Name — short description". */
+function rh_ai_hotel_facilities(PDO $db): array
+{
+    try {
+        $rows = $db->query('SELECT name, short_description, page_url FROM facilities WHERE is_active = 1 ORDER BY display_order, name LIMIT 100')->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return [];
+    }
+    $out = [];
+    foreach ($rows as $r) {
+        $page = strtolower(basename((string)$r['page_url']));
+        $name = (string)$r['name'];
+        if ((!rh_ai_module_on('gym') && (strpos($page, 'gym') === 0 || preg_match('/\b(gym|fitness)\b/i', $name)))
+            || (!rh_ai_module_on('conference') && strpos($page, 'conference') === 0)
+            || (!rh_ai_module_on('events') && strpos($page, 'events') === 0)
+            || (!rh_ai_restaurant_on() && strpos($page, 'restaurant') === 0)) {
+            continue; // a part switched off is never offered
+        }
+        $sd = rh_ai_plain((string)$r['short_description'], 160);
+        $out[] = rh_ai_plain($name, 80) . ($sd !== '' ? ' — ' . $sd : '');
+    }
+    return $out;
+}
+
+/** Active policies: "Title — summary". */
+function rh_ai_hotel_policies(PDO $db): array
+{
+    try {
+        $rows = $db->query('SELECT title, summary FROM policies WHERE is_active = 1 ORDER BY display_order, title LIMIT 100')->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return [];
+    }
+    $out = [];
+    foreach ($rows as $r) {
+        $sum = rh_ai_plain((string)$r['summary'], 200);
+        $out[] = rh_ai_plain((string)$r['title'], 80) . ($sum !== '' ? ' — ' . $sum : '');
+    }
+    return $out;
+}
+
+/** Hotel phone numbers, public mailboxes and address (no staff emails). A number listed under several names is shown once. */
+function rh_ai_hotel_contact(array $s): array
+{
+    $phones = [];
+    foreach (['phone_main' => 'Main', 'phone_reception' => 'Reception', 'phone_reservations' => 'Reservations', 'whatsapp_number' => 'WhatsApp'] as $k => $label) {
+        if ($s[$k] !== '') {
+            $phones[$s[$k]][] = $label;
+        }
+    }
+    $emails = [];
+    foreach (['email_main' => 'Main', 'email_reservations' => 'Reservations', 'email_info' => 'Info'] as $k => $label) {
+        if ($s[$k] !== '') {
+            $emails[$s[$k]][] = $label;
+        }
+    }
+    $out = ['phones' => [], 'emails' => []];
+    foreach ($phones as $num => $labels) {
+        $out['phones'][implode(' / ', $labels)] = (string)$num;
+    }
+    foreach ($emails as $em => $labels) {
+        $out['emails'][implode(' / ', $labels)] = (string)$em;
+    }
+    $addr = $s['hotel_address'] !== '' ? $s['hotel_address'] : $s['address'];
+    if ($addr === '') {
+        $addr = implode(', ', array_filter([$s['address_line1'], $s['address_line2'], $s['address_city'], $s['address_region'], $s['address_country']], static fn($x) => $x !== ''));
+    }
+    $out['hotel_address'] = $addr !== '' ? rh_ai_plain($addr, 200) : 'not set in Hotel Settings';
+    if (!$out['phones']) {
+        $out['phones'] = 'not set in Hotel Settings';
+    }
+    return $out;
+}
+
+/** Menu: categories with their available item counts and the available items with price, featured first. */
+function rh_ai_hotel_menu(PDO $db): array
+{
+    $cur = rh_ai_currency();
+    $price = static fn($p) => ($cur !== '' ? $cur . ' ' : '') . number_format((float)$p, 2);
+    $cats = [];
+    $items = [];
+    $total = 0;
+    try {
+        foreach ($db->query('SELECT c.name, COUNT(i.id) AS n FROM menu_categories c JOIN menu_items i ON i.category_id = c.id AND i.is_available = 1
+                             WHERE c.is_active = 1 GROUP BY c.id, c.name ORDER BY MIN(c.display_order), c.name')->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $cats[] = rh_ai_plain((string)$r['name'], 60) . ': ' . (int)$r['n'];
+            $total += (int)$r['n'];
+        }
+        foreach ($db->query('SELECT i.item_name, i.price, c.name AS cat FROM menu_items i JOIN menu_categories c ON c.id = i.category_id AND c.is_active = 1
+                             WHERE i.is_available = 1 ORDER BY i.is_featured DESC, c.display_order, i.display_order, i.item_name LIMIT 200')->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $items[] = rh_ai_plain((string)$r['item_name'], 60) . ' — ' . $price($r['price']) . ' (' . rh_ai_plain((string)$r['cat'], 40) . ')';
+        }
+    } catch (Throwable $e) {
+        // older menu tables (food_menu / drink_menu, as the public restaurant page reads them)
+        $cats = [];
+        $items = [];
+        $total = 0;
+        try {
+            $byCat = [];
+            foreach (['food_menu', 'drink_menu'] as $t) {
+                foreach ($db->query("SELECT item_name, price, category, is_featured FROM $t WHERE is_available = 1 ORDER BY is_featured DESC, display_order, item_name LIMIT 200")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                    $c = rh_ai_plain((string)$r['category'], 40);
+                    $byCat[$c] = ($byCat[$c] ?? 0) + 1;
+                    $total++;
+                    $items[] = ['f' => (int)$r['is_featured'], 't' => rh_ai_plain((string)$r['item_name'], 60) . ' — ' . $price($r['price']) . ' (' . $c . ')'];
+                }
+            }
+            usort($items, static fn($x, $y) => $y['f'] <=> $x['f']);
+            $items = array_slice(array_column($items, 't'), 0, 200);
+            foreach ($byCat as $c => $n) {
+                $cats[] = $c . ': ' . $n;
+            }
+        } catch (Throwable $e2) {
+            return ['menu' => 'no menu found'];
+        }
+    }
+    return ['categories_count' => count($cats), 'items_available' => $total, 'categories' => $cats, 'items' => $items];
+}
+
+function rh_ai_t_hotel_info(PDO $db, array $user, array $a): array
+{
+    $topic = (string)($a['topic'] ?? 'overview');
+    $s = rh_ai_hotel_settings($db, ['site_name', 'check_in_time', 'check_out_time',
+        'station_kitchen_opens_at', 'station_kitchen_closes_at', 'station_bar_opens_at', 'station_bar_closes_at', 'station_coffee_bar_opens_at', 'station_coffee_bar_closes_at',
+        'phone_main', 'phone_reception', 'phone_reservations', 'whatsapp_number', 'email_main', 'email_reservations', 'email_info',
+        'hotel_address', 'address', 'address_line1', 'address_line2', 'address_city', 'address_region', 'address_country']);
+    $out = ['hotel' => $s['site_name'] !== '' ? $s['site_name'] : 'not set in Hotel Settings', 'topic' => $topic];
+    $off = static fn(string $what) => $what . ' is switched off in this system, so there is nothing to show.';
+
+    if ($topic === 'hours') {
+        $out['hours'] = rh_ai_hotel_hours($db, $s);
+        return $out;
+    }
+    if ($topic === 'contact') {
+        return $out + rh_ai_hotel_contact($s);
+    }
+    if ($topic === 'facilities') {
+        $out['facilities'] = rh_ai_hotel_facilities($db) ?: 'none set up';
+        return $out;
+    }
+    if ($topic === 'policies') {
+        $out['policies'] = rh_ai_hotel_policies($db) ?: 'none set up';
+        return $out;
+    }
+    if ($topic === 'gym') {
+        if (!rh_ai_module_on('gym')) {
+            $out['gym'] = $off('The gym');
+            return $out;
+        }
+        $out['gym_hours'] = rh_ai_gym_hours($db);
+        foreach (rh_ai_hotel_facilities($db) as $f) {
+            if (preg_match('/\b(gym|fitness)\b/i', $f)) {
+                $out['gym'] = $f;
+                break;
+            }
+        }
+        return $out;
+    }
+    if ($topic === 'menu') {
+        if (!rh_ai_restaurant_on()) {
+            $out['menu'] = $off('The restaurant');
+            return $out;
+        }
+        return $out + rh_ai_hotel_menu($db);
+    }
+    if ($topic === 'restaurant_bar') {
+        if (!rh_ai_restaurant_on()) {
+            $out['restaurant'] = $off('The restaurant');
+            return $out;
+        }
+        $out['hours'] = array_intersect_key(rh_ai_hotel_hours($db, $s), array_flip(['kitchen', 'bar', 'coffee_bar'])) ?: 'no kitchen, bar or coffee bar station is switched on';
+        foreach (rh_ai_hotel_facilities($db) as $f) {
+            if (preg_match('/\b(restaurant|bar|dining|caf[eé]|coffee)\b/iu', $f)) {
+                $out['facility'][] = $f;
+            }
+        }
+        foreach (rh_ai_hotel_policies($db) as $p) {
+            if (preg_match('/\b(dining|restaurant|bar)\b/i', $p)) {
+                $out['dining_policy'] = $p;
+                break;
+            }
+        }
+        $m = rh_ai_hotel_menu($db);
+        $out['menu'] = isset($m['items_available']) ? $m['items_available'] . ' items available in ' . $m['categories_count'] . ' categories (topic menu lists them)' : 'no menu found';
+        try {
+            $t = $db->query('SELECT COUNT(*) AS n, COALESCE(SUM(capacity), 0) AS seats FROM restaurant_tables WHERE is_active = 1')->fetch(PDO::FETCH_ASSOC);
+            if ((int)$t['n'] > 0) {
+                $out['tables'] = (int)$t['n'] . ' tables, ' . (int)$t['seats'] . ' seats';
+            }
+        } catch (Throwable $e) {
+            // no tables set up
+        }
+        return $out;
+    }
+    if ($topic === 'conference_events') {
+        $cur = rh_ai_currency();
+        $money = static fn($v) => ($cur !== '' ? $cur . ' ' : '') . number_format((float)$v, 2);
+        if (rh_ai_module_on('conference')) {
+            try {
+                foreach ($db->query('SELECT name, capacity, daily_rate, half_day_rate FROM conference_rooms WHERE is_active = 1 ORDER BY display_order, name LIMIT 100')->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                    $out['conference_rooms'][] = rh_ai_plain((string)$r['name'], 60) . ' — up to ' . (int)$r['capacity'] . ' people'
+                        . ((float)$r['daily_rate'] > BALANCE_TOLERANCE ? ', day ' . $money($r['daily_rate']) : '') . ((float)$r['half_day_rate'] > BALANCE_TOLERANCE ? ', half day ' . $money($r['half_day_rate']) : '');
+                }
+            } catch (Throwable $e) {
+                // no conference rooms table
+            }
+            $out['conference_rooms'] = $out['conference_rooms'] ?? 'none set up';
+        } else {
+            $out['conference_rooms'] = $off('Conference');
+        }
+        if (rh_ai_module_on('events')) {
+            try {
+                $st = $db->prepare('SELECT title, event_date, start_time, end_time, location, ticket_price FROM events WHERE is_active = 1 AND event_date >= ? ORDER BY event_date, start_time LIMIT 100');
+                $st->execute([rh_ai_today()]);
+                foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                    $when = (string)$r['event_date'] . ((string)$r['start_time'] !== '' ? ' ' . rh_ai_clock((string)$r['start_time']) : '') . ((string)$r['end_time'] !== '' ? '–' . rh_ai_clock((string)$r['end_time']) : '');
+                    $out['upcoming_events'][] = rh_ai_plain((string)$r['title'], 80) . ' — ' . $when . ((string)$r['location'] !== '' ? ', ' . rh_ai_plain((string)$r['location'], 60) : '')
+                        . ((float)$r['ticket_price'] > BALANCE_TOLERANCE ? ', ticket ' . $money($r['ticket_price']) : '');
+                }
+            } catch (Throwable $e) {
+                // no events table
+            }
+            $out['upcoming_events'] = $out['upcoming_events'] ?? 'none coming up';
+        } else {
+            $out['upcoming_events'] = $off('Events');
+        }
+        return $out;
+    }
+    // overview (the default)
+    try {
+        $about = $db->query("SELECT content FROM about_us WHERE is_active = 1 AND section_type = 'main' ORDER BY display_order LIMIT 1")->fetchColumn();
+        if ($about !== false && trim((string)$about) !== '') {
+            $out['about'] = rh_ai_plain((string)$about, 400);
+        }
+    } catch (Throwable $e) {
+        // no about-us table
+    }
+    $out['hours'] = rh_ai_hotel_hours($db, $s);
+    $c = rh_ai_hotel_contact($s);
+    $out['phones'] = $c['phones'];
+    $out['hotel_address'] = $c['hotel_address'];
+    $out['facilities'] = array_map(static fn($f) => explode(' — ', $f)[0], rh_ai_hotel_facilities($db));
+    $parts = [];
+    foreach (['restaurant' => rh_ai_restaurant_on(), 'bar' => rh_ai_station_on('bar'), 'coffee bar' => rh_ai_station_on('coffee_bar'), 'gym' => rh_ai_module_on('gym'),
+        'conference rooms' => rh_ai_module_on('conference'), 'events' => rh_ai_module_on('events')] as $p => $on) {
+        if ($on) {
+            $parts[] = $p;
+        }
+    }
+    $out['switched_on'] = $parts;
+    $out['more'] = 'topics: hours, restaurant_bar, menu, facilities, policies, contact' . (rh_ai_module_on('gym') ? ', gym' : '') . ', conference_events';
+    return $out;
 }
