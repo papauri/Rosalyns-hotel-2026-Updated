@@ -159,6 +159,32 @@ function rh_ai_can_help_line(array $user, array $pages = []): string
     return 'I can help with: ' . ($can ? implode(', ', $can) . ' and ' : '') . $last . '.';
 }
 
+/**
+ * '' when the tool's part of the business is switched on; otherwise one plain "not offered here" line (owner 2026-10-28:
+ * a part a business type does not run is simply not offered - the module system is never named).
+ */
+function rh_ai_not_offered_line(string $tool): string
+{
+    $def = rh_ai_tool_registry()[$tool] ?? null;
+    if ($def === null) {
+        return '';
+    }
+    $mods = (array)$def['module'];
+    $modsOn = !$mods;
+    foreach ($mods as $m) {
+        $modsOn = $modsOn || rh_ai_module_on($m);
+    }
+    $roomsOnly = ($def['gate'] ?? '') === 'rh_ai_gate_rooms';
+    if ($modsOn && (!$roomsOnly || rh_ai_module_on('bookings'))) {
+        return '';
+    }
+    $key = $modsOn ? 'bookings' : (string)$mods[0];
+    $lines = ['pos' => "We don't take till orders here.", 'gym' => "We don't offer a gym here.", 'bookings' => "Room bookings aren't taken here.",
+        'conference' => "We don't offer conference rooms here.", 'events' => "We don't run events here.", 'stock' => "Stock isn't kept here.",
+        'housekeeping' => "Housekeeping isn't run here.", 'finance' => "Money reports aren't kept here."];
+    return $lines[$key] ?? "That isn't offered here.";
+}
+
 /** The best 1-2 staff guide sections for a question (local KB, only guides this person may read) as panel links. */
 function rh_ai_guide_links(PDO $db, array $user, string $q, int $n = 2): array
 {
@@ -274,6 +300,9 @@ function rh_ai_local_intent(string $t): ?array
     // Polite wrappers do not change the look-up ("please show me today's arrivals", "any arrivals today?").
     $t = trim((string)preg_replace('/\s+/u', ' ', (string)preg_replace('/\b(please|pls|can you|could you|would you|tell me|show me|give me|let me see|i need|i want|how many|any|list of|the list of|right now|quickly)\b/u', ' ', $t)));
     $t = trim((string)preg_replace('/^[,.\s]+|[,.\s]+$/u', '', $t));
+    if (($look = rh_ai_lookup_intent($t)) !== null) {
+        return $look; // one order, the open orders, a gym class / slot / member, memberships ending
+    }
     // today / tomorrow / yesterday are answered locally for arrivals and departures; other dates go to the model
     $when = '';
     if (preg_match('/\b(tomorrow|yesterday)\b/u', $t, $wm)) {
@@ -313,6 +342,50 @@ function rh_ai_local_intent(string $t): ?array
     }
     if (preg_match('/^(what can i (do|see|access)( here)?|my (access|permissions)|what am i allowed to (do|see))\??$/u', $t)) {
         return ['my_access', []];
+    }
+    return null;
+}
+
+/**
+ * One-record lookups answered locally, no tokens (owner 2026-10-28: "follow up on the status of an order or gym stuff"):
+ * "status of table 5", "is table 5 ready?", "order ORD-20261028-003", "which orders are open?", "who's on tomorrow's
+ * 6am class?", "today's gym bookings", "memberships ending soon", "member GYM-0012". $t is lower-case, polite words gone.
+ * @return array{0:string,1:array}|null [tool, view with 'args']
+ */
+function rh_ai_lookup_intent(string $t): ?array
+{
+    if (mb_strlen($t) > 70) {
+        return null;
+    }
+    $unit = '(?:no\.? |number |#)?([a-z0-9][a-z0-9\-]{0,9})';
+    if (preg_match('/^(?:(?:what(?:\'s| is) the )?(?:status|state) of |how(?:\'s| is) |where(?:\'s| is) |check )?(?:the )?(?:orders? (?:for|at|on|from) )?table ' . $unit . '(?:\'s)?(?: orders?)?(?: status| doing| order status)?\??$/u', $t, $m)
+        || preg_match('/^(?:is|are) (?:the )?(?:orders? (?:for|at|on|from) )?table ' . $unit . '(?:\'s)?(?: orders?| food| drinks)? ready(?: yet)?\??$/u', $t, $m)) {
+        return ['order_status', ['args' => ['table' => $m[1]]]];
+    }
+    if (preg_match('/^(?:(?:what(?:\'s| is) the )?(?:status|state) of |where(?:\'s| is) |check |track )?(?:the )?order (?:no\.? |number |#|ref(?:erence)? )?([a-z]{2,6}-\d[\d\-]{3,30})\??$/u', $t, $m)) {
+        return ['order_status', ['args' => ['reference' => $m[1]]]];
+    }
+    if (preg_match('/^(?:which|what) (?:orders|tabs) are (?:still )?open\??$|^(?:the )?open (?:orders|tabs)(?: now)?\??$/u', $t)) {
+        return ['order_status', ['args' => []]];
+    }
+    $day = static function (string $w): array {
+        $tom = strpos($w, 'tomorrow') === 0;
+        return [date('Y-m-d', strtotime($tom ? '+1 day' : 'today')), $tom ? 'tomorrow' : 'today'];
+    };
+    if (preg_match('/^who(?:\'s| is| are)(?: booked)?(?: on| in| for| into)? (today\'?s?|tomorrow\'?s?|the) (\d{1,2}(?:[:.]\d{2})?\s?(?:am|pm)?)(?: gym)? (?:class|session|slot)\??$/u', $t, $m)
+        && ($hm = rh_ai_hhmm($m[2])) !== '') {
+        [$d, $w] = $day($m[1]);
+        return ['gym_watch', ['args' => ['date' => $d, 'time' => $hm], '_when' => $w]];
+    }
+    if (preg_match('/^(today\'?s?|tomorrow\'?s?) gym (?:bookings|schedule|classes|slots)\??$|^gym (?:bookings|schedule|classes|slots) (today|tomorrow)\??$/u', $t, $m)) {
+        [$d, $w] = $day(($m[1] ?? '') !== '' ? $m[1] : (string)($m[2] ?? 'today'));
+        return ['gym_watch', ['args' => ['date' => $d], '_when' => $w]];
+    }
+    if (preg_match('/^(?:(?:gym )?memberships? (?:ending|expiring)(?: soon)?|(?:gym )?members? (?:ending|expiring)(?: soon)?|who(?:\'s| is) (?:membership )?(?:ending|expiring)(?: soon)?)\??$/u', $t)) {
+        return ['gym_watch', ['args' => []]];
+    }
+    if (preg_match('/^(?:(?:status of|look ?up|find|check) )?(?:the )?(?:gym )?member (?:no\.? |number |#)?([a-z0-9][a-z0-9\-]{2,19})\??$/u', $t, $m) && preg_match('/\d/', $m[1])) {
+        return ['gym_watch', ['args' => ['member' => $m[1]]]];
     }
     return null;
 }
@@ -489,6 +562,12 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
     if ($tool === 'hotel_info') {
         return rh_ai_hotel_local_text($view, $r);
     }
+    if ($tool === 'order_status') {
+        return rh_ai_order_local_text($r);
+    }
+    if ($tool === 'gym_watch') {
+        return rh_ai_gym_local_text($view, $r);
+    }
     $room = static function (array $x): string {
         return ($x['room_type'] ?? '') . (!empty($x['room_number']) ? ' · room ' . $x['room_number'] : ' · no room yet');
     };
@@ -558,6 +637,135 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
     return '';
 }
 
+/** Minutes in plain words ("12 min", "2 h 5 min"). */
+function rh_ai_mins(int $m): string
+{
+    return $m < 60 ? $m . ' min' : intdiv($m, 60) . ' h' . ($m % 60 ? ' ' . ($m % 60) . ' min' : '');
+}
+
+/** A list cut to ai_list_page_rows lines with "and N more" (local answers keep the same size rule as the model's). */
+function rh_ai_local_lines(array $lines): string
+{
+    $top = rh_ai_num('ai_list_page_rows');
+    $more = count($lines) - $top;
+    $lines = array_slice($lines, 0, $top);
+    return $lines ? "\n- " . implode("\n- ", $lines) . ($more > 0 ? "\n- and $more more" : '') : '';
+}
+
+/** The local answer for an order lookup (from the de-identified result: names stay tokens until shown). */
+function rh_ai_order_local_text(array $r): string
+{
+    $cur = (string)($r['currency'] ?? '');
+    $fmt = static fn($v) => ($cur !== '' ? $cur . ' ' : '') . number_format((float)$v, 2);
+    $where = static function (array $o): string {
+        return implode(' · ', array_filter([($o['table'] ?? '') !== '' ? 'table ' . $o['table'] : '', ($o['room'] ?? '') !== '' ? 'room ' . $o['room'] : '', (string)($o['guest_name'] ?? '')]));
+    };
+    $line = static function (array $o) use ($where, $fmt): string {
+        $w = $where($o);
+        return $o['order_ref'] . ($w !== '' ? ' · ' . $w : '') . (isset($o['state']) ? ' · ' . $o['state'] : '') . (isset($o['minutes_since_order']) ? ' · ' . rh_ai_mins((int)$o['minutes_since_order']) . ' ago' : '')
+            . (isset($o['balance_left']) && (float)$o['balance_left'] > BALANCE_TOLERANCE ? ' · owes ' . $fmt($o['balance_left']) : '');
+    };
+    $match = (string)($r['match'] ?? '');
+    $out = '';
+    if ($match === 'one') {
+        $o = (array)$r['order'];
+        $w = $where($o);
+        $out = '**' . ($w !== '' ? ucfirst($w) . ' · ' : '') . $o['order_ref'] . ': ' . $o['state'] . '**'
+            . ' (ordered ' . rh_ai_mins((int)$o['minutes_since_order']) . ' ago' . (isset($o['minutes_since_ready']) ? ', ready for ' . rh_ai_mins((int)$o['minutes_since_ready']) : '') . ')';
+        foreach ((array)($o['stations'] ?? []) as $st => $txt) {
+            $out .= "\n- " . ucfirst((string)$st) . ': ' . $txt;
+        }
+        $out .= "\n\nOpened by " . (string)($o['opened_by']['staff_name'] ?? 'not recorded') . ' · ' . $o['payment'] . ' · total ' . $fmt($o['total'])
+            . (isset($o['paid_so_far']) ? ' · paid ' . $fmt($o['paid_so_far']) : '') . (isset($o['balance_left']) ? ' · balance left ' . $fmt($o['balance_left']) : '');
+        $out .= "\n\n" . (string)($r['changes'] ?? '');
+    } elseif ($match === 'several') {
+        $out = '**' . count((array)$r['orders']) . ' orders match ' . $r['asked'] . '** — which one?' . rh_ai_local_lines(array_map($line, (array)$r['orders'])) . (!empty($r['more']) ? "\n\n" . ucfirst((string)$r['more']) . '.' : '');
+    } elseif ($match === 'none') {
+        $out = (string)$r['not_found'];
+        $out .= "\n\n" . (is_array($r['open_now'] ?? null) ? '**Open now:**' . rh_ai_local_lines(array_map($line, $r['open_now'])) : (string)($r['open_now'] ?? ''));
+        if (!empty($r['earlier_orders_for_room'])) {
+            $out .= "\n\n**Earlier orders for that room:**" . rh_ai_local_lines(array_map(static fn($o) => $o['order_ref'] . ' · ' . $o['date'] . ' · ' . $o['status'] . ' · ' . $fmt($o['total']), (array)$r['earlier_orders_for_room']));
+        }
+    } else { // the orders open now
+        $out = is_array($r['open_now'] ?? null) ? '**Open orders now:**' . rh_ai_local_lines(array_map($line, $r['open_now'])) . (!empty($r['more']) ? "\n\n" . ucfirst((string)$r['more']) . '.' : '') : (string)($r['open_now'] ?? '');
+    }
+    return trim($out . (!empty($r['note']) ? "\n\n" . $r['note'] : ''));
+}
+
+/** The local answer for a gym lookup: one member, a class / slot / day, or the members overview. */
+function rh_ai_gym_local_text(array $view, array $r): string
+{
+    $cur = (string)($r['currency'] ?? '');
+    $fmt = static fn($v) => is_numeric($v) ? ($cur !== '' ? $cur . ' ' : '') . number_format((float)$v, 2) : (string)$v;
+    $mline = static fn($m) => $m['guest_name'] . ' (member ' . $m['member_number'] . ')' . (($m['membership'] ?? '') !== '' ? ' · ' . $m['membership'] : '') . (isset($m['status']) ? ' · ' . $m['status'] : '')
+        . (isset($m['ends']) ? ' · ends ' . $m['ends'] : '');
+    $match = (string)($r['match'] ?? '');
+    if (isset($r['member']) || (isset($r['members']) && $match === 'several') || isset($r['nearest_matches'])) {
+        if ($match === 'one') {
+            $m = (array)$r['member'];
+            $out = '**' . $mline($m) . '**' . (isset($m['days_left']) ? ' — ' . (int)$m['days_left'] . ' days left' : '');
+            $rows = [];
+            if (isset($m['package'])) {
+                $rows[] = 'Package: ' . $m['package'];
+            }
+            $rows[] = 'Started: ' . ($m['starts'] ?? 'not recorded');
+            $rows[] = 'Balance owed: ' . $fmt($m['balance_owed'] ?? 'not shown');
+            if (isset($m['last_check_ins'])) {
+                $rows[] = 'Last check-ins: ' . (is_array($m['last_check_ins']) ? implode('; ', $m['last_check_ins']) : $m['last_check_ins']);
+            }
+            if (isset($m['classes'])) {
+                $rows[] = 'Classes: ' . (is_array($m['classes']) ? implode('; ', $m['classes']) : $m['classes']);
+            }
+            if (isset($m['booked_slots'])) {
+                $rows[] = 'Booked slots: ' . implode('; ', (array)$m['booked_slots']);
+            }
+            return $out . "\n- " . implode("\n- ", $rows);
+        }
+        if ($match === 'several') {
+            return '**Several members match** — which one?' . rh_ai_local_lines(array_map($mline, (array)$r['members']));
+        }
+        return (string)$r['not_found'] . (is_array($r['nearest_matches'] ?? null) && $r['nearest_matches'] ? "\n\n**Nearest names:**" . rh_ai_local_lines(array_map($mline, $r['nearest_matches'])) : '');
+    }
+    if (isset($r['day'])) { // a class, a slot or the whole day
+        $when = isset($view['_when']) ? ucfirst((string)$view['_when']) . ' (' . $r['day'] . ')' : $r['day'] . ' ' . $r['date'];
+        $out = [];
+        if (isset($r['slot'])) {
+            $s = (array)$r['slot'];
+            $who = is_array($s['booked_people']) ? rh_ai_local_lines(array_map(static fn($p) => $p['guest_name'] . ((int)$p['people'] > 1 ? ' (' . (int)$p['people'] . ' people)' : '') . ($p['status'] !== 'booked' ? ' · ' . $p['status'] : ''), $s['booked_people'])) : "\n- " . $s['booked_people'];
+            $out[] = '**' . $when . ', ' . $s['slot'] . ':** ' . (int)$s['booked'] . ' booked of ' . (int)$s['capacity'] . ' (' . (int)$s['spaces_left'] . ' spaces left)' . $who;
+        }
+        foreach ((array)($r['classes'] ?? []) as $c) {
+            $names = array_map(static fn($p) => (string)$p['guest_name'], (array)$c['enrolled_members']);
+            $out[] = '**' . $c['class'] . '** (' . trim($c['time'] . ', ' . $c['days'], ', ') . '): ' . (int)$c['enrolled'] . ' enrolled' . rh_ai_local_lines($names);
+        }
+        foreach (['class_not_found', 'no_class', 'slot_full', 'no_slot', 'slot_booking'] as $k) {
+            if (isset($r[$k])) {
+                $out[] = (string)$r[$k];
+            }
+        }
+        if (isset($r['slots_with_bookings'])) {
+            $out[] = '**' . $when . ':** ' . ($r['open'] ?? '') . ', ' . (int)($r['booked_today_total'] ?? 0) . ' booked in all'
+                . (is_array($r['slots_with_bookings']) ? rh_ai_local_lines(array_map(static fn($s) => $s['slot'] . ' · ' . $s['booked'] . ' of ' . $s['capacity'] . ' (' . $s['spaces_left'] . ' left)', $r['slots_with_bookings'])) : "\n- " . $r['slots_with_bookings']);
+        }
+        if (isset($r['classes_that_day'])) {
+            $out[] = '**Classes ' . mb_strtolower($when) . ':**' . (is_array($r['classes_that_day']) ? rh_ai_local_lines($r['classes_that_day']) : ' ' . $r['classes_that_day']);
+        }
+        if (isset($r['other_classes'])) {
+            $out[] = '**Classes we run:**' . (is_array($r['other_classes']) ? rh_ai_local_lines($r['other_classes']) : ' ' . $r['other_classes']);
+        }
+        if (isset($r['next_slots_with_space'])) {
+            $out[] = '**Next slots with space:**' . (is_array($r['next_slots_with_space']) ? rh_ai_local_lines($r['next_slots_with_space']) : ' ' . $r['next_slots_with_space']);
+        }
+        return implode("\n\n", $out);
+    }
+    if (isset($r['members']['active'])) { // the overview: counts and memberships ending soon
+        $c = (array)$r['members'];
+        $out = '**Members:** ' . (int)$c['active'] . ' active, ' . (int)$c['expiring_30_days'] . ' ending in the next 30 days, ' . (int)$c['expired'] . ' expired · ' . (int)($r['enquiries_waiting'] ?? 0) . ' enquiries waiting';
+        return $out . rh_ai_local_lines(array_map(static fn($m) => $m['guest_name'] . ' (member ' . $m['member_number'] . ') · ' . $m['membership'] . ' · ends ' . $m['expires'], (array)($r['expiring_soon'] ?? [])));
+    }
+    return '';
+}
+
 /** Suggested next replies (tap chips) after an answer. */
 function rh_ai_followup_chips(array $user, array $toolsUsed): array
 {
@@ -581,6 +789,12 @@ function rh_ai_followup_chips(array $user, array $toolsUsed): array
             $add('quote_stay', 'Quote that stay');
         } elseif ($t === 'how_to' || $t === 'summarise_guide') {
             $add('how_to', 'Show me the steps again');
+        } elseif ($t === 'order_status') {
+            $add('order_status', 'Which orders are open?');
+            $add('kitchen_tickets', 'What is waiting at the kitchen?');
+        } elseif ($t === 'gym_watch') {
+            $add('gym_watch', "Today's gym bookings");
+            $add('gym_watch', 'Memberships ending soon');
         }
     }
     return array_slice($chips, 0, 3);
@@ -589,7 +803,7 @@ function rh_ai_followup_chips(array $user, array $toolsUsed): array
 // ── Real conversation, within the hotel's realm (zero tokens where it can be) ─
 
 /** A short friendly reply to small talk (greeting, thanks, a hard shift), or null. Zero tokens. */
-function rh_ai_small_talk(string $t): ?array
+function rh_ai_small_talk(string $t, ?array $user = null): ?array
 {
     $t = trim(mb_strtolower($t));
     if (mb_strlen($t) > 60) {
@@ -598,7 +812,15 @@ function rh_ai_small_talk(string $t): ?array
     $h = (int)date('G');
     $part = $h < 12 ? 'morning' : ($h < 17 ? 'afternoon' : 'evening');
     if (preg_match('/^(hi|hello|hey|hiya|good (morning|afternoon|evening|day)|morning|evening)( there| assistant| team)?[!.,\s]*$/u', $t)) {
-        return ['Good ' . $part . '. What can I help with - a guest, a booking, the rooms or how to do something?', ['Give me the tea', 'Arrivals today']];
+        // Worded for the business type (a gym hears about members and classes, never rooms); chips only for lookups this person has
+        $b = rh_ai_business();
+        $chips = ['Give me the tea'];
+        foreach (['arrivals_departures' => 'bookings', 'order_status' => 'pos', 'gym_watch' => 'gym'] as $tool => $mod) {
+            if (count($chips) < 2 && ($user !== null ? rh_ai_tool_allowed($user, $tool) : rh_ai_module_on($mod))) {
+                $chips[] = ['arrivals_departures' => 'Arrivals today', 'order_status' => 'Which orders are open?', 'gym_watch' => "Today's gym bookings"][$tool];
+            }
+        }
+        return ['Good ' . $part . '. What can I help with - ' . ($b['asks'] ? implode(', ', $b['asks']) . ' or ' : '') . 'how to do something?', $chips];
     }
     if (preg_match('/^(ok(ay)?[, ]*)?(thanks|thank you|thank u|thx|cheers|great|perfect|nice|cool|brilliant|got it|noted|ok|okay)( (so much|a lot|very much|again))?[!.,\s]*$/u', $t)) {
         return ['You\'re welcome. Ask me anytime.', []];
@@ -791,13 +1013,13 @@ function rh_ai_specialists(): array
             'tools' => ['search_bookings', 'get_booking', 'check_availability', 'quote_stay', 'arrivals_departures', 'in_house', 'room_board', 'guest_history', 'rate_plans_and_deals', 'hotel_info']],
         'housekeeping' => ['label' => 'Housekeeping & Maintenance', 'brief' => 'room status, cleaning jobs, maintenance tasks, rooms off sale and rooms not ready for arrivals',
             'core' => ['work_queues', 'room_board'], 'tools' => ['work_queues', 'room_board']],
-        'restaurant' => ['label' => 'Restaurant & Bar', 'brief' => 'till sales, top sellers, voids, refunds and slow tickets at the kitchen, bar and coffee stations',
-            'core' => ['restaurant_sales', 'kitchen_tickets'], 'tools' => ['restaurant_sales', 'kitchen_tickets', 'hotel_info']],
+        'restaurant' => ['label' => 'Restaurant & Bar', 'brief' => 'till sales, top sellers, voids, refunds, slow tickets at the kitchen, bar and coffee stations, and where one order is',
+            'core' => ['restaurant_sales', 'kitchen_tickets', 'order_status'], 'tools' => ['restaurant_sales', 'kitchen_tickets', 'order_status', 'hotel_info']],
         'money' => ['label' => 'Money', 'brief' => 'money owed, refunds (always in full), voids, discounts, till shortages, no-shows and cancellations; you read and explain, staff do refunds and payments on screen',
             'core' => ['money_leaks', 'balances_due'], 'tools' => ['money_leaks', 'balances_due', 'room_performance', 'hotel_report']],
         'stock' => ['label' => 'Stock', 'brief' => 'stock out or low, expiring batches, wastage, count variance and the stock budget; read only',
             'core' => ['inventory_watch'], 'tools' => ['inventory_watch']],
-        'events_gym' => ['label' => 'Events, Conference & Gym', 'brief' => 'conference bookings coming up, event enquiries, gym memberships ending and gym enquiries',
+        'events_gym' => ['label' => 'Events, Conference & Gym', 'brief' => 'conference bookings coming up or one booking, event enquiries, gym memberships ending, one gym member, gym classes and slots, and gym enquiries',
             'core' => ['events_pipeline', 'gym_watch'], 'tools' => ['events_pipeline', 'gym_watch']],
         'revenue' => ['label' => 'Revenue & Sales', 'brief' => 'occupancy, ADR, RevPAR, pace against last year, pickup, lead time, unsold nights and where bookings come from; you recommend, you never change prices or deals',
             'core' => ['room_performance', 'booking_pace'], 'tools' => ['room_performance', 'booking_pace', 'rate_plans_and_deals', 'events_pipeline', 'rate_suggestions', 'lost_demand', 'upsell_finder', 'hotel_report']],
@@ -1404,11 +1626,11 @@ function rh_ai_lane_words(): array
 {
     return [
         'front_desk'   => '/\b(book(ing|ings|ed)?|reserv\w*|arriv\w*|depart\w*|check.?(in|out|ins|outs)|in.?house|guests?|stay\w*|nights?|free|availab\w*|vacan\w*|quote|room types?|assign\w*|due out|leav\w*|walk.?in|extend|cancel\w*)\b/u',
-        'housekeeping' => '/\b(housekeep\w*|clean\w*|dirty|maintenance|repair\w*|broken|fix\w*|room status|not ready|off sale|out of order|inspect\w*|jobs?|tasks?)\b/u',
-        'restaurant'   => '/\b(restaurant|bar|kitchen|till|food|drinks?|meals?|orders?|top sell\w*|voids?|tickets?|coffee|breakfast|lunch|dinner|dishes)\b/u',
+        'housekeeping' => '/\b(housekeep\w*|clean\w*|dirty|maintenance|repair\w*|broken|fix\w*|room status|status of room|not ready|off sale|out of order|inspect\w*|jobs?|tasks?)\b/u',
+        'restaurant'   => '/\b(restaurant|bar|kitchen|till|food|drinks?|meals?|orders?|top sell\w*|voids?|tickets?|coffee|breakfast|lunch|dinner|dishes|tabs?|tables?|room service|receipts?)\b/u',
         'money'        => '/\b(owe[sd]?|owing|balances?|unpaid|paid|payments?|refunds?|discounts?|money|cash|debts?|invoices?|losing|leaks?|revenue|takings|spend\w*)\b/u',
-        'stock'        => '/\b(stock|inventory|wastage|waste|expir\w*|batch\w*|suppliers?|low on|run(ning)? out)\b/u',
-        'events_gym'   => '/\b(events?|conference\w*|meeting rooms?|weddings?|gym|members?|membership\w*|fitness)\b/u',
+        'stock'        => '/\b(stock|inventory|wastage|waste|expir\w*|batch\w*|suppliers?|low on|run(ning)? out|purchase orders?|deliver(y|ies|ed))\b/u',
+        'events_gym'   => '/\b(events?|conference\w*|meeting rooms?|weddings?|gym|members?|membership\w*|fitness|class(es)?|slots?|sessions?)\b/u',
         'revenue'      => '/\b(occupancy|adr|revpar|pace|pick.?up|rates?|pricing|prices?|unsold|demand|sales|sell\w*|sources?|channels?|forecast\w*|lift|boost|fill|quiet|season\w*|upsell\w*)\b/u',
         'guest_voice'  => '/\b(reviews?|feedback|complain\w*|enquir\w*|inquir\w*|messages?|repl(y|ies)|whatsapp|emails?|concierge|ratings?)\b/u',
         'system_guide' => '/\b(how (do|to|does) (i|we|you)|how to|where (is|do|can|are)|guides?|help me (with|find|use)|settings?|screens?|pages?|menu|buttons?|what can i)\b/u',
@@ -1792,7 +2014,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         return $finish(rh_ai_out_of_scope_line() . ($help !== '' ? "\n\n" . $help : ''), 'declined', ['chips' => ['What can I do here?'], 'links' => rh_ai_guide_links($db, $user, $tok, 1)]);
     }
     // 1c. Small talk (greeting, thanks, a hard shift): a short friendly reply, no tokens
-    if (($st = rh_ai_small_talk($tok)) !== null) {
+    if (($st = rh_ai_small_talk($tok, $user)) !== null) {
         return $finish($st[0], 'local', ['chips' => $st[1]]);
     }
     // 1d. The daily briefing on request: deterministic findings, one short explanation
@@ -1814,10 +2036,12 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     if ($intent !== null) {
         [$tool, $view] = $intent;
         if (!rh_ai_tool_allowed($user, $tool)) {
+            // A part this business does not run gets "not offered here" (the module system never named); else the permission line
+            $off = rh_ai_not_offered_line($tool);
             $help = rh_ai_can_help_line($user);
-            return $finish(rh_ai_out_of_scope_line() . ($help !== '' ? "\n\n" . $help : ''), 'declined', ['chips' => ['What can I do here?']]);
+            return $finish(($off !== '' ? $off : rh_ai_out_of_scope_line()) . ($help !== '' ? "\n\n" . $help : ''), 'declined', ['chips' => ['What can I do here?']]);
         }
-        $args = isset($view['date']) ? ['date' => (string)$view['date']] : [];
+        $args = isset($view['args']) ? (array)$view['args'] : (isset($view['date']) ? ['date' => (string)$view['date']] : []);
         if (isset($view['topic'])) {
             $args['topic'] = (string)$view['topic']; // hotel_info
         }

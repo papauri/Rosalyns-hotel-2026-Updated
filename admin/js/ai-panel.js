@@ -238,7 +238,7 @@
         var h = document.createElement('p');
         h.innerHTML = '<strong>Hello.</strong>';
         var t = document.createElement('p');
-        t.textContent = 'Ask me about arrivals, departures, rooms, a booking, a price or how to do something in the system. Tap a suggestion below to start.';
+        t.textContent = panel.getAttribute('data-greeting') || 'Tap a suggestion below to start.'; // worded on the server for the business type
         w.appendChild(h); w.appendChild(t);
         stream.appendChild(w);
     }

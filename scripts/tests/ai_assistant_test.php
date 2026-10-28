@@ -3046,6 +3046,345 @@ if ($chatReady && rh_ai_memory_ready($pdo)) {
     check((int)$pdo->query("SELECT COUNT(*) FROM rooms WHERE slug LIKE 'aitest-count-%'")->fetchColumn() === 0, 'query-count checks rolled back');
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// One-record lookups + business type (owner 2026-10-28: "follow up on the status of an order or gym stuff or switch
+// off certain functions if the module is only for a certain business type ... I want a complete all rounder")
+// ══════════════════════════════════════════════════════════════════════════════
+echo "-- one-record lookups and business type --\n";
+$regL = rh_ai_tool_registry();
+check(isset($regL['order_status']) && $regL['order_status']['module'] === ['pos'] && in_array('pos_till', $regL['order_status']['perm'], true) && in_array('room_service_view', $regL['order_status']['perm'], true),
+    'order_status: a read tool gated by the POS module and the till / station / room-service permissions');
+check(isset($regL['gym_watch']['schema']['properties']['member'], $regL['gym_watch']['schema']['properties']['class'], $regL['gym_watch']['schema']['properties']['time'], $regL['events_pipeline']['schema']['properties']['query'],
+    $regL['work_queues']['schema']['properties']['room'], $regL['inventory_watch']['schema']['properties']['item'], $regL['inventory_watch']['schema']['properties']['purchase_order']),
+    'the existing reads take one-record arguments (member, class / slot, conference booking, room, stock item, purchase order) instead of a new tool each');
+check(isset(rh_ai_setting_defaults()['ai_lookup_matches'], rh_ai_setting_defaults()['ai_order_lookback_hours']) && rh_ai_num('ai_lookup_matches') >= 1, 'lookup sizes are settings (ai_lookup_matches, ai_order_lookback_hours), never numbers in the code');
+check(rh_ai_local_intent('status of table 5') === ['order_status', ['args' => ['table' => '5']]] && (rh_ai_local_intent('is table 12 ready?')[1]['args']['table'] ?? '') === '12'
+    && (rh_ai_local_intent('where is the order for table 3')[1]['args']['table'] ?? '') === '3' && (rh_ai_local_intent('order ORD-20261028-003')[1]['args']['reference'] ?? '') === 'ord-20261028-003'
+    && rh_ai_local_intent('which orders are open?') === ['order_status', ['args' => []]], 'order questions are looked up locally (table, reference, the open orders)');
+$giL = rh_ai_local_intent("who's on tomorrow's 6am class?");
+check(($giL[0] ?? '') === 'gym_watch' && ($giL[1]['args'] ?? null) === ['date' => date('Y-m-d', strtotime('+1 day')), 'time' => '06:00'] && rh_ai_local_intent('memberships ending soon') === ['gym_watch', ['args' => []]]
+    && (rh_ai_local_intent('member GYM-0012')[1]['args']['member'] ?? '') === 'gym-0012' && rh_ai_local_intent("today's gym bookings")[1]['args'] === ['date' => date('Y-m-d')],
+    'gym questions are looked up locally ("who\'s on tomorrow\'s 6am class?", memberships ending, one member, today\'s bookings)', json_encode($giL));
+check(rh_ai_local_intent('void the order for table 5') === null && rh_ai_hhmm('6:30 pm') === '18:30' && rh_ai_hhmm('12am') === '00:00' && rh_ai_hhmm('25:00') === '', 'times read plainly; a change request is never a lookup');
+
+// Business type: a gym or a shop never hears about rooms, check-in or a hotel
+$bizMods = static function (array $on): array {
+    $all = ['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms', 'station_kds', 'station_bds', 'station_cds', 'station_room_service', 'restaurant_page', 'events'];
+    return array_merge(array_fill_keys($all, false), array_fill_keys($on, true));
+};
+$siteL = function_exists('getSetting') ? (string)getSetting('site_name', '') : '';
+$noHotel = static function (string $t) use ($siteL): bool {
+    $t = str_ireplace(array_filter([$siteL, 'hotel_info']), '', $t);
+    return !preg_match('/\b(hotels?|rooms?|check-?in|check-?out|room types?|occupancy|arrivals?)\b/i', $t);
+};
+$GLOBALS['__rh_ai_module_override'] = $bizMods(['pos', 'gym', 'finance', 'website_cms', 'events']); // the Gym / Fitness preset
+$bz = rh_ai_business();
+$fzG = rh_ai_context_frozen($pdo);
+$stG = rh_ai_small_talk('good morning');
+check($bz['key'] === 'gym_fitness' && $bz['noun'] === 'gym' && strpos($fzG, 'business type: Gym / Fitness') !== false && strpos($fzG, 'gym members and classes') !== false && $noHotel($fzG),
+    'gym preset: the frozen prompt names the business type and its areas, and never mentions a hotel, rooms or check-in', $fzG);
+check($fzG === rh_ai_context_frozen($pdo) && strpos($fzG, date('Y-m-d')) === false, 'the business-type prompt is cache-stable (same text each call, no per-request data)');
+check(strpos(rh_ai_off_topic_line(), 'outside the gym') !== false && $noHotel(rh_ai_off_topic_line()) && $noHotel(rh_ai_hotel_info_description()) && $noHotel($stG[0]) && strpos($stG[0], 'a member') !== false
+    && $noHotel(rh_ai_extra_tools()['hotel_report']['description']) && !array_intersect(['occupancy', 'bookings', 'guests'], rh_ai_extra_tools()['hotel_report']['schema']['properties']['report']['enum']),
+    'gym preset: the off-topic line, the facts lookup, the report list and the greeting speak of members and classes, never rooms', json_encode([rh_ai_off_topic_line(), $stG[0]]));
+$pwG = rh_ai_panel_text();
+check($noHotel($pwG['help']) && $noHotel($pwG['greeting']) && $noHotel($pwG['privacy']) && strpos($pwG['help'], 'members') !== false && strpos($pwG['privacy'], "gym's server") !== false,
+    'gym preset: the panel help line, greeting and privacy line speak of members and classes, never rooms or a hotel', json_encode($pwG));
+$panelSrcL = (string)file_get_contents($root . '/admin/includes/ai-panel.php') . (string)file_get_contents($root . '/admin/js/ai-panel.js');
+check(strpos($panelSrcL, 'rh_ai_panel_text()') !== false && strpos($panelSrcL, 'data-greeting') !== false && strpos($panelSrcL, 'Ask me about arrivals') === false && strpos($panelSrcL, 'Ask about bookings, rooms') === false,
+    'the panel wording is rendered on the server from the business type (the JS greeting comes from data-greeting, no hotel text in the panel files)');
+$admB = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if ($admB) {
+    $toolsG = rh_ai_tools_for_user($admB);
+    $sugG = rh_ai_suggestions($admB, 'dashboard.php');
+    $helpG = rh_ai_can_help_line($admB);
+    check(!array_intersect(['room_performance', 'booking_pace', 'balances_due', 'arrivals_departures', 'room_board', 'in_house', 'upsell_finder'], array_keys($toolsG)),
+        'gym preset: room reads (occupancy, pace, room balances, arrivals) are hidden even from an administrator', implode(',', array_keys($toolsG)));
+    check(isset($toolsG['gym_watch'], $toolsG['order_status']) && !in_array('Arrivals today', $sugG, true) && in_array('Which orders are open?', $sugG, true) && $noHotel(implode(' ', $sugG)) && $noHotel($helpG) && $noHotel(implode(' ', (array)rh_ai_small_talk('hello', $admB)[1])),
+        'gym preset: starter chips, "I can help with" and greeting chips come from the gym and till lookups only', json_encode([$sugG, $helpG]));
+    $GLOBALS['__rh_ai_module_override'] = $bizMods(['pos', 'stock', 'finance']); // Retail / Shop
+    $fzS = rh_ai_context_frozen($pdo);
+    check(rh_ai_business()['key'] === 'retail_shop' && strpos($fzS, 'business type: Retail / Shop') !== false && $noHotel($fzS) && !preg_match('/\bgym\b/i', str_ireplace('hotel_info', '', $fzS)) && strpos(rh_ai_off_topic_line(), 'outside the shop') !== false,
+        'retail shop preset: the prompt and off-topic line are worded for a shop (no hotel, rooms or gym)', $fzS);
+    check(rh_ai_not_offered_line('gym_watch') === "We don't offer a gym here." && rh_ai_not_offered_line('arrivals_departures') === "Room bookings aren't taken here." && rh_ai_not_offered_line('room_performance') === "Room bookings aren't taken here." && rh_ai_not_offered_line('order_status') === '',
+        'a part the business does not run gets one plain "not offered here" line (the module system never named)');
+}
+$GLOBALS['__rh_ai_module_override'] = $bizMods(['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms', 'station_kds', 'station_bds', 'station_cds', 'station_room_service', 'restaurant_page', 'events']);
+$fzH = rh_ai_context_frozen($pdo);
+check(rh_ai_panel_text()['help'] === 'Ask about bookings, rooms, guests or how to do something. It only sees what your account can see.' && strpos(rh_ai_panel_text()['privacy'], "Guest names and contact details stay on the hotel's server.") === 0
+    && strpos(rh_ai_panel_text()['greeting'], 'Ask me about arrivals, departures, rooms, a booking, a price') === 0, 'full hotel: the panel keeps its hotel wording');
+check(rh_ai_business()['noun'] === 'hotel' && strpos($fzH, "\nHOTEL\n") !== false && strpos($fzH, 'Room types:') !== false && stripos(rh_ai_off_topic_line(), 'guests') !== false && strpos(rh_ai_hotel_info_description(), 'check-in/out') !== false,
+    'full hotel: rooms, check-in and guests are still in the prompt, the off-topic line and the facts lookup');
+unset($GLOBALS['__rh_ai_module_override']);
+
+if (!$chatReady || !rh_ai_memory_ready($pdo)) {
+    skip('one-record lookup database checks (Assistant migrations not run here)');
+} else {
+    $admL = $admB;
+    // The gym schedule library creates its tables on first use (DDL commits a transaction): warm it up before the transaction
+    rh_ai_admin_lib('gym-schedule-lib.php');
+    $gymCfg = function_exists('gymScheduleSettings') ? gymScheduleSettings() : ['enabled' => false];
+    if (function_exists('gymScheduleEnsureTables')) {
+        gymScheduleEnsureTables($pdo);
+    }
+    $wasOnL = rh_ai_enabled($pdo);
+    $pdo->beginTransaction();
+    try {
+        rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000',
+            'ai_rate_limit_per_10min' => '500', 'ai_turn_token_cap' => '60000', 'ai_swarm_models' => '0'], $pdo);
+        $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
+        rh_ai_store_key('google', 'AIzaFAKEKEYFORTESTSONLY0123456789abcd', (int)$admL['id'], $pdo);
+        $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL WHERE is_selected = 1");
+        $mi = $pdo->prepare("INSERT INTO ai_models (provider, model_id, label, capability_rank, source, is_selected, role, price_in_per_mtok, price_out_per_mtok) VALUES ('google', ?, ?, ?, 'catalog', 1, ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE is_selected = 1, role = VALUES(role), price_in_per_mtok = VALUES(price_in_per_mtok), price_out_per_mtok = VALUES(price_out_per_mtok)");
+        $mi->execute(['gemini-3.8-flash', 'Gemini 3.8 Flash', 92, 'primary', 0.75, 3.75]);
+        $mi->execute(['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 86, 'fast', 0.30, 2.50]);
+        rh_ai_set_transport(static function ($method, $url, $headers, $body, $timeout) {
+            $GLOBALS['ai2_calls'][] = ['url' => $url, 'headers' => $headers, 'body' => (string)$body];
+            $next = array_shift($GLOBALS['ai2_q']) ?? ['reply' => ['text' => 'OK']];
+            $reply = $next['reply'];
+            $reply['usage'] = ($reply['usage'] ?? []) + ['in' => 100, 'out' => 20];
+            return ['http' => 200, 'body' => json_encode(rh_ai_fake_body(ai2_prov($url), $reply, ''))];
+        });
+        $GLOBALS['__rh_ai_module_override'] = $bizMods(['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms', 'station_kds', 'station_bds', 'station_cds', 'station_room_service', 'restaurant_page', 'events']);
+        $turnL = static function (string $msg, ?array $who = null) use ($pdo, $admL): array {
+            $pdo->exec('DELETE FROM ai_tool_cache');
+            $GLOBALS['ai2_q'] = [];
+            $GLOBALS['ai2_calls'] = [];
+            return rh_ai_turn($pdo, $who ?? $admL, ['conversation_id' => 0, 'message' => $msg, 'page' => 'pos.php']);
+        };
+        $tol = BALANCE_TOLERANCE;
+
+        // ── Orders ──
+        $insO = $pdo->prepare("INSERT INTO stock_orders (reference, order_type, table_number, room_number, customer_name, status, total_amount, subtotal, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL ? DAY))");
+        // ready_at minutes ago, worked out by the database (its clock is the one the lookup reads)
+        $insI = $pdo->prepare("INSERT INTO stock_order_items (order_id, menu_item_id, menu_type, item_name, unit_price, quantity, line_total, kds_status, station, ready_at)
+                               VALUES (?, 0, 'food', ?, ?, 1, ?, ?, ?, IF(? IS NULL, NULL, DATE_SUB(NOW(), INTERVAL ? MINUTE)))");
+        $order = static function (string $ref, string $type, ?string $table, ?string $room, string $name, string $status, float $total, int $daysAgo = 0) use ($pdo, $insO, $admL): int {
+            $insO->execute([$ref, $type, $table, $room, $name, $status, $total, $total, (int)$admL['id'], $daysAgo]);
+            return (int)$pdo->lastInsertId();
+        };
+        $item = static function (int $oid, string $name, float $price, string $state, string $station, ?int $readyMinAgo = null) use ($insI): void {
+            $insI->execute([$oid, $name, $price, $price, $state, $station, $readyMinAgo, $readyMinAgo]);
+        };
+        $o1 = $order('ORD-AITEST-001', 'dine_in', '9097', null, 'AITest Tab One', 'placed', 15000);
+        $item($o1, 'AITest Burger', 10000, 'preparing', 'kitchen');
+        $item($o1, 'AITest Cola', 5000, 'ready', 'bar', 3);
+        $pdo->prepare("INSERT INTO stock_order_splits (order_id, split_number, split_amount, payment_method) VALUES (?, 1, 5000, 'cash')")->execute([$o1]);
+        $o2 = $order('ORD-AITEST-002', 'dine_in', '9098', null, '', 'placed', 8000);
+        $item($o2, 'AITest Salad', 8000, 'ready', 'kitchen', 7);
+        $order('ORD-AITEST-003', 'dine_in', '9099', null, '', 'placed', 1000);
+        $order('ORD-AITEST-004', 'dine_in', '9099', null, '', 'placed', 2000);
+        $order('ORD-AITEST-005', 'room_service', null, 'AIT-01', '', 'paid', 4000, 3);
+        $o6 = $order('ORD-AITEST-006', 'takeaway', null, null, '', 'voided', 3000);
+        $item($o6, 'AITest Pie', 3000, 'void', 'kitchen');
+
+        $r1 = rh_ai_t_order_status($pdo, $admL, ['table' => '9097']);
+        $one = (array)($r1['order'] ?? []);
+        check(($r1['match'] ?? '') === 'one' && $one['state'] === 'being made' && abs((float)$one['balance_left'] - 10000) <= $tol && abs((float)$one['paid_so_far'] - 5000) <= $tol && $one['payment'] === 'part paid'
+            && ($one['stations']['kitchen'] ?? '') === '1 being made' && ($one['stations']['bar'] ?? '') === '1 ready' && ($one['opened_by']['staff_name'] ?? '') !== '' && (int)$one['minutes_since_order'] >= 0 && !empty($r1['link']),
+            'order by table: one order - being made, items per station, who opened it, minutes since ordered, paid so far and balance left (total - split payments)', json_encode($r1));
+        $r2 = rh_ai_t_order_status($pdo, $admL, ['table' => 'Table 9098']);
+        check(($r2['order']['state'] ?? '') === 'ready' && (int)($r2['order']['minutes_since_ready'] ?? -1) >= 6, 'an order whose items are all ready: "ready", with minutes since it was ready', json_encode($r2['order'] ?? $r2));
+        $r6 = rh_ai_t_order_status($pdo, $admL, ['reference' => 'ord-aitest-006']);
+        check(($r6['order']['state'] ?? '') === 'voided' && !isset($r6['order']['balance_left']) && ($r6['order']['order_ref'] ?? '') === 'ORD-AITEST-006', 'order by reference (any case): a voided order says voided and owes nothing', json_encode($r6['order'] ?? $r6));
+        $r3 = rh_ai_t_order_status($pdo, $admL, ['table' => '9099']);
+        check(($r3['match'] ?? '') === 'several' && count((array)$r3['orders']) === 2 && !empty($r3['ask']), 'several open orders on one table: a short list to pick from', json_encode($r3));
+        $r4 = rh_ai_t_order_status($pdo, $admL, ['table' => '9100']);
+        $openRefs = array_column(is_array($r4['open_now'] ?? null) ? $r4['open_now'] : [], 'order_ref');
+        check(($r4['match'] ?? '') === 'none' && strpos((string)$r4['not_found'], 'table 9100') !== false && in_array('ORD-AITEST-001', $openRefs, true) && count($openRefs) <= rh_ai_num('ai_lookup_matches'),
+            'no order for that table: says so and offers the orders open now (bounded)', json_encode($r4));
+        $r5 = rh_ai_t_order_status($pdo, $admL, ['room' => 'AIT-01']);
+        check(($r5['match'] ?? '') === 'none' && in_array('ORD-AITEST-005', array_column((array)($r5['earlier_orders_for_room'] ?? []), 'order_ref'), true),
+            'a room with no order in the last ' . rh_ai_num('ai_order_lookback_hours') . ' hours: says so and offers that room\'s earlier orders', json_encode($r5));
+        $GLOBALS['__rh_ai_module_override']['station_room_service'] = false;
+        $r5b = rh_ai_t_order_status($pdo, $admL, ['room' => 'AIT-01']);
+        check(empty($r5b['earlier_orders_for_room']), 'room service switched off: room-service orders are not looked up');
+        $GLOBALS['__rh_ai_module_override']['station_room_service'] = true;
+        $r0 = rh_ai_t_order_status($pdo, $admL, []);
+        check(($r0['match'] ?? '') === 'open orders' && is_array($r0['open_now']) && count($r0['open_now']) <= rh_ai_num('ai_lookup_matches'), 'nothing asked: the orders open now, bounded');
+        // Zero tokens: "status of table 9097" answered locally
+        $t1 = $turnL('status of table 9097');
+        check($t1['ok'] && $t1['route'] === 'local' && !$GLOBALS['ai2_calls'] && (int)$t1['tokens_in'] === 0 && strpos($t1['reply'], 'being made') !== false && strpos($t1['reply'], 'balance left') !== false
+            && strpos($t1['reply'], 'Voids, payments and changes are made on the POS screen.') !== false, '"status of table 9097": answered locally, no tokens, read only', $t1['reply'] . ' ' . $t1['error']);
+        $t2 = $turnL('status of table 9099');
+        check($t2['route'] === 'local' && strpos($t2['reply'], 'which one?') !== false, '"status of table 9099" (two orders): asks which one, locally', $t2['reply']);
+        // The model is offered order_status for a wider order question
+        $GLOBALS['ai2_q'] = [];
+        $specsL = array_column(rh_ai_lane_specs($admL, rh_ai_specialists_for_user($admL), rh_ai_lanes_for(rh_ai_specialists_for_user($admL), 'has the burger order for the tab gone out yet'), []), 'name');
+        check(in_array('order_status', $specsL, true), 'an order question names the Restaurant lane, whose tools include order_status', implode(',', $specsL));
+        // Permission denied (a person with no till / station access) and module off
+        // A narrow test account: the Assistant and reviews only (no till, station, gym or stock access)
+        $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, is_active) VALUES (?, 'aitestlk.narrow@example.com', ?, 'Aitest Lookup Narrow', 'receptionist', 1)")
+            ->execute(['aitestlk_' . bin2hex(random_bytes(3)), password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT)]);
+        $noPos = ['id' => (int)$pdo->lastInsertId(), 'role' => 'receptionist', 'username' => 'aitestlk', 'full_name' => 'Aitest Lookup Narrow'];
+        $gpL = $pdo->prepare("INSERT INTO user_permissions (user_id, permission_key, is_granted) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted)");
+        foreach (array_keys(getAllPermissions()) as $k) {
+            $gpL->execute([$noPos['id'], $k, in_array($k, ['ai_assistant_use', 'reviews', 'dashboard'], true) ? 1 : 0]);
+        }
+        $rd = rh_ai_run_tool($pdo, $noPos, 0, 'order_status', ['table' => '9097']);
+        $rg = rh_ai_run_tool($pdo, $noPos, 0, 'gym_watch', ['member' => 'AIT-9001']);
+        $tNo = $turnL('status of table 9097', $noPos);
+        check(!$rd['ok'] && strpos($rd['error'], 'outside what this account can see') !== false && strpos($rd['json'], 'AITest') === false && !$rg['ok']
+            && !array_intersect(['order_status', 'gym_watch', 'inventory_watch'], array_keys(rh_ai_tools_for_user($noPos))) && $tNo['route'] === 'declined' && strpos($tNo['reply'], "That's outside what your account can see") === 0,
+            'no till, station or gym access: the lookups are hidden and refused, and "status of table 9097" gets the permission line (not "not offered")', $tNo['reply']);
+        $GLOBALS['__rh_ai_module_override']['pos'] = false;
+        $tOff = $turnL('status of table 9097');
+        check(!isset(rh_ai_tools_for_user($admL)['order_status']) && $tOff['route'] === 'declined' && strpos($tOff['reply'], "We don't take till orders here.") !== false && !preg_match('/switched|module/i', $tOff['reply']) && !$GLOBALS['ai2_calls'],
+            'till switched off: order_status is hidden and "status of table 9097" gets "not offered here", no tokens', $tOff['reply']);
+        $GLOBALS['__rh_ai_module_override']['pos'] = true;
+
+        // ── Gym ──
+        $pkgName = 'AITest Monthly Plus';
+        $pdo->prepare("INSERT INTO gym_packages (name, duration_label, duration_days, price, is_complimentary, is_active) VALUES (?, '30 days', 30, 30000, 0, 1)")->execute([$pkgName]);
+        $pdo->prepare("INSERT INTO gym_inquiries (reference_number, name, email, phone, status, total_amount, amount_due) VALUES ('AIT-GYM-1', 'AITest Thandi Banda', 'x@example.com', '0999000111', 'converted', 12000, 12000)")->execute();
+        $giId = (int)$pdo->lastInsertId();
+        $insM = $pdo->prepare("INSERT INTO gym_members (member_number, full_name, phone, membership_type, start_date, expiry_date, status, gym_inquiry_id)
+                               VALUES (?, ?, ?, ?, DATE_SUB(CURDATE(), INTERVAL ? DAY), DATE_ADD(CURDATE(), INTERVAL ? DAY), 'active', ?)");
+        $insM->execute(['AIT-9001', 'AITest Thandi Banda', '0999 000 111', $pkgName, 10, 20, $giId]);
+        $mId = (int)$pdo->lastInsertId();
+        $insM->execute(['AIT-9002', 'AITest Thandi Phiri', '0888 000 222', $pkgName, 0, 30, null]);
+        $pdo->prepare("INSERT INTO gym_attendance (member_id, member_number, checked_in_at, checked_out_at) VALUES (?, 'AIT-9001', ?, ?), (?, 'AIT-9001', ?, NULL)")
+            ->execute([$mId, date('Y-m-d 06:05:00', strtotime('-1 day')), date('Y-m-d 07:10:00', strtotime('-1 day')), $mId, date('Y-m-d H:i:s', strtotime('-20 minutes'))]);
+        $pdo->prepare("INSERT INTO gym_classes (title, day_label, time_label, level_label, is_active, display_order) VALUES ('AITest Sunrise Spin', 'Daily', '6:00 AM', 'All levels', 1, 999)")->execute();
+        $cId = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO gym_class_enrollments (class_id, member_id, status) VALUES (?, ?, 'enrolled')")->execute([$cId, $mId]);
+        $tom = date('Y-m-d', strtotime('+1 day'));
+        $pdo->prepare("INSERT INTO gym_slot_reservations (reference, slot_date, slot_time, member_id, member_number, full_name, party_size, status, source) VALUES ('AITGS1', ?, '06:00:00', ?, 'AIT-9001', 'AITest Thandi Banda', 2, 'booked', 'admin')")->execute([$tom, $mId]);
+
+        $gm = rh_ai_t_gym_watch($pdo, $admL, ['member' => 'AIT-9001']);
+        $m1 = (array)($gm['member'] ?? []);
+        check(($gm['match'] ?? '') === 'one' && $m1['guest_name'] === 'AITest Thandi Banda' && (int)$m1['days_left'] === 20 && $m1['status'] === 'active' && strpos((string)($m1['package'] ?? ''), $pkgName) === 0
+            && abs((float)$m1['balance_owed'] - 12000) <= $tol && count((array)$m1['last_check_ins']) === 2 && strpos(implode(' ', (array)$m1['classes']), 'AITest Sunrise Spin') !== false && count((array)($m1['booked_slots'] ?? [])) === 1,
+            'gym member by number: package, status, dates, days left, balance owed (the Gym Reports rule), last check-ins, classes and booked slots', json_encode($gm));
+        $gp = rh_ai_t_gym_watch($pdo, $admL, ['member' => '+265 0888 000 222']);
+        check(($gp['match'] ?? '') === 'one' && ($gp['member']['member_number'] ?? '') === 'AIT-9002', 'gym member by phone (spaces and country code ignored)', json_encode($gp['member'] ?? $gp));
+        $gs = rh_ai_t_gym_watch($pdo, $admL, ['member' => 'AITest Thandi']);
+        check(($gs['match'] ?? '') === 'several' && count((array)$gs['members']) === 2, 'two members match a name: a short list to pick from');
+        $gn = rh_ai_t_gym_watch($pdo, $admL, ['member' => 'AITest Zzyzx']);
+        check(($gn['match'] ?? '') === 'none' && in_array('AIT-9001', array_column(is_array($gn['nearest_matches']) ? $gn['nearest_matches'] : [], 'member_number'), true), 'no such member: says so and offers the nearest names', json_encode($gn));
+        $gc = rh_ai_t_gym_watch($pdo, $admL, ['class' => 'AITest Underwater Chess']);
+        check(!empty($gc['class_not_found']) && is_array($gc['other_classes'] ?? null) && count($gc['other_classes']) <= rh_ai_num('ai_lookup_matches'), 'no such class: says so and lists the classes the gym runs (bounded)', json_encode($gc));
+        if (!empty($gymCfg['enabled'])) {
+            $gt = rh_ai_t_gym_watch($pdo, $admL, ['date' => $tom, 'time' => '06:00']);
+            $slot = (array)($gt['slot'] ?? []);
+            check((int)($slot['booked'] ?? 0) >= 2 && (int)$slot['capacity'] === (int)$gymCfg['capacity'] && (int)$slot['spaces_left'] === (int)$slot['capacity'] - (int)$slot['booked']
+                && in_array('AITest Thandi Banda', array_column(is_array($slot['booked_people']) ? $slot['booked_people'] : [], 'guest_name'), true)
+                && in_array('AITest Sunrise Spin', array_column((array)($gt['classes'] ?? []), 'class'), true), "tomorrow's 6am: the slot's capacity, who is booked, spaces left, and the class on at that hour with who is enrolled", json_encode($gt));
+            $pdo->prepare("INSERT INTO gym_slot_reservations (reference, slot_date, slot_time, full_name, party_size, status, source) VALUES ('AITGS2', ?, '06:00:00', 'AITest Walk In', ?, 'booked', 'admin')")->execute([$tom, max(1, (int)$slot['spaces_left'])]);
+            $gf = rh_ai_t_gym_watch($pdo, $admL, ['date' => $tom, 'time' => '6am']);
+            check(($gf['slot_full'] ?? '') === 'That slot is full.' && is_array($gf['next_slots_with_space'] ?? null) && count($gf['next_slots_with_space']) <= rh_ai_num('ai_alt_max'), 'a full slot: says so and offers the next slots with space (bounded)', json_encode($gf));
+            $tg = $turnL("who's on tomorrow's 6am class?");
+            check($tg['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($tg['reply'], 'booked of') !== false && strpos($tg['reply'], 'AITest Sunrise Spin') !== false, '"who\'s on tomorrow\'s 6am class?": answered locally, no tokens', $tg['reply']);
+        } else {
+            skip('gym slot checks (slot booking is switched off here)');
+        }
+        $tm = $turnL('memberships ending soon');
+        check($tm['route'] === 'local' && strpos($tm['reply'], '**Members:**') !== false && !$GLOBALS['ai2_calls'], '"memberships ending soon": answered locally', $tm['reply']);
+        $GLOBALS['__rh_ai_module_override']['gym'] = false;
+        $tgo = $turnL('memberships ending soon');
+        check(!isset(rh_ai_tools_for_user($admL)['gym_watch']) && strpos($tgo['reply'], "We don't offer a gym here.") !== false && !preg_match('/switched|module/i', $tgo['reply']), 'gym switched off: the gym lookups are hidden and say "not offered here"', $tgo['reply']);
+        $GLOBALS['__rh_ai_module_override']['gym'] = true;
+
+        // ── Conference booking, one room's jobs, one stock item, one purchase order ──
+        $crId = (int)$pdo->query("SELECT COALESCE(MIN(id), 0) FROM conference_rooms")->fetchColumn();
+        $pdo->prepare("INSERT INTO conference_inquiries (inquiry_reference, conference_room_id, company_name, contact_person, email, phone, event_date, start_time, end_time, number_of_attendees, status, total_amount, total_with_vat, amount_due)
+                       VALUES ('AIT-CONF-1', ?, 'AITest Widgets Ltd', 'AITest Contact', 'c@example.com', '0999', ?, '09:00:00', '17:00:00', 40, 'confirmed', 500000, 500000, 200000)")->execute([$crId, date('Y-m-d', strtotime('+10 days'))]);
+        $ec = rh_ai_t_events_pipeline($pdo, $admL, ['query' => 'AITest Widgets']);
+        check(($ec['match'] ?? '') === 'one' && ($ec['booking']['status'] ?? '') === 'confirmed' && abs((float)$ec['booking']['still_owed'] - 200000) <= $tol && (int)$ec['booking']['attendees'] === 40,
+            'one conference booking by company: date, room, attendees, status, total and still owed', json_encode($ec));
+        $en = rh_ai_t_events_pipeline($pdo, $admL, ['query' => 'AITest Nobody Corp']);
+        check(($en['match'] ?? '') === 'none' && (isset($en['conference']) || isset($en['events'])), 'no such booking: says so and shows what is coming up instead', json_encode(array_keys($en)));
+        $room1 = $pdo->query("SELECT room_number FROM individual_rooms WHERE is_active = 1 ORDER BY id LIMIT 1")->fetchColumn();
+        if ($room1 !== false) {
+            $wq = rh_ai_t_work_queues($pdo, $admL, ['room' => (string)$room1]);
+            check(($wq['match'] ?? '') === 'one' && $wq['room'] === (string)$room1 && isset($wq['room_status'], $wq['housekeeping_jobs'], $wq['maintenance_tasks']), 'one room: its status, open housekeeping jobs and maintenance tasks', json_encode($wq));
+        }
+        $wn = rh_ai_t_work_queues($pdo, $admL, ['room' => 'ZZ-AIT-999']);
+        check(($wn['match'] ?? '') === 'none' && (isset($wn['housekeeping']) || isset($wn['maintenance'])), 'no such room: says so and shows the open jobs instead');
+        $pdo->prepare("INSERT INTO stock_ingredients (name, unit, current_quantity, min_quantity, reorder_point) VALUES ('AITest Basmati Rice', 'kg', 2, 5, 5)")->execute();
+        $ingId = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO stock_suppliers (name, is_active) VALUES ('AITest Mill Co', 1)")->execute();
+        $supId = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO stock_purchase_orders (reference, supplier_id, status, order_date, expected_date, total_cost) VALUES ('PO-AIT0042', ?, 'sent', ?, ?, 90000)")->execute([$supId, date('Y-m-d', strtotime('-5 days')), date('Y-m-d', strtotime('-1 day'))]);
+        $poId = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO stock_purchase_order_items (purchase_order_id, ingredient_id, description, unit, ordered_qty, received_qty, unit_cost, line_total) VALUES (?, ?, 'AITest Basmati Rice', 'kg', 50, 20, 1800, 90000)")->execute([$poId, $ingId]);
+        $si = rh_ai_t_inventory_watch($pdo, $admL, ['item' => 'AITest Basmati']);
+        check(($si['match'] ?? '') === 'one' && $si['item']['level'] === 'low' && abs((float)$si['item']['quantity'] - 2) < 0.001 && in_array('PO-AIT0042', array_column(is_array($si['item']['on_order'] ?? null) ? $si['item']['on_order'] : [], 'po_ref'), true),
+            'one stock item: quantity, level by the dashboard rule (low), and what is on order', json_encode($si));
+        $sn = rh_ai_t_inventory_watch($pdo, $admL, ['item' => 'AITest unicorn flour']);
+        check(($sn['match'] ?? '') === 'none' && in_array('AITest Basmati Rice', array_column(is_array($sn['nearest_items']) ? $sn['nearest_items'] : [], 'item'), true), 'no such stock item: says so and offers the nearest items');
+        $po = rh_ai_t_inventory_watch($pdo, $admL, ['purchase_order' => 'PO-AIT0042']);
+        check(($po['match'] ?? '') === 'one' && $po['purchase_order']['overdue'] === true && (float)$po['purchase_order']['lines'][0]['received'] === 20.0 && $po['purchase_order']['supplier'] === 'AITest Mill Co',
+            'one purchase order: supplier, status, overdue, ordered vs received per line', json_encode($po));
+        $pn = rh_ai_t_inventory_watch($pdo, $admL, ['purchase_order' => 'PO-NOPE-ZZ']);
+        check(($pn['match'] ?? '') === 'none' && in_array('PO-AIT0042', array_column(is_array($pn['open_purchase_orders']) ? $pn['open_purchase_orders'] : [], 'po_ref'), true), 'no such purchase order: says so and lists those waiting for delivery');
+    } catch (Throwable $e) {
+        bad('one-record lookup checks threw', $e->getMessage() . ' @' . $e->getLine());
+    } finally {
+        unset($GLOBALS['__rh_ai_module_override']);
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        rh_ai_settings($pdo, true);
+        rh_ai_vault_forget();
+    }
+    rh_ai_set_transport($queueTransport);
+    check(rh_ai_enabled($pdo) === $wasOnL && (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE reference LIKE 'ORD-AITEST-%'")->fetchColumn() === 0
+        && (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE member_number LIKE 'AIT-90%'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM gym_slot_reservations WHERE reference LIKE 'AITGS%'")->fetchColumn() === 0
+        && (int)$pdo->query("SELECT COUNT(*) FROM stock_purchase_orders WHERE reference = 'PO-AIT0042'")->fetchColumn() === 0
+        && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestlk%'")->fetchColumn() === 0, 'one-record lookup checks rolled back (no test rows, on/off state unchanged)');
+
+    // Bounded work: a lookup costs a fixed number of queries whatever the number of orders / members
+    $cqL = new RhAiCountPdo('mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET, DB_USER, DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    $cqL->beginTransaction();
+    try {
+        $insQ = $cqL->prepare("INSERT INTO stock_orders (reference, order_type, table_number, status, total_amount, subtotal, created_by) VALUES (?, 'dine_in', ?, 'placed', 100, 100, ?)");
+        $insQI = $cqL->prepare("INSERT INTO stock_order_items (order_id, menu_item_id, menu_type, item_name, unit_price, quantity, line_total, kds_status) VALUES (?, 0, 'food', 'AITest x', 100, 1, 100, 'pending')");
+        $counts = [];
+        foreach ([3, 40] as $size) {
+            for ($i = 0; $i < $size; $i++) {
+                $insQ->execute(['ORD-AITQ-' . $size . '-' . $i, 'Q' . $size, (int)$admB['id']]);
+                $oid = (int)$cqL->lastInsertId();
+                for ($k = 0; $k < 3; $k++) {
+                    $insQI->execute([$oid]);
+                }
+            }
+            $cqL->n = 0;
+            rh_ai_t_order_status($cqL, $admB, ['table' => 'Q' . $size]);
+            $several = $cqL->n;
+            $cqL->n = 0;
+            rh_ai_t_order_status($cqL, $admB, ['room' => 'AIT-NONE']);
+            $none = $cqL->n;
+            $cqL->n = 0;
+            rh_ai_t_order_status($cqL, $admB, ['reference' => 'ORD-AITQ-' . $size . '-0']);
+            $counts[$size] = [$several, $none, $cqL->n];
+        }
+        check($counts[3] === $counts[40] && max(array_merge($counts[3], $counts[40])) <= 6, 'order_status runs a fixed number of queries (several / none / one: ' . implode('/', $counts[40]) . ') whether a table has 3 or 40 orders', json_encode($counts));
+        $insGM = $cqL->prepare("INSERT INTO gym_members (member_number, full_name, start_date, status) VALUES (?, ?, CURDATE(), 'active')");
+        $gcounts = [];
+        foreach ([2, 30] as $size) {
+            for ($i = 0; $i < $size; $i++) {
+                $insGM->execute(['AQ' . $size . '-' . $i, 'AITestQ' . $size . ' Member ' . $i]);
+            }
+            $cqL->n = 0;
+            rh_ai_t_gym_watch($cqL, $admB, ['member' => 'AITestQ' . $size]);
+            $sev = $cqL->n;
+            $cqL->n = 0;
+            rh_ai_t_gym_watch($cqL, $admB, ['member' => 'AQ' . $size . '-0']);
+            $gcounts[$size] = [$sev, $cqL->n];
+        }
+        check($gcounts[2] === $gcounts[30] && max(array_merge($gcounts[2], $gcounts[30])) <= 7, 'gym member lookup runs a fixed number of queries (several / one: ' . implode('/', $gcounts[30]) . ') whatever the number of members', json_encode($gcounts));
+    } catch (Throwable $e) {
+        bad('lookup query-count checks threw', $e->getMessage() . ' @' . $e->getLine());
+    } finally {
+        if ($cqL->inTransaction()) {
+            $cqL->rollBack();
+        }
+    }
+    check((int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE reference LIKE 'ORD-AITQ-%'")->fetchColumn() === 0, 'lookup query-count checks rolled back');
+}
+
 rh_ai_set_transport(null);
 if ($origEnv === null) { unset($_ENV['APP_ENCRYPTION_SALT']); } else { $_ENV['APP_ENCRYPTION_SALT'] = $origEnv; }
 

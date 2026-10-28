@@ -190,6 +190,10 @@ function rh_ai_setting_defaults(): array
         'ai_alt_max'              => '3',  // when a room is not free: other room types offered, and date options offered (each)
         'ai_alt_tries'            => '4',  // when a room is not free: options priced and confirmed by quote_stay at most (bounded work)
         'ai_alt_menu_max'         => '5',  // other menu items, and facilities, offered when something is not available
+        // Owner 2026-10-28 ("a complete all rounder"): one-record lookups (an order, a gym member or class, a conference
+        // booking, a stock item, a purchase order, one room's jobs)
+        'ai_lookup_matches'       => '5',  // several matches: this many listed to pick from; also nearest names, recent check-ins and open orders offered
+        'ai_order_lookback_hours' => '24', // an order asked for by table, room or name: open orders, plus those placed in the last this-many hours
     ];
 }
 

@@ -107,19 +107,22 @@ define('RH_AI_PANEL_RENDERED', true);
     $alertsOn = rh_ai_extras_ready($db);
     $digestOk = rh_ai_extras_ready($db) && hasPermission($uid, 'ai_settings'); // digest goes to Assistant Settings holders only
     $tolerance = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+    require_once __DIR__ . '/../../includes/ai/ai-context.php';
+    $words = rh_ai_panel_text(); // worded for the business type (a hotel keeps its wording; a gym or shop never hears about rooms)
     ?>
 <?php if (!$cssPrinted): ?><link rel="stylesheet" href="css/ai-panel.css?v=<?php echo (int)$cssV; ?>"><?php endif; ?>
-<button type="button" class="rh-ai-launch" id="rhAiLaunch" aria-controls="rhAiPanel" aria-expanded="false" data-help="Assistant|Ask about bookings, rooms, guests or how to do something. It only sees what your account can see.">
+<button type="button" class="rh-ai-launch" id="rhAiLaunch" aria-controls="rhAiPanel" aria-expanded="false" data-help="Assistant|<?php echo htmlspecialchars($words['help']); ?>">
     <i class="fas fa-comments" aria-hidden="true"></i><span>Assistant</span><span class="rh-ai-launch__count" id="rhAiLaunchCount" hidden></span>
 </button>
 <aside class="rh-ai-panel" id="rhAiPanel" role="dialog" aria-modal="false" aria-labelledby="rhAiTitle" hidden
        data-endpoint="api/ai-chat.php" data-action-endpoint="api/ai-action.php" data-csrf="<?php echo htmlspecialchars($csrf); ?>"
        data-feedback="<?php echo $feedback ? '1' : '0'; ?>" data-tolerance="<?php echo htmlspecialchars((string)$tolerance); ?>"
-       data-locked="<?php echo $locked ? '1' : '0'; ?>" data-alerts="<?php echo $alertsOn ? '1' : '0'; ?>">
+       data-locked="<?php echo $locked ? '1' : '0'; ?>" data-alerts="<?php echo $alertsOn ? '1' : '0'; ?>"
+       data-greeting="<?php echo htmlspecialchars($words['greeting']); ?>">
     <header class="rh-ai-head">
         <div class="rh-ai-head__text">
             <h2 id="rhAiTitle">Assistant</h2>
-            <p class="rh-ai-help">Ask about bookings, rooms, guests or how to do something. It only sees what your account can see.</p>
+            <p class="rh-ai-help"><?php echo htmlspecialchars($words['help']); ?></p>
         </div>
         <div class="rh-ai-head__btns">
             <?php if ($alertsOn): ?><button type="button" class="rh-ai-icon rh-ai-icon--alerts" data-ai="alerts" aria-label="Alerts" title="Alerts"><i class="fas fa-bell" aria-hidden="true"></i><span class="rh-ai-icon__count" id="rhAiAlertCount" hidden></span></button><?php endif; ?>
@@ -207,7 +210,7 @@ define('RH_AI_PANEL_RENDERED', true);
             <button type="submit" class="btn btn-primary rh-ai-send" aria-label="Send"><i class="fas fa-paper-plane" aria-hidden="true"></i><span>Send</span></button>
             <button type="button" class="btn btn-secondary rh-ai-stop" data-ai="stop" hidden aria-label="Stop"><i class="fas fa-stop" aria-hidden="true"></i><span>Stop</span></button>
         </form>
-        <p class="rh-ai-foot">Guest names and contact details stay on the hotel's server. A card changes nothing until you tap Confirm.</p>
+        <p class="rh-ai-foot"><?php echo htmlspecialchars($words['privacy']); ?></p>
     </section>
 </aside>
 <script src="js/ai-panel.js?v=<?php echo (int)$jsV; ?>" defer></script>

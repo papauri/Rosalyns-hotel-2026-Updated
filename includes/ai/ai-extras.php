@@ -418,10 +418,16 @@ function rh_ai_alert_dismiss(PDO $db, int $uid, int $id): bool
 function rh_ai_extra_tools(): array
 {
     $date = ['type' => 'string', 'description' => 'Date as YYYY-MM-DD', 'format' => 'date'];
+    // Report sections of parts the business does not run are not offered (owner 2026-10-28: business-type aware)
+    $rooms = rh_ai_module_on('bookings');
+    $reports = array_values(array_filter(['overview', 'revenue', 'vat', 'aging', 'bookings', 'occupancy', 'guests', 'conference', 'fnb', 'stock', 'staff', 'voids'], static function ($r) use ($rooms) {
+        $mod = ['bookings' => 'bookings', 'occupancy' => 'bookings', 'guests' => 'bookings', 'fnb' => 'pos', 'staff' => 'pos', 'stock' => 'stock', 'conference' => 'conference'][$r] ?? '';
+        return $mod === '' || ($mod === 'bookings' ? $rooms : rh_ai_module_on($mod));
+    }));
     return [
         'hotel_report' => [
-            'description' => 'A Reports screen section for a date range (overview, revenue, occupancy, bookings, guests, aging, vat, fnb, stock, staff, voids, conference) with its room headline figures where available, and the button to open it (Export CSV is on that screen). Default this month.',
-            'schema' => ['properties' => ['report' => ['type' => 'string', 'enum' => ['overview', 'revenue', 'vat', 'aging', 'bookings', 'occupancy', 'guests', 'conference', 'fnb', 'stock', 'staff', 'voids']], 'from' => $date, 'to' => $date]],
+            'description' => 'A Reports screen section for a date range (' . implode(', ', $reports) . ')' . ($rooms ? ' with its room headline figures where available,' : '') . ' and the button to open it (Export CSV is on that screen). Default this month.',
+            'schema' => ['properties' => ['report' => ['type' => 'string', 'enum' => $reports], 'from' => $date, 'to' => $date]],
             'perm' => ['reports', 'accounting'], 'module' => [], 'cache' => 120, 'handler' => 'rh_ai_t_hotel_report', 'step' => 'Opening the report',
         ],
         'reply_queue' => [

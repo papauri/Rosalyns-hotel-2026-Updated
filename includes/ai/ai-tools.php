@@ -20,6 +20,7 @@ require_once __DIR__ . '/ai-vault.php';
 require_once __DIR__ . '/ai-insights.php'; // Phase 3 department reads + the daily briefing (read only)
 require_once __DIR__ . '/ai-memory.php';   // Phase 4b: the circuit breaker (a tool that keeps failing is switched off for an hour)
 require_once __DIR__ . '/ai-extras.php';   // Phases 4c + 5: password on risky cards, idle lock, audit chain, alerts, extra reads
+require_once __DIR__ . '/ai-lookups.php';  // one-record lookups: an order, a gym member or class, a conference booking, a stock item, a room's jobs
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
@@ -132,7 +133,7 @@ function rh_ai_tool_registry(): array
         'balances_due' => [
             'description' => 'Money still owed on room bookings (folio balance, the same figure as the booking screen), largest first, with the total.',
             'schema' => ['properties' => (object)[]],
-            'perm' => ['accounting', 'payments'], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_balances_due',
+            'perm' => ['accounting', 'payments'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_balances_due',
         ],
         'how_to' => [
             'description' => 'Search the staff guides and knowledge base for how to do something in this system. Returns matching sections with links.',
@@ -165,21 +166,21 @@ function rh_ai_tool_registry(): array
             'perm' => [], 'module' => [], 'cache' => 0, 'handler' => 'rh_ai_t_open_page',
         ],
         'hotel_info' => [
-            'description' => 'The hotel\'s own facts: check-in/out and opening hours (restaurant kitchen, bar, coffee bar, gym) and what is open now, restaurant and bar, menu (or one item: is it available, what else to offer), facilities, policies, contact details, conference rooms and upcoming events. Parts the hotel does not offer are left out; a time that is not set is said to be not set.',
+            'description' => rh_ai_hotel_info_description(),
             'schema' => ['properties' => ['topic' => ['type' => 'string', 'enum' => ['overview', 'hours', 'restaurant_bar', 'menu', 'facilities', 'policies', 'contact', 'gym', 'conference_events'], 'description' => 'Default overview'],
                 'item' => ['type' => 'string', 'maxLength' => 60, 'description' => 'Menu: one dish or drink to check, or vegetarian / vegan']]],
-            'perm' => [], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_hotel_info', 'step' => 'Reading the hotel\'s details',
+            'perm' => [], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_hotel_info', 'step' => 'Reading the ' . rh_ai_business()['noun'] . '\'s details',
         ],
         // ── Phase 3: department reads (includes/ai/ai-insights.php) ──
         'room_performance' => [
             'description' => 'Occupancy %, ADR, RevPAR, room-nights sold, cancellations and no-shows for a date range (default this month) - the same figures as Reports for the same dates.',
             'schema' => ['properties' => ['from' => $date, 'to' => $date]],
-            'perm' => ['reports', 'accounting'], 'module' => ['finance'], 'cache' => 120, 'handler' => 'rh_ai_t_room_performance', 'step' => 'Working out occupancy and room revenue',
+            'perm' => ['reports', 'accounting'], 'module' => ['finance'], 'gate' => 'rh_ai_gate_rooms', 'cache' => 120, 'handler' => 'rh_ai_t_room_performance', 'step' => 'Working out occupancy and room revenue',
         ],
         'booking_pace' => [
             'description' => 'Pace for coming nights (default next 30): room-nights on the books vs the same nights last year, pickup in the last 7 days, unsold nights, lead time, where bookings come from.',
             'schema' => ['properties' => ['from' => $date, 'to' => $date]],
-            'perm' => ['reports', 'accounting'], 'module' => ['finance'], 'cache' => 120, 'handler' => 'rh_ai_t_booking_pace', 'step' => 'Checking bookings on the books against last year',
+            'perm' => ['reports', 'accounting'], 'module' => ['finance'], 'gate' => 'rh_ai_gate_rooms', 'cache' => 120, 'handler' => 'rh_ai_t_booking_pace', 'step' => 'Checking bookings on the books against last year',
         ],
         'money_leaks' => [
             'description' => 'Where money is being lost in a date range (default last 7 days): money still owed after departure, refunds paid (in full), till voids, discounts, till shortages, removed bill charges, wastage, stock missing at count, no-shows, cancellations, stock budget - each with amount, cause and who.',
@@ -197,19 +198,21 @@ function rh_ai_tool_registry(): array
             'perm' => ['kds_view', 'bds_view', 'cds_view', 'kds_reports', 'pos_till', 'room_service_view'], 'module' => ['pos'], 'cache' => 30, 'handler' => 'rh_ai_t_kitchen_tickets', 'step' => 'Checking tickets at the stations',
         ],
         'inventory_watch' => [
-            'description' => 'Stock out, low or negative (the stock dashboard rule), batches expiring this week, wastage in a date range (default last 7 days), the last count\'s variance and counts waiting for approval. Read only.',
-            'schema' => ['properties' => ['from' => $date, 'to' => $date]],
+            'description' => 'Stock: one item\'s level (item), one purchase order and what has arrived (purchase_order), or the stock dashboard alerts. Alerts: stock out, low or negative (the stock dashboard rule), batches expiring this week, wastage in a date range (default last 7 days), the last count\'s variance and counts waiting for approval. Read only.',
+            'schema' => ['properties' => ['from' => $date, 'to' => $date, 'item' => ['type' => 'string', 'maxLength' => 80, 'description' => 'One stock item: its level, batches and what is on order'],
+                'purchase_order' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Purchase order reference or supplier name']]],
             'perm' => ['stock_dashboard', 'stock_management', 'stock_reports', 'stock_count', 'stock_wastage', 'stock_batches'], 'module' => ['stock'], 'cache' => 120, 'handler' => 'rh_ai_t_inventory_watch', 'step' => 'Checking stock levels',
         ],
         'events_pipeline' => [
-            'description' => 'Conference bookings coming up (default next 30 days) by status with value and money still owed, enquiries not confirmed, and event enquiries waiting.',
-            'schema' => ['properties' => ['days' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 180]]],
+            'description' => 'Conference and event bookings: one booking by reference, company or name (query), or those coming up with money owed. Coming up (default next 30 days): by status with value and money still owed, enquiries not confirmed, and event enquiries waiting.',
+            'schema' => ['properties' => ['days' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 180], 'query' => ['type' => 'string', 'maxLength' => 80, 'description' => 'One booking: reference, company or name']]],
             'perm' => ['conference', 'events_bookings', 'events'], 'module' => ['conference', 'events'], 'cache' => 120, 'handler' => 'rh_ai_t_events_pipeline', 'step' => 'Checking conference and event bookings',
         ],
         'gym_watch' => [
-            'description' => 'Gym members (the Members screen counts), memberships ending in the next 30 days and gym enquiries waiting.',
-            'schema' => ['properties' => (object)[]],
-            'perm' => ['gym'], 'module' => ['gym'], 'cache' => 120, 'handler' => 'rh_ai_t_gym_watch', 'step' => 'Checking gym memberships',
+            'description' => 'Gym: one member (name, phone or number), a class or time slot on a date (who is booked, spaces left), or the member counts. One member: package, status, dates, days left, balance, check-ins, classes. With no arguments: the Members screen counts, memberships ending in the next 30 days and gym enquiries waiting.',
+            'schema' => ['properties' => ['member' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Member name, phone or member number'], 'class' => ['type' => 'string', 'maxLength' => 60, 'description' => 'Class name'],
+                'date' => $date, 'time' => ['type' => 'string', 'maxLength' => 10, 'description' => 'Slot or class time as HH:MM']]],
+            'perm' => ['gym'], 'module' => ['gym'], 'cache' => 30, 'handler' => 'rh_ai_t_gym_watch', 'step' => 'Checking gym memberships',
         ],
         'guest_voice' => [
             'description' => 'Reviews waiting for approval or a reply, low ratings, and website / event / gym / conference enquiries waiting for an answer.',
@@ -217,8 +220,8 @@ function rh_ai_tool_registry(): array
             'perm' => ['reviews', 'contact', 'events_bookings', 'gym', 'conference'], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_guest_voice', 'step' => 'Checking reviews and enquiries',
         ],
         'work_queues' => [
-            'description' => 'Open housekeeping jobs and maintenance tasks: overdue, due today, urgent, blocked or keeping a room off sale, and who has them.',
-            'schema' => ['properties' => (object)[]],
+            'description' => 'Housekeeping and maintenance: one room\'s status and jobs (room), or all open jobs and who has them. Open jobs: overdue, due today, urgent, blocked or keeping a room off sale.',
+            'schema' => ['properties' => ['room' => ['type' => 'string', 'maxLength' => 30, 'description' => 'One room number']]],
             'perm' => ['housekeeping', 'room_maintenance'], 'module' => ['housekeeping', 'bookings'], 'cache' => 45, 'handler' => 'rh_ai_t_work_queues', 'step' => 'Checking housekeeping and maintenance jobs',
         ],
         'daily_briefing' => [
@@ -227,7 +230,7 @@ function rh_ai_tool_registry(): array
             'perm' => [], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_daily_briefing', 'step' => 'Going through today',
         ],
     ];
-    return array_merge($reg, rh_ai_extra_tools()); // Phases 4c + 5: reports, reply queue, review insights, upsell, lost demand, rate suggestions (read only)
+    return array_merge($reg, rh_ai_extra_tools(), rh_ai_lookup_tools()); // Phases 4c + 5 extras (read only) + one-record lookups (read only)
 }
 
 /** The plain status line shown while a tool runs ("Checking today's departures..."). */
@@ -251,6 +254,27 @@ function rh_ai_gate_presence(array $user): bool
         require_once dirname(__DIR__, 2) . '/admin/includes/presence-lib.php';
     }
     return rh_presence_can_view((string)($user['role'] ?? ''));
+}
+
+/** Room-only reads (occupancy, pace): offered only where room bookings are switched on. */
+function rh_ai_gate_rooms(array $user): bool
+{
+    return rh_ai_module_on('bookings');
+}
+
+/**
+ * hotel_info's description, worded for the business type (owner 2026-10-28): only the parts offered here are named, so
+ * a gym or a shop never hears about rooms or check-in. Built from module switches only (cache-stable).
+ */
+function rh_ai_hotel_info_description(): string
+{
+    $b = rh_ai_business();
+    $hours = array_keys(array_filter(['check-in/out' => $b['on']['bookings'] === 1, 'restaurant kitchen' => rh_ai_station_on('kitchen'), 'bar' => rh_ai_station_on('bar'),
+        'coffee bar' => rh_ai_station_on('coffee_bar'), 'gym' => $b['on']['gym'] === 1]));
+    $parts = array_keys(array_filter(['restaurant and bar' => $b['on']['restaurant_page'] === 1, 'menu (or one item: is it available, what else to offer)' => rh_ai_restaurant_on(), 'facilities, policies, contact details' => true,
+        'conference rooms' => $b['on']['conference'] === 1, 'upcoming events' => $b['on']['events_page'] === 1]));
+    return 'The ' . $b['noun'] . '\'s own facts: opening hours' . ($hours ? ' (' . implode(', ', $hours) . ')' : '') . ' and what is open now, ' . rh_ai_and_list($parts)
+        . '. Parts not offered here are left out; a time that is not set is said to be not set.';
 }
 
 /** May this person use this tool right now? Permission (any-of) + module (any-of) + gate. */
@@ -409,7 +433,8 @@ function rh_ai_bound_result($data, string $tool = '', int $page = 1)
 function rh_ai_paged_tools(): array
 {
     return ['search_bookings', 'arrivals_departures', 'in_house', 'room_board', 'balances_due', 'guest_history', 'money_leaks', 'inventory_watch',
-        'work_queues', 'events_pipeline', 'guest_voice', 'reply_queue', 'kitchen_tickets', 'restaurant_sales', 'upsell_finder', 'who_is_online', 'check_availability', 'hotel_info'];
+        'work_queues', 'events_pipeline', 'guest_voice', 'reply_queue', 'kitchen_tickets', 'restaurant_sales', 'upsell_finder', 'who_is_online', 'check_availability', 'hotel_info',
+        'order_status', 'gym_watch'];
 }
 
 /** Provider-ready tool list [{name, description, schema}] for this person. */

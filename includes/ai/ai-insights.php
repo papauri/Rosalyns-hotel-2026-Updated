@@ -498,6 +498,13 @@ function rh_ai_t_kitchen_tickets(PDO $db, array $user, array $a): array
 /** Out / low / negative stock (the stock dashboard rule), batches expiring, wastage, count variance, counts waiting. */
 function rh_ai_t_inventory_watch(PDO $db, array $user, array $a): array
 {
+    if (trim((string)($a['purchase_order'] ?? '')) !== '') {
+        return rh_ai_purchase_order_lookup($db, $user, (string)$a['purchase_order']); // one purchase order (ai-lookups.php)
+    }
+    if (trim((string)($a['item'] ?? '')) !== '') {
+        $r = rh_ai_stock_item_lookup($db, $user, (string)$a['item']); // one stock item (ai-lookups.php)
+        return $r + ['link' => 'stock-dashboard.php', 'link_label' => 'Open Stock'];
+    }
     [$from, $to] = rh_ai_range($a, date('Y-m-d', strtotime('-6 days')), date('Y-m-d'), 92);
     if ($from === null) {
         return ['error' => $to];
@@ -543,6 +550,13 @@ function rh_ai_t_inventory_watch(PDO $db, array $user, array $a): array
 /** Conference bookings coming up (and not yet confirmed), event enquiries waiting. */
 function rh_ai_t_events_pipeline(PDO $db, array $user, array $a): array
 {
+    $one = null;
+    if (trim((string)($a['query'] ?? '')) !== '') {
+        $one = rh_ai_events_lookup($db, $user, (string)$a['query']); // one booking (ai-lookups.php)
+        if (($one['match'] ?? '') !== 'none') {
+            return $one;
+        }
+    }
     $days = max(1, min(180, (int)($a['days'] ?? 30)));
     $out = ['days_ahead' => $days, 'currency' => rh_ai_currency()];
     if (rh_ai_mod('conference') && rh_ai_perm_any($user, ['conference'])) {
@@ -583,12 +597,21 @@ function rh_ai_t_events_pipeline(PDO $db, array $user, array $a): array
     }
     $out['link'] = isset($out['conference']) ? 'conference-management.php' : 'events-inquiries.php';
     $out['link_label'] = isset($out['conference']) ? 'Open Conference' : 'Open Event enquiries';
+    if ($one !== null) { // nothing matched the booking asked for: say so, then what is coming up
+        $out = ['match' => 'none', 'not_found' => $one['not_found'], 'coming_up_instead' => true] + $out;
+    }
     return $out;
 }
 
 /** Gym members: the Members screen's own counts, who expires in the next 30 days, new enquiries. */
 function rh_ai_t_gym_watch(PDO $db, array $user, array $a): array
 {
+    if (trim((string)($a['member'] ?? '')) !== '') {
+        return rh_ai_gym_member_lookup($db, $user, (string)$a['member']); // one member (ai-lookups.php)
+    }
+    if (trim((string)($a['class'] ?? '')) !== '' || !empty($a['date']) || trim((string)($a['time'] ?? '')) !== '') {
+        return rh_ai_gym_class_lookup($db, $user, $a); // a class or time slot on a date (ai-lookups.php)
+    }
     $c = [
         'all' => (int)$db->query("SELECT COUNT(*) FROM gym_members")->fetchColumn(),
         'active' => (int)$db->query("SELECT COUNT(*) FROM gym_members WHERE status='active' AND (expiry_date IS NULL OR expiry_date >= CURDATE())")->fetchColumn(),
@@ -672,6 +695,13 @@ function rh_ai_t_guest_voice(PDO $db, array $user, array $a): array
 /** Open housekeeping jobs and maintenance tasks (overdue, today, urgent, blocking a room) and unsellable rooms. */
 function rh_ai_t_work_queues(PDO $db, array $user, array $a): array
 {
+    $roomAsked = null;
+    if (trim((string)($a['room'] ?? '')) !== '') {
+        $roomAsked = rh_ai_room_jobs_lookup($db, $user, (string)$a['room']); // one room (ai-lookups.php)
+        if (($roomAsked['match'] ?? '') === 'one' || ($roomAsked['match'] ?? '') === 'several') {
+            return $roomAsked + ['link' => 'housekeeping.php', 'link_label' => 'Open Housekeeping'];
+        }
+    }
     $out = [];
     $ids = [];
     if (rh_ai_mod('housekeeping') && rh_ai_perm_any($user, ['housekeeping'])) {
@@ -720,6 +750,9 @@ function rh_ai_t_work_queues(PDO $db, array $user, array $a): array
     }
     $out['link'] = isset($out['housekeeping']) ? 'housekeeping.php' : 'room-maintenance.php';
     $out['link_label'] = isset($out['housekeeping']) ? 'Open Housekeeping' : 'Open Maintenance';
+    if ($roomAsked !== null) { // no such room: say so, then the open jobs there are
+        $out = ['match' => 'none', 'not_found' => $roomAsked['not_found'] ?? 'No such room.'] + $out;
+    }
     return $out;
 }
 
