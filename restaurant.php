@@ -30,14 +30,16 @@ function buildValidatedMenuLink(string $candidate, string $fallback): string
 
     // Allow only safe relative links (no protocol-relative //, no javascript:)
     if (preg_match('#^(?!//)[A-Za-z0-9_./?=&%\-]+$#', $candidate)) {
-        return siteUrl(ltrim($candidate, '/'));
+        // Kept relative so the guest's browser resolves it on whatever domain it is on.
+        return ltrim($candidate, '/');
     }
 
     return $fallback;
 }
 
 /**
- * Reject cross-domain menu URLs when running in local/dev.
+ * Reject cross-domain menu URLs; a same-domain URL comes back as its path, so
+ * the link follows the domain the guest is actually on.
  */
 function enforceMenuHost(string $url, string $currentHost): string
 {
@@ -53,7 +55,11 @@ function enforceMenuHost(string $url, string $currentHost): string
         return '';
     }
 
-    return $url;
+    if ($urlHost === '') {
+        return $url;
+    }
+
+    return ($parts['path'] ?? '/') . (isset($parts['query']) ? '?' . $parts['query'] : '');
 }
 
 function menuCategorySlug(string $category): string
@@ -196,8 +202,10 @@ $current_origin = $menu_protocol . '://' . $menu_host;
 $menu_view_setting = (string)getSetting('restaurant_menu_url', '');
 $menu_pdf_setting = (string)getSetting('restaurant_menu_pdf_url', '');
 
-// Always use the correct fallback - menu-pdf.php is in root, not /api/
-$menu_page_fallback = siteUrl('menu-pdf.php');
+// Always use the correct fallback - menu-pdf.php is in root, not /api/.
+// Relative, never BASE_URL: behind a proxy or temporary domain the server's idea of
+// its own host can differ from the address in the guest's browser.
+$menu_page_fallback = 'menu-pdf.php';
 
 // Check if stored settings point to non-existent paths and ignore them
 $invalid_paths = ['/api/menu-pdf.php', 'api/menu-pdf.php', '/api/menu-pdf'];
@@ -230,9 +238,10 @@ if (empty($menu_pdf_url) || strpos($menu_pdf_url, '/api/menu-pdf') !== false) {
     $menu_pdf_url = $menu_page_fallback;
 }
 
-// QR image – same URL for prod/uat/local (content is already correct),
-// but styling will be lighter so it's always visible.
-$menu_qr_image = 'https://api.qrserver.com/v1/create-qr-code/?size=520x520&data=' . urlencode($menu_view_url) . '&margin=0&bgcolor=ffffff&color=000000';
+// QR image. The browser rebuilds it from its own address (syncMenuQr below), so
+// it points at the domain the guest is on; this server-built one is the no-JS fallback.
+$menu_view_absolute = $menu_view_url[0] === '/' ? $current_origin . $menu_view_url : siteUrl($menu_view_url);
+$menu_qr_image = 'https://api.qrserver.com/v1/create-qr-code/?size=520x520&margin=0&bgcolor=ffffff&color=000000&data=' . urlencode($menu_view_absolute);
 
 // Use different QR background color for local vs production
 $qr_bg_color = $is_local_env ? '#f5f5f5' : '#ffffff';
@@ -448,16 +457,10 @@ try {
                             <div class="qr-menu-brand">
                                 <span class="qr-menu-mark"><i class="fas fa-qrcode"></i> Scan &amp; Dine</span>
                                 <h3 class="qr-menu-title">Digital Menu</h3>
-                                <p class="qr-menu-desc">Browse our full menu on your phone. Scan the QR code or tap below to view dishes, prices, and save a copy as PDF.</p>
+                                <p class="qr-menu-desc">Scan or tap to see the full menu on your phone.</p>
                                 <div class="qr-menu-actions">
                                     <a class="btn" href="<?php echo htmlspecialchars($menu_view_url); ?>" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> View Menu</a>
                                     <a class="btn btn-outline" href="<?php echo htmlspecialchars($menu_pdf_url); ?>" target="_blank" rel="noopener"><i class="fas fa-file-pdf"></i> Save as PDF</a>
-                                </div>
-                                <div class="qr-menu-meta">
-                                    <i class="fas fa-sync-alt"></i>
-                                    <span>Always up to date</span>
-                                    <span aria-hidden="true">·</span>
-                                    <span>Live from our kitchen</span>
                                 </div>
                             </div>
                             <div class="qr-menu-qr">
@@ -466,11 +469,10 @@ try {
                                     <div class="qr-pulse-ring"></div>
                                     <div class="qr-pulse-ring-2"></div>
                                     <div class="qr-code-container">
-                                        <img src="<?php echo $menu_qr_image; ?>" alt="QR code to view the restaurant menu" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%23ffffff%22 width=%22200%22 height=%22200%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-family=%22monospace%22 font-size=%2214%22 fill=%22%23000%22%3EScan QR Code%3C/text%3E%3Crect x=%2240%22 y=%2240%22 width=%2230%22 height=%2230%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%224%22/%3E%3Crect x=%22130%22 y=%2240%22 width=%2230%22 height=%2230%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%224%22/%3E%3Crect x=%2240%22 y=%22130%22 width=%2230%22 height=%2230%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%224%22/%3E%3Crect x=%2275%22 y=%2275%22 width=%2250%22 height=%2250%22 fill=%22%23000%22/%3E%3C/svg%3E';">
+                                        <img src="<?php echo htmlspecialchars($menu_qr_image); ?>" data-menu-qr data-menu-path="<?php echo htmlspecialchars($menu_view_url); ?>" alt="QR code to view the restaurant menu" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%23ffffff%22 width=%22200%22 height=%22200%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-family=%22monospace%22 font-size=%2214%22 fill=%22%23000%22%3EScan QR Code%3C/text%3E%3Crect x=%2240%22 y=%2240%22 width=%2230%22 height=%2230%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%224%22/%3E%3Crect x=%22130%22 y=%2240%22 width=%2230%22 height=%2230%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%224%22/%3E%3Crect x=%2240%22 y=%22130%22 width=%2230%22 height=%2230%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%224%22/%3E%3Crect x=%2275%22 y=%2275%22 width=%2250%22 height=%2250%22 fill=%22%23000%22/%3E%3C/svg%3E';">
                                         <div class="scan-corners"><span></span></div>
                                     </div>
-                                    <span class="qr-label"><i class="fas fa-qrcode"></i> Scan to View Menu</span>
-                                    <span class="qr-subtitle">Instant access on your device</span>
+                                    <span class="qr-label"><i class="fas fa-qrcode"></i> Scan for menu</span>
                                 </div>
                             </div>
                         </div>
@@ -958,8 +960,19 @@ try {
             window.fetchMenuData = fetchMenuData;
             window.renderMenu = renderMenu;
 
+            // Point the menu QR at the address the guest is actually on, whatever
+            // the domain (temporary host, proxy, new domain) — no setting to change.
+            function syncMenuQr() {
+                const img = document.querySelector('img[data-menu-qr]');
+                if (!img) return;
+                const target = new URL(img.getAttribute('data-menu-path') || 'menu-pdf.php', window.location.href).href;
+                const src = 'https://api.qrserver.com/v1/create-qr-code/?size=520x520&margin=0&bgcolor=ffffff&color=000000&data=' + encodeURIComponent(target);
+                if (img.getAttribute('src') !== src) img.setAttribute('src', src);
+            }
+
             // Initialize menu when DOM is ready
             function initMenu() {
+                syncMenuQr();
                 if (!initMenuElements()) {
                     // Retry after a short delay in case DOM is still being built
                     setTimeout(initMenu, 100);
