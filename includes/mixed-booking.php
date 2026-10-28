@@ -71,6 +71,27 @@ if (!function_exists('rh_mixed_load_room')) {
         return !empty($av['available']) ? max(0, (int)($av['remaining_rooms'] ?? 0)) : 0;
     }
 
+    /**
+     * Why a party needs rooms of other types besides the chosen one ('' = it does not):
+     *   'rooms'    the party is fine for the chosen type but too few of its rooms are free;
+     *   'children' the chosen type is adults only and children are coming (they need a room that takes children).
+     * Needs at least 1 free room of the chosen type either way.
+     */
+    function rh_mixed_reason(array $chosenRoom, int $chosenFree, int $totalGuests, int $childGuests): string
+    {
+        if ($chosenFree < 1) {
+            return '';
+        }
+        $alone = ga_plan($chosenRoom, $totalGuests, $childGuests);
+        if (!empty($alone['valid'])) {
+            return (int)$alone['rooms_needed'] > $chosenFree ? 'rooms' : '';
+        }
+        if ($childGuests > 0 && $totalGuests - $childGuests >= 1 && ($alone['reason'] ?? '') === 'children_not_allowed') {
+            return 'children';
+        }
+        return '';
+    }
+
     /** A joined-room type is priced and given rooms through a combination, not a room of its own. */
     function rh_mixed_apply_combination(array $room, array $combination): array
     {
@@ -294,6 +315,11 @@ if (!function_exists('rh_mixed_load_room')) {
             return [];
         }
         $nights = (int)$resolved['nights'];
+        $seatedChildren = 0;
+        foreach ($resolved['plan']['rows'] as $planRow) {
+            $seatedChildren += (int)$planRow['children'];
+        }
+        $childrenUnseated = $childGuests > $seatedChildren;
         $options = [];
         $ids = $pdo->query("SELECT id FROM rooms WHERE is_active = 1 ORDER BY display_order ASC, id ASC")->fetchAll(PDO::FETCH_COLUMN);
         $usedTypes = array_keys($resolved['types']);
@@ -314,6 +340,10 @@ if (!function_exists('rh_mixed_load_room')) {
             $alreadyAdded = isset($resolved['need'][$id]) ? (int)$resolved['need'][$id] : count(array_filter($resolved['extras'], static fn($e) => (int)$e['id'] === $id));
             $free = rh_mixed_free_rooms($id, $checkIn, $checkOut);
             if ($free - $alreadyAdded < 1) {
+                continue;
+            }
+            // While children are still without a room, only a type that takes children can help.
+            if ($childrenUnseated && empty(ga_resolve_policy($cand)['children_allowed'])) {
                 continue;
             }
             $plan = ga_plan_mixed($chosen, (int)$resolved['chosen_free'], array_merge($resolved['extras'], [$cand]), $totalGuests, $childGuests);
@@ -338,6 +368,7 @@ if (!function_exists('rh_mixed_load_room')) {
                 'name' => (string)$cand['name'],
                 'rate_per_night' => round($priced['rate_per_night'], 2),
                 'guests_taken' => (int)$last['guests'],
+                'adults_taken' => (int)$last['adults'],
                 'max_guests' => (int)$room['max_guests'],
                 'rooms_free' => $free - $alreadyAdded,
                 'children_allowed' => !empty(ga_resolve_policy($cand)['children_allowed']),
@@ -385,7 +416,7 @@ if (!function_exists('rh_mixed_load_room')) {
         // Added rooms are only for the overflow: refuse a room the party does not need.
         $chosenRoom = $resolved['chosen'];
         $alone = ga_plan($chosenRoom, $total, $children);
-        if (!empty($alone['valid']) && (int)$alone['rooms_needed'] <= (int)$resolved['chosen_free']) {
+        if (rh_mixed_reason($chosenRoom, (int)$resolved['chosen_free'], $total, $children) === '' && !empty($alone['valid'])) {
             return $fail($chosenRoom['name'] . ' has enough free rooms for your whole party. Please remove the rooms you added.');
         }
         if (count($resolved['extras']) > 1) {

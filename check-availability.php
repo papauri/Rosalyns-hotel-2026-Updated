@@ -352,14 +352,22 @@ try {
         if ($chosenFree === 0) {
             $chosenFree = rh_mixed_free_rooms($room_id, $check_in, $check_out);
         }
-        $needed = !empty($ordinary['valid']) && $chosenFree >= 1 && (int)$ordinary['rooms_needed'] > $chosenFree;
+        // Also needed when the chosen type is adults only and children are coming: the children go in an added room.
+        $why = rh_mixed_reason($chosenRoom, $chosenFree, $total_guests, $child_guests);
+        $needed = $why !== '';
+        $mixedMessage = $needed ? (string)$resolved['message'] : '';
+        $adultsOnlyBlocked = $why === 'children' && ($total_guests - $child_guests) < 2;
+        if ($adultsOnlyBlocked) {
+            $mixedMessage = $chosenRoom['name'] . ' is adults only, so this party needs at least 2 adults: 1 to stay in ' . $chosenRoom['name'] . ' and 1 with the children in a room that takes children.';
+        }
 
         $resp = [
             'success' => true,
             'mode' => 'mixed',
             'needed' => $needed,
+            'why' => $why,
             'ok' => $needed && !empty($resolved['ok']),
-            'message' => $needed ? (string)$resolved['message'] : '',
+            'message' => $mixedMessage,
             'nights' => $mixedNights,
             'chosen' => ['id' => (int)$chosenRoom['id'], 'name' => (string)$chosenRoom['name'], 'rooms_free' => $chosenFree, 'max_guests' => (int)$chosenRoom['max_guests'], 'rooms_needed_alone' => (int)$ordinary['rooms_needed']],
             'party' => ['guests' => $total_guests, 'children' => $child_guests],
@@ -410,7 +418,7 @@ try {
                 $resp['message'] = $priced['error'];
             }
             $resp['rows'] = $rowsOut;
-            $resp['options'] = rh_mixed_options($pdo, $resolved, $check_in, $check_out, $total_guests, $child_guests);
+            $resp['options'] = $adultsOnlyBlocked ? [] : rh_mixed_options($pdo, $resolved, $check_in, $check_out, $total_guests, $child_guests);
         }
         echo json_encode($resp);
         exit;

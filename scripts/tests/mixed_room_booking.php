@@ -174,6 +174,32 @@ ok('single-type split: 3 guests in 2-guest rooms = 2 rooms (2 + 1)', !empty($one
 $refused = rh_mixed_create($pdo, mx_in($pdo, "$tag H", $plain, [$suite], $ci, $co, 3, 0, 'MX' . $run . '08'));
 ok('  a type that can seat everyone does not accept added rooms', empty($refused['success']) && count(mx_rows($pdo, "$tag H")) === 0, (string)($refused['error'] ?? ''));
 
+// ── 6. villa link with a family: children never in the adults-only villa ────
+$why = fn(int $t, int $g, int $c) => rh_mixed_reason(rh_mixed_load_room($pdo, $villa), rh_mixed_free_rooms($villa, $ci, $co), $g, $c);
+ok('villa + children: an added room is needed (reason children)', $why($villa, 3, 1) === 'children');
+ok('villa + no children, party fits: no added room', $why($villa, 3, 0) === '');
+$rs = rh_mixed_resolve($pdo, $villa, [$suite], $ci, $co, 3, 1);
+$pl = $rs['plan']['rows'] ?? [];
+ok('villa + 2 adults + 1 child + suite: seated', $rs['ok'] && count($pl) === 2, $rs['message']);
+ok('  villa row 0 children; suite 1 adult + 1 child', ($pl[0]['room_id'] ?? 0) === $villa && ($pl[0]['children'] ?? 1) === 0 && ($pl[0]['adults'] ?? 0) === 1 && ($pl[1]['adults'] ?? 0) === 1 && ($pl[1]['children'] ?? 0) === 1, json_encode($pl));
+$rs = rh_mixed_resolve($pdo, $villa, [$suite, $suite], $ci, $co, 5, 2);
+$pl = $rs['plan']['rows'] ?? [];
+$kids = 0; foreach ($pl as $p) { if ((int)$p['room_id'] === $villa) { $kids += (int)$p['children']; } }
+ok('villa + 3 adults + 2 children + suites: no child in the villa row, everyone seated', $kids === 0 && $rs['ok'] && array_sum(array_column($pl, 'guests')) === 5, json_encode([$rs['message'], $pl]));
+$rs = rh_mixed_resolve($pdo, $villa, [$suite], $ci, $co, 2, 1);
+ok('villa + 1 adult + 1 child: refused', !$rs['ok'] && $rs['message'] !== '', $rs['message']);
+$no = rh_mixed_create($pdo, mx_in($pdo, "$tag I", $villa, [$suite], $ci, $co, 2, 1, 'MX' . $run . '09'));
+ok('  creating it is refused, nothing saved', empty($no['success']) && count(mx_rows($pdo, "$tag I")) === 0, (string)($no['error'] ?? ''));
+$no = rh_mixed_create($pdo, mx_in($pdo, "$tag J", $villa, [], $ci, $co, 3, 1, 'MX' . $run . '10'));
+ok('villa + children with no added room: refused, nothing saved', empty($no['success']) && count(mx_rows($pdo, "$tag J")) === 0, (string)($no['error'] ?? ''));
+$opts = rh_mixed_options($pdo, rh_mixed_resolve($pdo, $villa, [], $ci, $co, 3, 1), $ci, $co, 3, 1);
+$oi = array_column($opts, 'room_id');
+ok('  options offered are child-friendly types only', in_array($suite, $oi, true) && !array_filter($opts, fn($o) => empty($o['children_allowed'])), json_encode($oi));
+$fam = rh_mixed_create($pdo, mx_in($pdo, "$tag K", $villa, [$suite], $ci, $co, 3, 1, 'MX' . $run . '11'));
+$rk = mx_rows($pdo, "$tag K");
+ok('villa + 2 adults + 1 child + suite: created, child on the suite row only', !empty($fam['success']) && count($rk) === 2 && (int)$rk[0]['child_guests'] === 0 && (int)$rk[1]['child_guests'] === 1, (string)($fam['error'] ?? ''));
+mx_clear_bookings($pdo);
+
 // ── Layer 2: the real booking.php POST (rolled back) ─────────────────────────
 $harness = $root . '/scripts/tests/page_harness.php';
 function mx_post(string $harness, array $post, array $verify): array {
@@ -208,6 +234,13 @@ $n4 = "MIXTEST Page Child Suite";
 $r = mx_post($harness, mx_page_post($n4, $villa, [$suite], 5, 1, $ci, $co), $verifySql($n4));
 $v = $r['verify'][0] ?? [];
 ok('booking.php POST, 1 child: the child is saved on the suite row', is_array($v) && count($v) === 2 && (int)$v[0]['child_guests'] === 0 && (int)$v[1]['child_guests'] === 1, json_encode([$v, $r['raw'] ?? '']));
+$n5 = "MIXTEST Page Villa Family";
+$r = mx_post($harness, mx_page_post($n5, $villa, [$suite], 3, 1, $ci, $co), $verifySql($n5));
+$v = $r['verify'][0] ?? [];
+ok('booking.php POST, villa + 2 adults + 1 child + suite: villa 0 children, suite 1 child', is_array($v) && count($v) === 2 && (int)$v[0]['child_guests'] === 0 && (int)$v[1]['child_guests'] === 1, json_encode([$v, $r['raw'] ?? '']));
+$n6 = "MIXTEST Page Villa NoRoom";
+$r = mx_post($harness, mx_page_post($n6, $villa, [], 3, 1, $ci, $co), $verifySql($n6));
+ok('booking.php POST, villa + child with no added room: refused', isset($r['verify'][0]) && is_array($r['verify'][0]) && count($r['verify'][0]) === 0, json_encode([$r['verify'] ?? null, $r['raw'] ?? '']));
 
 mx_cleanup($pdo);
 $left = (int)$pdo->query("SELECT (SELECT COUNT(*) FROM bookings WHERE guest_name LIKE 'MIXTEST%') + (SELECT COUNT(*) FROM rooms WHERE name LIKE 'MIXTEST%') + (SELECT COUNT(*) FROM individual_rooms WHERE room_number LIKE 'MX-%')")->fetchColumn();

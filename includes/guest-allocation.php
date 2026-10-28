@@ -545,7 +545,7 @@ if (!function_exists('ga_resolve_policy')) {
      * @return array {valid, reason, message, left_guests, chosen_rooms, rows[]} where each row is
      *         {room_id, room_name, is_extra, extra_index, guests, adults, children, occupancy_type}
      */
-    function ga_plan_mixed(array $chosenRoom, int $chosenFree, array $extraRooms, int $totalGuests, int $childGuests): array
+    function ga_plan_mixed(array $chosenRoom, int $chosenFree, array $extraRooms, int $totalGuests, int $childGuests, ?int $forceChosenRooms = null): array
     {
         $fail = function (string $reason, string $message, array $rows = [], int $left = 0, int $chosenRooms = 0): array {
             return ['valid' => false, 'reason' => $reason, 'message' => $message, 'left_guests' => $left, 'chosen_rooms' => $chosenRooms, 'rows' => $rows];
@@ -557,6 +557,23 @@ if (!function_exists('ga_resolve_policy')) {
         }
         $chosenCap = max(1, (int)($chosenRoom['max_guests'] ?? 1));
         $chosenRooms = min(max(0, $chosenFree), max(1, (int)ceil($totalGuests / $chosenCap)));
+        if ($forceChosenRooms !== null) {
+            $chosenRooms = min($chosenRooms, max(1, $forceChosenRooms));
+        } elseif ($chosenRooms > 1 && $childGuests > 0 && empty(ga_resolve_policy($chosenRoom)['children_allowed'])) {
+            // An adults-only chosen type: the adults fill as few of its rooms as they need and the children go into the
+            // added rooms (a child is never seated in it). Take the smallest count that seats everyone, else the one seating most.
+            $best = null;
+            for ($k = 1; $k <= $chosenRooms; $k++) {
+                $try = ga_plan_mixed($chosenRoom, $chosenFree, $extraRooms, $totalGuests, $childGuests, $k);
+                if (!empty($try['valid'])) {
+                    return $try;
+                }
+                if ($best === null || (int)$try['left_guests'] < (int)$best['left_guests']) {
+                    $best = $try;
+                }
+            }
+            return $best;
+        }
         if ($chosenRooms < 1) {
             return $fail('chosen_full', (string)($chosenRoom['name'] ?? 'This room type') . ' is fully booked for your dates.', [], $totalGuests);
         }

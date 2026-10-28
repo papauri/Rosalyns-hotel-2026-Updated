@@ -268,9 +268,14 @@
         }
 
         // The batch answer for a room type: the party is fine for it but too few of its rooms are free.
+        // Also: the type is adults only and children are coming, so the children go into an added room that takes them.
         function isMixedCandidate(result) {
-            return !!result && result.available === false && result.reason === 'not_enough_rooms' &&
-                Number(result.rooms_free || 0) >= 1 && !!result.split_pricing && result.split_pricing.valid === true;
+            if (!result || result.available !== false || Number(result.rooms_free || 0) < 1) return false;
+            if (result.reason === 'children_not_allowed') {
+                const adults = parseInt(document.getElementById('number_of_guests')?.value || '0', 10) - getCurrentChildGuestCount();
+                return getCurrentChildGuestCount() > 0 && adults >= 1;
+            }
+            return result.reason === 'not_enough_rooms' && !!result.split_pricing && result.split_pricing.valid === true;
         }
 
         function selectedIsMixedCandidate() {
@@ -411,8 +416,12 @@
             const rowHtml = (name, detail, removeIndex) => `<li class="extra-room-row"><div class="extra-room-row__text"><strong>${escapeHtml(name)}</strong><small>${detail}</small></div>` +
                 (removeIndex === null ? '' : `<button type="button" class="btn btn--secondary btn--sm" data-remove-extra="${removeIndex}" aria-label="Remove ${escapeHtml(name)}">Remove</button>`) + '</li>';
 
-            let html = left > 0 ? `<h4>Add a room for the other ${plural(left, 'guest')}</h4>` : '<h4>Everyone has a room</h4>';
-            html += `<p>${escapeHtml(chosen.name || 'This room type')} has ${free === 1 ? 'only 1 room' : `only ${free} rooms`} free for your dates and holds up to ${plural(Number(chosen.max_guests || 0), 'guest')} each, ` +
+            const forChildren = m.why === 'children';
+            let html = left > 0 ? `<h4>${forChildren ? 'Add a room for the children' : `Add a room for the other ${plural(left, 'guest')}`}</h4>` : '<h4>Everyone has a room</h4>';
+            if (forChildren) {
+                html += `<p>${escapeHtml(chosen.name || 'This room type')} is adults only, so children cannot stay in it. The children need a room that takes children, with at least 1 adult. ` +
+                    (left > 0 ? `The adults stay in ${escapeHtml(chosen.name || 'this room type')} first; add a room that takes children below.` : 'The children are in the room added below.') + '</p>';
+            } else html += `<p>${escapeHtml(chosen.name || 'This room type')} has ${free === 1 ? 'only 1 room' : `only ${free} rooms`} free for your dates and holds up to ${plural(Number(chosen.max_guests || 0), 'guest')} each, ` +
                 `but your party of ${plural(guests, 'guest')} needs ${Number(chosen.rooms_needed_alone || 0)}.${left > 0 ? ' Add a different room type for the rest.' : ''}</p>`;
 
             let rows = m.rows || [];
@@ -426,14 +435,14 @@
                     return rowHtml(row.room_name, who + rate, row.is_extra ? row.extra_index : null);
                 }).join('') + '</ul>';
             }
-            if (m.message && !m.ok) {
+            if (m.message && !m.ok && !(forChildren && (m.options || []).length)) {
                 html += `<p style="color:#b02a37;">${escapeHtml(m.message)}</p>`;
             }
             if (left > 0) {
                 const options = m.options || [];
                 if (options.length) {
                     html += '<p class="extra-rooms-panel__label">Rooms you can add</p><ul>' + options.map(opt => {
-                        const take = opt.takes_all ? `seats the ${plural(opt.guests_taken, 'guest')} left` : `seats ${plural(opt.guests_taken, 'guest')}`;
+                        const take = forChildren ? `seats the children with ${plural(Number(opt.adults_taken || 1), 'adult')}` : (opt.takes_all ? `seats the ${plural(opt.guests_taken, 'guest')} left` : `seats ${plural(opt.guests_taken, 'guest')}`);
                         const detail = `Up to ${plural(Number(opt.max_guests), 'guest')} &middot; ${currencySymbol}${Number(opt.rate_per_night).toLocaleString()}/night &middot; ${take}`;
                         return `<li class="extra-room-row"><div class="extra-room-row__text"><strong>${escapeHtml(opt.name)}</strong><small>${detail}</small></div>` +
                             `<button type="button" class="btn btn--primary btn--sm" data-add-room="${Number(opt.room_id)}" aria-label="Add ${escapeHtml(opt.name)}">Add</button></li>`;
@@ -973,20 +982,17 @@
             const allowed = Number(room.children_allowed || 0) === 1;
             if (!childInput) return;
 
-            // The party is usually chosen before the room, so the children field stays open and
-            // adults-only room types disable themselves while children are entered. Only a room
-            // fixed up front (booking.php?room_id=…) that is adults only hides the field.
-            const lockedAdultsOnly = !allowed && !!document.getElementById('preselectedRoomId');
-            childInput.disabled = lockedAdultsOnly;
-            if (lockedAdultsOnly) childInput.value = '0';
+            // The children question always stays open. An adults-only room never seats a child; a family
+            // adds a room that takes children (see the mixed-room panel).
+            childInput.disabled = false;
             if (childGroup) {
                 childGroup.style.opacity = '1';
-                childGroup.style.display = lockedAdultsOnly ? 'none' : '';
+                childGroup.style.display = '';
             }
-            if (childHint && !lockedAdultsOnly) {
+            if (childHint) {
                 if (!allowed) {
                     childHint.innerHTML = '<i class="fas fa-ban" style="color: #dc3545;"></i> ' +
-                        escapeHtml(room.name) + ' is adults only. Children cannot stay in this room type.';
+                        escapeHtml(room.name) + ' is adults only. Children cannot stay in it. If children are coming, add a room that takes children for them below (with at least 1 adult).';
                     childHint.style.color = '#dc3545';
                 } else {
                     childHint.innerHTML = `<i class="fas fa-child"></i> ${escapeHtml(childRuleText(getChildRule(room)))} At least 1 adult required.`;
@@ -1107,14 +1113,13 @@
             const capacityHint = document.getElementById('guestCapacityHint');
             const room = getSelectedRoomData();
             if (!guestSelect) return;
-            const adultsOnlyFixed = !!room && Number(room.children_allowed || 0) !== 1 && !!document.getElementById('preselectedRoomId');
 
             // Guests are chosen BEFORE rooms, so the list is fixed (1-20). Once a room type
             // is picked, each head-count says how many of that type it takes.
             Array.from(guestSelect.options).forEach(option => {
                 const n = parseInt(option.value, 10);
                 if (!n) return;
-                let label = plural(n, adultsOnlyFixed ? 'Adult' : 'Guest');
+                let label = plural(n, 'Guest');
                 if (room) {
                     const plan = getPartyPlan(n, 0, room);
                     if (plan.valid && plan.roomsNeeded > 1) {
@@ -1124,8 +1129,8 @@
                 option.textContent = label;
             });
 
-            if (capacityHint && adultsOnlyFixed) {
-                capacityHint.textContent = `${room.name} is adults only and holds up to ${plural(maxGuests, 'guest')}. Larger parties are booked into several rooms automatically.`;
+            if (capacityHint && room && Number(room.children_allowed || 0) !== 1) {
+                capacityHint.textContent = `${room.name} is adults only and holds up to ${plural(maxGuests, 'guest')}. Children cannot stay in it; they go in an added room that takes children.`;
             } else if (capacityHint && room) {
                 capacityHint.textContent = `Each ${room.name} holds up to ${plural(maxGuests, 'guest')}. Larger parties are booked into several ${room.name} rooms automatically (every room needs at least 1 adult).`;
             }
@@ -1156,7 +1161,14 @@
                 const room = roomsData.find(r => r.id === Number(card.getAttribute('data-room-id')));
                 if (!room) return;
                 const plan = getPartyPlan(total, children, room);
-                if (!plan.valid) {
+                if (!plan.valid && plan.reason === 'children_not_allowed') {
+                    // Adults-only type: stays selectable; the children go in an added room that takes them.
+                    if (card.dataset.localDisabled === '1') {
+                        enableRoomOption(card);
+                        delete card.dataset.localDisabled;
+                    }
+                    setRoomCardLine(card, 'Adults only. Choose it for the adults and add a room that takes children for the children.', false);
+                } else if (!plan.valid) {
                     disableRoomOption(card, plan.message, plan.reason);
                     card.dataset.localDisabled = '1';
                     setRoomCardLine(card, plan.message, true);
@@ -1813,6 +1825,14 @@
                 } else {
                     hintHtml = `<i class="fas fa-child"></i> ${escapeHtml(childRuleSentence)} At least 1 adult is required in each room. Max ${maxChildren} children for this selection.`;
                 }
+                const adultsOnlyRoom = selectedRoomId ? roomsData.find(room => room.id === selectedRoomId) : null;
+                if (adultsOnlyRoom && Number(adultsOnlyRoom.children_allowed || 0) !== 1) {
+                    hintHtml = '<i class="fas fa-ban" style="color: #dc3545;"></i> ' + escapeHtml(adultsOnlyRoom.name) +
+                        ' is adults only. Children cannot stay in it. If children are coming, add a room that takes children for them below (with at least 1 adult).';
+                    childHint.style.color = '#dc3545';
+                } else {
+                    childHint.style.color = '';
+                }
                 childHint.innerHTML = hintHtml;
             }
 
@@ -2275,6 +2295,10 @@
                 return;
             }
             const pricing = result && result.split_pricing && result.split_pricing.valid ? result.split_pricing : null;
+            if (isMixedCandidate(result) && result.reason === 'children_not_allowed') {
+                setRoomCardLine(roomOption, 'Adults only. Choose it for the adults and add a room that takes children for the children.', false);
+                return;
+            }
             if (isMixedCandidate(result)) {
                 const free = Number(result.rooms_free || 0);
                 setRoomCardLine(roomOption, `Only ${free} ${free === 1 ? 'room is' : 'rooms are'} free for your dates and your party needs ${Number(result.rooms_needed || 0)}. Choose it and add another room type for the rest.`, false);
@@ -2653,9 +2677,10 @@
             }
 
             const selectedRoom = getSelectedRoomData();
-            const allocationValid = selectedRoom ? hasValidAllocation(totalGuestsInt, selectedRoom, childGuests) : false;
             // Rooms of different types: submit only once the server says every guest has a room.
             const mixedActive = !!selectedRoomId && mixedInPlay();
+            // An adults-only room with children is not "unsupported" while the children are being given a room of their own.
+            const allocationValid = selectedRoom ? (hasValidAllocation(totalGuestsInt, selectedRoom, childGuests) || (mixedActive && childGuests > 0 && adultsInt >= 1)) : false;
             const mixedNow = mixedActive ? getMixedForCurrent() : null;
 
             // Determine button state based on all validations — guide guest step by step
@@ -2687,7 +2712,9 @@
                 btnText = '<i class="fas fa-spinner fa-spin"></i> Checking Rooms…';
                 btnDisabled = true;
             } else if (mixedActive && !mixedNow.ok) {
-                btnText = Number(mixedNow.left_guests || 0) > 0
+                btnText = Number(mixedNow.left_guests || 0) > 0 && mixedNow.why === 'children'
+                    ? '<i class="fas fa-bed"></i> Add a Room for the Children'
+                    : Number(mixedNow.left_guests || 0) > 0
                     ? `<i class="fas fa-bed"></i> Add a Room for the Other ${plural(Number(mixedNow.left_guests), 'Guest')}`
                     : '<i class="fas fa-exclamation-triangle"></i> These Rooms Cannot Take Your Party';
                 btnDisabled = true;
