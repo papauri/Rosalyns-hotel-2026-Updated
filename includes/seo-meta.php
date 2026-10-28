@@ -250,7 +250,7 @@ if (!empty($seo['breadcrumbs'])):
     window._siteName = <?php echo json_encode((string)($site_name ?: ''), JSON_HEX_TAG | JSON_HEX_AMP); ?>;
 </script>
 <!-- PWA manifest — enables browser install prompt on desktop + mobile -->
-<link rel="manifest" href="<?php echo htmlspecialchars(defined('BASE_URL') ? rtrim(BASE_URL, '/') . '/manifest.php' : 'manifest.php'); ?>">
+<link rel="manifest" href="<?php echo htmlspecialchars(defined('BASE_URL') ? rtrim(BASE_URL, '/') . '/manifest.php' : 'manifest.php'); ?>" crossorigin="use-credentials">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">

@@ -9,7 +9,7 @@
  *
  * BUMP SW_VERSION whenever cached assets must be force-refreshed on all clients.
  */
-const SW_VERSION = 'rh-public-v5-2026-10-21';
+const SW_VERSION = 'rh-public-v6-2026-10-28';
 const ASSET_CACHE = `${SW_VERSION}-assets`;
 const PAGE_CACHE  = `${SW_VERSION}-pages`;
 
@@ -33,8 +33,11 @@ const isPage           = url => /\.php(\?.*)?$/.test(url.pathname) || /\/$/.test
 self.addEventListener('install', e => {
     // Precache the offline fallback page so it is always available, even on first visit.
     e.waitUntil(
+        // Not cache.add(): offline.php answers 503 on purpose, which add() rejects,
+        // so the page was never stored. Keep 503 (or 2xx), never a proxy/host error page.
         caches.open(PAGE_CACHE)
-            .then(c => c.add(OFFLINE_FALLBACK))
+            .then(c => fetch(OFFLINE_FALLBACK, { cache: 'no-store' })
+                .then(r => (r.ok || r.status === 503) ? c.put(OFFLINE_FALLBACK, r) : null))
             .catch(() => { /* non-fatal if server unreachable at install time */ })
             .then(() => self.skipWaiting())
     );
