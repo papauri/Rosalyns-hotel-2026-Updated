@@ -74,9 +74,18 @@
       <tr><td><strong>Your chats</strong> (list)</td><td>Your recent conversations. Only you can see them. Tap one to carry on; the box icon removes it from the list.</td></tr>
       <tr><td><strong>New chat</strong> (plus)</td><td>Starts an empty conversation.</td></tr>
       <tr><td><strong>Reply settings</strong> (sliders)</td><td><strong>Reply length</strong> (Short, Normal, Detailed), <strong>Tone</strong> (Plain, Friendly), <strong>Language</strong> and <strong>Daily briefing</strong> (On or Off). Only affects your own replies.</td></tr>
+      <tr><td><strong>Clear chats</strong> (eraser)</td><td>Offers <strong>Clear this chat</strong>, <strong>Clear all my chats</strong> or <strong>Cancel</strong>. Clearing takes the chat off your list and starts a fresh one. Nothing is deleted (see <a href="#clear">Clear chats</a>).</td></tr>
       <tr><td><strong>Close</strong> (cross)</td><td>Hides the chat. Your conversation is kept.</td></tr>
     </tbody>
   </table>
+
+  <h3 id="clear">Clear chats</h3>
+  <ol class="steps">
+    <li>Open the chat and click the <strong>Clear chats</strong> eraser at the top.</li>
+    <li>Choose <strong>Clear this chat</strong> to remove the open chat, or <strong>Clear all my chats</strong> to remove every chat on your list. Choose <strong>Cancel</strong> to keep everything.</li>
+    <li>The chat is taken off your list and a fresh chat starts.</li>
+  </ol>
+  <p>Nothing is deleted. Confirmed cards stay on the record, and cleared chats still count towards your message limit.</p>
 
   <h3>What it can answer</h3>
   <ul>
@@ -98,6 +107,24 @@
     <li>When something is not available, what is: other room types free on the same dates, the nearest dates (3 days either side by default) with the room asked for, or a joined family room for a large party, each with its price; other dishes from the same part of the menu; when a closed bar or kitchen opens next and what is open now; the facilities the hotel does have. It never makes an option up: if nothing is free, it says so. When it cannot do something, it gives the screen, the best guide section and what it can help you with instead.</li>
   </ul>
   <p>Figures come from the same places as the screens, so the chat and the screen always agree. Short lookups such as <em>"Arrivals today"</em>, <em>"Departures tomorrow"</em>, <em>"Who is in house?"</em>, <em>"Room status"</em>, <em>"What time does the bar open?"</em> and <em>"What's check-out time?"</em> are answered straight from the system.</p>
+
+  <h3>Spelling mistakes and follow-up questions</h3>
+  <ul>
+    <li><strong>Spelling mistakes are fine.</strong> Type a guest name, room type, menu item, stock item, supplier, gym member or class, event, staff member or tab as best you can. If one clear match exists, it carries on and shows the correct name, for example <em>"Mr Nthani (Charles Nthani, RBH...)"</em>. If several could match, it asks one short question. If nothing matches, it says so and shows what exists. Typos in questions work too, for example <em>"arivals tomorow"</em>.</li>
+    <li>A typo never makes it change anything. Changes still need a card and <strong>Confirm</strong>.</li>
+    <li><strong>Follow-ups stay on the same booking.</strong> Once a booking is found, "they", "him/her", "Mr X" and "the room" mean that booking. Ask <em>"How much was the room?"</em> and it gives that booking's own total, paid and balance, the same as the booking screen.</li>
+  </ul>
+
+  <h3>Is it included?</h3>
+  <p>For one booking, ask <em>"Is breakfast included?"</em> or <em>"What's included?"</em>. It reads the booking's packages, rate plan and the room's listed extras. If none of them mention breakfast, it says so and gives the kitchen hours. It never guesses. To make it show, add the package or rate plan to the booking (see <a href="#problems">Problems and fixes</a>).</p>
+
+  <h3>Room prices and child charges</h3>
+  <ul>
+    <li>Ask <em>"room rates"</em>, <em>"price list"</em>, <em>"child policy"</em>, or name one room type.</li>
+    <li>Each room shows only the prices it offers, its guest limit and the child rule.</li>
+    <li>Room prices include VAT and the tourism levy. Nothing is added on top.</li>
+    <li>For an exact total, give the dates and who is staying. If the party does not fit the room, it says why and offers rooms that do.</li>
+  </ul>
 
   <h3>What it cannot do</h3>
   <ul>
@@ -392,6 +419,9 @@
       <tr><td><em>Could not reach the Assistant. Check the connection and try again.</em></td><td>The device lost its connection.</td><td>Check Wi-Fi or data and send again.</td></tr>
       <tr><td><strong>No order found</strong></td><td>The order is older than 24 hours, the table or number is wrong, or your account is till-only and the order was opened by someone else.</td><td>Check the table or number. Look for older orders on the POS screen. Till-only staff see only their own orders.</td></tr>
       <tr><td><strong>No balance shown</strong> for a gym member</td><td>Your account does not have gym finance, accounting, reports or payments access.</td><td>Ask a manager or someone with those permissions, or check the member on the gym screen.</td></tr>
+      <tr><td>It picked the wrong guest</td><td>Only a first name or a short name was given, and more than one guest matched.</td><td>Say the full name or the booking reference.</td></tr>
+      <tr><td>My old chats are gone</td><td>You used <strong>Clear this chat</strong> or <strong>Clear all my chats</strong>.</td><td>Nothing was deleted. The chats are archived, not deleted.</td></tr>
+      <tr><td>Breakfast says not included but the guest paid for it</td><td>The breakfast is not on the booking's packages or rate plan.</td><td>Add the package or rate plan to the booking, then ask again.</td></tr>
       <tr><td>The Assistant talks about rooms on a gym-only site</td><td>The business type set in Settings &rarr; Modules does not match what the hotel runs.</td><td>Ask an administrator to check the preset in Settings &rarr; Modules.</td></tr>
     </tbody>
   </table>
