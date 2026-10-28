@@ -86,8 +86,8 @@ function rh_ai_tool_registry(): array
     $date = ['type' => 'string', 'description' => 'Date as YYYY-MM-DD', 'format' => 'date'];
     $reg = [
         'search_bookings' => [
-            'description' => 'Find room bookings by guest name, email, phone or booking reference (tokens like [GUEST_1] are fine). Returns up to 10 matches.',
-            'schema' => ['properties' => ['query' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Name, email, phone or reference'], 'status' => ['type' => 'string', 'enum' => ['pending', 'confirmed', 'tentative', 'checked-in', 'checked-out', 'cancelled', 'no-show']]], 'required' => ['query']],
+            'description' => 'Find room bookings by guest name, email, phone or booking reference (tokens like [GUEST_1] are fine). Leave query empty to list the latest bookings and totals (all time, by status, upcoming arrivals). A search that finds nothing also returns the totals and the latest bookings.',
+            'schema' => ['properties' => ['query' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Name, email, phone or reference; empty = latest bookings and totals'], 'status' => ['type' => 'string', 'enum' => ['pending', 'confirmed', 'tentative', 'checked-in', 'checked-out', 'cancelled', 'no-show']]]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_search_bookings',
         ],
         'get_booking' => [
@@ -708,24 +708,67 @@ function rh_ai_nights(string $ci, string $co): int
 
 // ── Handlers (read only) ─────────────────────────────────────────────────────
 
+/** An empty or "list everything" search ("*", "all", "any", "everything", "%"): list the latest bookings with the totals. */
+function rh_ai_is_wildcard_query(string $q): bool
+{
+    $q = trim(mb_strtolower($q), " \t\n\r\0\x0B*?!.,'\"");
+    return in_array($q, ['', '%', 'all', 'any', 'every', 'everything', 'everyone', 'anything', 'all bookings', 'any bookings', 'bookings', 'booking', 'latest', 'recent', 'latest bookings', 'recent bookings'], true);
+}
+
+/**
+ * Booking totals the Bookings screen counts (not deleted): all time, by status, and arrivals still to come. One query,
+ * whatever the number of bookings. Owner fault 2026-10-28: a search that finds nothing must never read as "no bookings".
+ */
+function rh_ai_booking_totals(PDO $db): array
+{
+    $st = $db->query("SELECT status, COUNT(*) AS n, SUM(check_in_date >= CURDATE() AND status IN ('pending', 'confirmed', 'tentative')) AS upcoming
+                      FROM bookings WHERE deleted_at IS NULL GROUP BY status ORDER BY n DESC");
+    $all = 0;
+    $up = 0;
+    $by = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $all += (int)$r['n'];
+        $up += (int)$r['upcoming'];
+        $by[(string)$r['status'] !== '' ? (string)$r['status'] : 'no status'] = (int)$r['n'];
+    }
+    return ['total_in_system' => $all, 'by_status' => $by ?: 'none', 'upcoming_arrivals' => $up];
+}
+
 function rh_ai_t_search_bookings(PDO $db, array $user, array $a): array
 {
-    $like = '%' . $a['query'] . '%';
-    $sql = "SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.check_out_date, b.status, r.name AS room_name
-            FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
-            WHERE b.deleted_at IS NULL AND (b.booking_reference LIKE ? OR b.guest_name LIKE ? OR b.room_guest_name LIKE ? OR b.guest_email LIKE ? OR b.guest_phone LIKE ?)";
-    $p = [$like, $like, $like, $like, $like];
+    $q = trim((string)($a['query'] ?? ''));
+    $wild = rh_ai_is_wildcard_query($q);
+    $top = rh_ai_num('ai_list_page_rows');
+    $cols = "SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.check_out_date, b.status, r.name AS room_name
+             FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.deleted_at IS NULL";
+    $sql = $cols;
+    $p = [];
+    if (!$wild) {
+        $like = '%' . rh_ai_like($q) . '%';
+        $sql .= " AND (b.booking_reference LIKE ? OR b.guest_name LIKE ? OR b.room_guest_name LIKE ? OR b.guest_email LIKE ? OR b.guest_phone LIKE ?)";
+        $p = [$like, $like, $like, $like, $like];
+    }
     if (!empty($a['status'])) {
         $sql .= " AND b.status = ?";
         $p[] = $a['status'];
     }
-    $st = $db->prepare($sql . " ORDER BY b.id DESC LIMIT 10");
+    $st = $db->prepare($sql . " ORDER BY b.id DESC LIMIT " . $top);
     $st->execute($p);
-    $rows = [];
-    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-        $rows[] = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'room_type' => $r['room_name'], 'check_in' => $r['check_in_date'], 'check_out' => $r['check_out_date'], 'status' => $r['status']];
+    $line = static fn(array $r): array => ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'room_type' => $r['room_name'],
+        'check_in' => $r['check_in_date'], 'check_out' => $r['check_out_date'], 'status' => $r['status']];
+    $rows = array_map($line, $st->fetchAll(PDO::FETCH_ASSOC));
+    $link = ['link' => $wild ? 'bookings.php' : 'bookings.php?search=' . rawurlencode($q), 'link_label' => 'Open on Bookings'];
+    if ($wild) {
+        return ['match' => 'latest bookings', 'count' => count($rows), 'bookings' => $rows ?: 'none'] + rh_ai_booking_totals($db) + $link;
     }
-    return ['count' => count($rows), 'bookings' => $rows, 'link' => 'bookings.php?search=' . rawurlencode((string)$a['query']), 'link_label' => 'Open on Bookings'];
+    if ($rows) {
+        return ['count' => count($rows), 'bookings' => $rows] + $link;
+    }
+    // Nothing matched: a search miss is not "no bookings" - give the totals and the latest few (what IS there)
+    $st = $db->query($cols . " ORDER BY b.id DESC LIMIT " . rh_ai_num('ai_lookup_matches'));
+    $totals = rh_ai_booking_totals($db);
+    return ['count' => 0, 'not_found' => 'No booking matches that search' . (!empty($a['status']) ? ' with status ' . $a['status'] : '') . ($totals['total_in_system'] > 0 ? '. Other bookings exist: see total_in_system and latest_bookings.' : '. There are no bookings in the system yet.')]
+        + $totals + ['latest_bookings' => array_map($line, $st->fetchAll(PDO::FETCH_ASSOC)) ?: 'none'] + ['link' => 'bookings.php', 'link_label' => 'Open on Bookings'];
 }
 
 function rh_ai_t_get_booking(PDO $db, array $user, array $a): array
@@ -1264,10 +1307,12 @@ function rh_ai_t_guest_history(PDO $db, array $user, array $a): array
                         FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
                         WHERE b.deleted_at IS NULL AND (b.guest_email = ? OR b.guest_name LIKE ? OR b.guest_phone = ?)
                         ORDER BY b.check_in_date DESC LIMIT 200");
-    $st->execute([$g, '%' . $g . '%', $g]);
+    $st->execute([$g, '%' . rh_ai_like($g) . '%', $g]);
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     if (!$rows) {
-        return ['stays' => 0, 'message' => 'No bookings found for that guest.'];
+        // A miss for this guest is not "no bookings": the totals say what IS there (one query)
+        $t = rh_ai_booking_totals($db);
+        return ['stays' => 0, 'not_found' => 'No bookings found for that guest' . ($t['total_in_system'] > 0 ? '; the system holds other bookings (total_in_system).' : '.'), 'total_in_system' => $t['total_in_system'], 'upcoming_arrivals' => $t['upcoming_arrivals']];
     }
     $stays = 0;
     $nights = 0;

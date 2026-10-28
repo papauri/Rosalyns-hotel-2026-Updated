@@ -46,6 +46,13 @@
         {"id": "checkout_time", "q": "what's check-out time?", "expect": {"route": ["local"], "contains_any": ["Check-out", "check-out"]}},
         {"id": "menu", "q": "what's on the menu?", "model": true, "expect": {"route_not": ["declined"], "no_card": true}},
         {"id": "gym_offered", "q": "do we have a gym?", "expect": {"route": ["local"], "contains_any": ["gym", "Gym"], "no_card": true}},
-        {"id": "stock_write_offers_help", "q": "adjust stock of rice", "expect": {"route": ["declined"], "contains_any": ["I can help with"], "no_card": true}}
+        {"id": "stock_write_offers_help", "q": "adjust stock of rice", "expect": {"route": ["declined"], "contains_any": ["I can help with"], "no_card": true}},
+        {"id": "ground_bookings_ever", "q": "have we had any bookings?", "daily": true, "expect": {"route": ["local"], "not_contains": ["no bookings in the system"], "figure_from": {"tool": "search_bookings", "path": "total_in_system"}}},
+        {"id": "ground_bookings_count", "q": "how many bookings", "daily": true, "expect": {"route": ["local"], "figure_from": {"tool": "search_bookings", "path": "total_in_system"}}},
+        {"id": "ground_open_orders", "q": "which orders are open?", "daily": true, "expect": {"route": ["local"], "figure_from": {"tool": "order_status", "path": "open_count"}}},
+        {"id": "ground_gym_members", "q": "how many gym members", "daily": true, "expect": {"route": ["local"], "figure_from": {"tool": "gym_watch", "path": "members.all"}}},
+        {"id": "ground_stock_items", "q": "How many stock items do we have?", "model": true, "expect": {"route_not": ["declined"], "no_card": true, "figure_from": {"tool": "inventory_watch", "path": "items_on_file"}}},
+        {"id": "ground_purchase_orders_waiting", "q": "How many purchase orders are waiting for delivery?", "model": true, "expect": {"route_not": ["declined"], "no_card": true, "figure_from": {"tool": "inventory_watch", "path": "purchase_orders_waiting"}}},
+        {"id": "ground_conference_upcoming", "q": "How many conference bookings are coming up in the next 30 days?", "model": true, "expect": {"route_not": ["declined"], "no_card": true, "modules": ["conference"], "figure_from": {"tool": "events_pipeline", "path": "conference.upcoming_total"}}}
     ]
 }

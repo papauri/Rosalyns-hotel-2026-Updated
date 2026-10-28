@@ -29,7 +29,7 @@ function rh_ai_eval_seed_cases(): array
     $cases = [];
     foreach ((array)($j['cases'] ?? []) as $c) {
         if (is_array($c) && !empty($c['id']) && isset($c['q'])) {
-            $cases[] = ['id' => (string)$c['id'], 'q' => (string)$c['q'], 'smoke' => !empty($c['smoke']), 'model' => !empty($c['model']),
+            $cases[] = ['id' => (string)$c['id'], 'q' => (string)$c['q'], 'smoke' => !empty($c['smoke']), 'model' => !empty($c['model']), 'daily' => !empty($c['daily']),
                 'page' => (string)($c['page'] ?? 'dashboard.php'), 'expect' => (array)($c['expect'] ?? []), 'source' => 'seed'];
         }
     }
@@ -47,14 +47,14 @@ function rh_ai_eval_cases(PDO $db, string $set = 'full'): array
         try {
             foreach ($db->query("SELECT case_key, question, expect_json, smoke FROM ai_eval_cases WHERE active = 1 ORDER BY id")->fetchAll(PDO::FETCH_ASSOC) as $r) {
                 $exp = json_decode((string)$r['expect_json'], true) ?: [];
-                $cases[] = ['id' => (string)$r['case_key'], 'q' => (string)$r['question'], 'smoke' => (int)$r['smoke'] === 1, 'model' => !empty($exp['model']),
+                $cases[] = ['id' => (string)$r['case_key'], 'q' => (string)$r['question'], 'smoke' => (int)$r['smoke'] === 1, 'model' => !empty($exp['model']), 'daily' => false,
                     'page' => 'dashboard.php', 'expect' => $exp, 'source' => 'incident'];
             }
         } catch (Throwable $e) {
         }
     }
-    if ($set === 'smoke') {
-        $cases = array_values(array_filter($cases, static fn($c) => $c['smoke']));
+    if ($set === 'smoke') { // the 5 key questions + the zero-token ground-truth counts (daily: answered locally, no tokens)
+        $cases = array_values(array_filter($cases, static fn($c) => $c['smoke'] || !empty($c['daily'])));
     } elseif ($set === 'model') {
         $cases = array_values(array_filter($cases, static fn($c) => $c['model']));
     }
@@ -136,6 +136,19 @@ function rh_ai_eval_args(array $args): array
         }
     }
     return $args;
+}
+
+/** '' when a question can be asked here; otherwise why it is skipped (its figure's lookup or a module it needs is off). */
+function rh_ai_eval_unavailable(array $user, array $case): string
+{
+    $e = (array)($case['expect'] ?? []);
+    foreach ((array)($e['modules'] ?? []) as $m) {
+        if (!rh_ai_module_on((string)$m)) {
+            return 'not offered here (' . $m . ' is off)';
+        }
+    }
+    $tool = (string)($e['figure_from']['tool'] ?? '');
+    return $tool !== '' && !rh_ai_tool_allowed($user, $tool) ? 'the lookup is not available here' : '';
 }
 
 /** Run one read tool's handler directly (no cache, no vault) for checks. */
@@ -265,6 +278,9 @@ function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
                     $st = ['fail', 'the lookup failed: ' . mb_substr($ex->getMessage(), 0, 120)];
                 }
                 $res = ['tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0, 'route' => 'tool'];
+            } elseif (($why = rh_ai_eval_unavailable($user, $c)) !== '') {
+                $st = ['skip', $why]; // a part this business does not run, or the checking account cannot see
+                $res = ['tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0, 'route' => ''];
             } elseif ($c['model'] && !$modelOk) {
                 $st = ['skip', 'no model can be used right now'];
                 $res = ['tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0, 'route' => ''];

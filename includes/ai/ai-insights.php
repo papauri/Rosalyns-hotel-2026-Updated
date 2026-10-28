@@ -540,6 +540,15 @@ function rh_ai_t_inventory_watch(PDO $db, array $user, array $a): array
     if ($b !== null) {
         $out['stock_budget_this_month'] = $b;
     }
+    // Totals, so "none" is never read from an alert list: stock items on file, purchase orders waiting for delivery
+    $out['items_on_file'] = (int)$db->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
+    if (rh_ai_perm_any($user, ['stock_management'])) {
+        try {
+            $out['purchase_orders_waiting'] = (int)$db->query("SELECT COUNT(*) FROM stock_purchase_orders WHERE status IN ('sent', 'partial')")->fetchColumn();
+        } catch (Throwable $e) {
+            // no purchase orders
+        }
+    }
     $out['link'] = 'stock-dashboard.php';
     $out['link_label'] = 'Open Stock';
     return $out;
@@ -576,7 +585,7 @@ function rh_ai_t_events_pipeline(PDO $db, array $user, array $a): array
             $list = array_map(static fn($r) => ['reference' => $r['inquiry_reference'], 'guest_name' => $r['company_name'] !== '' && $r['company_name'] !== null ? $r['company_name'] : $r['contact_person'],
                 'date' => $r['event_date'], 'attendees' => (int)$r['number_of_attendees'], 'status' => $r['status'], 'still_owed' => rh_ai_money((float)$r['amount_due'])], $st->fetchAll(PDO::FETCH_ASSOC));
             $pending = (int)$db->query("SELECT COUNT(*) FROM conference_inquiries WHERE status = 'pending'")->fetchColumn();
-            $out['conference'] = ['upcoming_by_status' => $by, 'upcoming' => $list, 'enquiries_not_confirmed' => $pending];
+            $out['conference'] = ['upcoming_total' => array_sum(array_column($by, 'bookings')), 'upcoming_by_status' => $by, 'upcoming' => $list, 'enquiries_not_confirmed' => $pending];
         } catch (Throwable $e) {
             $out['conference'] = ['error' => 'Could not be read.'];
         }

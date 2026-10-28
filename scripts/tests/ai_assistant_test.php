@@ -2610,7 +2610,7 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         rh_ai_daily_eval($pdo);
         $last = $pdo->query("SELECT kind, total, model_id FROM ai_eval_runs ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
         $evModels = array_unique(array_map(static fn($c) => preg_match('#/models/([^:]+):#', $c['url'], $mm) ? $mm[1] : '', $GLOBALS['ai2_calls']));
-        check(($last['kind'] ?? '') === 'smoke' && (int)$last['total'] === count(rh_ai_eval_cases($pdo, 'smoke')) && (int)$last['total'] <= 5 && (!$evModels || $evModels === ['gemini-3.5-flash-lite']) && ($last['model_id'] ?? '') === 'gemini-3.5-flash-lite',
+        check(($last['kind'] ?? '') === 'smoke' && (int)$last['total'] === count(rh_ai_eval_cases($pdo, 'smoke')) && count(array_filter(rh_ai_eval_cases($pdo, 'smoke'), static fn($c) => empty($c['daily']))) <= 5 && (!$evModels || $evModels === ['gemini-3.5-flash-lite']) && ($last['model_id'] ?? '') === 'gemini-3.5-flash-lite',
             'the daily check asks only the 5 key questions, on the Fast model', json_encode([$last, $evModels]));
         $pdo->exec("UPDATE ai_eval_runs SET run_date = DATE_SUB(CURDATE(), INTERVAL 8 DAY) WHERE kind = 'full'");
         check(rh_ai_full_eval_due($pdo), 'after a week the whole question set is due (once a week)');
@@ -3319,6 +3319,133 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
             'one purchase order: supplier, status, overdue, ordered vs received per line', json_encode($po));
         $pn = rh_ai_t_inventory_watch($pdo, $admL, ['purchase_order' => 'PO-NOPE-ZZ']);
         check(($pn['match'] ?? '') === 'none' && in_array('PO-AIT0042', array_column(is_array($pn['open_purchase_orders']) ? $pn['open_purchase_orders'] : [], 'po_ref'), true), 'no such purchase order: says so and lists those waiting for delivery');
+        // A miss is never "nothing exists": each one-record miss says how many are on file
+        check((int)($gn['members_on_file'] ?? 0) >= 2 && (int)($sn['items_on_file'] ?? 0) >= 1 && (int)($pn['purchase_orders_on_file'] ?? 0) >= 1, 'member / stock item / purchase order misses say how many are on file', json_encode([$gn['members_on_file'] ?? null, $sn['items_on_file'] ?? null, $pn['purchase_orders_on_file'] ?? null]));
+
+        // ── Bookings: "have I had any bookings ever" (owner fault 2026-10-28: search_bookings {"query":"*"} said none) ──
+        $refT = 'AITBK-77Zq1';
+        $rmT = (int)$pdo->query("SELECT id FROM rooms WHERE is_active = 1 ORDER BY id LIMIT 1")->fetchColumn();
+        $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests, total_amount, total_with_vat, amount_paid, amount_due, status)
+                       VALUES (?, ?, 'AITest Wildcard Guest', 'aitbk.test@example.com', '+265 991 000 777', ?, ?, 2, 1, 1, 0, 1000, 1000, 1000, 0, 'confirmed')")
+            ->execute([$refT, $rmT, date('Y-m-d', strtotime('+2 days')), date('Y-m-d', strtotime('+4 days'))]);
+        $allBk = (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL")->fetchColumn();
+        $wq1 = rh_ai_t_search_bookings($pdo, $admL, ['query' => '*']);
+        $wq2 = rh_ai_t_search_bookings($pdo, $admL, []);
+        $wq3 = rh_ai_t_search_bookings($pdo, $admL, ['query' => 'everything']);
+        $rows1 = is_array($wq1['bookings'] ?? null) ? $wq1['bookings'] : [];
+        check($allBk >= 1 && (int)($wq1['total_in_system'] ?? -1) === $allBk && array_sum((array)$wq1['by_status']) === $allBk && (int)$wq1['upcoming_arrivals'] >= 1
+            && ($rows1[0]['reference'] ?? '') === $refT && count($rows1) <= rh_ai_num('ai_list_page_rows') && (int)($wq2['total_in_system'] ?? -1) === $allBk && (int)($wq3['total_in_system'] ?? -1) === $allBk,
+            'search_bookings "*", empty or "everything": the latest bookings (capped) with all-time totals, by status and upcoming arrivals', json_encode([$allBk, $wq1['total_in_system'] ?? null, count($rows1)]));
+        $rtE = rh_ai_run_tool($pdo, $admL, 0, 'search_bookings', []);
+        check($rtE['ok'] && strpos($rtE['json'], 'total_in_system') !== false && empty(rh_ai_tool_registry()['search_bookings']['schema']['required'])
+            && stripos(rh_ai_tool_registry()['search_bookings']['description'], 'leave query empty') !== false, 'search_bookings needs no query (the description tells the model to leave it empty for the latest bookings)', $rtE['error']);
+        $mq = rh_ai_t_search_bookings($pdo, $admL, ['query' => 'AITest Zzyzx Nobody']);
+        check((int)($mq['count'] ?? -1) === 0 && (int)($mq['total_in_system'] ?? -1) === $allBk && in_array($refT, array_column(is_array($mq['latest_bookings'] ?? null) ? $mq['latest_bookings'] : [], 'reference'), true)
+            && count((array)$mq['latest_bookings']) <= rh_ai_num('ai_lookup_matches') && stripos((string)$mq['not_found'], 'other bookings exist') !== false,
+            'a filtered search that finds nothing returns total_in_system and the latest few bookings (never reads as "no bookings")', json_encode($mq));
+        $hq = rh_ai_t_search_bookings($pdo, $admL, ['query' => 'AITest Wildcard']);
+        check((int)($hq['count'] ?? 0) === 1 && ($hq['bookings'][0]['reference'] ?? '') === $refT, 'a normal search still finds the booking');
+        $e1 = rh_ai_t_search_bookings($pdo, $admL, ['query' => 'AITBK%Zq']);
+        $e2 = rh_ai_t_search_bookings($pdo, $admL, ['query' => 'AITBK_77']);
+        check((int)($e1['count'] ?? -1) === 0 && (int)($e2['count'] ?? -1) === 0 && !rh_ai_is_wildcard_query('AITBK%Zq') && rh_ai_is_wildcard_query('%') && rh_ai_is_wildcard_query(' * ') && rh_ai_is_wildcard_query('All'),
+            'search text is taken literally: "%" and "_" inside a search are not LIKE wildcards', json_encode([$e1['count'] ?? null, $e2['count'] ?? null]));
+        $gh = rh_ai_t_guest_history($pdo, $admL, ['guest' => 'AITest Zzyzx Nobody']);
+        check((int)($gh['stays'] ?? -1) === 0 && (int)($gh['total_in_system'] ?? -1) === $allBk && !isset($gh['message']), 'guest history miss: says so with the total bookings in the system', json_encode($gh));
+        // Zero tokens: "Have I had any bookings ever" answered locally with the real count and the newest booking
+        $li = rh_ai_local_intent('Have I had any bookings ever');
+        check(($li[0] ?? '') === 'search_bookings' && ($li[1]['args'] ?? null) === [] && (rh_ai_local_intent('how many bookings')[0] ?? '') === 'search_bookings' && (rh_ai_local_intent('total bookings?')[0] ?? '') === 'search_bookings'
+            && (rh_ai_local_intent('latest bookings')[0] ?? '') === 'search_bookings' && (rh_ai_local_intent('have we had any bookings yet?')[0] ?? '') === 'search_bookings' && (rh_ai_local_intent('how many bookings do we have')[0] ?? '') === 'search_bookings',
+            '"have I had any bookings ever", "how many bookings", "total bookings", "latest bookings" are local look-ups');
+        check((rh_ai_local_intent('find booking for John Banda')[0] ?? '') !== 'search_bookings' && (rh_ai_local_intent('cancel all bookings')[0] ?? '') !== 'search_bookings'
+            && (rh_ai_local_intent('how many bookings this month')[0] ?? '') !== 'search_bookings' && (rh_ai_local_intent('do we have a booking for [GUEST_1]')[0] ?? '') !== 'search_bookings',
+            'a named search, a change or a dated count is not taken by the bookings-total answer');
+        $tb = $turnL('Have I had any bookings ever');
+        check($tb['ok'] && $tb['route'] === 'local' && !$GLOBALS['ai2_calls'] && (int)$tb['tokens_in'] === 0 && strpos($tb['reply'], 'Bookings in the system: ' . $allBk) !== false && strpos($tb['reply'], $refT) !== false
+            && stripos($tb['reply'], 'no bookings') === false, '"Have I had any bookings ever": answered locally, no tokens, with the real count and the newest booking', $tb['reply'] . ' ' . $tb['error']);
+        // Bounded: a fixed number of queries whatever the number of bookings
+        $cqB = new RhAiCountPdo('mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET, DB_USER, DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+        $bq = [];
+        foreach ([['query' => '*'], ['query' => 'AITest Zzyzx Nobody'], ['query' => 'a']] as $qa) {
+            $cqB->n = 0;
+            rh_ai_t_search_bookings($cqB, $admL, $qa);
+            $bq[] = $cqB->n;
+        }
+        $cqB = null;
+        check($bq[0] === 2 && $bq[1] === 3 && $bq[2] <= 3, 'search_bookings runs a fixed number of queries (latest: 2, miss: 3, hit: 1)', json_encode($bq));
+        check(strpos(rh_ai_context_frozen($pdo), 'A search that finds nothing is not proof nothing exists') !== false, 'the prompt says a search miss is not proof nothing exists (look again without filters)');
+        // ── "None exist" needs a total behind it (owner 2026-10-28: "no such mistakes with anything") ──
+        $turnM = static function (string $msg, array $q, int $cv = 0) use ($pdo, $admL): array {
+            $pdo->exec('DELETE FROM ai_tool_cache');
+            $GLOBALS['ai2_q'] = array_map(static fn($x) => ['reply' => $x], $q);
+            $GLOBALS['ai2_calls'] = [];
+            return rh_ai_turn($pdo, $admL, ['conversation_id' => $cv, 'message' => $msg, 'page' => 'bookings.php']);
+        };
+        check(array_keys(rh_ai_absence_claims('No bookings have been made yet.')) === ['bookings'] && !rh_ai_absence_claims('No booking matches that search.')
+            && !rh_ai_absence_claims('No bookings for [GUEST_1].') && !rh_ai_absence_claims('There are no arrivals today.') && array_keys(rh_ai_absence_claims('There are no purchase orders.')) === ['purchase_orders']
+            && array_keys(rh_ai_absence_claims("I couldn't find any gym members.")) === ['gym_members'], 'a whole-kind "none exist" is spotted; a narrowed one (a name, a search, a day) is not');
+        // Fail-safe: only the bare shapes count; any narrower answer is never touched (QA 2026-10-28)
+        $narrow = ['No bookings in the Deluxe room.', 'No bookings right now.', 'Arrivals today: 0', 'None available at the bar.', 'No members need renewing.', 'No problem, the booking is fine.',
+            'No room-service orders yet.', 'There are no bookings for next week.', 'No bookings are due out.'];
+        $narrowHit = array_values(array_filter($narrow, static fn($s) => rh_ai_absence_claims($s) !== [] || rh_ai_absence_conflicts($pdo, $admL, $s)[0] !== []));
+        $bare = ['No bookings have been made yet.', 'There are no bookings in the system.', 'You have 0 bookings in total.', "We haven't had any bookings yet.", 'Bookings: 0', "There aren't any bookings.", 'Unfortunately, no bookings exist.'];
+        $bareMiss = array_values(array_filter($bare, static fn($s) => array_keys(rh_ai_absence_claims($s)) !== ['bookings']));
+        check(!$narrowHit && !$bareMiss, 'only a bare "none exist" about the whole subject is acted on; "No bookings in the Deluxe room", "No bookings right now", "Arrivals today: 0" are left alone', json_encode([$narrowHit, $bareMiss]));
+        $keepN = $turnM('Any bookings in the Deluxe room?', [['text' => 'No bookings in the Deluxe room.']]);
+        $keepR = $turnM('Anything booked right now?', [['text' => 'No bookings right now.']]);
+        $keepA = $turnM('What about arrivals?', [['text' => 'Arrivals today: 0']]);
+        check($keepN['reply'] === 'No bookings in the Deluxe room.' && $keepR['reply'] === 'No bookings right now.' && $keepA['reply'] === 'Arrivals today: 0' && count($GLOBALS['ai2_calls']) === 1,
+            'narrower "none" answers go out unchanged, with no extra model call', json_encode([$keepN['reply'], $keepR['reply'], $keepA['reply']]));
+        $ga = $turnM('Find the booking for Xyzzy Nobody', [['tool_calls' => [['id' => 'g1', 'name' => 'search_bookings', 'args' => ['query' => 'Xyzzy Nobody']]]], ['text' => 'No bookings have been made yet.'], ['text' => 'No bookings yet.']]);
+        check($ga['ok'] && count($GLOBALS['ai2_calls']) === 3 && strpos($ga['reply'], 'The system holds ' . $allBk . ' bookings') !== false && stripos($ga['reply'], 'have been made') === false && stripos($ga['reply'], 'No bookings yet') === false
+            && strpos((string)$GLOBALS['ai2_calls'][2]['body'], 'your reply says there are none') !== false, 'a "no bookings" reply with a booking on file is re-asked once with the total, then corrected locally', json_encode([count($GLOBALS['ai2_calls']), $ga['reply']]));
+        $gok = $turnM('Find the booking for Xyzzy Nobody please', [['text' => 'No booking matches Xyzzy Nobody.']]);
+        check(count($GLOBALS['ai2_calls']) === 1 && strpos($gok['reply'], 'No booking matches') !== false, 'a narrowed "no booking matches" is left alone (no extra model call)', $gok['reply']);
+        // "I see a booking in bookings": the last lookup runs again without filters, on the Primary model; the filtered call is not repeated
+        $cvA = (int)$ga['conversation_id'];
+        $gb = $turnM('I see a booking in bookings', [['tool_calls' => [['id' => 'c1', 'name' => 'search_bookings', 'args' => ['query' => 'Xyzzy Nobody']]]], ['text' => 'You are right: there are ' . $allBk . ' bookings in the system.']], $cvA);
+        $rcB = $pdo->prepare("SELECT tool_name, tool_args_json, agent FROM ai_messages WHERE conversation_id = ? AND role = 'tool' AND id > (SELECT MAX(u.id) FROM ai_messages u WHERE u.conversation_id = ? AND u.role = 'user')");
+        $rcB->execute([$cvA, $cvA]);
+        $rcRows = $rcB->fetchAll(PDO::FETCH_ASSOC);
+        $body0 = (string)($GLOBALS['ai2_calls'][0]['body'] ?? '');
+        check($gb['ok'] && $gb['route'] === 'primary' && strpos((string)($GLOBALS['ai2_calls'][0]['url'] ?? ''), 'gemini-3.8-flash') !== false && strpos($body0, 'RECHECK') !== false && strpos($body0, 'total_in_system') !== false
+            && in_array(['tool_name' => 'search_bookings', 'tool_args_json' => '[]', 'agent' => 'recheck'], $rcRows, true) && count(array_filter($rcRows, static fn($x) => $x['agent'] !== 'recheck')) === 0
+            && strpos((string)($GLOBALS['ai2_calls'][1]['body'] ?? ''), 'the person says is wrong') !== false && strpos($gb['reply'], (string)$allBk) !== false,
+            '"I see a booking": search_bookings again with no filters, the Primary model answers, the same filtered call is not run again', json_encode([$gb['route'], $rcRows, $gb['reply'], $gb['error']]));
+        // A "Not right" tap: the next question in that chat takes the same path
+        $lastA = $pdo->prepare("SELECT MAX(id) FROM ai_messages WHERE conversation_id = ? AND role = 'assistant'");
+        $lastA->execute([$cvA]);
+        rh_ai_feedback_save($pdo, $admL, (int)$lastA->fetchColumn(), -1);
+        $gn2 = $turnM('and the bookings?', [['text' => 'Checked again: ' . $allBk . ' bookings.']], $cvA);
+        check($gn2['route'] === 'primary' && strpos((string)($GLOBALS['ai2_calls'][0]['body'] ?? ''), 'RECHECK') !== false, 'after a Not right tap the next question is re-checked without filters on the Primary model', json_encode([$gn2['route'], $gn2['reply']]));
+        check(rh_ai_is_contradiction("that's wrong") && rh_ai_is_contradiction('I see a booking in bookings') && rh_ai_is_contradiction('not right, check again') && !rh_ai_is_contradiction('there is a guest at the desk asking for towels')
+            && !rh_ai_is_contradiction('arrivals today'), 'contradictions are recognised; ordinary questions are not');
+        // Ground-truth questions: expected figures come from the database at run time
+        $gcD = array_column(rh_ai_eval_cases($pdo, 'smoke'), null, 'id');
+        $gcF = array_column(rh_ai_eval_cases($pdo, 'full'), null, 'id');
+        check(isset($gcD['ground_bookings_ever'], $gcD['ground_bookings_count'], $gcD['ground_open_orders'], $gcD['ground_gym_members']) && !isset($gcD['ground_stock_items']) && isset($gcF['ground_stock_items'], $gcF['ground_purchase_orders_waiting'], $gcF['ground_conference_upcoming']),
+            'ground-truth counts: the local ones run daily (no tokens), the model ones weekly');
+        $evB = rh_ai_eval_check($pdo, $admL, $gcD['ground_bookings_ever'], $turnL('have we had any bookings?'));
+        $evBad = rh_ai_eval_check($pdo, $admL, $gcD['ground_bookings_ever'], ['ok' => true, 'route' => 'local', 'reply' => '**Bookings in the system: ' . ($allBk + 7) . '**']);
+        $evG = rh_ai_eval_check($pdo, $admL, $gcD['ground_gym_members'], $turnL('how many gym members'));
+        $evO = rh_ai_eval_check($pdo, $admL, $gcD['ground_open_orders'], $turnL('which orders are open?'));
+        $wantS = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
+        $evS = rh_ai_eval_check($pdo, $admL, $gcF['ground_stock_items'], ['ok' => true, 'route' => 'fast', 'reply' => 'You have ' . $wantS . ' stock items.']);
+        $evS2 = rh_ai_eval_check($pdo, $admL, $gcF['ground_stock_items'], ['ok' => true, 'route' => 'fast', 'reply' => 'You have ' . ($wantS + 3) . ' stock items.']);
+        check($evB[0] === 'pass' && $evBad[0] === 'fail' && strpos($evBad[1], (string)$allBk) !== false && $evG[0] === 'pass' && $evO[0] === 'pass' && $evS[0] === 'pass' && $evS2[0] === 'fail',
+            'ground-truth questions pass only when the reply shows the figure worked out from the database', json_encode([$evB, $evBad, $evG, $evO, $evS, $evS2]));
+        $GLOBALS['__rh_ai_module_override']['conference'] = false;
+        $GLOBALS['__rh_ai_module_override']['gym'] = false;
+        check(rh_ai_eval_unavailable($admL, $gcF['ground_conference_upcoming']) !== '' && rh_ai_eval_unavailable($admL, $gcD['ground_gym_members']) !== '' && rh_ai_eval_unavailable($admL, $gcD['ground_bookings_ever']) === '',
+            'a ground-truth question for a part switched off is skipped');
+        $GLOBALS['__rh_ai_module_override']['conference'] = true;
+        $GLOBALS['__rh_ai_module_override']['gym'] = true;
+        // Room bookings switched off: not offered, "not offered here", no tokens
+        $GLOBALS['__rh_ai_module_override']['bookings'] = false;
+        check(rh_ai_eval_unavailable($admL, $gcD['ground_bookings_ever']) !== '', 'bookings switched off: the bookings ground-truth questions are skipped');
+        $tbo = $turnL('Have I had any bookings ever');
+        check(!isset(rh_ai_tools_for_user($admL)['search_bookings']) && $tbo['route'] === 'declined' && strpos($tbo['reply'], "Room bookings aren't taken here.") !== false && !$GLOBALS['ai2_calls'],
+            'bookings switched off: search_bookings is hidden and "have I had any bookings ever" gets "not offered here"', $tbo['reply']);
+        $GLOBALS['__rh_ai_module_override']['bookings'] = true;
     } catch (Throwable $e) {
         bad('one-record lookup checks threw', $e->getMessage() . ' @' . $e->getLine());
     } finally {
@@ -3333,7 +3460,8 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
     check(rh_ai_enabled($pdo) === $wasOnL && (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE reference LIKE 'ORD-AITEST-%'")->fetchColumn() === 0
         && (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE member_number LIKE 'AIT-90%'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM gym_slot_reservations WHERE reference LIKE 'AITGS%'")->fetchColumn() === 0
         && (int)$pdo->query("SELECT COUNT(*) FROM stock_purchase_orders WHERE reference = 'PO-AIT0042'")->fetchColumn() === 0
-        && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestlk%'")->fetchColumn() === 0, 'one-record lookup checks rolled back (no test rows, on/off state unchanged)');
+        && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestlk%'")->fetchColumn() === 0
+        && (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE booking_reference = 'AITBK-77Zq1'")->fetchColumn() === 0, 'one-record lookup checks rolled back (no test rows, on/off state unchanged)');
 
     // Bounded work: a lookup costs a fixed number of queries whatever the number of orders / members
     $cqL = new RhAiCountPdo('mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET, DB_USER, DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);

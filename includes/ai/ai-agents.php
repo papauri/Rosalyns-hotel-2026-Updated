@@ -215,6 +215,198 @@ function rh_ai_is_no_data_reply(string $t): bool
     return (bool)preg_match("/\b(i (don't|do not|can't|cannot|couldn't|could not) (have|find|see|get)|i have no (data|record|information|details)|no (data|records?|information|details|results?) (found|for|on|about)|(isn't|is not|aren't|are not) (in|on) (the|my|our) (data|records|system)|nothing (found|came up|on record))\b/iu", $t);
 }
 
+// ── "None exist" needs a total behind it (owner fault 2026-10-28: "No bookings have been made yet" with a booking on file) ──
+
+/** What a reply may say does not exist, the lookup whose unfiltered total backs it, and the plain label. */
+function rh_ai_absence_subjects(): array
+{
+    return [
+        'purchase_orders' => ['re' => 'purchase orders?', 'tool' => 'inventory_watch', 'label' => 'purchase orders'],
+        'conference' => ['re' => '(?:conference|event) (?:bookings?|enquiries|inquiries)', 'tool' => 'events_pipeline', 'label' => 'conference and event bookings'],
+        'bookings' => ['re' => '(?<!gym |class |slot )(?:room )?(?:bookings?|reservations?)', 'tool' => 'search_bookings', 'label' => 'bookings'],
+        'orders' => ['re' => '(?<!purchase )(?:till |open |room.service )?orders?', 'tool' => 'order_status', 'label' => 'orders open now'],
+        'gym_members' => ['re' => '(?:gym )?members(?:hips)?', 'tool' => 'gym_watch', 'label' => 'gym members'],
+        'stock_items' => ['re' => 'stock items?|ingredients?', 'tool' => 'inventory_watch', 'label' => 'stock items'],
+    ];
+}
+
+/**
+ * The unfiltered count for one subject, from the same rule its screen and lookup use; null when this person may not see
+ * it (module off or no permission). One or two COUNT queries.
+ */
+function rh_ai_subject_total(PDO $db, array $user, string $subject): ?int
+{
+    $s = rh_ai_absence_subjects()[$subject] ?? null;
+    if (!$s || !rh_ai_tool_allowed($user, $s['tool'])) {
+        return null;
+    }
+    try {
+        switch ($subject) {
+            case 'bookings':
+                return rh_ai_booking_totals($db)['total_in_system'];
+            case 'orders':
+                return (int)(rh_ai_t_order_status($db, $user, [])['open_count'] ?? 0);
+            case 'gym_members':
+                return (int)$db->query("SELECT COUNT(*) FROM gym_members")->fetchColumn();
+            case 'stock_items':
+                return (int)$db->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
+            case 'purchase_orders':
+                return rh_ai_perm_any($user, ['stock_management']) ? (int)$db->query("SELECT COUNT(*) FROM stock_purchase_orders")->fetchColumn() : null;
+            case 'conference':
+                $n = null;
+                if (rh_ai_module_on('conference') && rh_ai_perm_any($user, ['conference'])) {
+                    $n = (int)$db->query("SELECT COUNT(*) FROM conference_inquiries")->fetchColumn();
+                }
+                if (rh_ai_module_on('events') && rh_ai_perm_any($user, ['events_bookings', 'events'])) {
+                    $n = (int)$n + (int)$db->query("SELECT COUNT(*) FROM event_inquiries")->fetchColumn();
+                }
+                return $n;
+        }
+    } catch (Throwable $e) {
+        return null;
+    }
+    return null;
+}
+
+/**
+ * Sentences of a reply that are a BARE "none exist" about a whole subject - an allowlist of whole-sentence shapes:
+ * "no bookings (have been made / exist / yet / ever / in the system)", "there are no X", "0 X in total", "X: 0",
+ * "we haven't had any X", "I couldn't find any X". Anything else is left alone (fail-safe): a sentence with any other
+ * word - in, at, for, right now, available, a room, a name, a date - is a narrower answer and is never "corrected".
+ */
+function rh_ai_absence_claims(string $reply): array
+{
+    $found = [];
+    $subjects = ['purchase_orders' => 'purchase orders?', 'conference' => '(?:conference|event) (?:bookings?|enquiries|inquiries)', 'bookings' => '(?:room )?(?:bookings?|reservations?)',
+        'orders' => '(?:open )?orders?', 'gym_members' => '(?:gym )?members(?:hips)?', 'stock_items' => 'stock items?|ingredients?'];
+    $lead = '(?:(?:sorry|unfortunately|so far|it (?:looks|seems) like|i\'m afraid),? )?';
+    $made = '(?: (?:have|has) (?:been|ever been) (?:made|taken|added|created|recorded)| (?:exist|were found|found|on record))?';
+    $tail = '(?:,? (?:yet|ever|at all|so far|in the system|on the system|on file|in total|altogether|to date))*';
+    foreach (preg_split('/(?<=[.!?;])\s+|\n+/u', $reply) as $i => $s) {
+        $l = trim((string)preg_replace('/[\s.!?;]+$/u', '', str_replace(['’', '‘', '*'], ["'", "'", ''], mb_strtolower(trim($s)))));
+        if ($l === '') {
+            continue;
+        }
+        foreach ($subjects as $k => $re) {
+            $x = '(?:' . $re . ')';
+            $shapes = [
+                '(?:there (?:are|is|were|have been) )?no ' . $x . $made . $tail,                                    // no bookings (have been made) yet
+                '(?:there (?:are|were) |you have |we have |the hotel has )?(?:0|zero) ' . $x . $made . $tail,        // 0 bookings in total
+                '(?:total )?' . $x . ': (?:0|none)' . $tail,                                                       // bookings: 0
+                '(?:you|we|i|the hotel) (?:have|has)(?:n\'t| not)(?: yet| ever)? (?:had|got|received|taken|made) any ' . $x . $tail, // we haven't had any bookings
+                '(?:there (?:aren\'t|are not|haven\'t been|have not been) any) ' . $x . $made . $tail,              // there aren't any bookings
+                '(?:i )?(?:couldn\'t|could not|can\'t|cannot) (?:find|see) any ' . $x . $tail,                      // I couldn't find any bookings
+                $x . ' (?:do not|don\'t) exist' . $tail,                                                            // bookings don't exist
+            ];
+            foreach ($shapes as $shape) {
+                if (preg_match('/^' . $lead . $shape . '$/u', $l)) {
+                    $found[$k][] = $i;
+                    continue 3;
+                }
+            }
+        }
+    }
+    return $found; // subject => sentence numbers
+}
+
+/**
+ * Check a reply's "none exist" against the real totals. @return array{0:array,1:string} [subject => total (only those
+ * above 0), the plain fact line] - both empty when the reply is consistent.
+ */
+function rh_ai_absence_conflicts(PDO $db, array $user, string $reply): array
+{
+    $facts = [];
+    foreach (array_keys(rh_ai_absence_claims($reply)) as $k) {
+        $n = rh_ai_subject_total($db, $user, $k);
+        if ($n !== null && $n > 0) {
+            $facts[$k] = $n;
+        }
+    }
+    $parts = [];
+    foreach ($facts as $k => $n) {
+        $parts[] = $n . ' ' . rh_ai_absence_subjects()[$k]['label'];
+    }
+    return [$facts, $parts ? 'The system holds ' . rh_ai_and_list($parts) . '.' : ''];
+}
+
+/** The reply with its wrong "none exist" sentences replaced by the real totals (no model call). */
+function rh_ai_absence_correct(string $reply, array $facts, string $line): string
+{
+    $claims = array_intersect_key(rh_ai_absence_claims($reply), $facts);
+    $drop = $claims ? array_flip(array_merge(...array_values($claims))) : [];
+    $keep = [];
+    foreach (preg_split('/(?<=[.!?;])\s+|\n+/u', $reply) as $i => $s) { // the same split as rh_ai_absence_claims
+        if (!isset($drop[$i]) && trim($s) !== '') {
+            $keep[] = $s;
+        }
+    }
+    return trim($line . ' Ask me to list them.' . ($keep ? "\n\n" . implode(' ', $keep) : ''));
+}
+
+/** The person says the last answer was wrong ("I see a booking", "that's wrong", "there is one"). */
+function rh_ai_is_contradiction(string $t): bool
+{
+    $t = mb_strtolower(trim($t));
+    if ($t === '' || mb_strlen($t) > 200) {
+        return false;
+    }
+    return (bool)preg_match("/\\b(that'?s|that is|this is|you'?re|you are|it'?s|your answer is)\\s+(wrong|not right|incorrect|not true|not correct|mistaken)\\b|^(wrong|not right|incorrect|not true)\\b|\\bi (can )?(see|have|found) (a|an|one|some|two|three|\\d+|the|it|them)\\b|\\bthere (is|are) (one|some|definitely|actually|clearly)\\b|\\b(but|yet) there (is|are)\\b|\\b(check|look) again\\b/u", $t);
+}
+
+/** The last reply in this chat was marked Not right (the next question re-checks without filters). */
+function rh_ai_last_reply_not_right(PDO $db, int $uid, int $conv): bool
+{
+    try {
+        $st = $db->prepare("SELECT f.rating FROM ai_messages m LEFT JOIN ai_feedback f ON f.message_id = m.id AND f.user_id = ? WHERE m.conversation_id = ? AND m.role = 'assistant' ORDER BY m.id DESC LIMIT 1");
+        $st->execute([$uid, $conv]);
+        return (int)$st->fetchColumn() < 0;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+/**
+ * "You're wrong": the lookups behind the last answer run again WITHOUT filters (get_booking / guest_history become
+ * search_bookings with no query), plus the subjects the person names. The results go in as DATA; the earlier filtered
+ * calls are marked in $seenCalls so asking them again returns a note, never the same lookup again.
+ */
+function rh_ai_recheck_unfiltered(PDO $db, array $user, int $conv, int $userMsgId, string $tok, array &$budget, array &$seenCalls): string
+{
+    $st = $db->prepare("SELECT tool_name, tool_args_json FROM ai_messages WHERE conversation_id = ? AND role = 'tool' AND id < ?
+                        AND id > (SELECT COALESCE(MAX(u.id), 0) FROM ai_messages u WHERE u.conversation_id = ? AND u.role = 'user' AND u.id < ?) ORDER BY id LIMIT 6");
+    $st->execute([$conv, $userMsgId, $conv, $userMsgId]);
+    $map = ['get_booking' => 'search_bookings', 'guest_history' => 'search_bookings'];
+    $tools = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $p) {
+        $tools[] = $map[(string)$p['tool_name']] ?? (string)$p['tool_name'];
+        $seenCalls[rh_ai_call_key((string)$p['tool_name'], (array)(json_decode((string)$p['tool_args_json'], true) ?: []))] =
+            '{"note":"This is the lookup behind the answer the person says is wrong. Use the fresh results without filters in DATA."}';
+    }
+    $low = mb_strtolower($tok);
+    foreach (rh_ai_absence_subjects() as $sub) {
+        if (preg_match('/\b(?:' . $sub['re'] . ')\b/u', $low)) {
+            $tools[] = $sub['tool'];
+        }
+    }
+    $reg = rh_ai_tool_registry();
+    $data = [];
+    foreach (array_slice(array_values(array_unique($tools)), 0, 4) as $name) {
+        if (!isset($reg[$name]) || !empty($reg[$name]['schema']['required']) || rh_ai_action_key_for_tool($name) !== '' || !rh_ai_tool_allowed($user, $name)) {
+            continue; // only read lookups that work with no arguments
+        }
+        $tr = rh_ai_run_tool($db, $user, $conv, $name, []);
+        if (!$tr['ok']) {
+            continue;
+        }
+        rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $name, 'args' => [], 'result' => $tr['json'], 'agent' => 'recheck']);
+        $budget['evidence'] .= "\n" . $tr['json'];
+        $budget['tools_used'][] = $name;
+        $seenCalls[rh_ai_call_key($name, [])] = $tr['view'];
+        $data[] = $name . ' (no filters): ' . $tr['view'];
+    }
+    return implode("\n", $data);
+}
+
 /** Plainly not about the hotel or this system. */
 function rh_ai_is_off_topic(string $t): bool
 {
@@ -328,6 +520,9 @@ function rh_ai_local_intent(string $t): ?array
     if ($when !== '') {
         return null;
     }
+    if (rh_ai_booking_totals_intent($t)) {
+        return ['search_bookings', ['args' => [], '_view' => 'totals']]; // latest bookings + all-time totals (owner fault 2026-10-28)
+    }
     if (($fact = rh_ai_hotel_fact_intent($t)) !== null) {
         return $fact;
     }
@@ -344,6 +539,45 @@ function rh_ai_local_intent(string $t): ?array
         return ['my_access', []];
     }
     return null;
+}
+
+/**
+ * "Have we had any bookings (ever)?", "how many bookings", "total bookings", "latest bookings": answered locally from
+ * search_bookings with no query (all-time totals + the latest rows). $t is lower-case with "how many" / "any" / "please"
+ * already removed. A question naming a guest, a date or a change ("find booking for Banda", "cancel bookings") is not one.
+ */
+function rh_ai_booking_totals_intent(string $t): bool
+{
+    if (mb_strlen($t) > 60 || strpos($t, '[') !== false) {
+        return false;
+    }
+    $bk = '(?:room )?bookings?';
+    $tail = '(?: (?:ever|yet|at all|so far|in total|altogether|in the system|on the system|all.?time|to date|until now|till now))*';
+    return (bool)preg_match('/^(?:have|has) (?:i|we|the hotel|this hotel) (?:ever )?(?:had|got|received|taken) (?:a |some )?' . $bk . $tail . '\??$/u', $t)
+        || (bool)preg_match('/^(?:do|did) (?:i|we|the hotel|this hotel) (?:ever )?(?:have|get|receive|take) (?:a |some )?' . $bk . $tail . '\??$/u', $t)
+        || (bool)preg_match('/^(?:are|were) there (?:ever )?(?:some )?' . $bk . $tail . '\??$/u', $t)
+        || (bool)preg_match('/^(?:show |list |see |what are )?(?:the |our |my )?(?:(?:total|all|all the|latest|recent|most recent|newest|number of|count of) )*' . $bk
+            . '(?: (?:do|have|did) (?:we|i) (?:have|had|got|get))?' . $tail . '\??$/u', $t);
+}
+
+/** The local answer for "have we had any bookings / how many / latest" (de-identified result: names and references stay tokens). */
+function rh_ai_bookings_local_text(array $r): string
+{
+    $total = (int)($r['total_in_system'] ?? 0);
+    if ($total === 0) {
+        return 'There are no bookings in the system yet.';
+    }
+    $parts = [];
+    foreach ((array)($r['by_status'] ?? []) as $s => $n) {
+        $parts[] = (int)$n . ' ' . str_replace(['-', '_'], ' ', (string)$s);
+    }
+    $up = (int)($r['upcoming_arrivals'] ?? 0);
+    $out = '**Bookings in the system: ' . $total . '**' . ($parts ? ' (' . implode(', ', $parts) . ')' : '') . ' · ' . $up . ' upcoming arrival' . ($up === 1 ? '' : 's');
+    $lines = [];
+    foreach (is_array($r['bookings'] ?? null) ? $r['bookings'] : [] as $x) {
+        $lines[] = $x['reference'] . ' · ' . $x['guest_name'] . (!empty($x['room_type']) ? ' · ' . $x['room_type'] : '') . ' · ' . $x['check_in'] . ' to ' . $x['check_out'] . ' · ' . str_replace('-', ' ', (string)$x['status']);
+    }
+    return $out . ($lines ? "\n\nLatest:" . rh_ai_local_lines($lines) : '');
 }
 
 /**
@@ -382,6 +616,9 @@ function rh_ai_lookup_intent(string $t): ?array
         return ['gym_watch', ['args' => ['date' => $d], '_when' => $w]];
     }
     if (preg_match('/^(?:(?:gym )?memberships? (?:ending|expiring)(?: soon)?|(?:gym )?members? (?:ending|expiring)(?: soon)?|who(?:\'s| is) (?:membership )?(?:ending|expiring)(?: soon)?)\??$/u', $t)) {
+        return ['gym_watch', ['args' => []]];
+    }
+    if (preg_match('/^(?:(?:do|did) we have |have we (?:ever )?had |are there )?(?:the |our |all |total )?(?:gym )?members(?: do we have| have we had| in total| on file| ever| yet| so far)?\??$/u', $t)) {
         return ['gym_watch', ['args' => []]];
     }
     if (preg_match('/^(?:(?:status of|look ?up|find|check) )?(?:the )?(?:gym )?member (?:no\.? |number |#)?([a-z0-9][a-z0-9\-]{2,19})\??$/u', $t, $m) && preg_match('/\d/', $m[1])) {
@@ -568,6 +805,9 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
     if ($tool === 'gym_watch') {
         return rh_ai_gym_local_text($view, $r);
     }
+    if ($tool === 'search_bookings') {
+        return rh_ai_bookings_local_text($r);
+    }
     $room = static function (array $x): string {
         return ($x['room_type'] ?? '') . (!empty($x['room_number']) ? ' · room ' . $x['room_number'] : ' · no room yet');
     };
@@ -687,7 +927,8 @@ function rh_ai_order_local_text(array $r): string
             $out .= "\n\n**Earlier orders for that room:**" . rh_ai_local_lines(array_map(static fn($o) => $o['order_ref'] . ' · ' . $o['date'] . ' · ' . $o['status'] . ' · ' . $fmt($o['total']), (array)$r['earlier_orders_for_room']));
         }
     } else { // the orders open now
-        $out = is_array($r['open_now'] ?? null) ? '**Open orders now:**' . rh_ai_local_lines(array_map($line, $r['open_now'])) . (!empty($r['more']) ? "\n\n" . ucfirst((string)$r['more']) . '.' : '') : (string)($r['open_now'] ?? '');
+        $out = isset($r['open_count']) ? '**Open orders now: ' . (int)$r['open_count'] . '**' . (is_array($r['open_now'] ?? null) ? '' : ' — ' . lcfirst((string)$r['open_now'])) : '';
+        $out .= is_array($r['open_now'] ?? null) ? ($out === '' ? '**Open orders now:**' : '') . rh_ai_local_lines(array_map($line, $r['open_now'])) . (!empty($r['more']) ? "\n\n" . ucfirst((string)$r['more']) . '.' : '') : (string)($r['open_now'] ?? '');
     }
     return trim($out . (!empty($r['note']) ? "\n\n" . $r['note'] : ''));
 }
@@ -760,7 +1001,7 @@ function rh_ai_gym_local_text(array $view, array $r): string
     }
     if (isset($r['members']['active'])) { // the overview: counts and memberships ending soon
         $c = (array)$r['members'];
-        $out = '**Members:** ' . (int)$c['active'] . ' active, ' . (int)$c['expiring_30_days'] . ' ending in the next 30 days, ' . (int)$c['expired'] . ' expired · ' . (int)($r['enquiries_waiting'] ?? 0) . ' enquiries waiting';
+        $out = '**Members:** ' . (isset($c['all']) ? (int)$c['all'] . ' on file — ' : '') . (int)$c['active'] . ' active, ' . (int)$c['expiring_30_days'] . ' ending in the next 30 days, ' . (int)$c['expired'] . ' expired · ' . (int)($r['enquiries_waiting'] ?? 0) . ' enquiries waiting';
         return $out . rh_ai_local_lines(array_map(static fn($m) => $m['guest_name'] . ' (member ' . $m['member_number'] . ') · ' . $m['membership'] . ' · ends ' . $m['expires'], (array)($r['expiring_soon'] ?? [])));
     }
     return '';
@@ -2013,8 +2254,11 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         $help = rh_ai_can_help_line($user);
         return $finish(rh_ai_out_of_scope_line() . ($help !== '' ? "\n\n" . $help : ''), 'declined', ['chips' => ['What can I do here?'], 'links' => rh_ai_guide_links($db, $user, $tok, 1)]);
     }
+    // 1b+. "You're wrong" / "I see a booking" (or the last reply was marked Not right): no cached or local answer; the
+    // lookups behind the last answer run again without filters and the Primary model answers (owner fault 2026-10-28).
+    $contradict = !$new && (rh_ai_is_contradiction($tok) || rh_ai_last_reply_not_right($db, $uid, $conv));
     // 1c. Small talk (greeting, thanks, a hard shift): a short friendly reply, no tokens
-    if (($st = rh_ai_small_talk($tok, $user)) !== null) {
+    if (!$contradict && ($st = rh_ai_small_talk($tok, $user)) !== null) {
         return $finish($st[0], 'local', ['chips' => $st[1]]);
     }
     // 1d. The daily briefing on request: deterministic findings, one short explanation
@@ -2027,12 +2271,12 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     // Kept per conversation so the cached reply's tokens always belong to this chat's vault.
     $norm = trim(preg_replace('/[^\p{L}\p{N} ]+/u', '', mb_strtolower($tok)));
     $answerKey = rh_ai_cache_key($user, 'answer:' . $conv . ':' . $page . ':' . $bookingId, $norm);
-    $hit = rh_ai_cache_get($db, $answerKey);
+    $hit = $contradict ? null : rh_ai_cache_get($db, $answerKey);
     if ($hit !== null && isset($hit['reply_tok'])) {
         return $finish((string)$hit['reply_tok'], 'cache', ['links' => (array)($hit['links'] ?? []), 'chips' => (array)($hit['chips'] ?? [])]);
     }
     // 1f. Exact lookups straight from a read tool, and follow-ups of them ("and tomorrow?")
-    $intent = rh_ai_local_intent($tok) ?? rh_ai_followup_local($tok, $lastLocal);
+    $intent = $contradict ? null : (rh_ai_local_intent($tok) ?? rh_ai_followup_local($tok, $lastLocal));
     if ($intent !== null) {
         [$tool, $view] = $intent;
         if (!rh_ai_tool_allowed($user, $tool)) {
@@ -2090,6 +2334,13 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     if ($playbook && $route === 'primary' && $fast && $primary) {
         $route = 'fast'; // a learned playbook replaces a long reasoning call (cheaper; the Fast model can still escalate)
     }
+    if ($contradict) { // re-checked on the Primary model, with tools (never the Fast model's quick reply)
+        $route = $primary ? 'primary' : 'fast';
+        $kind = $kind === 'short' ? 'lookup' : $kind;
+        if (!$lanes) {
+            $lanes = rh_ai_advice_default_lanes($team);
+        }
+    }
     rh_ai_memory_mark_used($db, array_column($mem, 'id'));
     $prefs = rh_ai_prefs_get($db, $uid);
     $hist = rh_ai_history($db, $conv, $userMsgId);
@@ -2125,9 +2376,18 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
             $question .= "\n\n" . $data;
         }
     }
+    if ($contradict) {
+        $data = rh_ai_recheck_unfiltered($db, $user, $conv, $userMsgId, $tok, $budget, $seenCalls);
+        $question .= "
+
+RECHECK: the person says the last answer was wrong. A search that found nothing is not proof nothing exists. "
+            . ($data !== '' ? "Fresh lookups without filters:
+" . $data : 'Look again without filters before answering.');
+    }
     $messages[] = ['role' => 'user', 'content' => $question];
     $notice = '';
     $usedModel = '';
+    $absAsked = false;
     $final = null;
     $escalated = false;
     $consulted = false;
@@ -2326,6 +2586,23 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         }
         if ($bad) {
             $text = rh_ai_strip_unsupported($text, $bad);
+        }
+        // "None exist" needs a total behind it: checked against the unfiltered count (local, no model call unless wrong)
+        if (!$budget['cards'] && $text !== '') {
+            [$absFacts, $absLine] = rh_ai_absence_conflicts($db, $user, $text);
+            if ($absFacts) {
+                $budget['evidence'] .= "
+" . $absLine;
+                if (!$absAsked && ($budget['in'] + $budget['out']) < $budget['tokens_cap']) {
+                    $absAsked = true;
+                    $messages[] = ['role' => 'assistant', 'content' => $text];
+                    $messages[] = ['role' => 'user', 'content' => 'CHECK BEFORE ANSWERING: your reply says there are none, but ' . lcfirst($absLine)
+                        . ' Answer again from those totals (a lookup with no filters lists the latest). Say "none" only about a narrower set, and name it.'];
+                    $final = rh_ai_absence_correct($text, $absFacts, $absLine); // used if asking again does not come back
+                    continue;
+                }
+                $text = rh_ai_absence_correct($text, $absFacts, $absLine);
+            }
         }
         if ($r['stop'] === 'max_tokens') {
             $text .= "\n\n(The answer was cut short - ask me to continue.)";

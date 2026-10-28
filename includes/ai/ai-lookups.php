@@ -237,9 +237,11 @@ function rh_ai_t_order_status(PDO $db, array $user, array $a): array
         return $out;
     };
 
-    if (!isset($where)) { // nothing asked for: the orders open now
+    if (!isset($where)) { // nothing asked for: the orders open now (and how many: one COUNT, the same scope)
         $list = array_map($summary, array_slice($rows, 0, $n));
-        return $withLink($base + ['match' => 'open orders', 'open_now' => $list ?: 'No orders are open right now.', 'more' => count($rows) > $n ? 'more than ' . $n . ' are open; ask for a table, room or name' : null], $link);
+        $cnt = $db->prepare("SELECT COUNT(*) FROM stock_orders o WHERE $openSql$scope");
+        $cnt->execute($scopeArgs);
+        return $withLink($base + ['match' => 'open orders', 'open_count' => (int)$cnt->fetchColumn(), 'open_now' => $list ?: 'No orders are open right now.', 'more' => count($rows) > $n ? 'more than ' . $n . ' are open; ask for a table, room or name' : null], $link);
     }
     if (count($rows) === 1) {
         $o = $rows[0];
@@ -371,7 +373,9 @@ function rh_ai_gym_member_lookup(PDO $db, array $user, string $q): array
             $st->execute(array_merge(array_map(static fn($w) => '%' . rh_ai_like($w) . '%', $words), [$words[0]]));
             $near = array_map(static fn($m) => ['member_number' => (string)$m['member_number'], 'guest_name' => (string)$m['full_name'], 'membership' => (string)($m['membership_type'] ?? ''), 'status' => (string)$m['status'], 'ends' => $m['expiry_date']], $st->fetchAll(PDO::FETCH_ASSOC));
         }
-        return $out + ['match' => 'none', 'not_found' => 'No gym member matches that name, phone or member number.', 'nearest_matches' => $near ?: 'none close'];
+        // A miss is not "no members": how many are on file (one query)
+        $onFile = (int)$db->query("SELECT COUNT(*) FROM gym_members")->fetchColumn();
+        return $out + ['match' => 'none', 'not_found' => 'No gym member matches that name, phone or member number.', 'nearest_matches' => $near ?: 'none close', 'members_on_file' => $onFile];
     }
     if (count($rows) > 1) {
         return $out + ['match' => 'several', 'members' => array_map($line, array_slice($rows, 0, $n)), 'more' => count($rows) > $n ? 'more than ' . $n . ' match; ask with the member number' : null, 'ask' => 'Several members match: ask which one.'];
@@ -700,7 +704,8 @@ function rh_ai_stock_item_lookup(PDO $db, array $user, string $q): array
             $st->execute(array_map(static fn($w) => '%' . rh_ai_like($w) . '%', $words));
             $near = array_map($line, $st->fetchAll(PDO::FETCH_ASSOC));
         }
-        return ['match' => 'none', 'not_found' => 'No stock item is called that.', 'nearest_items' => $near ?: 'none close'];
+        $onFile = (int)$db->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn(); // a miss is not "no stock"
+        return ['match' => 'none', 'not_found' => 'No stock item is called that.', 'nearest_items' => $near ?: 'none close', 'items_on_file' => $onFile];
     }
     if (count($rows) > 1) {
         return ['match' => 'several', 'items' => array_map($line, array_slice($rows, 0, $n)), 'more' => count($rows) > $n ? 'more than ' . $n . ' match; ask with the full name' : null, 'ask' => 'Several items match: ask which one.'];
@@ -757,6 +762,7 @@ function rh_ai_purchase_order_lookup(PDO $db, array $user, string $q): array
     if (!$rows) {
         $open = $db->query("SELECT $cols FROM stock_purchase_orders po LEFT JOIN stock_suppliers s ON s.id = po.supplier_id WHERE po.status IN ('sent', 'partial') ORDER BY po.expected_date IS NULL, po.expected_date LIMIT " . $n)->fetchAll(PDO::FETCH_ASSOC);
         return $out + ['match' => 'none', 'not_found' => 'No purchase order matches that reference or supplier.', 'open_purchase_orders' => array_map($line, $open) ?: 'none waiting for delivery',
+            'purchase_orders_on_file' => (int)$db->query("SELECT COUNT(*) FROM stock_purchase_orders")->fetchColumn(),
             'link' => 'purchase-orders.php', 'link_label' => 'Open Purchase orders'];
     }
     if (count($rows) > 1) {
