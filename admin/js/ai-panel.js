@@ -622,6 +622,23 @@
             setChips(j.chips || []);
         }).catch(function () { busy(false); });
     }
+    // Clear (owner 2026-10-29): this chat or all of mine are archived on the server (never deleted), then a fresh chat
+    function clearChats(scope) {
+        var msg = document.getElementById('rhAiClearMsg');
+        var btns = panel.querySelectorAll('[data-ai="clear-this"], [data-ai="clear-all"]');
+        msg.hidden = true;
+        if (scope === 'this' && !state.conv) { newChat(); return; }
+        btns.forEach(function (x) { x.disabled = true; });
+        post({ action: 'clear', scope: scope, conversation_id: state.conv || 0 }).then(function (j) {
+            btns.forEach(function (x) { x.disabled = false; });
+            if (!j || !j.success) { msg.textContent = (j && j.error) || 'The chats could not be cleared just now. Try again.'; msg.hidden = false; return; }
+            newChat();
+        }).catch(function () {
+            btns.forEach(function (x) { x.disabled = false; });
+            msg.textContent = 'Could not reach the server. Check the connection and try again.';
+            msg.hidden = false;
+        });
+    }
     function newChat() {
         state.conv = 0;
         store(KEY_CONV, null);
@@ -691,6 +708,9 @@
         var what = b.getAttribute('data-ai');
         if (what === 'close') { close(); }
         else if (what === 'new') { newChat(); }
+        else if (what === 'clear') { document.getElementById('rhAiClearMsg').hidden = true; show('clear'); }
+        else if (what === 'clear-this') { clearChats('this'); }
+        else if (what === 'clear-all') { clearChats('all'); }
         else if (what === 'chats') { show('chats'); }
         else if (what === 'alerts') { show('alerts'); }
         else if (what === 'prefs') { show('prefs'); }

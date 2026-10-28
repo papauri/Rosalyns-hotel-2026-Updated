@@ -30,7 +30,8 @@ function rh_ai_eval_seed_cases(): array
     foreach ((array)($j['cases'] ?? []) as $c) {
         if (is_array($c) && !empty($c['id']) && isset($c['q'])) {
             $cases[] = ['id' => (string)$c['id'], 'q' => (string)$c['q'], 'smoke' => !empty($c['smoke']), 'model' => !empty($c['model']), 'daily' => !empty($c['daily']),
-                'page' => (string)($c['page'] ?? 'dashboard.php'), 'expect' => (array)($c['expect'] ?? []), 'source' => 'seed'];
+                'page' => (string)($c['page'] ?? 'dashboard.php'), 'expect' => (array)($c['expect'] ?? []), 'source' => 'seed',
+                'setup' => (string)($c['setup'] ?? ''), 'before' => array_values(array_map('strval', (array)($c['before'] ?? [])))];
         }
     }
     return $cases;
@@ -216,8 +217,25 @@ function rh_ai_eval_check(PDO $db, array $user, array $case, array $res): array
             return ['fail', 'the lookup gave no figure at ' . (string)($f['path'] ?? '')];
         }
         $want = (string)(int)round((float)$v);
-        if (!preg_match('/(?<![\d.,])' . preg_quote($want, '/') . '(?![\d])/', $reply)) {
+        if (!empty($f['money'])) { // an amount: as the screens show it (MWK 712,000.00) or plain
+            $okMoney = strpos($reply, number_format((float)$v, 2)) !== false || strpos($reply, number_format((float)$v)) !== false
+                || preg_match('/(?<![\d.,])' . preg_quote($want, '/') . '(?![\d])/', $reply);
+            if (!$okMoney) {
+                return ['fail', 'the answer does not show ' . number_format((float)$v, 2) . ' (the booking screen figure)'];
+            }
+        } elseif (!preg_match('/(?<![\d.,])' . preg_quote($want, '/') . '(?![\d])/', $reply)) {
             return ['fail', 'the answer does not show ' . $want . ' (the screen figure)'];
+        }
+    }
+    if (!empty($e['verdict_from']['tool'])) { // a yes / no worked out from the data (e.g. breakfast on one booking)
+        $f = $e['verdict_from'];
+        $r = rh_ai_eval_tool($db, $user, (string)$f['tool'], (array)($f['args'] ?? []));
+        if ($r === null) {
+            return ['skip', 'the lookup is not available here'];
+        }
+        $want = !empty(rh_ai_eval_path($r, (string)($f['path'] ?? ''))) ? (string)($f['if_true'] ?? '') : (string)($f['if_false'] ?? '');
+        if ($want !== '' && stripos($reply, $want) === false) {
+            return ['fail', 'the answer does not say "' . $want . '" (worked out from the data)'];
         }
     }
     return ['pass', ''];
@@ -290,7 +308,23 @@ function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
             } else {
                 try {
                     rh_ai_vault_people_reset();
-                    $res = rh_ai_turn($db, $user, ['conversation_id' => 0, 'message' => $c['q'], 'page' => $c['page']]);
+                    $conv0 = 0;
+                    $preTokens = 0;
+                    $vars = ($c['setup'] ?? '') !== '' ? rh_ai_eval_setup($db, (string)$c['setup']) : [];
+                    if (($c['setup'] ?? '') !== '' && !$vars) {
+                        throw new RuntimeException('skip');
+                    }
+                    $c = rh_ai_eval_bind($c, $vars);
+                    foreach ((array)($c['before'] ?? []) as $bq) { // the chat so far: a follow-up is asked in the same chat
+                        $r0 = rh_ai_turn($db, $user, ['conversation_id' => $conv0, 'message' => $bq, 'page' => $c['page']]);
+                        $conv0 = (int)($r0['conversation_id'] ?? 0);
+                        $preTokens += (int)($r0['tokens_in'] ?? 0) + (int)($r0['tokens_out'] ?? 0);
+                        if ($conv0 > 0) {
+                            $convs[] = $conv0;
+                        }
+                    }
+                    $res = rh_ai_turn($db, $user, ['conversation_id' => $conv0, 'message' => $c['q'], 'page' => $c['page']]);
+                    $res['tokens_in'] = (int)($res['tokens_in'] ?? 0) + $preTokens;
                     if (!empty($res['conversation_id'])) {
                         $convs[] = (int)$res['conversation_id'];
                         // a card a check prepared is never left waiting
@@ -298,8 +332,9 @@ function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
                     }
                     $st = rh_ai_eval_check($db, $user, $c, $res);
                 } catch (Throwable $ex) {
-                    $res = ['tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0, 'route' => 'error'];
-                    $st = ['fail', 'error: ' . mb_substr($ex->getMessage(), 0, 120)];
+                    $skipIt = $ex->getMessage() === 'skip';
+                    $res = ['tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0, 'route' => $skipIt ? '' : 'error'];
+                    $st = $skipIt ? ['skip', 'no booking here to ask about'] : ['fail', 'error: ' . mb_substr($ex->getMessage(), 0, 120)];
                 }
             }
             $tokens = (int)($res['tokens_in'] ?? 0) + (int)($res['tokens_out'] ?? 0);
@@ -361,6 +396,65 @@ function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
         rh_ai_pause($db, 'eval', 'the daily check scored ' . rtrim(rtrim(number_format($out['smoke_pct'], 1), '0'), '.') . '% on its five key questions (below ' . (int)rh_ai_setting('ai_eval_smoke_min_pct', '80') . '%).');
     }
     return $out;
+}
+
+/**
+ * Values a chat question is asked with, read from the hotel's data at run time (never written in evals.json).
+ * latest_booking: the newest booking whose guest has a surname of 5+ letters; that surname with two letters swapped
+ * ({guest_close}, checked to resolve clearly to that booking), the surname ({guest_last}) and the booking id ({bk_id}).
+ * One bounded query plus the close-name check. [] = nothing suitable here (the question is skipped).
+ */
+function rh_ai_eval_setup(PDO $db, string $kind): array
+{
+    if ($kind !== 'latest_booking') {
+        return [];
+    }
+    try {
+        $rows = $db->query("SELECT id, booking_reference, guest_name FROM bookings WHERE deleted_at IS NULL AND guest_name <> '' ORDER BY id DESC LIMIT 20")->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return [];
+    }
+    foreach ($rows as $r) {
+        $parts = preg_split('/\s+/u', trim((string)$r['guest_name']));
+        $last = (string)end($parts);
+        if (!preg_match('/^\p{L}{5,}$/u', $last)) {
+            continue;
+        }
+        $ch = preg_split('//u', $last, -1, PREG_SPLIT_NO_EMPTY);
+        for ($i = 2; $i < count($ch) - 1; $i++) {
+            if (mb_strtolower($ch[$i]) !== mb_strtolower($ch[$i + 1])) {
+                [$ch[$i], $ch[$i + 1]] = [$ch[$i + 1], $ch[$i]];
+                break;
+            }
+        }
+        $close = implode('', $ch);
+        if (mb_strtolower($close) === mb_strtolower($last)) {
+            continue;
+        }
+        $hit = rh_ai_close_name_search($db, $close);
+        if ((int)($hit['clear']['booking_id'] ?? 0) !== (int)$r['id']) {
+            continue; // the data holds another close name: this one would rightly be asked about
+        }
+        return ['{guest_close}' => $close, '{guest_last}' => $last, '{bk_id}' => (string)(int)$r['id']];
+    }
+    return [];
+}
+
+/** A case with its {placeholders} filled in (question, the chat before it, expectations and their lookup arguments). */
+function rh_ai_eval_bind(array $c, array $vars): array
+{
+    if (!$vars) {
+        return $c;
+    }
+    array_walk_recursive($c, static function (&$v) use ($vars) {
+        if (is_string($v) && strpos($v, '{') !== false) {
+            $v = strtr($v, $vars);
+            if (preg_match('/^\d+$/', $v)) {
+                $v = (int)$v;
+            }
+        }
+    });
+    return $c;
 }
 
 /** Safe sample arguments for a read tool's self-test (dates ahead, the first room type, harmless words). */

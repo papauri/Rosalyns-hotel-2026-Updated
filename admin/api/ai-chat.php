@@ -7,7 +7,7 @@
  * permission ai_assistant_use (403) -> rate limit (429) -> action. The session is closed before any
  * provider call so the rest of the portal never waits on the Assistant.
  *
- * Actions: send, list, load, rename, archive (own conversations only), prefs_get, prefs_set, prefs_reset, suggestions,
+ * Actions: send, list, load, rename, archive, clear (scope this|all; archives, never deletes; own conversations only), prefs_get, prefs_set, prefs_reset, suggestions,
  * briefing (the daily "full tea"; auto=1 only on the first open of the day when the person's preference is on),
  * status (the plain line naming the step the Assistant is on, polled while it answers) and feedback (Helpful /
  * Not right on one of the person's own replies, with an optional correction - Phase 4b; it changes the
@@ -127,6 +127,12 @@ try {
             }
             $pdo->prepare("UPDATE ai_conversations SET archived = 1 WHERE id = ? AND user_id = ?")->execute([$conv, $uid]);
             rh_ai_api_out(200, ['success' => true]);
+            break;
+
+        case 'clear': // owner 2026-10-29: clear this chat or all of my chats - ARCHIVED, never deleted (limits and card records stay)
+            $scope = (string)($in['scope'] ?? '') === 'all' ? 'all' : 'this';
+            $n = rh_ai_chats_clear($pdo, $uid, $scope, (int)($in['conversation_id'] ?? 0));
+            rh_ai_api_out(200, ['success' => true, 'scope' => $scope, 'cleared' => $n]);
             break;
 
         case 'prefs_get':

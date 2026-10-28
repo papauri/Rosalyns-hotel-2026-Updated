@@ -426,7 +426,7 @@ function rh_ai_extra_tools(): array
     }));
     return [
         'hotel_report' => [
-            'description' => 'A Reports screen section for a date range (' . implode(', ', $reports) . ')' . ($rooms ? ' with its room headline figures where available,' : '') . ' and the button to open it (Export CSV is on that screen). Default this month.',
+            'description' => 'A Reports screen section for a date range (' . implode(', ', $reports) . ')' . ($rooms ? ' with its room headline figures where available,' : '') . ' and the button to open it (Export CSV is on that screen). Default this month. Never for what one booking cost or owes (get_booking).',
             'schema' => ['properties' => ['report' => ['type' => 'string', 'enum' => $reports], 'from' => $date, 'to' => $date]],
             'perm' => ['reports', 'accounting'], 'module' => [], 'cache' => 120, 'handler' => 'rh_ai_t_hotel_report', 'step' => 'Opening the report',
         ],
@@ -481,7 +481,7 @@ function rh_ai_t_hotel_report(PDO $db, array $user, array $a): array
     $url = 'reports.php?tab=' . rawurlencode($tab) . '&start_date=' . $from . '&end_date=' . $to;
     if (function_exists('rhCanOpenPage') && rhCanOpenPage((int)$user['id'], 'reports.php')) {
         $out['link'] = $url;
-        $out['link_label'] = 'Open the report (Export CSV is on the screen)';
+        $out['link_label'] = 'Open the report'; // one plain button (owner 2026-10-29); the note says Export is on the screen
     } elseif (function_exists('rhCanOpenPage') && rhCanOpenPage((int)$user['id'], 'accounting-dashboard.php')) {
         $out['link'] = 'accounting-dashboard.php';
         $out['link_label'] = 'Open Accounting';

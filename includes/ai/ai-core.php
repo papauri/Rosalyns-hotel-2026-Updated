@@ -194,6 +194,14 @@ function rh_ai_setting_defaults(): array
         // booking, a stock item, a purchase order, one room's jobs)
         'ai_lookup_matches'       => '5',  // several matches: this many listed to pick from; also nearest names, recent check-ins and open orders offered
         'ai_order_lookback_hours' => '24', // an order asked for by table, room or name: open orders, plus those placed in the last this-many hours
+        // Owner 2026-10-29 ("handle all sorts of misspellings"): the shared close-match rule (includes/ai/ai-fuzzy.php)
+        'ai_close_match_pool'       => '50', // a misspelt name: rows of each candidate set read (latest, upcoming, same-sounding)
+        'ai_close_match_min_pct'    => '70', // a name this close (0-100) is plausible: offered in "Do you mean ...?"
+        'ai_close_match_strong_pct' => '80', // the closest name at least this close ...
+        'ai_close_match_lead_pct'   => '10', // ... and this far ahead of the next is clearly the one meant: used, real name shown
+        'ai_typo_min_len'           => '4',  // question words shorter than this are never corrected
+        'ai_typo_two_edit_len'      => '8',  // question words this long may have two slips; shorter ones one
+        'ai_breakfast_words'        => 'breakfast', // words that mean breakfast in packages, rate plans and room extras (comma separated)
     ];
 }
 

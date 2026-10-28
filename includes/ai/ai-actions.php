@@ -581,7 +581,7 @@ function rh_ai_pv_room_type_change(PDO $db, array $user, array $a): array
     }
     $t = rh_ai_find_room_type($db, (string)$a['new_room_type']);
     if (!$t) {
-        return ['error' => 'No room type matches "' . $a['new_room_type'] . '".'];
+        return ['error' => 'No room type matches "' . $a['new_room_type'] . '".' . rh_ai_room_type_ask($db, (string)$a['new_room_type'])];
     }
     if (!function_exists('rh_room_change_options')) {
         require_once dirname(__DIR__) . '/booking-room-change.php';

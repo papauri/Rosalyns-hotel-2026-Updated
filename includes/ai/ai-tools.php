@@ -21,6 +21,7 @@ require_once __DIR__ . '/ai-insights.php'; // Phase 3 department reads + the dai
 require_once __DIR__ . '/ai-memory.php';   // Phase 4b: the circuit breaker (a tool that keeps failing is switched off for an hour)
 require_once __DIR__ . '/ai-extras.php';   // Phases 4c + 5: password on risky cards, idle lock, audit chain, alerts, extra reads
 require_once __DIR__ . '/ai-lookups.php';  // one-record lookups: an order, a gym member or class, a conference booking, a stock item, a room's jobs
+require_once __DIR__ . '/ai-focus.php';    // the booking in focus, close names, what a booking includes (owner fault 2026-10-29)
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
@@ -86,12 +87,12 @@ function rh_ai_tool_registry(): array
     $date = ['type' => 'string', 'description' => 'Date as YYYY-MM-DD', 'format' => 'date'];
     $reg = [
         'search_bookings' => [
-            'description' => 'Find room bookings by guest name, email, phone or booking reference (tokens like [GUEST_1] are fine). Leave query empty to list the latest bookings and totals (all time, by status, upcoming arrivals). A search that finds nothing also returns the totals and the latest bookings.',
+            'description' => 'Find room bookings by guest name, email, phone or booking reference (tokens like [GUEST_1] are fine). Leave query empty to list the latest bookings and totals (all time, by status, upcoming arrivals). A misspelt name gives the clearly closest guest (read_as) or close names to ask about. A search that finds nothing also returns the totals and the latest bookings.',
             'schema' => ['properties' => ['query' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Name, email, phone or reference; empty = latest bookings and totals'], 'status' => ['type' => 'string', 'enum' => ['pending', 'confirmed', 'tentative', 'checked-in', 'checked-out', 'cancelled', 'no-show']]]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_search_bookings',
         ],
         'get_booking' => [
-            'description' => 'One booking in detail: guest, room, dates, party, status, total, paid and balance (same figures as the booking screen). Give booking_id or reference.',
+            'description' => 'One booking in detail: guest, room, dates, party, status, total, paid and balance (same figures as the booking screen), and what it includes (packages, rate plan, room extras, breakfast yes/no). The answer for what one booking cost, paid or owes. Give a booking_id or reference from this chat\'s results.',
             'schema' => ['properties' => ['booking_id' => ['type' => 'integer', 'minimum' => 1], 'reference' => ['type' => 'string', 'maxLength' => 40]]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_get_booking',
         ],
@@ -156,8 +157,8 @@ function rh_ai_tool_registry(): array
             'perm' => [], 'module' => [], 'cache' => 600, 'handler' => 'rh_ai_t_page_help',
         ],
         'who_is_online' => [
-            'description' => 'Staff signed in and active in the last 30 minutes, and which screen they are on.',
-            'schema' => ['properties' => (object)[]],
+            'description' => 'Staff signed in and active in the last 30 minutes, and which screen they are on. staff: is one person signed in (a misspelt name finds the closest).',
+            'schema' => ['properties' => ['staff' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Optional: one staff member\'s name']]],
             'perm' => [], 'module' => [], 'gate' => 'rh_ai_gate_presence', 'cache' => 30, 'handler' => 'rh_ai_t_who_is_online',
         ],
         'my_access' => [
@@ -701,9 +702,27 @@ function rh_ai_find_room_type(PDO $db, string $q): ?array
         return $r;
     }
     $st = $db->prepare("SELECT * FROM rooms WHERE is_active = 1 AND name LIKE ? ORDER BY display_order LIMIT 1");
-    $st->execute(['%' . $q . '%']);
+    $st->execute(['%' . rh_ai_like($q) . '%']);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    if ($r) {
+        return $r;
+    }
+    // A misspelt room type ("superior suit", "vip vila"): the one clearly closest name (owner 2026-10-29); several close -> null
+    $p = rh_ai_fuzzy_from_table($db, $q, 'rooms', 'name', 'is_active = 1', [], 'display_order, id');
+    if ($p['clear'] === null) {
+        return null;
+    }
+    $st = $db->prepare("SELECT * FROM rooms WHERE is_active = 1 AND name = ? LIMIT 1");
+    $st->execute([$p['clear']]);
     $r = $st->fetch(PDO::FETCH_ASSOC);
     return $r ?: null;
+}
+
+/** ' Do you mean A or B?' for a room type that matched nothing ('' when none is close). One query, on the miss path only. */
+function rh_ai_room_type_ask(PDO $db, string $q): string
+{
+    $p = rh_ai_fuzzy_from_table($db, $q, 'rooms', 'name', 'is_active = 1', [], 'display_order, id');
+    return $p['options'] ? ' ' . rh_ai_did_you_mean($p['options']) : '';
 }
 
 function rh_ai_nights(string $ci, string $co): int
@@ -769,7 +788,18 @@ function rh_ai_t_search_bookings(PDO $db, array $user, array $a): array
     if ($rows) {
         return ['count' => count($rows), 'bookings' => $rows] + $link;
     }
-    // Nothing matched: a search miss is not "no bookings" - give the totals and the latest few (what IS there)
+    // Nothing matched exactly: a misspelt name (owner 2026-10-29). One clearly closest name is the guest meant (used, with
+    // the name as on the booking); several close ones, or one weak one, are listed for one short question.
+    $close = rh_ai_close_name_search($db, $q, (string)($a['status'] ?? ''));
+    if ($close['clear'] !== null) {
+        return ['count' => 1, 'close_match' => 'clear', 'read_as' => 'No booking is under exactly "' . $q . '"; one guest name is clearly the closest (a slip in the spelling), so this is the booking meant. Answer with it and show the name as on the booking.',
+            'bookings' => [$close['clear']]] + $link;
+    }
+    if ($close['options']) {
+        return ['count' => 0, 'close_matches' => $close['options'], 'ask' => 'No booking is under exactly that name, but these are close. Ask one short question listing them ("Do you mean ... or ...?"); never pick one yourself.']
+            + rh_ai_booking_totals($db) + $link;
+    }
+    // Nothing close either: a search miss is not "no bookings" - give the totals and the latest few (what IS there)
     $st = $db->query($cols . " ORDER BY b.id DESC LIMIT " . rh_ai_num('ai_lookup_matches'));
     $totals = rh_ai_booking_totals($db);
     return ['count' => 0, 'not_found' => 'No booking matches that search' . (!empty($a['status']) ? ' with status ' . $a['status'] : '') . ($totals['total_in_system'] > 0 ? '. Other bookings exist: see total_in_system and latest_bookings.' : '. There are no bookings in the system yet.')]
@@ -781,7 +811,7 @@ function rh_ai_t_get_booking(PDO $db, array $user, array $a): array
     if (empty($a['booking_id']) && empty($a['reference'])) {
         return ['error' => 'Give a booking id or reference.'];
     }
-    $st = $db->prepare("SELECT b.*, r.name AS room_name, ir.room_number, ir.room_name AS individual_room_name
+    $st = $db->prepare("SELECT b.*, r.name AS room_name, r.amenities AS room_amenities, ir.room_number, ir.room_name AS individual_room_name
                         FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                         WHERE b.deleted_at IS NULL AND " . (!empty($a['booking_id']) ? "b.id = ?" : "b.booking_reference = ?") . " LIMIT 1");
     $st->execute([!empty($a['booking_id']) ? (int)$a['booking_id'] : (string)$a['reference']]);
@@ -799,6 +829,8 @@ function rh_ai_t_get_booking(PDO $db, array $user, array $a): array
         'special_requests' => (string)($b['special_requests'] ?? ''),
         'currency' => rh_ai_currency(),
         'money' => rh_ai_folio((int)$b['id']),
+        // What the stay includes (packages, rate plan, room extras) and whether any of it is breakfast (owner fault 2026-10-29)
+        'included' => rh_ai_booking_inclusions($db, $b),
         'link' => 'booking-details.php?id=' . (int)$b['id'], 'link_label' => 'Open booking',
     ];
     if ($out['special_requests'] === '') {
@@ -818,7 +850,7 @@ function rh_ai_t_check_availability(PDO $db, array $user, array $a): array
     if (!empty($a['room_type'])) {
         $t = rh_ai_find_room_type($db, (string)$a['room_type']);
         if (!$t) {
-            return ['error' => 'No room type matches "' . $a['room_type'] . '".',
+            return ['error' => 'No room type matches "' . $a['room_type'] . '".' . rh_ai_room_type_ask($db, (string)$a['room_type']),
                 'alternatives' => rh_ai_room_alternatives($db, $user, null, (string)$a['check_in'], (string)$a['check_out'], $adults, $children, 1)];
         }
         $types[] = $t;
@@ -1104,7 +1136,7 @@ function rh_ai_t_room_rates(PDO $db, array $user, array $a): array
         $t = rh_ai_find_room_type($db, $one);
         if (!$t) {
             $names = $db->query("SELECT name FROM rooms WHERE is_active = 1 ORDER BY display_order, id LIMIT " . RH_AI_TOOL_ROWS)->fetchAll(PDO::FETCH_COLUMN);
-            return ['error' => 'No room type matches "' . $one . '".', 'room_types_here' => $names];
+            return ['error' => 'No room type matches "' . $one . '".' . rh_ai_room_type_ask($db, $one), 'room_types_here' => $names];
         }
         $where .= ' AND r.id = ?';
         $params[] = (int)$t['id'];
@@ -1208,7 +1240,7 @@ function rh_ai_quote_stay_run(PDO $db, array $user, array $a): array
     }
     $t = rh_ai_find_room_type($db, (string)$a['room_type']);
     if (!$t) {
-        return ['error' => 'No room type matches "' . $a['room_type'] . '".', '_alt' => 0];
+        return ['error' => 'No room type matches "' . $a['room_type'] . '".' . rh_ai_room_type_ask($db, (string)$a['room_type']), '_alt' => 0];
     }
     $rid = (int)$t['id'];
     $adults = (int)$a['adults'];
@@ -1469,6 +1501,20 @@ function rh_ai_t_guest_history(PDO $db, array $user, array $a): array
                         ORDER BY b.check_in_date DESC LIMIT 200");
     $st->execute([$g, '%' . rh_ai_like($g) . '%', $g]);
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows && empty($a['_close'])) {
+        // A misspelt name (owner 2026-10-29): one clearly closest guest is the one meant; several close ones are asked about
+        $close = rh_ai_close_name_search($db, $g);
+        if ($close['clear'] !== null) {
+            $again = rh_ai_t_guest_history($db, $user, ['guest' => (string)$close['clear']['guest_name'], '_close' => 1]);
+            return ['read_as' => 'No guest is called exactly as typed; read_as_name is clearly the closest (a slip in the spelling), so these are their stays. Show the name as on the booking.',
+                'read_as_name' => ['guest_name' => (string)$close['clear']['guest_name']]] + $again;
+        }
+        if ($close['options']) {
+            $t = rh_ai_booking_totals($db);
+            return ['stays' => 0, 'close_matches' => $close['options'], 'ask' => 'No guest is called exactly that, but these are close. Ask one short question listing them; never pick one yourself.',
+                'total_in_system' => $t['total_in_system']];
+        }
+    }
     if (!$rows) {
         // A miss for this guest is not "no bookings": the totals say what IS there (one query)
         $t = rh_ai_booking_totals($db);
@@ -1707,6 +1753,20 @@ function rh_ai_t_who_is_online(PDO $db, array $user, array $a): array
     $list = [];
     foreach (rh_presence_rows($db, false) as $r) {
         $list[] = ['staff_name' => $r['name'], 'role' => $r['role_label'], 'status' => $r['status_label'], 'screen' => $r['page_title'], 'since' => $r['since']];
+    }
+    $staff = trim((string)($a['staff'] ?? ''));
+    if ($staff !== '') { // one person: are they signed in? A misspelt name: the clearly closest staff member (owner 2026-10-29)
+        $hit = array_values(array_filter($list, static fn($x) => mb_stripos((string)$x['staff_name'], $staff) !== false));
+        if (!$hit && empty($a['_close'])) {
+            $p = rh_ai_fuzzy_from_table($db, $staff, 'admin_users', 'full_name', 'is_active = 1', [], 'id DESC');
+            if ($p['clear'] !== null) {
+                return rh_ai_fuzzy_note($staff, $p['clear'], [], 'staff_name') + rh_ai_t_who_is_online($db, $user, ['staff' => $p['clear'], '_close' => 1]);
+            }
+            if ($p['options']) {
+                return ['online' => count($list)] + rh_ai_fuzzy_note($staff, null, $p['options'], 'staff_name');
+            }
+        }
+        return ['online' => count($list), 'staff_name' => $staff, 'signed_in_now' => $hit ? 'yes' : 'no (not active in the last 30 minutes)', 'list' => array_slice($hit, 0, RH_AI_TOOL_ROWS)];
     }
     return ['online' => count($list), 'list' => array_slice($list, 0, RH_AI_TOOL_ROWS)];
 }
@@ -2126,7 +2186,7 @@ function rh_ai_menu_rows(PDO $db): ?array
  * One menu item (owner 2026-10-28): available or not, and then up to ai_alt_menu_max available items from the same category (featured
  * items when there are none, or when nothing matches). "vegetarian" / "vegan" lists the items marked so. Prices as stored.
  */
-function rh_ai_menu_item(PDO $db, string $item): array
+function rh_ai_menu_item(PDO $db, string $item, bool $fuzzy = true): array
 {
     $rows = rh_ai_menu_rows($db);
     if (!$rows) {
@@ -2180,6 +2240,19 @@ function rh_ai_menu_item(PDO $db, string $item): array
         $cat = array_values(array_filter($avail, static fn($r) => $match((string)$r['c'])));
         if ($cat) {
             return $out + ['status' => 'a menu category', 'items' => array_map($fmt, $cat)];
+        }
+        if ($fuzzy) { // a misspelt dish (owner 2026-10-29): the menu already read, no extra query
+            $names = [];
+            foreach ($rows as $r) {
+                $names[(string)$r['n']] = (string)$r['n'];
+            }
+            $p = rh_ai_fuzzy_pick($item, $names);
+            if ($p['clear'] !== null) {
+                return rh_ai_fuzzy_note($item, $p['clear']) + rh_ai_menu_item($db, $p['clear'], false);
+            }
+            if ($p['options']) {
+                return $out + ['status' => 'Not on the menu under that name.'] + rh_ai_fuzzy_note($item, null, $p['options']);
+            }
         }
         return $out + ['status' => 'Not on the menu.'] + $fallback;
     }

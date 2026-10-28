@@ -128,6 +128,7 @@ define('RH_AI_PANEL_RENDERED', true);
             <?php if ($alertsOn): ?><button type="button" class="rh-ai-icon rh-ai-icon--alerts" data-ai="alerts" aria-label="Alerts" title="Alerts"><i class="fas fa-bell" aria-hidden="true"></i><span class="rh-ai-icon__count" id="rhAiAlertCount" hidden></span></button><?php endif; ?>
             <button type="button" class="rh-ai-icon" data-ai="chats" aria-label="Your chats" title="Your chats"><i class="fas fa-list" aria-hidden="true"></i></button>
             <button type="button" class="rh-ai-icon" data-ai="new" aria-label="New chat" title="New chat"><i class="fas fa-plus" aria-hidden="true"></i></button>
+            <button type="button" class="rh-ai-icon" data-ai="clear" aria-label="Clear chats" title="Clear chats"><i class="fas fa-eraser" aria-hidden="true"></i></button>
             <button type="button" class="rh-ai-icon" data-ai="prefs" aria-label="Reply settings" title="Reply settings"><i class="fas fa-sliders" aria-hidden="true"></i></button>
             <button type="button" class="rh-ai-icon" data-ai="close" aria-label="Close the Assistant" title="Close"><i class="fas fa-xmark" aria-hidden="true"></i></button>
         </div>
@@ -156,6 +157,18 @@ define('RH_AI_PANEL_RENDERED', true);
         <p class="rh-ai-help">Your recent chats. Only you can see them. Tap one to carry on.</p>
         <ul class="rh-ai-chatlist" id="rhAiChatList"></ul>
         <button type="button" class="btn btn-secondary rh-ai-back" data-ai="back"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back to the chat</button>
+    </section>
+
+    <section class="rh-ai-view" data-view="clear" hidden aria-label="Clear chats">
+        <p class="rh-ai-clear__title"><i class="fas fa-eraser" aria-hidden="true"></i> Clear chats</p>
+        <p class="rh-ai-help">Clearing takes chats off your list and starts a fresh one. Nothing is deleted: cards you confirmed stay on record and the message limits still count them.</p>
+        <div class="rh-ai-clear__btns">
+            <button type="button" class="btn btn-primary" data-ai="clear-this">Clear this chat</button>
+            <button type="button" class="btn btn-secondary" data-ai="clear-all">Clear all my chats</button>
+            <button type="button" class="btn btn-secondary" data-ai="back">Cancel</button>
+        </div>
+        <p class="rh-ai-help">This chat: only the one open now. All my chats: every chat in your list.</p>
+        <p class="rh-ai-card__warn" id="rhAiClearMsg" role="alert" hidden></p>
     </section>
 
     <section class="rh-ai-view" data-view="prefs" hidden aria-label="Reply settings">

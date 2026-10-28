@@ -3042,7 +3042,7 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         $mon = date('F Y', strtotime($dq));
         check(rh_ai_local_intent('book a room for 2 adults from 5 to 7 ' . $mon) === null && rh_ai_room_intent($pdo, 'book the AITest Rates Suite for 2 adults from 5 to 7 ' . $mon) === null
             && rh_ai_room_intent($pdo, 'please reserve the AITest Rates Suite for 2 adults from 5 to 7 ' . $mon) === null && rh_ai_local_intent('How much for 2 adults in the AITest Rates Suite from 5 to 7 ' . $mon . '?') === null
-            && rh_ai_local_intent('what is our occupancy rate?') === null && rh_ai_local_intent('What is the occupancy rate this week?') === null
+            && (rh_ai_local_intent('what is our occupancy rate?')[0] ?? '') !== 'room_rates' && (rh_ai_local_intent('What is the occupancy rate this week?')[0] ?? '') !== 'room_rates'
             && (rh_ai_room_intent($pdo, 'How much for 2 adults in the AITest Rates Suite from 5 to 7 ' . $mon . '?')[0] ?? '') === 'quote_stay',
             'the price-list and child intents never catch "book a room for...", a dated quote or occupancy %; a dated party goes to quote_stay');
         $bookAsks = ['I want to book the AITest Rates Suite for 2 adults 5 to 7 ' . $mon, "I'd like to book the AITest Rates Suite for 2 adults 5 to 7 " . $mon,
@@ -3475,7 +3475,7 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
             $bq[] = $cqB->n;
         }
         $cqB = null;
-        check($bq[0] === 2 && $bq[1] === 3 && $bq[2] <= 3, 'search_bookings runs a fixed number of queries (latest: 2, miss: 3, hit: 1)', json_encode($bq));
+        check($bq[0] === 2 && $bq[1] === 4 && $bq[2] <= 3, 'search_bookings runs a fixed number of queries (latest: 2, miss: 4 with the close-name check, hit: 1)', json_encode($bq));
         check(strpos(rh_ai_context_frozen($pdo), 'A search that finds nothing is not proof nothing exists') !== false, 'the prompt says a search miss is not proof nothing exists (look again without filters)');
         // ── "None exist" needs a total behind it (owner 2026-10-28: "no such mistakes with anything") ──
         $turnM = static function (string $msg, array $q, int $cv = 0) use ($pdo, $admL): array {
@@ -3615,6 +3615,314 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         }
     }
     check((int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE reference LIKE 'ORD-AITQ-%'")->fetchColumn() === 0, 'lookup query-count checks rolled back');
+}
+
+
+// ── Misspellings, the booking in focus, what's included, clear chats (owner fault 2026-10-29, Rosalyn's chat 6965-6978) ──
+echo "-- misspellings, booking focus, inclusions, clear chats --\n";
+// The shared close-match rule (no database)
+check(rh_ai_word_closeness('Ntahni', 'Nthani') >= rh_ai_num('ai_close_match_strong_pct') / 100 && rh_ai_edit_distance('ntahni', 'nthani') === 1 && rh_ai_word_closeness('Banda', 'Phiri') < rh_ai_num('ai_close_match_min_pct') / 100,
+    'close names: two letters swapped is one slip ("Ntahni" is clearly "Nthani"); unrelated names are not close');
+$fpR = rh_ai_fuzzy_pick('superior suit', ['Superior Suite' => 'Superior Suite', 'Superior Room' => 'Superior Room', 'Deluxe Room' => 'Deluxe Room']);
+$fpV = rh_ai_fuzzy_pick('vip vila', ['VIP Villa' => 'VIP Villa', 'Deluxe Room' => 'Deluxe Room']);
+$fpJ = rh_ai_fuzzy_pick('jointed room', ['Joined Room' => 'Joined Room', 'Deluxe Suite' => 'Deluxe Suite']);
+$fpTwo = rh_ai_fuzzy_pick('Mvila', ['Grace Mvula' => 'Grace Mvula', 'Grace Mvala' => 'Grace Mvala']);
+$fpNone = rh_ai_fuzzy_pick('Zzyzx', ['Grace Mvula' => 'Grace Mvula']);
+check($fpR['clear'] === 'Superior Suite' && $fpV['clear'] === 'VIP Villa' && $fpJ['clear'] === 'Joined Room' && $fpTwo['clear'] === null && count($fpTwo['options']) === 2 && $fpNone['clear'] === null && $fpNone['options'] === [],
+    'one shared rule: one clear match is used ("superior suit", "vip vila", "jointed room"); two similar names are asked about; nothing close is "none"', json_encode([$fpR, $fpV, $fpJ, $fpTwo, $fpNone]));
+check(strpos(rh_ai_did_you_mean(['Grace Mvula', 'Grace Mvala']), 'Do you mean Grace Mvula or Grace Mvala?') === 0 && isset(rh_ai_fuzzy_note('x', 'X')['read_as'], rh_ai_fuzzy_note('x', null, ['A', 'B'])['ask']),
+    'a clarifying question is one short line listing the options');
+foreach (['ai_close_match_pool', 'ai_close_match_min_pct', 'ai_close_match_strong_pct', 'ai_close_match_lead_pct', 'ai_typo_min_len', 'ai_typo_two_edit_len', 'ai_breakfast_words'] as $k) {
+    if (!isset(rh_ai_setting_defaults()[$k])) {
+        bad('close-match and typo sizes are settings', $k);
+    }
+}
+$fzSrc = (string)file_get_contents($root . '/includes/ai/ai-fuzzy.php') . (string)file_get_contents($root . '/includes/ai/ai-focus.php');
+check(!preg_match('/(levenshtein|closeness)[^;\n]*(0\.[5-9]\d*|>=\s*[5-9]\d)\s*[;)]/', $fzSrc) && strpos($fzSrc, "rh_ai_num('ai_close_match_strong_pct')") !== false && strpos($fzSrc, "rh_ai_num('ai_typo_two_edit_len')") !== false,
+    'thresholds and candidate counts come from settings, never numbers in the code');
+// Typos in the question's own words
+$tf = static fn(string $t): string => rh_ai_typo_fix($t)['text'];
+$typoCases = ['arivals today' => 'arrivals today', 'ocupancy this week' => 'occupancy this week', 'is brekfast included' => 'is breakfast included', 'departurs tommorow' => 'departures tomorrow',
+    'bokings today' => 'bookings today', 'arrivals on 5 novemebr' => 'arrivals on 5 november', 'avaliable rooms tonight' => 'available rooms tonight'];
+$typoBad = [];
+foreach ($typoCases as $in => $want) {
+    if ($tf($in) !== $want) {
+        $typoBad[] = $in . ' -> ' . $tf($in);
+    }
+}
+check(!$typoBad, 'typos in the question are read right ("arivals", "ocupancy", "brekfast", "departurs", "tommorow", "bokings", "novemebr", "avaliable")', implode(' | ', $typoBad));
+check(rh_ai_local_intent($tf('arivals today')) === ['arrivals_departures', ['_view' => 'arrivals']] && (rh_ai_local_intent($tf('ocupancy this week'))[0] ?? '') === 'room_performance',
+    'typo\'d questions reach the same local answers ("arivals today", "ocupancy this week")');
+$realBad = [];
+foreach (['were the arrivals late', 'where are the towels', 'rooms ready', 'show the staff list', 'what time is breakfast', 'when is Mr Ntahni coming', 'is Banda here', 'our menu prices'] as $t) {
+    if ($tf($t) !== $t) {
+        $realBad[] = $t . ' -> ' . $tf($t);
+    }
+}
+check(!$realBad, 'a correct real word, a name and a word after a title are never "corrected"', implode(' | ', $realBad));
+$writeBad = [];
+foreach (['boko the deluxe for friday', 'canel', 'chek them in', 'refnd the guest', 'bokings for friday', 'is brekfast included', 'arivals today', 'extnd their stay?'] as $t) {
+    $fx = rh_ai_typo_fix($t);
+    if (!rh_ai_text_is_write($t) && rh_ai_text_is_write($fx['text'])) {
+        $writeBad[] = $t . ' -> ' . $fx['text'];
+    }
+}
+check(!$writeBad && strpos($tf('boko the deluxe for friday'), 'book ') === false, 'no correction ever turns a read into a change ("boko" never becomes "book")', implode(' | ', $writeBad));
+check(rh_ai_typo_note(['arivals' => 'arrivals']) === 'TYPOS READ AS: "arivals" = "arrivals".' && strpos(rh_ai_context_frozen($pdo), 'TYPOS') === false && strpos(rh_ai_context_frozen($pdo), 'BOOKING IN FOCUS') === false,
+    'the model is told the words read as typos in the turn context, never in the cached prompt');
+// One booking: the intents and the guards
+check(rh_ai_person_search_intent('When is Mr Ntahni coming') === 'Ntahni' && rh_ai_person_search_intent('is Mrs Banda arriving today') === 'Banda' && rh_ai_person_search_intent('Find the booking for Xyzzy Nobody') === null && rh_ai_person_search_intent('when is the bus coming') === null
+    && rh_ai_person_search_intent('When is the restaurant opening') === null && rh_ai_person_search_intent('cancel Mr Banda booking') === null,
+    'a person search is recognised ("When is Mr Ntahni coming"), never a bus, a screen or a change');
+check(rh_ai_focus_kind('how much was mr nthanis room') === 'money' && rh_ai_focus_kind('are they getting free breakfast') === 'included' && rh_ai_focus_kind("what's their balance?") === 'money'
+    && rh_ai_focus_kind('revenue this month') === null && rh_ai_focus_kind('how much is a deluxe room for 2 nights') === null && rh_ai_focus_is_change('cancel their booking') && rh_ai_focus_is_change('please check them in') && !rh_ai_focus_is_change('when are they checking out'),
+    'follow-ups about the booking in focus: money, what is included, dates; never a period report or a change');
+$lm = rh_ai_links_merge([['label' => 'Open the report', 'url' => 'reports.php?tab=bookings']], [['label' => 'Open the report', 'url' => 'reports.php?tab=revenue'], ['label' => 'Open booking', 'url' => 'reports.php?tab=bookings'], ['label' => 'Open booking', 'url' => 'booking-details.php?id=1']], 4);
+check(count($lm) === 2 && $lm[1]['url'] === 'booking-details.php?id=1', 'links are never shown twice (same page or same words)', json_encode($lm));
+$exSrc = (string)file_get_contents($root . '/includes/ai/ai-extras.php');
+check(strpos($exSrc, "'Open the report'") !== false && strpos($exSrc, 'Open the report (Export CSV is on the screen)') === false, 'the report button is a plain "Open the report"');
+// Clear chats: a panel button, an inline confirm, archive only
+$panelC = (string)file_get_contents($root . '/admin/includes/ai-panel.php');
+$jsC = (string)file_get_contents($root . '/admin/js/ai-panel.js');
+$chatC = (string)file_get_contents($root . '/admin/api/ai-chat.php');
+$clearFn = (string)preg_replace('/^.*?(function rh_ai_chats_clear.*?\n}\n).*$/s', '$1', (string)file_get_contents($root . '/includes/ai/ai-agents.php'));
+check(strpos($panelC, 'data-ai="clear"') !== false && strpos($panelC, 'fa-eraser') !== false && strpos($panelC, 'data-view="clear"') !== false && strpos($panelC, 'Clear this chat') !== false && strpos($panelC, 'Clear all my chats') !== false
+    && !preg_match('/fa-(magic|wand|robot|sparkle|stars)/', $panelC) && !preg_match('/\bconfirm\(/', $jsC) && strpos($jsC, "action: 'clear'") !== false,
+    'Clear: an icon button in the panel bar, an inline confirm with "Clear this chat" and "Clear all my chats" (no browser confirm, no AI-looking icon)');
+check(strpos($chatC, "case 'clear':") !== false && strpos($clearFn, 'archived = 1') !== false && stripos($clearFn, 'DELETE') === false && strpos($clearFn, 'user_id = ?') !== false,
+    'the clear action archives the person\'s own chats and never deletes anything');
+
+if (!$chatReady || !rh_ai_memory_ready($pdo)) {
+    skip('misspelling, booking focus and clear-chat database checks (Assistant migrations not run here)');
+} else {
+    $admF = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    rh_ai_admin_lib('gym-schedule-lib.php');
+    if (function_exists('gymScheduleEnsureTables')) {
+        gymScheduleEnsureTables($pdo);
+    }
+    $pdo->beginTransaction();
+    try {
+        rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000',
+            'ai_rate_limit_per_10min' => '500', 'ai_turn_token_cap' => '60000', 'ai_swarm_models' => '0'], $pdo);
+        $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
+        rh_ai_store_key('google', 'AIzaFAKEKEYFORTESTSONLY0123456789abcd', (int)$admF['id'], $pdo);
+        $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL WHERE is_selected = 1");
+        $mi = $pdo->prepare("INSERT INTO ai_models (provider, model_id, label, capability_rank, source, is_selected, role, price_in_per_mtok, price_out_per_mtok) VALUES ('google', ?, ?, ?, 'catalog', 1, ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE is_selected = 1, role = VALUES(role), price_in_per_mtok = VALUES(price_in_per_mtok), price_out_per_mtok = VALUES(price_out_per_mtok)");
+        $mi->execute(['gemini-3.8-flash', 'Gemini 3.8 Flash', 92, 'primary', 0.75, 3.75]);
+        $mi->execute(['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 86, 'fast', 0.30, 2.50]);
+        rh_ai_set_transport(static function ($method, $url, $headers, $body, $timeout) {
+            $GLOBALS['ai2_calls'][] = ['url' => $url, 'body' => (string)$body];
+            $next = array_shift($GLOBALS['ai2_q']) ?? ['reply' => ['text' => 'OK']];
+            $reply = $next['reply'];
+            $reply['usage'] = ($reply['usage'] ?? []) + ['in' => 100, 'out' => 20];
+            return ['http' => 200, 'body' => json_encode(rh_ai_fake_body(ai2_prov($url), $reply, ''))];
+        });
+        $GLOBALS['__rh_ai_module_override'] = $bizMods(['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms', 'station_kds', 'station_bds', 'station_cds', 'station_room_service', 'restaurant_page', 'events']);
+        $chatF = static function (string $msg, int $conv, array $q = []) use ($pdo, $admF): array {
+            $pdo->exec('DELETE FROM ai_tool_cache');
+            $GLOBALS['ai2_q'] = array_map(static fn($r) => ['reply' => $r], $q);
+            $GLOBALS['ai2_calls'] = [];
+            return rh_ai_turn($pdo, $admF, ['conversation_id' => $conv, 'message' => $msg, 'page' => 'dashboard.php']);
+        };
+        // A test room type with listed extras (no breakfast) and a booking for "Charles Qwnthani"
+        $pdo->prepare("INSERT INTO rooms (name, slug, description, price_per_night, max_guests, total_rooms, rooms_available, display_order, is_active, amenities) VALUES ('AITest Qw Lakeside', 'aitest-qw-lakeside', 'AITest', 356000, 2, 1, 1, 0, 1, 'King Bed,Free WiFi,Coffee and Tea')")->execute();
+        $qwRoom = (int)$pdo->lastInsertId();
+        $insB = $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests, total_amount, total_with_vat, amount_paid, amount_due, status)
+                               VALUES (?, ?, ?, ?, '+265 991 000 777', ?, ?, 2, 1, 1, 0, 712000, 712000, 0, 712000, 'confirmed')");
+        $ci = date('Y-m-d', strtotime('+1 day'));
+        $co = date('Y-m-d', strtotime('+3 days'));
+        $refQ = 'AITQW' . random_int(100000, 999999);
+        $insB->execute([$refQ, $qwRoom, 'Charles Qwnthani', 'johnpaulchirwa@gmail.com', $ci, $co]);
+        $qwId = (int)$pdo->lastInsertId();
+        rh_ai_vault_people_reset();
+        $money = rh_ai_folio($qwId);
+        $tot = number_format((float)($money['total'] ?? 0), 2);
+        $bal = number_format((float)($money['balance_due'] ?? 0), 2);
+
+        // F. The owner's chat, replayed: "Qwntahni" resolves straight to the booking, the follow-ups use it
+        $r1 = $chatF('When is Mr Qwntahni coming', 0);
+        $cv = (int)$r1['conversation_id'];
+        check($r1['ok'] && $r1['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r1['reply'], 'Mr Qwnthani') !== false && strpos($r1['reply'], 'Charles Qwnthani') !== false && strpos($r1['reply'], $refQ) !== false
+            && stripos($r1['reply'], 'do you mean') === false && rh_ai_focus_state($pdo, $cv)['focus'] === $qwId,
+            '"When is Mr Qwntahni coming": the one clear name is used at once, the real name and reference shown, no model call, and it becomes the chat\'s booking', $r1['reply'] . ' ' . $r1['error']);
+        $r2 = $chatF('How much was Mr Qwnthanis room', $cv);
+        $urls = array_column($r2['links'], 'url');
+        $labs = array_column($r2['links'], 'label');
+        check($r2['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r2['reply'], $tot) !== false && strpos($r2['reply'], 'Balance due') !== false && strpos($r2['reply'], "booking's own bill") !== false
+            && stripos($r2['reply'], 'ADR') === false && count($urls) === count(array_unique($urls)) && count($labs) === count(array_unique($labs)) && !in_array('Open the report', $labs, true),
+            '"How much was Mr Qwnthanis room": the booking\'s own bill (get_booking money), never a date-range report; no duplicate buttons', $r2['reply'] . ' ' . json_encode($r2['links']));
+        $r3 = $chatF('Are they getting free breakfast', $cv);
+        check($r3['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r3['reply'], 'Nothing on this booking includes breakfast') !== false && strpos($r3['reply'], 'Coffee and Tea') !== false && strpos($r3['reply'], 'Looked up') === false,
+            '"Are they getting free breakfast": answered from the booking\'s packages, rate plan and room extras (none mention breakfast), no "(Looked up"', $r3['reply']);
+        $r4 = $chatF("What's their balance?", $cv);
+        check($r4['route'] === 'local' && strpos($r4['reply'], $bal) !== false && (int)$r4['tokens_in'] === 0, '"What\'s their balance?": the booking in focus, from its own bill, zero tokens', $r4['reply']);
+        // A breakfast package on the booking: "Yes", and where it came from
+        $pdo->prepare("INSERT INTO room_packages (name, slug, price_type, price_amount, inclusions, is_active) VALUES ('AITest Bed and Breakfast', 'aitest-bnb', 'per_night', 0, ?, 1)")->execute([json_encode(['Full breakfast daily', 'Late check-out'])]);
+        $pkgId = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO booking_packages (booking_id, package_id, package_name, price_type, price_amount, quantity, total_cost) VALUES (?, ?, 'AITest Bed and Breakfast', 'per_night', 0, 1, 0)")->execute([$qwId, $pkgId]);
+        $r5 = $chatF('is brekfast included', $cv);
+        check($r5['route'] === 'local' && strpos($r5['reply'], 'Yes - breakfast is included') !== false && strpos($r5['reply'], 'AITest Bed and Breakfast') !== false && strpos($r5['reply'], 'Full breakfast daily') !== false,
+            '"is brekfast included" (a typo): yes, from the package and its inclusion line', $r5['reply']);
+        $gb = rh_ai_t_get_booking($pdo, $admF, ['booking_id' => $qwId]);
+        check(($gb['included']['breakfast'] ?? null) === true && ($gb['included']['packages'][0]['package'] ?? '') === 'AITest Bed and Breakfast' && in_array('Free WiFi', (array)($gb['included']['room_extras'] ?? []), true),
+            'get_booking shows what the stay includes (packages with inclusions, rate plan, room extras) and breakfast yes/no', json_encode($gb['included'] ?? null));
+        $rw = $chatF('cancel their booking', $cv, [['text' => 'I can prepare that.']]);
+        check(strpos($rw['reply'], 'Balance due') === false && strpos($rw['reply'], 'breakfast') === false, 'a change request ("cancel their booking") is never answered by a local read', $rw['reply']);
+
+        // Two similar names: one short clarifying question
+        $insB->execute(['AITQX' . random_int(100000, 999999), $qwRoom, 'Grace Qwmvula', 'johnpaulchirwa@gmail.com', $ci, $co]);
+        $insB->execute(['AITQY' . random_int(100000, 999999), $qwRoom, 'Grace Qwmvala', 'johnpaulchirwa@gmail.com', $ci, $co]);
+        $otherId = (int)$pdo->lastInsertId();
+        rh_ai_vault_people_reset();
+        $r6 = $chatF('When is Mr Qwmvila coming', 0);
+        check($r6['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r6['reply'], 'Do you mean') !== false && strpos($r6['reply'], 'Grace Qwmvula') !== false && strpos($r6['reply'], 'Grace Qwmvala') !== false
+            && rh_ai_focus_state($pdo, (int)$r6['conversation_id'])['focus'] === 0,
+            'two similar names ("Qwmvila"): one short "Do you mean ... or ...?" and no booking is assumed', $r6['reply']);
+        $s1 = rh_ai_t_search_bookings($pdo, $admF, ['query' => 'Qwntahni']);
+        $s2 = rh_ai_t_search_bookings($pdo, $admF, ['query' => 'Qwmvila']);
+        $s3 = rh_ai_t_search_bookings($pdo, $admF, ['query' => 'Zzqxvb']);
+        $h1 = rh_ai_t_guest_history($pdo, $admF, ['guest' => 'Charles Qwntahni']);
+        check(($s1['close_match'] ?? '') === 'clear' && (int)($s1['bookings'][0]['booking_id'] ?? 0) === $qwId && count((array)($s2['close_matches'] ?? [])) === 2 && !empty($s2['ask'])
+            && (int)($s3['count'] ?? -1) === 0 && empty($s3['close_matches']) && isset($s3['total_in_system'], $s3['latest_bookings']) && (int)($h1['bookings_found'] ?? 0) === 1 && !empty($h1['read_as']),
+            'search_bookings and guest_history: a clear close name is used (read_as), two are asked about, none gives the totals and the latest bookings', json_encode([$s1, $s2['ask'] ?? null, $h1['read_as'] ?? null]));
+
+        // An invented booking id is refused; the booking in focus is used
+        $ra = $chatF('When is Mr Qwntahni coming', 0);
+        $cvA = (int)$ra['conversation_id'];
+        $rb = $chatF('Tell me about the special requests on their booking', $cvA, [['tool_calls' => [['id' => 'f1', 'name' => 'get_booking', 'args' => ['booking_id' => $otherId]]]], ['text' => 'There are no special requests on it.']]);
+        $tr = (string)$pdo->query("SELECT tool_result_json FROM ai_messages WHERE conversation_id = " . $cvA . " AND tool_name = 'get_booking' ORDER BY id DESC LIMIT 1")->fetchColumn();
+        check($rb['ok'] && strpos($tr, '"booking_id":' . $qwId) !== false && strpos($tr, '"booking_id":' . $otherId . ',') === false && strpos($tr, 'did not come from this chat') !== false,
+            'a booking id the model made up (another guest\'s) is refused and the booking in focus is used', $tr);
+        $volA = '';
+        foreach ((array)$GLOBALS['ai2_calls'] as $call) {
+            $volA .= $call['body'];
+        }
+        check(strpos($volA, 'BOOKING IN FOCUS: booking_id ' . $qwId) !== false && strpos($volA, 'Charles Qwnthani') === false, 'the model is told the booking in focus by token only (no name leaves)', json_encode([count((array)$GLOBALS['ai2_calls']), strpos($volA, 'BOOKING IN FOCUS') !== false ? mb_substr($volA, (int)strpos($volA, 'BOOKING IN FOCUS'), 120) : 'no focus line', strpos($volA, 'Charles Qwnthani'), $rb['route']]));
+        // No focus: an invented id is refused, and a "(Looked up: ...)" stand-in never reaches the person
+        $rc = $chatF('Is breakfast included on their booking?', 0, [['tool_calls' => [['id' => 'f2', 'name' => 'get_booking', 'args' => ['booking_id' => $qwId]]]], ['text' => '(Looked up: hotel_info.)'], ['text' => '(Looked up: hotel_info.)']]);
+        $trc = (string)$pdo->query("SELECT tool_result_json FROM ai_messages WHERE conversation_id = " . (int)$rc['conversation_id'] . " AND tool_name = 'get_booking' ORDER BY id DESC LIMIT 1")->fetchColumn();
+        check($rc['ok'] && stripos($rc['reply'], 'looked up:') === false && strpos($trc, 'did not come from this chat') !== false, 'no booking in this chat: an id from nowhere is refused, and "(Looked up: ...)" never reaches the person', $rc['reply'] . ' | ' . $trc);
+        // The model finds the booking itself: the answer is built from get_booking if it gives none, and the focus is set
+        $rd = $chatF('Find the booking for Charles Qwnthani and tell me everything about it', 0, [['tool_calls' => [['id' => 'f3', 'name' => 'search_bookings', 'args' => ['query' => 'Charles Qwnthani']]]],
+            ['tool_calls' => [['id' => 'f4', 'name' => 'get_booking', 'args' => ['booking_id' => $qwId]]]], ['text' => '(Looked up: get_booking.)'], ['text' => '']]);
+        check(strpos($rd['reply'], 'Balance due') !== false && stripos($rd['reply'], 'looked up:') === false && rh_ai_focus_state($pdo, (int)$rd['conversation_id'])['focus'] === $qwId,
+            'a booking the model looked up becomes the chat\'s focus; an empty reply is built from get_booking (bill and inclusions)', $rd['reply']);
+
+        // Each lookup type resolves a typo to the right record
+        $pdo->prepare("INSERT INTO rooms (name, slug, description, price_per_night, max_guests, total_rooms, rooms_available, display_order, is_active) VALUES (?, ?, 'AITest', 1000, 2, 1, 1, 0, 1)")->execute(['AITest Qw VIP Villa', 'aitest-qw-vip-villa']);
+        $rt = rh_ai_find_room_type($pdo, 'aitest qw vip vila');
+        $rtAsk = rh_ai_room_type_ask($pdo, 'aitest qw lakesde villa');
+        $lk = [];
+        $lk['room type'] = ($rt['name'] ?? '') === 'AITest Qw VIP Villa';
+        try {
+            $pdo->prepare("INSERT INTO menu_categories (name, slug, is_active) VALUES ('AITest Qw Mains', 'aitest-qw-mains', 1)")->execute();
+            $catId = (int)$pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO menu_items (category_id, item_name, price, is_available) VALUES (?, 'AITest Qwchambo Fillet', 15000, 1)")->execute([$catId]);
+            $mn = rh_ai_menu_item($pdo, 'aitest qwchambo filet');
+            $lk['menu item'] = !empty($mn['read_as']) && strpos(json_encode($mn['items'] ?? []), 'AITest Qwchambo Fillet') !== false;
+        } catch (Throwable $e) {
+            $lk['menu item'] = 'skipped: ' . $e->getMessage();
+        }
+        $pdo->prepare("INSERT INTO stock_ingredients (name, unit, current_quantity, is_archived) VALUES ('AITest Qw Basmati Rice', 'kg', 5, 0)")->execute();
+        $st1 = rh_ai_t_inventory_watch($pdo, $admF, ['item' => 'AITest Qw Basmatti Rice']);
+        $lk['stock item'] = ($st1['match'] ?? '') === 'one' && !empty($st1['read_as']);
+        $pdo->prepare("INSERT INTO stock_suppliers (name) VALUES ('AITest Qw Lilongwe Millers')")->execute();
+        $sup1 = rh_ai_purchase_order_lookup($pdo, $admF, 'AITest Qw Lilongwe Milers');
+        $lk['supplier'] = !empty($sup1['read_as']) && ($sup1['read_as_name'] ?? '') === 'AITest Qw Lilongwe Millers';
+        $pdo->prepare("INSERT INTO gym_members (member_number, full_name, start_date, status) VALUES ('AQW-1', 'AITest Qw Tiwonge Mkandawire', CURDATE(), 'active')")->execute();
+        $gm1 = rh_ai_t_gym_watch($pdo, $admF, ['member' => 'AITest Qw Tiwonge Mkandawrie']);
+        $lk['gym member'] = ($gm1['match'] ?? '') === 'one' && !empty($gm1['read_as']);
+        $pdo->prepare("INSERT INTO gym_classes (title, day_label, time_label, level_label, is_active, display_order) VALUES ('AITest Qw Sunrise Pilates', 'Daily', '6:00 AM', 'All', 1, 0)")->execute();
+        $gc1 = rh_ai_t_gym_watch($pdo, $admF, ['class' => 'AITest Qw Sunrise Pilattes']);
+        $lk['gym class'] = !empty($gc1['read_as']) && strpos(json_encode($gc1['classes'] ?? []), 'AITest Qw Sunrise Pilates') !== false;
+        try {
+            $pdo->prepare("INSERT INTO event_inquiries (reference_number, event_id, name, email, phone, guests, status) VALUES (?, 0, 'AITest Qw Kamuzu Choir', 'johnpaulchirwa@gmail.com', '0999000777', 10, 'new')")->execute(['AITQE' . random_int(10000, 99999)]);
+            $ev1 = rh_ai_t_events_pipeline($pdo, $admF, ['query' => 'AITest Qw Kamuzu Chior']);
+            $lk['event name'] = !empty($ev1['read_as']) && ($ev1['match'] ?? '') === 'one';
+        } catch (Throwable $e) {
+            $lk['event name'] = 'skipped: ' . $e->getMessage();
+        }
+        $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, is_active) VALUES (?, 'aitestqw.staff@example.com', ?, 'Aitest Qw Chimwemwe Banda', 'receptionist', 1)")
+            ->execute(['aitestqw_' . bin2hex(random_bytes(3)), password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT)]);
+        $wo = rh_ai_t_who_is_online($pdo, $admF, ['staff' => 'Aitest Qw Chimwemwe Bnada']);
+        $lk['staff name'] = !empty($wo['read_as']) && ($wo['staff_name'] ?? '') === 'Aitest Qw Chimwemwe Banda' && ($wo['read_as_name']['staff_name'] ?? '') === 'Aitest Qw Chimwemwe Banda';
+        $pdo->prepare("INSERT INTO stock_orders (reference, order_type, table_number, customer_name, status, total_amount, subtotal, created_by) VALUES ('ORD-AITQW-1', 'dine_in', 'Q77', 'AITest Qw Mphatso Tab', 'placed', 1000, 1000, ?)")->execute([(int)$admF['id']]);
+        $or1 = rh_ai_t_order_status($pdo, $admF, ['name' => 'AITest Qw Mphatzo Tab']);
+        $lk['order tab'] = ($or1['match'] ?? '') === 'one' && !empty($or1['read_as']);
+        $gmRun = rh_ai_run_tool($pdo, $admF, $cvA, 'gym_watch', ['member' => 'AITest Qw Tiwonge Mkandawrie']);
+        $lk['person names leave as tokens'] = $gmRun['ok'] && strpos($gmRun['json'], 'Mkandawire') === false && strpos($gmRun['json'], '[GUEST_') !== false;
+        $lkBad = array_keys(array_filter($lk, static fn($v) => $v !== true));
+        check(!$lkBad, 'each lookup reads a typo as the right record: ' . implode(', ', array_keys($lk)), json_encode($lk));
+        check(strpos($rtAsk, 'Do you mean') !== false || $rtAsk === '', 'a room type that matches nothing exactly: a short "Do you mean ...?" when names are close', $rtAsk);
+
+        // Typo'd questions answer locally
+        $t1 = $chatF('arivals today', 0);
+        $t2 = $chatF('ocupancy this week', 0);
+        check($t1['route'] === 'local' && strpos($t1['reply'], 'Arrivals today') !== false && $t2['route'] === 'local' && strpos($t2['reply'], 'Occupancy this week') !== false && !$GLOBALS['ai2_calls'],
+            '"arivals today" and "ocupancy this week" are answered locally, no model call', $t1['reply'] . ' | ' . $t2['reply']);
+        $storedQ = (string)$pdo->query("SELECT content FROM ai_messages WHERE conversation_id = " . (int)$t1['conversation_id'] . " AND role = 'user' ORDER BY id LIMIT 1")->fetchColumn();
+        check($storedQ === 'arivals today', 'the person\'s own words are what is stored', $storedQ);
+
+        // Clear chats: archived (never deleted), a fresh chat starts, the rate limit still counts them
+        $before = (int)$pdo->query("SELECT COUNT(*) FROM ai_messages m JOIN ai_conversations c ON c.id = m.conversation_id WHERE c.user_id = " . (int)$admF['id'] . " AND m.role = 'user' AND m.created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)")->fetchColumn();
+        $nThis = rh_ai_chats_clear($pdo, (int)$admF['id'], 'this', $cv);
+        $nOther = rh_ai_chats_clear($pdo, 999999999, 'this', $cvA);
+        $nAll = rh_ai_chats_clear($pdo, (int)$admF['id'], 'all');
+        $left = (int)$pdo->query("SELECT COUNT(*) FROM ai_conversations WHERE user_id = " . (int)$admF['id'] . " AND archived = 0 AND page_path <> '" . RH_AI_CHECK_PAGE . "'")->fetchColumn();
+        $kept = (int)$pdo->query("SELECT COUNT(*) FROM ai_messages WHERE conversation_id = " . $cv)->fetchColumn();
+        $after = (int)$pdo->query("SELECT COUNT(*) FROM ai_messages m JOIN ai_conversations c ON c.id = m.conversation_id WHERE c.user_id = " . (int)$admF['id'] . " AND m.role = 'user' AND m.created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)")->fetchColumn();
+        check($nThis === 1 && $nOther === 0 && $nAll >= 1 && $left === 0 && $kept > 0 && $after === $before,
+            'clear: this chat or all my chats are archived (own chats only), the messages are kept and still count toward the rate limit', json_encode([$nThis, $nOther, $nAll, $left, $kept, $before, $after]));
+        $pdo->exec("UPDATE site_settings SET setting_value = '2' WHERE setting_key = 'ai_rate_limit_per_10min'");
+        rh_ai_settings($pdo, true);
+        check(rh_ai_rate_problem($pdo, (int)$admF['id']) !== '', 'archived (cleared) chats still count in the rate limit (no way round it by clearing)');
+        rh_ai_save_settings(['ai_rate_limit_per_10min' => '500'], $pdo);
+        rh_ai_settings($pdo, true);
+        $re = $chatF("What's their balance?", $cv);
+        check($re['ok'] && (int)$re['conversation_id'] !== $cv && strpos($re['reply'], 'Balance due') === false, 'a cleared chat is not carried on: the next question starts a fresh chat with no booking in focus', json_encode([$re['conversation_id'], $cv, $re['reply']]));
+    } catch (Throwable $e) {
+        bad('misspelling and booking focus checks threw', get_class($e) . ': ' . $e->getMessage() . ' @' . $e->getFile() . ':' . $e->getLine());
+    } finally {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        unset($GLOBALS['__rh_ai_module_override']);
+        rh_ai_settings($pdo, true);
+        rh_ai_vault_forget();
+        rh_ai_vault_people_reset();
+    }
+    check((int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE booking_reference LIKE 'AITQ%'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM rooms WHERE slug LIKE 'aitest-qw-%'")->fetchColumn() === 0
+        && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestqw%'")->fetchColumn() === 0, 'misspelling and focus checks rolled back (no test rows left)');
+
+    // Bounded work: a misspelt name costs a fixed number of queries whatever the number of bookings
+    $cqF = new RhAiCountPdo('mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET, DB_USER, DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    $cqF->beginTransaction();
+    try {
+        $roomAny = (int)$cqF->query("SELECT id FROM rooms ORDER BY id LIMIT 1")->fetchColumn();
+        $insC = $cqF->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests, total_amount, total_with_vat, amount_paid, amount_due, status)
+                               VALUES (?, ?, ?, 'johnpaulchirwa@gmail.com', '', CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 DAY), 1, 1, 1, 0, 10, 10, 0, 10, 'confirmed')");
+        $insC->execute(['AITQC' . random_int(100000, 999999), $roomAny, 'Charles Qwnthani']);
+        $countsF = [];
+        foreach ([3, 60] as $size) {
+            for ($i = 0; $i < $size; $i++) {
+                $insC->execute(['AITQC' . $size . 'x' . $i . random_int(1000, 9999), $roomAny, 'AITest Pool Guest ' . $size . ' ' . $i]);
+            }
+            $cqF->n = 0;
+            rh_ai_t_search_bookings($cqF, $admF, ['query' => 'Qwntahni']);
+            $clear = $cqF->n;
+            $cqF->n = 0;
+            rh_ai_t_search_bookings($cqF, $admF, ['query' => 'Zzqxvb']);
+            $countsF[$size] = [$clear, $cqF->n];
+        }
+        check($countsF[3] === $countsF[60] && max(array_merge($countsF[3], $countsF[60])) <= 4, 'a misspelt-name search runs a fixed number of queries (clear / none: ' . implode('/', $countsF[60]) . ') whether 3 or 60 more bookings exist', json_encode($countsF));
+    } catch (Throwable $e) {
+        bad('misspelt-name query-count checks threw', $e->getMessage() . ' @' . $e->getLine());
+    } finally {
+        if ($cqF->inTransaction()) {
+            $cqF->rollBack();
+        }
+    }
 }
 
 rh_ai_set_transport(null);

@@ -209,6 +209,34 @@ function rh_ai_guide_links(PDO $db, array $user, string $q, int $n = 2): array
     return $links;
 }
 
+/**
+ * Links for one reply, never the same button twice (owner fault 2026-10-29: "Open the report" showed twice): a link is
+ * left out when its page address or its words are already there. At most $max.
+ */
+function rh_ai_links_merge(array $links, array $add, int $max): array
+{
+    $out = [];
+    $urls = [];
+    $labels = [];
+    foreach (array_merge($links, $add) as $l) {
+        if (!is_array($l) || trim((string)($l['url'] ?? '')) === '') {
+            continue;
+        }
+        $u = mb_strtolower(trim((string)$l['url']));
+        $lb = mb_strtolower(trim((string)($l['label'] ?? '')));
+        if (isset($urls[$u]) || ($lb !== '' && isset($labels[$lb]))) {
+            continue;
+        }
+        $urls[$u] = true;
+        $labels[$lb] = true;
+        $out[] = $l;
+        if (count($out) >= $max) {
+            break;
+        }
+    }
+    return $out;
+}
+
 /** The reply says the data has nothing ("I can't find...", "I don't have that"). */
 function rh_ai_is_no_data_reply(string $t): bool
 {
@@ -495,6 +523,9 @@ function rh_ai_local_intent(string $t): ?array
     if (($look = rh_ai_lookup_intent($t)) !== null) {
         return $look; // one order, the open orders, a gym class / slot / member, memberships ending
     }
+    if (($occ = rh_ai_occupancy_intent($t)) !== null) {
+        return $occ; // "occupancy this week": the Reports figures for that period
+    }
     // today / tomorrow / yesterday are answered locally for arrivals and departures; other dates go to the model
     $when = '';
     if (preg_match('/\b(tomorrow|yesterday)\b/u', $t, $wm)) {
@@ -544,6 +575,28 @@ function rh_ai_local_intent(string $t): ?array
     return null;
 }
 
+/**
+ * "Occupancy this week", "what's our occupancy today", "occupancy rate last month": room_performance for that period,
+ * answered locally (the same figures as Reports). $t is lower-case with polite words removed. Anything longer (a
+ * comparison, a why) goes to the model.
+ * @return array{0:string,1:array}|null
+ */
+function rh_ai_occupancy_intent(string $t): ?array
+{
+    if (!preg_match('/^(?:what(?:\'s| is| was) )?(?:the |our )?(?:hotel(?:\'s)? )?occupancy(?: rate)?(?: (?:for |on )?(today|tonight|this week|this month|last week|last month|next week|next month|yesterday))?\??$/u', trim($t), $m)) {
+        return null;
+    }
+    $p = $m[1] ?? 'this month';
+    $mon = static fn(string $rel): string => date('Y-m-d', strtotime($rel));
+    $ranges = [
+        'today' => [$mon('today'), $mon('today')], 'tonight' => [$mon('today'), $mon('today')], 'yesterday' => [$mon('-1 day'), $mon('-1 day')],
+        'this week' => [$mon('monday this week'), $mon('sunday this week')], 'last week' => [$mon('monday last week'), $mon('sunday last week')],
+        'next week' => [$mon('monday next week'), $mon('sunday next week')], 'this month' => [date('Y-m-01'), date('Y-m-t')],
+        'last month' => [$mon('first day of last month'), $mon('last day of last month')], 'next month' => [$mon('first day of next month'), $mon('last day of next month')],
+    ];
+    [$from, $to] = $ranges[$p] ?? $ranges['this month'];
+    return ['room_performance', ['args' => ['from' => $from, 'to' => $to], '_when' => $p]];
+}
 /**
  * "Have we had any bookings (ever)?", "how many bookings", "total bookings", "latest bookings": answered locally from
  * search_bookings with no query (all-time totals + the latest rows). $t is lower-case with "how many" / "any" / "please"
@@ -1168,6 +1221,9 @@ function rh_ai_answer_from_results(array $results): string
             $txt = rh_ai_quote_local_text($res, ['check_in' => $res['check_in'], 'check_out' => $res['check_out'], 'adults' => $res['adults'], 'children' => $res['children'] ?? 0, 'rooms' => $res['rooms'] ?? 1]);
         } elseif (in_array($tool, ['in_house', 'room_board', 'who_is_online', 'my_access'], true)) {
             $txt = rh_ai_local_format($tool, [], $res);
+        } elseif ($tool === 'get_booking' && !empty($res['booking_id'])) {
+            // One booking: its line, its own bill and what it includes (owner fault 2026-10-29: never a "(Looked up: ...)" stand-in)
+            $txt = rh_ai_booking_line($res) . "\n\n" . rh_ai_booking_money_text($res) . "\n\n" . rh_ai_booking_included_text($res, false);
         } else {
             // No generic dump of other results (QA 2026-10-28): a filtered search's "0 matches" must never go out as
             // "none" without the checked total. The caller says plainly that it could not put the answer together.
@@ -1282,6 +1338,12 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
     }
     if ($tool === 'room_rates') {
         return rh_ai_rates_local_text($view, $r);
+    }
+    if ($tool === 'room_performance' && isset($r['occupancy_pct'])) {
+        $cur = (string)($r['currency'] ?? '');
+        return '**Occupancy ' . (string)($view['_when'] ?? '') . ' (' . $r['from'] . ($r['to'] !== $r['from'] ? ' to ' . $r['to'] : '') . '): ' . $r['occupancy_pct'] . '%**'
+            . ' · ' . (int)$r['room_nights_sold'] . ' of ' . (int)$r['room_nights_available'] . ' room-nights sold · ADR ' . rh_ai_fmt_cur($cur, $r['adr_incl_vat']) . ' · RevPAR ' . rh_ai_fmt_cur($cur, $r['revpar'])
+            . "\n\nThe same figures as Reports for these dates (ADR and RevPAR include VAT).";
     }
     $room = static function (array $x): string {
         return ($x['room_type'] ?? '') . (!empty($x['room_number']) ? ' · room ' . $x['room_number'] : ' · no room yet');
@@ -1878,18 +1940,20 @@ function rh_ai_swarm_consult(PDO $db, array $user, int $conv, array $models, arr
                 $state[$k]['messages'][] = ['role' => 'assistant', 'content' => $r['text'], 'tool_calls' => $r['tool_calls']];
                 foreach ($r['tool_calls'] as $i => $c) {
                     $name = (string)$c['name'];
+                    $sgArgs = (array)$c['args'];
+                    if ($name === 'get_booking') { // a booking id or reference must come from this chat (owner fault 2026-10-29)
+                        $sgArgs = rh_ai_booking_args_guard($db, $conv, $sgArgs, rh_ai_focus_state($db, $conv)['focus'])[0];
+                    }
                     if ($i >= 4 || !in_array($name, $team[$k]['tools'], true)) {
                         $json = '{"error":"That lookup is not one of your tools."}';
+                    } elseif ($sgArgs === null) {
+                        $json = '{"error":"That booking did not come from this chat. Find it first with search_bookings."}';
                     } else {
                         rh_ai_step_set($db, $uid, rh_ai_tool_step($name));
-                        $tr = rh_ai_run_tool($db, $user, $conv, $name, (array)$c['args']);
+                        $tr = rh_ai_run_tool($db, $user, $conv, $name, $sgArgs);
                         $json = $tr['json'];
                         $budget['tools_used'][] = $name;
-                        foreach ($tr['links'] as $l) {
-                            if (count($budget['links']) < 3 && !in_array($l, $budget['links'], true)) {
-                                $budget['links'][] = $l;
-                            }
-                        }
+                        $budget['links'] = rh_ai_links_merge($budget['links'], $tr['links'], 3);
                         rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $name, 'args' => rh_ai_vault_protect($db, $conv, (array)$c['args']), 'result' => $json, 'agent' => 'specialist:' . $k]);
                     }
                     $state[$k]['evidence'] .= "\n" . $json;
@@ -2117,6 +2181,28 @@ function rh_ai_conversation_create(PDO $db, int $uid, string $page): int
     return (int)$db->lastInsertId();
 }
 
+/**
+ * Clear chats (owner 2026-10-29: "be able to clear the chats easily"): this chat, or all of this person's chats, are
+ * ARCHIVED - never deleted. Messages stay, so the rate limit still counts them, and confirmed cards and their
+ * tamper-evident record are untouched. The automatic checks' chats are left alone. Returns how many were cleared.
+ */
+function rh_ai_chats_clear(PDO $db, int $uid, string $scope, int $conv = 0): int
+{
+    if ($uid <= 0) {
+        return 0;
+    }
+    if ($scope === 'all') {
+        $st = $db->prepare("UPDATE ai_conversations SET archived = 1 WHERE user_id = ? AND archived = 0 AND page_path <> ?");
+        $st->execute([$uid, RH_AI_CHECK_PAGE]);
+        return $st->rowCount();
+    }
+    if ($conv <= 0 || !rh_ai_conversation($db, $uid, $conv)) {
+        return 0;
+    }
+    $st = $db->prepare("UPDATE ai_conversations SET archived = 1 WHERE id = ? AND user_id = ? AND archived = 0");
+    $st->execute([$conv, $uid]);
+    return $st->rowCount();
+}
 function rh_ai_message_add(PDO $db, int $conv, string $role, string $content, array $extra = []): int
 {
     $db->prepare("INSERT INTO ai_messages (conversation_id, role, agent, content, tool_name, tool_args_json, tool_result_json, provider, model_id, tokens_in, tokens_out, cost_usd, latency_ms)
@@ -2532,11 +2618,7 @@ function rh_ai_prefetch(PDO $db, array $user, int $conv, array $lanes, string $t
             continue;
         }
         $budget['tools_used'][] = $t;
-        foreach ($tr['links'] as $l) {
-            if (count($budget['links']) < 3 && !in_array($l, $budget['links'], true)) {
-                $budget['links'][] = $l;
-            }
-        }
+        $budget['links'] = rh_ai_links_merge($budget['links'], $tr['links'], 3);
         $budget['evidence'] .= "\n" . $tr['json'];
         rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $t, 'args' => $args, 'result' => $tr['json'], 'agent' => 'prefetch']);
         $parts[] = $t . ': ' . $tr['view'];
@@ -2649,9 +2731,13 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     $page = basename((string)($in['page'] ?? ''));
     $bookingId = max(0, (int)($in['booking_id'] ?? 0));
     $conv = (int)($in['conversation_id'] ?? 0);
-    if ($conv > 0 && !rh_ai_conversation($db, $uid, $conv)) {
+    $convRow = $conv > 0 ? rh_ai_conversation($db, $uid, $conv) : null;
+    if ($conv > 0 && !$convRow) {
         $out['error'] = 'That conversation was not found.';
         return $out;
+    }
+    if ($convRow && (int)$convRow['archived'] === 1) {
+        $conv = 0; // a cleared (archived) chat is not carried on: a fresh one starts
     }
     $new = $conv <= 0;
     $lastLocal = $new ? null : rh_ai_last_local($db, $conv);
@@ -2667,6 +2753,15 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         $db->prepare("UPDATE ai_conversations SET title = ? WHERE id = ?")->execute([rh_ai_title_from($tok), $conv]);
     }
     $GLOBALS['__rh_ai_current_q'] = mb_substr($tok, 0, 400); // tokenised: kept with any incident this question raises
+    // Typos in the question's own words (owner 2026-10-29: "arivals", "ocupancy", "brekfast"): read locally, PHP only. The
+    // local answers read the corrected text; the stored message stays as typed; the model is told the words read.
+    $typo = rh_ai_typo_fix($tok, rh_ai_module_on('bookings') ? array_column(rh_ai_room_type_names($db), 'name') : []);
+    $tokQ = $typo['text'];
+    $msgQ = $message;
+    foreach ($typo['fixed'] as $typed => $readAs) {
+        $msgQ = (string)preg_replace('/(?<![\p{L}])' . preg_quote((string)$typed, '/') . '(?![\p{L}])/u', (string)$readAs, $msgQ);
+    }
+    $typoNote = rh_ai_typo_note($typo['fixed']);
     // Learning from staff: "no, breakfast starts at 6:30" becomes a fact candidate (probation, never a rule).
     $learned = '';
     if (!rh_ai_eval_mode() && rh_ai_memory_ready($db) && ($fact = rh_ai_chat_correction($tok)) !== '') {
@@ -2678,7 +2773,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     }
 
     $finish = static function (string $tokReply, string $route, array $extra = []) use ($db, $conv, $uid, &$out, $learned): array {
-        $links = (array)($extra['links'] ?? []);
+        $links = rh_ai_links_merge([], (array)($extra['links'] ?? []), 4); // never the same button twice (same page or same words)
         $chips = (array)($extra['chips'] ?? []);
         $items = (array)($extra['items'] ?? []);
         if ($learned !== '' && strpos((string)($extra['notice'] ?? ''), $learned) === false) {
@@ -2700,6 +2795,12 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         }
         if (!empty($extra['playbook'])) {
             $meta['playbook'] = (int)$extra['playbook'];
+        }
+        if (array_key_exists('focus', $extra) && $extra['focus'] !== null) { // the booking this chat is about (owner fault 2026-10-29)
+            $meta['focus'] = (int)$extra['focus'];
+        }
+        if (!empty($extra['focus_offer'])) {
+            $meta['focus_offer'] = (int)$extra['focus_offer'];
         }
         $out['message_id'] = rh_ai_message_add($db, $conv, 'assistant', $tokReply, [
             'agent' => $route, 'args' => $meta,
@@ -2723,7 +2824,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     };
 
     // 1a. Not about the hotel: a friendly one-line steer back, no tokens
-    if (rh_ai_is_off_topic($tok)) {
+    if (rh_ai_is_off_topic($tokQ)) {
         return $finish(rh_ai_off_topic_line(), 'declined');
     }
     // 1a+. A change nobody can make here (stock, till, payments, prices, closes): one line and the screen, any role
@@ -2733,7 +2834,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         return $finish($nw[0] . ($help !== '' ? "\n\n" . $help : ''), 'declined', ['links' => array_merge($nw[1], rh_ai_guide_links($db, $user, $tok))]);
     }
     // 1b. Outside this person's permissions: owner's one line, no figure, no tokens; then what they CAN do
-    if (rh_ai_scope_block($user, $tok) !== '') {
+    if (rh_ai_scope_block($user, $tokQ) !== '') {
         $help = rh_ai_can_help_line($user);
         return $finish(rh_ai_out_of_scope_line() . ($help !== '' ? "\n\n" . $help : ''), 'declined', ['chips' => ['What can I do here?'], 'links' => rh_ai_guide_links($db, $user, $tok, 1)]);
     }
@@ -2741,28 +2842,34 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     // lookups behind the last answer run again without filters and the Primary model answers (owner fault 2026-10-28).
     $contradict = !$new && (rh_ai_is_contradiction($tok) || rh_ai_last_reply_not_right($db, $uid, $conv));
     // 1c. Small talk (greeting, thanks, a hard shift): a short friendly reply, no tokens
-    if (!$contradict && ($st = rh_ai_small_talk($tok, $user)) !== null) {
+    // 1b++. One booking (owner fault 2026-10-29): a person search, "yes" to "Do you mean ...?", and money / what's included /
+    // dates for the booking this chat is about - answered locally from get_booking, zero tokens. Never a change request.
+    $focusState = $new ? ['focus' => 0, 'offer' => 0] : rh_ai_focus_state($db, $conv);
+    if (!$contradict && ($fl = rh_ai_focus_local($db, $user, $conv, $msgQ, $tokQ, $focusState)) !== null) {
+        return $finish($fl['text'], 'local', ['links' => $fl['links'], 'chips' => $fl['chips'], 'focus' => $fl['focus'] ?? null, 'focus_offer' => $fl['focus_offer'] ?? 0]);
+    }
+    if (!$contradict && ($st = rh_ai_small_talk($tokQ, $user)) !== null) {
         return $finish($st[0], 'local', ['chips' => $st[1]]);
     }
     // 1d. The daily briefing on request: deterministic findings, one short explanation
-    if (rh_ai_is_briefing_request($tok)) {
+    if (rh_ai_is_briefing_request($tokQ)) {
         $b = rh_ai_briefing_build($db, $user, $conv, false); // local findings, zero tokens
         return $finish($b['text'], 'briefing', ['items' => $b['items'], 'chips' => $b['chips'], 'provider' => $b['provider'], 'model' => $b['model'],
             'tokens_in' => $b['tokens_in'], 'tokens_out' => $b['tokens_out'], 'cost' => $b['cost'], 'ms' => $b['ms']]);
     }
     // 1e. Same question asked moments ago in this chat (same person, permission set and screen).
     // Kept per conversation so the cached reply's tokens always belong to this chat's vault.
-    $norm = trim(preg_replace('/[^\p{L}\p{N} ]+/u', '', mb_strtolower($tok)));
+    $norm = trim(preg_replace('/[^\p{L}\p{N} ]+/u', '', mb_strtolower($tokQ)));
     $answerKey = rh_ai_cache_key($user, 'answer:' . $conv . ':' . $page . ':' . $bookingId, $norm);
     $hit = $contradict ? null : rh_ai_cache_get($db, $answerKey);
     if ($hit !== null && isset($hit['reply_tok'])) {
         return $finish((string)$hit['reply_tok'], 'cache', ['links' => (array)($hit['links'] ?? []), 'chips' => (array)($hit['chips'] ?? [])]);
     }
     // 1f. Exact lookups straight from a read tool, and follow-ups of them ("and tomorrow?")
-    $intent = $contradict ? null : rh_ai_local_intent($tok);
+    $intent = $contradict ? null : rh_ai_local_intent($tokQ);
     // 1f+. Room questions that need the room type names (owner 2026-10-28): one type's rates locally, and a party with
     // dates always priced by quote_stay here (the exact reason and real alternatives when it does not fit), zero tokens.
-    if (!$contradict && $intent === null && ($room = rh_ai_room_intent($db, $tok)) !== null) {
+    if (!$contradict && $intent === null && ($room = rh_ai_room_intent($db, $tokQ)) !== null) {
         if ($room[0] === 'room_rates') {
             $intent = $room;
         } elseif (!rh_ai_module_on('bookings')) {
@@ -2779,7 +2886,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         }
     }
     if (!$contradict && $intent === null) {
-        $intent = rh_ai_followup_local($tok, $lastLocal);
+        $intent = rh_ai_followup_local($tokQ, $lastLocal);
     }
     if ($intent !== null) {
         [$tool, $view] = $intent;
@@ -2824,15 +2931,15 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         return $out;
     }
     $team = rh_ai_specialists_for_user($user);
-    $lanes = rh_ai_lanes_for($team, $tok);
-    $kind = rh_ai_needs_reasoning($tok) ? 'advice' : ($lanes ? 'lookup' : 'short');
+    $lanes = rh_ai_lanes_for($team, $tokQ);
+    $kind = rh_ai_needs_reasoning($tokQ) ? 'advice' : ($lanes ? 'lookup' : 'short');
     if ($kind === 'advice' && !$lanes) {
         $lanes = rh_ai_advice_default_lanes($team);
     }
     $route = ($kind === 'advice' || !$fast) && $primary ? 'primary' : 'fast';
     // What the hotel has taught it: up to 8 notes (local BM25), quoted, after the cache breakpoint. Notes never
     // reach the tool list, permissions, limits or the confirm step (decided above and below, in code).
-    $mem = rh_ai_memory_retrieve($db, $user, $tok, $page);
+    $mem = rh_ai_memory_retrieve($db, $user, $tokQ, $page);
     $memBlock = rh_ai_memory_block($mem);
     $playbook = rh_ai_memory_playbook($mem);
     if ($playbook && $route === 'primary' && $fast && $primary) {
@@ -2853,7 +2960,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         $lanes = ['front_desk']; // a change that names no department is a booking change
         $kind = $kind === 'short' ? 'lookup' : $kind;
     }
-    $factTools = rh_ai_hotel_fact_question($tok) ? ['hotel_info'] : []; // hours, menu, facilities...: the hotel's own facts
+    $factTools = rh_ai_hotel_fact_question($tokQ) ? ['hotel_info'] : []; // hours, menu, facilities...: the hotel's own facts
     if ($factTools && $kind === 'short') {
         $kind = 'lookup'; // a fact is looked up, never answered from general knowledge (Fast model)
     }
@@ -2863,6 +2970,9 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     $frozen = rh_ai_context_frozen($db);
     $userBlock = rh_ai_context_user($db, $conv, $user, $prefs);
 
+    // Short, per-turn (never in the cached prompt): the booking this chat is about, and words read as typos
+    $turnNotes = implode("\n", array_filter([rh_ai_focus_note($db, $user, $conv, (int)$focusState['focus']), $typoNote]));
+    $turnNotes = $turnNotes !== '' ? $turnNotes . "\n\n" : '';
     $messages = $hist['messages']; // older turns are already folded into the rolling summary
     $histCount = count($messages);
     // What a reply may draw figures from: this turn's tool results, the question, the context sent, the chat so far.
@@ -2875,7 +2985,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     $prefetched = false;
     $question = $tok;
     if ($kind === 'advice') {
-        $data = rh_ai_prefetch($db, $user, $conv, $lanes, $tok, $budget);
+        $data = rh_ai_prefetch($db, $user, $conv, $lanes, $tokQ, $budget);
         $prefetched = true;
         if ($data !== '') {
             $question .= "\n\n" . $data;
@@ -2930,7 +3040,7 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
                 $offer[] = $consultSpec;
             }
         }
-        $volatile = rh_ai_context_volatile($db, $conv, $user, $page, $bookingId, $hist['summary'], $memBlock !== '' ? $memBlock . "\n\n" . $note : $note);
+        $volatile = rh_ai_context_volatile($db, $conv, $user, $page, $bookingId, $hist['summary'], $turnNotes . ($memBlock !== '' ? $memBlock . "\n\n" . $note : $note));
         $req = [
             'provider' => $models['provider'], 'model' => $m['model_id'],
             'system_frozen' => $frozen, 'system_user' => $userBlock, 'system_volatile' => $volatile,
@@ -3021,20 +3131,28 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
                 } elseif (isset($seenCalls[rh_ai_call_key($name, (array)$c['args'])])) {
                     // The same lookup again: the earlier result again (not run again, adds nothing new).
                     $json = $seenCalls[rh_ai_call_key($name, (array)$c['args'])];
+                } elseif ($name === 'get_booking' && ($bkGuard = rh_ai_booking_args_guard($db, $conv, (array)$c['args'], (int)$focusState['focus'], $bookingId, $message))[0] === null) {
+                    // A booking id or reference that did not come from this chat (owner fault 2026-10-29: an invented id) is refused
+                    $json = rh_ai_compact_json(['error' => $bkGuard[1]]);
+                    $budget['tools_used'][] = $name;
+                    $newInfo = true;
+                    rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $name, 'args' => rh_ai_vault_protect($db, $conv, (array)$c['args']), 'result' => $json, 'agent' => $route]);
                 } else {
                     rh_ai_step_set($db, $uid, rh_ai_tool_step($name));
-                    $tr = rh_ai_run_tool($db, $user, $conv, $name, (array)$c['args']);
+                    $runArgs = $name === 'get_booking' && isset($bkGuard) ? (array)$bkGuard[0] : (array)$c['args']; // an invented id: the booking in focus
+                    $tr = rh_ai_run_tool($db, $user, $conv, $name, $runArgs);
                     $json = $tr['json'];
                     $view = $tr['view']; // the model gets the summary; the full result stays here as evidence
+                    if ($name === 'get_booking' && isset($bkGuard) && $bkGuard[1] !== '') {
+                        $json = rh_ai_compact_json(['note' => $bkGuard[1]] + (array)json_decode($json, true));
+                        $view = rh_ai_compact_json(['note' => $bkGuard[1]] + (array)json_decode((string)$view, true));
+                    }
+                    unset($bkGuard);
                     $budget['tools_used'][] = $name;
                     if ($tr['ok']) {
-                        $budget['results'][] = [$name, (array)$tr['result'], (array)$c['args']]; // an answer can be built from these if the model gives none
+                        $budget['results'][] = [$name, (array)$tr['result'], $runArgs]; // an answer can be built from these if the model gives none
                     }
-                    foreach ($tr['links'] as $l) {
-                        if (count($budget['links']) < 3 && !in_array($l, $budget['links'], true)) {
-                            $budget['links'][] = $l;
-                        }
-                    }
+                    $budget['links'] = rh_ai_links_merge($budget['links'], $tr['links'], 3);
                     rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $name, 'args' => rh_ai_vault_protect($db, $conv, (array)$c['args']), 'result' => $json, 'agent' => $route]);
                     $seenCalls[rh_ai_call_key($name, (array)$c['args'])] = $view;
                     if (!isset($seenResults[md5($json)])) {
@@ -3150,15 +3268,13 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
     $chips = rh_ai_followup_chips($user, array_unique($budget['tools_used']));
     // Nothing found (owner 2026-10-28): the best 2 guide sections and 2-3 starter questions for this screen (local, no tokens)
     if (!$budget['cards'] && rh_ai_is_no_data_reply($final)) {
-        foreach (rh_ai_guide_links($db, $user, $tok) as $l) {
-            if (count($budget['links']) < 4 && !in_array($l, $budget['links'], true)) {
-                $budget['links'][] = $l;
-            }
-        }
+        $budget['links'] = rh_ai_links_merge($budget['links'], rh_ai_guide_links($db, $user, $tok), 4);
         $sugs = array_values(array_filter(rh_ai_suggestions($user, $page), static fn($x) => $x !== 'Give me the tea' && strcasecmp($x, $message) !== 0));
         $chips = array_slice(array_values(array_unique(array_merge(array_slice($sugs, 0, 3), $chips))), 0, 3);
     }
-    $res = $finish($final, $consulted ? 'swarm' : $route, ['links' => $budget['links'], 'chips' => $chips, 'cards' => $budget['cards'], 'provider' => $models['provider'], 'model' => $usedModel,
+    $focusNow = rh_ai_focus_from_results($budget['results']); // the booking this turn settled on (none: the focus stays as it was)
+    $res = $finish($final, $consulted ? 'swarm' : $route, ['focus' => $focusNow['focus'] ?? null, 'focus_offer' => $focusNow['focus_offer'] ?? 0,
+        'links' => $budget['links'], 'chips' => $chips, 'cards' => $budget['cards'], 'provider' => $models['provider'], 'model' => $usedModel,
         'tokens_in' => $budget['in'], 'tokens_out' => $budget['out'], 'cost' => round($budget['cost'], 6), 'ms' => $budget['ms'], 'notice' => $notice,
         'memory' => array_column($mem, 'id'), 'playbook' => $playbook ? (int)$playbook['id'] : 0]);
     $res['answer_kind'] = $kind;

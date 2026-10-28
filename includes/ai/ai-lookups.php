@@ -120,6 +120,7 @@ function rh_ai_order_state(array $o, array $items): array
 
 function rh_ai_t_order_status(PDO $db, array $user, array $a): array
 {
+    $fuzzy = empty($a['_close']);
     $n = rh_ai_num('ai_lookup_matches');
     $hours = rh_ai_num('ai_order_lookback_hours');
     $uid = (int)$user['id'];
@@ -273,8 +274,17 @@ function rh_ai_t_order_status(PDO $db, array $user, array $a): array
         return $withLink($base + ['match' => 'several', 'asked' => $asked, 'orders' => array_map($summary, array_slice($rows, 0, $n)),
             'more' => count($rows) > $n ? 'more than ' . $n . ' match; ask with the order reference' : null, 'ask' => 'Several orders match: ask which one.'], $link);
     }
+    // A misspelt tab or guest name (owner 2026-10-29): the one clearly closest name on this person's recent orders is used
+    $ask = [];
+    if ($name !== '' && $fuzzy) {
+        $p = rh_ai_fuzzy_from_table($db, $name, 'stock_orders o', 'o.customer_name', "($openSql OR o.created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR))$scope", array_merge([$hours], $scopeArgs), 'o.created_at DESC');
+        if ($p['clear'] !== null) {
+            return rh_ai_fuzzy_note($name, $p['clear'], [], 'guest_name') + rh_ai_t_order_status($db, $user, ['name' => $p['clear'], '_close' => 1]);
+        }
+        $ask = rh_ai_fuzzy_note($name, null, $p['options'], 'guest_name');
+    }
     // None: say so, then what IS there (the orders open now; for a room, its latest orders)
-    $out = $base + ['match' => 'none', 'asked' => $asked,
+    $out = $ask + $base + ['match' => 'none', 'asked' => $asked,
         'not_found' => 'No ' . ($ref !== '' ? 'order with that reference' : 'open order, or order in the last ' . $hours . ' hours, for ' . $asked) . ($all ? '' : ' among the orders this person opened') . '.'];
     $openRows = $openNow();
     $out['open_now'] = $openRows ? array_map(static fn($o) => ['order_ref' => (string)$o['reference'], 'table' => (string)($o['table_number'] ?? ''), 'room' => (string)($o['room_number'] ?? ''),
@@ -362,6 +372,14 @@ function rh_ai_gym_member_lookup(PDO $db, array $user, string $q): array
             'starts' => $m['start_date'], 'ends' => $m['expiry_date'] ?? 'no end date',
             'days_left' => $m['expiry_date'] === null ? null : max(0, (int)$m['days_left']), 'complimentary' => (int)$m['is_complimentary'] === 1 ? true : null];
     };
+    $ask = [];
+    if (!$rows && !preg_match('/\d/', $q)) { // a misspelt name (owner 2026-10-29): the one clearly closest member is used
+        $p = rh_ai_fuzzy_from_table($db, $q, 'gym_members', 'full_name', '1=1', [], "(status = 'active') DESC, id DESC");
+        if ($p['clear'] !== null && mb_strtolower($p['clear']) !== mb_strtolower($q)) {
+            return rh_ai_fuzzy_note($q, $p['clear'], [], 'guest_name') + rh_ai_gym_member_lookup($db, $user, $p['clear']);
+        }
+        $ask = rh_ai_fuzzy_note($q, null, $p['options'], 'guest_name');
+    }
     if (!$rows) {
         // Nearest names: any word of what was asked (3+ letters), or a name that sounds the same
         $words = array_values(array_filter(preg_split('/\s+/u', $q), static fn($w) => mb_strlen($w) >= 3));
@@ -375,7 +393,7 @@ function rh_ai_gym_member_lookup(PDO $db, array $user, string $q): array
         }
         // A miss is not "no members": how many are on file (one query)
         $onFile = (int)$db->query("SELECT COUNT(*) FROM gym_members")->fetchColumn();
-        return $out + ['match' => 'none', 'not_found' => 'No gym member matches that name, phone or member number.', 'nearest_matches' => $near ?: 'none close', 'members_on_file' => $onFile];
+        return $out + ['match' => 'none', 'not_found' => 'No gym member matches that name, phone or member number.', 'nearest_matches' => $near ?: 'none close', 'members_on_file' => $onFile] + $ask;
     }
     if (count($rows) > 1) {
         return $out + ['match' => 'several', 'members' => array_map($line, array_slice($rows, 0, $n)), 'more' => count($rows) > $n ? 'more than ' . $n . ' match; ask with the member number' : null, 'ask' => 'Several members match: ask which one.'];
@@ -473,6 +491,18 @@ function rh_ai_gym_class_lookup(PDO $db, array $user, array $a): array
         }
     }
     $match = array_slice($match, 0, $n);
+    $classAsk = [];
+    if (!$match && $class !== '' && empty($a['_close'])) { // a misspelt class (owner 2026-10-29): the classes already read, no extra query
+        $titles = [];
+        foreach ($all as $c) {
+            $titles[(string)$c['title']] = (string)$c['title'];
+        }
+        $p = rh_ai_fuzzy_pick($class, $titles);
+        if ($p['clear'] !== null) {
+            return rh_ai_fuzzy_note($class, $p['clear']) + rh_ai_gym_class_lookup($db, $user, ['class' => $p['clear'], '_close' => 1] + $a);
+        }
+        $classAsk = rh_ai_fuzzy_note($class, null, $p['options']);
+    }
     if ($match) {
         $ids = array_map(static fn($c) => (int)$c['id'], $match);
         $counts = [];
@@ -499,6 +529,7 @@ function rh_ai_gym_class_lookup(PDO $db, array $user, array $a): array
         }
     } elseif ($class !== '') {
         $out['class_not_found'] = 'No active class is called that.';
+        $out += $classAsk;
         $out['other_classes'] = array_map(static fn($c) => rh_ai_plain((string)$c['title'], 60) . ' — ' . rh_ai_plain(trim($c['day_label'] . ' ' . $c['time_label']), 60), array_slice($all, 0, $n)) ?: 'no classes set up';
     } elseif ($hourKey !== '') {
         $out['no_class'] = 'No class at that time on ' . date('l', strtotime($date)) . '.';
@@ -564,7 +595,7 @@ function rh_ai_gym_class_lookup(PDO $db, array $user, array $a): array
 
 // ── Conference and events: one booking ───────────────────────────────────────
 
-function rh_ai_events_lookup(PDO $db, array $user, string $q): array
+function rh_ai_events_lookup(PDO $db, array $user, string $q, bool $fuzzy = true): array
 {
     $n = rh_ai_num('ai_lookup_matches');
     $q = trim($q);
@@ -619,7 +650,23 @@ function rh_ai_events_lookup(PDO $db, array $user, string $q): array
     if ($found) {
         return $out + ['match' => 'several', 'bookings' => array_slice($found, 0, $n), 'more' => count($found) > $n ? 'more than ' . $n . ' match; ask with the reference' : null, 'ask' => 'Several bookings match: ask which one.'];
     }
-    return $out + ['match' => 'none', 'not_found' => 'No conference or event booking matches that reference or name.'];
+    $ask = [];
+    if ($fuzzy && !preg_match('/\d/', $q)) { // a misspelt company or name (owner 2026-10-29): one query per part this person may see
+        $labels = [];
+        if (rh_ai_module_on('conference') && rh_ai_perm_any($user, ['conference'])) {
+            $labels = array_merge($labels, rh_ai_fuzzy_labels($db, $q, 'conference_inquiries', 'company_name', '1=1', [], 'event_date DESC'));
+        }
+        if (rh_ai_module_on('events') && rh_ai_perm_any($user, ['events_bookings', 'events'])) {
+            $labels = array_merge($labels, rh_ai_fuzzy_labels($db, $q, 'event_inquiries', 'name', '1=1', [], 'created_at DESC'));
+        }
+        $labels = array_values(array_unique($labels));
+        $p = rh_ai_fuzzy_pick($q, $labels ? array_combine($labels, $labels) : []);
+        if ($p['clear'] !== null) {
+            return rh_ai_fuzzy_note($q, $p['clear'], [], 'guest_name') + rh_ai_events_lookup($db, $user, $p['clear'], false);
+        }
+        $ask = rh_ai_fuzzy_note($q, null, $p['options'], 'guest_name');
+    }
+    return $out + ['match' => 'none', 'not_found' => 'No conference or event booking matches that reference or name.'] + $ask;
 }
 
 // ── Housekeeping and maintenance: one room ───────────────────────────────────
@@ -684,7 +731,7 @@ function rh_ai_stock_level_word(float $qty, float $thr): string
     return $thr > 0 && $qty <= $thr ? 'low' : 'ok';
 }
 
-function rh_ai_stock_item_lookup(PDO $db, array $user, string $q): array
+function rh_ai_stock_item_lookup(PDO $db, array $user, string $q, bool $fuzzy = true): array
 {
     $n = rh_ai_num('ai_lookup_matches');
     $q = trim($q);
@@ -695,6 +742,14 @@ function rh_ai_stock_item_lookup(PDO $db, array $user, string $q): array
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     $line = static fn($i) => ['item' => rh_ai_plain((string)$i['name'], 80), 'unit' => (string)$i['unit'], 'quantity' => round((float)$i['current_quantity'], 2),
         'level' => rh_ai_stock_level_word((float)$i['current_quantity'], (float)$i['threshold']), 'reorder_at' => (float)$i['threshold'] > 0 ? round((float)$i['threshold'], 2) : null];
+    $ask = [];
+    if (!$rows && $fuzzy) { // a misspelt item (owner 2026-10-29): the one clearly closest item is used
+        $p = rh_ai_fuzzy_from_table($db, $q, 'stock_ingredients', 'name', 'is_archived = 0', [], 'id DESC');
+        if ($p['clear'] !== null) {
+            return rh_ai_fuzzy_note($q, $p['clear']) + rh_ai_stock_item_lookup($db, $user, $p['clear'], false);
+        }
+        $ask = rh_ai_fuzzy_note($q, null, $p['options']);
+    }
     if (!$rows) {
         $words = array_values(array_filter(preg_split('/\s+/u', $q), static fn($w) => mb_strlen($w) >= 3));
         $near = [];
@@ -705,7 +760,7 @@ function rh_ai_stock_item_lookup(PDO $db, array $user, string $q): array
             $near = array_map($line, $st->fetchAll(PDO::FETCH_ASSOC));
         }
         $onFile = (int)$db->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn(); // a miss is not "no stock"
-        return ['match' => 'none', 'not_found' => 'No stock item is called that.', 'nearest_items' => $near ?: 'none close', 'items_on_file' => $onFile];
+        return ['match' => 'none', 'not_found' => 'No stock item is called that.', 'nearest_items' => $near ?: 'none close', 'items_on_file' => $onFile] + $ask;
     }
     if (count($rows) > 1) {
         return ['match' => 'several', 'items' => array_map($line, array_slice($rows, 0, $n)), 'more' => count($rows) > $n ? 'more than ' . $n . ' match; ask with the full name' : null, 'ask' => 'Several items match: ask which one.'];
@@ -740,7 +795,7 @@ function rh_ai_stock_item_lookup(PDO $db, array $user, string $q): array
     return ['match' => 'one', 'item' => $one];
 }
 
-function rh_ai_purchase_order_lookup(PDO $db, array $user, string $q): array
+function rh_ai_purchase_order_lookup(PDO $db, array $user, string $q, bool $fuzzy = true): array
 {
     if (!rh_ai_perm_any($user, ['stock_management'])) {
         return ['error' => "Purchase orders are outside what this account can see."];
@@ -759,11 +814,19 @@ function rh_ai_purchase_order_lookup(PDO $db, array $user, string $q): array
     $line = static fn($r) => ['po_ref' => (string)$r['reference'], 'supplier' => rh_ai_plain((string)($r['supplier'] ?? ''), 80), 'status' => (string)$r['status'], 'ordered_on' => $r['order_date'],
         'expected' => $r['expected_date'], 'overdue' => in_array($r['status'], ['sent', 'partial'], true) && $r['expected_date'] !== null && $r['expected_date'] < $today ? true : null, 'total_cost' => rh_ai_money((float)$r['total_cost'])];
     $out = ['currency' => rh_ai_currency()];
+    $ask = [];
+    if (!$rows && $fuzzy && !preg_match('/\d/', $q)) { // a misspelt supplier (owner 2026-10-29): the one clearly closest supplier is used
+        $p = rh_ai_fuzzy_from_table($db, $q, 'stock_suppliers', 'name', '1=1', [], 'id DESC');
+        if ($p['clear'] !== null) {
+            return rh_ai_fuzzy_note($q, $p['clear']) + rh_ai_purchase_order_lookup($db, $user, $p['clear'], false);
+        }
+        $ask = rh_ai_fuzzy_note($q, null, $p['options']);
+    }
     if (!$rows) {
         $open = $db->query("SELECT $cols FROM stock_purchase_orders po LEFT JOIN stock_suppliers s ON s.id = po.supplier_id WHERE po.status IN ('sent', 'partial') ORDER BY po.expected_date IS NULL, po.expected_date LIMIT " . $n)->fetchAll(PDO::FETCH_ASSOC);
         return $out + ['match' => 'none', 'not_found' => 'No purchase order matches that reference or supplier.', 'open_purchase_orders' => array_map($line, $open) ?: 'none waiting for delivery',
             'purchase_orders_on_file' => (int)$db->query("SELECT COUNT(*) FROM stock_purchase_orders")->fetchColumn(),
-            'link' => 'purchase-orders.php', 'link_label' => 'Open Purchase orders'];
+            'link' => 'purchase-orders.php', 'link_label' => 'Open Purchase orders'] + $ask;
     }
     if (count($rows) > 1) {
         return $out + ['match' => 'several', 'purchase_orders' => array_map($line, array_slice($rows, 0, $n)), 'more' => count($rows) > $n ? 'more than ' . $n . ' match; ask with the reference' : null,
