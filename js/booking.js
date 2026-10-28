@@ -248,6 +248,203 @@
         // check-availability.php (missing key = not yet known).
         const roomsFreeByType = {};
 
+        // ── Rooms of different types for one party ───────────────────────────────────────────────────
+        // When the chosen room type cannot seat everyone (too few of its rooms are free), the guest adds rooms of other
+        // types for the rest. The seating, the choices and the prices all come from check-availability.php?mode=mixed
+        // (ga_plan_mixed in includes/guest-allocation.php); this code only shows them and posts extra_room_types[].
+        let extraRoomTypes = (typeof postedBooking !== 'undefined' && postedBooking && Array.isArray(postedBooking.extra_room_types)) ?
+            postedBooking.extra_room_types.map(Number).filter(n => n > 0) : [];
+        let mixedResult = null;
+        let mixedSeq = 0;
+
+        function mixedKey() {
+            return [selectedRoomId,
+                document.getElementById('check_in_date')?.value || '',
+                document.getElementById('check_out_date')?.value || '',
+                document.getElementById('number_of_guests')?.value || '',
+                getCurrentChildGuestCount(),
+                extraRoomTypes.join(',')
+            ].join('|');
+        }
+
+        // The batch answer for a room type: the party is fine for it but too few of its rooms are free.
+        function isMixedCandidate(result) {
+            return !!result && result.available === false && result.reason === 'not_enough_rooms' &&
+                Number(result.rooms_free || 0) >= 1 && !!result.split_pricing && result.split_pricing.valid === true;
+        }
+
+        function selectedIsMixedCandidate() {
+            return isMixedCandidate(getServerResultForCurrentParty());
+        }
+
+        function mixedInPlay() {
+            return selectedIsMixedCandidate() || extraRoomTypes.length > 0;
+        }
+
+        // The server's seating for exactly what is on screen now (null while it is still loading or out of date).
+        function getMixedForCurrent() {
+            return mixedResult && mixedResult.key === mixedKey() && mixedResult.needed ? mixedResult : null;
+        }
+
+        function syncExtraInputs() {
+            const holder = document.getElementById('extraRoomInputs');
+            if (!holder) return;
+            holder.innerHTML = extraRoomTypes.map(id => `<input type="hidden" name="extra_room_types[]" value="${Number(id)}">`).join('');
+        }
+
+        function clearMixed() {
+            mixedSeq++;
+            mixedResult = null;
+            if (extraRoomTypes.length) {
+                extraRoomTypes = [];
+                syncExtraInputs();
+            }
+            renderMixedPanel();
+        }
+
+        function loadMixed() {
+            const checkIn = document.getElementById('check_in_date')?.value;
+            const checkOut = document.getElementById('check_out_date')?.value;
+            const total = parseInt(document.getElementById('number_of_guests')?.value || '0', 10);
+            const children = getCurrentChildGuestCount();
+            if (!selectedRoomId || !checkIn || !checkOut || total < 1) {
+                clearMixed();
+                return;
+            }
+            const key = mixedKey();
+            const seq = ++mixedSeq;
+            const params = new URLSearchParams({
+                mode: 'mixed',
+                room_id: String(selectedRoomId),
+                check_in: checkIn,
+                check_out: checkOut,
+                number_of_guests: String(total),
+                child_guests: String(children),
+                extra_room_types: extraRoomTypes.join(',')
+            });
+            const done = data => {
+                if (seq !== mixedSeq) return;
+                data.key = key;
+                if (data.success === true && !data.needed) {
+                    // The chosen room type can seat everyone after all (dates or guests changed): back to the normal flow.
+                    mixedResult = null;
+                    if (extraRoomTypes.length) {
+                        extraRoomTypes = [];
+                        syncExtraInputs();
+                    }
+                } else {
+                    mixedResult = data.success === true ? data : {
+                        key: key,
+                        needed: true,
+                        ok: false,
+                        message: data.message || 'Unable to check the rooms. Please try again.',
+                        rows: [],
+                        options: [],
+                        left_guests: total,
+                        chosen: {}
+                    };
+                    if (mixedResult.ok) {
+                        applyDynamicPricingState(mixedResult.rate_plan || mixedResult.dynamic_pricing || null);
+                        renderPackages(mixedResult.packages || [], Number(mixedResult.nights || 0), Math.max(1, total - children));
+                    }
+                }
+                renderMixedPanel();
+                renderPartyPlan();
+                updateSummary();
+                validateFormForSubmit();
+            };
+            fetch(`check-availability.php?${params.toString()}`)
+                .then(response => response.json())
+                .then(done)
+                .catch(() => done({ success: false, message: 'Unable to check the rooms. Please try again.' }));
+        }
+
+        function getExtraRoomsPanel() {
+            let panel = document.getElementById('extraRoomsPanel');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.id = 'extraRoomsPanel';
+                panel.className = 'booking-split-notice extra-rooms-panel';
+                panel.setAttribute('role', 'region');
+                panel.setAttribute('aria-label', 'Rooms for your party');
+                panel.setAttribute('aria-live', 'polite');
+                panel.addEventListener('click', event => {
+                    const addBtn = event.target.closest('[data-add-room]');
+                    const removeBtn = event.target.closest('[data-remove-extra]');
+                    if (addBtn) {
+                        extraRoomTypes.push(Number(addBtn.getAttribute('data-add-room')));
+                    } else if (removeBtn) {
+                        extraRoomTypes.splice(Number(removeBtn.getAttribute('data-remove-extra')), 1);
+                    } else {
+                        return;
+                    }
+                    syncExtraInputs();
+                    mixedResult = null;
+                    renderMixedPanel();
+                    updateSummary();
+                    validateFormForSubmit();
+                    loadMixed();
+                });
+            }
+            return panel;
+        }
+
+        function renderMixedPanel() {
+            const panel = getExtraRoomsPanel();
+            const m = getMixedForCurrent();
+            if (!m && !mixedInPlay()) {
+                panel.style.display = 'none';
+                return;
+            }
+            const card = document.querySelector('.room-option.selected') || document.querySelector(`.room-option[data-room-id="${selectedRoomId}"]`);
+            if (card && panel.previousElementSibling !== card) card.insertAdjacentElement('afterend', panel);
+            panel.style.display = '';
+            if (!m) {
+                panel.innerHTML = '<p>Checking which rooms can take the rest of your party...</p>';
+                return;
+            }
+
+            const left = Number(m.left_guests || 0);
+            const chosen = m.chosen || {};
+            const free = Number(chosen.rooms_free || 0);
+            const guests = Number((m.party && m.party.guests) || 0);
+            const rowHtml = (name, detail, removeIndex) => `<li class="extra-room-row"><div class="extra-room-row__text"><strong>${escapeHtml(name)}</strong><small>${detail}</small></div>` +
+                (removeIndex === null ? '' : `<button type="button" class="btn btn--secondary btn--sm" data-remove-extra="${removeIndex}" aria-label="Remove ${escapeHtml(name)}">Remove</button>`) + '</li>';
+
+            let html = left > 0 ? `<h4>Add a room for the other ${plural(left, 'guest')}</h4>` : '<h4>Everyone has a room</h4>';
+            html += `<p>${escapeHtml(chosen.name || 'This room type')} has ${free === 1 ? 'only 1 room' : `only ${free} rooms`} free for your dates and holds up to ${plural(Number(chosen.max_guests || 0), 'guest')} each, ` +
+                `but your party of ${plural(guests, 'guest')} needs ${Number(chosen.rooms_needed_alone || 0)}.${left > 0 ? ' Add a different room type for the rest.' : ''}</p>`;
+
+            let rows = m.rows || [];
+            if (!rows.length && extraRoomTypes.length) {
+                rows = extraRoomTypes.map((id, i) => ({ room_name: (roomsData.find(r => r.id === id) || {}).name || 'Added room', is_extra: true, extra_index: i, guests: 0 }));
+            }
+            if (rows.length) {
+                html += '<p class="extra-rooms-panel__label">Your rooms</p><ul>' + rows.map(row => {
+                    const rate = row.rate_per_night !== undefined ? ` &middot; ${currencySymbol}${Number(row.rate_per_night).toLocaleString()}/night` : '';
+                    const who = row.guests ? escapeHtml(describeRoomGuests(row)) : '';
+                    return rowHtml(row.room_name, who + rate, row.is_extra ? row.extra_index : null);
+                }).join('') + '</ul>';
+            }
+            if (m.message && !m.ok) {
+                html += `<p style="color:#b02a37;">${escapeHtml(m.message)}</p>`;
+            }
+            if (left > 0) {
+                const options = m.options || [];
+                if (options.length) {
+                    html += '<p class="extra-rooms-panel__label">Rooms you can add</p><ul>' + options.map(opt => {
+                        const take = opt.takes_all ? `seats the ${plural(opt.guests_taken, 'guest')} left` : `seats ${plural(opt.guests_taken, 'guest')}`;
+                        const detail = `Up to ${plural(Number(opt.max_guests), 'guest')} &middot; ${currencySymbol}${Number(opt.rate_per_night).toLocaleString()}/night &middot; ${take}`;
+                        return `<li class="extra-room-row"><div class="extra-room-row__text"><strong>${escapeHtml(opt.name)}</strong><small>${detail}</small></div>` +
+                            `<button type="button" class="btn btn--primary btn--sm" data-add-room="${Number(opt.room_id)}" aria-label="Add ${escapeHtml(opt.name)}">Add</button></li>`;
+                    }).join('') + '</ul>';
+                } else if (!m.message) {
+                    html += '<p>No other room type is free for these dates and this party. Try other dates, fewer guests or a different room.</p>';
+                }
+            }
+            panel.innerHTML = html;
+        }
+
         function buildAvailabilityStatusKey(roomId, checkIn, checkOut, childGuests, totalGuests) {
             const room = roomsData.find(item => item.id === Number(roomId));
             const roomsNeeded = getRoomsNeededForGuests(Number(totalGuests || 0), room);
@@ -865,6 +1062,7 @@
 
             roomRadio.checked = true;
 
+            if (selectedRoomId !== roomId) clearMixed(); // rooms added for the previous room type no longer apply
             selectedRoomId = roomId;
             selectedRoomName = roomName;
             selectedRoomMaxGuests = parseInt(label.getAttribute('data-max-guests'));
@@ -1011,6 +1209,13 @@
             const childGuests = getCurrentChildGuestCount();
 
             if (!numGuests || !room) {
+                suggestionBox.style.display = 'none';
+                validateFormForSubmit();
+                return;
+            }
+
+            // Party spread over more than one room type: the panel under the selected room explains it.
+            if (mixedInPlay()) {
                 suggestionBox.style.display = 'none';
                 validateFormForSubmit();
                 return;
@@ -1271,11 +1476,36 @@
                     const selectedRoom = roomsData.find(room => room.id === selectedRoomId);
                     if (!selectedRoom) return;
 
-                    const roomsNeeded = getRoomsNeededForGuests(totalGuests, selectedRoom);
+                    // Rooms of different types: price and list every room from the server's seating; nothing to show until
+                    // every guest has a room.
+                    let mixedNow = null;
+                    if (mixedInPlay()) {
+                        mixedNow = getMixedForCurrent();
+                        if (!mixedNow || !mixedNow.ok || !(mixedNow.rows || []).length) {
+                            bookingSummary.style.display = 'none';
+                            validateFormForSubmit();
+                            return;
+                        }
+                    }
+                    const roomsNeeded = mixedNow ? mixedNow.rows.length : getRoomsNeededForGuests(totalGuests, selectedRoom);
                     const statusKey = buildAvailabilityStatusKey(selectedRoomId, checkIn, checkOut, childGuests, totalGuests);
-                    const serverPricing = currentAvailabilityResult && currentAvailabilityResult.status_key === statusKey ?
+                    const serverPricing = mixedNow ? {
+                        valid: true,
+                        allocation: mixedNow.rows,
+                        room_rate_total_per_night: mixedNow.rows.reduce((sum, r) => sum + Number(r.rate_per_night || 0), 0),
+                        base_total: mixedNow.rows.reduce((sum, r) => sum + Number(r.rate_per_night || 0) * nights, 0),
+                        child_supplement_total: mixedNow.rows.reduce((sum, r) => sum + Number(r.child_supplement_total || 0), 0),
+                        levy: mixedNow.levy,
+                        vat: mixedNow.vat,
+                        total_with_vat: mixedNow.total_with_vat,
+                        tourism_levy_percent: mixedNow.tourism_levy_percent,
+                        vat_rate: mixedNow.vat_rate,
+                        vat_mode: mixedNow.vat_mode,
+                        vat_shows_amount: mixedNow.vat_shows_amount,
+                        rate_plan: mixedNow.rate_plan
+                    } : (currentAvailabilityResult && currentAvailabilityResult.status_key === statusKey ?
                         currentAvailabilityResult.split_pricing :
-                        null;
+                        null);
                     const allocation = serverPricing && Array.isArray(serverPricing.allocation) ?
                         serverPricing.allocation.map(part => ({
                             guests: Number(part.guests || 0),
@@ -1383,7 +1613,21 @@
                     }
 
                     // Update room details section
-                    document.getElementById('summaryRoom').textContent = selectedRoomName;
+                    const summaryRoomList = document.getElementById('summaryRoomList');
+                    if (mixedNow) {
+                        // Every room with its own type name and nightly price.
+                        document.getElementById('summaryRoom').textContent = `${roomsNeeded} rooms`;
+                        if (summaryRoomList) {
+                            summaryRoomList.innerHTML = mixedNow.rows.map(r => `<li><strong>${escapeHtml(r.room_name)}</strong> &middot; ${escapeHtml(describeRoomGuests(r))} &middot; ${currencySymbol}${Number(r.rate_per_night).toLocaleString()}/night</li>`).join('');
+                            summaryRoomList.style.display = '';
+                        }
+                    } else {
+                        document.getElementById('summaryRoom').textContent = selectedRoomName;
+                        if (summaryRoomList) {
+                            summaryRoomList.innerHTML = '';
+                            summaryRoomList.style.display = 'none';
+                        }
+                    }
                     const occupancySummary = roomsNeeded > 1 ?
                         `${totalGuests} Guests (${roomsNeeded} rooms: ${allocation.map((part, index) => `R${index + 1} ${getOccupancyTierName(part.occupancyType)}`).join(', ')})` :
                         `${getOccupancyTierName(allocation[0].occupancyType)} rate (${totalGuests} Guest${totalGuests === 1 ? '' : 's'})`;
@@ -1791,7 +2035,14 @@
                             const statusKey = buildAvailabilityStatusKey(selectedRoomId, checkIn, checkOut, childGuests, totalGuests);
                             const roomStatus = roomAvailabilityStatus[statusKey];
 
-                            if (roomStatus && !roomStatus.available) {
+                            const mixedForSubmit = mixedInPlay() ? getMixedForCurrent() : null;
+                            if (mixedInPlay() && !(mixedForSubmit && mixedForSubmit.ok)) {
+                                // Not everyone has a room yet (or the rooms are still being checked).
+                                e.preventDefault();
+                                showAvailabilityMessage('<i class="fas fa-bed"></i> Add rooms until everyone in your party has one, then confirm.', 'warning');
+                                return false;
+                            }
+                            if (roomStatus && !roomStatus.available && !mixedForSubmit) {
                                 e.preventDefault();
 
                                 // Clean up any raw HTML that might be in the error message
@@ -1878,16 +2129,24 @@
                         updateRoomAvailabilityCount(roomOption, result, childGuests);
                         renderRoomCardPlan(roomOption, result, numGuests > 0);
 
-                        if (result.available) {
+                        // A room type with a few rooms free but not enough for the whole party stays selectable: the guest adds
+                        // rooms of other types for the rest (see loadMixed()).
+                        const mixedCandidate = isMixedCandidate(result);
+                        if (result.available || mixedCandidate) {
                             availableCount++;
                             enableRoomOption(roomOption);
 
                             if (roomId === selectedRoomId) {
                                 currentAvailabilityResult = result;
-                                const nights = Number(result.nights || 0);
-                                applyDynamicPricingState(result.split_pricing?.rate_plan || result.dynamic_pricing || null);
-                                renderPackages(result.packages || [], nights, adultGuests);
-                                updateSummary();
+                                if (mixedCandidate) {
+                                    applyDynamicPricingState(null);
+                                    updateSummary(); // hides the one-type summary until the server has seated the party
+                                } else {
+                                    const nights = Number(result.nights || 0);
+                                    applyDynamicPricingState(result.split_pricing?.rate_plan || result.dynamic_pricing || null);
+                                    renderPackages(result.packages || [], nights, adultGuests);
+                                    updateSummary();
+                                }
                             }
                         } else {
                             disableRoomOption(roomOption, result.message || result.error || 'Unavailable', result.reason || '');
@@ -1929,6 +2188,14 @@
                         updateGuestOptions(selectedRoomMaxGuests);
                     }
                     renderPartyPlan();
+
+                    // Selected room type cannot seat the whole party alone: ask the server for the seating + what can be added.
+                    if (mixedInPlay()) {
+                        renderMixedPanel();
+                        loadMixed();
+                    } else {
+                        clearMixed();
+                    }
 
                     if (availableCount === 0) {
                         showAvailabilityMessage(
@@ -2008,6 +2275,11 @@
                 return;
             }
             const pricing = result && result.split_pricing && result.split_pricing.valid ? result.split_pricing : null;
+            if (isMixedCandidate(result)) {
+                const free = Number(result.rooms_free || 0);
+                setRoomCardLine(roomOption, `Only ${free} ${free === 1 ? 'room is' : 'rooms are'} free for your dates and your party needs ${Number(result.rooms_needed || 0)}. Choose it and add another room type for the rest.`, false);
+                return;
+            }
             if (result && result.available && pricing) {
                 const counts = pricing.allocation.map(part => part.guests).join(' + ');
                 const rooms = Number(result.rooms_needed || pricing.allocation.length);
@@ -2374,13 +2646,17 @@
                 const statusKey = buildAvailabilityStatusKey(selectedRoomId, checkIn, checkOut, childGuests, totalGuestsInt);
                 const roomStatus = roomAvailabilityStatus[statusKey];
                 availabilityKnown = !!roomStatus;
-                if (roomStatus && !roomStatus.available) {
+                // Too few rooms of this type for the whole party is not "fully booked": the guest adds other rooms.
+                if (roomStatus && !roomStatus.available && !isMixedCandidate(roomStatus)) {
                     availabilityValid = false;
                 }
             }
 
             const selectedRoom = getSelectedRoomData();
             const allocationValid = selectedRoom ? hasValidAllocation(totalGuestsInt, selectedRoom, childGuests) : false;
+            // Rooms of different types: submit only once the server says every guest has a room.
+            const mixedActive = !!selectedRoomId && mixedInPlay();
+            const mixedNow = mixedActive ? getMixedForCurrent() : null;
 
             // Determine button state based on all validations — guide guest step by step
             let btnText = '<i class="fas fa-calendar-check"></i> Complete All Fields';
@@ -2406,6 +2682,14 @@
                 btnDisabled = true;
             } else if (!allocationValid) {
                 btnText = '<i class="fas fa-exclamation-triangle"></i> Guest Count Not Supported for This Room';
+                btnDisabled = true;
+            } else if (mixedActive && !mixedNow) {
+                btnText = '<i class="fas fa-spinner fa-spin"></i> Checking Rooms…';
+                btnDisabled = true;
+            } else if (mixedActive && !mixedNow.ok) {
+                btnText = Number(mixedNow.left_guests || 0) > 0
+                    ? `<i class="fas fa-bed"></i> Add a Room for the Other ${plural(Number(mixedNow.left_guests), 'Guest')}`
+                    : '<i class="fas fa-exclamation-triangle"></i> These Rooms Cannot Take Your Party';
                 btnDisabled = true;
             } else {
                 // All required fields are filled — browser validation handles contact fields on submit

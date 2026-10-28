@@ -207,10 +207,28 @@ try {
                     <div class="conf-card">
                         <div class="conf-card-body">
                             <div class="conf-card-title"><i class="fas fa-bed"></i> Your Stay</div>
+                            <?php
+                            // One party in rooms of different types: name every room, with its guests and price.
+                            $mixed_room_names = array_values(array_unique(array_map(static fn($b) => (string)$b['room_name'], $split_bookings)));
+                            $is_mixed_rooms = $split_count > 1 && count($mixed_room_names) > 1;
+                            ?>
                             <div class="conf-room-name">
-                                <?php echo htmlspecialchars($booking['room_name']); ?>
+                                <?php echo htmlspecialchars($is_mixed_rooms ? implode(' + ', $mixed_room_names) : $booking['room_name']); ?>
                                 <?php if ($split_count > 1): ?><span style="font-size:0.85rem;color:#736149;"> (<?php echo $split_count; ?> rooms)</span><?php endif; ?>
                             </div>
+                            <?php if ($is_mixed_rooms): ?>
+                            <ul class="conf-room-lines" style="list-style:none;margin:0 0 12px;padding:0;font-size:0.9rem;color:#736149;">
+                                <?php foreach ($split_bookings as $room_line):
+                                    $room_line_owed = (float)($room_line['total_with_vat'] ?? 0);
+                                    if ($room_line_owed <= 0) { $room_line_owed = (float)($room_line['total_amount'] ?? 0) + (float)($room_line['vat_amount'] ?? 0); }
+                                ?>
+                                <li><strong><?php echo htmlspecialchars($room_line['room_name']); ?></strong>
+                                    &middot; <?php echo (int)$room_line['number_of_guests']; ?> guest<?php echo (int)$room_line['number_of_guests'] === 1 ? '' : 's'; ?>
+                                    &middot; <?php echo htmlspecialchars((string)$currency_symbol) . number_format($room_line_owed, 0); ?>
+                                    <small>(<?php echo htmlspecialchars((string)$room_line['booking_reference']); ?>)</small></li>
+                                <?php endforeach; ?>
+                            </ul>
+                            <?php endif; ?>
                             <div class="conf-dates-row">
                                 <div class="conf-date-block">
                                     <div class="conf-date-label"><i class="fas fa-sign-in-alt"></i> Check-in</div>

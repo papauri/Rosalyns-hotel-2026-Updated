@@ -466,6 +466,158 @@ if (!function_exists('ga_resolve_policy')) {
     }
 
     /**
+     * Seat as many guests as fit in an ordered list of rooms (one entry per room). Every room gets 1 adult first;
+     * children then go to the first rooms that take children (respecting each room's capacity and child limit);
+     * the remaining adults fill the rooms in order. Nothing is invented: guests that do not fit are reported.
+     *
+     * @param array $slots list of ['capacity' => int, 'children_allowed' => bool, 'max_children' => ?int]
+     * @return array {rows: [['adults','children','guests'], ...], left_adults, left_children, message}
+     *         message is '' when everyone is seated, otherwise one plain line saying why not.
+     */
+    function ga_seat_slots(array $slots, int $adults, int $children): array
+    {
+        $count = count($slots);
+        $adults = max(0, $adults);
+        $children = max(0, $children);
+        if ($count < 1) {
+            return ['rows' => [], 'left_adults' => $adults, 'left_children' => $children, 'message' => 'Please select at least one room.'];
+        }
+        if ($adults < $count) {
+            return ['rows' => [], 'left_adults' => $adults, 'left_children' => $children,
+                'message' => "Every room needs at least 1 adult, and there " . ($adults === 1 ? 'is only 1 adult' : "are only {$adults} adults") . " for {$count} rooms. Add adults or remove a room."];
+        }
+        $seated = [];
+        foreach ($slots as $i => $slot) {
+            $seated[$i] = ['adults' => 1, 'children' => 0, 'left' => max(1, (int)($slot['capacity'] ?? 1)) - 1];
+        }
+        $adultsLeft = $adults - $count;
+        $childrenLeft = $children;
+        $anyChildRoom = false;
+        foreach ($slots as $i => $slot) {
+            if (empty($slot['children_allowed'])) {
+                continue;
+            }
+            $anyChildRoom = true;
+            if ($childrenLeft <= 0) {
+                continue;
+            }
+            $take = min($childrenLeft, $seated[$i]['left']);
+            if (isset($slot['max_children']) && $slot['max_children'] !== null) {
+                $take = min($take, max(0, (int)$slot['max_children']));
+            }
+            $seated[$i]['children'] += $take;
+            $seated[$i]['left'] -= $take;
+            $childrenLeft -= $take;
+        }
+        foreach ($slots as $i => $slot) {
+            if ($adultsLeft <= 0) {
+                break;
+            }
+            $take = min($adultsLeft, $seated[$i]['left']);
+            $seated[$i]['adults'] += $take;
+            $seated[$i]['left'] -= $take;
+            $adultsLeft -= $take;
+        }
+        $rows = [];
+        foreach ($seated as $part) {
+            $rows[] = ['adults' => $part['adults'], 'children' => $part['children'], 'guests' => $part['adults'] + $part['children']];
+        }
+        $message = '';
+        if ($childrenLeft > 0 && !$anyChildRoom) {
+            $message = 'Children cannot stay in the rooms chosen so far. Add a room that takes children.';
+        } elseif ($childrenLeft > 0) {
+            $message = $childrenLeft === 1 ? '1 child still needs a room that takes children.' : "{$childrenLeft} children still need a room that takes children.";
+        } elseif ($adultsLeft > 0) {
+            $message = $adultsLeft === 1 ? '1 guest still needs a room.' : "{$adultsLeft} guests still need a room.";
+        }
+        return ['rows' => $rows, 'left_adults' => $adultsLeft, 'left_children' => $childrenLeft, 'message' => $message];
+    }
+
+    /**
+     * One party over several room TYPES (owner request 2026-10-28). The chosen type is filled first: as many of its
+     * rooms as are free (never more than the party needs), each to capacity. The overflow goes to the added rooms in
+     * the order they were added (one room each). Children only go to rooms whose type takes children, every room has
+     * at least 1 adult. Pure: availability is passed in, nothing is read or priced here.
+     *
+     * @param array $chosenRoom room-type row with the effective max_guests
+     * @param int   $chosenFree rooms of the chosen type free for every night
+     * @param array $extraRooms room-type rows in the order the guest added them (one entry per added room)
+     * @return array {valid, reason, message, left_guests, chosen_rooms, rows[]} where each row is
+     *         {room_id, room_name, is_extra, extra_index, guests, adults, children, occupancy_type}
+     */
+    function ga_plan_mixed(array $chosenRoom, int $chosenFree, array $extraRooms, int $totalGuests, int $childGuests): array
+    {
+        $fail = function (string $reason, string $message, array $rows = [], int $left = 0, int $chosenRooms = 0): array {
+            return ['valid' => false, 'reason' => $reason, 'message' => $message, 'left_guests' => $left, 'chosen_rooms' => $chosenRooms, 'rows' => $rows];
+        };
+        $childGuests = max(0, $childGuests);
+        $adultGuests = $totalGuests - $childGuests;
+        if ($totalGuests < 1 || $adultGuests < 1) {
+            return $fail('invalid_party', 'At least 1 adult is required for every booking.', [], max(0, $totalGuests));
+        }
+        $chosenCap = max(1, (int)($chosenRoom['max_guests'] ?? 1));
+        $chosenRooms = min(max(0, $chosenFree), max(1, (int)ceil($totalGuests / $chosenCap)));
+        if ($chosenRooms < 1) {
+            return $fail('chosen_full', (string)($chosenRoom['name'] ?? 'This room type') . ' is fully booked for your dates.', [], $totalGuests);
+        }
+
+        $roomsInOrder = [];
+        for ($i = 0; $i < $chosenRooms; $i++) {
+            $roomsInOrder[] = ['room' => $chosenRoom, 'is_extra' => false, 'extra_index' => null];
+        }
+        foreach (array_values($extraRooms) as $k => $extra) {
+            $roomsInOrder[] = ['room' => $extra, 'is_extra' => true, 'extra_index' => $k];
+        }
+
+        $slots = [];
+        $policies = [];
+        foreach ($roomsInOrder as $i => $entry) {
+            $policy = ga_resolve_policy($entry['room']);
+            $policies[$i] = $policy;
+            $max = null;
+            if ($childGuests > 0 && function_exists('rh_child_rule')) {
+                $max = rh_child_rule($entry['room'])['max'];
+            }
+            $slots[] = [
+                'capacity' => max(1, (int)($entry['room']['max_guests'] ?? 1)),
+                'children_allowed' => !empty($policy['children_allowed']),
+                'max_children' => $max,
+            ];
+        }
+
+        $seat = ga_seat_slots($slots, $adultGuests, $childGuests);
+        $left = (int)$seat['left_adults'] + (int)$seat['left_children'];
+        if (!$seat['rows']) {
+            return $fail('adults_per_room', (string)$seat['message'], [], $left, $chosenRooms);
+        }
+
+        $rows = [];
+        foreach ($seat['rows'] as $i => $part) {
+            $entry = $roomsInOrder[$i];
+            $room = $entry['room'];
+            $occupancy = ga_pick_occupancy((int)$part['guests'], $policies[$i]);
+            if ($occupancy === null) {
+                $tier = $part['guests'] === 1 ? 'single' : ($part['guests'] === 2 ? 'double' : 'triple');
+                return $fail('no_pricing', (string)$room['name'] . " has no {$tier} rate enabled, so a room with {$part['guests']} guest" . ($part['guests'] === 1 ? '' : 's') . ' cannot be booked.', [], $left, $chosenRooms);
+            }
+            $rows[] = [
+                'room_id' => (int)$room['id'],
+                'room_name' => (string)$room['name'],
+                'is_extra' => $entry['is_extra'],
+                'extra_index' => $entry['extra_index'],
+                'guests' => (int)$part['guests'],
+                'adults' => (int)$part['adults'],
+                'children' => (int)$part['children'],
+                'occupancy_type' => $occupancy,
+            ];
+        }
+        if ($left > 0) {
+            return $fail('seats', (string)$seat['message'], $rows, $left, $chosenRooms);
+        }
+        return ['valid' => true, 'reason' => '', 'message' => '', 'left_guests' => 0, 'chosen_rooms' => $chosenRooms, 'rows' => $rows];
+    }
+
+    /**
      * Inventory gate for a plan: are enough rooms free for EVERY night?
      * $availability is the checkRoomAvailability() result for the allocation's
      * child-room count. Returns '' when fine, otherwise the guest-facing reason.

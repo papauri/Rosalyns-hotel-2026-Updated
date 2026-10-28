@@ -5349,3 +5349,69 @@
         font-size: 0.75rem;
     }
 }
+
+/* ============================================
+   EXTRA ROOMS PANEL
+   Shown under the chosen room when that room type cannot seat the whole party: lists the
+   rooms the party sits in, and the other room types that can be added for the rest.
+   Reuses .booking-split-notice. Sits inside the .room-selection grid, so it spans the width.
+   ============================================ */
+.extra-rooms-panel {
+    grid-column: 1 / -1;
+    margin-top: var(--space-3, 0.75rem);
+}
+.extra-rooms-panel h4 {
+    margin: 0;
+    color: var(--color-text-primary, #1A1A1A);
+    font-size: clamp(1rem, 0.95rem + 0.25vw, 1.15rem);
+    font-weight: 600;
+}
+.extra-rooms-panel ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-2, 0.5rem);
+}
+.extra-room-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3, 0.75rem);
+    flex-wrap: wrap;
+    padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+    border-radius: var(--radius-md, 8px);
+    background: var(--color-surface, #fff);
+    border: 1px solid color-mix(in srgb, var(--color-lux-gold) 25%, transparent);
+}
+.extra-room-row__text {
+    flex: 1 1 14rem;
+    min-width: 0;
+}
+.extra-room-row__text small {
+    display: block;
+    color: var(--color-text-secondary);
+}
+.extra-room-row .btn {
+    min-height: 44px;
+    min-width: 88px;
+}
+.extra-rooms-panel__label {
+    margin: var(--space-2, 0.5rem) 0 0;
+    font-weight: 600;
+    color: var(--color-text-primary, #1A1A1A);
+}
+.bsum-room-list {
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+    display: grid;
+    gap: 4px;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.85rem;
+    color: #7A6A58;
+}
+.bsum-room-list strong {
+    color: #1A1A1A;
+    font-weight: 600;
+}

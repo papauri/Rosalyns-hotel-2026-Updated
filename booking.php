@@ -23,6 +23,7 @@ require_once 'includes/idempotency.php';
 require_once 'includes/pricing.php';
 require_once 'includes/public-csrf.php';
 require_once 'includes/guest-allocation.php';
+require_once 'includes/mixed-booking.php';
 
 
 // Check if booking system is enabled
@@ -209,6 +210,94 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $selected_room = $room_pre_stmt->fetch(PDO::FETCH_ASSOC);
         if (!$selected_room) {
             throw new Exception('Selected room not found or inactive.');
+        }
+
+        // One party in rooms of different types: the guest added rooms (extra_room_types[], in the order added) because the
+        // chosen type cannot seat everyone. The server seats the party itself (ga_plan_mixed) and never trusts guest counts
+        // from the page. Without extras the single-type flow below runs exactly as before.
+        $extraTypeIds = rh_mixed_parse_extras($_POST['extra_room_types'] ?? []);
+        if ($extraTypeIds) {
+            $mxCheckIn = $sanitized_data['check_in_date'];
+            $mxCheckOut = $sanitized_data['check_out_date'];
+            $mxTotal = (int)$sanitized_data['number_of_guests'];
+            $mxChildren = (int)($sanitized_data['child_guests'] ?? 0);
+            $mxAdults = $mxTotal - $mxChildren;
+            $mxNights = (int)(new DateTime($mxCheckIn))->diff(new DateTime($mxCheckOut))->days;
+
+            // Add-on packages: validated against the chosen (lead) type and charged on the lead row, as in a split booking.
+            $mxPackageTotal = 0.0;
+            $mxPackageRows = [];
+            $mxPkgIds = (!empty($_POST['package_ids']) && is_array($_POST['package_ids'])) ? array_values(array_unique(array_map('intval', $_POST['package_ids']))) : [];
+            if ($mxPkgIds) {
+                foreach (getActivePackages($pdo, (int)$sanitized_data['room_id']) as $pkg) {
+                    if (in_array((int)$pkg['id'], $mxPkgIds, true)) {
+                        $cost = calculatePackageCost($pkg, $mxNights, $mxAdults);
+                        $mxPackageTotal += $cost;
+                        $mxPackageRows[] = ['package_id' => (int)$pkg['id'], 'package_name' => $pkg['name'], 'price_type' => $pkg['price_type'], 'price_amount' => (float)$pkg['price_amount'], 'total_cost' => $cost];
+                    }
+                }
+            }
+
+            $mxDup = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE guest_email = ? AND room_id = ? AND status IN ('pending', 'tentative', 'confirmed', 'checked-in') AND check_in_date = ? AND check_out_date = ?");
+            $mxDup->execute([$sanitized_data['guest_email'], $sanitized_data['room_id'], $mxCheckIn, $mxCheckOut]);
+            if ((int)$mxDup->fetchColumn() > 0) {
+                throw new Exception('A booking already exists for these dates and room. Please check your existing bookings.');
+            }
+
+            $mxPrefix = rh_booking_reference_prefix();
+            do {
+                $mxReference = $mxPrefix . date('Y') . str_pad(random_int(1, 999999), 6, '0', STR_PAD_LEFT);
+                $mxRefCheck = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE booking_reference = ?");
+                $mxRefCheck->execute([$mxReference]);
+            } while ((int)$mxRefCheck->fetchColumn() > 0);
+
+            $mxTentative = isset($_POST['booking_type']) && $_POST['booking_type'] === 'tentative' && getSetting('tentative_bookings_enabled', '1') !== '0';
+            $mxExpires = $mxTentative ? date('Y-m-d H:i:s', strtotime('+' . (int)getSetting('tentative_duration_hours', 48) . ' hours')) : null;
+            $mxStatus = $mxTentative ? 'tentative' : 'pending';
+
+            $mxCreated = rh_mixed_create($pdo, [
+                'chosen_id' => (int)$sanitized_data['room_id'],
+                'extra_ids' => $extraTypeIds,
+                'guest_name' => $sanitized_data['guest_name'],
+                'guest_email' => $sanitized_data['guest_email'],
+                'guest_phone' => $sanitized_data['guest_phone'],
+                'guest_country' => $sanitized_data['guest_country'],
+                'guest_address' => $sanitized_data['guest_address'],
+                'total_guests' => $mxTotal,
+                'child_guests' => $mxChildren,
+                'check_in' => $mxCheckIn,
+                'check_out' => $mxCheckOut,
+                'special_requests' => $sanitized_data['special_requests'],
+                'status' => $mxStatus,
+                'is_tentative' => $mxTentative ? 1 : 0,
+                'tentative_expires_at' => $mxExpires,
+                'reference' => $mxReference,
+                'client_uuid' => idem_normalize_uuid($__incomingClientUuid),
+                'package_total' => $mxPackageTotal,
+                'package_rows' => $mxPackageRows,
+                'validation_data' => $sanitized_data,
+            ]);
+            if (empty($mxCreated['success'])) {
+                throw new Exception($mxCreated['error'] ?: 'These rooms cannot seat your party.');
+            }
+            rh_mixed_finish([
+                'created' => $mxCreated,
+                'lead_room' => $selected_room,
+                'guest_name' => $sanitized_data['guest_name'],
+                'guest_email' => $sanitized_data['guest_email'],
+                'guest_phone' => $sanitized_data['guest_phone'],
+                'check_in' => $mxCheckIn,
+                'check_out' => $mxCheckOut,
+                'nights' => $mxNights,
+                'total_guests' => $mxTotal,
+                'adult_guests' => $mxAdults,
+                'child_guests' => $mxChildren,
+                'special_requests' => $sanitized_data['special_requests'],
+                'status' => $mxStatus,
+                'is_tentative' => $mxTentative ? 1 : 0,
+                'is_tentative_booking' => $mxTentative,
+                'tentative_expires_at' => $mxExpires,
+            ]);
         }
 
         // One shared rule set (includes/guest-allocation.php): rooms needed, per-room
@@ -847,7 +936,9 @@ if (isset($_GET['room_type']) && !empty($_GET['room_type'])) {
 $posted_room_id = 0;
 $posted_booking_type = '';
 $posted_package_ids = [];
+$posted_extra_room_types = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($error_message)) {
+    $posted_extra_room_types = rh_mixed_parse_extras($_POST['extra_room_types'] ?? []);
     foreach (['check_in_date' => 'hero_check_in', 'check_out_date' => 'hero_check_out'] as $postKey => $varName) {
         $postedDate = trim((string)($_POST[$postKey] ?? ''));
         $parsedDate = DateTime::createFromFormat('Y-m-d', $postedDate);
@@ -1081,6 +1172,7 @@ try {
                 }
                 ?>
                 <input type="hidden" name="client_uuid" value="<?php echo htmlspecialchars($_SESSION['booking_form_uuid']); ?>">
+                <div id="extraRoomInputs"></div><!-- extra_room_types[] hidden inputs, filled by js/booking.js -->
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(pub_csrf_generate('booking'), ENT_QUOTES, 'UTF-8'); ?>">
 
                 <!-- Booking Details — date-first UX: pick dates before browsing rooms -->
@@ -1447,6 +1539,7 @@ try {
                         <!-- ── Room hero ── -->
                         <div class="bsum-room-hero">
                             <div class="bsum-room-name" id="summaryRoom">—</div>
+                            <ul class="bsum-room-list" id="summaryRoomList" style="display:none;"></ul>
                             <div class="bsum-room-meta">
                                 <span class="bsum-rate-type" id="summaryOccupancyType"></span>
                                 <span class="bsum-meta-dot">·</span>
@@ -1593,6 +1686,7 @@ try {
             'room_id' => $posted_room_id ?: null,
             'booking_type' => $posted_booking_type ?: null,
             'package_ids' => $posted_package_ids,
+            'extra_room_types' => $posted_extra_room_types,
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
         // Rooms data for dynamic validation

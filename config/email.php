@@ -2205,6 +2205,11 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         $roomAssignment = getBookingRoomLabel((int)$booking['id']);
     }
     $displayRoomName = $roomAssignment !== '' ? trim($roomTypeName . ' - ' . $roomAssignment) : $roomTypeName;
+    // One party in rooms of different types: list every room with its type (set by includes/mixed-booking.php).
+    if (!empty($booking['rooms_summary'])) {
+        $displayRoomName = (string)$booking['rooms_summary'];
+        $roomAssignment = '';
+    }
 
     $occupancyType = (string)($booking['occupancy_type'] ?? '');
     $occupancyLabel = $occupancyType !== '' ? rh_occupancy_tier_label($occupancyType, isset($room['max_guests']) ? (int)$room['max_guests'] : null) : '';

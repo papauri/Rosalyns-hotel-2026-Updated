@@ -250,9 +250,37 @@ try {
                     </div>
 
                     <div class="result-grid">
+                        <?php
+                        // One party in rooms of different types (linked by primary_booking_id): list every room with its type.
+                        $lookup_group_rooms = [];
+                        try {
+                            $lookup_lead_id = (int)($booking['primary_booking_id'] ?: $booking['id']);
+                            $lookup_group_stmt = $pdo->prepare("
+                                SELECT b.id, b.booking_reference, b.number_of_guests, b.total_with_vat, b.total_amount, b.vat_amount, r.name AS room_name
+                                FROM bookings b JOIN rooms r ON b.room_id = r.id
+                                WHERE (b.id = ? OR b.primary_booking_id = ?) AND b.guest_email = ?
+                                ORDER BY b.id ASC
+                            ");
+                            $lookup_group_stmt->execute([$lookup_lead_id, $lookup_lead_id, $booking['guest_email']]);
+                            $lookup_group_rooms = $lookup_group_stmt->fetchAll(PDO::FETCH_ASSOC);
+                        } catch (PDOException $e) {
+                            error_log('Booking lookup group query: ' . $e->getMessage());
+                        }
+                        $lookup_mixed = count($lookup_group_rooms) > 1
+                            && count(array_unique(array_column($lookup_group_rooms, 'room_name'))) > 1;
+                        ?>
                         <div class="result-item">
                             <label>Room</label>
-                            <div class="value"><?php echo htmlspecialchars($booking['room_name']); ?></div>
+                            <?php if ($lookup_mixed): ?>
+                                <div class="value">
+                                    <?php foreach ($lookup_group_rooms as $lookup_room_line): ?>
+                                        <div><?php echo htmlspecialchars($lookup_room_line['room_name']); ?>
+                                            <small>(<?php echo (int)$lookup_room_line['number_of_guests']; ?> guest<?php echo (int)$lookup_room_line['number_of_guests'] === 1 ? '' : 's'; ?>, <?php echo htmlspecialchars($lookup_room_line['booking_reference']); ?>)</small></div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php else: ?>
+                                <div class="value"><?php echo htmlspecialchars($booking['room_name']); ?></div>
+                            <?php endif; ?>
                         </div>
                         <div class="result-item">
                             <label>Guest Name</label>
@@ -272,7 +300,7 @@ try {
                         </div>
                         <div class="result-item">
                             <label>Guests</label>
-                            <div class="value"><?php echo $booking['number_of_guests']; ?></div>
+                            <div class="value"><?php echo $lookup_mixed ? (int)array_sum(array_column($lookup_group_rooms, 'number_of_guests')) : $booking['number_of_guests']; ?></div>
                         </div>
                         <div class="result-item">
                             <label>Total Amount</label>
@@ -281,6 +309,13 @@ try {
                                 $lookup_owed = (float)($booking['total_with_vat'] ?? 0);
                                 if ($lookup_owed <= 0) {
                                     $lookup_owed = rh_booking_full_total($booking);
+                                }
+                                if ($lookup_mixed) { // the whole party, every room
+                                    $lookup_owed = 0.0;
+                                    foreach ($lookup_group_rooms as $lookup_room_line) {
+                                        $line_owed = (float)($lookup_room_line['total_with_vat'] ?? 0);
+                                        $lookup_owed += $line_owed > 0 ? $line_owed : (float)$lookup_room_line['total_amount'] + (float)$lookup_room_line['vat_amount'];
+                                    }
                                 }
                                 echo number_format($lookup_owed, 0);
                             ?></div>

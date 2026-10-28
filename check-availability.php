@@ -9,6 +9,7 @@
 require_once 'config/database.php';
 require_once 'includes/pricing.php';
 require_once 'includes/guest-allocation.php';
+require_once 'includes/mixed-booking.php';
 require_once __DIR__ . '/includes/demand-log.php'; // lost-demand log (never affects the answer)
 
 header('Content-Type: application/json');
@@ -329,6 +330,89 @@ try {
             'available' => false,
             'message' => "Bookings can only be made up to {$maxAdvanceDays} days in advance."
         ]);
+        exit;
+    }
+
+    // Mixed-room mode (one party in rooms of different types): the chosen type cannot seat everyone, so the guest adds
+    // rooms of other types. The seating, the alternatives and the prices all come from the shared helpers; the page
+    // only displays them.  GET: room_id, check_in, check_out, number_of_guests, child_guests, extra_room_types=1,2,2
+    if (($_GET['mode'] ?? '') === 'mixed') {
+        $extraIds = rh_mixed_parse_extras($_GET['extra_room_types'] ?? '');
+        $chosenRoom = rh_mixed_load_room($pdo, $room_id);
+        if (!$chosenRoom) {
+            echo json_encode(['success' => true, 'mode' => 'mixed', 'needed' => false, 'message' => 'Room not found or not available']);
+            exit;
+        }
+        $mixedNights = (int)$checkInDate->diff($checkOutDate)->days;
+        $resolved = rh_mixed_resolve($pdo, $room_id, $extraIds, $check_in, $check_out, $total_guests, $child_guests);
+
+        // Needed only when the party itself is fine for the chosen type and just too few of its rooms are free.
+        $ordinary = ga_plan($chosenRoom, $total_guests, $child_guests);
+        $chosenFree = (int)$resolved['chosen_free'];
+        if ($chosenFree === 0) {
+            $chosenFree = rh_mixed_free_rooms($room_id, $check_in, $check_out);
+        }
+        $needed = !empty($ordinary['valid']) && $chosenFree >= 1 && (int)$ordinary['rooms_needed'] > $chosenFree;
+
+        $resp = [
+            'success' => true,
+            'mode' => 'mixed',
+            'needed' => $needed,
+            'ok' => $needed && !empty($resolved['ok']),
+            'message' => $needed ? (string)$resolved['message'] : '',
+            'nights' => $mixedNights,
+            'chosen' => ['id' => (int)$chosenRoom['id'], 'name' => (string)$chosenRoom['name'], 'rooms_free' => $chosenFree, 'max_guests' => (int)$chosenRoom['max_guests'], 'rooms_needed_alone' => (int)$ordinary['rooms_needed']],
+            'party' => ['guests' => $total_guests, 'children' => $child_guests],
+            'rows' => [],
+            'options' => [],
+            'left_guests' => $total_guests,
+        ];
+        if ($needed && $resolved['plan']) {
+            $resp['left_guests'] = (int)$resolved['plan']['left_guests'];
+            $priced = rh_mixed_price_plan($pdo, $resolved, $check_in, $check_out);
+            $rowsOut = [];
+            if ($priced['error'] === '') {
+                foreach ($priced['rows'] as $r) {
+                    $rowsOut[] = [
+                        'room_id' => $r['room_id'], 'room_name' => $r['room_name'], 'is_extra' => $r['is_extra'], 'extra_index' => $r['extra_index'],
+                        'guests' => $r['guests'], 'adults' => $r['adults'], 'children' => $r['children'], 'occupancy_type' => $r['occupancy_type'],
+                        'rate_per_night' => round($r['priced']['rate_per_night'], 2),
+                        'child_supplement_total' => round($r['priced']['child_supplement'], 2),
+                        'total_with_vat' => round($r['priced']['stay']['total_with_vat'], 2),
+                    ];
+                }
+                $ratePlan = null;
+                $discountPerNight = 0.0;
+                foreach ($priced['rows'] as $r) {
+                    if (!empty($r['priced']['dynamic']['rate_plan_id'])) {
+                        $ratePlan = $ratePlan ?: ['rate_plan_id' => (int)$r['priced']['dynamic']['rate_plan_id'], 'rate_plan_label' => $r['priced']['dynamic']['rate_plan_label']];
+                        $discountPerNight += (float)$r['priced']['dynamic']['discount_amount'];
+                    }
+                }
+                if ($ratePlan) {
+                    $ratePlan['discount_amount_per_night_total'] = round($discountPerNight, 2);
+                }
+                $first = $priced['rows'] ? $priced['rows'][0]['priced']['stay'] : null;
+                $leadBase = $priced['rows'] ? ga_price_for_occupancy($chosenRoom, $priced['rows'][0]['occupancy_type']) : (float)$chosenRoom['price_per_night'];
+                $preview = getDynamicPricingPreview($pdo, (int)$chosenRoom['id'], $check_in, $check_out, $mixedNights, $leadBase);
+                $resp['total_with_vat'] = round($priced['total_with_vat'], 2);
+                $resp['net'] = round($priced['net'], 2);
+                $resp['levy'] = round($priced['levy'], 2);
+                $resp['vat'] = round($priced['vat'], 2);
+                $resp['vat_rate'] = $first ? $first['vat_rate'] : 0;
+                $resp['tourism_levy_percent'] = $first ? $first['levy_rate'] : 0;
+                $resp['vat_mode'] = function_exists('vat_mode') ? vat_mode() : 'off';
+                $resp['vat_shows_amount'] = function_exists('vat_shows_amount') ? vat_shows_amount() : false;
+                $resp['rate_plan'] = $ratePlan;
+                $resp['packages'] = $preview['packages'];
+                $resp['dynamic_pricing'] = $preview['dynamic_pricing'];
+            } elseif ($resp['message'] === '') {
+                $resp['message'] = $priced['error'];
+            }
+            $resp['rows'] = $rowsOut;
+            $resp['options'] = rh_mixed_options($pdo, $resolved, $check_in, $check_out, $total_guests, $child_guests);
+        }
+        echo json_encode($resp);
         exit;
     }
 
