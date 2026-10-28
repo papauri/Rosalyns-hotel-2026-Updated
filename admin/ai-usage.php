@@ -15,10 +15,20 @@ require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/ai/ai-core.php';
 require_once __DIR__ . '/../includes/ai/ai-memory.php';
 require_once __DIR__ . '/../includes/ai/ai-extras.php';
+require_once __DIR__ . '/../includes/ai/ai-router.php';
 
 $h = static function ($v): string {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 };
+$isAdmin = (string)($user['role'] ?? '') === 'admin';
+// "Forget this" on a learned local answer (administrators only; the route is archived, never used again)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'forget_route') {
+    if ($isAdmin && validateCsrfToken($_POST['csrf_token'] ?? '') && rh_ai_schema_ready($pdo)) {
+        rh_ai_route_forget($pdo, (int)($_POST['route_id'] ?? 0));
+    }
+    header('Location: ai-usage.php#ai-usage-routes');
+    exit;
+}
 $okDate = static fn($d) => is_string($d) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d) && strtotime($d) !== false;
 $from = $okDate($_GET['from'] ?? null) ? (string)$_GET['from'] : date('Y-m-01');
 $to = $okDate($_GET['to'] ?? null) ? (string)$_GET['to'] : date('Y-m-d');
@@ -32,6 +42,7 @@ $ready = rh_ai_schema_ready($pdo);
 $u = $ready ? rh_ai_usage_summary($pdo, $from, $to) : null;
 $money = static fn($v) => $v === null ? '-' : '$' . number_format((float)$v, (float)$v > 0 && (float)$v < 0.01 ? 4 : 2);
 $canSettings = hasPermission((int)$user['id'], 'ai_settings');
+$ls = ($ready && $isAdmin) ? rh_ai_local_share($pdo, date('Y-m-01')) : null;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -106,6 +117,60 @@ $canSettings = hasPermission((int)$user['id'], 'ai_settings');
                 <span class="ai-stat__sub"><?php echo $u['auto_month'] === null ? 'No automatic checks have run yet' : $h('based on the last ' . (int)$u['auto_days'] . ' days'); ?></span>
             </div>
         </div>
+
+        <?php if ($ls !== null): ?>
+        <div class="rh-panel ai-card" id="ai-usage-routes">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Answered locally this month <i class="help" data-tip="Administrators only. Answers given from the hotel's own data with no model call since the 1st of this month, and the question shapes the Assistant has learned to answer that way.">?</i></h2></div>
+            <div class="rh-panel__body">
+                <div class="ai-usage-cards">
+                    <div class="ai-stat">
+                        <span class="ai-stat__label">Local share <i class="help" data-tip="Answers with no model call divided by all answers this month (the automatic checks are left out).">?</i></span>
+                        <span class="ai-stat__value"><?php echo $ls['share_pct'] === null ? '-' : $h(number_format((float)$ls['share_pct'], 1) . '%'); ?></span>
+                        <span class="ai-stat__sub"><?php echo $h(number_format($ls['local'])); ?> local, <?php echo $h(number_format($ls['model'])); ?> by a model</span>
+                    </div>
+                    <div class="ai-stat">
+                        <span class="ai-stat__label">Tokens saved <i class="help" data-tip="Local answers this month times the average tokens of a model answer this month: about what they would have used.">?</i></span>
+                        <span class="ai-stat__value"><?php echo $h(number_format($ls['tokens_saved'])); ?></span>
+                        <span class="ai-stat__sub"><?php echo $ls['avg_model_tokens'] > 0 ? $h('about ' . number_format($ls['avg_model_tokens']) . ' tokens a model answer') : 'No model answers yet this month'; ?></span>
+                    </div>
+                </div>
+                <h3 class="ai-subhead">Learned local answers <i class="help" data-tip="Question shapes the model answered the same way several times, now answered from the same lookup with no model call. A learned answer marked Not right, or failing a check, stops being used. Forget removes one for good.">?</i></h3>
+                <?php if (!$ls['routes']): ?>
+                    <p class="help-text">None learned yet. They appear once the same kind of question has been answered the same way in a few chats.</p>
+                <?php else: ?>
+                <div class="table-container"><div class="table-responsive">
+                <table class="table ai-table">
+                    <thead><tr>
+                        <th>Question shape <i class="help" data-tip="An example of the questions it covers (names are never kept).">?</i></th>
+                        <th>In use <i class="help" data-tip="Yes: used now. Retired: stopped after a Not right or a failed check.">?</i></th>
+                        <th>Used <i class="help" data-tip="Times it answered a question.">?</i></th>
+                        <th>Learned <i class="help" data-tip="The day it was learned.">?</i></th>
+                        <th></th>
+                    </tr></thead>
+                    <tbody>
+                    <?php foreach ($ls['routes'] as $rt): ?>
+                        <tr>
+                            <td><?php echo $h($rt['text']); ?></td>
+                            <td><?php echo $rt['status'] === 'active' ? 'Yes' : 'Retired'; ?></td>
+                            <td><?php echo $h(number_format((int)$rt['uses'])); ?></td>
+                            <td><?php echo $h(date('j M Y', strtotime((string)$rt['created_at']))); ?></td>
+                            <td>
+                                <form method="post" action="ai-usage.php" class="ai-inline-form">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                                    <input type="hidden" name="action" value="forget_route">
+                                    <input type="hidden" name="route_id" value="<?php echo (int)$rt['id']; ?>">
+                                    <button type="submit" class="btn btn-secondary btn-sm">Forget this</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div></div>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <div class="rh-panel ai-card" id="ai-usage-people">
             <div class="rh-panel__head"><h2 class="rh-panel__title">By person <i class="help" data-tip="Each person's answers and estimated cost in the chosen days. Nightly checks are the Assistant testing itself.">?</i></h2></div>

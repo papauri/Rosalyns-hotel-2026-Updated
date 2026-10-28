@@ -477,7 +477,7 @@ function rh_ai_reflect_run(PDO $db): array
     // Lessons from mistakes (Fast model, tokenised data only)
     $lines = [];
     foreach ($inc as $i) {
-        if (!in_array($i['kind'], ['reply_not_right', 'action_failed', 'tool_breaker'], true)) {
+        if (!in_array($i['kind'], ['reply_not_right', 'action_failed', 'tool_breaker', 'absence_fixed', 'contradiction', 'false_refusal', 'reask'], true)) {
             continue;
         }
         $c = json_decode((string)$i['context_json'], true) ?: [];
@@ -515,12 +515,18 @@ function rh_ai_reflect_run(PDO $db): array
         }
     }
     $out['playbooks'] = rh_ai_reflect_playbooks($db);
+    // Owner 2026-10-29: every mistake signal gets its right path and a regression question; the local router learns
+    $sig = function_exists('rh_ai_learn_from_signals') ? rh_ai_learn_from_signals($db) : ['signals' => 0, 'evals' => 0];
+    $rt = function_exists('rh_ai_route_train') ? rh_ai_route_train($db) : ['promoted' => 0, 'updated' => 0, 'note' => ''];
+    $out['signals'] = $sig['signals'];
+    $out['regression_questions'] = $sig['evals'];
+    $out['routes'] = $rt['promoted'];
     if ($inc) {
         $ids = array_map('intval', array_column($inc, 'id'));
         $db->prepare("UPDATE ai_incidents SET status = 'reviewed', reviewed_at = NOW() WHERE id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")")->execute($ids);
     }
     $out['note'] = count($inc) . ' incident(s) reviewed; ' . $out['lessons'] . ' lesson(s), ' . $out['playbooks'] . ' playbook(s), ' . $out['faults'] . ' fault write-up(s); '
-        . $sc['promoted'] . ' note(s) promoted, ' . $sc['retired'] . ' retired.';
+        . $sc['promoted'] . ' note(s) promoted, ' . $sc['retired'] . ' retired; ' . $sig['evals'] . ' regression question(s) from ' . $sig['signals'] . ' signal(s); ' . (string)$rt['note'];
     return $out;
 }
 
@@ -698,7 +704,14 @@ function rh_ai_hard_limit_problems(): array
     }
     // Owner 2026-10-29 ("Assistant should be a master"): confirm a pending booking or hold, start / finish a room's job
     $want = ['create_booking', 'edit_booking', 'extend_stay', 'change_checkout', 'room_type_change', 'cancel_booking', 'check_in', 'assign_room', 'confirm_booking', 'booking_note', 'check_out',
-        'housekeeping_job', 'maintenance_job', 'housekeeping_progress', 'maintenance_progress', 'room_status', 'send_email', 'send_invoice', 'whatsapp', 'reply_review', 'reply_enquiry'];
+        'housekeeping_job', 'maintenance_job', 'housekeeping_progress', 'maintenance_progress', 'room_status', 'send_email', 'send_invoice', 'whatsapp', 'reply_review', 'reply_enquiry',
+        // Owner 2026-10-29 ("do it all"; money stays out): dates, holds, quotations, verifying jobs, gym check-in
+        'block_dates', 'unblock_dates', 'extend_hold', 'send_quotation', 'housekeeping_verify', 'maintenance_verify', 'gym_checkin'];
+    foreach (rh_ai_action_registry() as $k => $d) { // no card ever moves money (owner 2026-10-29: "do not touch money")
+        if (preg_match('/(pay|refund|no.?show|deposit|invoice_add|credit|void|charge|price|rate|deal|stock|pos_)/i', $k . ' ' . $d['tool'] . ' ' . $d['page'])) {
+            $p[] = 'money or forbidden card ' . $k;
+        }
+    }
     if (array_keys(rh_ai_action_registry()) !== $want) {
         $p[] = 'the card list changed';
     }

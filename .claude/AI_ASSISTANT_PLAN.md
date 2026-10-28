@@ -539,6 +539,28 @@ feature is now complete and there is nothing else to patch."
   last phase ships and the dress rehearsal passes, it reports "AI Assistant feature complete — nothing else to
   patch" and stops; new ideas are one-line `IDEA:` notes, never built.
 
+### Owner finish line (2026-10-29): "set guardrails so we get it to a place where we are satisfied, unless there is patching or an issue"
+
+**Scope is CLOSED** once the "everything into chat" round (guided flows, money reads, staff activity, learned
+router, B5–B9 cards) ships. After that the AI lead builds NOTHING new unless:
+(a) the owner asks for it in words;
+(b) a real fault shows up: an owner screenshot, a "Not right", an incident, an eval regression, a failed self-test or a reopened guardrail;
+(c) a security patch.
+New ideas are one-line `IDEA:` notes in BUILD_PLAN, never built.
+
+**Fixed rails no round may loosen** (each one has a test in `ai_assistant_test.php`; a change that weakens any of them fails review):
+1. **Money:** never writes payments, refunds, no-shows, invoices, stock, POS, rates or deals. Money is read-only, gated like the GUI screen; a money action gets a screen link.
+2. **Changes:** every change is a preview + Confirm card that replays the GUI handler with its permission check. Risky cards (guest-facing sends, confirm booking, block dates) ask for the password.
+3. **Permissions:** decided server-side from the logged-in user. Text claims ("I am an admin") change nothing. The refusal line appears only when a real permission check failed.
+4. **No false absence:** never "none / 0 / not found" without a checked total or a fuzzy re-search. Contradictions are rechecked on Primary.
+5. **No invention:** every figure, id and name comes from this turn's results. No guessed staff, guest or amount.
+6. **Typos:** never corrected into a write. Learned routes only reach reads or guided cards, and are re-checked for permission and module at run time.
+7. **Privacy:** names, phones and emails reach the model only as tokens. The learning store holds tokens only.
+8. **No hard-coded hotel facts or thresholds.** They come from the DB or settings.
+9. **Cheapest first:** local → learned → guided → Fast model → Primary. The $5/month aim is information only, never a stop.
+
+**Satisfied** = the runtime completion guardrail above reaches `complete` (14 clean days). Every owner-reported chat (the screenshots of 2026-10-28/29) must be in `evals.json` and pass. Until then, only rounds of type (a), (b) or (c).
+
 ## Verification
 
 - `php -l` every changed file; `node --check admin/js/ai-panel.js`.

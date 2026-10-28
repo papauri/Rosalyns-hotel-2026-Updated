@@ -347,6 +347,9 @@ function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
                         $db->prepare("UPDATE ai_actions SET status = 'expired' WHERE conversation_id = ? AND status = 'proposed'")->execute([(int)$res['conversation_id']]);
                     }
                     $st = rh_ai_eval_check($db, $user, $c, $res);
+                    if ($st[0] === 'fail' && !empty($res['learned_route']) && function_exists('rh_ai_route_demote')) {
+                        rh_ai_route_demote($db, (int)$res['learned_route'], 'question-set failure: ' . $id); // a learned answer that fails a check is retired
+                    }
                 } catch (Throwable $ex) {
                     $skipIt = $ex->getMessage() === 'skip';
                     $res = ['tokens_in' => 0, 'tokens_out' => 0, 'cost_usd' => 0, 'route' => $skipIt ? '' : 'error'];

@@ -23,6 +23,9 @@ require_once __DIR__ . '/ai-extras.php';   // Phases 4c + 5: password on risky c
 require_once __DIR__ . '/ai-lookups.php';  // one-record lookups: an order, a gym member or class, a conference booking, a stock item, a room's jobs
 require_once __DIR__ . '/ai-focus.php';    // the booking in focus, close names, what a booking includes (owner fault 2026-10-29)
 require_once __DIR__ . '/ai-desk.php';     // the front desk without clicking: who made a booking, next arrivals, holds, blocked dates, cards from words
+require_once __DIR__ . '/ai-money.php';    // money read and shown, never moved (owner 2026-10-29)
+require_once __DIR__ . '/ai-guided.php';   // guided cards: one question at a time from the database, no model call
+require_once __DIR__ . '/ai-router.php';   // the learned local router: repeat questions answered with no model call
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)

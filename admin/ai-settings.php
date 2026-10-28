@@ -407,7 +407,7 @@ if ($memReady) {
         $evalRuns = $pdo->query("SELECT run_date, kind, run, passed, failed, skipped, pass_pct, tokens_per_answer, clean_day, finished_at FROM ai_eval_runs ORDER BY id DESC LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
         $openFaults = rh_ai_open_faults($pdo);
         if ($tab === 'memory') {
-            $where = ["1 = 1"];
+            $where = ["m.kind <> 'route'"]; // learned routes are listed on the usage page (with Forget)
             $args = [];
             if (isset(rh_ai_memory_kinds()[$memKind])) {
                 $where[] = 'kind = ?';

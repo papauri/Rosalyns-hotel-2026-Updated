@@ -473,10 +473,19 @@
             if (i >= steps.length) { return Promise.resolve({ json: last }); }
             var s = steps[i++];
             if (!safePage(s.url)) { return Promise.resolve({ json: { success: false, message: 'That screen is not allowed.' } }); }
-            var fd = new FormData();
-            fd.append('csrf_token', csrf());
-            (s.fields || []).forEach(function (f) { fd.append(String(f[0]), String(f[1])); });
-            return fetch(s.url, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': csrf() } })
+            var body;
+            var hdr = { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': csrf() };
+            if (s.json) { // the screen's own button sends JSON (Tentative Bookings: extend hold, send quotation)
+                var o = { csrf: csrf(), csrf_token: csrf() };
+                (s.fields || []).forEach(function (f) { o[String(f[0])] = String(f[1]); });
+                body = JSON.stringify(o);
+                hdr['Content-Type'] = 'application/json';
+            } else {
+                body = new FormData();
+                body.append('csrf_token', csrf());
+                (s.fields || []).forEach(function (f) { body.append(String(f[0]), String(f[1])); });
+            }
+            return fetch(s.url, { method: 'POST', body: body, credentials: 'same-origin', headers: hdr })
                 .then(function (r) { return r.text(); })
                 .then(function (t) {
                     var j = null;

@@ -205,6 +205,20 @@ function rh_ai_setting_defaults(): array
         // Owner 2026-10-29 ("Assistant should be a master"): the front desk reads (includes/ai/ai-desk.php)
         'ai_upcoming_days'          => '90', // next arrivals and blocked dates: this many days ahead when no period is named
         'ai_history_rows'           => '12', // a booking's history: the latest this-many entries
+        'ai_hold_soon_hours'        => '24', // bookings waiting to be confirmed: a tentative hold ending within this many hours is "ending soon"
+        // Owner 2026-10-29 ("ask in a sequence, without using credit"): guided cards (includes/ai/ai-guided.php)
+        'ai_guided_minutes'         => '30', // a step-by-step card left unanswered this long is dropped (nothing was saved)
+        'ai_guided_chips'           => '6',  // tap answers offered per question at most (free room types, bookings, rooms, dates)
+        'ai_hold_extend_hours'      => '24', // extend a tentative hold: hours offered first (the Tentative Bookings screen's own default)
+        'ai_quote_valid_days'       => '7',  // send a quotation: days it stays valid unless said (the screen's own default)
+        // Owner 2026-10-29 ("learns ... faster, cheaper or free answering"): the learned local router (includes/ai/ai-router.php)
+        'ai_router_enabled'         => '1',  // '0' = learned routes are neither learned nor used
+        'ai_route_promote_n'        => '3',  // a question shape answered by the model this many times (2+ chats, same lookup, no Not right) is learned
+        'ai_route_min_pct'          => '80', // a question this close (0-100, word overlap) to a learned shape is answered locally
+        'ai_route_max'              => '200', // learned routes kept in use at most
+        'ai_route_train_rows'       => '2000', // model answers read by the daily training at most (bounded work)
+        'ai_route_train_days'       => '30', // ... from this many days back
+        'ai_reask_seconds'          => '180', // the same question asked again in other words within this time counts as a sign the answer missed
     ];
 }
 

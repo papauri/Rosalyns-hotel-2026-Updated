@@ -298,7 +298,7 @@ function rh_ai_memory_retrieve(PDO $db, array $user, string $question, string $p
     $uid = (int)($user['id'] ?? 0);
     try {
         $st = $db->prepare("SELECT id, kind, scope, text, terms, meta_json, status, pinned, wins, losses FROM ai_memory
-                            WHERE status IN ('active', 'probation') AND (scope = 'hotel' OR (scope = 'user' AND scope_ref = ?) OR (scope = 'page' AND scope_ref = ?))
+                            WHERE status IN ('active', 'probation') AND kind <> 'route' AND (scope = 'hotel' OR (scope = 'user' AND scope_ref = ?) OR (scope = 'page' AND scope_ref = ?))
                             ORDER BY pinned DESC, status = 'active' DESC, wins DESC, id DESC LIMIT 400");
         $st->execute([(string)$uid, basename($page)]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -449,10 +449,10 @@ function rh_ai_memory_rescore(PDO $db): array
     }
     $need = max(1, (int)rh_ai_setting('ai_memory_promote_wins', '3'));
     try {
-        $st = $db->prepare("UPDATE ai_memory SET status = 'active' WHERE status = 'probation' AND wins >= ? AND wins > losses");
+        $st = $db->prepare("UPDATE ai_memory SET status = 'active' WHERE status = 'probation' AND kind <> 'route' AND wins >= ? AND wins > losses");
         $st->execute([$need]);
         $out['promoted'] = $st->rowCount();
-        $st = $db->prepare("UPDATE ai_memory SET status = 'retired' WHERE status IN ('active', 'probation') AND pinned = 0 AND losses >= 3 AND losses > wins");
+        $st = $db->prepare("UPDATE ai_memory SET status = 'retired' WHERE status IN ('active', 'probation') AND kind <> 'route' AND pinned = 0 AND losses >= 3 AND losses > wins");
         $st->execute();
         $out['retired'] = $st->rowCount();
     } catch (Throwable $e) {
@@ -575,8 +575,12 @@ function rh_ai_feedback_save(PDO $db, array $user, int $messageId, int $rating, 
         $q->execute([$conv, $messageId]);
         rh_ai_incident_add($db, 'reply_not_right', 'A reply was marked Not right', [
             'question' => mb_substr((string)$q->fetchColumn(), 0, 400), 'reply' => mb_substr((string)$msg['content'], 0, 400),
-            'route' => (string)($meta['route'] ?? $msg['agent'] ?? ''), 'correction' => mb_substr($tok, 0, 300),
+            'route' => (string)($meta['route'] ?? $msg['agent'] ?? ''), 'correction' => mb_substr($tok, 0, 300), 'message_id' => $messageId,
+            'wrong' => ['route' => (string)($meta['route'] ?? $msg['agent'] ?? ''), 'head' => function_exists('rh_ai_wrong_head') ? rh_ai_wrong_head((string)$msg['content']) : ''],
         ], ['user_id' => $uid, 'conversation_id' => $conv]);
+        if (!empty($meta['learned_route']) && function_exists('rh_ai_route_demote')) {
+            rh_ai_route_demote($db, (int)$meta['learned_route'], 'marked Not right'); // a learned answer marked Not right is never used again
+        }
     }
     $note = '';
     if ($tok !== '') {

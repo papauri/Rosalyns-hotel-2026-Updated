@@ -49,7 +49,190 @@ function rh_ai_desk_tools(): array
             'schema' => ['properties' => ['from' => $date, 'days' => $days, 'room_type' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Optional room type name']]],
             'perm' => ['blocked_dates', 'calendar'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_blocked_dates', 'step' => 'Checking blocked dates',
         ],
+        // Owner fault 2026-10-29: "How many staff were active today" - staff activity from the activity log and sign-ins.
+        // Who may see it: the people who see who is online (administrators and managers) AND hold a screen that shows
+        // staff activity (System Logs, or the last activity column on User Management).
+        'staff_activity' => [
+            'description' => 'Which staff were active on a day or over a period (default today): each person with the number of logged actions, first and last activity, and who was signed in; or what one staff member did (staff = a name). From the activity log and sign-ins.',
+            'schema' => ['properties' => ['from' => $date, 'to' => $date, 'staff' => ['type' => 'string', 'maxLength' => 80, 'description' => 'One staff member (a name or token)']]],
+            'perm' => ['system_logs', 'user_management'], 'module' => [], 'gate' => 'rh_ai_gate_presence', 'cache' => 30, 'handler' => 'rh_ai_t_staff_activity', 'step' => 'Checking staff activity',
+        ],
     ];
+}
+
+/**
+ * Staff active between two dates: distinct people in admin_activity_log (every sign-in, change and Assistant card writes
+ * a row) plus admin_presence (seen in the portal in that time, even with nothing logged). Counts, first / last activity,
+ * role. One person (staff): their logged actions, newest first. The total of staff accounts comes along, so a "none"
+ * always has a checked total behind it.
+ */
+function rh_ai_t_staff_activity(PDO $db, array $user, array $a): array
+{
+    $from = (string)($a['from'] ?? '') !== '' ? (string)$a['from'] : rh_ai_today();
+    $to = (string)($a['to'] ?? '') !== '' ? (string)$a['to'] : $from;
+    if ($to < $from) {
+        [$from, $to] = [$to, $from];
+    }
+    $toEx = date('Y-m-d', strtotime($to . ' +1 day'));
+    $accounts = (int)$db->query("SELECT COUNT(*) FROM admin_users WHERE is_active = 1")->fetchColumn();
+    $people = [];
+    try {
+        $st = $db->prepare("SELECT user_id, COUNT(*) AS n, MIN(created_at) AS first_at, MAX(created_at) AS last_at FROM admin_activity_log WHERE created_at >= ? AND created_at < ? AND user_id > 0 GROUP BY user_id");
+        $st->execute([$from, $toEx]);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $people[(int)$r['user_id']] = ['actions' => (int)$r['n'], 'first' => (string)$r['first_at'], 'last' => (string)$r['last_at'], 'seen' => ''];
+        }
+    } catch (Throwable $e) {
+        // no activity log: sign-ins below still count
+    }
+    try {
+        $st = $db->prepare("SELECT user_id, last_seen_at FROM admin_presence WHERE last_seen_at >= ? AND last_seen_at < ?");
+        $st->execute([$from, $toEx]);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $id = (int)$r['user_id'];
+            $people[$id] = $people[$id] ?? ['actions' => 0, 'first' => '', 'last' => '', 'seen' => ''];
+            $people[$id]['seen'] = (string)$r['last_seen_at'];
+        }
+    } catch (Throwable $e) {
+        // no presence table on this install
+    }
+    $names = [];
+    if ($people) {
+        $ids = array_keys($people);
+        $st = $db->prepare("SELECT id, full_name, username, role FROM admin_users WHERE id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")");
+        $st->execute($ids);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $u) {
+            $names[(int)$u['id']] = ['name' => trim((string)$u['full_name']) !== '' ? (string)$u['full_name'] : (string)$u['username'], 'role' => (string)$u['role']];
+        }
+    }
+    $roles = function_exists('getAllRoles') ? getAllRoles() : [];
+    $roleLabel = static fn(string $r): string => (string)($roles[$r]['label'] ?? $r);
+    $want = trim((string)($a['staff'] ?? ''));
+    if ($want !== '') {
+        $hit = null;
+        foreach ($names as $id => $n) {
+            if (mb_stripos($n['name'], $want) !== false) {
+                $hit = $id;
+            }
+        }
+        if ($hit === null) {
+            $st = $db->prepare("SELECT id, full_name FROM admin_users WHERE full_name LIKE ? ORDER BY is_active DESC, id LIMIT 1");
+            $st->execute(['%' . rh_ai_like($want) . '%']);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row && empty($a['_close'])) {
+                $p = rh_ai_fuzzy_from_table($db, $want, 'admin_users', 'full_name', '1=1', [], 'is_active DESC, id DESC');
+                if ($p['clear'] !== null) {
+                    return rh_ai_fuzzy_note($want, $p['clear'], [], 'staff_name') + rh_ai_t_staff_activity($db, $user, ['staff' => $p['clear'], '_close' => 1] + $a);
+                }
+                return ['from' => $from, 'to' => $to, 'staff_name' => $want, 'found' => 'no staff account has that name'] + rh_ai_fuzzy_note($want, null, $p['options'], 'staff_name');
+            }
+            if (!$row) {
+                return ['from' => $from, 'to' => $to, 'staff_name' => $want, 'found' => 'no staff account has that name'];
+            }
+            return ['from' => $from, 'to' => $to, 'staff_name' => (string)$row['full_name'], 'active' => 'no', 'actions' => 0];
+        }
+        $acts = [];
+        try {
+            $st = $db->prepare("SELECT action, created_at FROM admin_activity_log WHERE user_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT " . rh_ai_num('ai_history_rows'));
+            $st->execute([$hit, $from, $toEx]);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $acts[] = ['at' => substr((string)$r['created_at'], 0, 16), 'what' => rh_ai_desk_event_text((string)$r['action'])];
+            }
+        } catch (Throwable $e) {
+        }
+        $p = $people[$hit];
+        return ['from' => $from, 'to' => $to, 'staff_name' => $names[$hit]['name'], 'role' => $roleLabel($names[$hit]['role']), 'active' => 'yes',
+            'actions' => $p['actions'], 'last_seen' => substr(max($p['seen'], $p['last']), 0, 16), 'latest_actions' => $acts ?: 'none logged (seen in the portal only)'];
+    }
+    $list = [];
+    foreach ($people as $id => $p) {
+        $list[] = ['staff_name' => $names[$id]['name'] ?? ('user #' . $id), 'role' => $roleLabel((string)($names[$id]['role'] ?? '')),
+            'actions' => $p['actions'], 'first' => $p['first'] !== '' ? substr($p['first'], 0, 16) : null, 'last_seen' => substr(max($p['last'], $p['seen']), 0, 16)];
+    }
+    usort($list, static fn($x, $y) => strcmp((string)$y['last_seen'], (string)$x['last_seen']));
+    $link = function_exists('rhCanOpenPage') && rhCanOpenPage((int)$user['id'], 'system-logs.php') ? ['system-logs.php', 'Open System Logs'] : ['user-management.php', 'Open User Management'];
+    return ['from' => $from, 'to' => $to, 'active_staff' => count($list), 'staff_accounts' => $accounts, 'staff' => $list ? array_slice($list, 0, RH_AI_TOOL_ROWS) : 'none',
+        'counted_from' => 'the activity log (sign-ins, changes, Assistant cards) and portal sign-ins', 'link' => $link[0], 'link_label' => $link[1]];
+}
+
+/**
+ * "How many staff were active today", "who logged in this week", "staff activity yesterday", "what did Mphatso do today":
+ * ['from','to','when','staff'] or null. $l: lower case (typos already read).
+ */
+function rh_ai_desk_staff_intent(string $l): ?array
+{
+    $l = trim($l, " ?.!");
+    $period = '(?:\s+(today|yesterday|this week|last week|this month))?';
+    $staff = '(?:staff|staff members?|employees?|workers?|colleagues?|people|team members?|users?)';
+    $who = null;
+    if (preg_match('/^what (?:did|has) (?<who>\p{L}[\p{L}\'\- ]{1,40}?) (?:done|do)' . $period . '$/u', $l, $g)) {
+        $who = trim($g['who']);
+        if (preg_match('/^(they|he|she|we|you|i|it|the guest|the guests|the system|the hotel)$/u', $who)) {
+            return null;
+        }
+        $when = $g[1] ?? '';
+    } elseif (preg_match('/^(?:how many|which|what|any)\s+' . $staff . '\s+(?:were|was|are|is|have been|has been)?\s*(?:active|on duty|working|logged (?:in|on)|signed (?:in|on)|online|in the (?:system|portal))' . $period . '$/u', $l, $g)
+        || preg_match('/^who (?:was|were|has been|have been)?\s*(?:active|working|on duty|logged (?:in|on)|signed (?:in|on))' . $period . '$/u', $l, $g)
+        || preg_match('/^(?:staff|team|user) (?:activity|logins?|sign.?ins?)' . $period . '$/u', $l, $g)
+        || preg_match('/^(?:active|logged.in) ' . $staff . $period . '$/u', $l, $g)) {
+        $when = $g[1] ?? '';
+    } else {
+        return null;
+    }
+    $today = rh_ai_today();
+    switch ($when) {
+        case 'yesterday':
+            $from = $to = date('Y-m-d', strtotime($today . ' -1 day'));
+            break;
+        case 'this week':
+            $from = date('Y-m-d', strtotime('monday this week', strtotime($today)));
+            $to = $today;
+            break;
+        case 'last week':
+            $from = date('Y-m-d', strtotime('monday last week', strtotime($today)));
+            $to = date('Y-m-d', strtotime($from . ' +6 days'));
+            break;
+        case 'this month':
+            $from = date('Y-m-01', strtotime($today));
+            $to = $today;
+            break;
+        default:
+            $from = $to = $today;
+            $when = 'today';
+    }
+    return ['from' => $from, 'to' => $to, 'when' => $when, 'staff' => $who ?? ''];
+}
+
+/** The staff-activity answer in plain words (de-identified result: names are tokens). */
+function rh_ai_desk_staff_text(array $r, string $when): string
+{
+    $d = static fn($x) => strtotime((string)$x) ? date('D j M', strtotime((string)$x)) : (string)$x;
+    $span = $r['from'] === $r['to'] ? $when . ' (' . $d($r['from']) . ')' : $when . ' (' . $d($r['from']) . ' to ' . $d($r['to']) . ')';
+    if (isset($r['staff_name']) && !isset($r['active_staff'])) {
+        if (isset($r['found'])) {
+            $opts = array_values(array_filter(array_map(static fn($x) => is_array($x) ? (string)($x['staff_name'] ?? '') : (string)$x, is_array($r['close_matches'] ?? null) ? $r['close_matches'] : [])));
+            return 'No staff account has that name.' . ($opts ? ' ' . rh_ai_did_you_mean($opts) : '');
+        }
+        if (($r['active'] ?? '') !== 'yes') {
+            return '**' . $r['staff_name'] . '** has nothing logged ' . $span . ' and was not seen in the portal.';
+        }
+        $lines = [];
+        foreach (is_array($r['latest_actions'] ?? null) ? $r['latest_actions'] : [] as $x) {
+            $lines[] = date('D j M, H:i', strtotime((string)$x['at'])) . ' · ' . $x['what'];
+        }
+        return '**' . $r['staff_name'] . '** (' . ($r['role'] ?? '') . ') ' . $span . ': ' . (int)$r['actions'] . ' logged action' . ((int)$r['actions'] === 1 ? '' : 's') . ', last seen ' . date('D j M, H:i', strtotime((string)$r['last_seen'])) . '.'
+            . ($lines ? rh_ai_local_lines($lines) : ' Seen in the portal only (nothing logged).');
+    }
+    $n = (int)($r['active_staff'] ?? 0);
+    $acc = (int)($r['staff_accounts'] ?? 0);
+    if ($n === 0) {
+        return 'No staff activity is recorded ' . $span . ': nobody signed in or changed anything (checked against the activity log and sign-ins; ' . $acc . ' staff account' . ($acc === 1 ? '' : 's') . ' in the system).';
+    }
+    $lines = [];
+    foreach (is_array($r['staff'] ?? null) ? $r['staff'] : [] as $x) {
+        $lines[] = '**' . $x['staff_name'] . '**' . ($x['role'] !== '' ? ' (' . $x['role'] . ')' : '') . ' · ' . (int)$x['actions'] . ' logged action' . ((int)$x['actions'] === 1 ? '' : 's') . ' · last seen ' . date('D j M, H:i', strtotime((string)$x['last_seen']));
+    }
+    return '**Staff active ' . $span . ': ' . $n . '** of ' . $acc . ' staff account' . ($acc === 1 ? '' : 's') . '.' . rh_ai_local_lines($lines) . "\n\nCounted from the activity log (sign-ins, changes) and portal sign-ins.";
 }
 
 /** One booking row (live) by id or reference, with its room type and room. */
@@ -168,7 +351,11 @@ function rh_ai_t_booking_history(PDO $db, array $user, array $a): array
             $st = $db->prepare("SELECT COUNT(*) FROM booking_audit_log WHERE booking_id = ?");
             $st->execute([$id]);
             $total = (int)$st->fetchColumn();
-            $st = $db->prepare("SELECT action, IF(performed_by IS NULL, 'guest', 'admin') AS performed_by_type, performed_by AS performed_by_id, performed_by_name, performed_at AS created_at
+            // No staff id: "the guest" only when the record itself says the booking came in online (website); otherwise
+            // nothing says who it was, so it is "not recorded" (QA 2026-10-29: never assume the guest).
+            $st = $db->prepare("SELECT action, CASE WHEN performed_by IS NOT NULL AND performed_by > 0 THEN 'admin'
+                                    WHEN LOWER(COALESCE(note, '')) LIKE '%online%' OR LOWER(COALESCE(note, '')) LIKE '%website%' THEN 'guest' ELSE 'unknown' END AS performed_by_type,
+                                    performed_by AS performed_by_id, performed_by_name, performed_at AS created_at
                                 FROM booking_audit_log WHERE booking_id = ? ORDER BY performed_at DESC, id DESC LIMIT " . $n);
             $st->execute([$id]);
             $rows = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -191,6 +378,8 @@ function rh_ai_t_booking_history(PDO $db, array $user, array $a): array
             $e['by'] = 'the guest';
         } elseif ($type === 'api') {
             $e['by'] = 'another system';
+        } elseif ($type === 'unknown') {
+            $e['by'] = 'not recorded';
         } else {
             $e['by'] = 'the system';
         }
@@ -240,7 +429,7 @@ function rh_ai_t_booking_holds(PDO $db, array $user, array $a): array
 {
     $where = "b.deleted_at IS NULL AND b.status IN ('pending', 'tentative') AND b.check_out_date >= CURDATE()";
     $c = $db->query("SELECT SUM(b.status = 'pending') AS p, SUM(b.status = 'tentative') AS t,
-                            SUM(b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at <= DATE_ADD(NOW(), INTERVAL 1 DAY)) AS soon
+                            SUM(b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at <= DATE_ADD(NOW(), INTERVAL " . rh_ai_num('ai_hold_soon_hours') . " HOUR)) AS soon
                      FROM bookings b WHERE $where")->fetch(PDO::FETCH_ASSOC) ?: [];
     $rows = $db->query("SELECT b.id, b.booking_reference, b.guest_name, b.status, b.check_in_date, b.check_out_date, b.tentative_expires_at, b.expires_at, r.name AS room_name
                         FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE $where
@@ -252,7 +441,7 @@ function rh_ai_t_booking_holds(PDO $db, array $user, array $a): array
         $list[] = array_filter(['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'status' => $r['status'], 'room_type' => $r['room_name'],
             'check_in' => $r['check_in_date'], 'check_out' => $r['check_out_date'], 'hold_ends' => $ends !== '' ? substr($ends, 0, 16) : null, 'balance_due' => $f['balance_due'] ?? null], static fn($v) => $v !== null);
     }
-    return ['pending' => (int)($c['p'] ?? 0), 'tentative' => (int)($c['t'] ?? 0), 'holds_ending_within_24h' => (int)($c['soon'] ?? 0), 'currency' => rh_ai_currency(),
+    return ['pending' => (int)($c['p'] ?? 0), 'tentative' => (int)($c['t'] ?? 0), 'holds_ending_soon' => (int)($c['soon'] ?? 0), 'ending_soon_hours' => rh_ai_num('ai_hold_soon_hours'), 'currency' => rh_ai_currency(),
         'list' => $list ?: 'none', 'link' => 'bookings.php', 'link_label' => 'Open on Bookings'];
 }
 
@@ -646,8 +835,9 @@ function rh_ai_desk_holds_text(array $r): string
             . (!empty($x['hold_ends']) ? ' · hold ends ' . date('D j M, H:i', strtotime((string)$x['hold_ends'])) : '')
             . (isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? ' · owes ' . rh_ai_fmt_cur($cur, $x['balance_due']) : '');
     }
-    $soon = (int)($r['holds_ending_within_24h'] ?? 0);
-    return '**Waiting to be confirmed: ' . ($p + $t) . '** (' . $p . ' pending, ' . $t . ' tentative' . ($soon > 0 ? '; ' . $soon . ' hold' . ($soon === 1 ? ' ends' : 's end') . ' within 24 hours' : '') . ')'
+    $soon = (int)($r['holds_ending_soon'] ?? 0);
+    $hrs = (int)($r['ending_soon_hours'] ?? rh_ai_num('ai_hold_soon_hours'));
+    return '**Waiting to be confirmed: ' . ($p + $t) . '** (' . $p . ' pending, ' . $t . ' tentative' . ($soon > 0 ? '; ' . $soon . ' hold' . ($soon === 1 ? ' ends' : 's end') . ' within ' . $hrs . ' hour' . ($hrs === 1 ? '' : 's') : '') . ')'
         . rh_ai_local_lines($lines) . "\n\nSay \"confirm the booking for ...\" and I'll prepare the card.";
 }
 
@@ -759,6 +949,19 @@ function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, arra
         }
         return ['text' => rh_ai_desk_blocked_text((array)$r['result'], $bl['when']), 'links' => $r['links'], 'chips' => []];
     }
+    // 6. Staff activity (owner fault 2026-10-29: "How many staff were active today")
+    if (($sa = rh_ai_desk_staff_intent($l)) !== null) {
+        if (!rh_ai_tool_allowed($user, 'staff_activity')) {
+            return rh_ai_desk_declined($user, 'staff_activity');
+        }
+        $args = ['from' => $sa['from'], 'to' => $sa['to']] + ($sa['staff'] !== '' ? ['staff' => $sa['staff']] : []);
+        $r = rh_ai_desk_read($db, $user, $conv, 'staff_activity', $args);
+        if ($r === null) {
+            return null;
+        }
+        return ['text' => rh_ai_desk_staff_text((array)$r['result'], $sa['when']), 'links' => $r['links'], 'chips' => $sa['staff'] === '' ? ['Who is online now?'] : [],
+            'local' => ['tool' => 'staff_activity', 'view' => $args]];
+    }
     return null;
 }
 
@@ -769,47 +972,65 @@ function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, arra
 function rh_ai_desk_card(PDO $db, array $user, int $conv, array $ci, array $state, int $pageBooking): array
 {
     $key = (string)$ci['key'];
-    $def = rh_ai_action_registry()[$key] ?? null;
-    if ($def === null) {
+    if (!isset(rh_ai_action_registry()[$key])) {
         return ['text' => 'That one needs the screen.', 'links' => [], 'chips' => []];
     }
-    $mod = function_exists('getModuleForPage') ? getModuleForPage((string)$def['page']) : null;
-    if ($mod !== null && !rh_ai_module_on((string)$mod)) {
-        $line = rh_ai_not_offered_lines()[(string)$mod] ?? "That isn't offered here.";
-        $help = rh_ai_can_help_line($user);
-        return ['text' => $line . ($help !== '' ? "\n\n" . $help : ''), 'links' => [], 'chips' => ['What can I do here?'], 'route' => 'declined'];
+    // "Room 12 is clean" with no housekeeping job open (QA 2026-10-29): the room's own status, never an error
+    if ($key === 'housekeeping_progress' && (string)($ci['step'] ?? '') === 'complete' && (string)$ci['room'] !== '' && rh_ai_page_modules_on('housekeeping.php')) {
+        $a4 = rh_ai_desk_room_clean($db, $user, $conv, (string)$ci['room']);
+        if ($a4 !== null) {
+            return $a4;
+        }
     }
-    $problem = rh_ai_action_problem($user, $key);
-    if ($problem !== '') {
-        $help = rh_ai_can_help_line($user);
-        return ['text' => $problem . ($help !== '' ? "\n\n" . $help : ''), 'links' => [], 'chips' => ['What can I do here?'], 'route' => 'declined'];
-    }
-    $args = [];
-    $focus = null;
-    if (in_array($key, ['housekeeping_progress', 'maintenance_progress'], true)) {
-        $args = ['room' => (string)$ci['room'], 'step' => (string)$ci['step']];
+    $prefill = [];
+    if (in_array($key, ['housekeeping_progress', 'maintenance_progress', 'housekeeping_verify', 'maintenance_verify'], true)) {
+        $prefill = ['room' => (string)$ci['room']] + (isset($ci['step']) ? ['step' => (string)$ci['step']] : []);
     } else {
-        $prefer = ['check_in' => ['confirmed', 'pending'], 'check_out' => ['checked-in'], 'confirm_booking' => ['pending', 'tentative'], 'assign_room' => ['confirmed', 'pending', 'checked-in']][$key] ?? [];
-        $pick = rh_ai_desk_pick($db, $user, $conv, (string)$ci['who'], $state, $pageBooking, $prefer);
-        if (isset($pick['reply'])) {
-            return $pick['reply'];
-        }
-        $args = ['booking_id' => (int)$pick['id']];
+        $prefill['booking_id'] = (string)$ci['who']; // '' = the booking in focus (or on screen)
         if ((string)$ci['room'] !== '' && in_array($key, ['assign_room', 'check_in'], true)) {
-            $args['room'] = (string)$ci['room'];
+            $prefill['room'] = (string)$ci['room'];
         }
-        if ($key === 'booking_note') {
-            $args['note'] = mb_substr((string)($ci['note'] ?? ''), 0, 1000);
+        if ($key === 'booking_note' && trim((string)($ci['note'] ?? '')) !== '') {
+            $prefill['note'] = mb_substr((string)$ci['note'], 0, 1000);
         }
-        $focus = (int)$pick['id'];
     }
-    rh_ai_step_set($db, (int)$user['id'], 'Preparing a card for you to check...');
-    $p = rh_ai_propose($db, $user, $conv, $key, $args, false);
-    rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => (string)$def['tool'], 'args' => rh_ai_vault_protect($db, $conv, $args), 'result' => $p['json'], 'agent' => 'local']);
+    // The guided steps: the same checks first, then only what is still missing is asked (often nothing: the card at once)
+    return rh_ai_guided_begin($db, $user, $conv, $key, '', '', $prefill, $state, $pageBooking);
+}
+
+/**
+ * "Room 12 is clean" when the room has no open housekeeping job: a room still marked for cleaning gets the Individual
+ * Rooms status card (Available), with that screen's permission; a room already available just says so. null = the room
+ * has an open job (the normal card), or no such room (the card's own message).
+ */
+function rh_ai_desk_room_clean(PDO $db, array $user, int $conv, string $room): ?array
+{
+    $r = rh_ai_act_room($db, $room);
+    if (!$r) {
+        return null;
+    }
+    $st = $db->prepare("SELECT COUNT(*) FROM housekeeping_assignments WHERE individual_room_id = ? AND status IN ('pending','in_progress')");
+    $st->execute([(int)$r['id']]);
+    if ((int)$st->fetchColumn() > 0) {
+        return null;
+    }
+    $status = (string)$r['status'];
+    if ($status === 'available' || $status === 'occupied') {
+        return ['text' => 'Room ' . $r['room_number'] . ' has no open housekeeping job and is already marked ' . str_replace('_', ' ', $status) . ' - nothing to change.', 'links' => [], 'chips' => [], 'route' => 'local'];
+    }
+    if ($status !== 'cleaning') {
+        return ['text' => 'Room ' . $r['room_number'] . ' has no open housekeeping job. It is marked ' . str_replace('_', ' ', $status) . ' - that is changed on Individual Rooms or Room Maintenance, not by marking it clean.', 'links' => [], 'chips' => [], 'route' => 'local'];
+    }
+    if (rh_ai_action_problem($user, 'room_status') !== '') {
+        return ['text' => 'Room ' . $r['room_number'] . ' has no open housekeeping job; it is still marked for cleaning. Setting it to available is done on Individual Rooms, which is outside what your account can do - a supervisor can do it.', 'links' => [], 'chips' => [], 'route' => 'local'];
+    }
+    $p = rh_ai_propose($db, $user, $conv, 'room_status', ['room' => (string)$r['room_number'], 'status' => 'available', 'reason' => 'Cleaned (no housekeeping job was open)'], false);
+    rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => 'propose_room_status', 'args' => ['room' => (string)$r['room_number'], 'status' => 'available'], 'result' => $p['json'], 'agent' => 'local']);
     if (!$p['ok']) {
-        return ['text' => 'Not prepared: ' . rh_ai_scrub_outbound($db, $conv, (string)$p['error']), 'links' => [], 'chips' => [], 'focus' => $focus];
+        return ['text' => 'Room ' . $r['room_number'] . ' has no open housekeeping job. ' . rh_ai_scrub_outbound($db, $conv, (string)$p['error']), 'links' => [], 'chips' => [], 'route' => 'local'];
     }
-    return ['text' => 'Check the card below and tap **Confirm** - nothing changes until you do.', 'links' => [], 'chips' => [], 'cards' => [(int)$p['card']['id']], 'focus' => $focus];
+    return ['text' => 'Room ' . $r['room_number'] . ' has no open housekeeping job, so the card below sets the room itself to Available (the same as Change status on Individual Rooms). Nothing changes until you tap **Confirm**.',
+        'links' => [], 'chips' => [], 'cards' => [(int)$p['card']['id']], 'route' => 'local'];
 }
 
 // ── "No booking for X" is checked before it goes out (owner fault 2026-10-29) ──

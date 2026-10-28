@@ -234,7 +234,8 @@ function rh_ai_intent_vocab(): array
     $fns = ['rh_ai_local_intent', 'rh_ai_lookup_intent', 'rh_ai_hotel_fact_intent', 'rh_ai_booking_totals_intent', 'rh_ai_room_rates_intent', 'rh_ai_rates_not_list_re',
         'rh_ai_hotel_fact_question', 'rh_ai_is_briefing_request', 'rh_ai_focus_kind', 'rh_ai_person_search_intent', 'rh_ai_parse_stay_dates', 'rh_ai_parse_party',
         'rh_ai_lane_words', 'rh_ai_occupancy_intent', 'rh_ai_small_talk', 'rh_ai_followup_local', 'rh_ai_count_word',
-        'rh_ai_desk_booking_intent', 'rh_ai_desk_upcoming_intent', 'rh_ai_desk_other_days', 'rh_ai_desk_holds_intent', 'rh_ai_desk_blocked_intent'];
+        'rh_ai_desk_booking_intent', 'rh_ai_desk_upcoming_intent', 'rh_ai_desk_other_days', 'rh_ai_desk_holds_intent', 'rh_ai_desk_blocked_intent',
+        'rh_ai_desk_staff_intent', 'rh_ai_money_read_intent'];
     $vocab = [];
     $files = [];
     foreach ($fns as $fn) {

@@ -245,6 +245,71 @@ function rh_ai_links_merge(array $links, array $add, int $max): array
     return $out;
 }
 
+/**
+ * Owner fault 2026-10-29 ("Open Rate Plans" under a staff-activity answer): a lookup's screen link is shown only when the
+ * answer used that lookup - one of its figures, privacy tokens or names is in the reply. When none can be tied, only the
+ * last lookup's link stays (the answer came from it). Links not from a lookup (guides, a card) are kept.
+ * $src: [[links, result json], ...] in the order the lookups ran.
+ */
+function rh_ai_links_for_reply(string $reply, array $src, array $links): array
+{
+    if (!$src) {
+        return $links;
+    }
+    $facts = [];
+    if (preg_match_all('/\[[A-Z]+_\d+\]|\d[\d,]*(?:\.\d+)?|\p{Lu}\p{Ll}{4,}/u', $reply, $m)) {
+        foreach ($m[0] as $f) {
+            if (preg_match('/^\d/', $f)) {
+                $n = str_replace(',', '', $f);
+                if (strlen(str_replace('.', '', $n)) < 2) {
+                    continue; // "1", "2": too common to tie a link to
+                }
+                $facts[] = $n;
+                if (strpos($n, '.') !== false) {
+                    $facts[] = rtrim(rtrim($n, '0'), '.');
+                }
+            } else {
+                $facts[] = $f;
+            }
+        }
+    }
+    $toolUrls = [];
+    $keep = [];
+    foreach ($src as $s) {
+        [$ls, $json] = [(array)($s[0] ?? []), (string)($s[1] ?? '')];
+        foreach ($ls as $l) {
+            $toolUrls[mb_strtolower((string)($l['url'] ?? ''))] = true;
+        }
+        foreach (array_unique($facts) as $f) {
+            if ($f !== '' && strpos($json, $f) !== false) {
+                $keep = rh_ai_links_merge($keep, $ls, 4);
+                break;
+            }
+        }
+    }
+    if (!$keep) { // no figure ties a lookup to the answer: the lookup whose words the answer uses most, else the last one
+        $words = static function (string $t): array {
+            preg_match_all('/\p{L}{4,}/u', mb_strtolower(str_replace('_', ' ', $t)), $m);
+            return array_unique($m[0]);
+        };
+        $rw = $words($reply);
+        $best = 0;
+        foreach ($src as $s) {
+            $n = count(array_intersect($rw, $words((string)($s[1] ?? ''))));
+            if ($n > $best) {
+                $best = $n;
+                $keep = (array)($s[0] ?? []);
+            }
+        }
+        if (!$keep) {
+            $last = end($src);
+            $keep = (array)($last[0] ?? []);
+        }
+    }
+    $other = array_values(array_filter($links, static fn($l) => is_array($l) && !isset($toolUrls[mb_strtolower((string)($l['url'] ?? ''))])));
+    return rh_ai_links_merge($keep, $other, 3);
+}
+
 /** The reply says the data has nothing ("I can't find...", "I don't have that"). */
 function rh_ai_is_no_data_reply(string $t): bool
 {
@@ -263,6 +328,7 @@ function rh_ai_absence_subjects(): array
         'orders' => ['re' => '(?<!purchase )(?:till |open |room.service )?orders?', 'tool' => 'order_status', 'label' => 'orders open now'],
         'gym_members' => ['re' => '(?:gym )?members(?:hips)?', 'tool' => 'gym_watch', 'label' => 'gym members'],
         'stock_items' => ['re' => 'stock items?|ingredients?', 'tool' => 'inventory_watch', 'label' => 'stock items'],
+        'staff_active' => ['re' => '(?:active )?staff(?: members)?', 'tool' => 'staff_activity', 'label' => 'staff active today (from the activity log and sign-ins)'],
     ];
 }
 
@@ -284,6 +350,8 @@ function rh_ai_subject_total(PDO $db, array $user, string $subject): ?int
                 return (int)(rh_ai_t_order_status($db, $user, [])['open_count'] ?? 0);
             case 'gym_members':
                 return (int)$db->query("SELECT COUNT(*) FROM gym_members")->fetchColumn();
+            case 'staff_active':
+                return (int)(rh_ai_t_staff_activity($db, $user, [])['active_staff'] ?? 0);
             case 'stock_items':
                 return (int)$db->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
             case 'purchase_orders':
@@ -321,6 +389,11 @@ function rh_ai_absence_claims(string $reply): array
     foreach (preg_split('/(?<=[.!?;])\s+|\n+/u', $reply) as $i => $s) {
         $l = trim((string)preg_replace('/[\s.!?;]+$/u', '', str_replace(['’', '‘', '*'], ["'", "'", ''], mb_strtolower(trim($s)))));
         if ($l === '') {
+            continue;
+        }
+        // "no active staff recorded for today", "nobody was logged in today" (owner fault 2026-10-29): a claim about staff activity
+        if (preg_match('/\b(?:no|zero|0) (?:active )?(?:staff|employees|users)(?: members)?\b.{0,40}\b(?:active|recorded|logged|signed|working|on duty)\b|\bno(?:body| one| staff(?: member)?) (?:was |has been |were )?(?:active|logged in|signed in|working|on duty)\b/u', $l)) {
+            $found['staff_active'][] = $i;
             continue;
         }
         foreach ($subjects as $k => $re) {
@@ -1824,6 +1897,9 @@ function rh_ai_specialists(): array
             'core' => ['guest_voice'], 'tools' => ['guest_voice', 'get_booking', 'guest_history', 'search_bookings', 'reply_queue', 'review_insights', 'hotel_info']],
         'system_guide' => ['label' => 'System Guide', 'brief' => 'how to do things in this portal, from the staff guides only',
             'core' => ['how_to', 'summarise_guide'], 'tools' => ['how_to', 'summarise_guide', 'page_help', 'open_page', 'my_access']],
+        // Owner fault 2026-10-29 ("How many staff were active today" got the permission line): staff questions have a lead
+        'people' => ['label' => 'Staff & Access', 'brief' => 'which staff were active on a day or week, who signed in, what one staff member did, who is online now, and your own access',
+            'core' => ['staff_activity', 'who_is_online'], 'tools' => ['staff_activity', 'who_is_online', 'my_access']],
     ];
 }
 
@@ -2455,6 +2531,7 @@ function rh_ai_lane_words(): array
         'revenue'      => '/\b(occupancy|adr|revpar|pace|pick.?up|rates?|pricing|prices?|unsold|demand|sales|sell\w*|sources?|channels?|forecast\w*|lift|boost|fill|quiet|season\w*|upsell\w*)\b/u',
         'guest_voice'  => '/\b(reviews?|feedback|complain\w*|enquir\w*|inquir\w*|messages?|repl(y|ies)|whatsapp|emails?|concierge|ratings?)\b/u',
         'system_guide' => '/\b(how (do|to|does) (i|we|you)|how to|where (is|do|can|are)|guides?|help me (with|find|use)|settings?|screens?|pages?|menu|buttons?|what can i)\b/u',
+        'people'       => '/\b(staff|employees?|workers?|colleagues?|team members?|logged (in|on)|signed (in|on)|log ?ins?|online|shifts? worked|who (was|is|were) (on|in|working))\b/u',
     ];
 }
 
@@ -2497,7 +2574,7 @@ function rh_ai_change_cards(string $tok): array
         '/\b(change|move|modify|amend|switch|upgrade|downgrade|room type)\b/u' => ['edit_booking', 'room_type_change', 'change_checkout'],
         '/\b(extend|another night|extra night|one more night|longer|stay on)\b/u' => ['extend_stay', 'change_checkout'],
         '/\b(shorten|leave early|check.?out date)\b/u' => ['change_checkout'],
-        '/\b(cancel|no.?show)\b/u' => ['cancel_booking'],
+        '/\bcancel\b/u' => ['cancel_booking'], // a no-show is marked on the screen (it moves money): never offered as a cancel
         '/\bcheck(ed|ing)? (\S+ ){0,3}in\b|\bcheck.?in\b/u' => ['check_in', 'assign_room'],
         '/\b(assign|allocate|give .{1,30}room)\b/u' => ['assign_room'],
         '/\bcheck(ed|ing)? (\S+ ){0,3}out\b|\bcheck.?out\b/u' => ['check_out'],
@@ -2509,6 +2586,12 @@ function rh_ai_change_cards(string $tok): array
         '/\b(mark|set) (room|it|the room)\b|\broom status to\b/u' => ['room_status'],
         '/\bconfirm (the |this |that |their |his |her |[^ ]+\'s )?(booking|reservation|hold)\b|\bconfirm (it|them|him|her)\b/u' => ['confirm_booking'],
         '/\b(add|put|leave|write|make) (a )?(booking )?note\b|\bnote (on|to|for)\b/u' => ['booking_note'],
+        '/\b(block|close|shut)\b.{0,40}\b(dates?|days?|nights?|rooms?|hotel|for sale)\b|\bblock(ed)? (off|out)\b/u' => ['block_dates'],
+        '/\b(unblock|re-?open|open up|open (the )?(dates?|room))\b/u' => ['unblock_dates'],
+        '/\b(extend|more time|longer)\b.{0,30}\bhold\b|\bhold\b.{0,30}\b(extend|longer|more time)\b/u' => ['extend_hold'],
+        '/\b(quot(e|ation)|estimate)\b/u' => ['send_quotation'],
+        '/\b(verify|sign(ed)? off|inspect(ed)?|approve)\b/u' => ['housekeeping_verify', 'maintenance_verify'],
+        '/\bgym\b.{0,30}\bcheck.?in\b|\bcheck.?in\b.{0,30}\bgym\b|\b(at|to) the gym\b/u' => ['gym_checkin'],
         '/\b(clean(ing|ed)?|housekeeping|job|task)\b.{0,40}\b(done|finished|complete[d]?|started?|in progress)\b|\b(start|begin|finish(ed)?)\b.{0,12}\bclean(ing)?\b|\broom \S+ (is )?(clean(ed)?|ready|done)\b/u' => ['housekeeping_progress'],
         '/\b(repair|maintenance|fix(ing)?|job|task)\b.{0,40}\b(done|finished|complete[d]?|started?|in progress)\b|\b(start|begin|finish(ed)?)\b.{0,12}\b(repair|maintenance|fixing)\b|\broom \S+ (is )?(fixed|repaired)\b/u' => ['maintenance_progress'],
     ];
@@ -2790,9 +2873,14 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         }
     }
 
-    $finish = static function (string $tokReply, string $route, array $extra = []) use ($db, $conv, $uid, &$out, $learned): array {
+    $guidedResume = null; // a step-by-step card still open: its question is asked again after another answer
+    $finish = static function (string $tokReply, string $route, array $extra = []) use ($db, $conv, $uid, &$out, $learned, &$guidedResume): array {
+        if ($guidedResume !== null && !array_key_exists('guided', $extra) && empty($extra['cards'])) {
+            $tokReply = rtrim($tokReply) . "\n\n" . (string)$guidedResume['text'];
+            $extra['chips'] = array_values(array_unique(array_merge((array)$guidedResume['chips'], (array)($extra['chips'] ?? []))));
+        }
         $links = rh_ai_links_merge([], (array)($extra['links'] ?? []), 4); // never the same button twice (same page or same words)
-        $chips = (array)($extra['chips'] ?? []);
+        $chips = array_values(array_map(static fn($c) => rh_ai_scrub_outbound($db, $conv, (string)$c), (array)($extra['chips'] ?? []))); // stored with privacy tokens
         $items = (array)($extra['items'] ?? []);
         if ($learned !== '' && strpos((string)($extra['notice'] ?? ''), $learned) === false) {
             $extra['notice'] = trim((string)($extra['notice'] ?? '') . ' ' . $learned); // the correction was noted
@@ -2820,6 +2908,14 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         if (!empty($extra['focus_offer'])) {
             $meta['focus_offer'] = (int)$extra['focus_offer'];
         }
+        if (array_key_exists('guided', $extra) && $extra['guided'] !== null) { // the step-by-step card's state (privacy tokens only)
+            $gs = (array)$extra['guided'];
+            $meta['guided'] = !empty($gs['done']) ? ['done' => 1] : rh_ai_guided_pack($db, $conv, $gs);
+        }
+        if (!empty($extra['learned_route'])) {
+            $meta['learned_route'] = (int)$extra['learned_route'];
+        }
+        $meta['local_answer'] = in_array($route, ['local', 'guided', 'declined', 'cache', 'briefing', 'learned'], true) && (int)($extra['tokens_in'] ?? 0) === 0 ? 1 : 0;
         $out['message_id'] = rh_ai_message_add($db, $conv, 'assistant', $tokReply, [
             'agent' => $route, 'args' => $meta,
             'provider' => $extra['provider'] ?? null, 'model' => ($extra['model'] ?? '') !== '' ? $extra['model'] : null,
@@ -2831,16 +2927,42 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         $out['route'] = $route;
         $out['model'] = (string)($extra['model'] ?? '');
         $out['links'] = $links;
-        $out['chips'] = $chips;
+        $out['chips'] = array_map(static fn($c) => rh_ai_vault_rehydrate($db, $conv, (string)$c), $chips); // tap answers may name a guest (shown locally)
         $out['items'] = $items ? rh_ai_items_rehydrate($db, $conv, $items) : [];
         $out['cards'] = $cards ? rh_ai_cards_for($db, $conv, $cards) : [];
         $out['tokens_in'] = (int)($extra['tokens_in'] ?? 0);
         $out['tokens_out'] = (int)($extra['tokens_out'] ?? 0);
         $out['cost_usd'] = (float)($extra['cost'] ?? 0);
         $out['notice'] = (string)($extra['notice'] ?? '');
+        $out['learned_route'] = (int)($extra['learned_route'] ?? 0);
         return $out;
     };
 
+    $focusState = $new ? ['focus' => 0, 'offer' => 0] : rh_ai_focus_state($db, $conv);
+    // 0. Money is never moved here (owner 2026-10-29: "do not touch money"): "take 50,000 cash from him", "mark them
+    // no-show", "refund the guest" get one line, the screen, and the live figures where this person may see them. The
+    // person's own words only (a word read as a typo never makes a money request). No card, no tokens.
+    if (($ma = rh_ai_money_action_intent($message)) !== null) {
+        $mr = rh_ai_money_action_reply($db, $user, $conv, $ma, $focusState, $bookingId);
+        return $finish(rh_ai_scrub_outbound($db, $conv, $mr['text']), 'declined', ['links' => $mr['links'], 'chips' => $mr['chips'], 'focus' => $mr['focus'] ?? null]);
+    }
+    // 0b. Guided cards (owner 2026-10-29: "ask in a sequence, without using credit"): an open step-by-step card takes the
+    // answer; a card asked for in plain words starts one. Local, zero tokens. A real question in the middle is answered as
+    // usual below and the step is asked again after it.
+    $gt = rh_ai_guided_turn($db, $user, $conv, $message, $msgQ, $focusState, $bookingId, $new);
+    if ($gt !== null && empty($gt['offscript'])) {
+        return $finish(rh_ai_scrub_outbound($db, $conv, (string)$gt['text']), (string)($gt['route'] ?? 'guided'), ['links' => $gt['links'] ?? [], 'chips' => $gt['chips'] ?? [], 'cards' => $gt['cards'] ?? [],
+            'focus' => $gt['focus'] ?? null, 'guided' => $gt['guided'] ?? null]);
+    }
+    if ($gt !== null) {
+        $guidedResume = ['text' => (string)$gt['resume'], 'chips' => (array)$gt['chips']];
+    }
+    // 0c. Money questions (owner 2026-10-29: "is it fully paid", "what's left to pay", "deposit paid?", "last payment"):
+    // a booking, a gym member, a conference or event booking, a till order - each behind its own screen's lookup. Local.
+    if (($mq = rh_ai_money_read_intent($msgQ)) !== null && ($mr = rh_ai_money_read_reply($db, $user, $conv, $mq, $focusState, $bookingId)) !== null) {
+        return $finish(rh_ai_scrub_outbound($db, $conv, (string)$mr['text']), (string)($mr['route'] ?? 'local'), ['links' => $mr['links'] ?? [], 'chips' => $mr['chips'] ?? [],
+            'focus' => $mr['focus'] ?? null, 'focus_offer' => $mr['focus_offer'] ?? 0, 'local' => $mr['local'] ?? null]);
+    }
     // 1a. Not about the hotel: a friendly one-line steer back, no tokens
     if (rh_ai_is_off_topic($tokQ)) {
         return $finish(rh_ai_off_topic_line(), 'declined');
@@ -2859,10 +2981,14 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     // 1b+. "You're wrong" / "I see a booking" (or the last reply was marked Not right): no cached or local answer; the
     // lookups behind the last answer run again without filters and the Primary model answers (owner fault 2026-10-28).
     $contradict = !$new && (rh_ai_is_contradiction($tok) || rh_ai_last_reply_not_right($db, $uid, $conv));
+    if ($contradict) { // a learning signal: the last answer was wrong (its right path is filled in by the daily review)
+        rh_ai_signal_from_last($db, 'contradiction', $conv, $userMsgId, $tok, $uid);
+    } elseif (!$new && $gt === null) {
+        rh_ai_reask_check($db, $conv, $userMsgId, $tok, $uid); // the same thing asked again in other words right after an answer
+    }
     // 1c. Small talk (greeting, thanks, a hard shift): a short friendly reply, no tokens
     // 1b++. One booking (owner fault 2026-10-29): a person search, "yes" to "Do you mean ...?", and money / what's included /
     // dates for the booking this chat is about - answered locally from get_booking, zero tokens. Never a change request.
-    $focusState = $new ? ['focus' => 0, 'offer' => 0] : rh_ai_focus_state($db, $conv);
     if (!$contradict && ($fl = rh_ai_focus_local($db, $user, $conv, $msgQ, $tokQ, $focusState)) !== null) {
         return $finish($fl['text'], 'local', ['links' => $fl['links'], 'chips' => $fl['chips'], 'focus' => $fl['focus'] ?? null, 'focus_offer' => $fl['focus_offer'] ?? 0]);
     }
@@ -2870,8 +2996,8 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     // history, the next arrivals ("any other day"), holds waiting, blocked dates, and cards straight from the words ("check
     // him in", "room 12 is clean") - local, zero tokens. Cards are only prepared; Confirm stays with the person.
     if (!$contradict && ($dl = rh_ai_desk_local($db, $user, $conv, $msgQ, $focusState, $bookingId, $message)) !== null) {
-        return $finish($dl['text'], (string)($dl['route'] ?? 'local'), ['links' => $dl['links'] ?? [], 'chips' => $dl['chips'] ?? [], 'cards' => $dl['cards'] ?? [],
-            'focus' => $dl['focus'] ?? null, 'focus_offer' => $dl['focus_offer'] ?? 0, 'local' => $dl['local'] ?? null]);
+        return $finish(rh_ai_scrub_outbound($db, $conv, (string)$dl['text']), (string)($dl['route'] ?? 'local'), ['links' => $dl['links'] ?? [], 'chips' => $dl['chips'] ?? [], 'cards' => $dl['cards'] ?? [],
+            'focus' => $dl['focus'] ?? null, 'focus_offer' => $dl['focus_offer'] ?? 0, 'local' => $dl['local'] ?? null, 'guided' => $dl['guided'] ?? null]);
     }
     if (!$contradict && ($st = rh_ai_small_talk($tokQ, $user)) !== null) {
         return $finish($st[0], 'local', ['chips' => $st[1]]);
@@ -2938,6 +3064,13 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         }
     }
 
+    // 1g. A learned local route (owner 2026-10-29: repeat questions go free): a question shape the model has answered the
+    // same way several times is answered here from the same read lookup, or opens the guided card it led to. Matched on
+    // the person's own words (never typo-read), with their own permissions; never a write, never money.
+    if (!$contradict && ($lr = rh_ai_route_answer($db, $user, $conv, $tok, $message, $focusState, $bookingId)) !== null) {
+        return $finish(rh_ai_scrub_outbound($db, $conv, (string)$lr['text']), (string)($lr['route'] ?? 'learned'), ['links' => $lr['links'] ?? [], 'chips' => $lr['chips'] ?? [],
+            'cards' => $lr['cards'] ?? [], 'focus' => $lr['focus'] ?? null, 'local' => $lr['local'] ?? null, 'guided' => $lr['guided'] ?? null, 'learned_route' => (int)($lr['learned_route'] ?? 0)]);
+    }
     // 2/3. A model is needed. Owner 2026-10-28 ("super swift", "efficiency at the cheapest", no cap that hurts the
     // reasoning): the question is sorted locally into a kind (short / look-up / advice) and into the departments it is
     // about. Only those departments' tools (short descriptions), the compact prompt and summarised tool results are
@@ -3179,6 +3312,7 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
                         $budget['results'][] = [$name, (array)$tr['result'], $runArgs]; // an answer can be built from these if the model gives none
                     }
                     $budget['links'] = rh_ai_links_merge($budget['links'], $tr['links'], 3);
+                    $budget['link_src'][] = [(array)$tr['links'], (string)$json]; // links kept only for the lookups the answer used (owner fault 2026-10-29)
                     rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $name, 'args' => rh_ai_vault_protect($db, $conv, (array)$c['args']), 'result' => $json, 'agent' => $route]);
                     $seenCalls[rh_ai_call_key($name, (array)$c['args'])] = $view;
                     if (!isset($seenResults[md5($json)])) {
@@ -3199,8 +3333,35 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
         if (!$routed && preg_match('/\[\[NEED:([a-z_]+)\]\]/', $text, $nm)) {
             $routed = true;
             if (!isset($team[$nm[1]])) {
-                $final = rh_ai_out_of_scope_line();
-                break;
+                // Owner fault 2026-10-29: a lead name the model made up (or one this business does not have) is NOT a
+                // permission refusal. The permission line is only for a real lead this person does not hold; otherwise
+                // the question goes to the leads its words point to, or gets an honest "can't look that up yet".
+                $real = rh_ai_specialists()[$nm[1]] ?? null;
+                if ($real !== null) { // a real lead: switched off here ("not offered"), or outside this account (the permission line)
+                    $off = '';
+                    foreach ((array)$real['core'] as $ct) {
+                        $o = rh_ai_not_offered_line((string)$ct);
+                        if ($o === '') {
+                            $off = '';
+                            break;
+                        }
+                        $off = $o;
+                    }
+                    $final = $off !== '' ? $off : rh_ai_out_of_scope_line();
+                    break;
+                }
+                rh_ai_incident_add($db, 'false_refusal', 'The model asked for a lead that this person has no access to or that does not exist: re-routed', ['lead' => mb_substr($nm[1], 0, 40), 'question' => mb_substr($tok, 0, 300)],
+                    ['user_id' => $uid, 'conversation_id' => $conv]);
+                $lanes = rh_ai_lanes_for($team, $tokQ) ?: [];
+                if (!$lanes) {
+                    $final = "I can't look that up from the chat yet." . (($gl = rh_ai_guide_links($db, $user, $tok, 1)) ? ' The guide below shows where it is on screen.' : ' Open the screen for it from the menu.');
+                    $budget['links'] = rh_ai_links_merge($budget['links'], $gl, 2);
+                    break;
+                }
+                $kind = 'lookup';
+                $specs = rh_ai_lane_specs($user, $team, $lanes, $cardsAsked, $factTools);
+                $route = $fast ? 'fast' : 'primary';
+                continue;
             }
             $lanes = [$nm[1]];
             $kind = 'lookup';
@@ -3265,6 +3426,9 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
         if (!$budget['cards'] && $text !== '') {
             [$absFacts, $absLine] = rh_ai_absence_conflicts($db, $user, $text);
             if ($absFacts) {
+                if (!$absAsked) { // a learning signal: a "none" the totals disprove
+                    rh_ai_mistake_signal($db, 'absence_fixed', $conv, $tok, ['route' => $route, 'head' => rh_ai_wrong_head($text), 'tools' => array_values(array_unique($budget['tools_used']))], ['user_id' => $uid]);
+                }
                 $budget['evidence'] .= "
 " . $absLine;
                 if (!$absAsked && ($budget['in'] + $budget['out']) < $budget['tokens_cap']) {
@@ -3279,7 +3443,11 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
             }
             // "No booking for Mr X" about one NAMED person (owner fault 2026-10-29): checked with the same close-name search
             // the lookups use; what IS there replaces the claim (local, no model call).
+            $beforeFix = $text;
             $text = rh_ai_named_absence_fix($db, $user, $conv, $text, $budget);
+            if ($text !== $beforeFix) {
+                rh_ai_mistake_signal($db, 'absence_fixed', $conv, $tok, ['route' => $route, 'head' => rh_ai_wrong_head($beforeFix), 'tools' => array_values(array_unique($budget['tools_used']))], ['user_id' => $uid]);
+            }
         }
         if ($r['stop'] === 'max_tokens') {
             $text .= "\n\n(The answer was cut short - ask me to continue.)";
@@ -3295,6 +3463,7 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
     }
     $final = rh_ai_scrub_outbound($db, $conv, $final); // stored tokenised (model text should already be)
     $chips = rh_ai_followup_chips($user, array_unique($budget['tools_used']));
+    $budget['links'] = rh_ai_links_for_reply($final, (array)($budget['link_src'] ?? []), $budget['links']);
     // Nothing found (owner 2026-10-28): the best 2 guide sections and 2-3 starter questions for this screen (local, no tokens)
     if (!$budget['cards'] && rh_ai_is_no_data_reply($final)) {
         $budget['links'] = rh_ai_links_merge($budget['links'], rh_ai_guide_links($db, $user, $tok), 4);

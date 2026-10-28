@@ -65,8 +65,12 @@ function rh_ai_card_risky(string $key, array $args): bool
     if (in_array($key, ['cancel_booking', 'check_out', 'change_checkout'], true)) {
         return true;
     }
-    // Anything that sends to a guest (booking email, invoice, WhatsApp, enquiry reply) cannot be called back.
-    if (in_array($key, ['send_email', 'send_invoice', 'whatsapp', 'reply_enquiry'], true)) {
+    // Anything that sends to a guest (booking email, invoice, WhatsApp, enquiry reply, quotation; confirming a booking
+    // emails the guest too - owner 2026-10-29) cannot be called back.
+    if (in_array($key, ['send_email', 'send_invoice', 'whatsapp', 'reply_enquiry', 'confirm_booking', 'send_quotation'], true)) {
+        return true;
+    }
+    if ($key === 'block_dates') { // closing dates takes rooms off sale, like a room set to out of order
         return true;
     }
     if ($key === 'reply_review') { // only when the reply is also emailed to the guest

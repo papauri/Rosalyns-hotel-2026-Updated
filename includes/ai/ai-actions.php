@@ -14,8 +14,9 @@
  *
  * Registry entry: key => {tool, label, description, schema, perm (all-of), page (replayed screen: its page
  * permission and module are checked too), gate (optional), preview, verify}.
- * There is no action for stock, recipes, till orders, payments, refunds, invoices (other than sending the
- * existing one), credit notes, shift / end-of-day close, rates, prices or deals (hard limits; tested).
+ * There is no action for stock, recipes, till orders, payments, refunds, no-shows, invoices (other than sending the
+ * existing one), credit notes, shift / end-of-day close, rates, prices or deals (hard limits; tested; owner 2026-10-29:
+ * "do not touch money" - money is read and shown, never moved).
  * Guest names, emails and phones stay on the server: the model sees only privacy tokens.
  */
 
@@ -44,15 +45,20 @@ function rh_ai_action_registry(): array
         'create_booking' => [
             'tool' => 'propose_create_booking', 'label' => 'New booking', 'page' => 'create-booking.php', 'perm' => ['create_booking'],
             'description' => 'Prepare a new room booking card (one room type, one or more rooms). Priced exactly like Create Booking. Guest name, email and phone may be tokens or left out: the person fills them in on the card. Set payment_requested when they want to take a payment, other_room_types when they want more than one room type: the card then hands over to the Create Booking screen.',
+            // Property order = the order Create Booking takes them (dates, party, room type, guest, who sleeps there, contact,
+            // requests): the guided steps (ai-guided.php) ask in this order. 'ask' = the optional fields the form asks for too
+            // ('needed' = the form requires it before saving).
             'schema' => ['properties' => [
-                'room_type' => ['type' => 'string', 'maxLength' => 80], 'check_in' => $date, 'check_out' => $date,
+                'check_in' => $date, 'check_out' => $date,
                 'adults' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40], 'children' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 20],
-                'rooms' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 10], 'occupancy' => ['type' => 'string', 'enum' => ['single', 'double', 'triple']],
-                'status' => ['type' => 'string', 'enum' => ['confirmed', 'pending', 'tentative']],
-                'guest_name' => ['type' => 'string', 'maxLength' => 120], 'guest_email' => ['type' => 'string', 'maxLength' => 160], 'guest_phone' => ['type' => 'string', 'maxLength' => 40],
+                'rooms' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 10], 'room_type' => ['type' => 'string', 'maxLength' => 80],
+                'occupancy' => ['type' => 'string', 'enum' => ['single', 'double', 'triple']], 'status' => ['type' => 'string', 'enum' => ['confirmed', 'pending', 'tentative']],
+                'guest_name' => ['type' => 'string', 'maxLength' => 120], 'room_guest' => ['type' => 'string', 'maxLength' => 150, 'description' => 'Who sleeps in the room(s), when not the guest who booked'],
+                'guest_phone' => ['type' => 'string', 'maxLength' => 40], 'guest_email' => ['type' => 'string', 'maxLength' => 160],
                 'guest_country' => ['type' => 'string', 'maxLength' => 60], 'special_requests' => ['type' => 'string', 'maxLength' => 500],
                 'payment_requested' => ['type' => 'boolean'], 'other_room_types' => ['type' => 'string', 'maxLength' => 120],
             ], 'required' => ['room_type', 'check_in', 'check_out', 'adults']],
+            'ask' => ['children' => 'optional', 'guest_name' => 'needed', 'room_guest' => 'optional', 'guest_phone' => 'needed', 'guest_email' => 'needed', 'special_requests' => 'optional'],
             'preview' => 'rh_ai_pv_create_booking', 'verify' => 'rh_ai_vf_create_booking',
         ],
         'edit_booking' => [
@@ -73,6 +79,7 @@ function rh_ai_action_registry(): array
             'tool' => 'propose_change_checkout', 'label' => 'Correct check-out date', 'page' => 'bookings.php', 'perm' => ['edit_booking'], 'gate' => 'rh_ai_gate_admin_manager',
             'description' => 'Administrators and managers: prepare a correction of an in-house guest\'s check-out date (earlier or later) with a reason.',
             'schema' => ['properties' => $bk + ['new_checkout' => $date, 'reason' => ['type' => 'string', 'maxLength' => 200]], 'required' => ['new_checkout']],
+            'ask' => ['reason' => 'needed'],
             'preview' => 'rh_ai_pv_change_checkout', 'verify' => 'rh_ai_vf_checkout_date',
         ],
         'room_type_change' => [
@@ -85,6 +92,7 @@ function rh_ai_action_registry(): array
             'tool' => 'propose_cancel_booking', 'label' => 'Cancel booking', 'page' => 'bookings.php', 'perm' => ['cancel_booking'],
             'description' => 'Prepare a cancellation card. It shows what the hotel\'s cancellation rule does with money paid; it never works out a refund (staff handle refunds).',
             'schema' => ['properties' => $bk + ['reason' => ['type' => 'string', 'maxLength' => 200]]],
+            'ask' => ['reason' => 'needed'],
             'preview' => 'rh_ai_pv_cancel_booking', 'verify' => 'rh_ai_vf_status',
         ],
         'check_in' => [
@@ -122,6 +130,7 @@ function rh_ai_action_registry(): array
             'description' => 'Prepare a new housekeeping job for one room.',
             'schema' => ['properties' => ['room' => ['type' => 'string', 'maxLength' => 20], 'job' => ['type' => 'string', 'enum' => ['checkout_cleanup', 'regular_cleaning', 'deep_clean', 'turn_down', 'maintenance']],
                 'priority' => ['type' => 'string', 'enum' => ['high', 'medium', 'low']], 'due_date' => $date, 'notes' => ['type' => 'string', 'maxLength' => 300]], 'required' => ['room']],
+            'ask' => ['job' => 'optional'],
             'preview' => 'rh_ai_pv_housekeeping_job', 'verify' => 'rh_ai_vf_housekeeping_job',
         ],
         'maintenance_job' => [
@@ -130,6 +139,7 @@ function rh_ai_action_registry(): array
             'schema' => ['properties' => ['room' => ['type' => 'string', 'maxLength' => 20], 'title' => ['type' => 'string', 'maxLength' => 120], 'description' => ['type' => 'string', 'maxLength' => 500],
                 'type' => ['type' => 'string', 'enum' => ['repair', 'replacement', 'inspection', 'upgrade', 'emergency']], 'priority' => ['type' => 'string', 'enum' => ['low', 'medium', 'high', 'urgent']],
                 'due_date' => $date, 'block_room' => ['type' => 'boolean']], 'required' => ['room', 'title']],
+            'ask' => ['block_room' => 'optional'],
             'preview' => 'rh_ai_pv_maintenance_job', 'verify' => 'rh_ai_vf_maintenance_job',
         ],
         'housekeeping_progress' => [
@@ -181,6 +191,53 @@ function rh_ai_action_registry(): array
             'schema' => ['properties' => ['inquiry_id' => ['type' => 'integer', 'minimum' => 1], 'subject' => ['type' => 'string', 'maxLength' => 200], 'reply' => ['type' => 'string', 'maxLength' => 3000]], 'required' => ['inquiry_id']],
             'preview' => 'rh_ai_pv_reply_enquiry', 'verify' => 'rh_ai_vf_reply_enquiry',
         ],
+        // Owner 2026-10-29 ("do it all"): the remaining screen-only desk tasks, each the screen's own button.
+        'block_dates' => [
+            'tool' => 'propose_block_dates', 'label' => 'Block dates', 'page' => 'blocked-dates.php', 'perm' => [], 'gate' => 'rh_ai_gate_block_rooms',
+            'description' => 'Prepare closing dates for sale, the same as Block dates on the Blocked Dates screen: the whole hotel (all room types), one room type, or one room (a joined room blocks both its rooms). from and to are the first and last date closed (leave to out for one date).',
+            'schema' => ['properties' => ['what' => ['type' => 'string', 'maxLength' => 80, 'description' => '"all rooms", a room type name, or "room 12"'], 'from' => $date, 'to' => $date,
+                'type' => ['type' => 'string', 'enum' => ['manual', 'maintenance', 'event', 'full']], 'reason' => ['type' => 'string', 'maxLength' => 200]], 'required' => ['what', 'from']],
+            'ask' => ['reason' => 'optional'],
+            'preview' => 'rh_ai_pv_block_dates', 'verify' => 'rh_ai_vf_block_dates',
+        ],
+        'unblock_dates' => [
+            'tool' => 'propose_unblock_dates', 'label' => 'Unblock dates', 'page' => 'blocked-dates.php', 'perm' => [], 'gate' => 'rh_ai_gate_block_rooms',
+            'description' => 'Prepare opening blocked dates again, the same as Unblock on the Blocked Dates screen: the whole hotel, one room type or one room, from a date to a date (leave to out for one date).',
+            'schema' => ['properties' => ['what' => ['type' => 'string', 'maxLength' => 80, 'description' => '"all rooms", a room type name, or "room 12"'], 'from' => $date, 'to' => $date], 'required' => ['what', 'from']],
+            'preview' => 'rh_ai_pv_unblock_dates', 'verify' => 'rh_ai_vf_unblock_dates',
+        ],
+        'extend_hold' => [
+            'tool' => 'propose_extend_hold', 'label' => 'Extend hold', 'page' => 'tentative-bookings.php', 'perm' => ['edit_booking'],
+            'description' => 'Prepare giving a tentative hold more time before it runs out, the same as Extend hold on Tentative Bookings (12, 24, 48 or 72 hours).',
+            'schema' => ['properties' => $bk + ['hours' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 168]]],
+            'ask' => ['hours' => 'optional'],
+            'preview' => 'rh_ai_pv_extend_hold', 'verify' => 'rh_ai_vf_extend_hold',
+        ],
+        'send_quotation' => [
+            'tool' => 'propose_send_quotation', 'label' => 'Send quotation', 'page' => 'tentative-bookings.php', 'perm' => ['create_booking'],
+            'description' => 'Prepare emailing the guest a quotation (PDF) for a booking that is not paid and not yet arrived, the same as Send quotation on Tentative Bookings.',
+            'schema' => ['properties' => $bk + ['valid_days' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 90], 'notes' => ['type' => 'string', 'maxLength' => 500]]],
+            'ask' => ['valid_days' => 'optional', 'notes' => 'optional'],
+            'preview' => 'rh_ai_pv_send_quotation', 'verify' => 'rh_ai_vf_send_quotation',
+        ],
+        'housekeeping_verify' => [
+            'tool' => 'propose_housekeeping_verify', 'label' => 'Verify housekeeping job', 'page' => 'housekeeping.php', 'perm' => ['housekeeping'],
+            'description' => 'Prepare signing off (verifying) one room\'s finished housekeeping job - the same Verify as on Housekeeping.',
+            'schema' => ['properties' => ['room' => ['type' => 'string', 'maxLength' => 20], 'job_id' => ['type' => 'integer', 'minimum' => 1]], 'required' => ['room']],
+            'preview' => 'rh_ai_pv_housekeeping_verify', 'verify' => 'rh_ai_vf_job_verify',
+        ],
+        'maintenance_verify' => [
+            'tool' => 'propose_maintenance_verify', 'label' => 'Verify maintenance job', 'page' => 'room-maintenance.php', 'perm' => ['room_maintenance'],
+            'description' => 'Prepare signing off (verifying) one room\'s finished maintenance job - the same Verify as on Room Maintenance (the room status then follows, as on the screen).',
+            'schema' => ['properties' => ['room' => ['type' => 'string', 'maxLength' => 20], 'job_id' => ['type' => 'integer', 'minimum' => 1]], 'required' => ['room']],
+            'preview' => 'rh_ai_pv_maintenance_verify', 'verify' => 'rh_ai_vf_job_verify',
+        ],
+        'gym_checkin' => [
+            'tool' => 'propose_gym_checkin', 'label' => 'Gym check-in', 'page' => 'gym-checkin.php', 'perm' => [],
+            'description' => 'Prepare checking a gym member in, the same as a manual entry on Gym Check-in (membership and daily-visit rules included). member = name or member number.',
+            'schema' => ['properties' => ['member' => ['type' => 'string', 'maxLength' => 80]], 'required' => ['member']],
+            'preview' => 'rh_ai_pv_gym_checkin', 'verify' => 'rh_ai_vf_gym_checkin',
+        ],
     ];
 }
 
@@ -193,6 +250,24 @@ function rh_ai_tap_actions(): array
 function rh_ai_gate_admin_manager(array $user): bool
 {
     return in_array((string)($user['role'] ?? ''), ['admin', 'manager'], true);
+}
+
+/** Blocking and unblocking dates takes rooms off sale: the Blocked Dates screen's own Block Rooms rule. */
+function rh_ai_gate_block_rooms(array $user): bool
+{
+    return function_exists('rhCanBlockRooms') && rhCanBlockRooms((int)($user['id'] ?? 0));
+}
+
+/** Every module a page needs is switched on (a page may need more than one, as admin-init checks). */
+function rh_ai_page_modules_on(string $page): bool
+{
+    $mod = function_exists('getModuleForPage') ? getModuleForPage($page) : null;
+    foreach ($mod === null ? [] : (array)$mod as $m) {
+        if (!rh_ai_module_on((string)$m)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /** May this person prepare / confirm this action right now? '' = yes, otherwise the plain reason. */
@@ -220,8 +295,7 @@ function rh_ai_action_problem(array $user, string $key): string
             return "That's outside what your account can do.";
         }
     }
-    $mod = function_exists('getModuleForPage') ? getModuleForPage($page) : null;
-    if ($mod !== null && function_exists('rh_module_key_enabled') && !rh_ai_module_on($mod)) {
+    if (function_exists('rh_module_key_enabled') && !rh_ai_page_modules_on($page)) {
         return 'That part of the system is switched off.';
     }
     if (!empty($def['gate']) && !call_user_func($def['gate'], $user)) {
@@ -354,12 +428,19 @@ function rh_ai_card_base(string $title, string $help, array $rows, string $confi
         'danger' => false, 'handoff' => null, 'fields' => [], 'choices' => []], $opt);
 }
 
-/** One replay step: POST to an existing admin screen. $fields = [[name, value], ...]. */
-function rh_ai_step(string $url, array $fields, string $guard = ''): array
+/**
+ * One replay step: POST to an existing admin screen. $fields = [[name, value], ...]. $json: the screen's own button
+ * sends a JSON body (api/tentative-actions.php, api/send-quotation.php): the panel sends the same fields as JSON with
+ * the security token, exactly as that button does.
+ */
+function rh_ai_step(string $url, array $fields, string $guard = '', bool $json = false): array
 {
     $s = ['url' => $url, 'fields' => array_map(static fn($f) => [(string)$f[0], (string)$f[1]], $fields)];
     if ($guard !== '') {
         $s['guard'] = $guard;
+    }
+    if ($json) {
+        $s['json'] = true;
     }
     return $s;
 }
@@ -427,6 +508,10 @@ function rh_ai_pv_create_booking(PDO $db, array $user, array $a): array
     if ($phone === '') {
         $missing[] = 'phone';
     }
+    $roomGuest = trim((string)($a['room_guest'] ?? ''));
+    if ($roomGuest !== '') {
+        $rows[] = ['label' => 'Sleeping in the room', 'new' => $roomGuest];
+    }
     $card = rh_ai_card_base('New booking', 'Priced the same way as Create Booking. Room numbers are assigned automatically. Check the guest details, then confirm.', $rows, 'Create booking', [
         'fields' => [
             ['name' => 'guest_name', 'label' => 'Guest name', 'type' => 'text', 'value' => $name, 'required' => true],
@@ -449,6 +534,9 @@ function rh_ai_pv_create_booking(PDO $db, array $user, array $a): array
             ['number_of_guests', (string)($adults + $children)], ['child_guests', (string)$children], ['booking_status', $status], ['auto_assign_room', '1'],
             ['room_line_room_id[]', (string)$q['room_type_id']], ['room_line_qty[]', (string)(int)$q['rooms']], ['room_line_occupancy[]', (string)$q['occupancy']],
             ['special_requests', (string)($a['special_requests'] ?? '')]];
+        if ($roomGuest !== '') {
+            $f[] = ['room_line_guest_name[]', $roomGuest]; // Create Booking's "who sleeps in this room" on the room line
+        }
         if (($a['email_guest'] ?? '1') !== '0') {
             $f[] = ['send_email', '1'];
         }
@@ -1244,6 +1332,383 @@ function rh_ai_pv_reply_enquiry(PDO $db, array $user, array $a): array
         'fp' => ['inquiry' => (int)$q['id']], 'facts' => ['inquiry_id' => (int)$q['id'], 'draft_ready' => true]];
 }
 
+// ── Owner 2026-10-29 ("do it all"): block / unblock dates, extend a hold, send a quotation, verify a finished job,
+// gym check-in. Each is read here only; Confirm replays the screen's own button. No money moves in any of them.
+
+/**
+ * What a block covers, from plain words: "all rooms" / "the whole hotel" (every room type), a room type name, or
+ * "room 12" (one room; a joined room is blocked with its partner by the Blocked Dates screen itself).
+ * @return array ['scope' => all|type|room, 'room_id' => ?int (type), 'ir_id' => ?int (room), 'label'] or ['error']
+ */
+function rh_ai_block_target(PDO $db, string $what): array
+{
+    $w = trim(mb_strtolower($what));
+    if ($w === '' ) {
+        return ['error' => 'Say what to block: the whole hotel, a room type or a room number.'];
+    }
+    if (preg_match('/^(?:the )?(?:all(?: (?:the )?rooms?| room types?)?|whole hotel|entire hotel|hotel|every(?:thing| room)|all of it)$/u', $w)) {
+        return ['scope' => 'all', 'room_id' => null, 'ir_id' => null, 'label' => 'The whole hotel (all room types)'];
+    }
+    if (preg_match('/^(?:room|rm|#)\s*([a-z0-9][a-z0-9\-]{0,9})$/u', $w, $m)) {
+        $r = rh_ai_act_room($db, $m[1]);
+        if (!$r) {
+            return ['error' => 'No active room numbered "' . $m[1] . '".'];
+        }
+        $label = 'Room ' . $r['room_number'] . ' (' . $r['type_name'] . ')';
+        $pair = function_exists('rh_joined_only_pair_map') ? (rh_joined_only_pair_map()[(int)$r['id']] ?? null) : null;
+        if ($pair) {
+            $label .= ' - a joined room: both its rooms are blocked together';
+        }
+        return ['scope' => 'room', 'room_id' => null, 'ir_id' => (int)$r['id'], 'label' => $label];
+    }
+    $t = rh_ai_find_room_type($db, trim($what));
+    if (!$t) {
+        return ['error' => 'No room type or room called "' . trim($what) . '".' . rh_ai_room_type_ask($db, trim($what))];
+    }
+    return ['scope' => 'type', 'room_id' => (int)$t['id'], 'ir_id' => null, 'label' => (string)$t['name'] . ' (the whole type)'];
+}
+
+/** Blocked rows of exactly this target between two dates (the Blocked Dates screen's own list). */
+function rh_ai_block_rows(array $t, string $from, string $to): array
+{
+    $out = [];
+    foreach (function_exists('getBlockedDates') ? (array)getBlockedDates(null, $from, $to) : [] as $r) {
+        $scope = (string)($r['block_scope'] ?? 'type');
+        $hit = ($t['scope'] === 'all' && $scope === 'type' && ($r['room_id'] === null || (string)$r['room_id'] === ''))
+            || ($t['scope'] === 'type' && $scope === 'type' && (int)$r['room_id'] === (int)$t['room_id'])
+            || ($t['scope'] === 'room' && $scope === 'individual' && (int)$r['individual_room_id'] === (int)$t['ir_id']);
+        if ($hit) {
+            $out[] = $r;
+        }
+    }
+    return $out;
+}
+
+/** Each date from $from to $to (both included), today or later, at most 366 (the screen's own limit). */
+function rh_ai_block_days(string $from, string $to): array
+{
+    $out = [];
+    for ($d = $from; $d <= $to && count($out) < 366; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
+        $out[] = $d;
+    }
+    return $out;
+}
+
+/** "Fri 5 Dec 2026" or "Fri 5 Dec to Sun 7 Dec 2026 (3 dates)". */
+function rh_ai_block_span_text(array $dates): string
+{
+    if (!$dates) {
+        return '-';
+    }
+    $a = $dates[0];
+    $b = $dates[count($dates) - 1];
+    return $a === $b ? rh_ai_fmt_date($a) : date('D j M', strtotime($a)) . ' to ' . rh_ai_fmt_date($b) . ' (' . count($dates) . ' dates)';
+}
+
+function rh_ai_block_dates_check(PDO $db, array $a): array
+{
+    $t = rh_ai_block_target($db, (string)($a['what'] ?? ''));
+    if (!empty($t['error'])) {
+        return $t;
+    }
+    $from = (string)$a['from'];
+    $to = (string)($a['to'] ?? '') !== '' ? (string)$a['to'] : $from;
+    if ($to < $from) {
+        return ['error' => 'The last date is before the first date.'];
+    }
+    if ((strtotime($to) - strtotime($from)) / 86400 > 365) {
+        return ['error' => 'At most 366 dates at a time, as on the Blocked Dates screen.'];
+    }
+    return ['t' => $t, 'from' => $from, 'to' => $to];
+}
+
+function rh_ai_pv_block_dates(PDO $db, array $user, array $a): array
+{
+    $c = rh_ai_block_dates_check($db, $a);
+    if (!empty($c['error'])) {
+        return $c;
+    }
+    [$t, $from, $to] = [$c['t'], $c['from'], $c['to']];
+    if ($from < date('Y-m-d')) {
+        return ['error' => 'A date in the past cannot be blocked: choose today or later.'];
+    }
+    $have = [];
+    foreach (rh_ai_block_rows($t, $from, $to) as $r) {
+        $have[substr((string)$r['block_date'], 0, 10)] = true;
+    }
+    $dates = array_values(array_filter(rh_ai_block_days($from, $to), static fn($d) => !isset($have[$d])));
+    if (!$dates) {
+        return ['error' => $t['label'] . ' is already blocked on ' . rh_ai_block_span_text(rh_ai_block_days($from, $to)) . '.'];
+    }
+    $type = (string)($a['type'] ?? 'manual');
+    $reason = trim((string)($a['reason'] ?? ''));
+    $over = function_exists('getBookingsOverlappingBlockDates') ? getBookingsOverlappingBlockDates($t['scope'] === 'type' ? $t['room_id'] : null, $t['scope'] === 'room' ? $t['ir_id'] : null, $dates) : [];
+    if ($t['scope'] === 'all' && function_exists('getBookingsOverlappingBlockDates')) {
+        $over = [];
+        foreach ($db->query("SELECT id FROM rooms WHERE is_active = 1")->fetchAll(PDO::FETCH_COLUMN) as $rid) {
+            foreach (getBookingsOverlappingBlockDates((int)$rid, null, $dates) as $o) {
+                $over[(int)$o['id']] = $o;
+            }
+        }
+        $over = array_values($over);
+    }
+    $labels = ['manual' => 'Manual block', 'maintenance' => 'Maintenance', 'event' => 'Event', 'full' => 'Fully booked'];
+    $rows = [['label' => 'Close for sale', 'new' => $t['label'], 'tone' => 'danger'], ['label' => 'Dates', 'new' => rh_ai_block_span_text($dates)], ['label' => 'Type of block', 'new' => $labels[$type] ?? $type]];
+    if (count($have) > 0) {
+        $rows[] = ['label' => 'Already blocked', 'new' => count($have) . ' of those dates (left as they are)'];
+    }
+    $card = rh_ai_card_base('Block dates', 'Closes these dates for sale, the same as Block dates on the Blocked Dates screen. Bookings already made are not moved or cancelled.', $rows, 'Block dates', [
+        'danger' => true, 'fields' => [['name' => 'reason', 'label' => 'Note (optional)', 'type' => 'text', 'value' => $reason, 'required' => false, 'max' => 200]],
+    ]);
+    if ($over) {
+        $refs = array_slice(array_map(static fn($o) => (string)$o['booking_reference'], $over), 0, 5);
+        $card['warn'][] = count($over) . ' booking' . (count($over) === 1 ? ' already sleeps' : 's already sleep') . ' on these nights (' . implode(', ', $refs) . (count($over) > 5 ? ', ...' : '') . '). The block does not move them: reassign or contact those guests.';
+    }
+    $f = [['action', 'block_multiple'], ['block_scope', $t['scope'] === 'room' ? 'individual' : 'type'], ['dates', json_encode($dates)], ['block_type', $type], ['reason', $reason]];
+    $f[] = $t['scope'] === 'room' ? ['individual_room_id', (string)$t['ir_id']] : ['room_id', $t['scope'] === 'type' ? (string)$t['room_id'] : ''];
+    return ['card' => $card, 'steps' => [rh_ai_step('blocked-dates.php', $f)], 'fp' => [implode(',', $dates), count($over)],
+        'facts' => ['what' => $t['label'], 'dates' => $dates, 'bookings_on_those_nights' => count($over)], 'block' => $t + ['dates' => $dates]];
+}
+
+function rh_ai_pv_unblock_dates(PDO $db, array $user, array $a): array
+{
+    $c = rh_ai_block_dates_check($db, $a);
+    if (!empty($c['error'])) {
+        return $c;
+    }
+    [$t, $from, $to] = [$c['t'], $c['from'], $c['to']];
+    $rows0 = rh_ai_block_rows($t, $from, $to);
+    if (!$rows0) {
+        return ['error' => $t['label'] . ' has no blocked dates on ' . rh_ai_block_span_text(rh_ai_block_days($from, $to)) . '.'];
+    }
+    $tokens = [];
+    $dates = [];
+    foreach ($rows0 as $r) {
+        $tokens[] = ((string)$r['block_scope'] === 'individual' ? 'individual' : 'type') . '-' . (int)$r['id'];
+        $dates[] = substr((string)$r['block_date'], 0, 10);
+    }
+    sort($dates);
+    $rows = [['label' => 'Open for sale again', 'new' => $t['label']], ['label' => 'Blocked dates opened', 'new' => count($dates) === 1 ? rh_ai_fmt_date($dates[0]) : count($dates) . ' (' . date('D j M', strtotime($dates[0])) . ' to ' . rh_ai_fmt_date($dates[count($dates) - 1]) . ')']];
+    $notes = array_values(array_unique(array_filter(array_map(static fn($r) => trim((string)($r['reason'] ?? '')), $rows0))));
+    if ($notes) {
+        $rows[] = ['label' => 'Their notes', 'new' => mb_substr(implode('; ', $notes), 0, 200)];
+    }
+    $card = rh_ai_card_base('Unblock dates', 'Opens these dates for sale again, the same as Unblock on the Blocked Dates screen.', $rows, 'Unblock dates');
+    $f = [['action', 'bulk_unblock']];
+    foreach ($tokens as $tk) {
+        $f[] = ['bulk_ids[]', $tk];
+    }
+    return ['card' => $card, 'steps' => [rh_ai_step('blocked-dates.php', $f)], 'fp' => [implode(',', $tokens)], 'facts' => ['what' => $t['label'], 'dates' => $dates], 'block' => $t + ['tokens' => $tokens]];
+}
+
+/** The tentative hold of one booking, or an error line. */
+function rh_ai_pv_extend_hold(PDO $db, array $user, array $a): array
+{
+    $b = rh_ai_act_booking($db, $a);
+    if (!empty($b['error'])) {
+        return $b;
+    }
+    if ((string)$b['status'] !== 'tentative' || (int)($b['is_tentative'] ?? 0) !== 1) {
+        return ['error' => 'Only a tentative hold can be extended; this booking is ' . str_replace('-', ' ', (string)$b['status']) . '.'];
+    }
+    $hours = max(1, min(168, (int)($a['hours'] ?? rh_ai_num('ai_hold_extend_hours'))));
+    $old = (string)($b['tentative_expires_at'] ?? '');
+    $base = max(time(), (int)strtotime($old));
+    $new = date('Y-m-d H:i:s', $base + $hours * 3600);
+    $rows = rh_ai_bk_rows($b);
+    $rows[] = ['label' => 'Hold ends', 'old' => $old !== '' ? date('D j M Y, H:i', strtotime($old)) : 'not set', 'new' => date('D j M Y, H:i', strtotime($new))];
+    $opts = array_values(array_unique(array_merge([12, 24, 48, 72], [$hours]))); // the Extend hold buttons on Tentative Bookings
+    sort($opts);
+    $card = rh_ai_card_base('Extend hold', 'Gives the hold more time, the same as Extend hold on Tentative Bookings. The reminder email can go again before the new time.', $rows, 'Extend hold', [
+        'choices' => [['name' => 'hours', 'label' => 'Extra time', 'value' => (string)$hours, 'options' => array_map(static fn($h) => [(string)$h, '+' . $h . ' hours'], $opts)]],
+    ]);
+    return ['card' => $card, 'steps' => [rh_ai_step('api/tentative-actions.php', [['action', 'extend'], ['booking_id', (string)(int)$b['id']], ['hours', (string)$hours]], '', true)],
+        'fp' => [$old], 'facts' => rh_ai_bk_facts($b) + ['hold_ends' => $old, 'new_hold_ends' => $new], 'old_expiry' => $old];
+}
+
+function rh_ai_pv_send_quotation(PDO $db, array $user, array $a): array
+{
+    $b = rh_ai_act_booking($db, $a);
+    if (!empty($b['error'])) {
+        return $b;
+    }
+    if (!in_array((string)$b['status'], ['pending', 'tentative', 'confirmed'], true)) {
+        return ['error' => 'A quotation is only sent for a pending, tentative or confirmed booking; this one is ' . str_replace('-', ' ', (string)$b['status']) . '.'];
+    }
+    if ((string)$b['check_in_date'] < date('Y-m-d')) {
+        return ['error' => 'The stay has already started, so a quotation is not sent (the booking screen offers it only before arrival).'];
+    }
+    $f = rh_ai_folio((int)$b['id']);
+    if ((float)($f['paid'] ?? 0) > BALANCE_TOLERANCE) {
+        return ['error' => 'Money has been paid on this booking, so a quotation is not sent (the booking screen offers it only before any payment). Send the invoice instead.'];
+    }
+    if (!function_exists('bookingAllowsAction') && is_file(dirname(__DIR__, 2) . '/admin/includes/booking-lifecycle.php')) {
+        require_once dirname(__DIR__, 2) . '/admin/includes/booking-lifecycle.php';
+    }
+    if (function_exists('bookingAllowsAction')) {
+        $lc = bookingAllowsAction($b, 'send_quotation');
+        if (empty($lc['allowed'])) {
+            return ['error' => (string)$lc['reason']];
+        }
+    }
+    if (!filter_var((string)$b['guest_email'], FILTER_VALIDATE_EMAIL)) {
+        return ['error' => 'This booking has no valid guest email.'];
+    }
+    $days = max(1, min(90, (int)($a['valid_days'] ?? rh_ai_num('ai_quote_valid_days'))));
+    $notes = trim((string)($a['notes'] ?? ''));
+    if (!function_exists('rh_doc_stay_lines')) {
+        require_once dirname(__DIR__) . '/pricing.php';
+    }
+    $total = function_exists('rh_doc_stay_lines') ? round((float)rh_doc_stay_lines($b)['total'], 2) : round((float)($f['total'] ?? 0), 2);
+    $rows = rh_ai_bk_rows($b);
+    $rows[] = ['label' => 'Quoted total', 'new' => rh_ai_fmt_money($total), 'tone' => 'money'];
+    $rows[] = ['label' => 'Valid for', 'new' => $days . ' day' . ($days === 1 ? '' : 's') . ' (until ' . rh_ai_fmt_date(date('Y-m-d', strtotime('+' . $days . ' days'))) . ')'];
+    $rows[] = ['label' => 'To', 'new' => rh_ai_mask_email((string)$b['guest_email'])];
+    $opts = array_values(array_unique([3, 7, 14, 30, $days]));
+    sort($opts);
+    $card = rh_ai_card_base('Send quotation', 'Emails the hotel\'s quotation (PDF) for this stay, the same as Send quotation on Tentative Bookings. It is kept in Quotations.', $rows, 'Send quotation', [
+        'fields' => [['name' => 'notes', 'label' => 'Note on the quotation (optional)', 'type' => 'text', 'value' => $notes, 'required' => false, 'max' => 500]],
+        'choices' => [['name' => 'valid_days', 'label' => 'Valid for', 'value' => (string)$days, 'options' => array_map(static fn($d) => [(string)$d, $d . ' days'], $opts)]],
+    ]);
+    return ['card' => $card, 'steps' => [rh_ai_step('api/send-quotation.php', [['booking_id', (string)(int)$b['id']], ['valid_days', (string)$days], ['quotation_notes', $notes]], '', true)],
+        'fp' => [(string)$b['status'], $total], 'facts' => rh_ai_bk_facts($b) + ['quoted_total' => $total, 'valid_days' => $days], 'quote_booking' => (int)$b['id']];
+}
+
+/** A finished, not yet verified job of one room on one board: the board's own Verify button. */
+function rh_ai_pv_job_verify(PDO $db, array $a, string $board): array
+{
+    $r = rh_ai_act_room($db, (string)$a['room']);
+    if (!$r) {
+        return ['error' => 'No active room numbered "' . $a['room'] . '".'];
+    }
+    $hk = $board === 'housekeeping';
+    try {
+        $st = $db->prepare($hk
+            ? "SELECT id, assignment_type AS title, completed_at FROM housekeeping_assignments WHERE individual_room_id = ? AND status = 'completed' AND verified_at IS NULL ORDER BY completed_at DESC, id DESC LIMIT 10"
+            : "SELECT id, title, completed_at FROM room_maintenance_schedules WHERE individual_room_id = ? AND status = 'completed' AND verified_at IS NULL ORDER BY completed_at DESC, id DESC LIMIT 10");
+        $st->execute([(int)$r['id']]);
+        $jobs = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return ['error' => 'Verifying jobs is not set up on this system yet (the ' . ($hk ? 'Housekeeping' : 'Room Maintenance') . ' screen says what is missing).'];
+    }
+    if (!$jobs) {
+        return ['error' => 'Room ' . $r['room_number'] . ' has no finished ' . ($hk ? 'housekeeping' : 'maintenance') . ' job waiting to be verified.'];
+    }
+    $chosen = (int)($a['job_id'] ?? 0);
+    $job = null;
+    foreach ($jobs as $j) {
+        if ((int)$j['id'] === $chosen) {
+            $job = $j;
+        }
+    }
+    if ($chosen > 0 && $job === null) {
+        return ['error' => 'That job is not waiting to be verified on room ' . $r['room_number'] . '.'];
+    }
+    $job = $job ?? $jobs[0];
+    $label = static fn(array $j): string => ucfirst(str_replace('_', ' ', (string)$j['title'])) . (!empty($j['completed_at']) ? ' (done ' . date('j M H:i', strtotime((string)$j['completed_at'])) . ')' : '');
+    $rows = [['label' => 'Room', 'new' => 'Room ' . $r['room_number'] . ' (' . $r['type_name'] . ')'], ['label' => 'Job', 'new' => $label($job)], ['label' => 'Status', 'old' => 'Done', 'new' => 'Verified']];
+    $card = rh_ai_card_base($hk ? 'Verify housekeeping job' : 'Verify maintenance job', 'Signs the job off, the same as Verify on ' . ($hk ? 'Housekeeping' : 'Room Maintenance') . '; the room\'s state follows as it does there.', $rows, 'Verify job');
+    if (count($jobs) > 1) {
+        $card['choices'][] = ['name' => 'job_id', 'label' => 'Which job', 'value' => (string)(int)$job['id'], 'options' => array_map(static fn($j) => [(string)(int)$j['id'], $label($j)], $jobs)];
+    }
+    if (!$hk) {
+        $card['notes'][] = 'Once verified, room ' . $r['room_number'] . ' can go back on sale (as when you verify on Room Maintenance).';
+    }
+    return ['card' => $card, 'steps' => [rh_ai_step($hk ? 'housekeeping.php' : 'room-maintenance.php', [['action', $hk ? 'verify_assignment' : 'verify_schedule'], ['id', (string)(int)$job['id']]])],
+        'fp' => array_map(static fn($j) => (int)$j['id'], $jobs), 'facts' => ['room' => $r['room_number'], 'job' => (string)$job['title']], 'job_id' => (int)$job['id'], 'job_board' => $board];
+}
+
+function rh_ai_pv_housekeeping_verify(PDO $db, array $user, array $a): array
+{
+    return rh_ai_pv_job_verify($db, $a, 'housekeeping');
+}
+
+function rh_ai_pv_maintenance_verify(PDO $db, array $user, array $a): array
+{
+    return rh_ai_pv_job_verify($db, $a, 'maintenance');
+}
+
+/**
+ * One gym member by member number or name (exact, else the shared close-match rule): ['member' => row, 'read_as' => bool]
+ * or ['error'] (several, none, or "Do you mean ...?").
+ */
+function rh_ai_gym_member(PDO $db, string $q): array
+{
+    $q = trim((string)preg_replace('/^(?:member|no\.?|number|#)\s*/iu', '', trim($q)));
+    if ($q === '') {
+        return ['error' => 'Which member? Give their name or member number.'];
+    }
+    $cols = "id, member_number, full_name, membership_type, start_date, expiry_date, status";
+    try {
+        $st = $db->prepare("SELECT $cols FROM gym_members WHERE member_number = ? LIMIT 1");
+        $st->execute([$q]);
+        if ($m = $st->fetch(PDO::FETCH_ASSOC)) {
+            return ['member' => $m, 'read_as' => false];
+        }
+        $st = $db->prepare("SELECT $cols FROM gym_members WHERE LOWER(TRIM(full_name)) = LOWER(?) ORDER BY (status = 'active') DESC, id DESC LIMIT " . (rh_ai_num('ai_lookup_matches') + 1));
+        $st->execute([$q]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (count($rows) === 1) {
+            return ['member' => $rows[0], 'read_as' => false];
+        }
+        if (count($rows) > 1) {
+            return ['error' => count($rows) . ' members have that name: give the member number (' . implode(', ', array_map(static fn($r) => (string)$r['member_number'], $rows)) . ').', 'options' => array_map(static fn($r) => (string)$r['member_number'], $rows), 'by_number' => true];
+        }
+        $fz = rh_ai_fuzzy_from_table($db, $q, 'gym_members', 'full_name');
+    } catch (Throwable $e) {
+        return ['error' => 'The gym members could not be read just now.'];
+    }
+    if (!empty($fz['clear'])) {
+        $st = $db->prepare("SELECT $cols FROM gym_members WHERE full_name = ? ORDER BY (status = 'active') DESC, id DESC LIMIT 1");
+        $st->execute([(string)$fz['clear']]);
+        if ($m = $st->fetch(PDO::FETCH_ASSOC)) {
+            return ['member' => $m, 'read_as' => true];
+        }
+    }
+    if (!empty($fz['options'])) {
+        return ['error' => 'No gym member has exactly that name; there are close ones - check the spelling or give the member number.', 'options' => array_values((array)$fz['options'])];
+    }
+    return ['error' => 'No gym member matches that name or number - check the spelling, or give the member number.'];
+}
+
+function rh_ai_pv_gym_checkin(PDO $db, array $user, array $a): array
+{
+    $g = rh_ai_gym_member($db, (string)$a['member']);
+    if (!empty($g['error'])) {
+        return ['error' => $g['error']];
+    }
+    $m = $g['member'];
+    $today = date('Y-m-d');
+    $st = $db->prepare("SELECT id, checked_in_at FROM gym_attendance WHERE member_id = ? AND checked_out_at IS NULL ORDER BY checked_in_at DESC LIMIT 1");
+    $st->execute([(int)$m['id']]);
+    if ($open = $st->fetch(PDO::FETCH_ASSOC)) {
+        return ['error' => 'This member is already checked in (since ' . date('H:i', strtotime((string)$open['checked_in_at'])) . '). Checking out is done on Gym Check-in.'];
+    }
+    // The same rules the scan applies (admin/includes/gym-checkin-lib.php), read only
+    $expired = !empty($m['expiry_date']) && (string)$m['expiry_date'] < $today;
+    $notStarted = !empty($m['start_date']) && (string)$m['start_date'] > $today;
+    if ((string)$m['status'] !== 'active' || $expired || $notStarted) {
+        $why = $expired ? 'membership expired ' . date('M j, Y', strtotime((string)$m['expiry_date'])) : ($notStarted ? 'membership starts ' . date('M j, Y', strtotime((string)$m['start_date'])) : 'membership is ' . $m['status']);
+        return ['error' => 'This member cannot check in - ' . $why . '.'];
+    }
+    $md = function_exists('getSetting') ? (int)getSetting('gym_max_daily_visits', 2) : 2;
+    $maxDaily = $md >= 1 && $md <= 10 ? $md : 2;
+    $st = $db->prepare("SELECT COUNT(*) FROM gym_attendance WHERE member_id = ? AND checked_in_at >= CURDATE()");
+    $st->execute([(int)$m['id']]);
+    $visits = (int)$st->fetchColumn();
+    if ($visits >= $maxDaily) {
+        return ['error' => 'This member has already visited ' . $visits . ' times today (the daily limit). A manager can let them in on Gym Check-in after checking it is them.'];
+    }
+    $rows = [['label' => 'Member', 'new' => $m['full_name'] . ' (' . $m['member_number'] . ')'], ['label' => 'Membership', 'new' => trim((string)$m['membership_type']) !== '' ? (string)$m['membership_type'] : 'Active'],
+        ['label' => 'Expires', 'new' => !empty($m['expiry_date']) ? rh_ai_fmt_date((string)$m['expiry_date']) : 'No end date'], ['label' => 'Visits today', 'new' => $visits . ' of ' . $maxDaily]];
+    $card = rh_ai_card_base('Gym check-in', 'Checks the member in, the same as a manual entry on Gym Check-in.', $rows, 'Check in');
+    if (!empty($g['read_as'])) {
+        $card['notes'][] = 'Taken as the closest name on file: check it is the right person.';
+    }
+    return ['card' => $card, 'steps' => [rh_ai_step('api/gym-checkin.php', [['action', 'scan'], ['code', (string)$m['member_number']], ['method', 'manual']])],
+        'fp' => [0, $visits], 'facts' => ['guest' => (string)$m['full_name'], 'visits_today' => $visits], 'member_id' => (int)$m['id']];
+}
+
 /** Run an action's preview with validated args. */
 function rh_ai_action_preview(PDO $db, array $user, string $key, array $args): array
 {
@@ -1554,6 +2019,95 @@ function rh_ai_vf_create_booking(PDO $db, array $row, array $pv): ?bool
     $st = $db->prepare("SELECT COUNT(*) FROM bookings WHERE client_uuid = ?");
     $st->execute([(string)$row['client_uuid']]);
     return (int)$st->fetchColumn() > 0;
+}
+
+/** Every date of the card is now blocked for its target (the Blocked Dates list decides). */
+function rh_ai_vf_block_dates(PDO $db, array $row, array $pv): ?bool
+{
+    $t = (array)($pv['block'] ?? []);
+    $dates = (array)($t['dates'] ?? []);
+    if (!$dates) {
+        return null;
+    }
+    $have = [];
+    foreach (rh_ai_block_rows($t, (string)$dates[0], (string)$dates[count($dates) - 1]) as $r) {
+        $have[substr((string)$r['block_date'], 0, 10)] = true;
+    }
+    foreach ($dates as $d) {
+        if (!isset($have[$d])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** None of the card's blocked rows is left (the screen answers with its page, not JSON). */
+function rh_ai_vf_unblock_dates(PDO $db, array $row, array $pv): ?bool
+{
+    $tokens = (array)($pv['block']['tokens'] ?? []);
+    if (!$tokens) {
+        return null;
+    }
+    foreach ($tokens as $tk) {
+        [$scope, $id] = explode('-', (string)$tk, 2) + [1 => '0'];
+        $st = $db->prepare($scope === 'individual' ? "SELECT COUNT(*) FROM individual_room_blocked_dates WHERE id = ?" : "SELECT COUNT(*) FROM blocked_dates WHERE id = ?");
+        $st->execute([(int)$id]);
+        if ((int)$st->fetchColumn() > 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** The hold now ends later than it did when the card was made. */
+function rh_ai_vf_extend_hold(PDO $db, array $row, array $pv): ?bool
+{
+    $args = (array)(json_decode((string)$row['params_json'], true)['args'] ?? []);
+    $b = rh_ai_act_booking($db, $args);
+    if (!empty($b['error'])) {
+        return null;
+    }
+    return (string)$b['tentative_expires_at'] !== '' && strtotime((string)$b['tentative_expires_at']) > (int)strtotime((string)($pv['old_expiry'] ?? ''));
+}
+
+/** A quotation for the booking was recorded as sent since the card was made. */
+function rh_ai_vf_send_quotation(PDO $db, array $row, array $pv): ?bool
+{
+    try {
+        $st = $db->prepare("SELECT COUNT(*) FROM quotations WHERE booking_id = ? AND booking_type = 'room' AND sent_at >= DATE_SUB(?, INTERVAL 5 SECOND)");
+        $st->execute([(int)($pv['quote_booking'] ?? 0), (string)$row['created_at']]);
+        return (int)$st->fetchColumn() > 0;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/** The job is now verified on its board. */
+function rh_ai_vf_job_verify(PDO $db, array $row, array $pv): ?bool
+{
+    $table = ['housekeeping' => 'housekeeping_assignments', 'maintenance' => 'room_maintenance_schedules'][(string)($pv['job_board'] ?? '')] ?? '';
+    if ($table === '' || empty($pv['job_id'])) {
+        return null;
+    }
+    try {
+        $st = $db->prepare("SELECT verified_at IS NOT NULL FROM $table WHERE id = ?");
+        $st->execute([(int)$pv['job_id']]);
+        return (bool)$st->fetchColumn();
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/** An open visit for the member started since the card was made (the scan answers success even when it refuses). */
+function rh_ai_vf_gym_checkin(PDO $db, array $row, array $pv): ?bool
+{
+    try {
+        $st = $db->prepare("SELECT COUNT(*) FROM gym_attendance WHERE member_id = ? AND checked_out_at IS NULL AND checked_in_at >= DATE_SUB(?, INTERVAL 5 SECOND)");
+        $st->execute([(int)($pv['member_id'] ?? 0), (string)$row['created_at']]);
+        return (int)$st->fetchColumn() > 0;
+    } catch (Throwable $e) {
+        return null;
+    }
 }
 
 /**
