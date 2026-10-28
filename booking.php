@@ -1131,9 +1131,14 @@ try {
                      whether it fits the party, how many rooms it takes, and what that costs. -->
                 <div class="form-section form-section--step" id="partySection">
                     <h3 class="form-section-title"><i class="fas fa-users"></i> Who Is Staying?</h3>
+                    <?php
+                    // A room picked up front (booking.php?room_id=…) that is adults only: no
+                    // children field at all, rather than one the booking would then refuse.
+                    $party_adults_only = $preselected_room && !(int)$preselected_room['children_allowed'];
+                    ?>
                     <div class="form-grid">
                         <div class="form-group">
-                            <label for="number_of_guests" class="required">Number of Guests</label>
+                            <label for="number_of_guests" class="required"><?php echo $party_adults_only ? 'Number of Adults' : 'Number of Guests'; ?></label>
                             <select id="number_of_guests" name="number_of_guests" class="form-control" required aria-describedby="guestCapacityHint">
                                 <?php
                                 $party_selected_guests = (int)($hero_guests ?: 2);
@@ -1146,7 +1151,7 @@ try {
                             </select>
                             <small id="guestCapacityHint" class="form-hint">Adults and children together. A party larger than one room holds is placed in several rooms of the same type automatically, with at least 1 adult in every room.</small>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group"<?php echo $party_adults_only ? ' style="display:none"' : ''; ?>>
                             <label for="child_guests">Of whom children (under 12)</label>
                             <input
                                 type="number"
@@ -1157,7 +1162,8 @@ try {
                                 max="19"
                                 inputmode="numeric"
                                 aria-describedby="childGuestHint"
-                                value="<?php echo isset($_POST['child_guests']) ? (int)$_POST['child_guests'] : (int)($hero_children ?: 0); ?>">
+                                <?php echo $party_adults_only ? 'disabled' : ''; ?>
+                                value="<?php echo $party_adults_only ? 0 : (isset($_POST['child_guests']) ? (int)$_POST['child_guests'] : (int)($hero_children ?: 0)); ?>">
                             <small id="childGuestHint" class="form-hint">Children must be accompanied by at least 1 adult. Some room types are adults only.</small>
                         </div>
                     </div>

@@ -776,13 +776,17 @@
             const allowed = Number(room.children_allowed || 0) === 1;
             if (!childInput) return;
 
-            // The party is chosen before the room, so the children field is never locked:
-            // adults-only room types simply disable themselves while children are entered.
-            childInput.disabled = false;
+            // The party is usually chosen before the room, so the children field stays open and
+            // adults-only room types disable themselves while children are entered. Only a room
+            // fixed up front (booking.php?room_id=…) that is adults only hides the field.
+            const lockedAdultsOnly = !allowed && !!document.getElementById('preselectedRoomId');
+            childInput.disabled = lockedAdultsOnly;
+            if (lockedAdultsOnly) childInput.value = '0';
             if (childGroup) {
                 childGroup.style.opacity = '1';
+                childGroup.style.display = lockedAdultsOnly ? 'none' : '';
             }
-            if (childHint) {
+            if (childHint && !lockedAdultsOnly) {
                 if (!allowed) {
                     childHint.innerHTML = '<i class="fas fa-ban" style="color: #dc3545;"></i> ' +
                         escapeHtml(room.name) + ' is adults only. Children cannot stay in this room type.';
@@ -905,13 +909,14 @@
             const capacityHint = document.getElementById('guestCapacityHint');
             const room = getSelectedRoomData();
             if (!guestSelect) return;
+            const adultsOnlyFixed = !!room && Number(room.children_allowed || 0) !== 1 && !!document.getElementById('preselectedRoomId');
 
             // Guests are chosen BEFORE rooms, so the list is fixed (1-20). Once a room type
             // is picked, each head-count says how many of that type it takes.
             Array.from(guestSelect.options).forEach(option => {
                 const n = parseInt(option.value, 10);
                 if (!n) return;
-                let label = plural(n, 'Guest');
+                let label = plural(n, adultsOnlyFixed ? 'Adult' : 'Guest');
                 if (room) {
                     const plan = getPartyPlan(n, 0, room);
                     if (plan.valid && plan.roomsNeeded > 1) {
@@ -921,7 +926,9 @@
                 option.textContent = label;
             });
 
-            if (capacityHint && room) {
+            if (capacityHint && adultsOnlyFixed) {
+                capacityHint.textContent = `${room.name} is adults only and holds up to ${plural(maxGuests, 'guest')}. Larger parties are booked into several rooms automatically.`;
+            } else if (capacityHint && room) {
                 capacityHint.textContent = `Each ${room.name} holds up to ${plural(maxGuests, 'guest')}. Larger parties are booked into several ${room.name} rooms automatically (every room needs at least 1 adult).`;
             }
         }
