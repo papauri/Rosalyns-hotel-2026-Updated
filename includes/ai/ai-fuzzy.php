@@ -233,7 +233,8 @@ function rh_ai_intent_vocab(): array
     }
     $fns = ['rh_ai_local_intent', 'rh_ai_lookup_intent', 'rh_ai_hotel_fact_intent', 'rh_ai_booking_totals_intent', 'rh_ai_room_rates_intent', 'rh_ai_rates_not_list_re',
         'rh_ai_hotel_fact_question', 'rh_ai_is_briefing_request', 'rh_ai_focus_kind', 'rh_ai_person_search_intent', 'rh_ai_parse_stay_dates', 'rh_ai_parse_party',
-        'rh_ai_lane_words', 'rh_ai_occupancy_intent', 'rh_ai_small_talk', 'rh_ai_followup_local', 'rh_ai_count_word'];
+        'rh_ai_lane_words', 'rh_ai_occupancy_intent', 'rh_ai_small_talk', 'rh_ai_followup_local', 'rh_ai_count_word',
+        'rh_ai_desk_booking_intent', 'rh_ai_desk_upcoming_intent', 'rh_ai_desk_other_days', 'rh_ai_desk_holds_intent', 'rh_ai_desk_blocked_intent'];
     $vocab = [];
     $files = [];
     foreach ($fns as $fn) {
@@ -304,9 +305,31 @@ function rh_ai_real_words(): array
         // slightly old word list is fine for telling a real word from a slip.
         $file = dirname(__DIR__, 2) . '/cache/guide-kb-index.json';
         $j = is_file($file) ? json_decode((string)@file_get_contents($file), true) : null;
-        $memo = is_array($j) ? array_fill_keys(array_map('strval', (array)($j['vocab'] ?? [])), true) : [];
+        $memo = rh_ai_real_words_from(is_array($j) ? (array)($j['entries'] ?? []) : []);
     }
     return $memo;
+}
+
+/**
+ * Real words from guide entries (title + text). Quoted text is left out: the guides quote what staff type, typos
+ * included ("arivals tomorow"), and a quoted typo must never count as a real word (owner fault 2026-10-29).
+ */
+function rh_ai_real_words_from(array $entries): array
+{
+    $out = [];
+    foreach ($entries as $e) {
+        $t = mb_strtolower(html_entity_decode((string)($e['title'] ?? '') . ' ' . (string)($e['text'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $t = (string)preg_replace('/"[^"\n]{1,120}"|“[^”\n]{1,120}”/u', ' ', $t);
+        foreach (preg_split('/[^\p{L}]+/u', $t, -1, PREG_SPLIT_NO_EMPTY) as $w) {
+            if (mb_strlen($w) >= 4) {
+                $out[$w] = true;
+                if (function_exists('rh_kb_stem')) {
+                    $out[rh_kb_stem($w)] = true;
+                }
+            }
+        }
+    }
+    return $out;
 }
 
 /** Is this text a request to change something? (the same tests the Assistant uses to decide on cards and refusals) */

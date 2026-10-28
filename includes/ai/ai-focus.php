@@ -239,7 +239,7 @@ function rh_ai_focus_from_results(array $results): array
         if (!empty($res['error'])) {
             continue;
         }
-        if ($tool === 'get_booking' && !empty($res['booking_id'])) {
+        if (in_array($tool, ['get_booking', 'booking_history'], true) && !empty($res['booking_id'])) {
             $out = ['focus' => (int)$res['booking_id'], 'focus_offer' => 0];
         } elseif ($tool === 'search_bookings' && isset($res['count']) && !isset($res['match'])) {
             $rows = is_array($res['bookings'] ?? null) ? $res['bookings'] : [];

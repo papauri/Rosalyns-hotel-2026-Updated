@@ -70,6 +70,9 @@ function rh_ai_no_write_area(array $user, string $t): ?array
     if (preg_match('/\b(check(ed|ing)? ?(in|out)|book(ing)? (a|an|the)? ?room|new booking|cancel|extend|assign|room status|housekeeping|maintenance|email|whatsapp|reply)\b/u', $t)) {
         return null;
     }
+    if (preg_match('/^\s*(add|put|leave|write|make) (a )?(booking )?note\b|^\s*note (on|for|to)\b/u', $t)) {
+        return null; // a staff note on a booking (its words may mention money: it is a note, not a payment)
+    }
     $v = '(adjust|change|set|update|edit|add|remove|deduct|subtract|reduce|increase|decrease|top up|write off|record|log|enter|transfer|delete|void|refund|reverse|post|take|receive|close|apply|raise|lower|put|mark|cut|bump|correct|fix)';
     $stockLine = "I can't change stock - record it on Stock > Wastage (waste or spoilage) or Stock > Stock count (a correction).";
     $stockPages = [['stock-wastage.php', 'Open Wastage'], ['stock-count.php', 'Open Stock count']];
@@ -179,10 +182,15 @@ function rh_ai_not_offered_line(string $tool): string
         return '';
     }
     $key = $modsOn ? 'bookings' : (string)$mods[0];
-    $lines = ['pos' => "We don't take till orders here.", 'gym' => "We don't offer a gym here.", 'bookings' => "Room bookings aren't taken here.",
+    return rh_ai_not_offered_lines()[$key] ?? "That isn't offered here.";
+}
+
+/** The plain "not offered here" line per part of the business (the module system is never named). */
+function rh_ai_not_offered_lines(): array
+{
+    return ['pos' => "We don't take till orders here.", 'gym' => "We don't offer a gym here.", 'bookings' => "Room bookings aren't taken here.",
         'conference' => "We don't offer conference rooms here.", 'events' => "We don't run events here.", 'stock' => "Stock isn't kept here.",
         'housekeeping' => "Housekeeping isn't run here.", 'finance' => "Money reports aren't kept here."];
-    return $lines[$key] ?? "That isn't offered here.";
 }
 
 /** The best 1-2 staff guide sections for a question (local KB, only guides this person may read) as panel links. */
@@ -1578,6 +1586,11 @@ function rh_ai_followup_chips(array $user, array $toolsUsed): array
         } elseif ($t === 'gym_watch') {
             $add('gym_watch', "Today's gym bookings");
             $add('gym_watch', 'Memberships ending soon');
+        } elseif ($t === 'booking_history') {
+            $add('get_booking', 'How much is their booking?');
+        } elseif ($t === 'upcoming_arrivals') {
+            $add('arrivals_departures', 'Arrivals today');
+            $add('booking_holds', 'Which bookings need confirming?');
         }
     }
     return array_slice($chips, 0, 3);
@@ -1793,7 +1806,8 @@ function rh_ai_specialists(): array
     return [
         'front_desk' => ['label' => 'Front Desk & Rooms', 'brief' => 'reservations, availability, quotes, arrivals, departures, in-house guests, room assignment and guest history',
             'core' => ['search_bookings', 'get_booking', 'arrivals_departures', 'in_house', 'check_availability'],
-            'tools' => ['search_bookings', 'get_booking', 'check_availability', 'quote_stay', 'room_rates', 'arrivals_departures', 'in_house', 'room_board', 'guest_history', 'rate_plans_and_deals', 'hotel_info']],
+            'tools' => ['search_bookings', 'get_booking', 'check_availability', 'quote_stay', 'room_rates', 'arrivals_departures', 'in_house', 'room_board', 'guest_history', 'rate_plans_and_deals', 'hotel_info',
+                'booking_history', 'upcoming_arrivals', 'booking_holds', 'blocked_dates']],
         'housekeeping' => ['label' => 'Housekeeping & Maintenance', 'brief' => 'room status, cleaning jobs, maintenance tasks, rooms off sale and rooms not ready for arrivals',
             'core' => ['work_queues', 'room_board'], 'tools' => ['work_queues', 'room_board']],
         'restaurant' => ['label' => 'Restaurant & Bar', 'brief' => 'till sales, top sellers, voids, refunds, slow tickets at the kitchen, bar and coffee stations, and where one order is',
@@ -2432,7 +2446,7 @@ function rh_ai_maybe_summarise(PDO $db, int $uid, int $conv, array $models): voi
 function rh_ai_lane_words(): array
 {
     return [
-        'front_desk'   => '/\b(book(ing|ings|ed)?|reserv\w*|arriv\w*|depart\w*|check.?(in|out|ins|outs)|in.?house|guests?|stay\w*|nights?|free|availab\w*|vacan\w*|quote|room types?|assign\w*|due out|leav\w*|walk.?in|extend|cancel\w*|child(ren)?|kids?|infants?|single|double|triple|occupancy (rates?|prices?)|price list|tariffs?)\b/u',
+        'front_desk'   => '/\b(book(ing|ings|ed)?|reserv\w*|arriv\w*|depart\w*|check.?(in|out|ins|outs)|in.?house|guests?|stay\w*|nights?|free|availab\w*|vacan\w*|quote|room types?|assign\w*|due out|leav\w*|walk.?in|extend|cancel\w*|child(ren)?|kids?|infants?|single|double|triple|occupancy (rates?|prices?)|price list|tariffs?|tentative|holds?|pending|confirm\w*|blocked|history|timeline)\b/u',
         'housekeeping' => '/\b(housekeep\w*|clean\w*|dirty|maintenance|repair\w*|broken|fix\w*|room status|status of room|not ready|off sale|out of order|inspect\w*|jobs?|tasks?)\b/u',
         'restaurant'   => '/\b(restaurant|bar|kitchen|till|food|drinks?|meals?|orders?|top sell\w*|voids?|tickets?|coffee|breakfast|lunch|dinner|dishes|tabs?|tables?|room service|receipts?)\b/u',
         'money'        => '/\b(owe[sd]?|owing|balances?|unpaid|paid|payments?|refunds?|discounts?|money|cash|debts?|invoices?|losing|leaks?|revenue|takings|spend\w*)\b/u',
@@ -2493,6 +2507,10 @@ function rh_ai_change_cards(string $tok): array
         '/\b(clean|housekeeping job|housekeeping task|make up)\b/u' => ['housekeeping_job', 'room_status'],
         '/\b(fix|repair|maintenance|broken|leak\w*|out of order)\b/u' => ['maintenance_job', 'room_status'],
         '/\b(mark|set) (room|it|the room)\b|\broom status to\b/u' => ['room_status'],
+        '/\bconfirm (the |this |that |their |his |her |[^ ]+\'s )?(booking|reservation|hold)\b|\bconfirm (it|them|him|her)\b/u' => ['confirm_booking'],
+        '/\b(add|put|leave|write|make) (a )?(booking )?note\b|\bnote (on|to|for)\b/u' => ['booking_note'],
+        '/\b(clean(ing|ed)?|housekeeping|job|task)\b.{0,40}\b(done|finished|complete[d]?|started?|in progress)\b|\b(start|begin|finish(ed)?)\b.{0,12}\bclean(ing)?\b|\broom \S+ (is )?(clean(ed)?|ready|done)\b/u' => ['housekeeping_progress'],
+        '/\b(repair|maintenance|fix(ing)?|job|task)\b.{0,40}\b(done|finished|complete[d]?|started?|in progress)\b|\b(start|begin|finish(ed)?)\b.{0,12}\b(repair|maintenance|fixing)\b|\broom \S+ (is )?(fixed|repaired)\b/u' => ['maintenance_progress'],
     ];
     $out = [];
     foreach ($map as $re => $keys) {
@@ -2848,6 +2866,13 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     if (!$contradict && ($fl = rh_ai_focus_local($db, $user, $conv, $msgQ, $tokQ, $focusState)) !== null) {
         return $finish($fl['text'], 'local', ['links' => $fl['links'], 'chips' => $fl['chips'], 'focus' => $fl['focus'] ?? null, 'focus_offer' => $fl['focus_offer'] ?? 0]);
     }
+    // 1b+++. The front desk without clicking (owner 2026-10-29: "Assistant should be a master"): who made a booking and its
+    // history, the next arrivals ("any other day"), holds waiting, blocked dates, and cards straight from the words ("check
+    // him in", "room 12 is clean") - local, zero tokens. Cards are only prepared; Confirm stays with the person.
+    if (!$contradict && ($dl = rh_ai_desk_local($db, $user, $conv, $msgQ, $focusState, $bookingId, $message)) !== null) {
+        return $finish($dl['text'], (string)($dl['route'] ?? 'local'), ['links' => $dl['links'] ?? [], 'chips' => $dl['chips'] ?? [], 'cards' => $dl['cards'] ?? [],
+            'focus' => $dl['focus'] ?? null, 'focus_offer' => $dl['focus_offer'] ?? 0, 'local' => $dl['local'] ?? null]);
+    }
     if (!$contradict && ($st = rh_ai_small_talk($tokQ, $user)) !== null) {
         return $finish($st[0], 'local', ['chips' => $st[1]]);
     }
@@ -2971,7 +2996,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     $userBlock = rh_ai_context_user($db, $conv, $user, $prefs);
 
     // Short, per-turn (never in the cached prompt): the booking this chat is about, and words read as typos
-    $turnNotes = implode("\n", array_filter([rh_ai_focus_note($db, $user, $conv, (int)$focusState['focus']), $typoNote]));
+    $turnNotes = implode("\n", array_filter([rh_ai_focus_note($db, $user, $conv, (int)$focusState['focus']), $typoNote, rh_ai_name_part_note($db, $conv, $tok)]));
     $turnNotes = $turnNotes !== '' ? $turnNotes . "\n\n" : '';
     $messages = $hist['messages']; // older turns are already folded into the rolling summary
     $histCount = count($messages);
@@ -3131,7 +3156,7 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
                 } elseif (isset($seenCalls[rh_ai_call_key($name, (array)$c['args'])])) {
                     // The same lookup again: the earlier result again (not run again, adds nothing new).
                     $json = $seenCalls[rh_ai_call_key($name, (array)$c['args'])];
-                } elseif ($name === 'get_booking' && ($bkGuard = rh_ai_booking_args_guard($db, $conv, (array)$c['args'], (int)$focusState['focus'], $bookingId, $message))[0] === null) {
+                } elseif (in_array($name, ['get_booking', 'booking_history'], true) && ($bkGuard = rh_ai_booking_args_guard($db, $conv, (array)$c['args'], (int)$focusState['focus'], $bookingId, $message))[0] === null) {
                     // A booking id or reference that did not come from this chat (owner fault 2026-10-29: an invented id) is refused
                     $json = rh_ai_compact_json(['error' => $bkGuard[1]]);
                     $budget['tools_used'][] = $name;
@@ -3139,11 +3164,12 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
                     rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $name, 'args' => rh_ai_vault_protect($db, $conv, (array)$c['args']), 'result' => $json, 'agent' => $route]);
                 } else {
                     rh_ai_step_set($db, $uid, rh_ai_tool_step($name));
-                    $runArgs = $name === 'get_booking' && isset($bkGuard) ? (array)$bkGuard[0] : (array)$c['args']; // an invented id: the booking in focus
+                    $isBk = in_array($name, ['get_booking', 'booking_history'], true);
+                    $runArgs = $isBk && isset($bkGuard) ? (array)$bkGuard[0] : (array)$c['args']; // an invented id: the booking in focus
                     $tr = rh_ai_run_tool($db, $user, $conv, $name, $runArgs);
                     $json = $tr['json'];
                     $view = $tr['view']; // the model gets the summary; the full result stays here as evidence
-                    if ($name === 'get_booking' && isset($bkGuard) && $bkGuard[1] !== '') {
+                    if ($isBk && isset($bkGuard) && $bkGuard[1] !== '') {
                         $json = rh_ai_compact_json(['note' => $bkGuard[1]] + (array)json_decode($json, true));
                         $view = rh_ai_compact_json(['note' => $bkGuard[1]] + (array)json_decode((string)$view, true));
                     }
@@ -3214,7 +3240,7 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
             $text = rh_ai_answer_from_results($budget['results']);
             if ($text !== '') { // built here from the lookups themselves: every figure is the tool's own
                 [$absFacts, $absLine] = rh_ai_absence_conflicts($db, $user, $text); // the absence guard still applies
-                $final = $absFacts ? rh_ai_absence_correct($text, $absFacts, $absLine) : $text;
+                $final = rh_ai_named_absence_fix($db, $user, $conv, $absFacts ? rh_ai_absence_correct($text, $absFacts, $absLine) : $text, $budget);
                 break;
             }
             // Nothing to build from: say so plainly, never a "none" (a filtered search's 0 is not a checked total)
@@ -3251,6 +3277,9 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
                 }
                 $text = rh_ai_absence_correct($text, $absFacts, $absLine);
             }
+            // "No booking for Mr X" about one NAMED person (owner fault 2026-10-29): checked with the same close-name search
+            // the lookups use; what IS there replaces the claim (local, no model call).
+            $text = rh_ai_named_absence_fix($db, $user, $conv, $text, $budget);
         }
         if ($r['stop'] === 'max_tokens') {
             $text .= "\n\n(The answer was cut short - ask me to continue.)";

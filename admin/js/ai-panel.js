@@ -38,6 +38,10 @@
     function csrf() {
         return panel.getAttribute('data-csrf') || window._rhCsrf || ((document.querySelector('meta[name="csrf-token"]') || {}).content) || '';
     }
+    // Phones and tablets: never focus the box ourselves, or the keyboard pops up and
+    // covers the messages. Staff tap the box when they want to type.
+    var touchOnly = !!(window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+    function focusLater(el) { if (el && !touchOnly) { setTimeout(function () { el.focus(); }, 0); } }
     function store(k, v) { try { if (v === null) { sessionStorage.removeItem(k); } else { sessionStorage.setItem(k, String(v)); } } catch (e) { /* private mode */ } }
     function read(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
 
@@ -295,7 +299,8 @@
         return box;
     }
     // ── Action cards ─────────────────────────────────────────────────────────
-    function safePage(u) { return /^(api\/)?[a-z0-9\-]+\.php$/i.test(String(u || '')); }
+    // A screen in this admin folder; a booking's own screen also carries its id (booking-details.php?id=12: a booking note)
+    function safePage(u) { return /^(api\/)?[a-z0-9\-]+\.php(\?id=\d+)?$/i.test(String(u || '')); }
     // A briefing point's one-tap fix: prepares the card (no model call); Confirm on the card is the second tap.
     function prepare(act, btn, row) {
         btn.disabled = true;
@@ -546,7 +551,7 @@
         if (view === 'chats') { loadChats(); }
         if (view === 'prefs') { loadPrefs(); }
         if (view === 'alerts') { loadAlerts(true); }
-        if (view === 'chat') { setTimeout(function () { input.focus(); }, 0); }
+        if (view === 'chat') { focusLater(input); }
     }
     function loadChats() {
         var ul = document.getElementById('rhAiChatList');
@@ -671,7 +676,7 @@
                 busy(false);
                 addError(e && e.name === 'AbortError' ? 'Stopped.' : 'Could not reach the Assistant. Check the connection and try again.');
             })
-            .finally(function () { setTimeout(function () { input.focus(); }, 0); });
+            .finally(function () { focusLater(input); });
     }
     function autosize() {
         input.style.height = 'auto';
@@ -756,7 +761,7 @@
         state.loaded = false;
         show('lock');
         var p = document.getElementById('rhAiUnlockPw');
-        if (p && !panel.hidden) { setTimeout(function () { p.focus(); }, 0); }
+        if (p && !panel.hidden) { focusLater(p); }
     }
     var unlockForm = document.getElementById('rhAiUnlock');
     if (unlockForm) {
@@ -829,6 +834,28 @@
         setInterval(function () {
             if (!document.hidden) { loadAlerts(!panel.hidden && !panel.querySelector('[data-view="alerts"]').hidden); }
         }, 600000);
+    }
+
+    // When the phone keyboard opens, keep the panel inside the part of the screen
+    // that is still visible, and keep the latest message in view.
+    var vv = window.visualViewport;
+    if (vv) {
+        var fitToKeyboard = function () {
+            var atEnd = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 80;
+            if (!panel.hidden && window.innerWidth <= 1024 && vv.height < window.innerHeight - 1) {
+                panel.style.top = vv.offsetTop + 'px';
+                panel.style.bottom = 'auto';
+                panel.style.height = vv.height + 'px';
+            } else {
+                panel.style.top = '';
+                panel.style.bottom = '';
+                panel.style.height = '';
+            }
+            if (atEnd && !panel.hidden) { scrollDown(); }
+        };
+        vv.addEventListener('resize', fitToKeyboard);
+        vv.addEventListener('scroll', fitToKeyboard);
+        input.addEventListener('focus', function () { setTimeout(fitToKeyboard, 300); });
     }
 
     if (read(KEY_OPEN) === '1') { open(); }

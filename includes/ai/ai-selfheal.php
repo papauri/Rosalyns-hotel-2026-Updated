@@ -696,7 +696,9 @@ function rh_ai_hard_limit_problems(): array
             $p[] = 'read tool ' . $n;
         }
     }
-    $want = ['create_booking', 'edit_booking', 'extend_stay', 'change_checkout', 'room_type_change', 'cancel_booking', 'check_in', 'assign_room', 'check_out', 'housekeeping_job', 'maintenance_job', 'room_status', 'send_email', 'send_invoice', 'whatsapp', 'reply_review', 'reply_enquiry'];
+    // Owner 2026-10-29 ("Assistant should be a master"): confirm a pending booking or hold, start / finish a room's job
+    $want = ['create_booking', 'edit_booking', 'extend_stay', 'change_checkout', 'room_type_change', 'cancel_booking', 'check_in', 'assign_room', 'confirm_booking', 'booking_note', 'check_out',
+        'housekeeping_job', 'maintenance_job', 'housekeeping_progress', 'maintenance_progress', 'room_status', 'send_email', 'send_invoice', 'whatsapp', 'reply_review', 'reply_enquiry'];
     if (array_keys(rh_ai_action_registry()) !== $want) {
         $p[] = 'the card list changed';
     }

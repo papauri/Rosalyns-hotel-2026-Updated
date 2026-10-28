@@ -22,6 +22,7 @@ require_once __DIR__ . '/ai-memory.php';   // Phase 4b: the circuit breaker (a t
 require_once __DIR__ . '/ai-extras.php';   // Phases 4c + 5: password on risky cards, idle lock, audit chain, alerts, extra reads
 require_once __DIR__ . '/ai-lookups.php';  // one-record lookups: an order, a gym member or class, a conference booking, a stock item, a room's jobs
 require_once __DIR__ . '/ai-focus.php';    // the booking in focus, close names, what a booking includes (owner fault 2026-10-29)
+require_once __DIR__ . '/ai-desk.php';     // the front desk without clicking: who made a booking, next arrivals, holds, blocked dates, cards from words
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
@@ -236,7 +237,7 @@ function rh_ai_tool_registry(): array
             'perm' => [], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_daily_briefing', 'step' => 'Going through today',
         ],
     ];
-    return array_merge($reg, rh_ai_extra_tools(), rh_ai_lookup_tools()); // Phases 4c + 5 extras (read only) + one-record lookups (read only)
+    return array_merge($reg, rh_ai_extra_tools(), rh_ai_lookup_tools(), rh_ai_desk_tools()); // Phases 4c + 5 extras + one-record lookups + the desk reads (all read only)
 }
 
 /** The plain status line shown while a tool runs ("Checking today's departures..."). */
@@ -440,7 +441,7 @@ function rh_ai_paged_tools(): array
 {
     return ['search_bookings', 'arrivals_departures', 'in_house', 'room_board', 'balances_due', 'guest_history', 'money_leaks', 'inventory_watch',
         'work_queues', 'events_pipeline', 'guest_voice', 'reply_queue', 'kitchen_tickets', 'restaurant_sales', 'upsell_finder', 'who_is_online', 'check_availability', 'hotel_info',
-        'order_status', 'gym_watch', 'room_rates'];
+        'order_status', 'gym_watch', 'room_rates', 'upcoming_arrivals', 'booking_history', 'blocked_dates'];
 }
 
 /** Provider-ready tool list [{name, description, schema}] for this person. */

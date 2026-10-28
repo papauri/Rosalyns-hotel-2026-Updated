@@ -101,6 +101,10 @@
     <li><strong>Follow up one gym class.</strong> Ask <em>"Who's on tomorrow's 6am class?"</em> It shows who is booked and the spaces left, using the capacity in the gym slot calendar.</li>
     <li><strong>Follow up one record:</strong> one conference or event booking, one room's cleaning or repair jobs, one stock item, or one purchase order or delivery.</li>
     <li>Common questions such as <em>"Status of table 5"</em> are answered instantly.</li>
+    <li><strong>Who made a booking.</strong> Ask <em>"Who booked Mr Banda in?"</em> or <em>"Who made the booking for her?"</em>. It says how the booking was made (online on the website by the guest, by a staff member in the portal, or through another system), who and when, and who confirmed it. This comes from the booking's own record; if nothing was recorded, it says so. Ask <em>"Show its history"</em> for every change and who made it.</li>
+    <li><strong>The next arrivals.</strong> Ask <em>"When is the next arrival?"</em>, <em>"Arrivals next week"</em>, or after an arrivals answer, <em>"Any other day?"</em>.</li>
+    <li><strong>Bookings waiting to be confirmed.</strong> Ask <em>"Which bookings need confirming?"</em> for pending bookings and tentative holds, when each hold ends and what is owed.</li>
+    <li><strong>Blocked dates.</strong> Ask <em>"Blocked dates"</em> or <em>"Which dates are blocked next month?"</em> (for staff who can open Blocked Dates or the Calendar).</li>
     <li>Wording follows the business type set in Settings &rarr; Modules. A gym, restaurant or shop never hears about rooms or check-in. Anything switched off is "not offered here".</li>
     <li>How to do anything in the system, from the staff guides (see below).</li>
     <li>The hotel's own facts: check-in and check-out times, opening hours of the restaurant kitchen, bar, coffee bar and gym, the menu with prices, facilities, policies, the hotel's phone and address, conference rooms and upcoming events. Times come from Hotel Settings and the Station Hours screen, and it says whether the kitchen, bar or coffee bar is open right now. A time that is not saved, it tells you so. Parts the hotel does not offer are left out.</li>
@@ -148,6 +152,7 @@
 
   <h2 id="actions">Action cards: changes with one Confirm</h2>
   <p>For people who also have <strong>Confirm Assistant actions</strong>. Ask for a change in plain words, for example <em>"Check out room 12"</em>, <em>"Book the Deluxe Room 3 to 5 November for 2 adults"</em> or <em>"Add a deep clean for room 7 tomorrow"</em>. The Assistant prepares a card; nothing is changed until you tap <strong>Confirm</strong> on it.</p>
+  <p>Short requests make the card straight away, with no waiting: <em>"Check him in"</em>, <em>"Check out Mrs Phiri"</em>, <em>"Confirm their booking"</em>, <em>"Put them in room 12"</em>, <em>"Add a note to their booking: late arrival"</em>, <em>"Room 12 is clean"</em>, <em>"Start cleaning room 7"</em> or <em>"Room 4 is fixed"</em>. "Him", "her" and "their booking" mean the booking you were just talking about.</p>
   <h3>How to confirm a card</h3>
   <ol class="steps">
     <li>Read the card. Each line shows what changes: the old value (crossed out) and the new value, and for money the total. Lines in red (and a red border) mean something serious, such as a cancellation or a room going off sale.</li>
@@ -165,8 +170,11 @@
       <tr><td><strong>Change room type</strong></td><td>Paid upgrade or downgrade, priced like Change room type on Bookings.</td><td>Edit Bookings</td></tr>
       <tr><td><strong>Cancel booking</strong></td><td>Shows what the hotel's cancellation rule does with money paid, the amount paid and still owed. It never works out a refund; refunds are recorded by staff. Asks for a reason, and for a booking of several rooms whether to cancel one room or all.</td><td>Cancel Bookings</td></tr>
       <tr><td><strong>Check in</strong> / <strong>Assign room</strong></td><td>Checks the guest in, optionally after assigning a free room. If the room is not marked clean you are asked to confirm a second time on a new card.</td><td>Check-in Guests (Assign: View Bookings)</td></tr>
+      <tr><td><strong>Confirm booking</strong></td><td>Confirms a pending booking or a tentative hold, the same as Confirm on Bookings: the room is checked again and the guest gets the booking confirmed email.</td><td>Edit Bookings</td></tr>
+      <tr><td><strong>Booking note</strong></td><td>Adds a staff note to the booking, the same as the Notes box on the booking screen. The guest never sees it.</td><td>View Bookings</td></tr>
       <tr><td><strong>Check out</strong></td><td>Only when nothing is owed and the guest leaves on the booked day.</td><td>Check-out Guests</td></tr>
       <tr><td><strong>New housekeeping job</strong> / <strong>New maintenance job</strong></td><td>Adds the job to the board. A maintenance job that takes the room off sale is shown in red.</td><td>Housekeeping / Room Maintenance</td></tr>
+      <tr><td><strong>Housekeeping job</strong> / <strong>Maintenance job</strong> (start or finish)</td><td>Marks a room's open job as started or done, the same as Start and Mark done on the board. If the room has more than one open job, pick it on the card. A finished repair stays in Maintenance until it is verified.</td><td>Housekeeping / Room Maintenance</td></tr>
       <tr><td><strong>Room status</strong></td><td>Available, cleaning, maintenance or out of order. The last two take the room off sale.</td><td>Individual Rooms (off sale: Block Rooms)</td></tr>
       <tr><td><strong>Send guest email</strong> / <strong>Send invoice</strong></td><td>Sends the hotel's own email; the card shows the address partly hidden.</td><td>View Bookings</td></tr>
     </tbody>

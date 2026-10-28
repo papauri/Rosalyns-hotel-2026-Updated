@@ -99,6 +99,18 @@ function rh_ai_action_registry(): array
             'schema' => ['properties' => $bk + ['room' => ['type' => 'string', 'maxLength' => 20]]],
             'preview' => 'rh_ai_pv_assign_room', 'verify' => 'rh_ai_vf_assign_room',
         ],
+        'confirm_booking' => [
+            'tool' => 'propose_confirm_booking', 'label' => 'Confirm booking', 'page' => 'bookings.php', 'perm' => ['edit_booking'],
+            'description' => 'Prepare confirming a pending booking or a tentative hold - the same Confirm as on Bookings (the room is checked again; the guest gets the hotel\'s booking confirmed email).',
+            'schema' => ['properties' => $bk],
+            'preview' => 'rh_ai_pv_confirm_booking', 'verify' => 'rh_ai_vf_status',
+        ],
+        'booking_note' => [
+            'tool' => 'propose_booking_note', 'label' => 'Booking note', 'page' => 'booking-details.php', 'perm' => [],
+            'description' => 'Prepare adding a staff note to one booking (the Notes box on the booking screen; staff only, never sent to the guest). Write the note in note (tokens like [GUEST_1] are fine); the person can edit it on the card.',
+            'schema' => ['properties' => $bk + ['note' => ['type' => 'string', 'maxLength' => 1000]], 'required' => ['note']],
+            'preview' => 'rh_ai_pv_booking_note', 'verify' => 'rh_ai_vf_booking_note',
+        ],
         'check_out' => [
             'tool' => 'propose_check_out', 'label' => 'Check out', 'page' => 'bookings.php', 'perm' => ['checkout_guest'],
             'description' => 'Prepare a check-out card. Only when nothing is owed and the guest leaves on the booked day; otherwise the card opens checkout on Bookings.',
@@ -119,6 +131,18 @@ function rh_ai_action_registry(): array
                 'type' => ['type' => 'string', 'enum' => ['repair', 'replacement', 'inspection', 'upgrade', 'emergency']], 'priority' => ['type' => 'string', 'enum' => ['low', 'medium', 'high', 'urgent']],
                 'due_date' => $date, 'block_room' => ['type' => 'boolean']], 'required' => ['room', 'title']],
             'preview' => 'rh_ai_pv_maintenance_job', 'verify' => 'rh_ai_vf_maintenance_job',
+        ],
+        'housekeeping_progress' => [
+            'tool' => 'propose_housekeeping_progress', 'label' => 'Housekeeping job', 'page' => 'housekeeping.php', 'perm' => ['housekeeping'],
+            'description' => 'Prepare marking one room\'s open housekeeping job as started or done - the same Start / Complete as on Housekeeping (the room\'s cleaning state follows, as on the screen).',
+            'schema' => ['properties' => ['room' => ['type' => 'string', 'maxLength' => 20], 'step' => ['type' => 'string', 'enum' => ['start', 'complete']], 'job_id' => ['type' => 'integer', 'minimum' => 1]], 'required' => ['room', 'step']],
+            'preview' => 'rh_ai_pv_housekeeping_progress', 'verify' => 'rh_ai_vf_job_progress',
+        ],
+        'maintenance_progress' => [
+            'tool' => 'propose_maintenance_progress', 'label' => 'Maintenance job', 'page' => 'room-maintenance.php', 'perm' => ['room_maintenance'],
+            'description' => 'Prepare marking one room\'s open maintenance job as started or done - the same Start / Complete as on Room Maintenance (the room stays in Maintenance until the job is verified there, as on the screen).',
+            'schema' => ['properties' => ['room' => ['type' => 'string', 'maxLength' => 20], 'step' => ['type' => 'string', 'enum' => ['start', 'complete']], 'job_id' => ['type' => 'integer', 'minimum' => 1]], 'required' => ['room', 'step']],
+            'preview' => 'rh_ai_pv_maintenance_progress', 'verify' => 'rh_ai_vf_job_progress',
         ],
         'room_status' => [
             'tool' => 'propose_room_status', 'label' => 'Room status', 'page' => 'individual-rooms.php', 'perm' => ['individual_rooms'],
@@ -831,6 +855,141 @@ function rh_ai_pv_check_out(PDO $db, array $user, array $a): array
     return ['card' => $card, 'steps' => $steps, 'fp' => [true], 'facts' => rh_ai_bk_facts($b) + ['balance_due' => $owed], 'expect_status' => 'checked-out', 'handoff_on_fail' => $link];
 }
 
+/**
+ * Confirm a pending booking or a tentative hold (owner 2026-10-29): the Bookings screen's own Confirm - a tentative hold
+ * through Convert to confirmed (convert_tentative), a pending booking through update_status. Availability is checked
+ * here with the same helper the screen re-checks under its lock; a room that is no longer free gives no card.
+ */
+function rh_ai_pv_confirm_booking(PDO $db, array $user, array $a): array
+{
+    $b = rh_ai_act_booking($db, $a);
+    if (!empty($b['error'])) {
+        return $b;
+    }
+    $s = (string)$b['status'];
+    if (!in_array($s, ['pending', 'tentative'], true)) {
+        return ['error' => 'Only a pending booking or a tentative hold can be confirmed; this booking is ' . str_replace('-', ' ', $s) . '.'];
+    }
+    $tr = validateBookingStatusTransition($s, 'confirmed');
+    if (empty($tr['allowed'])) {
+        return ['error' => (string)$tr['reason']];
+    }
+    $av = checkRoomAvailability((int)$b['room_id'], (string)$b['check_in_date'], (string)$b['check_out_date'], (int)$b['id']);
+    if (empty($av['available'])) {
+        return ['error' => function_exists('getBookingActionErrorMessage') ? getBookingActionErrorMessage('confirm', (string)($av['error'] ?? 'No rooms available')) : 'No room of this type is free for these dates any more.'];
+    }
+    $tentative = $s === 'tentative' && (int)($b['is_tentative'] ?? 0) === 1;
+    $rows = rh_ai_bk_rows($b);
+    $rows[] = ['label' => 'Status', 'old' => $tentative ? 'Tentative hold' : ucfirst($s), 'new' => 'Confirmed'];
+    if ($tentative && !empty($b['tentative_expires_at'])) {
+        $rows[] = ['label' => 'Hold ends', 'new' => date('D j M Y, H:i', strtotime((string)$b['tentative_expires_at']))];
+    }
+    $f = rh_ai_folio((int)$b['id']);
+    if ($f) {
+        $rows[] = ['label' => 'Still owed', 'new' => rh_ai_fmt_money((float)$f['balance_due']), 'tone' => (float)$f['balance_due'] > BALANCE_TOLERANCE ? 'money' : ''];
+    }
+    $card = rh_ai_card_base('Confirm booking', 'The same Confirm as on Bookings: the room is checked again when you confirm, and the room count is updated.', $rows, 'Confirm booking');
+    $card['notes'][] = 'The guest gets the hotel\'s ' . ($tentative ? 'booking confirmed (converted hold)' : 'booking confirmed') . ' email, as when you confirm on Bookings.';
+    $steps = [rh_ai_step('bookings.php', $tentative ? [['action', 'convert_tentative'], ['id', (string)(int)$b['id']]] : [['action', 'update_status'], ['id', (string)(int)$b['id']], ['status', 'confirmed']])];
+    return ['card' => $card, 'steps' => $steps, 'fp' => [$s, true], 'facts' => rh_ai_bk_facts($b) + ['hold' => $tentative], 'expect_status' => 'confirmed'];
+}
+
+/** A staff note on one booking - the booking screen's own Notes box (add_note), shown in its timeline. */
+function rh_ai_pv_booking_note(PDO $db, array $user, array $a): array
+{
+    $b = rh_ai_act_booking($db, $a);
+    if (!empty($b['error'])) {
+        return $b;
+    }
+    $note = trim((string)($a['note'] ?? ''));
+    $rows = rh_ai_bk_rows($b);
+    $card = rh_ai_card_base('Add a booking note', 'Adds the note to the booking, the same as the Notes box on the booking screen. Staff see it; the guest never does.', $rows, 'Add note', [
+        'fields' => [['name' => 'note', 'label' => 'Note (edit before confirming)', 'type' => 'textarea', 'value' => $note, 'required' => true, 'max' => 1000]],
+    ]);
+    $steps = [];
+    if ($note === '') {
+        $card['notes'][] = 'Type the note before confirming.';
+    } else {
+        $steps[] = rh_ai_step('booking-details.php?id=' . (int)$b['id'], [['add_note', '1'], ['note_text', $note]]);
+    }
+    return ['card' => $card, 'steps' => $steps, 'fp' => [], 'facts' => rh_ai_bk_facts($b) + ['note' => $note], 'incomplete' => !$steps, 'note_booking' => (int)$b['id']];
+}
+
+/** One room's open jobs of one board for a progress card: [room row, jobs] or ['error']. */
+function rh_ai_job_progress_rows(PDO $db, array $a, string $board): array
+{
+    $r = rh_ai_act_room($db, (string)$a['room']);
+    if (!$r) {
+        return ['error' => 'No active room numbered "' . $a['room'] . '".'];
+    }
+    $start = (string)$a['step'] === 'start';
+    if ($board === 'housekeeping') {
+        $st = $db->prepare("SELECT id, assignment_type AS title, status, due_date FROM housekeeping_assignments WHERE individual_room_id = ? AND status IN (" . ($start ? "'pending'" : "'pending','in_progress'") . ")
+                            ORDER BY (due_date IS NULL), due_date, id LIMIT 10");
+    } else {
+        $st = $db->prepare("SELECT id, title, status, due_date, block_room FROM room_maintenance_schedules WHERE individual_room_id = ? AND status IN (" . ($start ? "'planned','pending',''" : "'planned','pending','','in_progress'") . ")
+                            ORDER BY (due_date IS NULL), due_date, id LIMIT 10");
+    }
+    $st->execute([(int)$r['id']]);
+    $jobs = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (!$jobs) {
+        $what = $board === 'housekeeping' ? 'housekeeping' : 'maintenance';
+        return ['error' => 'Room ' . $r['room_number'] . ' has no open ' . $what . ' job waiting to be ' . ($start ? 'started' : 'finished') . '. Open ' . ($board === 'housekeeping' ? 'Housekeeping' : 'Room Maintenance') . ' to check, or ask me to add one.'];
+    }
+    return ['room' => $r, 'jobs' => $jobs];
+}
+
+/** Housekeeping / maintenance progress card (start or complete one open job of one room) - the board's own buttons. */
+function rh_ai_pv_job_progress(PDO $db, array $a, string $board): array
+{
+    $x = rh_ai_job_progress_rows($db, $a, $board);
+    if (!empty($x['error'])) {
+        return $x;
+    }
+    [$r, $jobs] = [$x['room'], $x['jobs']];
+    $start = (string)$a['step'] === 'start';
+    $chosen = (int)($a['job_id'] ?? 0);
+    $job = null;
+    foreach ($jobs as $j) {
+        if ((int)$j['id'] === $chosen) {
+            $job = $j;
+        }
+    }
+    if ($chosen > 0 && $job === null) {
+        return ['error' => 'That job is not open on room ' . $r['room_number'] . '.'];
+    }
+    $job = $job ?? $jobs[0];
+    $label = static fn(array $j): string => ucfirst(str_replace('_', ' ', (string)$j['title'])) . (!empty($j['due_date']) ? ' (due ' . date('j M', strtotime((string)$j['due_date'])) . ')' : '');
+    $state = static fn(string $s): string => $s === 'in_progress' ? 'In progress' : ($s === 'planned' || $s === '' ? 'Planned' : ucfirst($s));
+    $rows = [['label' => 'Room', 'new' => 'Room ' . $r['room_number'] . ' (' . $r['type_name'] . ')'], ['label' => 'Job', 'new' => $label($job)],
+        ['label' => 'Status', 'old' => $state((string)$job['status']), 'new' => $start ? 'In progress' : 'Done']];
+    $screen = $board === 'housekeeping' ? 'Housekeeping' : 'Room Maintenance';
+    $card = rh_ai_card_base(($start ? 'Start ' : 'Finish ') . ($board === 'housekeeping' ? 'housekeeping job' : 'maintenance job'), 'The same ' . ($start ? 'Start' : 'Complete') . ' as on ' . $screen . '; the room\'s state follows as it does there.', $rows, $start ? 'Start job' : 'Mark done');
+    if (count($jobs) > 1) {
+        $card['choices'][] = ['name' => 'job_id', 'label' => 'Which job', 'value' => (string)(int)$job['id'], 'options' => array_map(static fn($j) => [(string)(int)$j['id'], $label($j)], $jobs)];
+    }
+    if ($board === 'maintenance' && $start && (int)($job['block_room'] ?? 0) === 1) {
+        $card['warn'][] = 'This job keeps room ' . $r['room_number'] . ' off sale while it runs.';
+    }
+    if (!$start) { // what the board's own Mark done says
+        $card['notes'][] = $board === 'maintenance' ? 'Room ' . $r['room_number'] . ' stays in Maintenance until the job is verified on Room Maintenance.' : 'A supervisor can then verify it on Housekeeping.';
+    }
+    $page = $board === 'housekeeping' ? 'housekeeping.php' : 'room-maintenance.php';
+    return ['card' => $card, 'steps' => [rh_ai_step($page, [['action', $start ? 'mark_started' : 'mark_complete'], ['id', (string)(int)$job['id']]])],
+        'fp' => array_map(static fn($j) => (int)$j['id'] . ':' . (string)$j['status'], $jobs), 'facts' => ['room' => $r['room_number'], 'job' => (string)$job['title'], 'from' => (string)$job['status'], 'to' => $start ? 'in_progress' : 'completed'],
+        'job_id' => (int)$job['id'], 'job_board' => $board, 'expect_job' => $start ? 'in_progress' : 'completed'];
+}
+
+function rh_ai_pv_housekeeping_progress(PDO $db, array $user, array $a): array
+{
+    return rh_ai_pv_job_progress($db, $a, 'housekeeping');
+}
+
+function rh_ai_pv_maintenance_progress(PDO $db, array $user, array $a): array
+{
+    return rh_ai_pv_job_progress($db, $a, 'maintenance');
+}
+
 function rh_ai_pv_housekeeping_job(PDO $db, array $user, array $a): array
 {
     $r = rh_ai_act_room($db, (string)$a['room']);
@@ -1358,6 +1517,28 @@ function rh_ai_vf_maintenance_job(PDO $db, array $row, array $pv): ?bool
     $st = $db->prepare("SELECT COUNT(*) FROM room_maintenance_schedules WHERE individual_room_id = ? AND title = ? AND created_by = ? AND created_at >= DATE_SUB(?, INTERVAL 5 SECOND)");
     $st->execute([(int)$pv['room_id'], trim((string)$args['title']), (int)$row['user_id'], (string)$row['created_at']]);
     return (int)$st->fetchColumn() > 0;
+}
+
+/** A booking note: the note row by this person on this booking since the card was made (the screen answers with its page). */
+function rh_ai_vf_booking_note(PDO $db, array $row, array $pv): ?bool
+{
+    $args = (array)(json_decode((string)$row['params_json'], true)['args'] ?? []);
+    $st = $db->prepare("SELECT COUNT(*) FROM booking_notes WHERE booking_id = ? AND created_by = ? AND note_text = ? AND created_at >= DATE_SUB(?, INTERVAL 5 SECOND)");
+    $st->execute([(int)($pv['note_booking'] ?? 0), (int)$row['user_id'], trim((string)($args['note'] ?? '')), (string)$row['created_at']]);
+    return (int)$st->fetchColumn() > 0;
+}
+
+/** A job started or done: the job's own status in the database (the board answers with its page, not JSON). */
+function rh_ai_vf_job_progress(PDO $db, array $row, array $pv): ?bool
+{
+    $table = ['housekeeping' => 'housekeeping_assignments', 'maintenance' => 'room_maintenance_schedules'][(string)($pv['job_board'] ?? '')] ?? '';
+    if ($table === '' || empty($pv['job_id'])) {
+        return null;
+    }
+    $st = $db->prepare("SELECT status FROM $table WHERE id = ?");
+    $st->execute([(int)$pv['job_id']]);
+    $now = (string)$st->fetchColumn();
+    return $now === (string)$pv['expect_job'] || ($pv['expect_job'] === 'in_progress' && $now === 'completed');
 }
 
 function rh_ai_vf_room_status(PDO $db, array $row, array $pv): ?bool

@@ -133,11 +133,15 @@ function rh_ai_vault_rehydrate(PDO $db, int $conv, string $text): string
     }, $text);
 }
 
-/** Tool arguments from the model: every token inside a string becomes the real value. */
+/**
+ * Tool arguments from the model: every token inside a string becomes the real value. A token the model wrote without
+ * its brackets ("STAFF_2", owner fault 2026-10-29: the search then looked for the word STAFF_2) counts as the token.
+ */
 function rh_ai_vault_resolve_args(PDO $db, int $conv, array $args): array
 {
     foreach ($args as $k => $v) {
         if (is_string($v)) {
+            $v = (string)preg_replace('/(?<![\[\p{L}\p{N}_])(GUEST|EMAIL|PHONE|BK|STAFF)_(\d+)(?![\]\p{L}\p{N}_])/u', '[$1_$2]', $v);
             $args[$k] = rh_ai_vault_rehydrate($db, $conv, $v);
         } elseif (is_array($v)) {
             $args[$k] = rh_ai_vault_resolve_args($db, $conv, $v);
@@ -194,8 +198,9 @@ function rh_ai_vault_people(PDO $db): array
     if (isset($GLOBALS['__rh_ai_people']) && is_array($GLOBALS['__rh_ai_people'])) {
         return $GLOBALS['__rh_ai_people'];
     }
-    $people = ['full' => [], 'part' => []];
-    $add = static function (string $name, string $kind) use (&$people): void {
+    $people = ['full' => [], 'part' => [], 'shared' => []]; // shared: name words both a guest and a staff member have
+    $kinds = [];
+    $add = static function (string $name, string $kind) use (&$people, &$kinds): void {
         $name = trim(preg_replace('/\s+/u', ' ', $name));
         if (mb_strlen($name) < 3) {
             return;
@@ -208,6 +213,9 @@ function rh_ai_vault_people(PDO $db): array
             $part = trim($part, ".'-");
             if (mb_strlen($part) >= 3 && !isset($people['part'][$part])) {
                 $people['part'][$part] = $kind;
+            }
+            if (mb_strlen($part) >= 3) {
+                $kinds[$part][$kind] = true;
             }
         }
     };
@@ -240,6 +248,8 @@ function rh_ai_vault_people(PDO $db): array
     foreach (array_keys($people['part']) as $p) {
         if (isset($stop[$p])) {
             unset($people['part'][$p]);
+        } elseif (count($kinds[$p] ?? []) > 1) {
+            $people['shared'][$p] = true;
         }
     }
     return $GLOBALS['__rh_ai_people'] = $people;

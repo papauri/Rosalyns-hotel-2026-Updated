@@ -1281,7 +1281,8 @@ if ($schemaReady) {
 // ══════════════════════════════════════════════════════════════════════════════
 require_once $root . '/includes/ai/ai-actions.php';
 $areg = rh_ai_action_registry();
-check(array_keys($areg) === ['create_booking', 'edit_booking', 'extend_stay', 'change_checkout', 'room_type_change', 'cancel_booking', 'check_in', 'assign_room', 'check_out', 'housekeeping_job', 'maintenance_job', 'room_status', 'send_email', 'send_invoice', 'whatsapp', 'reply_review', 'reply_enquiry'], 'Phase 4 + 4c: the action list is exactly the planned one (draft replies added in 4c)', implode(',', array_keys($areg)));
+check(array_keys($areg) === ['create_booking', 'edit_booking', 'extend_stay', 'change_checkout', 'room_type_change', 'cancel_booking', 'check_in', 'assign_room', 'confirm_booking', 'booking_note', 'check_out', 'housekeeping_job', 'maintenance_job', 'housekeeping_progress', 'maintenance_progress', 'room_status', 'send_email', 'send_invoice', 'whatsapp', 'reply_review', 'reply_enquiry'],
+    'Phase 4 + 4c + the desk round: the action list is exactly the planned one (draft replies in 4c; confirm booking, a booking note and start / finish a room\'s job on 2026-10-29)', implode(',', array_keys($areg)));
 $forbidden = [];
 foreach ($areg as $k => $d) {
     if (preg_match('/(stock|recipe|pos_|till|payment|refund|credit|shift|eod|end_of_day|rate|price|deal|setting|user|permission|backup|sql|shell|file|void)/', $k . ' ' . $d['tool'])) { $forbidden[] = $k; }
@@ -3923,6 +3924,315 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
             $cqF->rollBack();
         }
     }
+}
+
+// ── The front desk without clicking + the "Mr Nthani" fault (owner 2026-10-29, Rosalyn's chat 7623-7639) ──
+echo "-- desk: who made a booking, next arrivals, holds, blocked dates, cards from words, named absence --\n";
+// A typo quoted in a guide is never a real word (the guide quotes "arivals tomorow" to show typos work)
+$rwq = rh_ai_real_words_from([['title' => 'Spelling mistakes', 'text' => 'Typos in questions work too, for example "arivals tomorow" and “brekfast”. Staff type quickly.']]);
+check(!isset($rwq['arivals']) && !isset($rwq['tomorow']) && !isset($rwq['brekfast']) && isset($rwq['typos'], $rwq['quickly']), 'a typo quoted in a guide ("arivals tomorow") never becomes a real word; the guide\'s own words do', json_encode(array_keys($rwq)));
+check(!isset(rh_ai_real_words()['arivals']) && !isset(rh_ai_real_words()['tomorow']) && rh_ai_typo_fix('arivals tomorow')['text'] === 'arrivals tomorrow',
+    'the saved guide index: quoted typos stay typos, so "arivals tomorow" is read as "arrivals tomorrow"', rh_ai_typo_fix('arivals tomorow')['text']);
+$biD = static fn(string $q) => rh_ai_desk_booking_intent(rh_ai_desk_clean($q));
+check($biD('Who booked Mr Nthani in') === ['kind' => 'made', 'who' => 'Nthani'] && $biD('Who made the booking for Mr Nthani') === ['kind' => 'made', 'who' => 'Nthani']
+    && $biD('who booked them?') === ['kind' => 'made', 'who' => ''] && $biD('Show its history') === ['kind' => 'history', 'who' => ''] && $biD('booking history for Charles Nthani') === ['kind' => 'history', 'who' => 'Charles Nthani']
+    && $biD('Who booked the most rooms') === null && $biD('who booked in') === null,
+    '"Who booked Mr Nthani in" / "Who made the booking for Mr Nthani" ask who made that booking (title dropped); "them" is the booking in focus; "who booked the most rooms" is not one');
+$ciD = static fn(string $q) => rh_ai_desk_card_intent(rh_ai_desk_clean($q));
+check(($ciD('check him in')['key'] ?? '') === 'check_in' && ($ciD('Check in Mr Banda')['who'] ?? '') === 'Banda' && ($ciD('check them out')['key'] ?? '') === 'check_out'
+    && ($ciD('confirm their booking')['key'] ?? '') === 'confirm_booking' && ($ciD('put them in room 12')['room'] ?? '') === '12'
+    && $ciD('room 12 is clean') === ['key' => 'housekeeping_progress', 'who' => '', 'room' => '12', 'step' => 'complete'] && ($ciD('start cleaning room 7')['step'] ?? '') === 'start'
+    && ($ciD('room 4 is fixed')['key'] ?? '') === 'maintenance_progress' && $ciD('check in time') === null && $ciD('check-in today') === null && $ciD('check the arrivals') === null,
+    'cards from plain words: "check him in", "confirm their booking", "put them in room 12", "room 12 is clean", "room 4 is fixed"; never "check in time" or "check the arrivals"');
+check(rh_ai_desk_upcoming_intent('when is the next arrival') !== null && (rh_ai_desk_upcoming_intent('arrivals next week')['when'] ?? '') === 'next week' && rh_ai_desk_other_days('any other day') && rh_ai_desk_other_days('what about other days')
+    && !rh_ai_desk_other_days('any other questions') && rh_ai_desk_holds_intent('which bookings need confirming') && rh_ai_desk_holds_intent('tentative bookings') && !rh_ai_desk_holds_intent('pending payments')
+    && rh_ai_desk_blocked_intent('blocked dates') !== null && rh_ai_desk_blocked_intent('blocked rooms') === null,
+    'next arrivals, "any other day", bookings waiting to be confirmed and blocked dates are recognised; payments and rooms are not');
+$nacD = rh_ai_named_absence_claims('No booking was found for Mr [STAFF_2]. The upcoming arrival is [GUEST_1] under reference [BK_1].');
+check($nacD === [0 => ['bookings', 'Mr [STAFF_2]']] && rh_ai_named_absence_claims('No booking was found for [STAFF_2].') === [0 => ['bookings', '[STAFF_2]']]
+    && rh_ai_named_absence_claims('There are no bookings for today.') === [] && rh_ai_named_absence_claims('We have no bookings.') === [] && rh_ai_named_absence_claims('No booking for tomorrow.') === []
+    && (rh_ai_named_absence_claims('No gym member called Tiwonge Phiri.')[0][0] ?? '') === 'gym_members',
+    'a named "no booking for Mr X" is caught for checking; a date ("for today") or a bare "we have no bookings" is not', json_encode($nacD));
+$vmD = &rh_ai_vault_memo();
+$vmD[-77] = ['tok' => ['[STAFF_2]' => 'Nthani', '[GUEST_1]' => 'Charles Nthani'], 'hash' => []];
+check(rh_ai_vault_resolve_args($pdo, -77, ['query' => 'STAFF_2'])['query'] === 'Nthani' && rh_ai_vault_resolve_args($pdo, -77, ['query' => 'Mr [STAFF_2]'])['query'] === 'Mr Nthani'
+    && rh_ai_vault_resolve_args($pdo, -77, ['query' => 'XSTAFF_2'])['query'] === 'XSTAFF_2', 'a token the model writes without brackets ("STAFF_2") is read as the token, never searched as a word');
+unset($vmD[-77], $vmD);
+$regD = rh_ai_tool_registry();
+$actD = rh_ai_action_registry();
+check(isset($regD['booking_history'], $regD['upcoming_arrivals'], $regD['booking_holds'], $regD['blocked_dates']) && $regD['booking_history']['perm'] === ['bookings'] && $regD['blocked_dates']['perm'] === ['blocked_dates', 'calendar']
+    && $actD['confirm_booking']['perm'] === ['edit_booking'] && $actD['confirm_booking']['page'] === 'bookings.php' && $actD['housekeeping_progress']['page'] === 'housekeeping.php' && $actD['maintenance_progress']['page'] === 'room-maintenance.php'
+    && !array_diff(['booking_history', 'upcoming_arrivals', 'booking_holds', 'blocked_dates'], rh_ai_specialists()['front_desk']['tools']) && !rh_ai_card_risky('confirm_booking', [])
+    && in_array('confirm_booking', rh_ai_change_cards('confirm their booking'), true) && in_array('housekeeping_progress', rh_ai_change_cards('room 12 is clean'), true) && in_array('maintenance_progress', rh_ai_change_cards('room 4 is fixed'), true),
+    'the new reads sit behind their screens\' permissions (Bookings; Blocked Dates or Calendar); the new cards replay Bookings, Housekeeping and Room Maintenance with those screens\' permissions');
+$jsD = (string)file_get_contents($root . '/admin/js/ai-panel.js');
+check(strpos($jsD, 'function safePage(u) { return /^(api\/)?[a-z0-9\-]+\.php(\?id=\d+)?$/i') !== false && !rh_ai_card_risky('booking_note', ['note' => 'x']) && ($actD['booking_note']['page'] ?? '') === 'booking-details.php',
+    'a booking note replays the booking screen\'s own Notes box (booking-details.php?id=N, the only query the panel allows); a staff note is not a risky card');
+$deskSrc = (string)file_get_contents($root . '/includes/ai/ai-desk.php');
+preg_match_all('/\b(?:INSERT\s+INTO|(?<!KEY\s)UPDATE\s+`?\w|DELETE\s+FROM|REPLACE\s+INTO|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE)\b/i', $deskSrc, $wmD);
+check(!$wmD[0] && !preg_match('/fa-(magic|wand|robot|sparkle|stars)|\bsmart\b|AI magic/i', $deskSrc) && rh_ai_hard_limit_problems() === [], 'the desk module writes nothing and has no AI-looking wording; the hard-limit self-check knows the new card list', json_encode($wmD[0]));
+
+if (!$chatReady || !rh_ai_memory_ready($pdo)) {
+    skip('desk database checks (Assistant migrations not run here)');
+} else {
+    $admD = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $pdo->beginTransaction();
+    try {
+        rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000',
+            'ai_rate_limit_per_10min' => '500', 'ai_turn_token_cap' => '60000', 'ai_swarm_models' => '0', 'ai_actions_enabled' => '1'], $pdo);
+        $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
+        rh_ai_store_key('google', 'AIzaFAKEKEYFORTESTSONLY0123456789abcd', (int)$admD['id'], $pdo);
+        $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL WHERE is_selected = 1");
+        $miD = $pdo->prepare("INSERT INTO ai_models (provider, model_id, label, capability_rank, source, is_selected, role, price_in_per_mtok, price_out_per_mtok) VALUES ('google', ?, ?, ?, 'catalog', 1, ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE is_selected = 1, role = VALUES(role), price_in_per_mtok = VALUES(price_in_per_mtok), price_out_per_mtok = VALUES(price_out_per_mtok)");
+        $miD->execute(['gemini-3.8-flash', 'Gemini 3.8 Flash', 92, 'primary', 0.75, 3.75]);
+        $miD->execute(['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 86, 'fast', 0.30, 2.50]);
+        rh_ai_set_transport(static function ($method, $url, $headers, $body, $timeout) {
+            $GLOBALS['ai2_calls'][] = ['url' => $url, 'body' => (string)$body];
+            $next = array_shift($GLOBALS['ai2_q']) ?? ['reply' => ['text' => 'OK']];
+            $reply = $next['reply'];
+            $reply['usage'] = ($reply['usage'] ?? []) + ['in' => 100, 'out' => 20];
+            return ['http' => 200, 'body' => json_encode(rh_ai_fake_body(ai2_prov($url), $reply, ''))];
+        });
+        $GLOBALS['__rh_ai_module_override'] = $bizMods(['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms', 'restaurant_page', 'events']);
+        $chatD = static function (string $msg, int $conv, array $q = [], ?array $who = null, int $bk = 0) use ($pdo, $admD): array {
+            $pdo->exec('DELETE FROM ai_tool_cache');
+            $GLOBALS['ai2_q'] = array_map(static fn($r) => ['reply' => $r], $q);
+            $GLOBALS['ai2_calls'] = [];
+            return rh_ai_turn($pdo, $who ?? $admD, ['conversation_id' => $conv, 'message' => $msg, 'page' => 'dashboard.php', 'booking_id' => $bk]);
+        };
+        // A guest "Charles Qdnthani" who booked on the website, confirmed by a staff member "Mphatso Qdnthani" (the same surname)
+        $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, is_active) VALUES (?, 'aitestqd.staff@example.com', ?, 'Mphatso Qdnthani', 'receptionist', 1)")
+            ->execute(['aitestqd_' . bin2hex(random_bytes(3)), password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT)]);
+        $staffQd = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO rooms (name, slug, description, price_per_night, max_guests, total_rooms, rooms_available, display_order, is_active) VALUES ('AITest Qd Lakeside', 'aitest-qd-lakeside', 'AITest', 100000, 2, 5, 5, 0, 1)")->execute();
+        $qdRoom = (int)$pdo->lastInsertId();
+        $insQd = $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests,
+                                total_amount, total_with_vat, amount_paid, amount_due, status, payment_status, is_tentative, tentative_expires_at)
+                                VALUES (?, ?, ?, 'johnpaulchirwa@gmail.com', '+265 991 000 778', ?, ?, 2, 1, 1, 0, 200000, 200000, ?, ?, ?, ?, ?, ?)");
+        $mkQd = static function (string $name, string $ci, string $status, string $pay = 'unpaid', ?string $holdEnds = null) use ($insQd, $pdo, $qdRoom): array {
+            $ref = 'AITQD' . random_int(100000, 999999);
+            $paid = $pay === 'paid' ? 200000 : 0;
+            $insQd->execute([$ref, $qdRoom, $name, $ci, date('Y-m-d', strtotime($ci . ' +2 days')), $paid, 200000 - $paid, $status, $pay, $status === 'tentative' ? 1 : 0, $holdEnds]);
+            return [(int)$pdo->lastInsertId(), $ref];
+        };
+        [$aId, $aRef] = $mkQd('Charles Qdnthani', date('Y-m-d', strtotime('+3 days')), 'confirmed', 'paid');
+        [$cId, $cRef] = $mkQd('Grace Qdbandamade', date('Y-m-d', strtotime('+4 days')), 'confirmed');
+        [$eId, $eRef] = $mkQd('Peter Qdnorecord', date('Y-m-d', strtotime('+4 days')), 'confirmed');
+        [$bId, $bRef] = $mkQd('Ruth Qdpending', date('Y-m-d', strtotime('+5 days')), 'pending');
+        [$dId, $dRef] = $mkQd('Alice Qdhold', date('Y-m-d', strtotime('+6 days')), 'tentative', 'unpaid', date('Y-m-d H:i:s', strtotime('+20 hours')));
+        [$gId, $gRef] = $mkQd('Moses Qdtoday', date('Y-m-d'), 'confirmed', 'paid');
+        $tlQd = $pdo->prepare("INSERT INTO booking_timeline_logs (booking_id, booking_reference, action, action_type, description, old_value, new_value, performed_by_type, performed_by_id, performed_by_name, created_at) VALUES (?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)");
+        $tlQd->execute([$aId, $aRef, 'Booking created', 'create', null, 'pending', 'guest', null, 'Charles Qdnthani', date('Y-m-d H:i:s', strtotime('-6 days'))]);
+        $tlQd->execute([$aId, $aRef, 'Status changed: pending → confirmed', 'status_change', 'pending', 'confirmed', 'admin', $staffQd, 'Mphatso Qdnthani', date('Y-m-d H:i:s', strtotime('-5 days'))]);
+        $auQd = $pdo->prepare("INSERT INTO booking_audit_log (booking_id, booking_reference, action, note, performed_by, performed_by_name, performed_at) VALUES (?, ?, 'created', ?, ?, ?, ?)");
+        $auQd->execute([$aId, $aRef, 'Booking made online by Charles Qdnthani', null, 'Charles Qdnthani', date('Y-m-d H:i:s', strtotime('-6 days'))]);
+        $auQd->execute([$cId, $cRef, 'Created manually by admin (Aitest Qd Frontdesk)', (int)$admD['id'], 'Aitest Qd Frontdesk', date('Y-m-d H:i:s', strtotime('-2 days'))]);
+        rh_ai_vault_people_reset();
+
+        // The read tools themselves: what the system records, never a guess
+        $hA = rh_ai_t_booking_history($pdo, $admD, ['booking_id' => $aId]);
+        $hC = rh_ai_t_booking_history($pdo, $admD, ['booking_id' => $cId]);
+        $hE = rh_ai_t_booking_history($pdo, $admD, ['booking_id' => $eId]);
+        check(($hA['made']['channel'] ?? '') === 'website' && ($hA['made']['guest_name'] ?? '') === 'Charles Qdnthani' && ($hA['made']['confirmed_by']['staff_name'] ?? '') === 'Mphatso Qdnthani'
+            && ($hA['history'][0]['what'] ?? '') === 'Status changed: pending → confirmed' && ($hA['history'][0]['staff_name'] ?? '') === 'Mphatso Qdnthani' && (int)$hA['history_total'] === 2
+            && ($hC['made']['channel'] ?? '') === 'staff' && ($hC['made']['staff_name'] ?? '') === 'Aitest Qd Frontdesk' && ($hE['made']['channel'] ?? '') === 'not recorded' && !isset($hE['made']['staff_name'], $hE['made']['guest_name']),
+            'booking_history: made online by the guest (and confirmed by staff), made by a staff member, or "not recorded" - from the timeline and audit only', json_encode([$hA['made'] ?? null, $hC['made'] ?? null, $hE['made'] ?? null]));
+
+        // The owner's chat, replayed: arrivals today -> "Any other day" -> "Who booked Mr X in" -> "Who made the booking for Mr X"
+        $d0 = $chatD('arrivals today', 0);
+        $cvD = (int)$d0['conversation_id'];
+        $truthUp = rh_ai_t_upcoming_arrivals($pdo, $admD, ['from' => date('Y-m-d', strtotime('+1 day'))]);
+        $wantUp = is_array($truthUp['list']) ? (string)$truthUp['list'][0]['reference'] : 'No arrivals are booked';
+        $d1 = $chatD('Any other day', $cvD);
+        check($d1['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($d1['reply'], $wantUp) !== false && strpos($d1['reply'], 'Next arrival') !== false,
+            '"Any other day" after an arrivals answer: the next arrivals from tomorrow, the same as the bookings on file (no model call)', $d1['reply']);
+        $d2 = $chatD('Who booked Mr Qdnthani in', $cvD);
+        check($d2['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($d2['reply'], 'Charles Qdnthani') !== false && strpos($d2['reply'], $aRef) !== false
+            && strpos($d2['reply'], 'online on the website by the guest') !== false && strpos($d2['reply'], 'Mphatso Qdnthani') !== false && stripos($d2['reply'], 'no booking') === false
+            && rh_ai_focus_state($pdo, $cvD)['focus'] === $aId,
+            '"Who booked Mr Qdnthani in": the guest\'s booking, made online on the website by the guest and confirmed by the staff member - never "no booking" (no model call)', $d2['reply']);
+        $d3 = $chatD('Who made the booking for Mr Qdnthani', $cvD);
+        check($d3['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($d3['reply'], $aRef) !== false && strpos($d3['reply'], 'online on the website by the guest') !== false && stripos($d3['reply'], 'no booking') === false,
+            '"Who made the booking for Mr Qdnthani": the same answer, no false "no booking"', $d3['reply']);
+        $d4 = $chatD('Who booked them?', $cvD);
+        $d5 = $chatD('Show its history', $cvD);
+        check($d4['route'] === 'local' && strpos($d4['reply'], $aRef) !== false && $d5['route'] === 'local' && strpos($d5['reply'], 'History of') !== false && strpos($d5['reply'], 'Status changed') !== false
+            && strpos($d5['reply'], 'Mphatso Qdnthani (staff)') !== false && !$GLOBALS['ai2_calls'],
+            'follow-ups use the booking in focus: "Who booked them?" and "Show its history" (who did each change), zero tokens', $d4['reply'] . ' | ' . $d5['reply']);
+        $d6 = $chatD('Who made the booking for Grace Qdbandamade', 0);
+        $d7 = $chatD('Who booked Peter Qdnorecord', 0);
+        check(strpos($d6['reply'], 'by a staff member in the portal') !== false && strpos($d6['reply'], 'Aitest Qd Frontdesk') !== false && strpos($d7['reply'], 'did not record who made it') !== false && strpos($d7['reply'], $eRef) !== false,
+            'a booking made at the desk names the staff member; one with nothing recorded says so and shows the booking (never a guess)', $d6['reply'] . ' | ' . $d7['reply']);
+        $tokOut = '';
+        foreach ([$d2, $d3] as $dx) {
+            $tokOut .= (string)$pdo->query("SELECT GROUP_CONCAT(content SEPARATOR ' ') FROM ai_messages WHERE conversation_id = " . (int)$dx['conversation_id'] . " AND role = 'assistant'")->fetchColumn();
+        }
+        check(strpos($tokOut, 'Qdnthani') === false && strpos($tokOut, $aRef) === false, 'the answers are stored with privacy tokens (names and references stay on the server)', mb_substr($tokOut, 0, 300));
+
+        // The model path: the fault's own replies, checked before they go out
+        $m1 = $chatD('Is Mr Qdnthani a guest of ours', 0, [['tool_calls' => [['id' => 'n1', 'name' => 'search_bookings', 'args' => ['query' => 'STAFF_1']]]], ['text' => 'No booking was found for Mr [STAFF_1].']]);
+        $cvM = (int)$m1['conversation_id'];
+        $tokM = (string)$pdo->query("SELECT CONCAT('[', kind, '_', num, ']') FROM ai_vault WHERE conversation_id = " . $cvM . " AND value_text = 'Qdnthani' LIMIT 1")->fetchColumn();
+        $srM = (string)$pdo->query("SELECT tool_result_json FROM ai_messages WHERE conversation_id = " . $cvM . " AND tool_name = 'search_bookings' ORDER BY id LIMIT 1")->fetchColumn();
+        $bodyM = implode(' ', array_column((array)$GLOBALS['ai2_calls'], 'body'));
+        check($tokM === '[STAFF_1]' && strpos($srM, '"count":1') !== false && strpos($m1['reply'], 'Checked again: there is a booking for Mr Qdnthani') !== false && strpos($m1['reply'], $aRef) !== false
+            && stripos($m1['reply'], 'No booking was found') === false && rh_ai_focus_state($pdo, $cvM)['focus'] === $aId,
+            'the fault\'s reply "No booking was found for Mr [STAFF_1]" (a token the model passed without brackets) is checked with the same search and replaced by the booking that is there', json_encode([$tokM, mb_substr($srM, 0, 120), $m1['reply']]));
+        check(strpos($bodyM, 'NAMES: [STAFF_1] is one word of a name') !== false && strpos($bodyM, 'a guest and a staff member share it') !== false && strpos($bodyM, 'Qdnthani') === false,
+            'the model is told a one-word name is shared by a guest and a staff member (and it never sees the name)', strpos($bodyM, 'NAMES:') !== false ? mb_substr($bodyM, (int)strpos($bodyM, 'NAMES:'), 200) : 'no NAMES line');
+        $m2 = $chatD('Who is staying in the Qdpending reservation', 0, [['tool_calls' => [['id' => 'n2', 'name' => 'booking_history', 'args' => ['booking_id' => $bId]]]], ['text' => 'I could not open it.']]);
+        $trM2 = (string)$pdo->query("SELECT tool_result_json FROM ai_messages WHERE conversation_id = " . (int)$m2['conversation_id'] . " AND tool_name = 'booking_history' ORDER BY id DESC LIMIT 1")->fetchColumn();
+        check(strpos($trM2, 'did not come from this chat') !== false && strpos($trM2, $bRef) === false, 'a booking id the model made up for booking_history is refused, as for get_booking', $trM2);
+        $bxD = [];
+        check(rh_ai_named_absence_fix($pdo, $admD, $cvM, 'No booking was found for Mr Zzqxvbk.', $bxD) ==='No booking was found for Mr Zzqxvbk.', 'a "no booking" that the search backs (nothing close either) is left as it is');
+
+        // Next arrival, holds, blocked dates: local, the same figures as the data
+        $truth0 = rh_ai_t_upcoming_arrivals($pdo, $admD, []);
+        $u0 = $chatD('When is the next arrival', 0);
+        check($u0['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($u0['reply'], is_array($truth0['list']) ? (string)$truth0['list'][0]['reference'] : 'No arrivals are booked') !== false,
+            '"When is the next arrival": the soonest confirmed or pending arrival on file, locally', $u0['reply']);
+        $hT = rh_ai_t_booking_holds($pdo, $admD, []);
+        $h0 = $chatD('Which bookings need confirming?', 0);
+        check($h0['route'] === 'local' && strpos($h0['reply'], 'Waiting to be confirmed: ' . ((int)$hT['pending'] + (int)$hT['tentative'])) !== false && (int)$hT['pending'] >= 1 && (int)$hT['tentative'] >= 1,
+            '"Which bookings need confirming?": pending bookings and tentative holds, counted as on file', $h0['reply']);
+        $pdo->prepare("INSERT INTO blocked_dates (room_id, block_date, block_type, reason, blocked_by) VALUES (?, ?, 'manual', 'AITest Qd painting', ?)")->execute([$qdRoom, date('Y-m-d', strtotime('+4 days')), (int)$admD['id']]);
+        $bT = rh_ai_t_blocked_dates($pdo, $admD, []);
+        $b0 = $chatD('blocked dates', 0);
+        check($b0['route'] === 'local' && strpos($b0['reply'], ': ' . (int)$bT['count'] . '**') !== false && strpos(json_encode($bT['blocked']), 'AITest Qd painting') !== false,
+            '"blocked dates": the Blocked Dates screen\'s own list, counted the same', $b0['reply']);
+
+        // Cards from plain words (prepared only; Confirm replays the screen)
+        $g1 = $chatD('When is Mr Qdtoday coming', 0);
+        $cvG = (int)$g1['conversation_id'];
+        $g2 = $chatD('check him in', $cvG);
+        check($g2['route'] === 'local' && !$GLOBALS['ai2_calls'] && ($g2['cards'][0]['key'] ?? '') === 'check_in' && ($g2['cards'][0]['status'] ?? '') === 'proposed' && strpos($g2['reply'], 'Confirm') !== false,
+            '"check him in" after finding the guest: a check-in card for the booking in focus, no model call, nothing changed', $g2['reply'] . ' ' . json_encode($g2['cards'][0]['rows'] ?? []));
+        $stG = (string)$pdo->query("SELECT status FROM bookings WHERE id = " . $gId)->fetchColumn();
+        check($stG === 'confirmed', 'preparing a card changes nothing (still confirmed until Confirm)', $stG);
+        $c1 = $chatD('confirm the booking for Ruth Qdpending', 0);
+        $c2 = $chatD('confirm the booking for Alice Qdhold', 0);
+        $c3 = $chatD('confirm the booking for Charles Qdnthani', 0);
+        $pv1 = json_decode((string)$pdo->query("SELECT preview_json FROM ai_actions WHERE id = " . (int)($c1['cards'][0]['id'] ?? 0))->fetchColumn(), true) ?: [];
+        $pv2 = json_decode((string)$pdo->query("SELECT preview_json FROM ai_actions WHERE id = " . (int)($c2['cards'][0]['id'] ?? 0))->fetchColumn(), true) ?: [];
+        check(($c1['cards'][0]['key'] ?? '') === 'confirm_booking' && json_encode($pv1['steps'][0]['fields'] ?? []) === json_encode([['action', 'update_status'], ['id', (string)$bId], ['status', 'confirmed']])
+            && json_encode($pv2['steps'][0]['fields'] ?? []) === json_encode([['action', 'convert_tentative'], ['id', (string)$dId]]) && empty($c3['cards']) && strpos($c3['reply'], 'Only a pending booking or a tentative hold can be confirmed') !== false,
+            'confirm: a pending booking replays the Bookings Confirm, a tentative hold its Convert to confirmed; a confirmed booking gets the plain reason, no card', json_encode([$pv1['steps'] ?? null, $pv2['steps'] ?? null, $c3['reply']]));
+        $cf = rh_ai_confirm($pdo, $admD, (int)$c1['cards'][0]['id']);
+        $pdo->prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?")->execute([$bId]); // what the screen does
+        $rp = rh_ai_report($pdo, $admD, (int)$c1['cards'][0]['id'], ['success' => true, 'message' => 'Booking status updated!']);
+        check(!empty($cf['success']) && ($rp['status'] ?? '') === 'executed', 'confirm then report: the database decides the card is done', json_encode([$cf['error'] ?? '', $rp['status'] ?? '', $rp['message'] ?? '']));
+        // A staff note on the booking in focus, exactly as typed (its words may mention money: it is still a note)
+        $nt1 = $chatD('add a note to their booking: Pays the balance on arrival, please keep room near the lift', $cvG);
+        $ntId = (int)($nt1['cards'][0]['id'] ?? 0);
+        $pvN = json_decode((string)$pdo->query("SELECT preview_json FROM ai_actions WHERE id = " . $ntId)->fetchColumn(), true) ?: [];
+        check(($nt1['cards'][0]['key'] ?? '') === 'booking_note' && ($pvN['steps'][0]['url'] ?? '') === 'booking-details.php?id=' . $gId
+            && json_encode($pvN['steps'][0]['fields'] ?? []) === json_encode([['add_note', '1'], ['note_text', 'Pays the balance on arrival, please keep room near the lift']]) && !$GLOBALS['ai2_calls'] && $nt1['route'] === 'local',
+            '"add a note to their booking: ...": a note card for the booking in focus with the note exactly as typed (the booking screen\'s Notes box), not a payment refusal', json_encode([$nt1['reply'], $pvN['steps'] ?? null]));
+        $cfN = rh_ai_confirm($pdo, $admD, $ntId, ['note' => 'Pays the balance on arrival']);
+        $pdo->prepare("INSERT INTO booking_notes (booking_id, note_text, created_by) VALUES (?, ?, ?)")->execute([$gId, 'Pays the balance on arrival', (int)$admD['id']]); // what the screen does
+        $rpN = rh_ai_report($pdo, $admD, $ntId, null);
+        check(!empty($cfN['success']) && json_encode($cfN['steps'][0]['fields'] ?? []) === json_encode([['add_note', '1'], ['note_text', 'Pays the balance on arrival']]) && ($rpN['status'] ?? '') === 'executed',
+            'the note edited on the card is the one sent, and the saved note decides the card is done', json_encode([$cfN['error'] ?? '', $rpN['status'] ?? '']));
+
+        // Housekeeping and maintenance jobs from plain words
+        $pdo->prepare("INSERT INTO rooms (name, slug, description, price_per_night, max_guests, total_rooms, rooms_available, display_order, is_active) VALUES ('AITest Qd Garden', 'aitest-qd-garden', 'AITest', 100000, 2, 1, 1, 0, 1)")->execute();
+        $gardenType = (int)$pdo->lastInsertId();
+        $roomNo = 'QD' . random_int(100, 999);
+        $pdo->prepare("INSERT INTO individual_rooms (room_type_id, room_number, room_name, status, is_active) VALUES (?, ?, 'AITest Qd room', 'cleaning', 1)")->execute([$gardenType, $roomNo]);
+        $irQd = (int)$pdo->lastInsertId();
+        $mf = $chatD('room ' . $roomNo . ' is fixed', 0);
+        check(empty($mf['cards']) && strpos($mf['reply'], 'has no open maintenance job') !== false, 'no open repair on the room: the plain reason, no card', $mf['reply']);
+        $hkIns = $pdo->prepare("INSERT INTO housekeeping_assignments (individual_room_id, status, due_date, assignment_type, priority, created_by) VALUES (?, 'pending', ?, ?, 'medium', ?)");
+        $hkIns->execute([$irQd, date('Y-m-d'), 'checkout_cleanup', (int)$admD['id']]);
+        $hk1 = (int)$pdo->lastInsertId();
+        $hkIns->execute([$irQd, date('Y-m-d', strtotime('+1 day')), 'deep_clean', (int)$admD['id']]);
+        $hk2 = (int)$pdo->lastInsertId();
+        $k1 = $chatD('room ' . strtolower($roomNo) . ' is clean', 0);
+        $kid = (int)($k1['cards'][0]['id'] ?? 0);
+        $pvK = json_decode((string)$pdo->query("SELECT preview_json FROM ai_actions WHERE id = " . $kid)->fetchColumn(), true) ?: [];
+        check(($k1['cards'][0]['key'] ?? '') === 'housekeeping_progress' && count($k1['cards'][0]['choices'][0]['options'] ?? []) === 2 && json_encode($pvK['steps'][0]['fields'] ?? []) === json_encode([['action', 'mark_complete'], ['id', (string)$hk1]]) && !$GLOBALS['ai2_calls'],
+            '"room ... is clean": a card marking the room\'s first open housekeeping job done (the Housekeeping screen\'s Mark done), with the other job to pick', json_encode([$k1['reply'], $pvK['steps'] ?? null]));
+        $cfK = rh_ai_confirm($pdo, $admD, $kid, ['job_id' => (string)$hk2]);
+        $pdo->prepare("UPDATE housekeeping_assignments SET status = 'completed' WHERE id = ?")->execute([$hk2]); // what the screen does
+        $rpK = rh_ai_report($pdo, $admD, $kid, null); // the board answers with its page: the database decides
+        check(!empty($cfK['success']) && json_encode($cfK['steps'][0]['fields'] ?? []) === json_encode([['action', 'mark_complete'], ['id', (string)$hk2]]) && ($rpK['status'] ?? '') === 'executed',
+            'picking the other job on the card replays that job (no "changed" card), and the job\'s own status decides it is done', json_encode([$cfK, $rpK['status'] ?? '']));
+        $pdo->prepare("INSERT INTO room_maintenance_schedules (individual_room_id, title, status, priority, maintenance_type, block_room, start_date, end_date, due_date, created_by) VALUES (?, 'AITest Qd tap leak', 'planned', 'high', 'repair', 1, NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY), CURDATE(), ?)")
+            ->execute([$irQd, (int)$admD['id']]);
+        $mtId = (int)$pdo->lastInsertId();
+        $mt1 = $chatD('start the repair in room ' . $roomNo, 0);
+        $pvM = json_decode((string)$pdo->query("SELECT preview_json FROM ai_actions WHERE id = " . (int)($mt1['cards'][0]['id'] ?? 0))->fetchColumn(), true) ?: [];
+        check(($mt1['cards'][0]['key'] ?? '') === 'maintenance_progress' && json_encode($pvM['steps'][0]['fields'] ?? []) === json_encode([['action', 'mark_started'], ['id', (string)$mtId]]) && strpos(json_encode($mt1['cards'][0]['warn'] ?? []), 'off sale') !== false,
+            '"start the repair in room ...": the Room Maintenance Start, with the off-sale warning for a job that blocks the room', json_encode([$mt1['reply'], $pvM['steps'] ?? null]));
+
+        // Permission denied and parts switched off
+        $gpD = $pdo->prepare("INSERT INTO user_permissions (user_id, permission_key, is_granted) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted)");
+        $mkUser = static function (string $tag, array $grant) use ($pdo, $gpD): array {
+            $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, is_active) VALUES (?, ?, ?, ?, 'receptionist', 1)")
+                ->execute(['aitestqd_' . $tag . bin2hex(random_bytes(2)), 'aitestqd.' . $tag . '@example.com', password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT), 'Aitest Qd ' . ucfirst($tag)]);
+            $u = ['id' => (int)$pdo->lastInsertId(), 'role' => 'receptionist', 'username' => 'aitestqd_' . $tag, 'full_name' => 'Aitest Qd ' . ucfirst($tag)];
+            foreach (array_keys(getAllPermissions()) as $k) {
+                $gpD->execute([$u['id'], $k, in_array($k, $grant, true) ? 1 : 0]);
+            }
+            return $u;
+        };
+        $noAct = $mkUser('noact', ['ai_assistant_use', 'dashboard', 'bookings', 'checkin_guest']);
+        $noBk = $mkUser('nobk', ['ai_assistant_use', 'ai_assistant_actions', 'dashboard']);
+        $p1 = $chatD('check in Moses Qdtoday', 0, [], $noAct);
+        $p2 = $chatD('Who booked Mr Qdnthani in', 0, [], $noBk);
+        $p3 = $chatD('check in Moses Qdtoday', 0, [], $noBk);
+        $p4 = $chatD('blocked dates', 0, [], $noAct);
+        $cardsNo = (int)$pdo->query("SELECT COUNT(*) FROM ai_actions WHERE user_id IN (" . $noAct['id'] . ',' . $noBk['id'] . ")")->fetchColumn();
+        check($p1['route'] === 'declined' && strpos($p1['reply'], 'cannot confirm Assistant actions') !== false && $p2['route'] === 'declined' && strpos($p2['reply'], "That's outside what your account can see") === 0
+            && strpos($p2['reply'], $aRef) === false && $p3['route'] === 'declined' && strpos($p3['reply'], "That's outside what your account can do") !== false && $p4['route'] === 'declined' && $cardsNo === 0 && !$GLOBALS['ai2_calls'],
+            'permissions: no card without Confirm Assistant actions or the screen\'s own permission; no booking read without Bookings; no blocked dates without that screen', json_encode([$p1['reply'], $p2['reply'], $p3['reply'], $p4['reply'], $cardsNo]));
+        $GLOBALS['__rh_ai_module_override']['bookings'] = false;
+        $o1 = $chatD('Who booked Mr Qdnthani in', 0);
+        $o2 = $chatD('check him in', $cvG);
+        $o3 = $chatD('When is the next arrival', 0);
+        $GLOBALS['__rh_ai_module_override']['bookings'] = true;
+        $GLOBALS['__rh_ai_module_override']['housekeeping'] = false;
+        $o4 = $chatD('room ' . $roomNo . ' is clean', 0);
+        $GLOBALS['__rh_ai_module_override']['housekeeping'] = true;
+        check(strpos($o1['reply'], "Room bookings aren't taken here.") === 0 && strpos($o2['reply'], "Room bookings aren't taken here.") === 0 && strpos($o3['reply'], "Room bookings aren't taken here.") === 0
+            && strpos($o4['reply'], "Housekeeping isn't run here.") === 0 && !preg_match('/module|switched/i', $o1['reply'] . $o2['reply'] . $o4['reply']) && empty($o2['cards']) && !$GLOBALS['ai2_calls'],
+            'parts the business does not run: "not offered here" for booking reads and cards, and for housekeeping cards (no module named, no tokens)', json_encode([$o1['reply'], $o2['reply'], $o3['reply'], $o4['reply']]));
+
+        // The new question set entries, run against this data (ground truth from the lookups)
+        $evD = [];
+        foreach (rh_ai_eval_seed_cases() as $c) {
+            $evD[$c['id']] = $c;
+        }
+        $evRes = [];
+        foreach (['next_arrival', 'any_other_day', 'who_booked_title', 'who_made_booking_for', 'who_booked_them', 'holds_waiting', 'blocked_dates'] as $eid) {
+            if (!isset($evD[$eid])) {
+                $evRes[$eid] = 'missing';
+                continue;
+            }
+            $cE = rh_ai_eval_bind($evD[$eid], ['{guest_close}' => 'Qdtnhani', '{guest_last}' => 'Qdnthani', '{bk_id}' => (string)$aId]);
+            $cvE = 0;
+            foreach ($cE['before'] as $bq) {
+                $cvE = (int)$chatD($bq, $cvE)['conversation_id'];
+            }
+            $evRes[$eid] = rh_ai_eval_check($pdo, $admD, $cE, $chatD($cE['q'], $cvE));
+        }
+        $evFail = array_filter($evRes, static fn($v) => !is_array($v) || $v[0] !== 'pass');
+        check(!$evFail, 'the new questions (the fault\'s three, next arrival, who booked them, holds, blocked dates) pass against data on file', json_encode($evFail));
+    } catch (Throwable $e) {
+        bad('desk checks threw', get_class($e) . ': ' . $e->getMessage() . ' @' . $e->getFile() . ':' . $e->getLine());
+    } finally {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        unset($GLOBALS['__rh_ai_module_override']);
+        rh_ai_settings($pdo, true);
+        rh_ai_vault_forget();
+        rh_ai_vault_people_reset();
+    }
+    check((int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE booking_reference LIKE 'AITQD%'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM rooms WHERE slug LIKE 'aitest-qd-%'")->fetchColumn() === 0
+        && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestqd%'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM blocked_dates WHERE reason = 'AITest Qd painting'")->fetchColumn() === 0,
+        'desk checks rolled back (no test rows left)');
 }
 
 rh_ai_set_transport(null);

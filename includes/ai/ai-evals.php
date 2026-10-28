@@ -227,6 +227,22 @@ function rh_ai_eval_check(PDO $db, array $user, array $case, array $res): array
             return ['fail', 'the answer does not show ' . $want . ' (the screen figure)'];
         }
     }
+    if (!empty($e['contains_from']['tool'])) { // words read from the data must be in the answer (who made a booking, the next arrival's reference)
+        $f = $e['contains_from'];
+        $r = rh_ai_eval_tool($db, $user, (string)$f['tool'], (array)($f['args'] ?? []));
+        if ($r === null) {
+            return ['skip', 'the lookup is not available here'];
+        }
+        $v = rh_ai_eval_path($r, (string)($f['path'] ?? ''));
+        if (!is_scalar($v) || (string)$v === '') {
+            $want = (string)($f['if_missing'] ?? '');
+            if ($want !== '' && stripos($reply, $want) === false) {
+                return ['fail', 'the data has nothing at ' . (string)($f['path'] ?? '') . ' and the answer does not say "' . $want . '"'];
+            }
+        } elseif (stripos($reply, (string)$v) === false) {
+            return ['fail', 'the answer does not show "' . mb_substr((string)$v, 0, 60) . '" (from the data)'];
+        }
+    }
     if (!empty($e['verdict_from']['tool'])) { // a yes / no worked out from the data (e.g. breakfast on one booking)
         $f = $e['verdict_from'];
         $r = rh_ai_eval_tool($db, $user, (string)$f['tool'], (array)($f['args'] ?? []));
@@ -434,6 +450,11 @@ function rh_ai_eval_setup(PDO $db, string $kind): array
         $hit = rh_ai_close_name_search($db, $close);
         if ((int)($hit['clear']['booking_id'] ?? 0) !== (int)$r['id']) {
             continue; // the data holds another close name: this one would rightly be asked about
+        }
+        $same = $db->prepare("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND (guest_name LIKE ? OR room_guest_name LIKE ?)");
+        $same->execute(['%' . rh_ai_like($last) . '%', '%' . rh_ai_like($last) . '%']);
+        if ((int)$same->fetchColumn() !== 1) {
+            continue; // the surname is on more than one booking: "Mr {surname}" would rightly be asked about
         }
         return ['{guest_close}' => $close, '{guest_last}' => $last, '{bk_id}' => (string)(int)$r['id']];
     }

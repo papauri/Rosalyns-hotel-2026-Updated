@@ -202,6 +202,9 @@ function rh_ai_setting_defaults(): array
         'ai_typo_min_len'           => '4',  // question words shorter than this are never corrected
         'ai_typo_two_edit_len'      => '8',  // question words this long may have two slips; shorter ones one
         'ai_breakfast_words'        => 'breakfast', // words that mean breakfast in packages, rate plans and room extras (comma separated)
+        // Owner 2026-10-29 ("Assistant should be a master"): the front desk reads (includes/ai/ai-desk.php)
+        'ai_upcoming_days'          => '90', // next arrivals and blocked dates: this many days ahead when no period is named
+        'ai_history_rows'           => '12', // a booking's history: the latest this-many entries
     ];
 }
 
